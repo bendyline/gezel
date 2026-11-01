@@ -1,5 +1,9 @@
 import type { ChatSession } from '@bendyline/gezel';
-import { resolveSecurityPolicy, securityPolicyForLevel } from '@bendyline/gezel';
+import {
+  CRAFTBOOK_FOCUS_BUILTIN_TOOLS,
+  resolveSecurityPolicy,
+  securityPolicyForLevel,
+} from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   availableBuiltinToolsForAllowlist,
@@ -387,6 +391,27 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     expect(editor.allowlist?.has('craftbook_update_step')).toBe(true);
     expect(editor.allowlist?.has('craftbook_write')).toBe(true);
     expect(editor.allowlist?.has('set_step_deliverable')).toBe(true);
+  });
+
+  it('a thread pinned to a craftbook holds only the craftbook-editing kit', async () => {
+    // The editor's AI assist used to carry the Meester's whole roster, so
+    // "add a step that writes a PowerPoint deck" read as a deck to make. The
+    // kit is the book's editors plus what helps improve it, whatever the
+    // message says.
+    const clamps: string[] = [];
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      session: baseSession({ craftbookRef: 'weekly-review' }),
+      tier: 'medium',
+      rolesAsTools: true,
+      latestUserMessage: 'Add a step that writes a PowerPoint deck of the findings.',
+      onClamp: (kind) => clamps.push(kind),
+    });
+    expect(clamps).toEqual(['craftbook-focus']);
+    expect([...allowlist!].sort()).toEqual([...CRAFTBOOK_FOCUS_BUILTIN_TOOLS].sort());
+    for (const tool of ['invoke_craftbook', 'create_task', 'start_project', 'write_file']) {
+      expect(allowlist!.has(tool)).toBe(false);
+    }
   });
 
   it('admits and predicts only conditionals enabled for this session', async () => {

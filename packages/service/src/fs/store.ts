@@ -5944,6 +5944,8 @@ export class Store {
      * (`ChatSession.subject.key`) — the Office pane's focused chat.
      */
     subjectKeys?: readonly string[];
+    /** Narrows the scope to the threads editing this craftbook (its AI assist). */
+    craftbookRef?: string;
     limit: number;
     before?: string;
     includeArchived?: boolean;
@@ -5994,6 +5996,7 @@ export class Store {
         if (opts.projectId && scanned.summary.projectId !== opts.projectId) continue;
         if (opts.taskRef && scanned.summary.taskRef !== opts.taskRef) continue;
         if (!aboutSubject(scanned.summary.subject)) continue;
+        if (opts.craftbookRef && scanned.summary.craftbookRef !== opts.craftbookRef) continue;
         if (!includeArchived && scanned.summary.archived) continue;
         const session =
           scanned.session ??
@@ -6006,6 +6009,7 @@ export class Store {
         // dropping every unrelated conversation in the project.
         if (opts.taskRef && session.taskRef !== opts.taskRef) continue;
         if (!aboutSubject(session.subject)) continue;
+        if (opts.craftbookRef && session.craftbookRef !== opts.craftbookRef) continue;
         if (!includeArchived && session.archived) continue;
         sessions.push(session);
       }

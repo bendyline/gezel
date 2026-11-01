@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { ChatComposer } from './ChatComposer.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
+import { SessionSwitcher } from './SessionSwitcher.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 interface CraftbookChatPaneProps {
@@ -16,12 +17,15 @@ interface CraftbookChatPaneProps {
 const PANE_PROJECT = 'default';
 
 /**
- * The craftbook editor's AI-assist pane. A streaming chat scoped to the
- * craftbook (`craftbookRef`) and driven by the **voorman** (the role that
- * authors craftbooks) — the same persona and `craftbook_*` tools used when
- * building a task's craftbook on the fly. Reuses ChatComposer +
- * ProjectTimeline wholesale; when a `craftbook_*` tool fires it nudges the
- * editor to refetch so the voorman's edits appear live in the tracker.
+ * The craftbook editor's AI-assist pane: a conversation dedicated to
+ * improving this one craftbook. Its threads are pinned to the book
+ * (`craftbookRef`), so the daemon gives them the craftbook-editing kit and a
+ * prompt about the book, and opens each of the person's messages with the
+ * book as it stands and a checkup. The timeline and the thread switcher show
+ * only this book's threads, and the newest one resumes when the pane opens.
+ * Driven by the **crew lead** (the role that authors craftbooks); when a
+ * `craftbook_*` tool fires it nudges the editor to refetch so the edits
+ * appear live in the tracker.
  */
 export function CraftbookChatPane({
   craftbookId,
@@ -31,6 +35,8 @@ export function CraftbookChatPane({
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const [sessionId, setSessionId] = useState('');
+  const [sessionRefreshKey, setSessionRefreshKey] = useState(0);
+  const [composerFocusRequestKey, setComposerFocusRequestKey] = useState(0);
 
   useEffect(() => {
     api
@@ -53,7 +59,7 @@ export function CraftbookChatPane({
   );
 
   const onCraftbookTool = (name: string | undefined) => {
-    if (name?.startsWith('craftbook_')) {
+    if (name?.startsWith('craftbook_') || name === 'set_step_deliverable') {
       window.dispatchEvent(
         new CustomEvent('gezel:craftbook-edited', { detail: { id: craftbookId } }),
       );
@@ -63,7 +69,7 @@ export function CraftbookChatPane({
   if (readOnly) {
     return (
       <div className="craftbook-chat-pane muted small">
-        This craftbook is read-only — fork it to a local copy to edit it with AI.
+        This craftbook is read-only — fork it to a local copy to improve it with AI.
       </div>
     );
   }
@@ -80,11 +86,13 @@ export function CraftbookChatPane({
     <div className="craftbook-chat-pane task-detail-chat">
       <ProjectTimeline
         projectId={PANE_PROJECT}
+        craftbookRef={craftbookId}
         activeSessionId={sessionId || undefined}
         onFocusSession={(sid, gid) => {
           if (gid === gezel.id) setSessionId(sid);
         }}
         onToolActivity={(tool) => onCraftbookTool(tool.name)}
+        emptyPlaceholder={`Ask ${gezelDisplayName} what would make “${craftbookName}” better, or what to change.`}
       />
       <ChatComposer
         gezelId={gezel.id}
@@ -96,10 +104,25 @@ export function CraftbookChatPane({
         {...(gezel.iconOverride ? { gezelIconOverride: gezel.iconOverride } : {})}
         projectId={PANE_PROJECT}
         sessionId={sessionId || undefined}
-        onSessionCreated={(sid) => setSessionId(sid)}
+        focusRequestKey={composerFocusRequestKey}
+        onSessionCreated={(sid) => {
+          setSessionId(sid);
+          setSessionRefreshKey((k) => k + 1);
+        }}
         onToolActivity={(tool) => onCraftbookTool(tool.name)}
         craftbookRef={craftbookId}
-        placeholder={`Ask ${gezelDisplayName} to shape “${craftbookName}” — add steps, set roles, wire gates…`}
+        placeholder={`Ask ${gezelDisplayName} to improve “${craftbookName}”: tighten a step, add a check, name roles…`}
+        belowAddressLine={
+          <SessionSwitcher
+            gezelId={gezel.id}
+            projectId={PANE_PROJECT}
+            sessionId={sessionId || undefined}
+            onSessionIdChange={(next) => setSessionId(next ?? '')}
+            onFreshThread={() => setComposerFocusRequestKey((key) => key + 1)}
+            refreshKey={sessionRefreshKey}
+            craftbookRef={craftbookId}
+          />
+        }
       />
     </div>
   );

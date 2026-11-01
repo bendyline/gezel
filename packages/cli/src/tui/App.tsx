@@ -9,6 +9,7 @@ import {
   type Task,
   type TaskStatus,
   gezelNamesInUse,
+  isTaskOrCraftbookSession,
   pickUnusedGezelName,
 } from '@bendyline/gezel';
 import type {
@@ -716,7 +717,11 @@ export function App(props: {
     setThreadsLoading(true);
     try {
       const result = await client.listChatSessions({ gezelId: activeGezelId, projectId });
-      setThreads(result.sessions.filter((session) => !session.archived && !session.taskRef));
+      setThreads(
+        result.sessions.filter(
+          (session) => !session.archived && !isTaskOrCraftbookSession(session),
+        ),
+      );
       setOverlay('thread');
     } catch (err) {
       note(`could not load threads: ${errMsg(err)}`, 'error');

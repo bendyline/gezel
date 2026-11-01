@@ -17,7 +17,6 @@ import { CraftbookStepPanel } from '../components/CraftbookStepPanel.js';
 import { MarkdownField } from '../components/MarkdownField.js';
 import { StepTracker } from '../components/StepTracker.js';
 import type { RecentTabInput } from '../components/recent-tabs.js';
-import { Tabs } from '../primitives/index.js';
 
 type Source = 'bundled' | 'local' | 'project';
 
@@ -46,23 +45,32 @@ function toUpdateBody(book: Craftbook) {
 
 /**
  * The craftbook editor — the design-mode sibling of `TaskDetail`. Header +
- * shared workshop-bench StepTracker (reorderable, no lifecycle status) +
- * docked per-step panel + an AI-assist tab. Local craftbooks are editable;
- * bundled/project books render read-only with a "Copy to edit" affordance
- * (the PATCH route refuses non-local books anyway).
+ * Overview / AI assist tabs beside the shared workshop-bench StepTracker
+ * (reorderable, no lifecycle status) + the docked page for whichever is
+ * selected. Local craftbooks are editable; bundled/project books render
+ * read-only with a "Copy to edit" affordance (the PATCH route refuses
+ * non-local books anyway).
  */
 export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEditorProps) {
   const [book, setBook] = useState<Craftbook | null>(null);
   const [resolvedSource, setResolvedSource] = useState<Source>(source ?? 'local');
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  // Overview / AI assist / each bench step form one mutually-exclusive tab
+  // set, as in TaskDetail. `null` means Overview or AI assist is showing.
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
-  const [tab, setTab] = useState<'editor' | 'chat'>('editor');
+  const [tab, setTab] = useState<'overview' | 'chat'>('overview');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const nameDraft = useRef('');
   const descDraft = useRef('');
+  const loadedId = useRef<string | null>(null);
 
   const readOnly = resolvedSource !== 'local';
+
+  const handleSelectTab = useCallback((next: 'overview' | 'chat') => {
+    setSelectedStepId(null);
+    setTab(next);
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -70,10 +78,16 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
       setBook(res.craftbook);
       nameDraft.current = res.craftbook.name;
       descDraft.current = res.craftbook.description ?? '';
+      // A book opens on its entry step. A reload (an AI assist edit, a
+      // rejected save) must not pull the person off Overview or AI assist.
+      const reload = loadedId.current === craftbookId;
+      loadedId.current = craftbookId;
       setSelectedStepId((prev) =>
         prev && res.craftbook.steps.some((s) => s.id === prev)
           ? prev
-          : (res.craftbook.entryStepId ?? res.craftbook.steps[0]?.id ?? null),
+          : reload && prev === null
+            ? null
+            : (res.craftbook.entryStepId ?? res.craftbook.steps[0]?.id ?? null),
       );
     } catch (err) {
       setError((err as Error).message);
@@ -228,9 +242,31 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
 
       <div
         className={`task-bench-row craftbook-bench-row${
-          selectedStepId !== null ? ' has-docked-panel has-selected-step' : ''
-        }`}
+          selectedStepId !== null || tab === 'overview' ? ' has-docked-panel' : ''
+        }${selectedStepId !== null ? ' has-selected-step' : ''}`}
       >
+        <div className="task-bench-sidebar">
+          <fieldset className="task-tab-rail" aria-label="Craftbook view">
+            <button
+              type="button"
+              aria-pressed={selectedStepId === null && tab === 'overview'}
+              className={`task-tab-btn${
+                selectedStepId === null && tab === 'overview' ? ' active' : ''
+              }`}
+              onClick={() => handleSelectTab('overview')}
+            >
+              Overview
+            </button>
+            <button
+              type="button"
+              aria-pressed={selectedStepId === null && tab === 'chat'}
+              className={`task-tab-btn${selectedStepId === null && tab === 'chat' ? ' active' : ''}`}
+              onClick={() => handleSelectTab('chat')}
+            >
+              AI assist
+            </button>
+          </fieldset>
+        </div>
         <StepTracker
           steps={book.steps}
           selectedStepId={selectedStepId}
@@ -244,30 +280,23 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
         />
       </div>
 
-      <CraftbookStepPanel
-        craftbookId={book.id}
-        steps={book.steps}
-        stepId={selectedStepId}
-        entryStepId={book.entryStepId}
-        gezels={gezels}
-        readOnly={readOnly}
-        busy={busy}
-        onPatch={onPatch}
-        onRemove={onRemove}
-        onSetEntry={onSetEntry}
-      />
+      {selectedStepId !== null && (
+        <CraftbookStepPanel
+          craftbookId={book.id}
+          steps={book.steps}
+          stepId={selectedStepId}
+          entryStepId={book.entryStepId}
+          gezels={gezels}
+          readOnly={readOnly}
+          busy={busy}
+          onPatch={onPatch}
+          onRemove={onRemove}
+          onSetEntry={onSetEntry}
+        />
+      )}
 
-      <div className="craftbook-editor-tabs">
-        <Tabs.Root value={tab} onValueChange={(v) => setTab(v as 'editor' | 'chat')}>
-          <Tabs.List>
-            <Tabs.Trigger value="editor">Overview</Tabs.Trigger>
-            <Tabs.Trigger value="chat">AI assist</Tabs.Trigger>
-          </Tabs.List>
-        </Tabs.Root>
-      </div>
-
-      {tab === 'editor' && (
-        <div className="craftbook-overview">
+      {selectedStepId === null && tab === 'overview' && (
+        <div className="task-view-panel craftbook-overview">
           <div className="task-step-field full-width">
             <span className="task-step-field-label">Description</span>
             <MarkdownField
@@ -291,7 +320,7 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
         </div>
       )}
 
-      {tab === 'chat' && (
+      {selectedStepId === null && tab === 'chat' && (
         <CraftbookChatPane craftbookId={book.id} craftbookName={book.name} readOnly={readOnly} />
       )}
     </div>

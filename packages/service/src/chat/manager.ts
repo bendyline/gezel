@@ -104,6 +104,7 @@ import {
   appToolsToolsetId,
   buildStepDispatchSeed,
   contractAsksForGrounding,
+  craftbookCheckup,
   createAwakeTimeout,
   createLogger,
   decodeProjectGezelId,
@@ -117,6 +118,7 @@ import {
   isProactiveAllowed,
   isScheduledRunSession,
   isScheduledTaskRun,
+  isTaskOrCraftbookSession,
   isTaskWorkAllowed,
   leaksUntaggedReasoning,
   normalizeCodexPermissionMode,
@@ -131,6 +133,8 @@ import {
   projectManagedWorkspaceWritable,
   pronounFormsForGender,
   redactCredentials,
+  renderCraftbookFocusBlock,
+  renderCraftbookTurnLine,
   resolveGeneralistKickoff,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
@@ -3695,7 +3699,7 @@ export class ChatManager extends LocalEngineRuntime {
     // night-shift sessions are created explicitly with taskRef/stepId and
     // must never become the implicit destination for lobby chat, mentions,
     // reactions, or legacy chat clients merely because they are newest.
-    const active = existing.find((s) => !s.archived && !s.taskRef);
+    const active = existing.find((s) => !s.archived && !isTaskOrCraftbookSession(s));
     if (active) {
       const full = await this.store.getSession(args.gezelId, active.id);
       if (full) {
@@ -7836,6 +7840,13 @@ export class ChatManager extends LocalEngineRuntime {
       if (subjectStateLine) {
         promptForTurn = `${subjectStateLine}\n\n${promptForTurn}`;
       }
+      const craftbookStateLine = await this.readCraftbookStateForTurn(
+        state.record,
+        resolveTurnMessageOrigin(opts),
+      );
+      if (craftbookStateLine) {
+        promptForTurn = `${craftbookStateLine}\n\n${promptForTurn}`;
+      }
       const freshGameState = await this.refreshLeanGameState(
         state.record,
         userText,
@@ -7868,7 +7879,15 @@ export class ChatManager extends LocalEngineRuntime {
       );
       // A person's nudge steers the work already running, and the composer
       // never sends the route opt-out with one, so it gets no route of its own.
-      if (messageOrigin === 'direct-user' && opts?.nudge !== true && opts?.turnIntent !== 'off') {
+      // A craftbook-editing thread routes nowhere: "add a step that makes a
+      // deck" is an edit to the book, never a deck to make.
+      const craftbookFocus = Boolean(state.record.craftbookRef);
+      if (
+        messageOrigin === 'direct-user' &&
+        opts?.nudge !== true &&
+        opts?.turnIntent !== 'off' &&
+        !craftbookFocus
+      ) {
         try {
           turnIntentPlan = await this.previewTurnIntent({
             message: userText,
@@ -7909,17 +7928,18 @@ export class ChatManager extends LocalEngineRuntime {
           }),
         );
       }
-      const projectRetrieval = await this.resolveTurnProjectRetrieval(
-        state,
-        userText,
-        messageOrigin,
-      );
+      // The book is the craftbook thread's whole context; the Default
+      // project's files and library hits would only pull it elsewhere.
+      const projectRetrieval = craftbookFocus
+        ? null
+        : await this.resolveTurnProjectRetrieval(state, userText, messageOrigin);
       // The unified retrieval includes the shared library. Keep the older
       // library-only behavior as a graceful fallback for tests/embedders that
       // have not wired SearchService yet.
-      const libraryRecall = projectRetrieval
-        ? []
-        : await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
+      const libraryRecall =
+        projectRetrieval || craftbookFocus
+          ? []
+          : await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
       const plannedPrelude = turnIntentPlan
         ? renderTurnIntentPrelude(turnIntentPlan, { workRouting: workRoutingOn })
         : null;
@@ -7928,14 +7948,16 @@ export class ChatManager extends LocalEngineRuntime {
         : await this.resolveTurnWorkOptions(state, userText, messageOrigin, workRoutingOn);
       const preludeForTurn = plannedPrelude
         ? { behaviorId: 'turn-intent-plan', text: plannedPrelude }
-        : await resolveUserPromptPrelude(
-            this.store,
-            state,
-            userText,
-            messageOrigin,
-            libraryRecall,
-            workOptions,
-          );
+        : craftbookFocus
+          ? null
+          : await resolveUserPromptPrelude(
+              this.store,
+              state,
+              userText,
+              messageOrigin,
+              libraryRecall,
+              workOptions,
+            );
       if (preludeForTurn) {
         // Prepend onto `promptForTurn`, NOT `userText` — the latter silently
         // discarded anything already spliced in above (image digests today,
@@ -13747,6 +13769,22 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * The craftbook a thread is pinned to, as it stands for this turn, with its
+   * checkup. Read fresh on every turn of the person's, because they edit the
+   * book by hand in the editor beside the chat; a book that cannot be read
+   * costs the line, never the turn.
+   */
+  private async readCraftbookStateForTurn(
+    record: ChatSession,
+    origin: TurnMessageOrigin,
+  ): Promise<string | null> {
+    if (!record.craftbookRef) return null;
+    if (origin !== 'direct-user' && origin !== 'question-answer') return null;
+    const book = await this.store.getLocalCraftbookTemplate(record.craftbookRef).catch(() => null);
+    return book ? renderCraftbookTurnLine(book, craftbookCheckup(book)) : null;
+  }
+
+  /**
    * Get or build the live state for a session. On first use after process
    * start (or after a resetClient), this loads the persisted record and
    * attempts to resume the provider session; on resume failure, falls back
@@ -15045,14 +15083,18 @@ export class ChatManager extends LocalEngineRuntime {
     // chat is about. A thread about one document keeps the document's tools
     // and a small core; installed toolsets (the document converters among
     // them) drop out of both the prompt and the bridge, the way a
-    // built-in-only step drops them.
-    const appToolBindings = builtinOnlyStep ? [] : this.appToolBindingsFor(record);
+    // built-in-only step drops them. A thread pinned to a craftbook keeps
+    // only its editing kit, so neither apps' tools nor toolsets join it.
+    const craftbookFocus = Boolean(record.craftbookRef);
+    const appToolBindings =
+      builtinOnlyStep || craftbookFocus ? [] : this.appToolBindingsFor(record);
     const appSubject = promptAppSubjectFor(record, appToolBindings);
     const appItemFocus = isItemFocus(appSubject);
     const activeToolsets = (entries: readonly InstalledToolset[]): InstalledToolset[] =>
       entries.filter(
         (entry) =>
-          (!(builtinOnlyStep || appItemFocus) || entry.runtime.kind === 'builtin') &&
+          (!(builtinOnlyStep || appItemFocus || craftbookFocus) ||
+            entry.runtime.kind === 'builtin') &&
           !stepDisabledToolsetIds.has(entry.toolsetId),
       );
     // A copy installed elsewhere that the shipped one replaces is the shipped
@@ -15220,7 +15262,6 @@ export class ChatManager extends LocalEngineRuntime {
     };
     const contextualBuiltinTools = [
       ...taskStepContextualBuiltinTools(record, taskContext?.step),
-      ...(record.craftbookRef ? ['craftbook_update_step'] : []),
       ...(project?.connectors?.some((binding) => binding.type.startsWith('mail-')) &&
       securityPolicy.allowMail
         ? ['draft_email', 'queue_email', 'send_email', 'save_email_draft']
@@ -15476,6 +15517,7 @@ export class ChatManager extends LocalEngineRuntime {
       // model treats it as data, not commands.
       ...(project?.connectors?.length ? { untrustedContentPresent: true } : {}),
       ...(appSubject ? { appSubject } : {}),
+      ...(craftbookFocus ? { craftbookFocus: true } : {}),
       ...(factualWriting.on
         ? {
             factualWriting: {
@@ -15506,9 +15548,10 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
 
-    // When this session is scoped to a craftbook template (the explicit
-    // editor's AI assist), append the book's current structure + how to
-    // edit it so the voorman acts on it in place via the craftbook_* tools.
+    // A session pinned to a craftbook (the editor's AI assist) gets the
+    // book's section: what the conversation is about and how to change it.
+    // Session-stable; the book's current state rides each turn instead
+    // (`renderCraftbookTurnLine`), because the person edits it by hand.
     let systemMessage = systemInstructions.full;
     let volatileContext = systemInstructions.volatileContext;
     const extraSections: PromptSectionSize[] = [];
@@ -15516,14 +15559,11 @@ export class ChatManager extends LocalEngineRuntime {
       const book = await this.store
         .getLocalCraftbookTemplate(record.craftbookRef)
         .catch(() => null);
-      const summary = book
-        ? JSON.stringify(
-            { id: book.id, name: book.name, entryStepId: book.entryStepId, steps: book.steps },
-            null,
-            2,
-          )
-        : `(craftbook "${record.craftbookRef}" not found — call craftbook_read to inspect it.)`;
-      const craftbookBlock = `\n\n## Craftbook you are editing\n\nYou are editing the local craftbook template **${record.craftbookRef}**. The unified \`craftbook_*\` tools default to it (no need to pass a target). For broad changes, read the full document with \`craftbook_read\`, edit it, and save it atomically with \`craftbook_write\`. For surgical changes use \`craftbook_add_step\` / \`craftbook_update_step\` / \`craftbook_remove_step\` / \`craftbook_reorder_steps\` / \`craftbook_set_entry\`; use \`set_step_deliverable\` for a focused deliverable gate. Give each step a role and concrete exit criteria. After each change, tell the user in one line what you changed. Current structure:\n\n\`\`\`json\n${summary}\n\`\`\``;
+      const craftbookBlock = `\n\n${renderCraftbookFocusBlock({
+        id: record.craftbookRef,
+        name: book?.name,
+        toolNames: availableBuiltinTools.map((tool) => tool.name),
+      })}`;
       extraSections.push({
         name: 'craftbookEditing',
         tokens: estimateTokens(craftbookBlock),

@@ -12,6 +12,7 @@ import {
   type Task,
   type TurnIntentPlan,
   displayName,
+  isTaskOrCraftbookSession,
   parseTaskRef,
   rewritePromptDraftFileRefs,
 } from '@bendyline/gezel';
@@ -864,16 +865,22 @@ export function ChatComposer({
           }
         }
       } else {
-        // A document's composer reuses only a thread about that document.
+        // A document's composer reuses only a thread about that document,
+        // and a craftbook's only a thread about that craftbook.
         const res = await api.listChatSessions({
           gezelId,
           projectId,
           ...(subjectKeys?.length ? { subjectKeys } : {}),
+          ...(craftbookRef ? { craftbookRef } : {}),
         });
         // Ordinary chat must never reuse a task/craftbook handoff session.
         // The SessionSwitcher applies the same boundary, but this fallback
         // also has to enforce it for the fast-type race before auto-pick.
-        const existing = res.sessions.find((s) => !s.archived && !s.taskRef);
+        const existing = res.sessions.find(
+          (s) =>
+            !s.archived &&
+            (craftbookRef ? s.craftbookRef === craftbookRef : !isTaskOrCraftbookSession(s)),
+        );
         if (existing) {
           liveSessionIdRef.current = existing.id;
           setLiveSessionId(existing.id);
@@ -885,7 +892,15 @@ export function ChatComposer({
       /* fall through to create */
     }
     return createFreshSession();
-  }, [gezelId, projectId, taskRef, subjectKeys, createFreshSession, onSessionCreated]);
+  }, [
+    gezelId,
+    projectId,
+    taskRef,
+    subjectKeys,
+    craftbookRef,
+    createFreshSession,
+    onSessionCreated,
+  ]);
 
   // Media belongs to the draft, in the `message_files/` companion beside its
   // `message.md` — the same shape every other squisq document here uses. A

@@ -532,6 +532,9 @@ export const ChatSessionSummarySchema = ChatSessionSchema.pick({
   stepId: true,
   parentSession: true,
   handoffFrom: true,
+  // Lets the craftbook editor list its own threads, and every other thread
+  // list leave them out.
+  craftbookRef: true,
   // Lets an app's chat list only the threads about its own document.
   subject: true,
   // The thread's context policy and last measured fill. Surfaced on the

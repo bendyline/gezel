@@ -100,10 +100,11 @@ describe('worker sessions are not offered coordinator-only tools', () => {
     }
   });
 
-  it('keeps export_task_craftbook in a worker-held craftbook editor', async () => {
+  it('gives a worker-held craftbook editor the editing kit without coordinator-only tools', async () => {
     const allow = (await surface({ session: session({ craftbookRef: 'supplier-intake' }) }))!;
-    expect(allow.has('export_task_craftbook')).toBe(true);
     expect(allow.has('craftbook_update_step')).toBe(true);
+    expect(allow.has('craftbook_write')).toBe(true);
+    expect(allow.has('list_gilde')).toBe(false);
     expect(coordinatorOnlyIn(allow)).toEqual([]);
   });
 

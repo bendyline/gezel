@@ -1,3 +1,25 @@
+/* Squisq's viewport-based outline grows to 460px even inside a split pane.
+   Keep document navigation compact and its toolbar tabs on the same width.
+   The shell sets this shared variable inline, so the host needs !important. */
+.squisq-editor-shell {
+  --squisq-outline-width: 240px !important;
+}
+
+/* The selected radio glyph sits below center in some UI fonts. Draw the dot
+   geometrically; this menu portals outside the editor shell. */
+.squisq-view-menu-popover .squisq-view-menu-radio {
+  font-size: 0;
+}
+
+.squisq-view-menu-radio-row[aria-checked="true"] .squisq-view-menu-radio::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
 /* Host actions (Export, narration, AI) cannot collapse into Squisq's format
    menu. Give view tabs their own row when those actions would leave the pane. */
 .squisq-editor-shell:not([data-host-mode="chat"]) .squisq-editor-header {

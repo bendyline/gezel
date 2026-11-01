@@ -126,6 +126,7 @@ import {
   binaryDocumentWriteRefusalText,
   coerceDeliverableKind,
   composeCraftbookLaunch,
+  craftbookCheckup,
   craftbookDocFormatFromEnv,
   createTaskText,
   crewMemberNamedIn,
@@ -5785,10 +5786,18 @@ server.tool(
       return cbResult(doc.content);
     }
     const book = await loadTargetCraftbook(t);
+    const template =
+      t.kind === 'craftbook' ? (await api.getCraftbook(t.id).catch(() => null))?.craftbook : null;
     const scripts =
       t.kind === 'task'
         ? (await api.getTask(t.projectId, t.num)).craftbook.scripts
-        : (await api.getCraftbook(t.id).catch(() => null))?.craftbook.scripts;
+        : template?.scripts;
+    // The editor's AI assist reads its own book to see what is left to
+    // improve, and to confirm a change cleared what it was meant to.
+    const checkup =
+      template && template.id === sessionCraftbookId
+        ? craftbookCheckup(template).map((finding) => finding.message)
+        : null;
     return cbResult(
       JSON.stringify(
         {
@@ -5796,6 +5805,7 @@ server.tool(
           entryStepId: book.entryStepId,
           steps: book.steps,
           ...(scripts ? { scripts: Object.keys(scripts) } : {}),
+          ...(checkup ? { checkup } : {}),
         },
         null,
         2,

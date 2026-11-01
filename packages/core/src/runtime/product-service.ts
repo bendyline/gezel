@@ -69,6 +69,7 @@ import type { ChatSession, ExpectedDeliverable, TurnMessageOrigin } from '../sch
 import { InterruptSessionRequestSchema, SendToSessionRequestSchema } from '../schemas/session.js';
 import type { Task } from '../schemas/task.js';
 import { resolveSecurityPolicy } from '../security/policy.js';
+import { isTaskOrCraftbookSession } from '../session-scope.js';
 import { taskSessionCanContinue } from '../task-execution.js';
 import { renderTaskContextBlock } from '../tasks/prompt-context.js';
 import { buildStepDispatchSeed } from '../tasks/step-dispatch-seed.js';
@@ -1046,7 +1047,7 @@ export class PortableProductService {
     const latest = (
       await this.store.listSessions({ gezelId: args.gezelId, projectId: args.projectId })
     )
-      .filter((session) => !session.archived && !session.taskRef)
+      .filter((session) => !session.archived && !isTaskOrCraftbookSession(session))
       .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))[0];
     const session =
       latest ??

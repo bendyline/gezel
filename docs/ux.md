@@ -1154,6 +1154,18 @@ and scroll the conversation above it. The task header and bench stay visible.
 This holds both when opening a task directly and beside the Tasks list;
 the Task overview and step details keep their normal page scrolling.
 
+The craftbook editor uses the same tab column: **Overview** and **AI assist**
+sit to the left of its steps, and together with the steps they form one set of
+tabs. A book opens on its entry step.
+
+AI assist is a conversation about improving that one book, not a general chat.
+It shows only the book's own threads and reopens the newest. The gezel there can
+change the book and look at other books and roles, but cannot run it, start
+work or write files. Each message the person sends carries the book as it
+stands and a short checkup, so "what would make this better?" starts from the
+book itself. Those threads never appear among a gezel's ordinary conversations
+or recent-thread pills, and a message to the gezel is never delivered into one.
+
 ### Activity: what’s going on
 
 The header’s **Activity** key opens one non-modal panel for work and questions

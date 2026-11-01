@@ -54,12 +54,15 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
     // `subject` (repeatable): only threads about these app items — the
     // Office pane asks for its document's path key and its own surface key.
     const subjectKeys = new Set(c.req.queries('subject') ?? []);
+    // `craftbook`: only the threads editing this craftbook (its AI assist).
+    const craftbookRef = c.req.query('craftbook') || undefined;
     const sessions = await ctx.chat.listSessions({ gezelId, projectId });
     return c.json({
-      sessions:
-        subjectKeys.size > 0
-          ? sessions.filter((s) => s.subject && subjectKeys.has(s.subject.key))
-          : sessions,
+      sessions: sessions.filter(
+        (s) =>
+          (subjectKeys.size === 0 || (s.subject && subjectKeys.has(s.subject.key))) &&
+          (!craftbookRef || s.craftbookRef === craftbookRef),
+      ),
     });
   });
 

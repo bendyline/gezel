@@ -453,11 +453,6 @@
   font-size: 0.85rem;
 }
 
-.pending-question-document-expand {
-  align-self: flex-start;
-  font-size: 0.75rem;
-}
-
 /* ── Attached-document split ──────────────────────────────────────
    A question that carries a document (a night-shift report, a plan)
    lifts it out of the card's context strip into its own column, so a

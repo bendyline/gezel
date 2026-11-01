@@ -75,6 +75,35 @@ describe('CraftbookEditor', () => {
     );
   });
 
+  it('shows Overview and AI assist as tabs beside the steps', async () => {
+    render(<CraftbookEditor craftbookId="review" source="local" />);
+    expect(await screen.findByText('Step panel')).toBeInTheDocument();
+    const row = screen.getByTestId('step-tracker').parentElement as HTMLElement;
+    const overview = screen.getByRole('button', { name: 'Overview' });
+    const assist = screen.getByRole('button', { name: 'AI assist' });
+    expect(row).toContainElement(overview);
+    expect(overview).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(overview);
+    expect(screen.getByText('Description field')).toBeInTheDocument();
+    expect(screen.queryByText('Step panel')).not.toBeInTheDocument();
+    expect(overview).toHaveAttribute('aria-pressed', 'true');
+    expect(row).toHaveClass('has-docked-panel');
+    expect(row).not.toHaveClass('has-selected-step');
+
+    fireEvent.click(assist);
+    expect(screen.getByText('AI pane')).toBeInTheDocument();
+    expect(screen.queryByText('Description field')).not.toBeInTheDocument();
+    expect(row).not.toHaveClass('has-docked-panel');
+
+    // An AI assist edit reloads the book without leaving the tab.
+    const loads = vi.mocked(api.getCraftbook).mock.calls.length;
+    window.dispatchEvent(new CustomEvent('gezel:craftbook-edited', { detail: { id: 'review' } }));
+    await waitFor(() => expect(api.getCraftbook).toHaveBeenCalledTimes(loads + 1));
+    expect(screen.getByText('AI pane')).toBeInTheDocument();
+    expect(screen.queryByText('Step panel')).not.toBeInTheDocument();
+  });
+
   it('adds a uniquely identified step to an editable craftbook', async () => {
     render(<CraftbookEditor craftbookId="review" source="local" />);
     fireEvent.click(await screen.findByRole('button', { name: 'Add step' }));

@@ -91,7 +91,8 @@ export async function openChat(deps: GezelChatDeps, opts: OpenChatOptions): Prom
       projectId: opts.projectId,
     });
     const latest = sessions
-      .filter((session) => !session.archived && !session.taskRef)
+      // Task and craftbook-editing threads belong to their own surfaces.
+      .filter((session) => !session.archived && !session.taskRef && !session.craftbookRef)
       .sort((a, b) => (a.lastActivityAt < b.lastActivityAt ? 1 : -1))[0];
     if (latest) return new GezelChat(deps.client, latest.id, gezelId, opts.projectId);
   }

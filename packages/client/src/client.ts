@@ -4075,11 +4075,14 @@ export class GezelClient {
     projectId?: string;
     /** Only threads about these app items (`ChatSession.subject.key`). */
     subjectKeys?: readonly string[];
+    /** Only the threads editing this craftbook (`ChatSession.craftbookRef`). */
+    craftbookRef?: string;
   }): Promise<ListChatSessionsResponse> {
     const params = new URLSearchParams();
     if (filter?.gezelId) params.set('gezel', filter.gezelId);
     if (filter?.projectId) params.set('project', filter.projectId);
     for (const key of filter?.subjectKeys ?? []) params.append('subject', key);
+    if (filter?.craftbookRef) params.set('craftbook', filter.craftbookRef);
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/sessions${qs}`);
   }
@@ -4597,6 +4600,8 @@ export class GezelClient {
       taskRef?: string;
       /** Only threads about these app items (`ChatSession.subject.key`). */
       subjectKeys?: readonly string[];
+      /** Only the threads editing this craftbook (`ChatSession.craftbookRef`). */
+      craftbookRef?: string;
     },
   ): Promise<ListTimelineResponse> {
     const params = new URLSearchParams();
@@ -4605,6 +4610,7 @@ export class GezelClient {
     if (opts?.gezelId) params.set('gezel', opts.gezelId);
     if (opts?.taskRef) params.set('task', opts.taskRef);
     for (const key of opts?.subjectKeys ?? []) params.append('subject', key);
+    if (opts?.craftbookRef) params.set('craftbook', opts.craftbookRef);
     const qs = params.toString() ? `?${params.toString()}` : '';
     return this.request('GET', `/api/projects/${encodeURIComponent(projectId)}/timeline${qs}`);
   }

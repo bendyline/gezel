@@ -368,7 +368,7 @@ describe('TaskDetail', () => {
     expect(views.getByRole('button', { name: 'Task' })).toHaveAttribute('aria-pressed', 'false');
   });
 
-  it('a catalog-craftbook draft shows the Fire button without plan guardrails', async () => {
+  it('a catalog-craftbook draft shows the Start task button without plan guardrails', async () => {
     const draft = {
       ...TASK,
       status: 'draft',
@@ -379,23 +379,23 @@ describe('TaskDetail', () => {
     render(<TaskDetail task={draft} gezels={GEZELS} projectName="Alpha" onChanged={onChanged} />);
 
     expect(screen.getByText('ready')).toBeInTheDocument();
-    const fire = screen.getByRole('button', { name: 'Fire task' });
+    const start = screen.getByRole('button', { name: 'Start task' });
     // Curated recipes skip the readiness warnings a hand-authored plan gets.
-    expect(fire).not.toHaveAttribute('title');
-    fireEvent.click(fire);
+    expect(start).not.toHaveAttribute('title');
+    fireEvent.click(start);
     await waitFor(() => {
       expect(api.activateTask).toHaveBeenCalledWith('pj-alpha', 42, false);
     });
     expect(onChanged).toHaveBeenCalled();
   });
 
-  it('a hand-authored draft keeps the guardrail warnings on its fire button', async () => {
+  it('a hand-authored draft keeps the guardrail warnings on its Start task button', async () => {
     const draft = { ...TASK, status: 'draft' } as unknown as Task;
     render(<TaskDetail task={draft} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
 
     expect(screen.getByText('draft')).toBeInTheDocument();
-    // The thin one-step fixture trips guardrails → the "anyway" label + hint.
-    const fire = screen.getByRole('button', { name: 'Fire anyway' });
-    expect(fire).toHaveAttribute('title', expect.stringContaining('Before running'));
+    // The thin one-step fixture trips guardrails, shown in the button's hint.
+    const start = screen.getByRole('button', { name: 'Start task' });
+    expect(start).toHaveAttribute('title', expect.stringContaining('Before running'));
   });
 });

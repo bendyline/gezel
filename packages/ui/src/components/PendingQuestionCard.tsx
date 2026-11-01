@@ -1810,9 +1810,8 @@ function DocumentContext({
   documentPath: string;
   /**
    * `inline` sits inside the card's context strip and shows a ten-line
-   * teaser with an expand toggle. `panel` is the hoisted right-hand
-   * column: the whole document, scrolling in place, no toggle. `full`
-   * keeps the whole report in the context strip without a toggle.
+   * teaser. `panel` is the hoisted right-hand column: the whole document,
+   * scrolling in place. `full` keeps the whole report in the context strip.
    */
   layout?: 'inline' | 'panel' | 'full';
 }) {
@@ -1827,7 +1826,6 @@ function DocumentContext({
     projectId: string;
     relativePath: string;
   } | null>(null);
-  const [expanded, setExpanded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -1865,14 +1863,14 @@ function DocumentContext({
 
   const previewLines = useMemo(() => {
     if (!content) return '';
-    const body = fullDocument || expanded ? content : content.split('\n').slice(0, 10).join('\n');
+    const body = fullDocument ? content : content.split('\n').slice(0, 10).join('\n');
     // Anything that isn't prose goes through the markdown renderer as a
     // fenced block: a raw JSON literal rendered AS markdown is neither
     // readable nor honest about what it is.
     return isProseDocument(documentPath)
       ? body
       : `\`\`\`${fenceLanguage(documentPath)}\n${body}\n\`\`\``;
-  }, [content, expanded, fullDocument, documentPath]);
+  }, [content, fullDocument, documentPath]);
 
   const kindLabel =
     resolvedKind === 'artifact'
@@ -1914,20 +1912,9 @@ function DocumentContext({
       </div>
       {error && <p className="muted small">Couldn't load preview: {error}</p>}
       {content !== null && (
-        <>
-          <div className="pending-question-document-preview">
-            <RenderedMarkdown markdown={previewLines} />
-          </div>
-          {!fullDocument && content.split('\n').length > 10 && (
-            <button
-              type="button"
-              className="pending-question-document-expand subtle"
-              onClick={() => setExpanded((v) => !v)}
-            >
-              {expanded ? 'Collapse' : 'Show full document'}
-            </button>
-          )}
-        </>
+        <div className="pending-question-document-preview">
+          <RenderedMarkdown markdown={previewLines} />
+        </div>
       )}
     </div>
   );

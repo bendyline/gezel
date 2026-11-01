@@ -28,6 +28,7 @@ export function ProjectTimeline({
   gezelId,
   taskRef,
   subjectKeys,
+  craftbookRef,
   activeSessionId,
   onFocusSession,
   onToolActivity,
@@ -53,6 +54,8 @@ export function ProjectTimeline({
    * the fetch, and by a session allowlist on the live stream.
    */
   subjectKeys?: readonly string[];
+  /** Narrows the timeline to the threads editing this craftbook (its AI assist), like `subjectKeys`. */
+  craftbookRef?: string;
   activeSessionId: string | undefined;
   onFocusSession?: (sessionId: string, gezelId: string, projectId: string) => void;
   onToolActivity?: (tool: ToolActivity) => void;
@@ -85,8 +88,9 @@ export function ProjectTimeline({
         ...(gezelId ? { gezelId } : {}),
         ...(taskRef ? { taskRef } : {}),
         ...(subjectScope ? { subjectKeys: subjectScope.split('\n') } : {}),
+        ...(craftbookRef ? { craftbookRef } : {}),
       }),
-    [projectId, gezelId, taskRef, subjectScope],
+    [projectId, gezelId, taskRef, subjectScope, craftbookRef],
   );
   // When `gezelId` is set we subscribe to the per-gezel stream rather
   // than the project stream and rely on the inflight-scope guard to
@@ -127,7 +131,7 @@ export function ProjectTimeline({
   const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: sessionsRefreshKey is the refetch trigger — it appears nowhere in the body by design.
   useEffect(() => {
-    if (!taskRef && !subjectScope) {
+    if (!taskRef && !subjectScope && !craftbookRef) {
       setTaskSessionIds(EMPTY_SET);
       return;
     }
@@ -139,7 +143,11 @@ export function ProjectTimeline({
     let cancelled = false;
     const inScope: Promise<{ sessions: ReadonlyArray<{ id: string; archived?: boolean }> }> = parsed
       ? api.listTaskSessions(parsed.projectId, parsed.num)
-      : api.listChatSessions({ projectId, subjectKeys: subjectScope.split('\n') });
+      : api.listChatSessions({
+          projectId,
+          ...(subjectScope ? { subjectKeys: subjectScope.split('\n') } : {}),
+          ...(craftbookRef ? { craftbookRef } : {}),
+        });
     void inScope
       .then((res) => {
         if (cancelled) return;
@@ -158,18 +166,18 @@ export function ProjectTimeline({
     return () => {
       cancelled = true;
     };
-  }, [taskRef, projectId, subjectScope, sessionsRefreshKey]);
+  }, [taskRef, projectId, subjectScope, craftbookRef, sessionsRefreshKey]);
 
   // A session created by this pane's composer, or one the timeline just
   // focused, is in scope by construction — union it in so the user's own
   // first message in a brand-new task thread isn't held back for the
   // round trip the refetch below costs.
   const scopedSessionIds = useMemo(() => {
-    if (!taskRef && !subjectScope) return undefined;
+    if (!taskRef && !subjectScope && !craftbookRef) return undefined;
     if (!activeSessionId) return taskSessionIds;
     if (taskSessionIds.has(activeSessionId)) return taskSessionIds;
     return new Set([...taskSessionIds, activeSessionId]);
-  }, [taskRef, subjectScope, taskSessionIds, activeSessionId]);
+  }, [taskRef, subjectScope, craftbookRef, taskSessionIds, activeSessionId]);
 
   // Debounce the refetch: a handoff session mid-turn emits a delta per
   // token, and every one of them misses the allowlist until the refetch
@@ -210,9 +218,11 @@ export function ProjectTimeline({
           ? `project:${projectId}:task:${taskRef}`
           : subjectScope
             ? `project:${projectId}:subject:${subjectScope}`
-            : gezelId
-              ? `project:${projectId}:gezel:${gezelId}`
-              : `project:${projectId}`
+            : craftbookRef
+              ? `project:${projectId}:craftbook:${craftbookRef}`
+              : gezelId
+                ? `project:${projectId}:gezel:${gezelId}`
+                : `project:${projectId}`
       }
       activeSessionId={activeSessionId}
       onFocusSession={onFocusSession}
@@ -227,14 +237,14 @@ export function ProjectTimeline({
       emptyPlaceholder={emptyPlaceholder}
       loadTimeline={loadTimeline}
       streamUrl={streamUrl}
-      {...(gezelId || taskRef || subjectScope || !runtimeCapabilities().terminal
+      {...(gezelId || taskRef || subjectScope || craftbookRef || !runtimeCapabilities().terminal
         ? {}
         : { terminalStreamUrl })}
       {...(terminalRefreshKey !== undefined ? { terminalRefreshKey } : {})}
       {...(terminalSubmission ? { terminalSubmission } : {})}
       {...(terminalFocusRequest ? { terminalFocusRequest } : {})}
       {...(sessionFocusRequest ? { sessionFocusRequest } : {})}
-      {...(gezelId || taskRef || subjectScope || !onTerminalWorkingDirChanged
+      {...(gezelId || taskRef || subjectScope || craftbookRef || !onTerminalWorkingDirChanged
         ? {}
         : { onTerminalWorkingDirChanged })}
       inflightScope={inflightScope}

@@ -485,6 +485,12 @@ export interface BuildInstructionsOptions {
    * — and condenses the project's about. Absent → byte-identical prompt.
    */
   appSubject?: PromptAppSubject;
+  /**
+   * The thread is pinned to one craftbook (the craftbook editor's AI
+   * assist). Stands down the same project-file layers as item focus; the
+   * book's own section is rendered by the caller (`renderCraftbookFocusBlock`).
+   */
+  craftbookFocus?: boolean;
 }
 
 /**
@@ -673,10 +679,12 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     browserLocalPreviewOnly,
     inAppWebPreview,
     appSubject,
+    craftbookFocus,
   } = opts;
-  // A thread about one document: the document is the job, and the layers
-  // that teach where project files go would send the model looking for one.
-  const itemFocus = isItemFocus(appSubject);
+  // A thread about one document or one craftbook: the item is the job, and
+  // the layers that teach where project files go would send the model
+  // looking for one.
+  const itemFocus = isItemFocus(appSubject) || craftbookFocus === true;
   // Provenance-framing block — present only when the session can surface
   // untrusted external content (mail-enabled projects). Constant + cache-stable.
   const untrustedContentBlock = untrustedContentPresent ? UNTRUSTED_CONTENT_GUIDANCE : '';
