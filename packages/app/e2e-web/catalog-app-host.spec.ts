@@ -17,6 +17,27 @@ for (const app of catalogPages()) {
     const manifest = JSON.parse(await readFile(join(app.dir, 'manifest.json'), 'utf8'));
     const project = await api.createProject({ name: `App audit ${app.id}` });
     await api.applyProjectType(project.id, { typeId: app.id, version: manifest.version });
+    if (app.id === 'image-feed' || app.id === 'social-feed') {
+      await api.writeProjectWorkspaceFile(project.id, {
+        path: 'posts/workshop-note/post.md',
+        content:
+          '---\ntitle: A note from the workshop\nstatus: idea\nplatforms: [bluesky]\ncreated: 2026-11-01\n---\n\nA real post to review with the crew.\n',
+      });
+      await api.writeProjectWorkspaceFile(project.id, {
+        path: 'posts/index.json',
+        content: JSON.stringify({
+          posts: [
+            {
+              id: 'workshop-note',
+              title: 'A note from the workshop',
+              status: 'idea',
+              platforms: ['bluesky'],
+              created: '2026-11-01',
+            },
+          ],
+        }),
+      });
+    }
     await gotoHome(page);
     await openProject(page, project.id);
     const frame = page.frameLocator('.project-output-iframe iframe');
@@ -106,6 +127,19 @@ for (const app of catalogPages()) {
         api.invokeProjectPageTool(project.id, { tool: 'not_a_declared_page_action', input: {} }),
       ).rejects.toThrow();
     }
+    if (app.id === 'image-feed' || app.id === 'social-feed') {
+      await frame.locator('[data-post="workshop-note"]').click();
+      await expect(frame.getByRole('dialog')).toContainText('A real post to review with the crew.');
+      await expect(page.locator('.page-chat-slot')).toBeHidden();
+      await frame.locator('[data-move="draft"]').click();
+      await expect(frame.locator('#d-meta')).toContainText('draft');
+      expect(
+        (await api.readProjectWorkspaceFile(project.id, 'posts/workshop-note/post.md')).content,
+      ).toContain('status: draft');
+      await frame.getByRole('button', { name: 'Close', exact: true }).click();
+      await expect(page.locator('.page-chat-slot')).toBeVisible();
+    }
+    await expect(frame.locator('#app-load-error')).toBeHidden();
     await page.screenshot({ path: info.outputPath(`${app.id}-host.png`) });
   });
 }

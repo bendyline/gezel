@@ -35,10 +35,13 @@ test('application layout preserves content and chat through restore, hide, and p
           '*',
         );
     });
-    frame.srcdoc = `${shim}<main style="max-width:600px"><h1>My workspace</h1><input aria-label="Draft" value="Keep this"><button onclick="document.querySelector('dialog').showModal()">Open dialog</button></main><dialog><button onclick="this.parentElement.close()">Close dialog</button></dialog><script>window.layout=gezel.ui.components.appLayout('main',{title:'Your companion'});</script>`;
+    frame.srcdoc = `${shim}<style>body{--line:rgb(10,20,30);color:rgb(40,50,60);font-size:19px}main{border:1px solid var(--line)}</style><main style="max-width:600px"><h1>My workspace</h1><input aria-label="Draft" value="Keep this"><button onclick="document.querySelector('dialog').showModal()">Open dialog</button></main><dialog><button onclick="this.parentElement.close()">Close dialog</button></dialog><script>window.layout=gezel.ui.components.appLayout('main',{title:'Your companion'});</script>`;
   }, shim);
   const frame = page.frameLocator('iframe');
   await expect(frame.locator('gezel-chat')).toHaveCount(1);
+  await expect(frame.locator('main')).toHaveCSS('border-top-color', 'rgb(10, 20, 30)');
+  await expect(frame.locator('main')).toHaveCSS('color', 'rgb(40, 50, 60)');
+  await expect(frame.locator('main')).toHaveCSS('font-size', '19px');
   await expect
     .poll(() =>
       page.evaluate(
@@ -138,7 +141,7 @@ test('conditional fields are omitted and asynchronous option updates preserve th
 }) => {
   await page.setContent(`<script>${pageDemoBootstrapSource()}</script><div id="form"></div><script>
 window.calls=[];
-const api=window.makeDemoGezel({tools:{save:input=>{window.calls.push(input);return {};}}});
+const api=window.makeDemoGezel({tools:{save:input=>new Promise(resolve=>{window.calls.push(input);window.finishSave=resolve;})}});
 window.form=api.ui.components.actionForm('#form',{title:'Update application',tool:'save',clearOnSave:false,fields:[{name:'stage',label:'Stage',required:true,options:['screening','closed']},{name:'outcome',label:'Outcome',required:true,options:['signed','withdrawn'],when:{field:'stage',equals:'closed'}},{name:'note',label:'Note'}]});
 </script>`);
   await page.locator('summary').click();
@@ -149,7 +152,15 @@ window.form=api.ui.components.actionForm('#form',{title:'Update application',too
   );
   await expect(page.getByLabel('Note', { exact: true })).toHaveValue('Keep this note');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.getByLabel('Note', { exact: true })).toBeDisabled();
+  await page.evaluate(() => {
+    Reflect.get(window, 'form').update({ title: 'Latest application details' });
+  });
+  await expect(page.locator('summary')).toHaveText('Update the application');
+  await page.evaluate(() => Reflect.get(window, 'finishSave')({}));
   await expect(page.getByRole('status')).toHaveText('Saved.');
+  await expect(page.locator('summary')).toHaveText('Latest application details');
+  await expect(page.getByLabel('Note', { exact: true })).toHaveValue('Keep this note');
   expect(await page.evaluate(() => Reflect.get(window, 'calls'))).toEqual([
     { stage: 'screening', note: 'Keep this note' },
   ]);

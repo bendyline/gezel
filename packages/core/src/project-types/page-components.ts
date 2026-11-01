@@ -50,14 +50,14 @@ window.installGezelComponents=function(api,transport){
   };
   var css=__COMPONENT_CSS__;
   function el(tag,text){var e=document.createElement(tag);if(text!==undefined)e.textContent=text;return e;}
-  function setup(target,tag){
+  function setup(target,tag,styles){
     var mount=typeof target==='string'?document.querySelector(target):target;
     if(!mount)throw new Error('Component mount element not found.');
     if(!customElements.get(tag))customElements.define(tag,class extends HTMLElement{
       connectedCallback(){if(this.connect)this.connect();}
       disconnectedCallback(){if(this.disconnect)this.disconnect();}
     });
-    var host=el(tag),root=host.attachShadow({mode:'open'}),style=el('style',css),unsubscribe;
+    var host=el(tag),root=host.attachShadow({mode:'open'}),style=el('style',styles===undefined?css:styles),unsubscribe;
     root.append(style);
     host.connect=function(){host.setAttribute('data-theme',api.ui.theme.mode);unsubscribe=api.ui.onTheme(function(t){host.setAttribute('data-theme',t.mode);});};
     host.disconnect=function(){if(unsubscribe)unsubscribe();unsubscribe=null;};
@@ -112,7 +112,7 @@ window.installGezelComponents=function(api,transport){
     return {element:s.host,refresh:refresh,update:function(next){opts=Object.assign({},opts,next);void refresh();},destroy:function(){destroyed=true;s.host.remove();s.host.disconnect();}};
   }
   ${pageChatComponentSource()}
-  ${pageAppComponentsSource()}
+${pageAppComponentsSource()}
   var components={version:1,fileCard:fileCard,fileAdder:fileAdder,chat:chat,appLayout:appLayout,actionForm:actionForm,collectionFilter:collectionFilter};
   if(demo)components.demo={files:function(){return demoFiles.slice();},reset:function(){urls.forEach(function(url){URL.revokeObjectURL(url);});urls.clear();demoFiles=[];}};
   api.ui.components=components;

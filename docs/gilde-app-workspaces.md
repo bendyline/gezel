@@ -10,7 +10,9 @@ their existing capabilities and navigation.
 
 - `ui.components.appLayout` expands existing content into a full workspace with
   native chat alongside it. Conversation visibility, page dialogs, restore, and
-  narrow layouts preserve the mounted conversation and draft.
+  narrow layouts preserve the mounted conversation and draft. Its theme applies
+  to its own controls and conversation panel; authored content keeps its fonts,
+  colors, and CSS variables.
 - `ui.components.actionForm` provides validated, accessible, serialized edits
   through declared page tools, with recoverable errors and retained drafts.
 - `ui.components.collectionFilter` searches rendered records without replacing
@@ -63,8 +65,10 @@ demo data. The shared demo bootstrap replaces copied legacy platform stubs.
 browser: fullscreen, forms, search, light/dark themes and 320-pixel layouts.
 `catalog-app-host.spec.ts` applies the catalog definitions in isolated projects,
 checks native chat and retained drafts, exercises real script-backed form
-actions, and reapplies definitions with `seedPolicy: preserve`. Models are
-mocked. `page-app-components.spec.ts` covers the shared components' dialog,
+actions, and reapplies definitions with `seedPolicy: preserve`. It also verifies
+that denied workspace writes retain the draft without changing the saved file,
+and that feed post dialogs can advance a real post and then restore native chat.
+Models are mocked. `page-app-components.spec.ts` covers the shared components' dialog,
 validation, failure, asynchronous and dynamic-search behavior.
 
 Run against a checkout with `GILDE_DIR` set to its root and
@@ -72,6 +76,13 @@ Run against a checkout with `GILDE_DIR` set to its root and
 Gilde's index builder. `pnpm test:e2e:catalog-apps` holds a dependency read lease;
 use existing browser binaries. Catalog schema validation and page-demo checks
 remain separate from browser behavior checks.
+
+The November 1, 2026 verification passed 65 browser tests, 23 SDK/page-bridge
+contract tests, the core build, and SDK type checking. Gilde validation reported
+zero errors and warnings across 35,678 files; all 23 current pages passed the
+standalone demo contract. The visual review covered native-host views, both
+themes, and narrow layouts. Model replies were mocked, so this verifies the
+application integration rather than a live model's tutoring or gameplay quality.
 
 These are source changes and new unreleased catalog versions. Public delivery
 requires the Gezel runtime containing the new components, a Gilde release, and
