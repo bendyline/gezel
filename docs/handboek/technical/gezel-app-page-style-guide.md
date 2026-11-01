@@ -32,6 +32,26 @@ The host supplies typography and an opt-in component kit, not a complete CSS fra
 
 ## Shared file components
 
+For a full application workspace, `ui.components.appLayout` wraps the existing
+main content and adds a responsive fullscreen conversation. It keeps the page
+mounted on restore, provides a conversation toggle, and suppresses its native
+chat slot while a page dialog is open. Use a specific companion title and a short
+description of useful work the person can do together. A file-only app can pass
+`chat: false`. Keep the content usable in the ordinary pane as well.
+
+Use `actionForm` for small, declared edits and `collectionFilter` for search over
+rendered records. These components supply controls and state handling, while the
+app owns field labels, domain data, allowed actions, and refresh behavior. Avoid
+duplicating the host's composer or building a separate persistence store. See
+[workspace components](gezel-page-apis.md#building-a-full-page-workspace).
+
+For a responsive game or other app, use `gezel.ui.layout` / `ui.onLayout` and
+`data-gezel-fullscreen` to adapt when the Output pane expands. Native chat slots
+use `ui.components.chat`; size their containing rectangle in page CSS and choose
+their controls through options. They inherit the shell's theme and fonts, not
+page CSS overrides. See [fullscreen and chat](gezel-page-apis.md#fullscreen-layout-and-embedded-chat)
+for the layout example and clipping constraints.
+
 Prefer `gezel.ui.components.fileCard` for a file tile/row and `fileAdder` for uploads. The [page API guide](gezel-page-apis.md#file-cards-and-adding-files) covers mounting, lifecycle, permission declarations and standalone demo setup. Both ship their own shadow-root styles, native buttons, focus outlines, status messages and light/dark colors. They inherit the host's `--font-ui`; published and exported demos receive the same fonts. A page's broad `button` or `img` rules do not change component internals.
 
 Pages own the containing grid/list, spacing and breakpoints. Choose `variant: 'tile'` or `'row'`; use `update` when changing layouts. Keep filenames as the primary label and preserve keyboard access. The adder states where files go and what was saved, so do not hide that destination or status.

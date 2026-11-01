@@ -61,7 +61,7 @@ const PROJECT = {
 
 const GEZELS = [{ id: 'g1', name: 'Amadou' }] as unknown as GezelSummary[];
 
-const EMPTY_COPY = /No gezellen available to chat with yet/;
+const EMPTY_COPY = /No crew members available to chat with yet/;
 
 beforeEach(() => {
   vi.clearAllMocks();

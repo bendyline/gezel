@@ -48,6 +48,6 @@ export {
   verifyNativeBinaries,
   type ElectronNativeReuseOptions,
   type ElectronNativeReuseResult,
-} from '@bendyline/gezel-inference/internal/engines/electron-native-reuse';
+} from './native-verification-entry.js';
 
 export type { EngineContext } from './http/engine-context.js';

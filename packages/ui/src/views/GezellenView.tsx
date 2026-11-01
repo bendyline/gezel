@@ -335,7 +335,7 @@ export function GezellenView({
             className="secondary gezellen-back"
             onClick={() => setShowCompactDetail(false)}
           >
-            Back to gezellen
+            Back to crew
           </button>
         )}
         {selectedGezelId ? (
@@ -346,7 +346,7 @@ export function GezellenView({
             activeTurnsReady={activeTurnsReady}
           />
         ) : (
-          <p className="placeholder">No gezellen yet — create one to get started.</p>
+          <p className="placeholder">No crew members yet — create one to get started.</p>
         )}
       </section>
     </div>

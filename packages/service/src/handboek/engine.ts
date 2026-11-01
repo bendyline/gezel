@@ -12,12 +12,13 @@ import {
   findHandboekContent,
   listReleaseNotes,
   loadCuratedArticles,
+  loadScorecardRoundNotes,
 } from './content.js';
 import type { HandboekDeviceInfo } from './device.js';
 import { type GeneratedSummary, buildGeneratedBody, listGeneratedSummaries } from './generated.js';
 import { type HandboekCatalog, expandMacros } from './macros.js';
 
-export type { CuratedArticle, ReleaseNoteEntry } from './content.js';
+export type { CuratedArticle, ReleaseNoteEntry, ScorecardRoundNote } from './content.js';
 // The CLI's site export builds its catalog over this: the catalog cannot find
 // Gilde on its own when it is installed globally beside the service.
 export { bundledGildeDataDir } from '../gilde-updates/bundled-gilde.js';
@@ -31,9 +32,11 @@ export {
 export {
   HANDBOEK_AREAS,
   HANDBOEK_AREA_TITLES,
+  SCORECARD_ROUND_NOTES_DIR,
   WHATS_NEW_INDEX_ID,
   findHandboekContent,
   listReleaseNotes,
+  loadScorecardRoundNotes,
 } from './content.js';
 export { siteDeviceInfo } from './device.js';
 export type {
@@ -43,8 +46,15 @@ export type {
   HandboekHardwareTier,
   HandboekModelInfo,
 } from './device.js';
-export { MACROS, expandMacros, parseAttrs } from './macros.js';
-export type { HandboekCatalog } from './macros.js';
+export {
+  MACROS,
+  SCORECARD_ROUND_PAGES,
+  expandMacros,
+  parseAttrs,
+  renderScorecardRoundPages,
+  scorecardRoundPageId,
+} from './macros.js';
+export type { HandboekCatalog, ScorecardRoundPage } from './macros.js';
 export {
   GEZEL_SITE_THEME,
   OG_CARD_HEIGHT,
@@ -108,6 +118,7 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
   }
 
   const curated = (): CuratedArticle[] => (contentDir ? loadCuratedArticles(contentDir) : []);
+  const roundNotes = () => (contentDir ? loadScorecardRoundNotes(contentDir) : []);
 
   const engine: HandboekEngine = {
     async toc(): Promise<HandboekToc> {
@@ -165,6 +176,7 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
           catalog: opts.catalog,
           device: opts.device,
           releases: listReleaseNotes(curatedArticles),
+          roundNotes: roundNotes(),
         });
         return {
           id,
@@ -193,6 +205,7 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
         catalog: opts.catalog,
         device: opts.device,
         releases: listReleaseNotes(curatedArticles),
+        roundNotes: roundNotes(),
       });
       return {
         id,

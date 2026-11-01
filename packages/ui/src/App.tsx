@@ -23,7 +23,6 @@ import { ActivityControl } from './components/ActivityControl.js';
 import { AddFolderSheet, openAddFolder } from './components/AddFolderSheet.js';
 import { AppBrand } from './components/AppBrand.js';
 import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
-import { BoekwachterPill } from './components/BoekwachterPill.js';
 import { ClaudeCliPoolPill } from './components/ClaudeCliPoolPill.js';
 import { EngagementModeIcon } from './components/EngagementModeIcon.js';
 import { EngagementModeMenu } from './components/EngagementModeMenu.js';
@@ -309,8 +308,8 @@ function FullApp() {
   const headerDensity = useHeaderDensityMeasurement(headerRef, headerClusterRef);
 
   // ProjectOutputPane reports its local maximize state through a window
-  // event so the persistent titlebar can provide the restore affordance
-  // that the pane's covered toolbar cannot. This avoids threading a UI-only
+  // event so the persistent titlebar can also provide a restore affordance.
+  // This avoids threading a UI-only
   // callback through TabContent and every project-view layer in between.
   useEffect(() => {
     const onMaximizedChange = (event: Event) => {
@@ -809,29 +808,36 @@ function FullApp() {
                 <ActivityControl />
               )}
             {!firstRun && runtimeCapabilities().connections && <WatchingIndicator />}
-            {!firstRun && runtimeCapabilities().daemonSettings && <BoekwachterPill />}
             {!firstRun && runtimeCapabilities().engineStatus && <EngineStatusPill />}
             {!firstRun && runtimeCapabilities().daemonSettings && (
               <>
                 <ClaudeCliPoolPill />
                 <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
-                <TaskSpeedMenu
-                  mode={engagementMode}
-                  nightShift={nightShift}
-                  onNightShiftChange={setNightShift}
-                />
               </>
             )}
-            {outputPaneMaximized && (
-              <button
-                type="button"
-                className="app-output-restore"
-                onClick={requestOutputPaneRestore}
-                title="Restore output pane (F5)"
-                aria-label="Restore output pane"
-              >
-                <OutputPaneRestoreIcon />
-              </button>
+            {/* The header tray: icon keys set into one slot, read as a
+              toolbar beside the status readouts. */}
+            {((!firstRun && runtimeCapabilities().daemonSettings) || outputPaneMaximized) && (
+              <div className="app-header-tray">
+                {!firstRun && runtimeCapabilities().daemonSettings && (
+                  <TaskSpeedMenu
+                    mode={engagementMode}
+                    nightShift={nightShift}
+                    onNightShiftChange={setNightShift}
+                  />
+                )}
+                {outputPaneMaximized && (
+                  <button
+                    type="button"
+                    className="app-output-restore"
+                    onClick={requestOutputPaneRestore}
+                    title="Restore output pane (F5)"
+                    aria-label="Restore output pane"
+                  >
+                    <OutputPaneRestoreIcon />
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </header>
@@ -1441,7 +1447,7 @@ function nightShiftSummary(
     hint:
       window && !window.open && start
         ? `Instead of waiting until ${start}.`
-        : 'Your gezellen work through the queue now.',
+        : 'Your crew works through the queue now.',
   };
   if (!window) {
     return {
@@ -1463,8 +1469,8 @@ function nightShiftSummary(
     line:
       lastNightLine(lastNight) ??
       (start
-        ? `Your gezellen work through the queue from ${start}.`
-        : 'Your gezellen work through the queue overnight.'),
+        ? `Your crew works through the queue from ${start}.`
+        : 'Your crew works through the queue overnight.'),
     badge: { text: nightWord(window.start), tone: 'idle' },
     track: ticks && { ...ticks, progress: 0 },
     action: startNow,
@@ -1483,7 +1489,7 @@ function lastNightLine(night: LastNight | null): string | null {
       : night.questions === 1
         ? ' One question is waiting for you.'
         : ` ${night.questions} questions are waiting for you.`;
-  return `Last night your gezellen ${did}.${ask}`;
+  return `Last night your crew ${did}.${ask}`;
 }
 
 /** "Tonight", "Tomorrow", or the weekday a window opens on. */

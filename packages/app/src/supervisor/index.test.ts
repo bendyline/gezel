@@ -283,6 +283,8 @@ vi.mock('@bendyline/gezel-service', () => ({
     cert: { certPem: 'EMBEDDED-CERT-PEM' },
     stop: vi.fn().mockResolvedValue(undefined),
   }),
+}));
+vi.mock('@bendyline/gezel-service/native-verification', () => ({
   reuseVerifiedElectronNativeBinaries: vi.fn(async () => {
     if (ctx.nativeReuse.reused && ctx.nativeReuse.nativeBinDir) {
       process.env.GEZEL_NATIVE_BIN_DIR = ctx.nativeReuse.nativeBinDir;
@@ -1325,7 +1327,9 @@ describe('Branch 3 — embedded', () => {
     const svc = await connectOrStart(baseOpts({ forceEmbedded: true }));
 
     expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(ctx.nativeRoot);
-    const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
+    const { reuseVerifiedElectronNativeBinaries } = await import(
+      '@bendyline/gezel-service/native-verification'
+    );
     expect(reuseVerifiedElectronNativeBinaries).toHaveBeenCalledWith({
       candidates: [ctx.nativeRoot],
       allowStandaloneMacPayload: true,
@@ -1367,7 +1371,9 @@ describe('Branch 3 — embedded', () => {
     const svc = await connectOrStart(baseOpts({ forceEmbedded: true }));
 
     expect(process.env.GEZEL_NATIVE_BIN_DIR).toBe(installedRoot);
-    const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
+    const { reuseVerifiedElectronNativeBinaries } = await import(
+      '@bendyline/gezel-service/native-verification'
+    );
     expect(reuseVerifiedElectronNativeBinaries).toHaveBeenCalledWith({
       candidates: [installedRoot],
       cacheFile: nativePayloadVerificationPath(testHome),
@@ -1382,7 +1388,9 @@ describe('Branch 3 — embedded', () => {
     await mkdir(ctx.nativeRoot, { recursive: true });
     await mkdir(installedRoot, { recursive: true });
     vi.mocked(resolveMode).mockResolvedValue({ kind: 'embedded' });
-    const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
+    const { reuseVerifiedElectronNativeBinaries } = await import(
+      '@bendyline/gezel-service/native-verification'
+    );
     vi.mocked(reuseVerifiedElectronNativeBinaries)
       .mockResolvedValueOnce({ reused: false, reason: 'dev hash mismatch' })
       .mockImplementationOnce(async () => {

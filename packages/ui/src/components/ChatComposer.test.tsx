@@ -941,6 +941,35 @@ describe('ChatComposer lossless draft submission', () => {
     );
   });
 
+  it('keeps a locked composer on its recipient even when a pasted draft contains mentions', async () => {
+    vi.mocked(api.sendToChatSession).mockResolvedValue({ accepted: true, sessionId: 'session-1' });
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        showAddress={false}
+        features={{
+          mentions: false,
+          dictation: false,
+          attachments: false,
+          expand: false,
+          promptAssist: false,
+        }}
+      />,
+    );
+    expect(screen.queryByText('To:')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Narrate prompt' })).not.toBeInTheDocument();
+    expect(screen.queryByTestId('chat-composer-expand')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Message'), {
+      target: { value: 'Ask @[Ada](gezel:ada)' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.sendToChatSession).mock.lastCall?.[1]).not.toHaveProperty('mentions');
+  });
+
   it('keeps the exact editor draft mounted until the daemon accepts it', async () => {
     const request = deferred<{ accepted: true; sessionId: string }>();
     vi.mocked(api.sendToChatSession).mockReturnValue(request.promise);

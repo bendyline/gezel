@@ -135,6 +135,15 @@ export interface ComposerTaskLaunchProps {
 }
 
 export interface ChatComposerProps {
+  showAddress?: boolean;
+  /** Surface controls. Existing callers retain the full composer by default. */
+  features?: {
+    attachments?: boolean;
+    dictation?: boolean;
+    promptAssist?: boolean;
+    expand?: boolean;
+    mentions?: boolean;
+  };
   gezelId: string;
   /** The primary recipient's friendly name. */
   gezelName: string;
@@ -378,6 +387,8 @@ function ComposerNarrateButton({
  *     global-scoped) SSE stream — no duplicate state here.
  */
 export function ChatComposer({
+  showAddress = true,
+  features,
   gezelId,
   gezelName,
   gezelRoleBasedName,
@@ -416,6 +427,9 @@ export function ChatComposer({
   imageGenerator,
   waitingStatus,
 }: ChatComposerProps) {
+  const attachmentsEnabled =
+    runtimeCapabilities().chatAttachments && features?.attachments !== false;
+  const mentionsEnabled = features?.mentions !== false;
   const composerRef = useRef<HTMLDivElement>(null);
   // Hysteresis because a split grip can drag the width across the line, and
   // each crossing remounts the thread bar in its other home.
@@ -444,6 +458,10 @@ export function ChatComposer({
    * it inside the slot loses the shape of the thing being written.
    */
   const [expanded, setExpanded] = useState(false);
+  const expansionAllowed = showAddress && features?.expand !== false;
+  useEffect(() => {
+    if (!expansionAllowed) setExpanded(false);
+  }, [expansionAllowed]);
   // The local SSE is only one view of a turn. Navigation, remounts, and a
   // renderer reconnect can drop it while the service keeps generating.
   // Track the service's authoritative in-flight state separately so the
@@ -643,7 +661,8 @@ export function ChatComposer({
     text: intentPreviewText,
     edits: imageGenerator?.edits === true,
   });
-  const promptAssistEnabled = runtimeCapabilities().promptAssist === true;
+  const promptAssistEnabled =
+    runtimeCapabilities().promptAssist === true && features?.promptAssist !== false;
   // A prefill can arrive with its task attached (a welcome first project that
   // runs a craftbook); attach it beside the sentence it came with.
   const attachTaskRef = useRef(taskLaunch.attach);
@@ -986,6 +1005,7 @@ export function ChatComposer({
    */
   const mentionProvider = useCallback(
     async (query: string): Promise<MentionCandidate[]> => {
+      if (!mentionsEnabled) return [];
       try {
         const res = await api.listMentionCandidates({ projectId, query });
         return res.candidates.map((c) => ({
@@ -1006,7 +1026,7 @@ export function ChatComposer({
         return [];
       }
     },
-    [projectId, roleBasedNameOnlyMode],
+    [projectId, roleBasedNameOnlyMode, mentionsEnabled],
   );
 
   useEffect(() => {
@@ -1248,7 +1268,7 @@ export function ChatComposer({
   // the existing fan-out semantics.
   const lastPivotedToRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!onPivotToMention) {
+    if (!onPivotToMention || !mentionsEnabled) {
       lastPivotedToRef.current = null;
       return;
     }
@@ -1262,7 +1282,7 @@ export function ChatComposer({
     if (lastPivotedToRef.current === firstOther.id) return;
     lastPivotedToRef.current = firstOther.id;
     onPivotToMention(firstOther.id);
-  }, [mentioned, gezelId, projectId, onPivotToMention]);
+  }, [mentioned, gezelId, projectId, onPivotToMention, mentionsEnabled]);
 
   const send = useCallback(async () => {
     // `/open` is renderer-local: never create a session or send the command to
@@ -1471,9 +1491,9 @@ export function ChatComposer({
         imageSettings?: ImageSettings;
         imageCues?: 'auto' | 'off';
       } = { message: userText };
-      if (runtimeCapabilities().multiRecipientChat && mentionIds.length > 0)
+      if (mentionsEnabled && runtimeCapabilities().multiRecipientChat && mentionIds.length > 0)
         body.mentions = mentionIds;
-      if (runtimeCapabilities().multiRecipientChat && ccIds.length > 0)
+      if (mentionsEnabled && runtimeCapabilities().multiRecipientChat && ccIds.length > 0)
         body.passiveCcGezelIds = ccIds;
       if (sentDraftId) body.draftId = sentDraftId;
       // The person turned down the task the daemon suggested for this
@@ -1556,6 +1576,7 @@ export function ChatComposer({
     syncInflight,
     onToolActivity,
     additionalRecipientIds,
+    mentionsEnabled,
     // Both are read at send-time on every invocation — without them
     // a pivot that updates `passiveCcGezelIds` after the composer
     // first mounted would still send with the stale (empty) list,
@@ -1853,109 +1874,115 @@ export function ChatComposer({
       )}
       {imageSettings.enabled && <ComposerImageSettingsBar settings={imageSettings} />}
       {promptAssistEnabled && <ComposerReviewStrip assist={promptAssist} />}
-      <div className="chat-composer-to">
-        <span className="chat-composer-to-label muted">To:</span>
-        <GezelIcon
-          svg={gezelIcon ?? null}
-          poppetje={gezelPoppetje}
-          iconOverride={gezelIconOverride}
-          name={primaryRecipientName}
-          size={18}
-        />
-        <span className="chat-composer-to-text">
-          <span className="chat-composer-to-name">{primaryRecipientName}</span>
-          {!roleBasedNameOnlyMode && gezelRole && (
-            <span className="chat-composer-to-role">{gezelRole}</span>
-          )}
-        </span>
-        {additionalRecipients.map((recipient) => {
-          const rendered = displayName(
-            { name: recipient.name, roleBasedName: recipient.roleBasedName },
-            roleBasedNameOnlyMode,
-          );
-          return (
-            <span key={recipient.id} className="chat-composer-to-recipient">
-              <GezelIcon
-                svg={recipient.icon ?? null}
-                poppetje={recipient.poppetje}
-                iconOverride={recipient.iconOverride}
-                name={rendered}
-                size={18}
-              />
-              <span className="chat-composer-to-text">
-                <span className="chat-composer-to-name">{rendered}</span>
-                {!roleBasedNameOnlyMode && recipient.role && (
-                  <span className="chat-composer-to-role">{recipient.role}</span>
-                )}
-              </span>
-              <button
-                type="button"
-                className="chat-composer-recipient-remove"
-                aria-label={`Remove ${rendered} from recipients`}
-                title={`Remove ${rendered}`}
-                onClick={() =>
-                  setAdditionalRecipientIds((current) =>
-                    current.filter((recipientId) => recipientId !== recipient.id),
-                  )
-                }
-              >
-                ×
-              </button>
-            </span>
-          );
-        })}
-        {mentioned
-          .filter(
-            (m) =>
-              (m.id !== gezelId || m.projectId !== undefined) &&
-              !additionalRecipientIds.includes(m.id),
-          )
-          .map((m) => (
-            <span
-              key={m.rawId}
-              className="chat-composer-to-mention"
-              title={m.projectId ? `@${m.label} re: ${m.projectId}` : `@${m.label}`}
-            >
-              @{m.label}
-            </span>
-          ))}
-        {recipientGezels && onPrimaryRecipientChange && recipientGezels.length > 0 && (
-          <ChatRecipientPicker
-            gezels={recipientGezels}
-            primaryGezelId={gezelId}
-            allowAdditionalRecipients={runtimeCapabilities().multiRecipientChat}
-            additionalRecipientIds={additionalRecipientIds}
-            roleBasedNameOnlyMode={roleBasedNameOnlyMode}
-            onSelectPrimary={(nextGezelId) => {
-              setAdditionalRecipientIds([]);
-              onPrimaryRecipientChange(nextGezelId);
-            }}
-            onAddRecipient={(nextGezelId) =>
-              setAdditionalRecipientIds((current) =>
-                nextGezelId === gezelId || current.includes(nextGezelId)
-                  ? current
-                  : [...current, nextGezelId],
-              )
-            }
+      {showAddress && (
+        <div className="chat-composer-to">
+          <span className="chat-composer-to-label muted">To:</span>
+          <GezelIcon
+            svg={gezelIcon ?? null}
+            poppetje={gezelPoppetje}
+            iconOverride={gezelIconOverride}
+            name={primaryRecipientName}
+            size={18}
           />
-        )}
-        <button
-          type="button"
-          className="chat-composer-expand-btn"
-          data-testid="chat-composer-expand"
-          onClick={() => setExpanded((current) => !current)}
-          aria-pressed={expanded}
-          aria-label={expanded ? 'Collapse the draft' : 'Expand the draft'}
-          title={
-            expanded
-              ? 'Collapse the draft back to a few lines'
-              : 'Expand the draft to fill the chat window'
-          }
-        >
-          {expanded ? <CollapseDraftIcon /> : <ExpandDraftIcon />}
-        </button>
-        {addressLineTrailing}
-      </div>
+          <span className="chat-composer-to-text">
+            <span className="chat-composer-to-name">{primaryRecipientName}</span>
+            {!roleBasedNameOnlyMode && gezelRole && (
+              <span className="chat-composer-to-role">{gezelRole}</span>
+            )}
+          </span>
+          {additionalRecipients.map((recipient) => {
+            const rendered = displayName(
+              { name: recipient.name, roleBasedName: recipient.roleBasedName },
+              roleBasedNameOnlyMode,
+            );
+            return (
+              <span key={recipient.id} className="chat-composer-to-recipient">
+                <GezelIcon
+                  svg={recipient.icon ?? null}
+                  poppetje={recipient.poppetje}
+                  iconOverride={recipient.iconOverride}
+                  name={rendered}
+                  size={18}
+                />
+                <span className="chat-composer-to-text">
+                  <span className="chat-composer-to-name">{rendered}</span>
+                  {!roleBasedNameOnlyMode && recipient.role && (
+                    <span className="chat-composer-to-role">{recipient.role}</span>
+                  )}
+                </span>
+                <button
+                  type="button"
+                  className="chat-composer-recipient-remove"
+                  aria-label={`Remove ${rendered} from recipients`}
+                  title={`Remove ${rendered}`}
+                  onClick={() =>
+                    setAdditionalRecipientIds((current) =>
+                      current.filter((recipientId) => recipientId !== recipient.id),
+                    )
+                  }
+                >
+                  ×
+                </button>
+              </span>
+            );
+          })}
+          {(mentionsEnabled ? mentioned : [])
+            .filter(
+              (m) =>
+                (m.id !== gezelId || m.projectId !== undefined) &&
+                !additionalRecipientIds.includes(m.id),
+            )
+            .map((m) => (
+              <span
+                key={m.rawId}
+                className="chat-composer-to-mention"
+                title={m.projectId ? `@${m.label} re: ${m.projectId}` : `@${m.label}`}
+              >
+                @{m.label}
+              </span>
+            ))}
+          {recipientGezels && onPrimaryRecipientChange && recipientGezels.length > 0 && (
+            <ChatRecipientPicker
+              gezels={recipientGezels}
+              primaryGezelId={gezelId}
+              allowAdditionalRecipients={
+                mentionsEnabled && runtimeCapabilities().multiRecipientChat
+              }
+              additionalRecipientIds={additionalRecipientIds}
+              roleBasedNameOnlyMode={roleBasedNameOnlyMode}
+              onSelectPrimary={(nextGezelId) => {
+                setAdditionalRecipientIds([]);
+                onPrimaryRecipientChange(nextGezelId);
+              }}
+              onAddRecipient={(nextGezelId) =>
+                setAdditionalRecipientIds((current) =>
+                  nextGezelId === gezelId || current.includes(nextGezelId)
+                    ? current
+                    : [...current, nextGezelId],
+                )
+              }
+            />
+          )}
+          {features?.expand !== false && (
+            <button
+              type="button"
+              className="chat-composer-expand-btn"
+              data-testid="chat-composer-expand"
+              onClick={() => setExpanded((current) => !current)}
+              aria-pressed={expanded}
+              aria-label={expanded ? 'Collapse the draft' : 'Expand the draft'}
+              title={
+                expanded
+                  ? 'Collapse the draft back to a few lines'
+                  : 'Expand the draft to fill the chat window'
+              }
+            >
+              {expanded ? <CollapseDraftIcon /> : <ExpandDraftIcon />}
+            </button>
+          )}
+          {addressLineTrailing}
+        </div>
+      )}
       {!threadBarInToolbar && belowAddressLine}
       <div className="chat-editor-wrap">
         {openCommandQuery !== null && (
@@ -2002,7 +2029,7 @@ export function ChatComposer({
           // it in Write and removes the document-oriented view tabs while
           // leaving one semantic hook for future chat-toolbar trimming.
           hostMode="chat"
-          mediaProvider={runtimeCapabilities().chatAttachments ? mediaProvider : null}
+          mediaProvider={attachmentsEnabled ? mediaProvider : null}
           mentionProvider={mentionProvider}
           {...(placeholder ? { placeholder } : {})}
           imageDisplayMode="thumbnail"
@@ -2023,14 +2050,14 @@ export function ChatComposer({
           // The direct shortcuts upload into Squisq's accessory bin. Keep its
           // toggle available once populated and open the bin when the first
           // attachment arrives so non-image files have a visible home.
-          showFilesToggle={runtimeCapabilities().chatAttachments}
+          showFilesToggle={attachmentsEnabled}
           {...CHAT_ACCESSORY_BIN_PROPS}
           fullWidth
           thinMargins
           toolbarSlotAfterActions={
-            runtimeCapabilities().chatAttachments || threadBarInToolbar ? (
+            attachmentsEnabled || threadBarInToolbar ? (
               <>
-                {runtimeCapabilities().chatAttachments && (
+                {attachmentsEnabled && (
                   <ChatAttachmentButtons mediaProvider={mediaProvider} onError={setError} />
                 )}
                 {threadBarInToolbar && (
@@ -2074,11 +2101,9 @@ export function ChatComposer({
                   )}
                 </>
               )}
-              {runtimeCapabilities().chatAttachments && (
-                <ComposerImageClipboard onError={setError} />
-              )}
+              {attachmentsEnabled && <ComposerImageClipboard onError={setError} />}
               <AutosaveStatus autosave={draft.autosave} failuresOnly />
-              {runtimeCapabilities().audio && (
+              {runtimeCapabilities().audio && features?.dictation !== false && (
                 <ComposerNarrateButton
                   projectId={projectId}
                   disabled={!gezelId || engagementOff || draftSubmissionPending}

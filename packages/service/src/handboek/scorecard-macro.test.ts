@@ -11,7 +11,10 @@ import {
   breakModelLabel,
   renderScorecardFilterHtml,
   renderScorecardMarkdown,
+  renderScorecardRoundPages,
   renderScorecardRunsMarkdown,
+  scorecardRoundPageId,
+  scorecardRoundTitles,
 } from './macros.js';
 
 function dataset(
@@ -733,6 +736,94 @@ describe('::handboek-model-scorecard in site mode', () => {
       } as never);
       expect(rendered, mode).not.toContain(SCORECARD_DATA_ATTRS.root);
       expect(rendered, mode).toContain('###');
+    }
+  });
+
+  it('lists each round on the site as a link to its own page', () => {
+    const html = renderScorecardFilterHtml(twoRounds(), ['core', 'productivity'], {
+      includeTaskCount: false,
+      roundLinks: true,
+    });
+    expect(html).not.toContain('<table>');
+    // The list still carries every stamp the pickers read, through the same
+    // markdown pipeline the cards relied on.
+    const rendered = markdownDocToPlainHtml(parseMarkdown(`## Results\n\n${html}\n`), {
+      title: 'scorecard',
+    });
+    expect(rendered).toContain(`${SCORECARD_DATA_ATTRS.root}="1"`);
+    expect(rendered).toContain(`${SCORECARD_DATA_ATTRS.round}="win-older"`);
+    expect(rendered).toMatch(new RegExp(`${SCORECARD_DATA_ATTRS.models}="[^"]*gemma4-12b`));
+    expect(rendered).toMatch(
+      new RegExp(
+        `${SCORECARD_DATA_ATTRS.round}="mac-latest"[^>]*${SCORECARD_DATA_ATTRS.latest}="1"`,
+      ),
+    );
+    expect(rendered).toContain('href="../model-scorecard/mac-latest/"');
+    expect(rendered).toContain('>2026-08-22 · Mac · Apple M4 Max</a>');
+  });
+
+  it('gives every round a page of its own, under a title that outlasts the next sweep', () => {
+    const pages = renderScorecardRoundPages(twoRounds());
+    expect(pages.map((page) => page.runId)).toEqual(['mac-latest', 'win-older']);
+    expect(pages.map((page) => page.title)).toEqual([
+      '2026-08-22 · Mac · Apple M4 Max',
+      '2026-08-20 · win32 · Ryzen',
+    ]);
+    const [latest] = pages;
+    expect(latest?.html).toContain('<table>');
+    expect(latest?.html).toContain('hb-scorecard-stamp');
+    // A page is not a filter: no root for the script, and no "Latest" that
+    // turns false with the next sweep.
+    expect(latest?.html).not.toContain(SCORECARD_DATA_ATTRS.root);
+    expect(latest?.html).not.toContain('Latest round');
+    expect(latest?.summary).toContain('across 2 task sets');
+    expect(scorecardRoundPageId('mac-latest')).toBe('model-scorecard/mac-latest');
+  });
+
+  it('tells apart rounds that share a date and a machine, and names a vague one', () => {
+    const [mac] = twoRounds().runs;
+    if (!mac) throw new Error('fixture');
+    const spark = {
+      ...mac,
+      id: '2026-08-19-gb10',
+      provenance: {
+        ...mac.provenance,
+        startedAt: '2026-08-19T00:00:00.000Z',
+        device: { label: 'linux · unknown', platform: 'linux', arch: 'arm64', memoryGb: 122 },
+      },
+    };
+    const titles = scorecardRoundTitles([
+      { ...mac, id: '2026-08-22-core-a' },
+      { ...mac, id: '2026-08-22-core-b' },
+      spark,
+    ]);
+    expect([...titles.values()]).toEqual([
+      '2026-08-22 · core-a',
+      '2026-08-22 · core-b',
+      '2026-08-19 · DGX Spark Class',
+    ]);
+  });
+});
+
+describe('::handboek-scorecard-notes', () => {
+  const roundNotes = [
+    {
+      id: '2026-08-22-mac',
+      title: 'August Mac results',
+      runs: ['mac-latest'],
+      body: 'See [the data](../../assets/scorecards/mac/scorecard.json).',
+    },
+  ];
+
+  it('stays off the site, where each round page carries its own notes', async () => {
+    expect(await MACROS['scorecard-notes']!({}, { mode: 'site', roundNotes } as never)).toBe('');
+  });
+
+  it('gives the app and the agent every note, its links rebased to the article', async () => {
+    for (const mode of ['app', 'agent'] as const) {
+      expect(await MACROS['scorecard-notes']!({}, { mode, roundNotes } as never), mode).toBe(
+        '## August Mac results\n\nSee [the data](../assets/scorecards/mac/scorecard.json).',
+      );
     }
   });
 });

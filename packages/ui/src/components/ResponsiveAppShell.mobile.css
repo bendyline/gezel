@@ -384,12 +384,32 @@
   gap: 0;
   overflow: visible;
   color: var(--titlebar-ink);
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(243, 237, 224, 0.35);
 }
 
-.app.app-compact :is(.queue-meter-button, .engine-pill, .narration-stop):hover,
-.app.app-compact :is(.queue-meter-button-open, .engine-pill[aria-expanded="true"]) {
+/* The compact bar's status keys share the lighter face of its menu and search
+   keys. The desktop titlebar key's lift, press and health rim
+   (app-shell.css) stay on the desktop bar; here the status light in the
+   engine key's corner carries health. `.app-header` lifts these above that
+   recipe in either cascade order. */
+.app.app-compact
+  .app-header
+  :is(.activity-control, .queue-meter-button, .engine-pill, .narration-stop) {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(243, 237, 224, 0.35);
+  box-shadow: none;
+  transform: none;
+}
+
+.app.app-compact
+  .app-header
+  :is(.activity-control, .queue-meter-button, .engine-pill, .narration-stop):hover,
+.app.app-compact
+  .app-header
+  :is(
+    .activity-control[data-state="open"],
+    .queue-meter-button-open,
+    .engine-pill[aria-expanded="true"]
+  ) {
   background: rgba(255, 255, 255, 0.16);
   border-color: var(--titlebar-ink);
 }
@@ -433,6 +453,7 @@
   position: absolute;
   top: 6px;
   right: 6px;
+  display: block;
 }
 
 /* Hidden visually, not removed: the label is the button's accessible name. */
@@ -653,15 +674,21 @@
   min-height: 36px;
   padding: 0;
   transform: translateY(-50%);
-  color: #2c352a;
+  color: var(--titlebar-ink);
   background: transparent;
   border: none;
   border-radius: var(--radius-md);
   cursor: pointer;
 }
 
+/* The well is dark sage until it takes focus, then cream (app-shell.css);
+   the close glyph follows it. */
+.app.app-compact .titlebar-search:focus-within .titlebar-search-close {
+  color: #2c352a;
+}
+
 .app.app-compact .titlebar-search-close:hover {
-  background: rgba(44, 53, 42, 0.1);
+  background: color-mix(in srgb, currentColor 12%, transparent);
 }
 
 .app.app-compact .titlebar-search-close svg {
@@ -730,38 +757,6 @@ html[data-layout="mobile"] {
    views cancel it with the same token, so they stay flush. */
 .app.app-compact .app-main {
   --app-main-pad-inline: 0.75rem;
-}
-
-/* Compact navigation fills the screen with nothing beside it, so the selected
-   row is a standalone key rather than a tab bridging into a content pane.
-   The bridge ran it to the screen edge, where it read as cropped. The
-   html + attribute prefix outranks the right-rail variants in either
-   stylesheet order. */
-html[data-layout="mobile"] .app-sidebar-scroll {
-  --sidebar-tab-rail-inset: 0px;
-  --sidebar-tab-bridge-size: 0px;
-}
-
-html[data-layout="mobile"]
-  .app-sidebar-scroll
-  :is(
-    .app-sidebar-item.active:not(:is(.app-sidebar-proj-row, .app-sidebar-gezel-row) > *),
-    .app-sidebar-group-header.active,
-    .app-sidebar-proj-row.active,
-    .app-sidebar-gezel-row.active,
-    .app-sidebar-tree .tree-row.tree-row-selected
-  ) {
-  --sidebar-tab-bridge-size: 0px;
-  width: auto;
-  margin-inline: 0;
-  border: 1px solid var(--sidebar-tab-border);
-  border-radius: var(--radius-md);
-}
-
-html[data-layout="mobile"]
-  .app-sidebar-scroll
-  :is(.app-sidebar-item.active, .app-sidebar-tree .tree-row.tree-row-selected)::after {
-  display: none;
 }
 
 /* Finger-sized hit areas (docs/ux.md: 44px on touch) for the controls a phone

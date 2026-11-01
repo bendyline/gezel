@@ -612,8 +612,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // [ProjectOutputPane](../components/ProjectOutputPane.tsx).
   const [outputOverride, setOutputOverride] = useState<{
     projectId: string;
-    visible: boolean;
+    visible?: boolean;
+    maximized?: boolean;
   } | null>(null);
+  const outputSaveQueue = useRef<Promise<void>>(Promise.resolve());
   // When the selected project has an applied custom project type that pins an
   // Output page (its dashboard), this holds that page so the output pane can
   // show it ahead of the workspace auto-ranker. See docs/project-types.md.
@@ -2047,20 +2049,43 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     runtimeCapabilities().htmlPreview &&
     Boolean(selected) &&
     (pendingOutputChoice ?? selected?.outputPaneVisible ?? (hasIndexHtml || Boolean(typePage)));
+  const outputMaximized =
+    (outputOverride?.projectId === selected?.id ? outputOverride?.maximized : undefined) ??
+    selected?.outputPaneMaximized ??
+    false;
+  const saveOutputChoice = useCallback(
+    (choice: { visible?: boolean; maximized?: boolean }) => {
+      if (!selected) return;
+      const projectId = selected.id;
+      setOutputOverride((current) => ({
+        ...(current?.projectId === projectId ? current : {}),
+        projectId,
+        ...choice,
+      }));
+      const patch = {
+        ...(choice.visible !== undefined ? { outputPaneVisible: choice.visible } : {}),
+        ...(choice.maximized !== undefined ? { outputPaneMaximized: choice.maximized } : {}),
+      };
+      // Rapid F5/restore clicks must reach disk in the same order. Merge only
+      // view preferences so a late save cannot replace other project edits.
+      outputSaveQueue.current = outputSaveQueue.current
+        .then(() => api.updateProject(projectId, patch))
+        .then(() => {
+          setSelected((current) =>
+            current?.id === projectId ? { ...current, ...patch } : current,
+          );
+        })
+        .catch((err) => setError((err as Error).message));
+    },
+    [selected],
+  );
   const toggleOutput = useCallback(() => {
-    if (!selected) return;
-    const next = !outputVisible;
-    const projectId = selected.id;
-    setOutputOverride({ projectId, visible: next });
-    void api
-      .updateProject(projectId, { outputPaneVisible: next })
-      .then((updated) => {
-        setSelected((current) => (current?.id === projectId ? updated : current));
-      })
-      .catch((err) => {
-        setError((err as Error).message);
-      });
-  }, [selected, outputVisible]);
+    saveOutputChoice({ visible: !outputVisible });
+  }, [saveOutputChoice, outputVisible]);
+  const saveOutputMaximized = useCallback(
+    (maximized: boolean) => saveOutputChoice({ maximized }),
+    [saveOutputChoice],
+  );
 
   // Resizable splitter between the output pane and the tab content. The
   // output pane is the LEFT column, so dragging the grip right grows it.
@@ -2146,7 +2171,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // takes over the body as the active 'output' tab. The tab content is
   // hidden only in the compact-output case.
   const showOutputBeside = !effectiveCompact && outputVisible;
-  const showOutputAsTab = compactOutputAvailable && tab === 'output';
+  const showOutputAsTab =
+    (compactOutputAvailable && tab === 'output') ||
+    (effectiveCompact && outputVisible && outputMaximized);
 
   // Clicking a row opens the project in the right pane — both in listing
   // mode (the Projects area tab) and detail-only mode (a single-project
@@ -2519,6 +2546,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   projectId={selected.id}
                   htmlFiles={workspaceHtmlFiles}
                   typePage={typePage ?? undefined}
+                  initialMaximized={outputMaximized}
+                  onMaximizedChange={saveOutputMaximized}
                   onClose={showOutputAsTab ? () => setTab('chat') : toggleOutput}
                   onDebugFrame={injectDebugFrame}
                 />
@@ -2650,7 +2679,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           id="project-about-workspace"
                           className="project-about-anchor"
                           title="Workspace"
-                          hint="Where this project’s files live and what gezellen may do with them."
+                          hint="Where this project’s files live and what your crew may do with them."
                         >
                           {runtimeCapabilities().externalFolders && (
                             <SettingField
@@ -2658,7 +2687,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               controlId="project-setting-folder"
                               hint={
                                 selected.workingDir
-                                  ? 'Gezellen work on the files in this folder.'
+                                  ? 'Your crew works on the files in this folder.'
                                   : 'No folder chosen, so files live in Gezel’s own workspace for this project.'
                               }
                             >
@@ -2699,7 +2728,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             hint={
                               selected.workingDir
                                 ? 'Off by default for a folder of your own. Turn on only if you trust the crew’s tools and automations to edit it.'
-                                : 'On by default for Gezel’s own workspace. Gezellen that run in Codex or Claude Code follow those apps’ own permissions.'
+                                : 'On by default for Gezel’s own workspace. Crew members that run in Codex or Claude Code follow those apps’ own permissions.'
                             }
                             checked={workspaceAccess.managedWritable}
                             onChange={(next) => {
@@ -2743,7 +2772,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                     ? selected.github.checkoutDir
                                       ? `Linked. Checkout: ${selected.github.checkoutDir}${selected.github.branch ? ` (${selected.github.branch})` : ''}`
                                       : 'Linked. Use the GitHub tab to clone.'
-                                    : 'Optional. When set, gezellen gain a GitHub-linked checkout and a new GitHub tab.'}
+                                    : 'Optional. When set, your crew gains a GitHub-linked checkout and a new GitHub tab.'}
                                   {gitStatus && (
                                     <>
                                       {' '}
@@ -2770,7 +2799,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             <SettingField label="Recent workspace changes">
                               {writesJournal.length === 0 ? (
                                 <p className="gz-setting-hint">
-                                  Nothing changed yet. Files gezellen write, delete, create, or
+                                  Nothing changed yet. Files crew members write, delete, create, or
                                   rename show up here.
                                 </p>
                               ) : (
@@ -2814,7 +2843,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             id="project-about-access"
                             className="project-about-anchor"
                             title="Access"
-                            hint="What gezellen here can reach beyond this project’s own files."
+                            hint="What your crew can reach beyond this project’s own files."
                           >
                             {showLinkedProjects && (
                               <SettingField
@@ -3079,7 +3108,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     message={
                       selected.workingDir ? (
                         <>
-                          Gezellen will be able to create, modify, and delete files inside{' '}
+                          Your crew will be able to create, modify, and delete files inside{' '}
                           <code>{selected.workingDir}</code>. Every change is logged in the Settings
                           section. You can turn this back off at any time.
                         </>
@@ -3131,7 +3160,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           ? selected.workingDir || !runtimeCapabilities().externalFolders
                             ? 'Workspace directory is empty.'
                             : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
-                          : 'No artifacts yet. Your gezellen will store reports and outputs here.'
+                          : 'No artifacts yet. Your crew will store reports and outputs here.'
                       }
                       mutations={fileMutations}
                       customList={fileCustomList}

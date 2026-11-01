@@ -112,7 +112,7 @@ export const MODEL_CATALOG_ID = 'model-catalog';
 export const TOOLSET_CATALOG_ID = 'toolset-catalog';
 export const ROLE_CATALOG_ID = 'role-catalog';
 
-const MODELS_AND_TESTING: HandboekTocSubcategory = {
+export const MODELS_AND_TESTING: HandboekTocSubcategory = {
   id: 'models-and-testing',
   title: 'Models and Testing',
   order: 4,

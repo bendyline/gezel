@@ -131,6 +131,58 @@ export function listReleaseNotes(articles: CuratedArticle[]): ReleaseNoteEntry[]
     .map((a) => ({ id: a.id, title: a.title, summary: a.summary }));
 }
 
+/** A hand-written note on one or more model scorecard rounds. */
+export interface ScorecardRoundNote {
+  /** File name without `.md`. Names lead with a date, so they sort by age. */
+  id: string;
+  title: string;
+  /** The runs it speaks to; each of their pages carries the note. */
+  runs: string[];
+  /** Markdown, with links relative to the note's own folder. */
+  body: string;
+}
+
+/**
+ * Round notes live one folder below `technical/`, which the article loader
+ * never descends into, so a note is never mistaken for an article of its own.
+ */
+export const SCORECARD_ROUND_NOTES_DIR = join('technical', 'scorecard-rounds');
+
+/**
+ * Every round note, newest first. Frontmatter names the note (`title`) and
+ * the run ids it covers (`runs`, a list); a note missing either is skipped
+ * with a warning, like a malformed article.
+ */
+export function loadScorecardRoundNotes(contentDir: string): ScorecardRoundNote[] {
+  const dir = join(contentDir, SCORECARD_ROUND_NOTES_DIR);
+  if (!existsSync(dir)) return [];
+  const files = readdirSync(dir)
+    .filter((f) => f.endsWith('.md'))
+    .sort()
+    .reverse();
+  return files.flatMap((file) => {
+    const path = join(dir, file);
+    try {
+      const { frontmatter, body } = splitFrontmatterBlock(readFileSync(path, 'utf8'));
+      const fm = frontmatter
+        ? (parseFrontmatter(
+            frontmatter.replace(/^---\r?\n/, '').replace(/\r?\n---(\r?\n)?$/, ''),
+          ) ?? {})
+        : {};
+      const runs = Array.isArray(fm.runs) ? fm.runs.map(String).filter(Boolean) : [];
+      const title = typeof fm.title === 'string' ? fm.title.trim() : '';
+      if (!title || runs.length === 0) {
+        log.warn(`skipping scorecard round note ${path}: it needs a title and a list of runs`);
+        return [];
+      }
+      return [{ id: file.replace(/\.md$/, ''), title, runs, body: body.trim() }];
+    } catch (err) {
+      log.warn(`skipping unreadable scorecard round note ${path}: ${String(err)}`);
+      return [];
+    }
+  });
+}
+
 export function parseCuratedArticle(
   source: string,
   area: HandboekArea,

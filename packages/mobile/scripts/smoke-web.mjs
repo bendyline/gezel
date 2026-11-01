@@ -209,7 +209,7 @@ try {
 
   await page.goto(url);
   const nav = await navigation();
-  for (const name of ['Projects', 'Documents', 'Gezellen', 'Tasks', 'Settings']) {
+  for (const name of ['Projects', 'Documents', 'Crew', 'Tasks', 'Settings']) {
     assert.equal(await nav.getByRole('button', { name, exact: true }).isEnabled(), true);
   }
   for (const name of ['Knowledge', 'History']) {

@@ -48,6 +48,10 @@
       "types": "./dist/native-release.d.ts",
       "import": "./dist/native-release.js"
     },
+    "./native-verification": {
+      "types": "./dist/native-verification.d.ts",
+      "import": "./dist/native-verification.js"
+    },
     "./media": {
       "types": "./dist/media.d.ts",
       "import": "./dist/media.js"

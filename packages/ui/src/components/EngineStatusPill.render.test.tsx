@@ -1,5 +1,5 @@
 import type { ConfigResponse, QueueStatusResponse } from '@bendyline/gezel-client';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -133,6 +133,34 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     expect(talkie).toHaveClass('engine-pill-busy');
     expect(talkie).toHaveTextContent(providerLabel('llama-cpp', window.__GEZEL__?.platform));
     expect(talkie.querySelector('.engine-pill-progress')).toBeInTheDocument();
+  });
+
+  it('puts a health warning on the key itself, not in a box inside it', async () => {
+    vi.mocked(api.getQueueStatus).mockResolvedValue({
+      providers: {
+        ds4: queueState(0),
+        'llama-cpp': queueState(1),
+      },
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+      sessions: [],
+      cache: [],
+      deviceHealth: {
+        state: 'cooling',
+        mode: 'observe',
+        sampledAt: '2026-07-29T12:00:00.000Z',
+        sources: ['test'],
+        readings: [{ vendor: 'nvidia', deviceId: '0', temperatureC: 88 }],
+        reasons: [],
+        summary: 'cooling (test)',
+      },
+      at: '',
+    } as QueueStatusResponse);
+    render(<EngineStatusPill />);
+
+    const talkie = await screen.findByRole('button', { description: /talkie-1930-13b-q4/ });
+    await waitFor(() => expect(talkie).toHaveTextContent('Cooling'));
+    expect(talkie).toHaveClass('engine-pill-warning');
+    expect(talkie).not.toHaveClass('engine-pill-danger');
   });
 
   it('restores the last completed turn from daemon usage after a page load', async () => {
@@ -282,10 +310,12 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     const user = userEvent.setup();
     render(<EngineStatusPill />);
 
-    const pill = await screen.findByRole('button', { name: /technical-writer.*Generating/i });
-    expect(pill).toHaveTextContent('technical-writer · Generating');
+    const pill = await screen.findByTitle(/talkie-1930-13b-q4 — Generating/);
+    expect(pill).toHaveTextContent('Generating');
+    expect(pill).not.toHaveTextContent('technical-writer');
     expect(pill).not.toHaveTextContent('tok');
     expect(pill).not.toHaveTextContent('Liesel');
+    expect(pill.querySelector('.engine-pill-avatar')).toBeNull();
     expect(pill.getAttribute('title')).toContain('about 100 output tokens');
 
     await user.click(pill);
@@ -980,13 +1010,14 @@ describe('EngineStatusPill — crowded titlebar', () => {
     return { dwarfStar: dwarfStar as HTMLElement, talkie: talkie as HTMLElement };
   }
 
-  it('keeps the machine name and the gezel at full density', async () => {
+  it('keeps the machine name and phase at full density', async () => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const { dwarfStar, talkie } = await pillsAt('full');
       expect(dwarfStar).toHaveTextContent('DwarfStar');
       expect(talkie).toHaveTextContent(device);
-      expect(talkie).toHaveTextContent('Liesel');
+      expect(talkie).toHaveTextContent('Generating');
+      expect(talkie).not.toHaveTextContent('Liesel');
       expect(
         consoleError.mock.calls.some(([message]) =>
           String(message).includes('change in the order of Hooks'),
@@ -997,7 +1028,7 @@ describe('EngineStatusPill — crowded titlebar', () => {
     }
   });
 
-  it("names a request's lead and what it is doing, not the specialist", async () => {
+  it('keeps the device phase when the crew is working on a request', async () => {
     vi.mocked(api.listGezels).mockResolvedValue({
       gezels: [
         { id: 'liesel', name: 'Liesel', updatedAt: '2026-08-13T00:00:00.000Z' },
@@ -1018,8 +1049,9 @@ describe('EngineStatusPill — crowded titlebar', () => {
     };
     try {
       const { talkie } = await pillsAt('full');
-      await waitFor(() => expect(talkie).toHaveTextContent('Dejan'));
-      expect(talkie).toHaveTextContent('drafting the invoices');
+      expect(talkie).toHaveTextContent('Generating');
+      expect(talkie).not.toHaveTextContent('Dejan');
+      expect(talkie).not.toHaveTextContent('drafting the invoices');
       expect(talkie).not.toHaveTextContent('Liesel');
     } finally {
       mockActivity = null;
@@ -1032,18 +1064,28 @@ describe('EngineStatusPill — crowded titlebar', () => {
     // once a second pill is up; "DwarfStar" still does.
     expect(talkie).not.toHaveTextContent(device);
     expect(dwarfStar).toHaveTextContent('DwarfStar');
-    // The machine name no longer precedes the gezel, so nothing dangles.
     expect(talkie.textContent).not.toMatch(/^\s*·/);
-    expect(talkie).toHaveTextContent('Liesel');
+    expect(talkie).toHaveTextContent('Generating');
     // Nothing is actually lost — the tooltip still names the machine.
     expect(talkie.getAttribute('title')).toContain(device);
   });
 
-  it('drops the gezel name too when tight', async () => {
+  it('keeps the device phase when tight', async () => {
     const { talkie } = await pillsAt('tight');
     expect(talkie).not.toHaveTextContent('Liesel');
     expect(talkie).toHaveTextContent('Generating');
-    expect(talkie.getAttribute('title')).toContain('Liesel');
+    expect(talkie.getAttribute('title')).toContain('Generating');
+  });
+
+  it('keeps crew identity out of the device pill at every density', async () => {
+    for (const density of ['full', 'tight'] as const) {
+      const { dwarfStar, talkie } = await pillsAt(density);
+      expect(talkie.querySelector('.gezel-icon')).toBeNull();
+      expect(talkie).not.toHaveTextContent('Liesel');
+      expect(talkie.getAttribute('title')).not.toContain('Liesel');
+      expect(dwarfStar.querySelector('.engine-pill-avatar')).toBeNull();
+      cleanup();
+    }
   });
 
   it('never names the model on the pill, only in the tooltip and popover', async () => {

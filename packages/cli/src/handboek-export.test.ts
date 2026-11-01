@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SCORECARD, SCORECARD_DATA_ATTRS, SCORECARD_QUERY_PARAMS } from '@bendyline/gezel';
+import { findHandboekContent, loadScorecardRoundNotes } from '@bendyline/gezel-service/handboek';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   type HandboekExportResult,
@@ -172,27 +173,55 @@ describe('runHandboekExport', () => {
     expect(existsSync(join(out, 'assets', 'scorecard.js'))).toBe(true);
   });
 
-  it('ships the scorecard as every round, stamped, with its filter attached', async () => {
+  it('lists every round under the scorecard filter, each linking to its own page', async () => {
     const page = await readFile(join(out, 'model-scorecard', 'index.html'), 'utf8');
     expect(page).toContain('<script defer src="../assets/scorecard.js"></script>');
     expect(page).toContain(`${SCORECARD_DATA_ATTRS.root}="1"`);
     expect(page).toContain(`${SCORECARD_DATA_ATTRS.controls}="1"`);
-    // Real containers, not a flat run of headings: the markdown pipeline must
-    // have kept the wrapper divs and their stamps, or there is nothing for the
-    // filter to hide. Rows carry the family id, so one pick covers every
-    // quantization of a model.
-    expect(page).toMatch(new RegExp(`${SCORECARD_DATA_ATTRS.round}="[^"]+"`));
-    expect(page).toMatch(new RegExp(`${SCORECARD_DATA_ATTRS.model}="[^"]+"`));
-    expect(page).toContain(`${SCORECARD_DATA_ATTRS.latest}="1"`);
-    expect(page).toContain('class="hb-table-scroll"');
+    // Every round is a stamped entry the pickers can hide — the markdown
+    // pipeline must keep the list items and their stamps — and a link to the
+    // page that now holds its tables.
     for (const run of SCORECARD.runs) {
       expect(page).toContain(`${SCORECARD_DATA_ATTRS.round}="${run.id}"`);
+      expect(page).toContain(`href="../model-scorecard/${run.id}/"`);
     }
+    expect(page).not.toMatch(new RegExp(`${SCORECARD_DATA_ATTRS.model}="[^"]+"`));
     const headline = SCORECARD.runs.find((run) => run.scope !== 'subset') ?? SCORECARD.runs[0]!;
     const defaultRound = page.match(
-      new RegExp(`<div class="hb-scorecard-round"[^>]*${SCORECARD_DATA_ATTRS.latest}="1"[^>]*>`),
+      new RegExp(
+        `<li class="hb-scorecard-round[^"]*"[^>]*${SCORECARD_DATA_ATTRS.latest}="1"[^>]*>`,
+      ),
     )?.[0];
     expect(defaultRound).toContain(`${SCORECARD_DATA_ATTRS.round}="${headline.id}"`);
+  });
+
+  it('gives every round a page with its tables, and its notes', async () => {
+    for (const run of SCORECARD.runs) {
+      const page = await readFile(join(out, 'model-scorecard', run.id, 'index.html'), 'utf8');
+      expect(page, run.id).toContain('class="hb-scorecard-stamp"');
+      expect(page, run.id).toContain('href="../../model-scorecard/"');
+      expect(page, run.id).not.toContain('assets/scorecard.js"');
+    }
+    // A note on a campaign of several rounds sits on each of their pages,
+    // links the others, and its downloads resolve from one folder deeper.
+    const contentDir = findHandboekContent();
+    expect(contentDir).toBeTruthy();
+    const shared = loadScorecardRoundNotes(contentDir!).find((note) => note.runs.length > 1);
+    expect(shared).toBeTruthy();
+    for (const id of shared!.runs) {
+      const page = await readFile(join(out, 'model-scorecard', id, 'index.html'), 'utf8');
+      expect(page, id).toContain(shared!.title);
+      for (const other of shared!.runs.filter((run) => run !== id)) {
+        expect(page, id).toContain(`href="../${other}/"`);
+      }
+      const links = [...page.matchAll(/href="(\.\.\/\.\.\/assets\/scorecards\/[^"#?]+)"/g)].map(
+        (match) => match[1]!,
+      );
+      expect(links.length, id).toBeGreaterThan(0);
+      for (const link of links) {
+        expect(existsSync(join(out, 'model-scorecard', id, link)), link).toBe(true);
+      }
+    }
   });
 
   it('exports the scorecard downloads linked by the article', async () => {
@@ -213,16 +242,16 @@ describe('runHandboekExport', () => {
     expect(page).not.toContain('scorecard.js');
   });
 
-  it('keeps the round headings out of the on-this-page list', async () => {
-    // Nine rounds under "Results by test round" would bury the article's own
-    // three sections, and eight of them are hidden the moment the filter runs.
+  it('keeps the rounds out of the on-this-page list', async () => {
+    // Thirty-odd round titles under "Results by test round" would bury the
+    // article's own sections, and most are hidden the moment the filter runs.
     const page = await readFile(join(out, 'model-scorecard', 'index.html'), 'utf8');
     const nav = page.match(/<aside class="hb-onthispage">([\s\S]*?)<\/aside>/)?.[1];
     expect(nav).toBeTruthy();
     const roundTitles = [
-      ...page.matchAll(/<h[2-6]\b[^>]*class="hb-scorecard-round-title"[^>]*>([^<]+)<\/h[2-6]>/g),
+      ...page.matchAll(/<a class="hb-scorecard-run-link"[^>]*>([^<]+)<\/a>/g),
     ].map((match) => match[1]!);
-    expect(roundTitles.length).toBeGreaterThan(0);
+    expect(roundTitles.length).toBe(SCORECARD.runs.length);
     for (const title of roundTitles) expect(nav).not.toContain(title);
   });
 

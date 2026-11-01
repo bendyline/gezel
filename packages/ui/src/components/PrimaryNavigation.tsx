@@ -5,7 +5,7 @@ import '../styles/primary-navigation.css';
 
 export const NAVIGATION_AREA_LABELS: Record<RecentTabArea, string> = {
   projects: 'Projects',
-  gezels: 'Gezellen',
+  gezels: 'Crew',
   documents: 'Documents',
   tasks: 'Tasks',
   craftbooks: 'Craftbooks',

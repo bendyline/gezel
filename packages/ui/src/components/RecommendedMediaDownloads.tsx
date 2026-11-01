@@ -512,8 +512,8 @@ export function RecommendedMediaDownloads() {
             {defaultPlanBytes > 0 ? ` · ${fmtSize(defaultPlanBytes)}` : ''}
           </button>
           <p className="muted small home-media-plan-hint">
-            Lets your gezellen create images, read pictures, and speak. You review the list — and
-            can add video — before anything downloads.
+            Lets your crew create images, read pictures, and speak. You review the list — and can
+            add video — before anything downloads.
           </p>
         </>
       )}

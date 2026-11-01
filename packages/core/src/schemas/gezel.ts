@@ -954,14 +954,13 @@ export const ChatMessageSchema = z.object({
   makerGezelId: z.string().optional(),
   /**
    * Display flag: the model sees this message as normal history, but the
-   * chat transcript UI never renders a bubble for it. Set on
+   * chat transcript UI only renders it in debug mode. Set on
    * machine-authored facilitation seeds that would only be noise to the
    * reader — e.g. a project-type page's `reaction` seed ("[Checkers page]:
    * Your opponent played c3-d4. Board now: …") when the reaction opts in
    * via `hideSeed`. Unlike `synthetic` (a muted-but-visible bubble), a
-   * `hidden` message is dropped entirely: `Store.listTimeline` filters it
-   * from loaded transcripts and the live-timeline handler skips its bubble
-   * while still opening the assistant's streaming slot.
+   * `hidden` message is omitted from ordinary timelines while still
+   * opening the assistant's streaming slot.
    */
   hidden: z.boolean().optional(),
   /**
@@ -986,7 +985,7 @@ export const ChatMessageSchema = z.object({
    * will accept mid-conversation, but the person never typed them.
    *
    * Display-only marker: the model still sees an ordinary user turn, and
-   * the UI labels the bubble **System** instead of "You". Without it the
+   * the UI hides it outside debug mode and labels it **System** there. Without it the
    * flagship Home thread opened with "YOU · call `advance_task_step` to
    * hand off" — internal plumbing quoted back at the user in their own
    * voice, which reads as a bug and undoes the warm-companion framing the
@@ -1317,6 +1316,8 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     queueId: z.string(),
     preview: z.string(),
     enqueuedAt: z.string(),
+    hidden: ChatMessageSchema.shape.hidden,
+    origin: ChatMessageSchema.shape.origin,
     /**
      * The entry was queued as a mid-turn nudge — the ghost bubble labels
      * it "nudge" and contiguous nudges merge into one turn on drain.

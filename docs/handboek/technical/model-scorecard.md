@@ -39,228 +39,15 @@ work**, which is developer work such as reviewing a change and proving a fix
 with tests, and **Complex workflows**, which asks a model to write and repair
 reusable recipes of its own.
 
+### Every result in one table {[dataTable src=../assets/scorecards/all-results.csv previewRows=5000 follow=scorecard group=run_id columns=model,suite,pass_rate_pct,judge_score,decode_tok_s,prefill_tok_s,device,started_at,run_id,successes,attributable_trials,rate_quotable,engine,perf_source,scope]}
+
+Every round laid end to end, one row per round, task set, and model, grouped
+by round, newest first. [Download every result as CSV](../assets/scorecards/all-results.csv);
+the file adds per-rubric judge scores, memory, context, and build details.
+
 ::handboek-model-scorecard{suites=core,productivity,developer,complex-work}
 
-## October 28–30 Spark comparison and review data
-
-Qwen 3.8 27B Q4 and Gemma 4 12B Q4 completed **258 planned attempts** on
-Windows ARM64 with an NVIDIA RTX Spark N1X and native 0.1.54. The four task
-sets each have three repetitions per model and scenario across the complete
-campaign. The tables retain three separate segments: 169 original attempts,
-83 continuation attempts, and six final attempts. These segments show counts,
-not percentages; the original and later script-isolation conditions are not
-pooled.
-
-On the original condition, Qwen passed 65/84 eligible attempts and Gemma
-52/84. Gemma's median engine decode speed was 66.15 tokens/s versus Qwen's
-26.44. The two later segments used the same verified condition with the
-Windows script sandbox disabled while other script permissions remained.
-All raw outcomes and fixed scores are retained. Two raw infrastructure
-exclusions remain, including a model-authored unevaluable gate. The published
-table additionally sets aside the final Gemma fanout attempt because capacity
-admission blocked it before inference; the download preserves its original
-failure classification and explains the correction.
-
-All **119 artifact judgments**, covering 125 produced paths across 112
-trials, are included in the download. The table uses one primary review per
-trial, keeps different rubrics separate, and excludes six primary A/B reviews
-whose rubric did not fit the output. Two declared artifacts were missing;
-144 trials had no declared quality rubric. These were bounded source reviews,
-not complete interactive or visual checks. Some automatic passes contained
-incorrect results, including the final Gemma parameterized report.
-
-Task performance includes every attempt within its own segment: engine-log
-decode and prefill, duration, and separately reported system RSS and GPU memory.
-The companion adds first-action and first-artifact timings, tokens, GPU
-utilization, sample coverage, exact review axes and justifications, per-trial
-postmortems, and infrastructure/evaluator findings. Local-model token evidence
-is unavailable for the admission-blocked attempt, rather than reported as zero.
-
-Download the [scorecard data](../assets/scorecards/2026-10-30-spark-native-0-1-54/scorecard.json),
-[full judging and performance data](../assets/scorecards/2026-10-30-spark-native-0-1-54/scorecard-details.json),
-[reviewed report](../assets/scorecards/2026-10-30-spark-native-0-1-54/report.md),
-and [all trials](../assets/scorecards/2026-10-30-spark-native-0-1-54/overall-trials.csv).
-[Download notes and validation](../assets/scorecards/2026-10-30-spark-native-0-1-54/README.md)
-explain the preserved baselines, review selection and published attribution.
-
-## October 28–30 DGX Spark results and review data
-
-Qwen 3.8 27B Q4 and Gemma 4 12B Q4 completed all **258 trials** on a DGX
-Spark (NVIDIA GB10, Linux) with native 0.1.54: three per model and scenario
-across the four task sets. Qwen passed 106 of 129 and Gemma 90 of 129. Three
-failures are set aside as infrastructure: a gap in Linux script sandboxing,
-and two gates the model wrote itself, which the harness classed as setup
-failures.
-
-Read the engineering set with care. Package scripts were switched off in the
-evaluation homes, so three tasks that need a test run could not pass for
-either model. The table keeps those 18 failures: Qwen failed 9 of 30
-engineering trials and Gemma 16 of 30. Excluding them, Qwen failed 0 of 21
-and Gemma 7 of 21. Docblocks-theme-roundtrip lacked its tools in all six
-trials, and the harness stopped three Qwen complex-workflow trials while they
-were still progressing. The reviewed report explains each case.
-
-Claude Sonnet 4.6 reviewed 121 artifacts after the sweep. The **Artifact
-reviews** tables use 108 of them, one column per rubric. They exclude 13
-reviews that used the wrong rubric or graded a starting page instead of the
-work; the other 137 tasks had no rubric to apply. The **Task performance**
-tables give output speed, prefill speed and wall time from the engine's logs
-for every attempt. Both models used speculative decoding, which is on by
-default. Memory is left out because this machine's shared memory is
-invisible to the measurement.
-
-Download the [scorecard data](../assets/scorecards/2026-10-28-dgx-spark-class/scorecard.json),
-[full results with judging and performance](../assets/scorecards/2026-10-28-dgx-spark-class/scorecard-details.json),
-[reviewed report](../assets/scorecards/2026-10-28-dgx-spark-class/report.md),
-and [all trials](../assets/scorecards/2026-10-28-dgx-spark-class/trials.csv).
-[Download notes](../assets/scorecards/2026-10-28-dgx-spark-class/README.md)
-explain the set-aside trials, the review selection and how to check the data.
-
-## October 28–30 R9700 comparison and review data
-
-The Qwen 3.8 27B Q4 and Gemma 4 12B Q4 comparison completed all **258 trials**
-across four task sets, with three repetitions per model and scenario.
-Qwen passed 104/125 eligible attempts; Gemma passed 81/127. Six raw exclusions
-remain recorded: three Windows sandbox failures and three model-authored
-gate configurations that the harness classified as infrastructure failures.
-Qwen's complex-work suite has no eligible custom-gate attempt, so that suite's
-headline is withheld while all its observations remain available.
-
-Download the [scorecard data](../assets/scorecards/2026-10-28-r9700-native-0-1-54/scorecard.json)
-and [full run data with judging and performance](../assets/scorecards/2026-10-28-r9700-native-0-1-54/scorecard-details.json).
-The companion includes per-trial fixed scores, both advisory judge ledgers,
-scenario and repetition results, latency, throughput, RAM/GPU measurements,
-postmortems and review audits. Known setup and evaluator problems remain
-visible beside the frozen results. Different review rubrics stay separate;
-misaligned A/B and incidental fixture-page opinions are excluded from the
-website's quality means and retained in the download.
-
-A **separate six-trial activation subset** exposed the missing DocBlocks tools
-and produced two Qwen passes and no Gemma passes. It does not replace the
-original six setup failures. Binary repair messages were rejected before
-delivery; the postmortem distinguishes that framework limitation from initial
-schema and grounding errors. All trials and judging are complete.
-
-Both models ran on Windows with a Radeon AI PRO R9700 and native 0.1.54.
-The task tables show engine-log measurements across all attempts; system RSS
-and GPU memory remain separate, and one GPU observation is missing.
-[Download notes and validation](../assets/scorecards/2026-10-28-r9700-native-0-1-54/README.md)
-explain all denominators, review selections, timing limitations and the
-frozen capability implementation's differences from its prose rubric.
-
-## October 28 Windows Gemma 4 12B results
-
-Gemma 4 12B completed all four task sets on an RTX 5070 Ti laptop using
-native 0.1.54: 129 attempts, three per scenario in each suite, with 89 raw
-passes. Twelve attempts lacked required tools and one had an unevaluable
-model-authored gate. The reviewed subset contains 89 passes in 116 attempts;
-the download retains every raw verdict and exclusion reason.
-
-All 59 applicable artifacts were judged, including outputs from failed
-attempts. The **Artifact reviews** tables keep each rubric separate, exclude
-three A/B reviews with mismatched axes, and distinguish 70 tasks with no
-applicable rubric from missing artifacts. These were unblinded source and
-artifact reviews by `codex-inline/current-session`. Nine deferred browser
-checks subsequently passed on unchanged saved artifacts; these short checks
-do not establish complete gameplay or visual quality.
-
-The **Task performance** tables cover all 129 attempts, with per-trial
-medians, ranges and sample counts for native output and prefill speed, wall
-time, peak system RSS and peak GPU memory. The overall median native output
-rate was 121.16 tokens/s. Admission-probe rates remain separate. Exact token
-counts, GPU utilization, memory samples and fixed-score breakdowns are in the
-download.
-
-Download the [scorecard data](../assets/scorecards/2026-10-27-windows-gemma4-12b-native-0-1-54/scorecard.json),
-[full judging and performance report](../assets/scorecards/2026-10-27-windows-gemma4-12b-native-0-1-54/scorecard-details.json),
-and [measurement notes](../assets/scorecards/2026-10-27-windows-gemma4-12b-native-0-1-54/README.md).
-The run identifier retains the October 27 scheduling date; execution occurred
-on October 28.
-
-## October 25 M5 Max Bolt comparison and review data
-
-The five-model core campaign completed all 165 trials: 11 scenarios, three
-repeats, five models. Bolt and Gemma E4B each passed 26/33, Gemma E2B 14/33,
-Gemma 12B 23/33 and Qwen 9B 21/33. Every trial was reviewed, including failed
-outputs: 158 artifacts have advisory scores and seven missing outputs have
-no invented score. HTML, code, data and document quality remain separate.
-
-Download the [scorecard data](../assets/scorecards/2026-10-25-m5max-bolt-five/scorecard.json)
-and [full report JSON with judging and performance](../assets/scorecards/2026-10-25-m5max-bolt-five/scorecard-details.json).
-The full report preserves exact review axes and rationales, per-trial timings,
-token coverage, fixed-score breakdowns, model identities and 32 documented
-framework/evaluator findings. Some gate passes contained incomplete or broken
-artifacts; some gates also rejected valid outputs. Raw verdicts remain
-unchanged, and these findings do not establish when a defect was introduced.
-
-Bolt ran on llama.cpp Metal using NVIDIA's October 23 revision; the other
-models used MLX. The **Task performance** rows show task medians, ranges and
-sample counts, including failed attempts and recovery. Bolt throughput is
-request-derived; MLX decode is an active-stream estimate and MLX prefill is
-unavailable. Token streams have incomplete coverage, first-write latency is
-not completed-output latency, and process RSS is not GPU telemetry.
-[Download notes and validation](../assets/scorecards/2026-10-25-m5max-bolt-five/README.md)
-explain the frozen comparison, measurement limits and excluded older trials.
-
-## October 2026 Windows results and review data
-
-The eight-model core evaluation completed all 264 requested attempts on an
-RTX 5070 Ti laptop: 182 passed, 70 failed their tasks, and 12 were excluded
-after exceeding Nanbeige's 32K context. These were context failures, not GPU
-out-of-memory failures. Every attempt has been reviewed.
-
-The tables preserve three runtime rounds: 49 original trials, 182 trials
-after a runtime correction, and the separate 33-trial Nanbeige 32K rerun.
-The original and continuation rounds show counts because neither alone has
-three repeats of every task. Nanbeige's full-suite score is withheld because
-some tasks have no attributable results. Its 12 passes, nine model failures
-and 12 infrastructure exclusions remain available in the data.
-
-Download the [scorecard data](../assets/scorecards/2026-10-19-windows-small-model-core/scorecard.json)
-and [full judging and performance data](../assets/scorecards/2026-10-19-windows-small-model-core/scorecard-details.json).
-The companion preserves all 254 artifact reviews: 247 eligible reviews,
-six infrastructure diagnostics and one excluded review that exceeded its
-input limit. Ten attempts produced no artifact to score. The four task
-rubrics stay separate: the **Artifact reviews** tables show HTML, code, data
-and document quality means with eligible artifact counts, plus counts for
-missing artifacts and excluded reviews. These were unblinded reviews by
-`codex-inline/current-session`; no combined quality score is calculated.
-
-The **Task performance** tables show output and prefill speed, wall time,
-peak system RSS and peak GPU memory as per-trial medians with ranges and
-sample counts. They include available observations from all attempts,
-including failures. These engine-log measurements are separate from
-admission probes. GPU performance changed during the run, so each journal
-keeps its own measurement period, including Nanbeige's slower and later
-faster periods. [Download notes](../assets/scorecards/2026-10-19-windows-small-model-core/README.md)
-explain provenance, exclusions, memory headroom and validation.
-
-## October 2026 Mac results and review data
-
-The Apple M5 Max campaign closed at 601 recorded attempts: 476 passed,
-119 failed their tasks, and six were excluded for infrastructure problems.
-LFM 2.5, Qwen 3.6, Qwen 3.8 and BTL4 each completed 129 attempts. Ornith
-completed 85 of 129 planned attempts; Nemotron and MiniCPM were not run.
-
-The tables retain 600 attempts in two separate rounds: four complete model
-arms and the partial Ornith round. One additional failed Ornith attempt had
-comparison-identity drift and remains in the evidence download with its
-original classification, outside the comparison tables.
-
-The [scorecard data](../assets/scorecards/2026-10-16-m5max-local-seven/scorecard.json)
-and [full judging and performance data](../assets/scorecards/2026-10-16-m5max-local-seven/scorecard-details.json)
-are available as JSON. The companion includes all 601 observations, 248
-artifact reviews, each task's rubric and sample counts, and per-trial speed
-and memory measurements. Four declared artifacts were missing, 14 reviews
-had a mismatched rubric, and 335 tasks had no applicable declared rubric.
-No review is pending. Different task rubrics are kept separate, so this
-round has no combined quality score in the tables.
-
-All nine admission probes generated fewer than 256 output tokens; Ornith's
-single probe generated 84. Treat the table's speeds as preliminary. The
-companion also records engine-derived speeds during the actual tasks and
-their sample counts. [Download notes and validation details](../assets/scorecards/2026-10-16-m5max-local-seven/README.md)
-explain the populations and caveats.
+::handboek-scorecard-notes
 
 ## Reading the table
 
@@ -314,6 +101,18 @@ without any model changing.
 **Size** is the model's parameter count where we know it. Bigger is often but
 not always better: on office work in particular, some smaller models beat
 larger ones, and a model family's habits matter more than its size.
+
+**Every result in one table** sets every round's rows side by side, under the
+column names the download uses. `pass_rate_pct` counts only the attempts the
+model was responsible for, and `rate_quotable` is `no` where a job ran fewer
+than three times, so read that figure as a count. `judge_score` is the one
+place task rubrics are averaged: a summary across a round's rubrics, weighted
+by how many pieces each covered, and fair to compare only within one judge;
+the download keeps each rubric's own score. Speeds are the median of each
+attempt's engine log where a round recorded them and the older probe
+otherwise, as `perf_source` says, and a round measured across separate
+hardware periods has no single speed, so those cells stay empty. Focused
+reruns show `subset` under `scope`.
 
 ## Choosing from this
 

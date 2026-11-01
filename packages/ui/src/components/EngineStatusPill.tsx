@@ -50,7 +50,6 @@ import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { MachineMemoryStrip } from './MachineMemoryStrip.js';
-import { useActivity } from './activity-context.js';
 import { summarizeCacheEntries } from './cacheDisplay.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { type DeviceHealth, presentDeviceHealth } from './engine-pill-device-health.js';
@@ -65,7 +64,6 @@ import {
 } from './engine-pill-stats.js';
 import { useHeaderDensity } from './header-density.js';
 import { deviceLabel, providerLabel } from './provider-label.js';
-import { useDebugMode } from './useDebugMode.js';
 import {
   type LiveTurnState,
   phaseBaseLabel,
@@ -416,8 +414,6 @@ function EngineStatusPillForProvider({
   // commonly has no provider until getConfig resolves; calling this hook only
   // after that transition changes the component's hook order.
   const density = useHeaderDensity();
-  const activity = useActivity();
-  const debugMode = useDebugMode();
   // Engine management (retention, health policy, memory, Hard Stop) belongs
   // to the desktop daemon; a phone's pill reports status only.
   const manages = runtimeCapabilities().daemonSettings;
@@ -861,22 +857,9 @@ function EngineStatusPillForProvider({
     : (current?.startedAt ?? inflight.earliestStartedAt ?? undefined);
   const activeGezelId = activeMedia?.gezelId ?? current?.gezelId ?? currentInflight?.gezelId;
   const activeGezel = activeGezelId ? gezels.get(activeGezelId) : undefined;
-  // A turn working on a person's request is named for it: the lead and what
-  // the request is doing ("Dejan · drafting the invoices"), not the
-  // specialist and the engine phase. Debug mode shows the real turn.
-  const currentSessionId = current
-    ? [...liveTurns.entries()].find(([, turn]) => turn === current)?.[0]
-    : currentInflight?.sessionId;
-  const request =
-    !debugMode && currentSessionId
-      ? activity?.snapshot?.requests?.find((r) => r.liveSessionIds.includes(currentSessionId))
-      : undefined;
-  const requestLead = request?.leadGezelId ? gezels.get(request.leadGezelId) : undefined;
-  const speaker = requestLead ?? activeGezel;
-  const activeGezelName = speaker
-    ? displayName(speaker, config?.roleBasedNameOnlyMode === true)
+  const activeGezelName = activeGezel
+    ? displayName(activeGezel, config?.roleBasedNameOnlyMode === true)
     : undefined;
-  const requestDoing = request?.line?.doing.replace(/^is /, '');
   // Live decode counters. llama-server (`timings_per_token`) and MLX both
   // publish an exact running token count and decode rate on the phase
   // event; that is the truth and is printed bare. Only when an engine
@@ -918,8 +901,7 @@ function EngineStatusPillForProvider({
   // empties the label, the phase names itself — same fallback the live-turn
   // hook applies to a detail-less event.
   const pillBusyLabel =
-    requestDoing ??
-    (stripTurnTelemetry(busyLabel) || (busyLabel && current ? phaseBaseLabel(current.phase) : ''));
+    stripTurnTelemetry(busyLabel) || (busyLabel && current ? phaseBaseLabel(current.phase) : '');
   // Active tuning for the loaded model. Two independent layers can be in
   // play (see InstallModelTuningEditor): an install-wide preset
   // (`modelTuningProfile[id]`) and custom per-leaf overrides
@@ -1033,15 +1015,20 @@ function EngineStatusPillForProvider({
     !activeMedia &&
     (!onDeviceProvider || onDeviceProvider === 'llama-cpp' || onDeviceProvider === 'mlx');
   const showKind = density === 'full' || !kindNamesTheMachine || !busy;
-  // Tighter still: the gezel's name goes, leaving the phase and the clock.
-  // Both stay in the pill's tooltip and in the popover's Status row.
-  const showActor = density === 'full' || density === 'compact';
+  const pillClassName = [
+    'engine-pill',
+    engineActive ? 'engine-pill-busy' : '',
+    healthPresentation?.tone === 'warning' ? 'engine-pill-warning' : '',
+    healthPresentation?.tone === 'danger' ? 'engine-pill-danger' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div className="engine-pill-root" ref={rootRef}>
       <button
         type="button"
-        className={engineActive ? 'engine-pill engine-pill-busy' : 'engine-pill'}
+        className={pillClassName}
         onClick={() => {
           if (!open) {
             window.dispatchEvent(
@@ -1055,7 +1042,7 @@ function EngineStatusPillForProvider({
         aria-expanded={open}
         title={
           busy
-            ? `${platformPillLabel}${tooltipModelSuffix} — ${activeGezelName ? `${activeGezelName} · ` : ''}${pillBusyLabel}${liveOutputTokens !== null ? ` · ${tokensAreExact ? '' : 'about '}${liveOutputTokens.toLocaleString('en-US')} output tokens` : ''}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
+            ? `${platformPillLabel}${tooltipModelSuffix} — ${pillBusyLabel}${liveOutputTokens !== null ? ` · ${tokensAreExact ? '' : 'about '}${liveOutputTokens.toLocaleString('en-US')} output tokens` : ''}${elapsed > 0 ? ` · ${elapsedLabel}` : ''}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''}`
             : `${platformPillLabel}${tooltipModelSuffix}${queueSuffix}${healthPresentation ? ` · ${healthPresentation.detail}` : ''} — click for details`
         }
       >
@@ -1072,15 +1059,8 @@ function EngineStatusPillForProvider({
                   progress bars would recreate the same ambiguity. On a
                   crowded bar the machine name drops out (see `showKind`):
                   two pills wearing "This Mac" were never told apart by
-                  that name in the first place, and the gezel beside it
-                  still is. */}
+                  that name in the first place. */}
               {showKind && <span className="engine-pill-kind">{platformPillLabel}</span>}
-              {showActor && activeGezelName && (
-                <span className="engine-pill-actor">
-                  {activeGezelName}
-                  {showProgress || pillBusyLabel ? ' · ' : ''}
-                </span>
-              )}
               {showProgress ? (
                 <span
                   className="engine-pill-progress"

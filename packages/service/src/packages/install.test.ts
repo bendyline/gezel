@@ -37,6 +37,7 @@ describe('installPackage', () => {
     expect(result.ok).toBe(true);
     expect(runPnpm).toHaveBeenCalledWith(['add', '--', '@types/node@^24'], {
       cwd: join(home, 'projects', 'safe-project'),
+      lifecycle: 'ignore',
     });
   });
 

@@ -68,6 +68,7 @@ export * from './observations.js';
 export * from './report-action.js';
 export * from './suggested-work.js';
 export * from './page-bridge.js';
+export * from './page-chat.js';
 export * from './page-tables.js';
 export * from './preview.js';
 export * from './render.js';

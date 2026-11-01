@@ -22,19 +22,19 @@ export const SECURITY_LEVEL_PRESETS: ReadonlyArray<SecurityLevelPreset> = [
     id: 'super-lockdown',
     label: 'Super Lockdown',
     description:
-      'Your work stays on your machine. Local models only — no external services, no connectors, no script execution, no model git, and no background traffic such as update checks. Gezel goes online only when you start something yourself, like downloading a model or a knowledge catalog. You can still do a lot in Super Lockdown mode, though: review, scan, index, chat, and build reports, prototypes, PowerPoints, images as well as do code reviews, and more. Gezellen can edit files in internal project workspaces; folders you open stay read-only unless you opt them in per project. Safest to get started, and you can move to more permissive modes later.',
+      'Your work stays on your machine. Local models only — no external services, no connectors, no script execution, no model git, and no background traffic such as update checks. Gezel goes online only when you start something yourself, like downloading a model or a knowledge catalog. You can still do a lot in Super Lockdown mode, though: review, scan, index, chat, and build reports, prototypes, PowerPoints, images as well as do code reviews, and more. Crew members can edit files in internal project workspaces; folders you open stay read-only unless you opt them in per project. Safest to get started, and you can move to more permissive modes later.',
   },
   {
     id: 'lockdown',
     label: 'Lockdown',
     description:
-      'A posture for trusted work. Edit files directly, run sandboxed scripts, use cloud chat providers, and do GitHub read/write. Package scripts such as npm run test stay off, because they run outside the sandbox with network access. Settings can turn them on by themselves.\n\nCloud chat providers like Claude and ChatGPT are available to use; keep in mind that cloud chat providers are not really constrained in what they can do, if you decide to use them.\n\nConnectors that you can use to pass data locally to your gezellen are allowed — they sync when you ask, not on their own. Auto-update is allowed.',
+      'A posture for trusted work. Edit files directly, run sandboxed scripts, use cloud chat providers, and do GitHub read/write. Package scripts such as npm run test stay off, because they run outside the sandbox with network access. Settings can turn them on by themselves.\n\nCloud chat providers like Claude and ChatGPT are available to use; keep in mind that cloud chat providers are not really constrained in what they can do, if you decide to use them.\n\nConnectors that you can use to pass data locally to your crew are allowed — they sync when you ask, not on their own. Auto-update is allowed.',
     recommended: true,
   },
   {
     id: 'free',
     label: 'Unrestricted',
     description:
-      'Everything: internet research, the full toolset gallery, cloud providers, scripts and package scripts, and file edits. The most capable posture — choose it when you trust the work and the gezellen.',
+      'Everything: internet research, the full toolset gallery, cloud providers, scripts and package scripts, and file edits. The most capable posture — choose it when you trust the work and the crew.',
   },
 ];

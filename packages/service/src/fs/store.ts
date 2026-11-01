@@ -3343,6 +3343,8 @@ export class Store {
        * view in noise.
        */
       outputPaneVisible?: boolean | null;
+      /** Output-page expansion; `null` resets it. Also view state, without history. */
+      outputPaneMaximized?: boolean | null;
       /** The Views tab's view; `null` resets it. View state, like the above. */
       selectedView?: string | null;
       /** Project shape — `solo` (a single-gezel job/game) vs `crew`. */
@@ -3500,6 +3502,9 @@ export class Store {
         : patch.outputPaneVisible !== undefined
           ? { outputPaneVisible: patch.outputPaneVisible }
           : {}),
+      ...(patch.outputPaneMaximized !== undefined
+        ? { outputPaneMaximized: patch.outputPaneMaximized ?? undefined }
+        : {}),
       ...(patch.selectedView !== undefined
         ? { selectedView: patch.selectedView ?? undefined }
         : {}),
@@ -5942,6 +5947,8 @@ export class Store {
     limit: number;
     before?: string;
     includeArchived?: boolean;
+    /** Include internal prompts for the debug transcript. */
+    includeHidden?: boolean;
     /**
      * Leave out scheduled runs' sessions (`isScheduledRunSession`) and every
      * session opened beneath one. Home's conversation passes this.
@@ -6132,7 +6139,7 @@ export class Store {
       session.messages.filter(
         (message) =>
           (message.role === 'user' || message.role === 'assistant') &&
-          !message.hidden &&
+          (!message.hidden || opts.includeHidden) &&
           (!before || message.at < before),
       ),
     );
@@ -6205,10 +6212,7 @@ export class Store {
       for (const m of s.messages) {
         if (!pageMessages.has(m)) continue;
         if (m.role !== 'user' && m.role !== 'assistant') continue;
-        // Hidden facilitation seeds (e.g. a project-type page reaction with
-        // `hideSeed`) stay in the session file for the model but never
-        // surface a transcript bubble.
-        if (m.hidden) continue;
+        if (m.hidden && !opts.includeHidden) continue;
         if (before && m.at >= before) continue;
         // Assistant-only: either forward the persisted list or compute one
         // on the fly from the project's current file inventory. A message
@@ -6263,6 +6267,7 @@ export class Store {
           ...(m.from ? { from: m.from } : {}),
           ...(m.nudge ? { nudge: true } : {}),
           ...(m.draftId ? { draftId: m.draftId } : {}),
+          ...(m.hidden ? { hidden: true } : {}),
           ...(m.origin === 'system' || (legacySeedAt !== undefined && m.at === legacySeedAt)
             ? { origin: 'system' as const }
             : {}),

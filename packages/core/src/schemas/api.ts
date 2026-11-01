@@ -4460,6 +4460,8 @@ export const UpdateProjectRequestSchema = z.object({
    * and returns the pane to its capability-driven default.
    */
   outputPaneVisible: z.boolean().nullable().optional(),
+  /** Remember the expanded Output page; `null` returns to the split-pane default. */
+  outputPaneMaximized: z.boolean().nullable().optional(),
   /**
    * The view the Views tab shows for this project. `null` clears the choice
    * and returns the tab to the project's default view.

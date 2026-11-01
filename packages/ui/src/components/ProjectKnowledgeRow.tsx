@@ -61,7 +61,7 @@ export function ProjectKnowledgeRow({
     <SettingField
       label="Knowledge catalogs"
       controlId="project-setting-knowledge"
-      hint="Reference material gezellen in this project can search and cite. Manage the catalogs themselves in Settings."
+      hint="Reference material crew members in this project can search and cite. Manage the catalogs themselves in Settings."
     >
       <div className="gz-setting-row">
         <select

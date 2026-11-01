@@ -3,7 +3,7 @@ import { join, normalize } from 'node:path';
 import { formatNpmRegistrySpec } from '@bendyline/gezel';
 import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { projectMetaFile, projectPrivateDir } from '@bendyline/gezel/paths';
-import { runPnpm } from './pnpm.js';
+import { addProjectPackage } from './project-install.js';
 
 export interface InstallPackageOptions {
   home: string;
@@ -59,11 +59,11 @@ export async function installPackage(opts: InstallPackageOptions): Promise<Insta
   await mkdir(cwd, { recursive: true });
 
   // `--` makes the package spec data even if a future validator regresses.
-  const result = await runPnpm(['add', '--', spec], { cwd });
+  const result = await addProjectPackage(spec, { cwd });
   if (result.ok) return { ok: true, log: result.log };
   return {
     ok: false,
     log: result.log,
-    error: `pnpm add exited with code ${result.code ?? 'null'}`,
+    error: result.error,
   };
 }

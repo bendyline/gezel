@@ -167,7 +167,7 @@ export function GrantConsentDialog() {
               {grant.scopes.includes('cli') && (
                 <p className="small" role="alert">
                   <strong>
-                    CLI access can read and change your gezellen, projects, settings, models, and
+                    CLI access can read and change your crew, projects, settings, models, and
                     conversations.
                   </strong>{' '}
                   Approve only if you started this request from your terminal.
@@ -176,8 +176,8 @@ export function GrantConsentDialog() {
               {grant.scopes.includes('product') && (
                 <p className="small" role="alert">
                   <strong>
-                    Product access can read and change your gezellen, projects, settings, models,
-                    and conversations.
+                    Product access can read and change your crew, projects, settings, models, and
+                    conversations.
                   </strong>{' '}
                   Approve only if you started this request from {grant.appName}.
                 </p>

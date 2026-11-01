@@ -1363,6 +1363,7 @@ handboek
       });
       console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
       for (const id of result.skipped) console.error(`  skipped (no body): ${id}`);
+      for (const note of result.warnings) console.error(`  data table: ${note}`);
       const cards = result.cards;
       if (cards?.skipped) {
         console.error(`  no Open Graph cards: ${cards.skipped}`);

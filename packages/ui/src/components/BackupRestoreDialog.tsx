@@ -285,8 +285,8 @@ export function BackupRestoreDialog() {
             <h3>{tab === 'backup' ? 'Back up your content' : 'Restore from a backup'}</h3>
           </AlertDialog.Title>
           <AlertDialog.Description className="muted small">
-            A backup holds your gezellen, projects, and documents. Saved credentials are never
-            included — reconnect your services after restoring.
+            A backup holds your crew, projects, and documents. Saved credentials are never included
+            — reconnect your services after restoring.
           </AlertDialog.Description>
 
           <div className="gz-backup-tabs" role="tablist">
@@ -435,7 +435,7 @@ export function BackupRestoreDialog() {
                           onChange={(e) => setRestoreSettings(e.target.checked)}
                         />
                         <span>
-                          Also restore settings: which gezellen hold roles such as your Meester.
+                          Also restore settings: which crew members hold roles such as your Meester.
                           Your AI providers, models, folders and security level stay as they are.
                         </span>
                       </label>

@@ -209,8 +209,8 @@ function PresetPicker({
       >
         <strong>Preset</strong>{' '}
         <span className="muted">
-          — applies to every gezel using {modelId}. Individual gezellen can override below in their
-          detail pane.
+          — applies to every gezel using {modelId}. Individual crew members can override below in
+          their detail pane.
         </span>
       </label>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>

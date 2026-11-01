@@ -139,7 +139,10 @@ describe('ChatTimelineView — queued task receipts', () => {
       content: 'Add some content on why gezel is awesome.',
       at: '2026-08-21T05:40:00.000Z',
     } as TimelineMessage;
-    renderTimeline({ messages: [seedMessage, newer], queuedTasks: [entry(6)] });
+    renderTimeline({
+      messages: [{ ...seedMessage, role: 'assistant', origin: undefined }, newer],
+      queuedTasks: [entry(6)],
+    });
     const card = await screen.findByText('Task number 6');
     const before = screen.getByText('Start the review.');
     const after = screen.getByText('Add some content on why gezel is awesome.');

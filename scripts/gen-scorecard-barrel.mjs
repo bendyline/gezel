@@ -33,7 +33,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dataDir = join(repoRoot, 'packages/core/src/scorecard/data');
@@ -124,4 +124,27 @@ if (process.argv.includes('--check')) {
       ? `[scorecard-barrel] unchanged (${shardFiles().length} sweeps)`
       : `[scorecard-barrel] wrote ${barrelPath} (${shardFiles().length} sweeps)`,
   );
+  refreshResultsCsv();
+}
+
+/**
+ * Every new sweep passes through here — the eval ingest runs this script
+ * after writing shards, and the campaign importers end with
+ * `pnpm scorecard:barrel` — so this is where the all-results CSV follows the
+ * shards too. It imports core's TypeScript, hence tsx (resolved from evals,
+ * as the dependency lease does). `--import` needs a URL: on Windows a bare
+ * path's drive letter reads as a URL scheme.
+ */
+function refreshResultsCsv() {
+  const tsx = createRequire(join(repoRoot, 'evals', 'package.json')).resolve('tsx');
+  const run = spawnSync(
+    process.execPath,
+    ['--import', pathToFileURL(tsx).href, join(repoRoot, 'scripts', 'gen-scorecard-csv.mjs')],
+    { cwd: repoRoot, encoding: 'utf8' },
+  );
+  if (run.status !== 0) {
+    const detail = run.stderr.trim() || run.stdout.trim() || run.error?.message || '';
+    throw new Error(`[scorecard-barrel] could not refresh the results CSV:\n${detail}`);
+  }
+  process.stdout.write(run.stdout);
 }

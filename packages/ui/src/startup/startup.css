@@ -26,7 +26,7 @@
   flex-shrink: 0;
 }
 .startup-header .app-header-right {
-  min-height: 34px;
+  min-height: var(--titlebar-control-h);
 }
 .startup-brand-host {
   display: contents;

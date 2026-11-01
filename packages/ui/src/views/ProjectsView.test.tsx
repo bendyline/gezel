@@ -929,6 +929,35 @@ describe('ProjectsView', () => {
     );
   });
 
+  it('restores fullscreen and saves only user changes, not leaving the project', async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      ...CODE_TYPE,
+      name: 'Alpha',
+      packages: [],
+      outputPaneVisible: true,
+      outputPaneMaximized: true,
+    } as never);
+    const { container, unmount } = render(<ProjectsView forceProjectId="pj-alpha" />);
+    await waitFor(() =>
+      expect(container.querySelector('.project-output-pane')).toHaveClass(
+        'project-output-pane-maximized',
+      ),
+    );
+    expect(api.updateProject).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    await waitFor(() =>
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', { outputPaneMaximized: false }),
+    );
+    fireEvent.keyDown(window, { key: 'F5' });
+    await waitFor(() =>
+      expect(api.updateProject).toHaveBeenLastCalledWith('pj-alpha', { outputPaneMaximized: true }),
+    );
+    unmount();
+    expect(api.updateProject).toHaveBeenCalledTimes(2);
+  });
+
   it('orders and indexes every section of the project Settings page', async () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');

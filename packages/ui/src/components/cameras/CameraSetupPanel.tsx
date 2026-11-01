@@ -385,8 +385,8 @@ export function CameraSetupPanel({
         <span>
           <strong>Let cloud AI see these pictures</strong>
           <span className="muted small">
-            Off: only gezellen running on this computer may look at this camera. Pictures are saved
-            on this computer either way.
+            Off: only crew members running on this computer may look at this camera. Pictures are
+            saved on this computer either way.
           </span>
         </span>
       </label>

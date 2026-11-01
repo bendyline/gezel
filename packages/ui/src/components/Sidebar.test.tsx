@@ -1113,7 +1113,7 @@ describe('Sidebar on an offline host', () => {
       await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
       expect(screen.getByText('Projects')).toBeInTheDocument();
       expect(screen.getByText('Documents')).toBeInTheDocument();
-      expect(screen.getByText('Gezellen')).toBeInTheDocument();
+      expect(screen.getByText('Crew')).toBeInTheDocument();
       expect(screen.getByText('Tasks')).toBeInTheDocument();
       expect(await screen.findByText('Scripts')).toBeInTheDocument();
       expect(screen.queryByText('Craftbooks')).not.toBeInTheDocument();

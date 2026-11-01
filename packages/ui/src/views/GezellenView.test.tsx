@@ -96,7 +96,7 @@ describe('GezellenView', () => {
     expect(detail()).not.toHaveAttribute('hidden');
     expect(screen.getByText('Bob')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to gezellen' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to crew' }));
     expect(roster()).not.toHaveAttribute('hidden');
     expect(detail()).toHaveAttribute('hidden');
     expect(screen.getByTestId('gezel-detail')).toBeInTheDocument();
@@ -182,7 +182,7 @@ describe('GezellenView', () => {
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: [] } as never);
     render(<GezellenView />);
     await waitFor(() => {
-      expect(screen.getByText(/No gezellen yet/)).toBeInTheDocument();
+      expect(screen.getByText(/No crew members yet/)).toBeInTheDocument();
     });
   });
 

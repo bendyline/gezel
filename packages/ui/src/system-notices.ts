@@ -103,7 +103,7 @@ export function serviceNotice(input: {
       id: 'machine-service-not-installed',
       railLabel: 'Model sharing is off',
       title: 'Gezel is using this account’s model engine.',
-      body: `Everything works and all of your gezellen, projects, chats, files, scheduled tasks, and night shift stay in this account. Local model downloads, memory use, and GPU work are not being shared with other Gezel users on this machine. The shared engine is installed for the whole machine, so Gezel cannot repair it from inside the app. ${reinstallHint(platform)}`,
+      body: `Everything works and all of your crew, projects, chats, files, scheduled tasks, and night shift stay in this account. Local model downloads, memory use, and GPU work are not being shared with other Gezel users on this machine. The shared engine is installed for the whole machine, so Gezel cannot repair it from inside the app. ${reinstallHint(platform)}`,
       technical: reason,
       reportable: true,
     };
@@ -156,7 +156,7 @@ export function serviceNotice(input: {
       // healthy but has never held any data, while this account's home has
       // the user's real gezellen and projects. Connecting to the empty one
       // would look like everything vanished.
-      body: 'The machine-wide background service is running, but it has never held any data — while this account already has gezellen, projects, and chats. Gezel connected to your existing data and will keep doing so. Everything works normally; the machine-wide service simply sits idle. This choice is saved, and you can revisit it under Settings.',
+      body: 'The machine-wide background service is running, but it has never held any data — while this account already has crew members, projects, and chats. Gezel connected to your existing data and will keep doing so. Everything works normally; the machine-wide service simply sits idle. This choice is saved, and you can revisit it under Settings.',
       technical: reason,
       // Working as intended — a bug report would only say "my data is where
       // I left it".
@@ -169,7 +169,7 @@ export function serviceNotice(input: {
       id: 'service-version-mismatch',
       railLabel: 'Service version differs',
       title: 'Gezel updated, but its background service did not.',
-      body: `Everything still works and none of your gezellen, projects, or chats are affected — but the app and the service are on different versions, so newer features may misbehave until they match. The service is installed for the whole machine, so only the installer can replace it. ${reinstallHint(platform)}`,
+      body: `Everything still works and none of your crew, projects, or chats are affected — but the app and the service are on different versions, so newer features may misbehave until they match. The service is installed for the whole machine, so only the installer can replace it. ${reinstallHint(platform)}`,
       technical: reason,
       reportable: true,
     };
@@ -199,7 +199,7 @@ export function serviceNotice(input: {
     // The app fell back to running the service inside its own window, so it
     // dies with the window and cannot host scheduled work at all.
     title: 'Background work is off.',
-    body: `Gezel itself works normally and all of your gezellen, projects, chats, and files are here. Autostart, scheduled work, and night shift stay off until the background service runs again, and it will not start again by itself. Reopening Gezel retries it once; if it stays off, reinstall Gezel. ${reinstallHint(platform)}`,
+    body: `Gezel itself works normally and all of your crew, projects, chats, and files are here. Autostart, scheduled work, and night shift stay off until the background service runs again, and it will not start again by itself. Reopening Gezel retries it once; if it stays off, reinstall Gezel. ${reinstallHint(platform)}`,
     technical: reason,
     reportable: true,
   };
@@ -548,7 +548,7 @@ export function childProcessNotice(input: {
     id: 'child-process-denied',
     railLabel: 'Service cannot run programs',
     title: 'Gezel’s background service is not allowed to start programs.',
-    body: `Your gezellen, projects, chats, and files are all safe and nothing has been lost. But the background service cannot start the programs it needs, so local models will not answer, your GPU is not detected, and gezel tools, scripts, and installs will fail. This comes from how the service was registered on this PC, which Gezel cannot change from inside. ${reinstallHint(input.platform)}`,
+    body: `Your crew, projects, chats, and files are all safe and nothing has been lost. But the background service cannot start the programs it needs, so local models will not answer, your GPU is not detected, and gezel tools, scripts, and installs will fail. This comes from how the service was registered on this PC, which Gezel cannot change from inside. ${reinstallHint(input.platform)}`,
     technical:
       'Child-process creation is denied (spawn EPERM). The GezelService token is write-restricted; ' +
       'from an elevated prompt: sc.exe sidtype GezelService unrestricted, then restart the service.',

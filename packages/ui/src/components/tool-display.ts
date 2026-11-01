@@ -69,7 +69,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   search_documents: 'Search the library',
 
   // Team management
-  list_gezels: 'List gezellen',
+  list_gezels: 'List crew',
   create_gezel: 'Create gezel',
   create_gezel_from_gilde: 'Create gezel from template',
   ensure_gezel: 'Find or create a gezel',

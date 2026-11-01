@@ -142,8 +142,8 @@ export function AudioEngineSettings() {
         ) : (
           <>
             Speech recognition prefers this device's offline recognizer and uses Whisper when it is
-            unavailable. Kokoro supplies your gezellen's voices. The speech models are included with
-            the app; no connection is needed.
+            unavailable. Kokoro supplies your crew's voices. The speech models are included with the
+            app; no connection is needed.
           </>
         )}
       </p>

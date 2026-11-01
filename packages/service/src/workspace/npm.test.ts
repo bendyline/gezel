@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { Store } from '../fs/store.js';
 import { runPnpm } from '../packages/pnpm.js';
-import { requestNpmInstalls } from './npm.js';
+import { applyNpmInstallApprovals, readProjectAllowlist, requestNpmInstalls } from './npm.js';
 
 // Stub the pnpm runner so the allowlisted-package case exercises the
 // real `installNow` branch without spawning a network `pnpm add`. The
@@ -28,6 +28,9 @@ let store: Store;
 const projectId = 'test-project';
 
 beforeEach(async () => {
+  vi.mocked(runPnpm)
+    .mockReset()
+    .mockResolvedValue({ ok: true, code: 0, stdout: '', stderr: '', log: '' });
   home = await mkdtemp(join(tmpdir(), 'gezel-npm-test-'));
   store = new Store({ home });
   await store.ensureLayout();
@@ -247,6 +250,69 @@ describe('requestNpmInstalls — approval question publishing', () => {
       sessionId: 'sess-abc',
     });
     expect(result.results[0]?.kind).toBe('pending-approval');
+  });
+});
+
+describe('approved installs', () => {
+  const decisions = [{ package: 'esbuild', version: 'latest', decision: 'install' as const }];
+
+  it('repairs an old layout after approval without asking again', async () => {
+    let adds = 0;
+    vi.mocked(runPnpm).mockImplementation(async (args) => {
+      const failed = args[0] === 'add' && ++adds === 1;
+      return {
+        ok: !failed,
+        code: failed ? 1 : 0,
+        stdout: failed ? 'ERR_PNPM_UNEXPECTED_STORE Old store' : '',
+        stderr: '',
+        log: '',
+      };
+    });
+    const message = await applyNpmInstallApprovals(store, home, projectId, decisions);
+    expect(message).toContain('installed esbuild@latest');
+    expect(vi.mocked(runPnpm).mock.calls.map(([args]) => args[0])).toEqual([
+      'config',
+      'add',
+      'install',
+      'add',
+    ]);
+    expect((await readProjectAllowlist(home, projectId)).approved).toEqual([
+      expect.objectContaining({ package: 'esbuild', approvedBy: 'user' }),
+    ]);
+    expect(await store.listProjectQuestions(projectId)).toEqual([]);
+  });
+
+  it('includes the actual pnpm error when the repair fails', async () => {
+    vi.mocked(runPnpm)
+      .mockResolvedValueOnce({ ok: true, code: 0, stdout: '', stderr: '', log: '' })
+      .mockResolvedValueOnce({
+        ok: false,
+        code: 1,
+        stdout: 'ERR_PNPM_UNEXPECTED_STORE Old store',
+        stderr: '',
+        log: '',
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        code: 1,
+        stdout: 'ERR_PNPM_FETCH_503 Registry unavailable',
+        stderr: '',
+        log: '',
+      });
+    const message = await applyNpmInstallApprovals(store, home, projectId, decisions);
+    expect(message).toContain('Dependency repair failed');
+    expect(message).toContain('ERR_PNPM_FETCH_503 Registry unavailable');
+  });
+
+  it('never repairs or installs when workspace writes are denied', async () => {
+    vi.spyOn(store, 'assertWorkspaceWritable').mockResolvedValueOnce({
+      ok: false,
+      reason: 'disabled-by-project',
+      workingDir: home,
+    });
+    const message = await applyNpmInstallApprovals(store, home, projectId, decisions);
+    expect(message).toContain('disabled-by-project');
+    expect(runPnpm).not.toHaveBeenCalled();
   });
 });
 

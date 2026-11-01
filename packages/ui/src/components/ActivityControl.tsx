@@ -8,6 +8,7 @@ import {
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { Dialog } from '../primitives/index.js';
 import { requestSettingsSection } from '../settings-nav.js';
+import { GezelIcon } from './GezelIcon.js';
 import {
   type QueueRowContext,
   type QueueRowSelection,
@@ -125,6 +126,38 @@ export function ActivityControl() {
   }, []);
   if (!activity) return null;
   const { gezels, projects, stale, receipts } = activity;
+  const activeRows = Object.values(snapshot?.queues.providers ?? {}).flatMap(
+    (provider) => provider?.active ?? [],
+  );
+  // Background indexing has a named worker but no chat session; its
+  // activity item is only an anonymous "background:running" summary.
+  // Include those queue owners just as the panel does. Request rows can
+  // also stand for several turns, whose workers take precedence over the lead.
+  const workingIds = [
+    ...activeRows.flatMap((row) => (row.gezelId ? [row.gezelId] : [])),
+    ...allItems
+      .filter((item) => item.section === 'working')
+      .flatMap((item) => {
+        const request = item.requestKey
+          ? snapshot?.requests?.find((request) => request.key === item.requestKey)
+          : undefined;
+        const sessions = new Set(request?.liveSessionIds ?? [item.sessionId]);
+        const runningIds = activeRows.flatMap((row) =>
+          row.sessionId && row.gezelId && sessions.has(row.sessionId) ? [row.gezelId] : [],
+        );
+        return runningIds.length ? runningIds : item.gezelId ? [item.gezelId] : [];
+      }),
+  ];
+  const workingGezels =
+    !needs && !stale
+      ? [...new Set(workingIds)].map((id) => gezels.get(id)).filter((gezel) => gezel !== undefined)
+      : [];
+  const workingGezel = workingGezels[0];
+  const workingName = workingGezel ? displayName(workingGezel, boringMode) : undefined;
+  const showWorking = !needs && !stale && working > 0;
+  const accessibleHeadline = workingGezel
+    ? `${headline} · ${workingGezels.map((gezel) => displayName(gezel, boringMode)).join(', ')}`
+    : headline;
   const items = allItems.filter((item) => !projectId || item.projectId === projectId);
   const pendingQuestions = snapshot?.questions ?? [];
   const pendingIds = new Set(pendingQuestions.map((q) => q.id));
@@ -217,16 +250,47 @@ export function ActivityControl() {
         <Dialog.Trigger asChild>
           <button
             type="button"
-            className={`activity-control${needs ? ' needs-attention' : ''}`}
+            className={`activity-control${needs ? ' needs-attention' : showWorking ? ' is-working' : ''}${showWorking ? ' has-worker' : ''}`}
             data-density={density}
-            aria-label={`Activity — ${headline}`}
-            title={`What's going on · ${headline}`}
+            aria-label={`Activity — ${accessibleHeadline}`}
+            title={`What's going on · ${accessibleHeadline}`}
           >
             <span aria-hidden="true" className="activity-control-dot" />
-            <span className="activity-control-label">Activity</span>
-            <span className="activity-control-summary">{headline}</span>
+            {!showWorking && <span className="activity-control-label">Activity</span>}
+            {showWorking ? (
+              <span className="activity-control-worker" aria-hidden="true">
+                {!boringMode && workingGezels.length > 0 && (
+                  <span className="activity-control-avatars">
+                    {workingGezels.slice(0, 3).map((gezel) => (
+                      <span className="activity-control-avatar" key={gezel.id}>
+                        <GezelIcon
+                          svg={gezel.icon ?? null}
+                          poppetje={gezel.poppetje}
+                          iconOverride={gezel.iconOverride}
+                          name={gezel.name}
+                          size={18}
+                          variant="icon"
+                        />
+                      </span>
+                    ))}
+                  </span>
+                )}
+                <span className="activity-control-worker-name">{workingName ?? 'Working…'}</span>
+                {workingGezels.length > 1 && (
+                  <span className="activity-control-more">+{workingGezels.length - 1}</span>
+                )}
+                <span className="activity-control-dots">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                {held && <span className="activity-control-summary">· automatic work paused</span>}
+              </span>
+            ) : (
+              <span className="activity-control-summary">{headline}</span>
+            )}
             <span className="activity-control-count" aria-hidden="true">
-              {needs || working || ready || next || '·'}
+              {needs || workingGezels.length || working || ready || next || '·'}
             </span>
           </button>
         </Dialog.Trigger>
@@ -406,6 +470,34 @@ export function ActivityControl() {
                                 {item.taskRef ? 'View task details' : 'Open chat'}
                               </button>
                             ) : null}
+                            {item.id.startsWith('index:') && (
+                              <>
+                                {item.projectId && (
+                                  <button
+                                    type="button"
+                                    className="btn secondary"
+                                    onClick={() => {
+                                      navigateToTab({ kind: 'project', id: item.projectId! });
+                                      setOpen(false);
+                                    }}
+                                  >
+                                    Open project
+                                  </button>
+                                )}
+                                {item.gezelId && (
+                                  <button
+                                    type="button"
+                                    className="btn secondary"
+                                    onClick={() => {
+                                      navigateToTab({ kind: 'gezel', id: item.gezelId! });
+                                      setOpen(false);
+                                    }}
+                                  >
+                                    Open {contextLabel({ gezelId: item.gezelId }) || 'Librarian'}
+                                  </button>
+                                )}
+                              </>
+                            )}
                             {item.heldByActivity && (
                               <button
                                 type="button"

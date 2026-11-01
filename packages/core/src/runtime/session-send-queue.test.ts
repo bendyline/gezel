@@ -33,6 +33,40 @@ function queued<R>(admission: ReturnType<SessionSendQueue<R>['admit']>) {
 }
 
 describe('SessionSendQueue — admission', () => {
+  it('preserves internal-prompt visibility across events, snapshots, edits, and coalescing', () => {
+    const { queue, events } = harness();
+    const opts: QueuedSendOptions = {
+      messageOrigin: 'system',
+      hidden: true,
+      coalescable: true,
+    };
+    const seed = queued(queue.admit('s', true, 'board state', opts));
+    const assertFlags = (hidden: boolean) => {
+      const flags = { origin: 'system', ...(hidden ? { hidden: true } : {}) };
+      const snapshots = [
+        events.at(-1)!.event,
+        queue.listSession('s')[0],
+        queue.list()[0]!.entries[0],
+      ];
+      for (const snapshot of snapshots) {
+        expect(snapshot).toMatchObject(flags);
+        if (!hidden) expect(snapshot).not.toHaveProperty('hidden');
+      }
+    };
+    assertFlags(true);
+    expect(queue.update('s', seed.queueId, 'updated board')).toMatchObject({
+      hidden: true,
+      origin: 'system',
+    });
+    assertFlags(true);
+    queue.admit('s', true, 'another internal prompt', { ...opts, hidden: false });
+    assertFlags(false);
+    queue.admit('s', true, 'My next move', user);
+    const human = queue.listSession('s')[1];
+    expect(human).not.toHaveProperty('origin');
+    expect(human).not.toHaveProperty('hidden');
+  });
+
   it('runs a send on an idle session with an empty queue', () => {
     const { queue, events } = harness();
     const admission = queue.admit('s', false, 'hello', user);

@@ -50,7 +50,7 @@ const STATUS_KEYS: Record<
 > = {
   active: {
     label: 'Active',
-    hint: 'Active — work runs and gezellen pick it up.',
+    hint: 'Active — work runs and crew members pick it up.',
     icon: ActiveIcon,
   },
   paused: {

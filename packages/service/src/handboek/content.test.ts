@@ -9,8 +9,43 @@ import {
   findHandboekContent,
   listReleaseNotes,
   loadCuratedArticles,
+  loadScorecardRoundNotes,
   parseCuratedArticle,
 } from './content.js';
+
+describe('loadScorecardRoundNotes', () => {
+  it('reads notes newest first, keeps them out of the articles, and skips incomplete ones', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-round-notes-'));
+    try {
+      const notes = join(dir, 'technical', 'scorecard-rounds');
+      await mkdir(notes, { recursive: true });
+      await writeFile(
+        join(notes, '2026-10-20-older.md'),
+        '---\ntitle: Older\nruns:\n  - r1\n---\n\nOlder body.\n',
+      );
+      await writeFile(
+        join(notes, '2026-10-28-newer.md'),
+        '---\ntitle: Newer\nruns:\n  - r2\n  - r3\n---\n\nNewer body.\n',
+      );
+      await writeFile(join(notes, '2026-10-29-untagged.md'), '---\ntitle: No runs\n---\n\nBody.\n');
+      expect(loadScorecardRoundNotes(dir)).toEqual([
+        { id: '2026-10-28-newer', title: 'Newer', runs: ['r2', 'r3'], body: 'Newer body.' },
+        { id: '2026-10-20-older', title: 'Older', runs: ['r1'], body: 'Older body.' },
+      ]);
+      expect(loadCuratedArticles(dir)).toEqual([]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('finds the notes the real scorecard article moved out', () => {
+    const dir = findHandboekContent();
+    if (!dir) return;
+    const notes = loadScorecardRoundNotes(dir);
+    expect(notes.length).toBeGreaterThan(0);
+    for (const note of notes) expect(note.runs.length, note.id).toBeGreaterThan(0);
+  });
+});
 
 describe('parseCuratedArticle', () => {
   it('reads frontmatter fields and keeps the body', () => {

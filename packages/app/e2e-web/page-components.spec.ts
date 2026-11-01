@@ -25,6 +25,126 @@ const target = {
   writable: true,
 };
 const mounts = '<main><div id="adder"></div><div id="cards"></div></main>';
+test('fullscreen notifications resize a live chat slot without remounting it', async ({ page }) => {
+  const shim = buildPageApiShim({
+    api: 1,
+    projectId: 'fixture',
+    source: 'type',
+    entry: 'index.html',
+    typeName: 'Game',
+    params: {},
+    tools: [],
+  });
+  await page.setContent(
+    '<iframe title="App" sandbox="allow-scripts" style="width:900px;height:700px"></iframe>',
+  );
+  await page.evaluate((shim) => {
+    const frame = document.querySelector('iframe')!;
+    const received: Record<string, unknown>[] = [];
+    Reflect.set(window, 'received', received);
+    window.addEventListener('message', (event) => {
+      if (event.source !== frame.contentWindow || event.data?.__gezelPage !== 1) return;
+      received.push(event.data);
+      if (event.data.kind === 'hello')
+        frame.contentWindow!.postMessage(
+          { __gezelPage: 1, kind: 'init', layout: { fullscreen: true } },
+          '*',
+        );
+      if (event.data.kind === 'chat-mount')
+        frame.contentWindow!.postMessage(
+          { __gezelPage: 1, kind: 'chat-result', id: event.data.id, ok: true },
+          '*',
+        );
+    });
+    frame.srcdoc = `${shim}<style>#chat{height:400px;width:320px}html[data-gezel-fullscreen=true] #chat{width:400px}</style><div id="chat"></div><script>window.chat=gezel.ui.components.chat('#chat',{gezelRole:'Opponent',showAddress:false});</script>`;
+  }, shim);
+  const view = page.frameLocator('iframe');
+  await expect(view.locator('html')).toHaveAttribute('data-gezel-fullscreen', 'true');
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          Reflect.get(window, 'received')
+            .filter((m: { kind: string }) => m.kind === 'chat-position')
+            .at(-1)?.rect.width,
+      ),
+    )
+    .toBe(400);
+  await page.evaluate(() =>
+    document
+      .querySelector('iframe')!
+      .contentWindow!.postMessage(
+        { __gezelPage: 1, kind: 'layout', layout: { fullscreen: false } },
+        '*',
+      ),
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          Reflect.get(window, 'received')
+            .filter((m: { kind: string }) => m.kind === 'chat-position')
+            .at(-1)?.rect.width,
+      ),
+    )
+    .toBe(320);
+  await view.locator('#chat').evaluate((element) => {
+    element.style.display = 'none';
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          Reflect.get(window, 'received')
+            .filter((m: { kind: string }) => m.kind === 'chat-position')
+            .at(-1)?.rect.width,
+      ),
+    )
+    .toBe(0);
+  await view.locator('#chat').evaluate((element) => {
+    element.style.display = 'block';
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          Reflect.get(window, 'received')
+            .filter((m: { kind: string }) => m.kind === 'chat-position')
+            .at(-1)?.rect.width,
+      ),
+    )
+    .toBe(320);
+  expect(
+    await page.evaluate(
+      () =>
+        Reflect.get(window, 'received').filter((m: { kind: string }) => m.kind === 'chat-mount')
+          .length,
+    ),
+  ).toBe(1);
+  await view.locator('#chat').evaluate((element) => {
+    element.remove();
+  });
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          Reflect.get(window, 'received').filter((m: { kind: string }) => m.kind === 'chat-destroy')
+            .length,
+      ),
+    )
+    .toBe(1);
+});
+
+test('standalone chat explains its unavailable state without sending to a parent or model', async ({
+  page,
+}) => {
+  await page.setContent('<div id="chat" style="height:400px"></div>');
+  await page.addScriptTag({ content: pageDemoBootstrapSource() });
+  await page.evaluate(() => Reflect.get(window, 'makeDemoGezel')({}).ui.components.chat('#chat'));
+  await expect(page.getByRole('status')).toContainText('This demo does not send messages.');
+  await expect(page.locator('html')).toHaveAttribute('data-gezel-fullscreen', 'false');
+});
+
 test('demo bootstrap is idempotent and never replaces a live host', async ({ page }) => {
   await page.setContent('<main></main>');
   await page.evaluate(() => {

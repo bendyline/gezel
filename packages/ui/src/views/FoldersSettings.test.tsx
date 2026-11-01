@@ -109,7 +109,7 @@ describe('FoldersSettings', () => {
     await waitFor(() => {
       expect(screen.getByText(/Documents library/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/Gezellen$/)).toBeInTheDocument();
+    expect(screen.getByText(/Crew$/)).toBeInTheDocument();
     expect(screen.getByText(/Projects \(artifacts/)).toBeInTheDocument();
     // Each row should have a Move button.
     expect(screen.getAllByRole('button', { name: /Move to other folder/ })).toHaveLength(3);
@@ -381,7 +381,7 @@ describe('FoldersSettings', () => {
     await waitFor(() => {
       expect(screen.getByText(/Move snapshots/)).toBeInTheDocument();
     });
-    expect(screen.getByText(/Gezellen · 2.0 KB/)).toBeInTheDocument();
+    expect(screen.getByText(/Crew · 2.0 KB/)).toBeInTheDocument();
 
     const user = userEvent.setup();
     await user.click(

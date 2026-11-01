@@ -313,6 +313,148 @@ body.hb {
    the description column takes the slack. */
 .hb-article tbody td:first-child { min-width: 6rem; }
 
+/* Sidecar data tables (handboek-data-tables.ts): a file the article links,
+   drawn once by the squisq player in static mode and then handed to
+   assets/data-table.js, which keeps a copy it can sort and filter. Hundreds
+   of rows scroll inside a box with the header row (names, sort buttons,
+   filter boxes) and the naming first column pinned, rather than pushing the
+   rest of the article down a screen per dozen rows. The table takes its
+   content's width (max-content), so these rows of figures read across on
+   one line and the box scrolls sideways — unlike the catalog tables above,
+   whose prose cells must wrap. */
+.hb-data-table { margin: 0 0 1.5rem; }
+/* Out of sight while the player draws. */
+.hb-data-table-stage {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+/* Should the hand-off never happen, the player's own table stands, reset to
+   sit in the article without a second heading. The player paints its theme
+   background as an inline style, which only !important outranks. */
+.hb-article .hb-data-table :is(.squisq-linear, .squisq-linear-content, .squisq-page-section, .squisq-page-section-inner) {
+  background: none;
+  color: inherit;
+  font-family: var(--hb-font-ui);
+  max-width: none;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
+.hb-article .hb-data-table .squisq-linear { background: transparent !important; }
+.hb-article .hb-data-table .squisq-page-table-title { display: none; }
+.hb-article .hb-data-table :is(.hb-data-table-scroll, .squisq-page-table-scroll) {
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid var(--hb-border);
+  border-radius: var(--hb-radius-md);
+  background: var(--hb-panel);
+  box-shadow: none;
+}
+.hb-data-table-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+  margin: 0 0 0.5rem;
+}
+.hb-article .hb-data-table-status { margin: 0; font-size: 0.85rem; color: var(--hb-ink-muted); }
+.hb-data-table-clear {
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--hb-border);
+  border-radius: var(--hb-radius-sm);
+  background: var(--hb-panel);
+  color: var(--hb-ink);
+  cursor: pointer;
+}
+.hb-data-table-clear:hover { border-color: var(--hb-accent); }
+.hb-data-table-clear[hidden] { display: none; }
+.hb-article .hb-data-table table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: max-content;
+  min-width: 100%;
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+.hb-article .hb-data-table tr { background: none; }
+.hb-article .hb-data-table :is(th, td) {
+  border: 0;
+  border-bottom: 1px solid var(--hb-border);
+  padding: 0.35rem 0.6rem;
+  min-width: 0;
+  color: var(--hb-ink);
+}
+.hb-article .hb-data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--hb-inset);
+  font-weight: 600;
+  vertical-align: bottom;
+}
+/* The first column names the row, so it stays put while the figures scroll
+   past it; its header cell is pinned both ways and sits above the rest. */
+.hb-article .hb-data-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--hb-panel);
+  font-weight: 600;
+}
+.hb-article .hb-data-table thead th:first-child { left: 0; z-index: 4; }
+.hb-article .hb-data-table tbody tr:hover td { background: var(--hb-reading); }
+/* A heading row per group (the scorecard's rounds). Its cell spans the whole
+   table, so the label itself is pinned to stay readable while it scrolls. */
+.hb-article .hb-data-table .hb-data-table-group th {
+  padding: 0.55rem 0.6rem 0.3rem;
+  background: var(--hb-reading);
+  color: var(--hb-ink-muted);
+  font-weight: 600;
+  text-align: left;
+}
+.hb-data-table-group-label { position: sticky; left: 0.6rem; }
+.hb-data-table-sort {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+.hb-data-table-sort:hover { color: var(--hb-accent); }
+.hb-data-table-sort::after { content: ' ↕'; opacity: 0.35; }
+th[aria-sort='ascending'] .hb-data-table-sort::after { content: ' ↑'; opacity: 1; }
+th[aria-sort='descending'] .hb-data-table-sort::after { content: ' ↓'; opacity: 1; }
+.hb-data-table-filter {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 5.5rem;
+  margin: 0.3rem 0 0;
+  padding: 0.15rem 0.35rem;
+  border: 1px solid var(--hb-border);
+  border-radius: var(--hb-radius-sm);
+  background: var(--hb-panel);
+  color: var(--hb-ink);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 400;
+}
+.hb-data-table-filter:focus { outline: 2px solid var(--hb-accent); outline-offset: -1px; }
+
 /* Model scorecard.
 
    The stack of test rounds is complete in the markup; assets/scorecard.js
@@ -388,6 +530,23 @@ body.hb {
   margin: 0.15rem 0 0;
 }
 .hb-scorecard-round { margin: 1.75rem 0 0; }
+/* On the site each round is a line in a list, linking to its own page; the
+   page itself opens straight into the stamp under its title. */
+.hb-article .hb-scorecard-runs-title { font-size: 1.05rem; margin: 1.5rem 0 0.5rem; }
+.hb-article .hb-scorecard-runs { list-style: none; margin: 0 0 1.5rem; padding: 0; }
+.hb-scorecard-round.hb-scorecard-run {
+  margin: 0;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--hb-border);
+}
+.hb-scorecard-run-link { font-weight: 600; }
+.hb-scorecard-run-meta {
+  display: block;
+  margin-top: 0.15rem;
+  font-size: 0.82rem;
+  color: var(--hb-ink-muted);
+}
+.hb-scorecard-round.hb-scorecard-round-page { margin-top: 0.5rem; }
 .hb-article .hb-scorecard-round-title { font-size: 1.1rem; margin-top: 0; }
 .hb-article .hb-scorecard-suite-title { font-size: 0.95rem; margin: 1.25rem 0 0.5rem; }
 .hb-scorecard-stamp { font-size: 0.85rem; margin: 0 0 0.75rem; }

@@ -201,7 +201,7 @@ export function MeesterWelcome({
           <p className="meester-welcome-line">{IDEAS_WHILE_FETCHING}</p>
         ) : (
           <p className="meester-welcome-line">
-            Tell me what you want to get done. I'll bring on the gezellen it needs — a writer, a
+            Tell me what you want to get done. I'll bring on the crew members it needs — a writer, a
             planner, a researcher — and they'll work on it together.
             {/* The intro already plays further down; a second copy of it is noise. */}
             {!showIntro && (

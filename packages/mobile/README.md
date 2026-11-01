@@ -116,7 +116,7 @@ templates, context limits, or resource requirements fail with an explicit error.
 
 ## Offline workflow
 
-1. Use **Gezellen** to create a named crew member and set their role/about text.
+1. Use **Crew** to create a named crew member and set their role/about text.
 2. Create a project, assign its crew/lead, and write its about/mission.
 3. Create or upload files through the ordinary Documents, Workspace, and Artifacts views. Text/Markdown editing uses the same editor as desktop.
 4. Choose an imported GGUF or available system model in Settings. Chat with a project crew member. Chat references to local files such as `workspace/brief.md` or `documents/style.md` supply the referenced text to the model; a missing, unsupported, or over-budget file fails explicitly.

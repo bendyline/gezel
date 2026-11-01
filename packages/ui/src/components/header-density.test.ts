@@ -174,4 +174,16 @@ describe('headerClusterSignature', () => {
     cluster.append(document.createElement('div'));
     expect(headerClusterSignature(cluster)).not.toBe(before);
   });
+
+  it('changes when a key joins the header tray', () => {
+    const cluster = document.createElement('div');
+    const tray = document.createElement('div');
+    tray.className = 'app-header-tray';
+    tray.append(document.createElement('button'));
+    cluster.append(tray);
+    const before = headerClusterSignature(cluster);
+
+    tray.append(document.createElement('button'));
+    expect(headerClusterSignature(cluster)).not.toBe(before);
+  });
 });

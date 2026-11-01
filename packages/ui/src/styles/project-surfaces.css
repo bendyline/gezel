@@ -271,44 +271,23 @@
   padding: 1rem;
 }
 
-/* Maximize: the SAME .project-output-pane <aside> goes full-window via
-   fixed positioning — no portal, so the iframe is never remounted and
-   the running app keeps its state. The app body's z-index: 0 stacking
-   context keeps the persistent titlebar above this pane; dialog/select
-   portals (1000–1100) remain above it too. The titlebar Restore button,
-   Esc, or F5 exits this state. */
+/* The shell contains fixed positioning inside .app-main while expanded.
+   The sidebar and titlebar remain available; the SAME iframe keeps its
+   state. Portaled dialogs and selects still sit above this workspace. */
 .project-output-pane-maximized {
   position: fixed;
   inset: 0;
   z-index: 500;
-  /* Override the inline-column constraints so it fills the viewport. */
+  /* Override the inline-column constraints so it fills the workspace. */
   min-width: 0;
   max-width: none;
   background: var(--bg);
   border-right: none;
 }
 
-/* The persistent app titlebar normally covers this strip while maximized.
-   Keep it draggable as a fallback for shells/layouts that expose any of it,
-   with interactive children opting out. */
-.project-output-pane-maximized .project-output-toolbar {
-  -webkit-app-region: drag;
-}
-.project-output-pane-maximized .project-output-toolbar button,
-.project-output-pane-maximized .project-output-toolbar .gz-select-trigger {
-  -webkit-app-region: no-drag;
-}
-
-/* Inset past the native window controls so the picker doesn't hide
-   under them — same offsets as .app-header (macOS traffic lights at the
-   left; the Windows/Linux overlay buttons at the right). The platform
-   attribute is set on <html> in App.tsx. */
-:root[data-platform="darwin"] .project-output-pane-maximized .project-output-toolbar {
-  padding-left: 83px;
-}
-:root[data-platform="win32"] .project-output-pane-maximized .project-output-toolbar,
-:root[data-platform="linux"] .project-output-pane-maximized .project-output-toolbar {
-  padding-right: 140px;
+.project-output-pane-maximized > .project-output-toolbar,
+.project-output-pane-maximized > .project-output-debugbar {
+  display: none;
 }
 
 /* In compact mode, suppress the project-list sidebar even when the
@@ -975,70 +954,31 @@
   font-style: italic;
 }
 
-/* Header AI-engagement and maximized-output controls. The pill-style
-   `.engagement-badge` moved to a mode-glyph dropdown trigger; the Output
-   restore button joins it only while that pane is maximized. Both mirror
-   `.app-nav-hamburger`'s transparent square with a hover halo so the cluster
-   reads as one unified control row. Restore gets a 36×36 escape hit target
-   that fills nearly the whole titlebar. Off mode tints the crew glyph red so the
+/* Header AI-engagement and maximized-output controls: icon keys in the
+   header tray (`.app-header-tray`, app-shell.css), which also owns their
+   size, face and focus ring. The Output restore key joins the crew key only
+   while that pane is maximized. Off mode tints the crew glyph red so the
    user can spot at a glance that AI is fully paused. */
 .app-engagement-trigger,
 .app-output-restore {
-  align-self: center;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 34px;
-  height: 34px;
   padding: 0;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
   color: inherit;
   cursor: pointer;
-  opacity: 0.82;
-  transition: background 0.15s, border-color 0.15s, opacity 0.15s, color 0.15s;
-}
-.app-engagement-trigger:hover,
-.app-output-restore:hover {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.08);
 }
 .app-output-restore {
   position: relative;
   z-index: 1;
-  flex: 0 0 36px;
-  width: 36px;
-  height: 36px;
   pointer-events: auto;
   -webkit-app-region: no-drag;
-  opacity: 1;
-}
-.app-output-restore:hover,
-.app-output-restore:focus-visible {
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(243, 237, 224, 0.34);
 }
 .app-output-restore > svg {
   pointer-events: none;
 }
-.app-engagement-trigger[data-state="open"] {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.12);
-}
-/* The global ring (a --bg gap plus an accent ring outside the element)
-   reads as a dark band on the sage titlebar and runs past the titlebar's
-   edge, which clips it. Keep the ring inside the key, in the titlebar ink. */
-.app-engagement-trigger:focus-visible {
-  opacity: 1;
-  border-radius: 6px;
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--titlebar-ink) 75%, transparent);
-}
 .app-engagement-trigger-off {
   color: #e6776a;
-}
-.app-engagement-trigger-off:hover {
-  background: rgba(192, 57, 43, 0.25);
 }
 
 /* Night Shift is the second section of the task-speed menu. While it runs,

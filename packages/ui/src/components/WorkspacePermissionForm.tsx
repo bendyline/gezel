@@ -80,8 +80,8 @@ export function WorkspacePermissionForm({
         )}
         <dt>Applies to</dt>
         <dd>
-          All gezellen using built-in tools, scripts and background work, throughout this folder and
-          its subfolders
+          All crew members using built-in tools, scripts and background work, throughout this folder
+          and its subfolders
         </dd>
         <dt>Duration</dt>
         <dd>Until revoked, including future tasks</dd>

@@ -89,7 +89,7 @@ describe('MeesterWelcome', () => {
       expect(
         screen.getByRole('heading', { name: /I'm Florian — I run this workshop/ }),
       ).toBeInTheDocument();
-      expect(screen.getByText(/bring on the gezellen it needs/)).toBeInTheDocument();
+      expect(screen.getByText(/bring on the crew members it needs/)).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Fetch my tools/ })).not.toBeInTheDocument();
       expect(screen.queryByText(/Change what I'm allowed to do/)).not.toBeInTheDocument();
       // Past first run the intro waits behind the tour link.

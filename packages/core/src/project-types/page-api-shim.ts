@@ -1,5 +1,6 @@
 import type { PageApiBootstrap } from '../schemas/page-bridge.js';
 import { pageComponentsSource } from './page-components.js';
+import { pageLayoutSource } from './page-layout.js';
 
 /**
  * Output Pane API v1 — the `window.gezel` shim injected into served
@@ -85,6 +86,7 @@ const MEDIA_TYPES: Record<string, string> = {
 export function pageApiShimSource(bootstrap: PageApiBootstrap): string {
   return `${pageComponentsSource()}\n(function(){
 if (window.gezel) return;
+${pageLayoutSource()}
 var B=${JSON.stringify(bootstrap)};
 var D=${JSON.stringify(DEFAULTS)};
 var embedded=window.parent!==window;
@@ -210,6 +212,7 @@ addEventListener('message',function(event){
   if(!d||d.__gezelPage!==1||typeof d.kind!=='string')return;
   if(d.kind==='import-result'){if(uploads[d.id])uploads[d.id](d.ok?null:err(d.errorCode||'unavailable',d.error),d.result);return;}
   if(d.kind==='init'){
+    if(d.layout)setLayout(d.layout);
     if(d.theme&&d.theme.mode)setTheme(d.theme.mode);
     if(d.limits&&typeof d.limits.maxInflight==='number')limits.maxInflight=d.limits.maxInflight;
     if(d.limits&&typeof d.limits.maxReadBytes==='number')limits.maxReadBytes=d.limits.maxReadBytes;
@@ -217,6 +220,10 @@ addEventListener('message',function(event){
     return;
   }
   if(d.kind==='theme'){if(d.theme&&d.theme.mode)setTheme(d.theme.mode);return;}
+  if(d.kind==='layout'){setLayout(d.layout);return;}
+  if(d.kind==='chat-result'){
+    settle(d.id,function(job){if(d.ok)job.resolve();else job.reject(err(d.errorCode||'unavailable',d.error||'Chat is unavailable.'));});return;
+  }
   if(d.kind==='change'){
     var w=watches[d.watchId];
     if(w)try{w.cb({path:d.path,etag:d.etag});}catch(_){/* page callback errors are the page's problem */}
@@ -459,7 +466,18 @@ if(S&&typeof matchMedia==='function'){
   try{matchMedia('(prefers-color-scheme: dark)').addEventListener('change',function(e){setTheme(e.matches?'dark':'light');});}catch(_){}
 }
 Object.defineProperty(window,'gezel',{value:api,writable:false,configurable:false});
+var setLayout=installPageLayout(api,embedded&&!S);
 window.installGezelComponents(api,{
+  chat:embedded&&!S?function(options){
+    var id=mintId();
+    return enqueue('chat',{__gezelPage:1,kind:'chat-mount',id:id,options:options},D.readTimeoutMs).then(function(){
+      return {
+        update:function(next){post({__gezelPage:1,kind:'chat-update',id:id,options:next});},
+        position:function(rect){post({__gezelPage:1,kind:'chat-position',id:id,rect:rect});},
+        destroy:function(){post({__gezelPage:1,kind:'chat-destroy',id:id});}
+      };
+    },function(error){post({__gezelPage:1,kind:'chat-destroy',id:id});throw error;});
+  }:null,
   targets:function(){return importCall('import-targets',{});},
   file:function(file,target,signal){return importCall('import-file',{target:target,name:file.name,file:file},signal);}
 });

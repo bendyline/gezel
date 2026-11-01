@@ -9,7 +9,7 @@ const APP_SCOPE_DESCRIPTIONS: Record<string, string> = {
   images:
     'Generate images on this computer, which uses graphics memory and disk space for image models',
   'remote-inference': 'Run models this computer serves',
-  product: 'Read and change your gezellen, projects, settings, models, and conversations',
+  product: 'Read and change your crew, projects, settings, models, and conversations',
   cli: 'Control Gezel from the command line',
 };
 

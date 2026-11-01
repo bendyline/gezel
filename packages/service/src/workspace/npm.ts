@@ -18,6 +18,7 @@ import { projectPrivateDir } from '@bendyline/gezel/paths';
 import type { ChatEventBus } from '../chat/events.js';
 import type { Store } from '../fs/store.js';
 import { runPnpm } from '../packages/pnpm.js';
+import { addProjectPackage } from '../packages/project-install.js';
 import { WorkspaceWriteDeniedError } from './errors.js';
 
 /**
@@ -462,15 +463,16 @@ async function installNow(
   // Without a workspace package.json, `pnpm add` would install into the
   // project's private package.json one directory up.
   await store.ensureWorkspaceTemplate(projectId);
-  const res = await runPnpm(['add', `--config.registry=${registry}`, '--', spec], {
+  const res = await addProjectPackage(spec, {
     cwd: workspaceDir,
+    registry,
   });
   if (!res.ok) {
     return {
       kind: 'failed',
       package: pkg,
       version,
-      error: `pnpm add exited with code ${res.code ?? 'null'}`,
+      error: res.error ?? `pnpm add exited with code ${res.code ?? 'null'}`,
       stdout: res.stdout,
       stderr: res.stderr,
     };

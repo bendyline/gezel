@@ -1,6 +1,7 @@
 import type { PageImportTarget } from '../schemas/page-imports.js';
 import { pageComponentsSource } from './page-components.js';
 import { PAGE_DEMO_STUB } from './page-demo-stub.js';
+import { pageLayoutSource } from './page-layout.js';
 
 export interface PageDemoConfig {
   imports?: PageImportTarget[];
@@ -13,12 +14,14 @@ if(window.gezel || window.__gezelDemoBootstrap)return;
 window.__gezelDemoBootstrap=1;
 ${PAGE_DEMO_STUB}
 ${pageComponentsSource()}
+${pageLayoutSource()}
 var make=window.makeDemoGezel;
 window.makeDemoGezel=function(opts){
   if(window.gezel)return window.gezel;
   var node=document.getElementById('gezel-demo-config');
   var config=node?JSON.parse(node.textContent):{};
   var api=make(opts);
+  installPageLayout(api,false);
   window.installGezelComponents(api,{demoTargets:config.imports||[],existingPaths:opts&&opts.existingPaths||[]});
   return api;
 };
