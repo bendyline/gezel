@@ -4102,6 +4102,7 @@ export function ChatTimelineView({
         className="chat-timeline"
         ref={scrollRef}
         onScroll={onScroll}
+        aria-busy={loading}
         data-testid="chat-timeline"
       >
         {hasMore && (
