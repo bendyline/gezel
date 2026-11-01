@@ -1,4 +1,5 @@
 import { valueGrounding, wordBand } from '@bendyline/gezel/checks';
+import { activeStepWithoutOwner } from '../../task-step-routing.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../../types.ts';
 import { evaluateCraftbookGateChecks } from '../gates.ts';
 import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
@@ -224,6 +225,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
         unfinishedTaskFailure({
           ref: found.task.ref,
           status: found.task.status,
+          unownedStep: activeStepWithoutOwner(found.task),
           source: `from "${PRESS_RELEASE_CRAFTBOOK_ID}"`,
         }),
       );
@@ -259,6 +261,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     bytes: progressBytes(release),
     milestones: completedTaskSteps(found?.task),
     taskProgress: runningTaskProgress(found?.task),
+    executingTask: authored.length === 0 ? found : null,
     deliverableMissing: release === null || release.length === 0,
     repairPath: RELEASE_PATH,
     repairDirective: [
@@ -296,6 +299,10 @@ export const routeMultiScenario: EvalScenario = {
   skipInitialPrompt: true,
   timeoutMs: 80 * 60_000,
   progressTimeoutMs: 12 * 60_000,
+  // Recipe selection is what this grades. suggest_work ranks recipes by a
+  // semantic score plus keyword overlap; with embeddings off only the keyword
+  // half runs, which is not what a real install does.
+  requiresEmbeddings: true,
   setup,
   successCheck,
 };

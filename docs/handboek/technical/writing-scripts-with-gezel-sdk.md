@@ -29,7 +29,7 @@ npm install --save-dev @bendyline/gezel-sdk
 
 ## The shape of a script
 
-Every script exports a static `meta` block, reads validated input from `gezel.input`, and stamps one final result with `gezel.output()`. This gate checks that a workspace contains a README before a task step can finish:
+Every script exports a static `meta` block, reads validated input from `gezel.input`, and stamps one final result with `gezel.output()`. This gate checks that a workspace contains a README with something in it before a task step can finish:
 
 ```ts
 import {
@@ -55,13 +55,15 @@ export const meta = defineScript({
 
 const input = gezel.input as InferredInput<typeof meta>;
 const files = await gezel.fs.listAll();
+const text = files.includes(input.path) ? await gezel.fs.read(input.path) : '';
 
-const result: GateScriptResult = files.includes(input.path)
-  ? { decision: 'approve', message: `${input.path} is present.` }
-  : {
-      decision: 'reject',
-      message: `Add ${input.path} with setup and usage instructions, then try again.`,
-    };
+const result: GateScriptResult =
+  text.trim().length > 0
+    ? { decision: 'approve', message: `${input.path} is present.` }
+    : {
+        decision: 'reject',
+        message: `Add ${input.path} with setup and usage instructions, then try again.`,
+      };
 
 gezel.output(result);
 ```
@@ -74,7 +76,7 @@ The `requires` list is both documentation and an enforced permission boundary. A
 
 | Capability | SDK surface |
 | --- | --- |
-| `workspace.read`, `workspace.write` | `gezel.fs` for project workspace files |
+| `workspace.read`, `workspace.write` | `gezel.fs` for project workspace files: `read`, `write`, `list`, `listAll`, `stat`, `rm`, `mkdir`, `rename` |
 | `artifacts.read`, `artifacts.write` | `gezel.artifacts` for generated project outputs |
 | `documents.read`, `documents.write` | `gezel.documents` for the shared document library |
 | `tasks.read`, `tasks.write` | `gezel.task` for task records, steps, and notes |

@@ -185,9 +185,28 @@ export function zodIssuesToDocErrors(issues: z.ZodIssue[], raw: unknown): Craftb
   const steps = Array.isArray((raw as { steps?: unknown[] } | null)?.steps)
     ? ((raw as { steps: unknown[] }).steps as { id?: string; name?: string }[])
     : [];
-  return issues.map((issue) => {
+  return issues.flatMap(unwrapUnionIssue).map((issue) => {
     const where = renderIssuePath(issue.path, steps);
     const input = valueAtIssuePath(raw, issue.path);
+    const inlineCheck = inlineGateCheckError(issue.path, raw);
+    if (inlineCheck) return { where, ...inlineCheck };
+    // A discriminator miss carries the legal values at runtime; Zod's issue
+    // type does not declare them.
+    const discriminatorOptions = (issue as { options?: unknown }).options;
+    if (issue.code === 'invalid_union' && Array.isArray(discriminatorOptions)) {
+      const opts = discriminatorOptions.map(String);
+      const got = String(input);
+      const near = nearestMatch(got, opts);
+      const field = String(issue.path.at(-1) ?? 'value');
+      return {
+        where,
+        message: `"${got}" is not a legal ${field}.`,
+        fix: `use one of: ${opts.join(', ')}${near ? ` — closest match: "${near}"` : ''}`,
+      };
+    }
+    if (issue.path.at(-1) === 'gate') {
+      return { where, message: issue.message, fix: GATE_SHAPE_FIX };
+    }
     if (issue.code === 'invalid_value') {
       const opts = issue.values.map(String);
       const got = String(input);
@@ -215,6 +234,51 @@ export function zodIssuesToDocErrors(issues: z.ZodIssue[], raw: unknown): Craftb
     }
     return { where, message: issue.message };
   });
+}
+
+/**
+ * Replace a union failure with the issues of the branch that came closest.
+ * Zod reports a step gate that matches neither gate generation as one
+ * "Invalid input" at `gate`, and the cause sits in its branches: gemma4-12b
+ * wrote a check of kind "script" holding Python, heard only "gate: Invalid
+ * input" three times, and dropped its gate script (2026-10-31).
+ */
+function unwrapUnionIssue(issue: z.ZodIssue): z.ZodIssue[] {
+  if (issue.code !== 'invalid_union' || !Array.isArray(issue.errors)) return [issue];
+  const branches = issue.errors.filter((branch) => branch.length > 0);
+  if (branches.length === 0) return [issue];
+  const closest = branches.reduce((best, branch) => (branch.length < best.length ? branch : best));
+  return closest.flatMap((nested) =>
+    unwrapUnionIssue({ ...nested, path: [...issue.path, ...nested.path] } as z.ZodIssue),
+  );
+}
+
+const GATE_SHAPE_FIX =
+  'a gate is { "at": "completion", "checks": [ ...built-in checks such as { "kind": "minBytes", "file": "<path>", "bytes": 200 } ], "scripts": [ { "name": "<script name>", "scope": "craftbook" } ], "onReject": "<step id>", "maxAttempts": 3 } with at least one check or script.';
+
+/**
+ * A gate check that tries to carry code: kind "script", or a body under
+ * `script`/`source`/`code`. Checks are built-in predicates; custom logic is a
+ * TypeScript script in the book's `scripts` map, named from `gate.scripts`.
+ */
+function inlineGateCheckError(
+  path: PropertyKey[],
+  raw: unknown,
+): Omit<CraftbookDocError, 'where'> | undefined {
+  const checksAt = path.lastIndexOf('checks');
+  if (checksAt < 1 || path[checksAt - 1] !== 'gate' || typeof path[checksAt + 1] !== 'number') {
+    return undefined;
+  }
+  const check = valueAtIssuePath(raw, path.slice(0, checksAt + 2));
+  if (!check || typeof check !== 'object') return undefined;
+  const rec = check as Record<string, unknown>;
+  const bodyKey = ['script', 'source', 'code'].find((key) => typeof rec[key] === 'string');
+  if (rec.kind !== 'script' && !bodyKey) return undefined;
+  return {
+    message:
+      'a gate check cannot hold code — checks are built-in predicates (minBytes, contains, recordSchema, …).',
+    fix: 'write the custom check as a TypeScript script stored in the book (JSON: the top-level "scripts" map, "scripts": { "checkReport": "<source>" }; markdown: a `## Script: checkReport` section holding a ```ts block), list it in the gate as "scripts": [ { "name": "checkReport", "scope": "craftbook" } ], and remove this check. The script imports gateResult from "@bendyline/gezel-sdk/checks", reads files with gezel.fs.read, and ends with gezel.output(gateResult(passed, message)).',
+  };
 }
 
 function valueAtIssuePath(raw: unknown, path: PropertyKey[]): unknown {

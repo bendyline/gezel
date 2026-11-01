@@ -25,6 +25,15 @@ export function validateScriptInput(
   const source = raw ?? {};
   const out: Record<string, unknown> = {};
 
+  // Unknown names first: a misnamed required input (`reportPath` for `path`)
+  // should hear that its name is wrong and what the right one is, not only
+  // that `path` is missing.
+  for (const key of Object.keys(source)) {
+    if (!(key in inputs)) {
+      throw new ScriptInputError(`unknown input "${key}"; ${declaredInputsLine(inputs)}`, key);
+    }
+  }
+
   for (const [name, spec] of Object.entries(inputs)) {
     const hasValue =
       Object.prototype.hasOwnProperty.call(source, name) && source[name] !== undefined;
@@ -39,12 +48,6 @@ export function validateScriptInput(
     }
     if (spec.required) {
       throw new ScriptInputError(`input "${name}" is required`, name);
-    }
-  }
-
-  for (const key of Object.keys(source)) {
-    if (!(key in inputs)) {
-      throw new ScriptInputError(`unknown input "${key}"`, key);
     }
   }
 
@@ -103,6 +106,20 @@ function validateField(name: string, spec: ScriptInputField, value: unknown): un
       return value;
     }
   }
+}
+
+/**
+ * The inputs a script accepts, for an unknown-input error. Models guess input
+ * names from the script's purpose (`reportPath` for a script that reads a
+ * report); naming the real ones is what lets the next call succeed.
+ */
+function declaredInputsLine(inputs: ScriptInputs): string {
+  const names = Object.entries(inputs).map(
+    ([name, spec]) => `${name} (${spec.type}${spec.required ? ', required' : ''})`,
+  );
+  return names.length > 0
+    ? `this script takes: ${names.join(', ')}`
+    : 'this script takes no inputs; call it without any';
 }
 
 function typeOf(v: unknown): string {

@@ -1,7 +1,11 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { GetScriptSourceResponse, SaveScriptSourceResponse } from '@bendyline/gezel';
+import {
+  type GetScriptSourceResponse,
+  type SaveScriptSourceResponse,
+  ScriptInputError,
+} from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -229,6 +233,29 @@ describe('POST /scripts/run trigger', () => {
   it('refuses a session scope without a session binding', () => {
     expect(() => scriptRunTrigger({ appId: 'root', scopes: ['session'] })).toThrow(
       /no session binding/,
+    );
+  });
+});
+
+describe('POST /scripts/run input errors', () => {
+  it('answers an unknown input with a 400 that names the declared inputs', async () => {
+    const run = vi.fn(async () => {
+      throw new ScriptInputError('unknown input "reportPath"; this script takes: path (string)');
+    });
+    const app = new Hono();
+    app.use('*', async (c, next) => {
+      c.set('auth', { appId: 'desktop-client', scopes: ['ui'] });
+      await next();
+    });
+    app.route('/', scriptRoutes({ scriptRunner: { run } } as unknown as ServiceContext));
+    const res = await app.request('/p1/scripts/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'check-report', input: { reportPath: 'out/report.json' } }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toBe(
+      'script "check-report" rejected its input: unknown input "reportPath"; this script takes: path (string)',
     );
   });
 });

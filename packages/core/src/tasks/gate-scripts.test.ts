@@ -29,6 +29,20 @@ describe('evaluateGateScripts', () => {
     expect(outcome.message).toMatch(/not a declared task step/);
   });
 
+  it('says a script that never called gezel.output never produced a verdict', async () => {
+    const silent = await evaluateGateScripts([{ name: 'checkReport' }], async () => ({
+      status: 'ok',
+      output: undefined,
+    }));
+    expect(silent).toMatchObject({ decision: 'reject', infrastructureError: true });
+    expect(silent.message).toContain('finished without calling gezel.output(...)');
+    const malformed = await evaluateGateScripts([{ name: 'checkReport' }], async () => ({
+      status: 'ok',
+      output: { verdict: 'pass' },
+    }));
+    expect(malformed.message).toContain('returned an invalid result');
+  });
+
   it('names where a misplaced SDK import lives', () => {
     expect(withSdkImportHint("does not provide an export named 'gateResult'")).toContain(
       '@bendyline/gezel-sdk/checks',

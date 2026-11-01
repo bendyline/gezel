@@ -674,7 +674,7 @@ export interface GezelSDKOptions {
  */
 export function createGezelSDK(rpc: ScriptTransport, options: GezelSDKOptions = {}): GezelSDK {
   let outputStamped = false;
-  return {
+  return withMemberHints({
     get input() {
       return (rpc.init.input ?? {}) as Record<string, unknown>;
     },
@@ -775,7 +775,41 @@ export function createGezelSDK(rpc: ScriptTransport, options: GezelSDKOptions = 
       run: <TOutput = unknown>(name: string, input?: Record<string, unknown>) =>
         rpc.call<ScriptResult<TOutput>>('script.run', { name, input }),
     },
-  };
+  });
+}
+
+/**
+ * Make `gezel` and each of its namespaces name their real members when a
+ * script reaches for one that does not exist. The bare runtime error,
+ * `gezel.fs.readFile is not a function`, names nothing to use instead:
+ * qwen3.8-27b called `gezel.fs.readFile` in a gate script six times and never
+ * found `gezel.fs.read` (craftbook-author-gate-script, 2026-10-31).
+ */
+function withMemberHints(sdk: GezelSDK): GezelSDK {
+  const members = sdk as unknown as Record<string, unknown>;
+  for (const [name, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(sdk))) {
+    const value: unknown = descriptor.value;
+    if (value && typeof value === 'object') {
+      members[name] = hintUnknownMembers(`gezel.${name}`, value);
+    }
+  }
+  return hintUnknownMembers('gezel', sdk);
+}
+
+/** Keys that runtimes and tooling probe on any object: thenables, JSON, test matchers. */
+const PROBED_KEYS = new Set(['then', 'toJSON', 'asymmetricMatch', 'nodeType', '$$typeof']);
+
+function hintUnknownMembers<T extends object>(path: string, target: T): T {
+  return new Proxy(target, {
+    get(obj, key, receiver) {
+      if (typeof key !== 'string' || key in obj || PROBED_KEYS.has(key)) {
+        return Reflect.get(obj, key, receiver);
+      }
+      throw new TypeError(
+        `${path}.${key} does not exist; ${path} has ${Object.keys(obj).join(', ')}`,
+      );
+    },
+  });
 }
 
 /**

@@ -167,6 +167,14 @@ export function scriptRoutes(ctx: ServiceContext): Hono {
       if (err instanceof Error && err.name === 'ScriptMetaError') {
         return c.json({ error: `script "${body.name}" has invalid meta: ${err.message}` }, 422);
       }
+      // Input the script does not declare (or of the wrong type) is the
+      // caller's mistake, and the message names the inputs that exist. As a
+      // sanitized 500 the model saw only `internal_error`: qwen3.8-27b sent
+      // the same unknown `reportPath` three times running its own gate
+      // script (craftbook-author-gate-script, 2026-10-31).
+      if (err instanceof Error && err.name === 'ScriptInputError') {
+        return c.json({ error: `script "${body.name}" rejected its input: ${err.message}` }, 400);
+      }
       throw err;
     }
     // Always 200: a completed run whose SCRIPT failed is a run report, not

@@ -297,6 +297,55 @@ describe('McpBridge', () => {
     expect(task?.assignee).toEqual({ kind: 'gezel', gezelId: 'ada' });
   });
 
+  // gemma4-12b's path through its own role-less recipe (2026-10-31): a whole
+  // new book with no `create` and no target, an invocation that nobody could
+  // start, and the assignment that should start it.
+  it('creates a book from a bare craftbook_write and starts its unowned entry once assigned', async () => {
+    const content = JSON.stringify({
+      name: 'Roleless intake',
+      steps: [
+        { id: 'analyze', name: 'Analyze the list', prompt: 'Read the list.', next: 'report' },
+        { id: 'report', name: 'Write the report', prompt: 'Write it.', terminal: true },
+      ],
+    });
+    const created = await bridge.callTool('craftbook_write', { content, format: 'json' });
+    expect(created).toContain('Created craftbook "Roleless intake"');
+    const bookId = created.match(/\(([^)]+)\)/)?.[1];
+    expect(bookId).toBeDefined();
+
+    // As in the trial: a project with no lead (Default hands unowned steps to
+    // its lead) and stepwise execution (generalist mode pins every step on
+    // one recruited gezel, and the mock provider counts as hosted).
+    const project = await svc.context.store.createProject({ name: 'Roleless intake run' });
+    const prior = (await svc.context.store.readConfig()).generalistMode;
+    await svc.context.store.writeConfig({ generalistMode: 'off' });
+    let invoked: string;
+    try {
+      invoked = await bridge.callTool('invoke_craftbook', {
+        craftbookId: bookId!,
+        project: project.id,
+        description: 'Run the role-less intake recipe so its first step needs an owner.',
+      });
+    } finally {
+      await svc.context.store.writeConfig({ generalistMode: prior ?? 'auto' });
+    }
+    expect(invoked).toContain('Nobody was assigned to start its first step "Analyze the list"');
+    expect(invoked).not.toContain('is underway');
+    const ref = invoked.match(/task (\S+\/\d+)/)?.[1];
+    expect(ref).toBeDefined();
+    const dispatched = async () =>
+      (
+        await svc.context.history.listEvents({
+          projectId: project.id,
+          kinds: ['task.entry.dispatched'],
+        })
+      ).filter((event) => (event.details as { ref?: string } | undefined)?.ref === ref);
+    expect(await dispatched()).toEqual([]);
+
+    await bridge.callTool('assign_task', { ref: ref!, assignee: 'ada' });
+    expect(await dispatched()).toHaveLength(1);
+  });
+
   it('reads the whole task-note feed by default from a step-scoped session', async () => {
     const task = await svc.context.tasks.create('default', {
       title: 'Cross-step notes',

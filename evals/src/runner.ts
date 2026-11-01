@@ -3993,6 +3993,8 @@ export interface InflightTurnSnapshot {
   gezelId: string;
   projectId: string;
   elapsedMs: number;
+  /** Time since this turn's latest tool call; absent until it has made one. */
+  lastToolCallAgoMs?: number;
 }
 
 interface WatchdogSessionSnapshot {
@@ -4023,7 +4025,30 @@ export function canDispatchPoisonedSessionRecovery(
 
 async function listInflightTurnsForWatchdog(client: GezelClient): Promise<InflightTurnSnapshot[]> {
   const { inflight } = await client.listInflightTurns();
-  return inflight ?? [];
+  if (!inflight?.length) return [];
+  const telemetry = await client.listSessionTelemetry().catch(() => null);
+  return inflight.map((turn) => {
+    const ago = telemetry ? turnLastToolCallAgoMs(telemetry, turn.sessionId) : undefined;
+    return ago === undefined ? turn : { ...turn, lastToolCallAgoMs: ago };
+  });
+}
+
+/**
+ * How long ago the session's RUNNING turn last called a tool, on the daemon's
+ * own clock. Undefined when that turn has made no tool call yet: a call left
+ * over from an earlier turn says nothing about this one.
+ */
+export function turnLastToolCallAgoMs(
+  telemetry: Pick<SessionTelemetryListResponse, 'capturedAt' | 'sessions'>,
+  sessionId: string,
+): number | undefined {
+  const row = telemetry.sessions.find((session) => session.sessionId === sessionId);
+  const turn = row?.currentTurn;
+  const lastToolAt = row?.lastToolActivityAt;
+  if (!turn || turn.toolCalls === 0 || lastToolAt == null || lastToolAt < turn.startedAt) {
+    return undefined;
+  }
+  return Math.max(0, telemetry.capturedAt - lastToolAt);
 }
 
 async function listPoisonedSessionsForWatchdog(
@@ -4467,7 +4492,21 @@ export function shouldDeferRetryLoopForInflight(args: {
     args.stallPathTripped || args.fastPathTripped
       ? Math.max(base, Math.round(STALL_INFLIGHT_DEFER_MS * (args.throughputScale ?? 1)))
       : base;
-  return shouldDeferSoftWatchdog(args.inflightTurns, deferMs);
+  if (shouldDeferSoftWatchdog(args.inflightTurns, deferMs)) return true;
+  // The stall path is wall-clock only, so it also waits on a turn past its
+  // budget that is still calling tools: that turn is working, slowly. A
+  // 27B's 100k-token authoring chat and a review step shared one slot, each
+  // swap re-read the long context for 3-8 minutes, and both turns passed 15
+  // minutes; the trial was failed while the review step was still calling
+  // tools (craftbook-author-gate-script, qwen3.8-27b, 2026-10-31). The
+  // in-turn loop guards still bound one turn's tool calls.
+  return (
+    args.stallPathTripped &&
+    !args.fastPathTripped &&
+    args.inflightTurns.some(
+      (turn) => turn.lastToolCallAgoMs !== undefined && turn.lastToolCallAgoMs < deferMs,
+    )
+  );
 }
 
 export function summarizeInflightTurnsForLog(inflightTurns: InflightTurnSnapshot[]): string {
@@ -4476,7 +4515,11 @@ export function summarizeInflightTurnsForLog(inflightTurns: InflightTurnSnapshot
   const top = sorted[0]!;
   const seconds = Math.max(0, Math.round(top.elapsedMs / 1000));
   const suffix = sorted.length > 1 ? ` (+${sorted.length - 1} more)` : '';
-  return `${top.gezelId}/${top.sessionId.slice(0, 8)} in ${top.projectId} for ${seconds}s${suffix}`;
+  const lastTool =
+    top.lastToolCallAgoMs === undefined
+      ? ''
+      : `, last tool call ${Math.round(top.lastToolCallAgoMs / 1000)}s ago`;
+  return `${top.gezelId}/${top.sessionId.slice(0, 8)} in ${top.projectId} for ${seconds}s${lastTool}${suffix}`;
 }
 
 /**

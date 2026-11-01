@@ -762,7 +762,12 @@ export async function postSniffFeedback(
       );
     }
   }
-  const deliveryProjectId = opts.projectId ?? target?.projectId;
+  // The Meester's live session is its front door (the kickoff lands in
+  // Default), not the project the failure is about.
+  const deliveryProjectId =
+    !opts.taskStep && target?.gezelId === ctx.meesterId && target.sessionId
+      ? target.projectId
+      : (opts.projectId ?? target?.projectId);
   const inflight = target ? await targetInflightTurn(ctx, target, deliveryProjectId) : null;
   const inflightFeedbackDeferMs = opts.inflightDeferMs ?? INFLIGHT_FEEDBACK_DEFER_MS;
   // The terminal handoff waits longer than an ordinary nudge, but not
@@ -857,6 +862,7 @@ export async function postSniffFeedback(
     }
   }
   const stepSessionId = opts.taskStep ? target.sessionId : undefined;
+  const toMeester = !stepSessionId && target.gezelId === ctx.meesterId;
   try {
     // A bound step session gets the text alone: no file-turn intent and no
     // expected-deliverable contract. The step's own gate is the stricter
@@ -864,19 +870,21 @@ export async function postSniffFeedback(
     // (`task-graph.md`) orders the turn to write a file it must never write.
     const delivered: { sessionId?: string } = stepSessionId
       ? await ctx.client.sendToChatSession(stepSessionId, { message: text, nudge: true })
-      : await ctx.client.messageGezel(target.gezelId, {
-          fileTurnIntent: {
-            kind: 'repair-file',
-            path: filePath,
-            ...(opts.postReadMutationTarget ? { mutationPath: opts.postReadMutationTarget } : {}),
-          },
-          fromGezelId: ctx.meesterId,
-          text,
-          suppressReply: true,
-          ...deliverableFragment,
-          ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
-        });
-    if (opts.notifyMeester) {
+      : toMeester
+        ? await deliverToMeester(ctx, target, text, deliveryProjectId)
+        : await ctx.client.messageGezel(target.gezelId, {
+            fileTurnIntent: {
+              kind: 'repair-file',
+              path: filePath,
+              ...(opts.postReadMutationTarget ? { mutationPath: opts.postReadMutationTarget } : {}),
+            },
+            fromGezelId: ctx.meesterId,
+            text,
+            suppressReply: true,
+            ...deliverableFragment,
+            ...(deliveryProjectId ? { projectId: deliveryProjectId } : {}),
+          });
+    if (opts.notifyMeester && !toMeester) {
       await ctx.client.sendChatMessage(ctx.meesterId, {
         message: [formatCoordinatorCopy(filePath, opts), '', text].join('\n'),
         ...((opts.projectId ?? target.projectId)
@@ -1985,12 +1993,17 @@ async function pickTargetGezel(
   opts: PickTargetOptions = {},
 ): Promise<TargetGezel | null> {
   const { sessions } = await ctx.client.listChatSessions();
-  const candidates: TargetGezel[] = sessions
-    .filter((s) => s.gezelId !== ctx.meesterId && !s.archived)
+  const live: TargetGezel[] = sessions
+    .filter((s) => !s.archived)
     .sort((a, b) => (b.lastActivityAt ?? '').localeCompare(a.lastActivityAt ?? ''))
     .map((s) => ({ gezelId: s.gezelId, sessionId: s.id, projectId: s.projectId }));
+  const candidates = live.filter((candidate) => candidate.gezelId !== ctx.meesterId);
   if (opts.targetGezelId) {
-    const existing = candidates.find((candidate) => candidate.gezelId === opts.targetGezelId);
+    // A pinned Meester target resolves to the Meester's own live session (the
+    // trial's front door) so delivery can address it directly; see
+    // `deliverToMeester`.
+    const pool = opts.targetGezelId === ctx.meesterId ? live : candidates;
+    const existing = pool.find((candidate) => candidate.gezelId === opts.targetGezelId);
     if (existing) {
       const roleMap = await loadGezelRoles(ctx);
       return { ...existing, role: roleMap.get(existing.gezelId) ?? null };
@@ -2041,6 +2054,31 @@ async function pickTargetGezel(
     projectId: target.projectId,
     role: target.role,
   };
+}
+
+/**
+ * Deliver a nudge whose target is the Meester itself. `messageGezel` cannot
+ * carry it: the harness sends every nudge as the Meester, and the daemon
+ * refuses a gezel messaging itself (400 `cannot message yourself`). The
+ * refusal then read as a permanent client error and suppressed every later
+ * repair, so craftbook-export-generalize on gemma4-12b failed as a chat stall
+ * without one repair ever reaching the model (2026-10-31). The Meester hears
+ * the harness the way it hears the kickoff: as the person, in its own session.
+ */
+async function deliverToMeester(
+  ctx: EvalContext,
+  target: TargetGezel,
+  text: string,
+  projectId: string | undefined,
+): Promise<{ sessionId?: string }> {
+  if (target.sessionId) {
+    return ctx.client.sendToChatSession(target.sessionId, { message: text });
+  }
+  await ctx.client.sendChatMessage(ctx.meesterId, {
+    message: text,
+    ...(projectId ? { projectId } : {}),
+  });
+  return {};
 }
 
 async function targetInflightTurn(

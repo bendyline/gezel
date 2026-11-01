@@ -1,3 +1,4 @@
+import { activeStepWithoutOwner } from '../../task-step-routing.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../../types.ts';
 import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
@@ -116,6 +117,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   let gradeProjectId = projectId;
   let taskSteps: number | undefined;
   let taskProgress: string | undefined;
+  let executingTask: Awaited<ReturnType<typeof findTaskForCraftbookAnywhere>> = null;
   let scriptSource: string | undefined;
   if (!book) {
     failures.push(
@@ -139,6 +141,8 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
         if (!substance.ok) failures.push(substance.reason);
       }
     }
+    // Any failure so far is the recipe's, for its author rather than a step.
+    const recipeSound = failures.length === 0;
     const found = await findTaskForCraftbookAnywhere(ctx.client, projectId, book.craftbook.id);
     if (!found) {
       failures.push(
@@ -148,11 +152,13 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       gradeProjectId = found.projectId;
       taskSteps = completedTaskSteps(found.task);
       taskProgress = runningTaskProgress(found.task);
+      if (recipeSound) executingTask = found;
       if (found.task.status !== 'complete') {
         failures.push(
           unfinishedTaskFailure({
             ref: found.task.ref,
             status: found.task.status,
+            unownedStep: activeStepWithoutOwner(found.task),
             source: `from craftbook "${book.craftbook.id}"`,
           }),
         );
@@ -173,6 +179,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     bytes: progressBytes(reportText, scriptSource, book ? book.craftbook.id : null),
     milestones: taskSteps,
     taskProgress,
+    executingTask,
     // `scriptSource` is the gate script embedded in the authored book, not
     // the workspace deliverable this scenario waits on.
     deliverableMissing: noDeliverableWritten(reportText),

@@ -143,8 +143,14 @@ export async function evaluateGateScripts(
         error: 'invalid gate result',
         ...(logsTail ? { logsTail } : {}),
       });
+      // No output at all is the common authoring slip: the check lives in an
+      // exported function nothing calls. gemma4-12b's `export async function
+      // runCheck(...)` never ran, and "expected object, received undefined"
+      // did not say so (craftbook-author-gate-script, 2026-10-31).
       return fault(
-        `Gate script "${ref.name}" returned an invalid result (${parsed.error.issues[0]?.message ?? 'shape mismatch'}). A gate script must output { decision: 'approve' | 'reject', message, ... }.`,
+        result.output === undefined
+          ? `Gate script "${ref.name}" finished without calling gezel.output(...). Its top-level code must end with gezel.output(gateResult(passed, message)); a function the script only defines or exports never runs.`
+          : `Gate script "${ref.name}" returned an invalid result (${parsed.error.issues[0]?.message ?? 'shape mismatch'}). A gate script must output { decision: 'approve' | 'reject', message, ... }.`,
       );
     }
     const verdict = parsed.data;

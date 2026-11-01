@@ -1,3 +1,4 @@
+import { activeStepWithoutOwner } from '../../task-step-routing.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../../types.ts';
 import { evaluateCraftbookGateChecks } from '../gates.ts';
 import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
@@ -145,6 +146,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   let gradeProjectId = projectId;
   let taskSteps: number | undefined;
   let taskProgress: string | undefined;
+  let executingTask: Awaited<ReturnType<typeof findTaskForCraftbookAnywhere>> = null;
   if (!book) {
     failures.push(
       'no reusable authored craftbook with at least 3 steps exists yet — author "CSV Order Cleanup" (inspect, clean, verify) as a craftbook template, not as ad-hoc chat work',
@@ -156,6 +158,8 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
         `craftbook "${book.craftbook.id}" has build steps without a gate or file deliverable: ${ungated.join(', ')} — declare each step's output file as its deliverable`,
       );
     }
+    // Any failure so far is the recipe's, for its author rather than a step.
+    const recipeSound = failures.length === 0;
     const found = await findTaskForCraftbookAnywhere(ctx.client, projectId, book.craftbook.id);
     if (!found) {
       failures.push(
@@ -165,11 +169,13 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
       gradeProjectId = found.projectId;
       taskSteps = completedTaskSteps(found.task);
       taskProgress = runningTaskProgress(found.task);
+      if (recipeSound) executingTask = found;
       if (found.task.status !== 'complete') {
         failures.push(
           unfinishedTaskFailure({
             ref: found.task.ref,
             status: found.task.status,
+            unownedStep: activeStepWithoutOwner(found.task),
             source: `from craftbook "${book.craftbook.id}"`,
           }),
         );
@@ -205,6 +211,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     ),
     milestones: taskSteps,
     taskProgress,
+    executingTask,
     deliverableMissing: noDeliverableWritten(cleanText, anomaliesText, reportTextLinear),
     repairPath: 'craftbook: CSV Order Cleanup',
     repairDirective: [

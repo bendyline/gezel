@@ -46,6 +46,7 @@ import {
 } from '../../references/file-references.js';
 import { craftbookScriptErrors } from '../../scripts/source.js';
 import { loadTaskResult, placeTaskDeliverable } from '../../tasks/completion-wrapup.js';
+import { dispatchNewlyOwnedEntry } from '../../tasks/entry-dispatch.js';
 import { type TaskLaunchResult, launchErrorResponse } from '../../tasks/launcher.js';
 import {
   type CompleteStepOutcome,
@@ -228,7 +229,9 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const num = parseNum(c.req.param('num'));
     if (num == null) return c.json({ error: 'invalid num' }, 400);
     const body = UpdateTaskRequestSchema.parse(await c.req.json());
+    const before = body.assignee ? await ctx.tasks.get(projectId, num) : null;
     const task = await ctx.tasks.update(projectId, num, body);
+    if (before) await dispatchNewlyOwnedEntry(ctx, before, task);
     return c.json(task);
   });
 

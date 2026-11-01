@@ -171,7 +171,10 @@ export function parseCraftbookMarkdown(text: string): CraftbookMarkdownParse {
       errors.push({
         where: 'frontmatter',
         message: `unknown key "${key}".`,
-        fix: `legal keys: ${FRONTMATTER_KEYS.join(', ')} — step fields go in the step's yaml block`,
+        fix:
+          key === 'scripts'
+            ? 'a markdown craftbook keeps each script in its own section: a `## Script: <name>` heading followed by a ```ts block with the source'
+            : `legal keys: ${FRONTMATTER_KEYS.join(', ')} — step fields go in the step's yaml block`,
       });
     }
   }

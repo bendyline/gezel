@@ -164,6 +164,67 @@ describe('parseCraftbookDoc — repair-grade errors', () => {
     }
   });
 
+  // gemma4-12b's gate, verbatim in shape: a check of kind "script" holding
+  // Python. It used to come back as "gate: Invalid input" (2026-10-31).
+  const gatedDoc = (check: Record<string, unknown>) =>
+    JSON.stringify({
+      name: 'Inventory health',
+      steps: [
+        {
+          id: 'build',
+          name: 'Build',
+          prompt: 'Write the report.',
+          next: 'verify',
+          gate: { at: 'completion', checks: [check], onReject: 'build', maxAttempts: 3 },
+        },
+        { id: 'verify', name: 'Verify', prompt: 'Check it.', terminal: true },
+      ],
+    });
+
+  it('a gate check carrying code says where custom checks live', () => {
+    const res = parseCraftbookDoc(
+      gatedDoc({ kind: 'script', script: 'import json\ndef check(path): ...' }),
+      'json',
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      const msg = formatCraftbookDocErrors(res.errors);
+      expect(msg).not.toContain('Invalid input');
+      expect(msg).toContain('steps[0] (id "build") → gate.checks.0.kind');
+      expect(msg).toContain('a gate check cannot hold code');
+      expect(msg).toContain('"scope": "craftbook"');
+      expect(msg).toContain('TypeScript script');
+      expect(msg).toContain('markdown: a `## Script: checkReport` section');
+    }
+  });
+
+  it('an unknown gate check kind names the legal kinds', () => {
+    const res = parseCraftbookDoc(
+      gatedDoc({ kind: 'minByte', file: 'out/r.json', bytes: 10 }),
+      'json',
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      const msg = formatCraftbookDocErrors(res.errors);
+      expect(msg).toContain('"minByte" is not a legal kind.');
+      expect(msg).toContain('closest match: "minBytes"');
+    }
+  });
+
+  it('a markdown book that puts scripts in its frontmatter hears where they go', () => {
+    // gemma4-12b followed the JSON-only advice into a markdown book (2026-10-31).
+    const res = parseCraftbookDoc(
+      '---\nname: X\nscripts:\n  checkReport: "x"\n---\n\n## Step: Build\n\ndo it\n',
+      'markdown',
+    );
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      const msg = formatCraftbookDocErrors(res.errors);
+      expect(msg).toContain('unknown key "scripts"');
+      expect(msg).toContain('`## Script: <name>` heading');
+    }
+  });
+
   it('markdown with an unknown section heading points at the heading', () => {
     const res = parseCraftbookDoc('---\nname: X\n---\n\n## Stap: Build\n\ndo it\n', 'markdown');
     expect(res.ok).toBe(false);

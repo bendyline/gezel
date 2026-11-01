@@ -1,6 +1,10 @@
 import type { Task } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
-import { type EntryDispatchDeps, dispatchTaskEntry } from './entry-dispatch.js';
+import {
+  type EntryDispatchDeps,
+  dispatchNewlyOwnedEntry,
+  dispatchTaskEntry,
+} from './entry-dispatch.js';
 
 function fixtureTask(overrides: Partial<Task> = {}): Task {
   const now = new Date().toISOString();
@@ -170,5 +174,47 @@ describe('dispatchTaskEntry', () => {
     const result = await dispatchTaskEntry(d, fixtureTask());
     expect(result).toMatchObject({ enqueued: false, reason: 'project-inactive' });
     expect(d.enqueued).toHaveLength(0);
+  });
+});
+
+describe('dispatchNewlyOwnedEntry', () => {
+  // A recipe whose steps name no role makes a task the person owns; nothing
+  // starts it until an assignment names a gezel.
+  const unowned = fixtureTask({ assignee: { kind: 'user' } });
+  const assigned = fixtureTask({ assignee: { kind: 'gezel', gezelId: 'reza' } });
+
+  it('starts the entry step the assignment gave its first owner', async () => {
+    const d = deps();
+    const result = await dispatchNewlyOwnedEntry(d, unowned, assigned);
+    expect(result).toMatchObject({ enqueued: true, gezelId: 'reza' });
+    expect(d.enqueued).toEqual([
+      { gezelId: 'reza', projectId: 'p1', taskRef: 'p1/1', stepId: 'build', kind: 'entry' },
+    ]);
+  });
+
+  it('leaves a reassigned task alone when its entry step already had an owner', async () => {
+    const d = deps();
+    const before = fixtureTask({ assignee: { kind: 'gezel', gezelId: 'task-owner' } });
+    expect(await dispatchNewlyOwnedEntry(d, before, assigned)).toBeNull();
+    expect(d.enqueued).toEqual([]);
+  });
+
+  it('leaves the person’s own entry step and a task past its entry alone', async () => {
+    const d = deps();
+    const now = new Date().toISOString();
+    const ownerEntry = fixtureTask({
+      assignee: { kind: 'user' },
+      craftbook: {
+        ...unowned.craftbook,
+        steps: [
+          { id: 'build', name: 'Approve', assignee: { kind: 'user' }, createdAt: now },
+          { id: 'done', name: 'Done', createdAt: now },
+        ],
+      },
+    });
+    expect(await dispatchNewlyOwnedEntry(d, ownerEntry, assigned)).toBeNull();
+    const pastEntry = fixtureTask({ assignee: { kind: 'user' }, activeStepId: 'done' });
+    expect(await dispatchNewlyOwnedEntry(d, pastEntry, assigned)).toBeNull();
+    expect(d.enqueued).toEqual([]);
   });
 });

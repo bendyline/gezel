@@ -126,6 +126,22 @@ describe('portable script SDK', () => {
     expect(rpc.notify).not.toHaveBeenCalled();
   });
 
+  it('names the real members when a script calls one that does not exist', async () => {
+    const rpc = transport();
+    const gezel = createGezelSDK(rpc) as unknown as Record<string, Record<string, unknown>>;
+
+    expect(() => gezel.fs!.readFile).toThrow(
+      'gezel.fs.readFile does not exist; gezel.fs has read, write, list, listAll, stat, rm, mkdir, rename',
+    );
+    expect(() => gezel.workspace).toThrow(/^gezel\.workspace does not exist; gezel has input, /);
+    // Probes a runtime makes on any object still read as absent.
+    expect(gezel.fs!.then).toBeUndefined();
+    expect(JSON.stringify({ input: (gezel as unknown as { input: unknown }).input })).toBe(
+      '{"input":{}}',
+    );
+    await expect(Promise.resolve(gezel.fs)).resolves.toBeDefined();
+  });
+
   it('delivers logs through the transport and the optional runtime log sink', () => {
     const rpc = transport();
     const log = vi.fn();

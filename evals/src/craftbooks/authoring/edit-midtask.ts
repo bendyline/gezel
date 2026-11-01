@@ -1,3 +1,4 @@
+import { activeStepWithoutOwner } from '../../task-step-routing.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../../types.ts';
 import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
@@ -193,7 +194,13 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     );
   }
   if (task.status !== 'complete') {
-    failures.push(unfinishedTaskFailure({ ref: task.ref, status: task.status }));
+    failures.push(
+      unfinishedTaskFailure({
+        ref: task.ref,
+        status: task.status,
+        unownedStep: activeStepWithoutOwner(task),
+      }),
+    );
   }
 
   const workspace = workspaceFromClient(ctx.client, projectId);

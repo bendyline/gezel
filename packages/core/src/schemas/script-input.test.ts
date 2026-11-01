@@ -30,6 +30,23 @@ describe('validateScriptInput', () => {
     ).toThrow(/unknown input/);
   });
 
+  it('names the declared inputs when it rejects an unknown one', () => {
+    expect(() =>
+      validateScriptInput(
+        meta({
+          path: { type: 'string', description: 'path', required: true },
+          strict: { type: 'boolean', description: 'strict' },
+        }),
+        { reportPath: 'out/report.json' },
+      ),
+    ).toThrow(
+      'unknown input "reportPath"; this script takes: path (string, required), strict (boolean)',
+    );
+    expect(() => validateScriptInput(meta({}), { reportPath: 'x' })).toThrow(
+      /this script takes no inputs/,
+    );
+  });
+
   it('validates string pattern', () => {
     const valid = validateScriptInput(
       meta({

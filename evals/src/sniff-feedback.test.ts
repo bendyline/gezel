@@ -113,6 +113,50 @@ describe('structuralOrderRepairLine', () => {
 });
 
 describe('postSniffFeedback', () => {
+  it('delivers a Meester-targeted nudge into its own session, never as a self-message', async () => {
+    // The harness sends every messageGezel nudge AS the Meester, and the
+    // daemon refuses a gezel messaging itself. export-generalize's
+    // coordinator nudges all died that way (gemma4-12b, 2026-10-31).
+    const client = makeClient({
+      sessions: [
+        {
+          id: 'sess-front',
+          gezelId: 'meester-1',
+          lastActivityAt: '2026-10-31T19:00:00Z',
+          projectId: 'default',
+        },
+        {
+          id: 'sess-worker',
+          gezelId: 'worker-1',
+          lastActivityAt: '2026-10-31T19:05:00Z',
+          projectId: 'suppliers',
+        },
+      ],
+    });
+    const ctx = makeCtx(client);
+    const sniff: SniffResult = {
+      ok: false,
+      signals: [],
+      score: 2,
+      failReason: 'no reusable authored craftbook with at least 2 steps exists yet',
+    };
+
+    const result = await postSniffFeedback(ctx, 'craftbook: supplier intake recipe', sniff, {
+      projectId: 'suppliers',
+      targetGezelId: 'meester-1',
+      expectedDeliverable: null,
+      notifyMeester: true,
+    });
+
+    expect(result).toMatchObject({ status: 'sent' });
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.sendChatMessage).not.toHaveBeenCalled();
+    expect(client.sendToChatSession).toHaveBeenCalledTimes(1);
+    const [sessionId, body] = client.sendToChatSession.mock.calls[0]!;
+    expect(sessionId).toBe('sess-front');
+    expect(body.message).toContain('no reusable authored craftbook');
+  });
+
   it('routes existing artifact repairs through drawer tools', async () => {
     const client = makeClient({
       sessions: [

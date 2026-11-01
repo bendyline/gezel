@@ -152,6 +152,10 @@ export const findVsCreateScenario: EvalScenario = {
   skipInitialPrompt: true,
   timeoutMs: 20 * 60_000,
   progressTimeoutMs: 10 * 60_000,
+  // Recipe selection is what this grades. suggest_work ranks recipes by a
+  // semantic score plus keyword overlap; with embeddings off only the keyword
+  // half runs, which is not what a real install does.
+  requiresEmbeddings: true,
   setup,
   successCheck,
 };

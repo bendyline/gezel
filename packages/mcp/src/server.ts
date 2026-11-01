@@ -226,6 +226,7 @@ import {
   normalizeDocumentOutputPath,
 } from './document-routing.js';
 import { createEntityResolvers } from './entity-resolvers.js';
+import { entryStepStart } from './entry-step-start.js';
 import { registerGitHubTools } from './github-tools.js';
 import {
   installedScriptMissHint,
@@ -5518,6 +5519,7 @@ async function runInvokeCraftbook({
     }
     const created = launch.task;
     const stepCount = created.craftbook.steps.length;
+    const start = entryStepStart(created);
     const installedText =
       launch.installed.length > 0
         ? ` Installed or upgraded project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
@@ -5548,7 +5550,7 @@ async function runInvokeCraftbook({
         },
       },
       {
-        text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${versionText}${idempotentText} Tell the person that ${taskPersonNoun(created)} is underway. ${PLAIN_WORDS_RELAY}`,
+        text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). ${start.text}${installedText}${versionText}${idempotentText}${start.underway ? ` Tell the person that ${taskPersonNoun(created)} is underway.` : ''} ${PLAIN_WORDS_RELAY}`,
       },
     );
   } catch (err) {
@@ -5604,6 +5606,18 @@ async function resolveCraftbookTarget(args: {
   task?: string;
   craftbook?: string;
 }): Promise<CraftbookTarget> {
+  const target = await resolveOptionalCraftbookTarget(args);
+  if (target) return target;
+  throw new Error(
+    'no craftbook target: pass `craftbook` (a local template id) or `task` (a task ref), or run inside a craftbook-editing or task session.',
+  );
+}
+
+/** {@link resolveCraftbookTarget}, but null when nothing names a target. */
+async function resolveOptionalCraftbookTarget(args: {
+  task?: string;
+  craftbook?: string;
+}): Promise<CraftbookTarget | null> {
   if (args.task) {
     const parsed = await parseRef(args.task);
     const target: CraftbookTarget = {
@@ -5631,9 +5645,7 @@ async function resolveCraftbookTarget(args: {
     const parsed = await parseRef(sessionTaskRef);
     return { kind: 'task', projectId: parsed.projectId, num: parsed.num, ref: sessionTaskRef };
   }
-  throw new Error(
-    'no craftbook target: pass `craftbook` (a local template id) or `task` (a task ref), or run inside a craftbook-editing or task session.',
-  );
+  return null;
 }
 
 function describeTarget(t: CraftbookTarget): string {
@@ -5809,13 +5821,16 @@ server.tool(
   },
   async ({ task, craftbook, create, content, format }) => {
     try {
-      if (create) {
+      // No target at all creates, as the description promises. It used to
+      // throw "no craftbook target", and gemma4-12b sent a complete new book
+      // without `create` four times (craftbook-author-gate-script, 2026-10-31).
+      const t = create ? null : await resolveOptionalCraftbookTarget({ task, craftbook });
+      if (!t) {
         const res = await api.createCraftbookDocument({ content, ...(format ? { format } : {}) });
         return cbResult(
           `Created craftbook "${res.craftbook.name}" (${res.craftbook.id}) — ${res.gatedSteps} of ${res.stepCount} steps are gated. Invoke it with invoke_craftbook({ craftbookId: "${res.craftbook.id}" }).`,
         );
       }
-      const t = await resolveCraftbookTarget({ task, craftbook });
       if (t.kind === 'task') {
         const res = await api.putTaskCraftbookDocument(t.projectId, t.num, {
           content,
