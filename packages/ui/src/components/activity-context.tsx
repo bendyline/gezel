@@ -20,6 +20,12 @@ import { api } from '../api.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 import { setVisibleInterval } from '../visible-interval.js';
+import {
+  INDEX_ACTIVITY_LINGER_MS,
+  type IndexProgress,
+  indexingActivityId,
+  indexingActivityItem,
+} from './indexing-activity.js';
 
 interface ActivityState {
   snapshot: ActivityStatusResponse | null;
@@ -75,6 +81,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   const [receipts, setReceipts] = useState<Question[]>([]);
   const [gezels, setGezels] = useState(new Map<string, GezelSummary>());
   const [projects, setProjects] = useState(new Map<string, Project>());
+  const [indexProgress, setIndexProgress] = useState(new Map<string, IndexProgress>());
   const acknowledged = useRef(new Set<string>());
   const mounted = useRef(false);
   const pending = useRef(false);
@@ -139,6 +146,31 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
       void refresh();
     }, 5_000);
     const controller = new AbortController();
+    const indexTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    const indexStarted = new Set<string>();
+    const indexingChanged = (event: IndexProgress) => {
+      const id = indexingActivityId(event);
+      clearTimeout(indexTimers.get(id));
+      indexTimers.delete(id);
+      if (event.state === 'started') indexStarted.add(id);
+      if (event.state === 'ended') indexStarted.delete(id);
+      setIndexProgress((current) => new Map(current).set(id, event));
+      // A start is a live operation until its end, even during a long scan.
+      // Batch-only pulses and completion receipts fade after a quiet spell.
+      if (!indexStarted.has(id)) {
+        indexTimers.set(
+          id,
+          setTimeout(() => {
+            indexTimers.delete(id);
+            setIndexProgress((current) => {
+              const next = new Map(current);
+              next.delete(id);
+              return next;
+            });
+          }, INDEX_ACTIVITY_LINGER_MS),
+        );
+      }
+    };
     let eventTimer: number | undefined;
     const changed = () => {
       if (eventTimer !== undefined) return;
@@ -171,7 +203,8 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
           signal: controller.signal,
           fetch: api.getFetch(),
         })) {
-          if (
+          if (event.type === 'index_progress') indexingChanged(event);
+          else if (
             event.type === 'question_asked' ||
             event.type === 'question_answered' ||
             event.type === 'task_event' ||
@@ -194,6 +227,13 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
         }
       } catch {
         /* Polling reconciles a disconnected event stream. */
+      } finally {
+        if (!controller.signal.aborted) {
+          for (const timer of indexTimers.values()) clearTimeout(timer);
+          indexTimers.clear();
+          indexStarted.clear();
+          setIndexProgress(new Map());
+        }
       }
     })();
     return () => {
@@ -201,15 +241,29 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
       controller.abort();
       timer();
       clearTimeout(eventTimer);
+      for (const timer of indexTimers.values()) clearTimeout(timer);
       window.removeEventListener('gezel:config-changed', changed);
       window.removeEventListener('gezel:projects-changed', roster);
       window.removeEventListener('gezel:gezels-changed', roster);
     };
   }, [refresh]);
   const clearReceipts = useCallback(() => setReceipts([]), []);
+  const combinedSnapshot = useMemo(
+    () =>
+      snapshot
+        ? {
+            ...snapshot,
+            items: [
+              ...snapshot.items,
+              ...[...indexProgress.values()].map((event) => indexingActivityItem(event, projects)),
+            ],
+          }
+        : null,
+    [snapshot, indexProgress, projects],
+  );
   const value = useMemo(
     () => ({
-      snapshot,
+      snapshot: combinedSnapshot,
       stale,
       refreshing,
       refresh,
@@ -219,7 +273,17 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
       gezels,
       projects,
     }),
-    [snapshot, stale, refreshing, refresh, answered, receipts, clearReceipts, gezels, projects],
+    [
+      combinedSnapshot,
+      stale,
+      refreshing,
+      refresh,
+      answered,
+      receipts,
+      clearReceipts,
+      gezels,
+      projects,
+    ],
   );
   return <ActivityContext.Provider value={value}>{children}</ActivityContext.Provider>;
 }

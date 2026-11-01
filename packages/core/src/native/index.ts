@@ -106,6 +106,7 @@ export {
 export type { FileFingerprint } from './file-fingerprint.js';
 export { fileFingerprint, sameFileFingerprint } from './file-fingerprint.js';
 export { LLAMA_ENGINE_VERSION } from './llama-engine-version.js';
+export { ORT_DISABLE_TELEMETRY_ENV, disableOnnxRuntimeTelemetry } from './onnx-telemetry.js';
 export { resolvePlatformKey } from './platform-key.js';
 export {
   SUPPORTED_ON_DEVICE_PLATFORMS,

@@ -9,6 +9,8 @@ export interface TrialJudgeScenario {
   prompt: string;
   description: string;
   judge?: ScenarioJudgeSpec;
+  /** See `EvalScenario.htmlDeliverable`. */
+  htmlDeliverable?: string;
 }
 
 function firstArtifactUnder(dir: string, matches: (name: string) => boolean): string | null {
@@ -37,20 +39,41 @@ function firstArtifactUnder(dir: string, matches: (name: string) => boolean): st
   return candidate;
 }
 
-function resolveJudgeArtifact(runDir: string, judge: ScenarioJudgeSpec | undefined): string | null {
-  const matches = judge
-    ? (name: string) => name === judge.artifactBasename
-    : (name: string) => name.toLowerCase().endsWith('.html');
-  return (
-    firstArtifactUnder(join(runDir, 'workspace'), matches) ??
-    firstArtifactUnder(join(runDir, 'artifacts'), matches)
-  );
+function resolveJudgeArtifact(runDir: string, scenario: TrialJudgeScenario): string | null {
+  const { judge, htmlDeliverable } = scenario;
+  if (judge) {
+    const matches = (name: string) => name === judge.artifactBasename;
+    return (
+      firstArtifactUnder(join(runDir, 'workspace'), matches) ??
+      firstArtifactUnder(join(runDir, 'artifacts'), matches)
+    );
+  }
+  if (!htmlDeliverable) return null;
+  // The snapshot holds one folder per project; the page is in the one the
+  // model built it in.
+  const workspace = join(runDir, 'workspace');
+  let projects: string[];
+  try {
+    projects = readdirSync(workspace);
+  } catch {
+    return null;
+  }
+  for (const project of projects) {
+    const candidate = join(workspace, project, htmlDeliverable);
+    try {
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      // Not in this project.
+    }
+  }
+  return null;
 }
 
 /**
  * Run the optional advisory judge over a single trial's final artifact.
- * Scenarios with a judge spec name a non-HTML deliverable and custom axes;
- * scenarios without one retain the legacy first-HTML behavior.
+ * Scenarios with a judge spec name a deliverable and custom axes; scenarios
+ * with an `htmlDeliverable` get the default HTML rubric on that page; every
+ * other scenario is skipped.
  * When a report is written, facts.json is immediately regenerated so the
  * canonical facts snapshot exposes `judge` in the same command invocation.
  * Returns true only when a judge report was persisted.
@@ -61,9 +84,13 @@ export async function maybeJudgeTrial(args: {
   log?: (line: string) => void;
 }): Promise<boolean> {
   const log = args.log ?? ((line: string) => console.log(line));
-  const artifactPath = resolveJudgeArtifact(args.runDir, args.scenario.judge);
+  if (!args.scenario.judge && !args.scenario.htmlDeliverable) {
+    log('[llm-judge] scenario declares no judged deliverable — skipping advisory judge');
+    return false;
+  }
+  const artifactPath = resolveJudgeArtifact(args.runDir, args.scenario);
   if (!artifactPath) {
-    const expected = args.scenario.judge?.artifactBasename ?? 'HTML artifact';
+    const expected = args.scenario.judge?.artifactBasename ?? args.scenario.htmlDeliverable;
     log(`[llm-judge] no ${expected} in trial dir — skipping advisory judge`);
     return false;
   }

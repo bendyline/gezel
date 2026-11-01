@@ -23,6 +23,7 @@
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
 import { findServiceWorkerEntry } from '@bendyline/gezel-inference/internal/utils/service-worker-entry';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import {
   InProcessKokoroBackend,
   type KokoroBackend,
@@ -303,6 +304,7 @@ export class KokoroWorkerBackend implements KokoroBackend {
     }
     let worker: Worker;
     try {
+      disableOnnxRuntimeTelemetry();
       worker = new Worker(entry, { workerData: this.config });
     } catch (err) {
       log.warn(

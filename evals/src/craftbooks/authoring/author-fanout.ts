@@ -166,6 +166,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
   // pins the seeded project, but a detour must not zero out real work.
   let gradeProjectId = projectId;
   let perStoreRuns = 0;
+  let runUnderway = false;
   if (!book) {
     failures.push(
       'no reusable authored craftbook exists yet — author the store health sweep as a craftbook template, not as ad-hoc chat work',
@@ -199,11 +200,11 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     // template, so they carry neither the book id nor its catalog source —
     // the parent link is what is actually observable. Manual re-invocations
     // of the same book are counted the other way.
-    const referencing = tasks.filter((task) => taskReferencesCraftbook(task, bookId)).length;
-    const children = found
-      ? tasks.filter((task) => task.parentTaskRef === found.task.ref).length
-      : 0;
-    perStoreRuns = Math.max(referencing, children);
+    const referencing = tasks.filter((task) => taskReferencesCraftbook(task, bookId));
+    const children = found ? tasks.filter((task) => task.parentTaskRef === found.task.ref) : [];
+    const runs = children.length >= referencing.length ? children : referencing;
+    perStoreRuns = runs.length;
+    runUnderway = runs.some((task) => task.status === 'active');
     if (perStoreRuns < STORES.length) {
       failures.push(
         `craftbook "${bookId}" has produced ${perStoreRuns} of ${STORES.length} per-store runs — invoke the recipe on this project and make sure its fanout step really fans out over ${STORES_JSON_PATH}, so each store gets its own run`,
@@ -242,6 +243,7 @@ async function successCheck(ctx: EvalContext): Promise<SuccessCheckResult> {
     // that field as evidence a deliverable EXISTS, and `healthTexts` above
     // already grows as the runs write their files.
     milestones: perStoreRuns,
+    unitsUnderway: runUnderway,
     deliverableMissing: noDeliverableWritten(...healthTexts),
     repairPath: 'craftbook: store health sweep',
     repairDirective: [

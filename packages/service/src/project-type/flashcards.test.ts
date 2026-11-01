@@ -169,6 +169,7 @@ describe('Flashcards bundled project type', () => {
       'record_review',
       'finish_session',
       'forge_from_notes',
+      'page_add_cards',
     ]);
     const finish = detail.manifest.tools.find((t) => t.name === 'finish_session');
     expect(finish?.reaction?.gezel).toBe('study-buddy');
@@ -204,6 +205,7 @@ describe('Flashcards bundled project type', () => {
       'record_review',
       'finish_session',
       'forge_from_notes',
+      'page_add_cards',
     ]);
   });
 });

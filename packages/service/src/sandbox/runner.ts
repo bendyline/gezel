@@ -56,8 +56,9 @@ export interface SandboxRunOptions {
    * defense-in-depth;
    * it covers fetch/WebSocket, socket APIs, and both callback and promise
    * DNS APIs, but is deliberately not treated as a security boundary by
-   * itself. The child only talks to the host over its fd-3 RPC pipe, so
-   * denying sockets does not block legitimate RPC. Default false
+   * itself. The child only talks to the host over its RPC pipe (fd 3, or
+   * stdin/stdout under a Linux or Windows boundary), so denying sockets
+   * does not block legitimate RPC. Default false
    * (workspace build/test commands may legitimately need network).
    */
   denyNet?: boolean;
@@ -156,7 +157,7 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
   // backstop as network isolation.
   const macSandboxAvailable = process.platform === 'darwin' && (await canApplyMacSandbox());
   const linuxSystemdSandboxAvailable =
-    process.platform === 'linux' && !opts.rpcChannel && (await canApplyLinuxSystemdSandbox());
+    process.platform === 'linux' && (await canApplyLinuxSystemdSandbox());
   const mxcLauncher = process.platform === 'win32' ? await windowsMxcLauncherForRun(nodeBin) : null;
   const windowsMxcSandboxAvailable = mxcLauncher !== null;
   if (
@@ -223,9 +224,15 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
       ...(opts.scriptArgs ?? []),
     ];
 
-    // The process container hands the script only the standard pipes.
+    // The Windows container and `systemd-run --pipe` hand the script only the
+    // standard pipes, so RPC rides stdin/stdout there instead of fd 3. Before
+    // the Linux unit used it, every denyNet script with an RPC channel (a
+    // gate script a model wrote, among others) refused to start on Linux.
+    const linuxSystemdWraps = linuxSystemdSandboxAvailable && opts.denyNet === true;
     const stdioRpcNonce =
-      windowsMxcSandboxAvailable && opts.rpcChannel ? newStdioRpcNonce() : undefined;
+      (windowsMxcSandboxAvailable || linuxSystemdWraps) && opts.rpcChannel
+        ? newStdioRpcNonce()
+        : undefined;
     const childEnv = {
       ...sandboxEnv(process.env),
       GEZEL_SANDBOX: '1',
@@ -728,7 +735,7 @@ export function browserScriptEnv(src: NodeJS.ProcessEnv): Record<string, string>
 
 export type DenyNetBoundary = 'macos-seatbelt' | 'linux-systemd' | 'windows-mxc' | 'unavailable';
 
-/** Whether this host can enforce `denyNet` for ordinary (non-RPC) script work. */
+/** Whether this host can enforce `denyNet` for script work, RPC-driven runs included. */
 export async function denyNetBoundaryAvailable(): Promise<boolean> {
   return (
     selectDenyNetBoundary({

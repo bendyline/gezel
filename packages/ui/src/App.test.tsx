@@ -17,9 +17,6 @@ vi.mock('./api.js', () => ({
     getFetch: vi.fn(() => fetch),
   }),
 }));
-vi.mock('./components/BoekwachterPill.js', () => ({
-  BoekwachterPill: () => <span data-testid="boekwachter-pill" />,
-}));
 vi.mock('./components/ClaudeCliPoolPill.js', () => ({
   ClaudeCliPoolPill: () => <span data-testid="claude-pool-pill" />,
 }));
@@ -116,7 +113,6 @@ describe('Responsive navigation in the desktop app', () => {
       const header = await screen.findByTestId('app-header');
       expect(within(header).getByRole('button', { name: /Activity —/ })).toBeInTheDocument();
       expect(within(header).getByTestId('engine-pill')).toBeInTheDocument();
-      expect(within(header).queryByTestId('boekwachter-pill')).toBeNull();
       expect(within(header).queryByTestId('claude-pool-pill')).toBeNull();
     } finally {
       window.__GEZEL__ = bridge;
@@ -368,10 +364,8 @@ describe('Crew activity menu', () => {
       await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
     );
 
-    const readout = await screen.findByText(/they start work, check in on projects/);
-    expect(readout.closest('.app-engagement-readout')).toHaveTextContent(
-      /^Proactive — Your gezellen/,
-    );
+    const readout = await screen.findByText(/members start work, check in on projects/);
+    expect(readout.closest('.app-engagement-readout')).toHaveTextContent(/^Proactive — Your crew/);
     const order = screen.getAllByRole('menuitemradio').map((item) => item.textContent);
     expect(order).toEqual(['Off', 'Chat only', 'Tasks + chat', 'Proactive']);
   });
@@ -397,7 +391,7 @@ describe('Crew activity menu', () => {
     expect(api.updateConfig).not.toHaveBeenCalled();
     // The focused key's tooltip describes it; the first Escape dismisses the
     // tooltip and the second closes the menu.
-    expect(await screen.findByRole('tooltip')).toHaveTextContent(/answer when you ask/);
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(/answers when you ask/);
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('tooltip')).not.toBeInTheDocument());
     expect(screen.getByRole('menu')).toBeInTheDocument();
@@ -470,7 +464,7 @@ describe('Crew activity menu', () => {
 
     await user.hover(screen.getByRole('menuitemradio', { name: /Tasks \+ chat/ }));
     expect(await screen.findByRole('tooltip')).toHaveTextContent(
-      /work through tasks and schedules/,
+      /works through tasks and schedules/,
     );
 
     // The latched key is already described by the readout beneath the tray.
@@ -779,7 +773,7 @@ describe('Night Shift header status', () => {
     );
 
     expect(
-      await screen.findByText(`Your gezellen work through the queue from ${clock(start)}.`),
+      await screen.findByText(`Your crew works through the queue from ${clock(start)}.`),
     ).toBeInTheDocument();
     const ticks = document.querySelector('.app-nightshift-track-ticks');
     expect(ticks).toHaveTextContent(`${clock(start)}${clock(end)}`);
@@ -1099,22 +1093,20 @@ describe('quota meter', () => {
     await waitFor(() => expect(screen.queryByText('Remaining')).not.toBeInTheDocument());
   });
 
-  it('sits before the combined task-speed control', async () => {
+  it('sits before the header tray holding the combined task-speed control', async () => {
     render(<App />);
     await screen.findByRole('button', { name: /1239\/1500/ });
 
     const cluster = screen.getByTestId('app-header').querySelector('.app-header-right');
     const children = [...(cluster?.children ?? [])];
     const quotaIndex = children.findIndex((child) => child.classList.contains('quota-meter-root'));
-    const engagementIndex = children.findIndex((child) =>
-      child.classList.contains('app-engagement-trigger'),
-    );
+    const trayIndex = children.findIndex((child) => child.classList.contains('app-header-tray'));
 
     expect(quotaIndex).toBeGreaterThanOrEqual(0);
-    expect(engagementIndex).toBeGreaterThan(quotaIndex);
-    expect(
-      children.filter((child) => child.classList.contains('app-engagement-trigger')),
-    ).toHaveLength(1);
+    expect(trayIndex).toBeGreaterThan(quotaIndex);
+    expect(trayIndex).toBe(children.length - 1);
+    expect(cluster?.querySelectorAll('.app-engagement-trigger')).toHaveLength(1);
+    expect(children[trayIndex]?.querySelector('.app-engagement-trigger')).not.toBeNull();
   });
 
   it('stays hidden while its provider is idle', async () => {

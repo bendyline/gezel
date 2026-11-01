@@ -34,6 +34,8 @@ import {
   CraftbookTestSpecSchema,
   GezelTemplateIdentitySchema,
   GezelTemplateVersionManifestSchema,
+  ImageLoraIdentitySchema,
+  ImageLoraVersionManifestSchema,
   ImageModelIdentitySchema,
   ImageModelVersionManifestSchema,
   KnowledgeCatalogIdentitySchema,
@@ -63,6 +65,8 @@ export const GILDE_SCHEMA_EXPORTS: Array<[filename: string, schema: z.ZodType]> 
   ['chat-model-version.schema.json', ChatModelVersionManifestSchema],
   ['image-model-identity.schema.json', ImageModelIdentitySchema],
   ['image-model-version.schema.json', ImageModelVersionManifestSchema],
+  ['image-lora-identity.schema.json', ImageLoraIdentitySchema],
+  ['image-lora-version.schema.json', ImageLoraVersionManifestSchema],
   ['video-model-identity.schema.json', VideoModelIdentitySchema],
   ['video-model-version.schema.json', VideoModelVersionManifestSchema],
   ['knowledge-catalog-identity.schema.json', KnowledgeCatalogIdentitySchema],
@@ -119,15 +123,28 @@ rules that matter are re-implemented in \`tools/validate.mjs\`.
 `;
 
 /**
+ * Zod names these string checks as a `format` beside the `pattern` that
+ * actually enforces them. No JSON Schema draft defines them, so gilde's ajv
+ * printed `unknown format "includes" ignored` for every `pathTemplate` on
+ * each `npm run check`. The pattern carries the whole constraint.
+ */
+const ZOD_PATTERN_FORMATS = new Set(['includes', 'starts_with', 'ends_with']);
+
+/**
  * `unrepresentable` stays at its default ('throw') so a future transform
  * in a published schema fails loudly here instead of silently weakening
  * gilde validation.
  */
 export function renderSchema(filename: string, schema: z.ZodType): string {
-  const json = z.toJSONSchema(schema, { target: 'draft-2020-12', io: 'input' }) as Record<
-    string,
-    unknown
-  >;
+  const json = z.toJSONSchema(schema, {
+    target: 'draft-2020-12',
+    io: 'input',
+    override: ({ jsonSchema }) => {
+      if (typeof jsonSchema.format === 'string' && ZOD_PATTERN_FORMATS.has(jsonSchema.format)) {
+        delete jsonSchema.format;
+      }
+    },
+  }) as Record<string, unknown>;
   const withId = {
     $schema: 'https://json-schema.org/draft/2020-12/schema',
     $id: `https://gezelgilde.com/schemas/${filename}`,

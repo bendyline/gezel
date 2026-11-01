@@ -2,9 +2,10 @@ import type { LoadedCraftbookTestSpec } from './test-spec-loader.ts';
 
 /**
  * Sidecar versions this correction was checked against. 1.0.5 (gilde 0.3.1)
- * changed only step prompts and shipped the 1.0.4 sidecar byte-for-byte.
+ * changed only step prompts and shipped the 1.0.4 sidecar byte-for-byte, and
+ * 1.0.6 (gilde 0.3.2) added the book's contract and shipped it again.
  */
-const CORRECTED_CODEMOD_SWEEP_VERSIONS = new Set(['1.0.4', '1.0.5']);
+const CORRECTED_CODEMOD_SWEEP_VERSIONS = new Set(['1.0.4', '1.0.5', '1.0.6']);
 
 /**
  * Compatibility correction for the pinned codemod-sweep sidecar.

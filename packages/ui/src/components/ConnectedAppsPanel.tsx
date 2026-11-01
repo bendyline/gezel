@@ -453,7 +453,7 @@ export function ConnectedAppsPanel() {
           <div className="settings-subsection">
             <h3>OpenAI-compatible endpoints</h3>
             <p className="muted small">
-              Other apps (editors, browser tools) can use your gezellen and models through standard
+              Other apps (editors, browser tools) can use your crew and models through standard
               OpenAI-style endpoints. Each app still needs your approval before it gets access.
             </p>
             <label className="debug-toggle">
@@ -512,8 +512,8 @@ export function ConnectedAppsPanel() {
               </Select.Root>
             </div>
             <p className="muted small">
-              Apps receive your gezellen as model choices, including their names and roles. If an
-              app asks for something else, {fallbackGezel?.name ?? 'your default gezel'} answers
+              Apps receive your crew members as model choices, including their names and roles. If
+              an app asks for something else, {fallbackGezel?.name ?? 'your default gezel'} answers
               with their character and model settings.
             </p>
             {fallbackGezel && fallbackLacksAppTools && (

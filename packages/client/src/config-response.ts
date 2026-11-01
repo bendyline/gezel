@@ -597,6 +597,8 @@ export interface ConfigResponse {
     'google-ai'?: string;
     openai?: string;
   };
+  /** Fast mode per local image model id; a model it omits has fast mode on. */
+  imageFastMode?: Record<string, boolean>;
   /**
    * Cost-confirmation behaviour for cloud image generation. `'ask'`
    * (or undefined) prompts the user before each cloud call.

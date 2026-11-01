@@ -340,7 +340,7 @@ export function HistoryView({
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
-              <Select.Item value="__ALL__">All gezellen</Select.Item>
+              <Select.Item value="__ALL__">All crew members</Select.Item>
               {gezels.map((g) => (
                 <Select.Item key={g.id} value={g.id}>
                   {g.name}

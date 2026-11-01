@@ -9,7 +9,7 @@ import { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
-import { canApplyWindowsMxcSandbox } from '../sandbox/windows-mxc.js';
+import { denyNetBoundaryAvailable } from '../sandbox/runner.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ScriptRunner, extractScriptFailureFromStderr } from './runner.js';
 
@@ -91,7 +91,7 @@ describe('extractScriptFailureFromStderr', () => {
 it.runIf(process.platform !== 'darwin')(
   'fails closed with an actionable error when denyNet has no OS boundary',
   async () => {
-    if (await canApplyWindowsMxcSandbox(process.execPath)) return;
+    if (await denyNetBoundaryAvailable()) return;
     await writeScript(
       'no-boundary',
       `
@@ -116,7 +116,8 @@ it.runIf(process.platform !== 'darwin')(
 
 // Provenance-trusted lane: a project script whose bytes exactly match the
 // catalog-shipped project-type script runs even where denyNet has no OS
-// boundary (Windows; Linux under the RPC channel). Any tampering — one
+// boundary (Linux without a systemd user manager, Windows without its
+// container). Any tampering — one
 // appended byte — drops it back to the fail-closed path. Uses the real
 // bundled fitness-coach type so a break in the shipped bytes fails here.
 describe('ScriptRunner — provenance-trusted sandbox lane', () => {
@@ -149,7 +150,7 @@ describe('ScriptRunner — provenance-trusted sandbox lane', () => {
   it.runIf(process.platform !== 'darwin')(
     'a tampered copy of the shipped script fails closed again',
     async () => {
-      if (await canApplyWindowsMxcSandbox(process.execPath)) return;
+      if (await denyNetBoundaryAvailable()) return;
       const catalog = new CatalogService();
       const trustedRunner = new ScriptRunner({ store, chat: manager, catalog });
       await installShippedScript(catalog, true);
@@ -168,7 +169,7 @@ describe('ScriptRunner — provenance-trusted sandbox lane', () => {
   it.runIf(process.platform !== 'darwin')(
     'without a catalog the same bytes stay fail-closed',
     async () => {
-      if (await canApplyWindowsMxcSandbox(process.execPath)) return;
+      if (await denyNetBoundaryAvailable()) return;
       const catalog = new CatalogService();
       await installShippedScript(catalog);
       const run = await runner.run({

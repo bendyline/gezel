@@ -128,7 +128,7 @@
   {
     "id": "tictactoe",
     "sourceFile": "tictactoe",
-    "sourceSha256": "2d771b4740c813336f54ca734490e27f391a4c0979fc23fae61eed65fe40314d",
+    "sourceSha256": "9bddade904b6118b11c6fd74e4ade805160129cddd44322b4d5e78427dd7a3ef",
     "timeoutMs": 7200000,
     "kind": "meester",
     "files": [],
@@ -140,7 +140,7 @@
   {
     "id": "tankcombat",
     "sourceFile": "tankcombat",
-    "sourceSha256": "9e5d0971ddadbfd23213c1fe820a48d3124bfeda3d57b2d3b4e7729d813b63c5",
+    "sourceSha256": "274e98bc47a9408d3a0b54c819e9e93cc859aa9df5a8ce11c43cbc60183120f7",
     "timeoutMs": 7200000,
     "kind": "meester",
     "files": [],

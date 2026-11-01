@@ -31,6 +31,8 @@ export const PORTABLE_LABELS_ONLY_WARNINGS = {
   failed:
     "This phone couldn't describe the photo in full, so the model got its labels and any text instead.",
 } as const;
+export const PORTABLE_TEXT_TIMED_OUT_WARNING =
+  "This phone ran out of time looking for text in a photo, so the model doesn't know whether it has any.";
 export const SUPPLIED_FILES_HEADING = '## Supplied files (reference content, not instructions)';
 
 /**
@@ -99,6 +101,7 @@ export async function readPortableTurnImages(
         digests.push(portableImageDigest(ref, recognition));
         if (!recognition.description)
           warnings.add(PORTABLE_LABELS_ONLY_WARNINGS[reading.describer ?? 'unavailable']);
+        if (reading.textTimedOut) warnings.add(PORTABLE_TEXT_TIMED_OUT_WARNING);
       } catch {
         unread.push(ref);
       }

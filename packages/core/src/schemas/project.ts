@@ -388,6 +388,8 @@ export const ProjectSchema = z.object({
    * which mirror to the config for exactly this failure.
    */
   outputPaneVisible: z.boolean().optional(),
+  /** Restore this project's Output page expanded within the main workspace. */
+  outputPaneMaximized: z.boolean().optional(),
   /**
    * The view the Views tab last showed (`village`, `diagram`, …). Kept here
    * for the same reason as `outputPaneVisible`. Stored as a plain string so

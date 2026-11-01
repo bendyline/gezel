@@ -1693,4 +1693,41 @@ describe('consolidated MCP tools', () => {
     expect(viaContent.isError).not.toBe(true);
     expect(received).toMatchObject({ text: 'Symptom summary.' });
   });
+
+  // 1.26300.100: launching a book that declares DocBlocks downloaded the
+  // catalog's older copy into the project beside the one Gezel ships, and
+  // every later session there carried its tools.
+  it('does not install a craftbook toolset the whole machine already has', async () => {
+    const requests: string[] = [];
+    handler = (url, method) => {
+      requests.push(`${method} ${url.pathname}${url.search}`);
+      if (url.pathname === '/api/projects/project-a/craftbooks') {
+        return {
+          items: [
+            {
+              manifest: {
+                kind: 'craftbook-template',
+                id: 'powerpoint-deck',
+                toolsets: [{ toolsetId: 'docblocks', sourceId: 'bundled' }],
+              },
+            },
+          ],
+          missingToolsets: {},
+        };
+      }
+      if (url.pathname === '/api/catalog/installed-toolsets') {
+        return url.searchParams.get('scope') === 'system'
+          ? { toolsets: [{ toolsetId: 'docblocks', sourceId: 'bundled', version: '2.7.5' }] }
+          : { toolsets: [] };
+      }
+      throw new Error(`stop after the toolset check: ${method} ${url.pathname}`);
+    };
+    await client.callTool({
+      name: 'invoke_craftbook',
+      arguments: { craftbookId: 'powerpoint-deck', description: 'A short deck about France.' },
+    });
+    expect(requests.some((r) => r.startsWith('GET /api/catalog/installed-toolsets'))).toBe(true);
+    expect(requests.filter((r) => r.startsWith('POST /api/catalog/toolset/'))).toEqual([]);
+    expect(requests.filter((r) => r.startsWith('GET /api/catalog/toolset/'))).toEqual([]);
+  });
 });

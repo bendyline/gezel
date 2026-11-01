@@ -97,16 +97,15 @@ test.describe('projects IDE', () => {
       await page.evaluate((nextSide) => {
         document.documentElement.dataset.sidebarSide = nextSide;
       }, side);
-      const connectedEdge = await activeProjectRow.evaluate((row, currentSide) => {
+      const rowInsets = await activeProjectRow.evaluate((row) => {
         const sidebar = document.querySelector<HTMLElement>('[data-testid="app-sidebar"]');
         if (!sidebar) throw new Error('Sidebar not found');
         const rowRect = row.getBoundingClientRect();
         const sidebarRect = sidebar.getBoundingClientRect();
-        return currentSide === 'right'
-          ? rowRect.left - sidebarRect.left
-          : rowRect.right - sidebarRect.right;
-      }, side);
-      expect(Math.abs(connectedEdge)).toBeLessThan(1.1);
+        return { left: rowRect.left - sidebarRect.left, right: sidebarRect.right - rowRect.right };
+      });
+      expect(rowInsets.left).toBeGreaterThan(0);
+      expect(rowInsets.right).toBeGreaterThan(0);
     }
     await page.evaluate(() => {
       document.documentElement.dataset.sidebarSide = 'right';
@@ -135,12 +134,12 @@ test.describe('projects IDE', () => {
     const activeProjectFocus = await activeProjectRow.evaluate((row) => {
       const rowStyle = getComputedStyle(row);
       const button = row.querySelector<HTMLElement>(':scope > .app-sidebar-item.active');
-      const openEdgeColor =
+      const contentEdgeColor =
         document.documentElement.dataset.sidebarSide === 'right'
           ? rowStyle.borderLeftColor
           : rowStyle.borderRightColor;
       return {
-        openEdgeColor,
+        contentEdgeColor,
         borderTopColor: rowStyle.borderTopColor,
         rowShadow: rowStyle.boxShadow,
         rowFilter: rowStyle.filter,
@@ -148,18 +147,18 @@ test.describe('projects IDE', () => {
         buttonFilter: button ? getComputedStyle(button).filter : null,
       };
     });
-    expect(activeProjectFocus.rowShadow).toBe('none');
+    expect(activeProjectFocus.rowShadow).not.toBe('none');
     expect(activeProjectFocus.rowFilter).toBe('none');
     expect(activeProjectFocus.buttonShadow).toBe('none');
     expect(activeProjectFocus.buttonFilter).toBe('none');
-    expect(activeProjectFocus.openEdgeColor).toBe('rgba(0, 0, 0, 0)');
+    expect(activeProjectFocus.contentEdgeColor).toBe(activeProjectFocus.borderTopColor);
     expect(activeProjectFocus.borderTopColor).not.toBe(unfocusedProject.borderTopColor);
 
     await setTheme(page, 'dark');
     await shot(page, 'ide-chat', {
       area: 'projects',
       theme: 'dark',
-      description: 'Project IDE — Chat tab, dark theme with connected project row',
+      description: 'Project IDE — Chat tab, dark theme with focused project row',
     });
     await setTheme(page, 'light');
 

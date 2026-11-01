@@ -538,7 +538,17 @@ export function ChatTimelineView({
    * and on scope change.
    */
   const queuedRef = useRef<
-    Map<string, Array<{ id: string; preview: string; enqueuedAt: string; nudge?: boolean }>>
+    Map<
+      string,
+      Array<{
+        id: string;
+        preview: string;
+        enqueuedAt: string;
+        nudge?: boolean;
+        hidden?: boolean;
+        origin?: 'system';
+      }>
+    >
   >(new Map());
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const responseRunwayRef = useRef<HTMLDivElement | null>(null);
@@ -767,6 +777,8 @@ export function ChatTimelineView({
                   preview: e.preview,
                   enqueuedAt: e.enqueuedAt,
                   ...(e.nudge ? { nudge: true } : {}),
+                  ...(e.hidden ? { hidden: true } : {}),
+                  ...(e.origin ? { origin: e.origin } : {}),
                 })),
               );
             }
@@ -1312,6 +1324,10 @@ export function ChatTimelineView({
     }
   }, [loadTimeline, liveStore.markStructureChanged]);
 
+  useEffect(() => {
+    if (debugMode) void refreshLatest();
+  }, [debugMode, refreshLatest]);
+
   // SSE remains the low-latency path, but a dropped `done` envelope must
   // not leave a permanent thinking/stalled bubble. Reconcile the local
   // slots against the service's authoritative in-flight set.
@@ -1485,7 +1501,7 @@ export function ChatTimelineView({
         // reading their reply before the next one takes over.
         // A `hidden` seed (a project-type page reaction with `hideSeed`,
         // e.g. checkers' "[Checkers page]: …") is machine facilitation: it
-        // must not interrupt the user's narration, nor render a bubble. We
+        // must not interrupt the user's narration, nor render outside debug mode. We
         // still fall through to the eager-slot logic below so the gezel's
         // reply (its move + table talk) streams immediately. A system
         // dispatch seed is the runtime starting work, not the user either.
@@ -1551,16 +1567,12 @@ export function ChatTimelineView({
           // renders as a "Yusuf → Leo" handoff instead of "You".
           ...(event.message.from ? { from: event.message.from } : {}),
           ...(event.message.nudge ? { nudge: true } : {}),
-          // Keep a live dispatch seed labelled System — without this the
-          // bubble reads as "You" until the next canonical refresh.
+          ...(event.message.hidden ? { hidden: true } : {}),
+          // Preserve provenance so the live seed stays out of ordinary chat.
           ...(event.message.origin === 'system' ? { origin: 'system' as const } : {}),
         };
         const dedupKey = `${sessionId}:${event.message.at}:${event.message.role}`;
         setMessages((prev) => {
-          // Hidden facilitation seeds never get a bubble — leave the
-          // transcript untouched (there's no optimistic row to reconcile,
-          // the user didn't type it).
-          if (event.message.hidden) return prev;
           const withoutOptimistic = prev.filter((m) => {
             if (!(m as OptimisticTimelineMessage).optimistic) return true;
             return !(
@@ -1838,6 +1850,8 @@ export function ChatTimelineView({
           preview: event.preview,
           enqueuedAt: event.enqueuedAt,
           ...(event.nudge ? { nudge: true } : {}),
+          ...(event.hidden ? { hidden: true } : {}),
+          ...(event.origin ? { origin: event.origin } : {}),
         };
         const existing = list.findIndex((e) => e.id === event.queueId);
         if (existing >= 0) {
@@ -2274,7 +2288,9 @@ export function ChatTimelineView({
     for (const [sid, slot] of liveRef.current.entries()) {
       liveRows.push({ kind: 'streaming', sessionId: sid, slot });
     }
-    const messageRows = messages.map((m) => ({ kind: 'message' as const, msg: m, at: m.at }));
+    const messageRows = messages
+      .filter((m) => debugMode || (!m.hidden && !(m.role === 'user' && m.origin === 'system')))
+      .map((m) => ({ kind: 'message' as const, msg: m, at: m.at }));
     const streamingAsRows = liveRows.map((r) => ({
       kind: 'streaming' as const,
       sessionId: r.sessionId,
@@ -2338,6 +2354,7 @@ export function ChatTimelineView({
     liveStructureVersion,
     terminalLiveStructureVersion,
     terminalOrderTick,
+    debugMode,
   ]);
 
   // Slack-style threading: fold the flat rows into turn-rooted thread
@@ -3104,7 +3121,7 @@ export function ChatTimelineView({
     const userMsg = messages.find(
       (m) => `msg:${m.sessionId}:${m.at}:${m.role}` === stickyHeader.userMessageId,
     );
-    if (!userMsg) return null;
+    if (!userMsg || (!debugMode && (userMsg.hidden || userMsg.origin === 'system'))) return null;
     let assistantInfo:
       | { kind: 'live'; sessionId: string }
       | { kind: 'message'; msg: TimelineMessage }
@@ -3120,7 +3137,7 @@ export function ChatTimelineView({
     }
     if (!assistantInfo) return null;
     return { userMsg, assistantInfo };
-  }, [stickyHeader, messages, liveStructureVersion]);
+  }, [stickyHeader, messages, liveStructureVersion, debugMode]);
 
   // Built once and rendered from both the empty branch and the main
   // one: a project whose only activity is a queued task has no rows at
@@ -3688,6 +3705,7 @@ export function ChatTimelineView({
     const queued = queuedRef.current.get(sessionId);
     if (queued && queued.length > 0) {
       for (const entry of queued) {
+        if (!debugMode && (entry.hidden || entry.origin === 'system')) continue;
         nodes.push(
           <GhostQueuedBubble
             key={`ghost:${entry.id}`}
@@ -4084,6 +4102,7 @@ export function ChatTimelineView({
         className="chat-timeline"
         ref={scrollRef}
         onScroll={onScroll}
+        aria-busy={loading}
         data-testid="chat-timeline"
       >
         {hasMore && (

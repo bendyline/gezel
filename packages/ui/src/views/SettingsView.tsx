@@ -798,7 +798,7 @@ function DaemonSettingsView() {
   const resetTemplatesNow = useCallback(async () => {
     if (
       !window.confirm(
-        'Reset all template-based gezellen back to their default instructions? Any edits you have made to their About section will be lost.',
+        'Reset all template-based crew members back to their default instructions? Any edits you have made to their About section will be lost.',
       )
     ) {
       return;
@@ -807,7 +807,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.resetGezelTemplates();
       const n = res.reset.length;
-      setStatus(`reset ${n} ${n === 1 ? 'gezel' : 'gezellen'} to template defaults`);
+      setStatus(`reset ${n} ${n === 1 ? 'gezel' : 'crew members'} to template defaults`);
     } catch (err) {
       setStatus(`reset failed: ${(err as Error).message}`);
     }
@@ -952,8 +952,8 @@ function DaemonSettingsView() {
       window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setStatus(
         show
-          ? 'gezellen show their names and poppetjes'
-          : 'gezellen show role-based names and plain letter avatars',
+          ? 'crew members show their names and poppetjes'
+          : 'crew members show role-based names and plain letter avatars',
       );
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
@@ -1827,7 +1827,7 @@ function DaemonSettingsView() {
               <section className="settings-sidebar-side" style={{ marginBottom: '2rem' }}>
                 <h3>Sidebar position</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Which side the navigation rail (projects, gezellen, documents…) sits on.
+                  Which side the navigation rail (projects, crew, documents…) sits on.
                 </p>
                 <SidebarSidePicker />
               </section>
@@ -2062,7 +2062,7 @@ function DaemonSettingsView() {
               <section style={{ marginTop: '2rem' }}>
                 <h3>Night shift cloud quota reserve</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  For Claude, Codex, and Copilot subscriptions, run the night shift only until:
+                  For Claude, Codex, and Copilot subscriptions, run the night shift unless:
                 </p>
                 <label
                   style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}
@@ -2109,7 +2109,7 @@ function DaemonSettingsView() {
                     }
                     aria-label="Reserve a share of my quota per day until reset"
                   />
-                  <span>It would dip into a reserve of</span>
+                  <span>I have at least</span>
                   <input
                     type="number"
                     min={0}
@@ -2124,12 +2124,12 @@ function DaemonSettingsView() {
                     disabled={config?.nightShift?.quotaReserve?.perDay?.enabled !== true}
                     aria-label="Daily quota reserve percent"
                   />
-                  <span>% of my quota per day until it resets</span>
+                  <span>% quota per day before it resets:</span>
                 </label>
                 <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
                   The daily reserve scales with the time left: 10% a day with 4 days until reset
                   keeps the last 40% for you. Work already running finishes; held work resumes when
-                  your quota frees up. Gezellen on local models are never held.
+                  your quota frees up. Crew members on local models are never held.
                 </p>
               </section>
               <section style={{ marginTop: '2rem' }}>
@@ -2137,7 +2137,7 @@ function DaemonSettingsView() {
                 <p className="muted" style={{ marginTop: 0 }}>
                   Restore every gezel created from a template back to the <code>about.md</code>{' '}
                   their template ships, discarding any edits you’ve made to their instructions.
-                  Bespoke gezellen (written from scratch) are left untouched.
+                  Bespoke crew members (written from scratch) are left untouched.
                 </p>
                 <button type="button" className="subtle" onClick={() => void resetTemplatesNow()}>
                   Reset to defaults
@@ -2318,7 +2318,7 @@ function DaemonSettingsView() {
                       </div>
                       <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
                         A brand-new gezel will be spun up with the curated Meester prompt and set as
-                        your active guide. You can rename or tune them later in the Gezellen tab.
+                        your active guide. You can rename or tune them later in the Crew tab.
                       </p>
                     </form>
                   )}
@@ -2329,7 +2329,7 @@ function DaemonSettingsView() {
                 <p className="muted" style={{ marginTop: 0 }}>
                   The Scribe handles your workshop&apos;s utility text work (about.md drafts,
                   rewrites, end-of-thread summaries, memory consolidation) so you can route grunt
-                  tasks to a different model than your conversational gezellen.
+                  tasks to a different model than your conversational crew members.
                 </p>
                 <div className="meester-picker">
                   {config?.klerkGezelId &&
@@ -2419,7 +2419,7 @@ function DaemonSettingsView() {
                       </div>
                       <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
                         A fresh gezel will be spun up with the curated Scribe prompt and set as your
-                        active Scribe. Tune their model in the Gezellen tab to point utility work at
+                        active Scribe. Tune their model in the Crew tab to point utility work at
                         Sonnet, a local model, or whatever fits.
                       </p>
                     </form>
@@ -2777,8 +2777,8 @@ function DaemonSettingsView() {
               <section style={{ marginBottom: '2rem' }}>
                 <h3>Default provider</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Which AI chat provider handles chat and one-shot generations. Individual gezellen
-                  can override this in their detail pane.
+                  Which AI chat provider handles chat and one-shot generations. Individual crew
+                  members can override this in their detail pane.
                 </p>
                 <div className="provider-switch" data-testid="default-provider-switch">
                   <button
@@ -3301,8 +3301,8 @@ function DaemonSettingsView() {
               <section style={{ marginBottom: '2rem' }}>
                 <h3>Media models</h3>
                 <p className="muted" style={{ marginTop: 0 }}>
-                  Optional models that let gezellen make images, read them, and speak and listen —
-                  the ones that fit this device.
+                  Optional models that let crew members make images, read them, and speak and listen
+                  — the ones that fit this device.
                 </p>
                 <RecommendedMediaDownloads />
               </section>
@@ -3559,14 +3559,14 @@ function DaemonSettingsView() {
                 <p className="muted small" style={{ marginTop: 0 }}>
                   Copilot turns are capped at a hard wall-clock ceiling — if the ceiling fires
                   before the model signals <code>session.idle</code>, the turn ends with a
-                  &ldquo;Turn stopped before finishing&rdquo; banner. Bump this if tool-heavy
-                  gezellen (long shell or Playwright chains) legitimately need longer. Leave blank
-                  to use the default (10 minutes).
+                  &ldquo;Turn stopped before finishing&rdquo; banner. Bump this if tool-heavy crew
+                  members (long shell or Playwright chains) legitimately need longer. Leave blank to
+                  use the default (10 minutes).
                 </p>
                 <TimeoutRow
                   label="Hard turn timeout"
                   unit="minutes"
-                  help="Total wall-clock cap from when the turn acquires its queue slot to when the model finishes. Default 10m. Raise for tool-heavy gezellen that run long chains without streaming reply text between calls."
+                  help="Total wall-clock cap from when the turn acquires its queue slot to when the model finishes. Default 10m. Raise for tool-heavy crew members that run long chains without streaming reply text between calls."
                   value={copilotTurnTimeoutDraft}
                   onChange={setCopilotTurnTimeoutDraft}
                   configValue={config?.copilotTurnTimeoutMin}
@@ -3771,7 +3771,7 @@ function DaemonSettingsView() {
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
                 Gezel’s narrow destructive-command guard stays on in every mode. Projects and
-                individual gezellen can override this default.
+                individual crew members can override this default.
               </p>
 
               {codexCliProbe.kind === 'ok' && (
@@ -4040,7 +4040,7 @@ function DaemonSettingsView() {
                 </div>
               </div>
               <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
-                Projects and individual gezellen can override this default.
+                Projects and individual crew members can override this default.
               </p>
 
               {anthropicCliProbe.kind === 'ok' && (
@@ -4145,9 +4145,9 @@ function DaemonSettingsView() {
                 </div>
                 <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
                   Each ready process stays with one chat thread, so later turns skip the start-up
-                  wait. More processes mean faster replies when several gezellen work at once, and
-                  more memory (about 100–200 MB each). When the pool is full, the idle process that
-                  was used longest ago is closed.
+                  wait. More processes mean faster replies when several crew members work at once,
+                  and more memory (about 100–200 MB each). When the pool is full, the idle process
+                  that was used longest ago is closed.
                 </p>
 
                 <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
@@ -4279,8 +4279,9 @@ function DaemonSettingsView() {
             <section className="provider-card">
               <h3>Web search</h3>
               <p className="muted" style={{ marginTop: 0 }}>
-                Powers the web search tools that gezellen use to discover content on the internet.
-                Picks one search backend; configure a key only for the providers you choose.
+                Powers the web search tools that crew members use to discover content on the
+                internet. Picks one search backend; configure a key only for the providers you
+                choose.
               </p>
               <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
                 <label className="muted" style={{ fontSize: '0.9rem' }}>

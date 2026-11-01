@@ -17,6 +17,7 @@ import {
   type CraftbookTestSpec,
   GEZEL_CONTENT_COMPAT,
   GezelTemplateVersionManifestSchema,
+  ImageLoraVersionManifestSchema,
   ImageModelVersionManifestSchema,
   KnowledgeCatalogVersionManifestSchema,
   ProjectTypeVersionManifestSchema,
@@ -256,6 +257,7 @@ const KINDS: CatalogKind[] = [
   'connector-type',
   'chat-model',
   'image-model',
+  'image-lora',
   'video-model',
   'knowledge-catalog',
 ];
@@ -273,6 +275,7 @@ const KIND_DIR: Record<CatalogKind, string> = {
   'connector-type': 'connector-types',
   'chat-model': 'chat-models',
   'image-model': 'image-models',
+  'image-lora': 'image-loras',
   'video-model': 'video-models',
   'knowledge-catalog': 'knowledge-catalogs',
 };
@@ -1109,6 +1112,7 @@ type AnyVersionPayload =
   | (ReturnType<typeof ConnectorTypeVersionManifestSchema.parse> & { __kind: 'connector-type' })
   | (ReturnType<typeof ChatModelVersionManifestSchema.parse> & { __kind: 'chat-model' })
   | (ReturnType<typeof ImageModelVersionManifestSchema.parse> & { __kind: 'image-model' })
+  | (ReturnType<typeof ImageLoraVersionManifestSchema.parse> & { __kind: 'image-lora' })
   | (ReturnType<typeof VideoModelVersionManifestSchema.parse> & { __kind: 'video-model' })
   | (ReturnType<typeof KnowledgeCatalogVersionManifestSchema.parse> & {
       __kind: 'knowledge-catalog';
@@ -1151,6 +1155,10 @@ function parseVersionPayload(
     if (kind === 'knowledge-catalog') {
       const p = readContent(KnowledgeCatalogVersionManifestSchema, raw, where);
       return { ...p, __kind: 'knowledge-catalog' } as AnyVersionPayload;
+    }
+    if (kind === 'image-lora') {
+      const p = readContent(ImageLoraVersionManifestSchema, raw, where);
+      return { ...p, __kind: 'image-lora' } as AnyVersionPayload;
     }
     const p = readContent(ImageModelVersionManifestSchema, raw, where);
     return { ...p, __kind: 'image-model' } as AnyVersionPayload;
@@ -1411,6 +1419,41 @@ function mergeIdentityAndVersion(
       ...(version.llamaCpp ? { llamaCpp: version.llamaCpp } : {}),
       ...(version.mlx ? { mlx: version.mlx } : {}),
       ...(version.ds4 ? { ds4: version.ds4 } : {}),
+      ...(version.notes !== undefined ? { notes: version.notes } : {}),
+      availableVersions,
+    };
+  }
+  if (kind === 'image-lora' && identity.kind === 'image-lora' && version.__kind === 'image-lora') {
+    return {
+      schemaVersion: 1,
+      kind: 'image-lora',
+      id: identity.id,
+      name: identity.name,
+      description: identity.description,
+      tags: identity.tags,
+      maintainer: identity.maintainer,
+      ...(identity.logo !== undefined ? { logo: identity.logo } : {}),
+      ...(identity.license !== undefined ? { license: identity.license } : {}),
+      ...(identity.licenseClass !== undefined ? { licenseClass: identity.licenseClass } : {}),
+      ...(identity.licenseShortName !== undefined
+        ? { licenseShortName: identity.licenseShortName }
+        : {}),
+      ...(identity.licenseUrl !== undefined ? { licenseUrl: identity.licenseUrl } : {}),
+      ...(identity.recoScore !== undefined ? { recoScore: identity.recoScore } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
+      baseModels: identity.baseModels,
+      purpose: identity.purpose,
+      strength: identity.strength,
+      ...(identity.prompt ? { prompt: identity.prompt } : {}),
+      ...(identity.render ? { render: identity.render } : {}),
+      ...(identity.upstream !== undefined ? { upstream: identity.upstream } : {}),
+      commercialUse: identity.commercialUse,
+      version: version.version,
+      releasedAt: version.releasedAt,
+      downloadUrl: version.downloadUrl,
+      sha256: version.sha256,
+      approxSizeBytes: version.approxSizeBytes,
+      ...(version.tensors ? { tensors: version.tensors } : {}),
       ...(version.notes !== undefined ? { notes: version.notes } : {}),
       availableVersions,
     };

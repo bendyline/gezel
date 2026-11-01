@@ -32,7 +32,16 @@
  * grew one terminal-error reader at a time.
  */
 
-import { closeSync, existsSync, fstatSync, openSync, readSync } from 'node:fs';
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  readdirSync,
+} from 'node:fs';
+import { join } from 'node:path';
 import type { SessionTelemetry } from '@bendyline/gezel';
 import { GRADER_UNAVAILABLE_PATTERN } from './grader-unavailable.ts';
 import { parseDaemonActivityText } from './progress-fingerprint.ts';
@@ -84,6 +93,12 @@ export interface ClassifyTrialInput {
   nativeIncidentLog?: string | null;
   /** Final structured service snapshot captured before daemon shutdown. */
   sessionTelemetry?: readonly SessionTelemetry[] | null;
+  /**
+   * Refs of tasks run from a recipe saved during the trial
+   * (`readTrialAuthoredTaskRefs`). A gate in one that cannot be evaluated is
+   * a defect in what the model wrote, not in the runtime.
+   */
+  trialAuthoredTaskRefs?: ReadonlySet<string> | null;
 }
 
 /** Failure modes where the trial died waiting/looping rather than on an
@@ -115,6 +130,67 @@ function findInReasonOrLog(input: ClassifyTrialInput, pattern: RegExp): string |
     return excerpt(log, logMatch.index);
   }
   return null;
+}
+
+/** Every unevaluable gate the log names sits in a task run from a recipe saved during the trial. */
+function unevaluableGatesAllTrialAuthored(input: ClassifyTrialInput): boolean {
+  const authored = input.trialAuthoredTaskRefs;
+  if (!authored || authored.size === 0) return false;
+  const refs = new Set(
+    [...`${input.reason ?? ''}\n${input.daemonLog ?? ''}`.matchAll(GATE_UNEVALUABLE_REF)].map(
+      (match) => match[1]!,
+    ),
+  );
+  return refs.size > 0 && [...refs].every((ref) => authored.has(ref));
+}
+
+/**
+ * Refs of the tasks a trial ran from a recipe saved inside the trial home:
+ * `craftbook.created` events name the recipes, and each `task.created` event
+ * names the recipes its task came from. Reads the run directory's
+ * `history.jsonl` and `project-history/*.jsonl`; missing files read as none.
+ */
+export function readTrialAuthoredTaskRefs(runDir: string): Set<string> {
+  const files = [join(runDir, 'history.jsonl')];
+  try {
+    for (const name of readdirSync(join(runDir, 'project-history'))) {
+      if (name.endsWith('.jsonl')) files.push(join(runDir, 'project-history', name));
+    }
+  } catch {
+    // No per-project history captured.
+  }
+  const created = new Set<string>();
+  const taskSources: Array<{ ref: string; ids: string[] }> = [];
+  for (const file of files) {
+    let text: string;
+    try {
+      text = readFileSync(file, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const line of text.split('\n')) {
+      if (!line.includes('"craftbook.created"') && !line.includes('"task.created"')) continue;
+      let event: { kind?: unknown; details?: Record<string, unknown> };
+      try {
+        event = JSON.parse(line) as typeof event;
+      } catch {
+        continue;
+      }
+      const details = event.details ?? {};
+      if (event.kind === 'craftbook.created' && typeof details.id === 'string') {
+        created.add(details.id);
+      } else if (event.kind === 'task.created' && typeof details.ref === 'string') {
+        const sources = Array.isArray(details.sourceCraftbookIds) ? details.sourceCraftbookIds : [];
+        const ids = sources
+          .map((source) => (source as { catalogId?: unknown }).catalogId)
+          .filter((id): id is string => typeof id === 'string');
+        taskSources.push({ ref: details.ref, ids });
+      }
+    }
+  }
+  return new Set(
+    taskSources.filter((task) => task.ids.some((id) => created.has(id))).map((task) => task.ref),
+  );
 }
 
 function countInLog(input: ClassifyTrialInput, pattern: RegExp): number {
@@ -190,6 +266,9 @@ const PRE_PROVIDER_STALL_REASON = /pre-provider stall/i;
 const SANDBOX_UNAVAILABLE = /denyNet requires an enforceable OS network boundary/;
 /** A gate the runtime could not evaluate at all (unfilled placeholders, missing inputs). */
 const GATE_UNEVALUABLE = /could not be evaluated — pausing without consuming an attempt/;
+/** The same line with the task it names, as `[gate] <ref> step "<id>" could not…`. */
+const GATE_UNEVALUABLE_REF =
+  /\[gate\] (\S+) step "[^"\n]*" could not be evaluated — pausing without consuming an attempt/g;
 /**
  * A step's onEnter script rejected its inputs before any model turn ran.
  * Early hooks prepare runtime-owned data (a connector corpus, batches), so
@@ -358,6 +437,14 @@ export function classifyTrial(input: ClassifyTrialInput): FailureClassification 
     }
     const unevaluable = findInReasonOrLog(input, GATE_UNEVALUABLE);
     if (unevaluable) {
+      // A recipe the model wrote in this trial is its own work product: an
+      // unfilled `{{workPath}}` or a gate script typed against the wrong
+      // parameter is an authoring failure. Gemma's export-generalize and
+      // Qwen's author-gate-script both booked as infra this way (DGX Spark,
+      // 2026-10-30).
+      if (unevaluableGatesAllTrialAuthored(input)) {
+        return { failureClass: 'model', rule: 'authored-gate-unevaluable', evidence: unevaluable };
+      }
       return { failureClass: 'infra', rule: 'gate-unevaluable', evidence: unevaluable };
     }
     // A render that opened and never completed at kill time means the

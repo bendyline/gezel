@@ -16,6 +16,7 @@ import {
   type LoadTransformersEnv,
   pinTransformersCacheDir,
 } from '@bendyline/gezel-inference/internal/transformers-cache';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 
 const log = createLogger('audio');
 
@@ -244,10 +245,12 @@ export class KokoroEngine {
     this.loadKokoroJs = loaders.loadKokoroJs ?? defaultKokoroLoader;
     this.loadTransformers =
       loaders.loadTransformers ??
-      (async () =>
-        (await import('@huggingface/transformers')) as unknown as {
+      (async () => {
+        disableOnnxRuntimeTelemetry();
+        return (await import('@huggingface/transformers')) as unknown as {
           Tensor: KokoroTensorConstructor;
-        });
+        };
+      });
     this.loadTransformersEnv = loaders.loadTransformersEnv;
   }
 
@@ -380,6 +383,7 @@ async function defaultKokoroLoader(): Promise<KokoroJsModule> {
   // kokoro-js being installed (mocked via `loadKokoroJs`). The cast
   // assumes upstream's CommonJS-flavored module shape — kokoro-js
   // re-exports `KokoroTTS` directly.
+  disableOnnxRuntimeTelemetry();
   try {
     return (await import('kokoro-js')) as unknown as KokoroJsModule;
   } catch (err) {

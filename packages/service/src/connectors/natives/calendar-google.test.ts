@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { syncWithAdapter } from '../manager.js';
+import { type SyncBindingOptions, syncWithAdapter } from '../manager.js';
 import { NATIVE_ADAPTERS } from '../registry.js';
 import {
   HOSTILE_NAME,
@@ -163,13 +163,18 @@ describe('GoogleCalendarAdapter', () => {
     w = null;
   });
 
-  async function pass(adapter: GoogleCalendarAdapter, cursor: unknown, backfillLimit = 500) {
+  async function pass(
+    adapter: GoogleCalendarAdapter,
+    cursor: unknown,
+    write?: SyncBindingOptions['write'],
+  ) {
     return syncWithAdapter(adapter, {
       storageDir: w!.env.artifactsDir,
       quarantineDir: w!.env.quarantineDir,
       corpusDir: 'data/calendar',
-      backfillLimit,
+      backfillLimit: 500,
       cursor,
+      write,
     });
   }
 
@@ -179,15 +184,27 @@ describe('GoogleCalendarAdapter', () => {
     for (let i = 0; i < 600; i++) {
       w.fake.addEvent(PRIMARY, { summary: `Slot ${i}`, ...timed(now + i * 3_600_000) });
     }
-    const first = await pass(w.adapter(), undefined);
+    // Conformance cases cover disk writes; this bulk pagination case must not
+    // spend its timeout on 600 record files and sidecar rewrites under contention.
+    const written: string[] = [];
+    const write: NonNullable<SyncBindingOptions['write']> = async ({ record }) => {
+      written.push(record.recordId);
+      return { status: 'written' };
+    };
+    const first = await pass(w.adapter(), undefined, write);
     expect(first.error).toBeUndefined();
     expect(first.written).toBe(600);
+    expect(written).toHaveLength(600);
+    expect(new Set(written)).toEqual(
+      new Set(w.fake.events(PRIMARY).map((event) => `${PRIMARY}:${event.id}`)),
+    );
     expect(scopeCursor(first.cursor, PRIMARY)).toMatchObject({ syncToken: expect.any(String) });
     expect(scopeCursor(first.cursor, PRIMARY)?.pageToken).toBeUndefined();
 
     const listing = eventRequests(w.fake);
     expect(listing).toHaveLength(3);
     for (const q of listing) {
+      expect(q.get('maxResults')).toBe('250');
       expect(q.get('syncToken')).toBeNull();
       expect(q.get('timeMin')).toBeTruthy();
       expect(q.get('timeMax')).toBeTruthy();
@@ -196,15 +213,17 @@ describe('GoogleCalendarAdapter', () => {
     }
     expect(listing[0]!.get('pageToken')).toBeNull();
     expect(listing[1]!.get('pageToken')).toBeTruthy();
+    expect(listing[2]!.get('pageToken')).toBeTruthy();
 
-    const second = await pass(w.adapter(), first.cursor);
+    const second = await pass(w.adapter(), first.cursor, write);
+    expect(second.error).toBeUndefined();
     expect(second.written).toBe(0);
     const incremental = eventRequests(w.fake).slice(3);
     expect(incremental).toHaveLength(1);
     expect(incremental[0]!.get('syncToken')).toBeTruthy();
     expect(incremental[0]!.get('timeMin')).toBeNull();
     expect(incremental[0]!.get('timeMax')).toBeNull();
-    expect(await readCorpus(w.env.artifactsDir, 'data/calendar')).toHaveLength(600);
+    expect(written).toHaveLength(600);
   });
 
   it('honors a batch smaller than a page: offsets into the page, no gaps, no repeats', async () => {

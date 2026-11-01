@@ -171,6 +171,13 @@ export interface EvalContext {
      * and must restart the plateau clock.
      */
     milestones?: number;
+    /**
+     * One of the scenario's declared units of work has started and not
+     * finished (a fanout run still active). The FAST retry-loop path then
+     * waits on a turn in flight, as the STALL path does: writes inside a
+     * unit's run are that unit's work, not a rewrite of the scored artifact.
+     */
+    unitsUnderway?: boolean;
   }) => void;
   /**
    * Request a terminal trial failure after the current success check. Used by
@@ -237,6 +244,16 @@ export interface EvalScenario {
    * the model to make an outbound call inside the trial.
    */
   modelNetworkAccess?: 'wikipedia';
+  /**
+   * Turn on "Run package scripts" in the trial home, on top of its lockdown
+   * posture. Set for a craftbook that declares package `commands`: its gates
+   * accept only `run_package_script` / `run_npx` receipts, and lockdown
+   * removes both tools, so without it the book cannot pass for any model.
+   * Every bug-fix-tdd, codemod-sweep and refactor-module trial on the DGX
+   * Spark scorecard (2026-10-28) stopped at its first command step this way.
+   * Package-manifest edits stay off.
+   */
+  packageScripts?: boolean;
   /**
    * Opt into the local embedding pipeline for scenarios whose asserted
    * behavior is semantic retrieval itself. Ordinary task trials keep it off
@@ -364,10 +381,19 @@ export interface EvalScenario {
   skipInitialPrompt?: boolean;
   /**
    * Advisory LLM-judge configuration for this scenario's deliverable.
-   * Consumed by the `--llm-judge` pass in bin/run.ts. Optional — HTML
-   * scenarios get the legacy default rubric without declaring anything.
+   * Consumed by the `--llm-judge` pass in bin/run.ts. Optional — a scenario
+   * that declares `htmlDeliverable` gets the default HTML rubric instead.
    */
   judge?: ScenarioJudgeSpec;
+  /**
+   * Project-workspace path of the HTML page the model builds from scratch
+   * (`index.html`). The default HTML rubric judges this file and nothing
+   * else; a scenario without it or a `judge` spec is not judged. The judge
+   * used to grade the first HTML file in the snapshot, which on
+   * craftbook-find-vs-create was a page the scenario seeded (0.8 in all six
+   * trials, DGX Spark 2026-10-28).
+   */
+  htmlDeliverable?: string;
   /**
    * Live mock services this scenario needs (from the craftbook's
    * `test.json` `mocks[]`). When any `http`/`webhook`/`mcp` entries exist

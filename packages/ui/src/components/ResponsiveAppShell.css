@@ -23,3 +23,11 @@
 .responsive-app-shell > .app-main:focus {
   outline: none;
 }
+
+/* Make the workspace the fixed-position boundary only while a page is
+   expanded. The sidebar keeps its own side, width and collapse state, and
+   the iframe stays in place rather than being remounted in a portal. */
+.responsive-app-shell > .app-main:has(.project-output-pane-maximized) {
+  contain: layout;
+  overflow: hidden;
+}

@@ -203,10 +203,10 @@ function OutputToolbarOverflow({ actions }: { actions: OutputAction[] }) {
  * `index.html` a model left behind (a common LLM-prototype failure mode).
  *
  * Maximize (the toolbar button or F5) expands the pane to fill the
- * whole window by toggling a `position: fixed` class on the SAME
+ * main workspace by toggling a `position: fixed` class on the SAME
  * `<aside>` — the iframe is never moved in the React tree, so the
  * running app keeps its state across maximize/restore (no reload). Its
- * app's persistent titlebar stays above it and exposes a Restore button;
+ * sidebar stays beside it and the titlebar exposes a Restore button;
  * dialogs/selects also remain above the pane. Esc or F5 restores it too.
  * F5 isn't bound to reload in our Electron shell (it uses Cmd/Ctrl+R),
  * so claiming it here is safe — we still `preventDefault` as
@@ -216,6 +216,8 @@ export function ProjectOutputPane({
   projectId,
   htmlFiles,
   typePage,
+  initialMaximized = false,
+  onMaximizedChange,
   onClose,
   onDebugFrame,
 }: {
@@ -229,6 +231,8 @@ export function ProjectOutputPane({
    * shown ahead of workspace files. See docs/project-types.md.
    */
   typePage?: { entry: string; label: string; pageTools?: string[] };
+  initialMaximized?: boolean;
+  onMaximizedChange?: (maximized: boolean) => void;
   /** Hide the pane entirely (flips the tab-row toggle off). */
   onClose: () => void;
   /**
@@ -245,7 +249,10 @@ export function ProjectOutputPane({
   const [autoTarget, setAutoTarget] = useState('');
   const [detecting, setDetecting] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
-  const [maximized, setMaximized] = useState(() => takeOutputPaneFullWindow(projectId));
+  const [maximized, setMaximized] = useState(
+    () => takeOutputPaneFullWindow(projectId) || initialMaximized,
+  );
+  const savedMaximized = useRef(initialMaximized);
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState('');
   const debugMode = useDebugMode();
@@ -352,11 +359,8 @@ export function ProjectOutputPane({
     return () => window.removeEventListener('keydown', onKey);
   }, [maximized]);
 
-  // The maximized pane's own toolbar is covered by the persistent app
-  // titlebar (the app body deliberately sits in a lower stacking context).
-  // Mirror this state into the titlebar so it can expose an always-visible
-  // Restore button, and accept that button's restore request here. Cleanup
-  // clears the titlebar affordance if this project/pane is unmounted.
+  // The titlebar offers another way back even if the page has focus.
+  // Cleanup clears that affordance without changing the project's choice.
   useEffect(() => {
     const openFull = () => {
       if (takeOutputPaneFullWindow(projectId)) setMaximized(true);
@@ -377,6 +381,12 @@ export function ProjectOutputPane({
   useEffect(() => {
     reportOutputPaneMaximized(maximized);
   }, [maximized]);
+
+  useEffect(() => {
+    if (savedMaximized.current === maximized) return;
+    savedMaximized.current = maximized;
+    onMaximizedChange?.(maximized);
+  }, [maximized, onMaximizedChange]);
 
   const openInBrowser = useCallback(() => {
     if (!selectedTarget || !previewUrl) return;
@@ -560,6 +570,7 @@ export function ProjectOutputPane({
 
   const body = selectedTarget ? (
     <HtmlPreviewFrame
+      fullscreen={maximized}
       projectId={projectId}
       path={selectedTarget.path}
       source={selectedTarget.source}

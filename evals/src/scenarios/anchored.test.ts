@@ -43,10 +43,13 @@ import { ANCHORED_SCENARIOS, SCENARIOS } from './index.ts';
 // elements. The grader now reads visible subtree text to avoid rejecting
 // those valid games while still excluding script and hidden content.
 // Prompt/evidence and the requirement to display a winner are unchanged.
+// Judge-target re-pin: each anchor declares `htmlDeliverable: 'index.html'`
+// so the advisory judge grades that page and nothing else. Prompts,
+// evidence and success checks are unchanged; pass/fail is unaffected.
 const PINNED: Record<(typeof ANCHORED_SCENARIOS)[number], { semantic: string; source: string }> = {
-  tictactoe: { semantic: 'a553e5a80e5dab9f', source: '2d771b4740c81333' },
-  petshop: { semantic: '20a5fbfb35b86f9c', source: 'c6ae728c51d8f80c' },
-  tankcombat: { semantic: 'c247df6736d31ac8', source: '9e5d0971ddadbfd2' },
+  tictactoe: { semantic: 'a553e5a80e5dab9f', source: '9bddade904b6118b' },
+  petshop: { semantic: '20a5fbfb35b86f9c', source: '331063ad66cd8bad' },
+  tankcombat: { semantic: 'c247df6736d31ac8', source: '274e98bc47a9408d' },
 };
 
 const here = dirname(fileURLToPath(import.meta.url));

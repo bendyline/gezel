@@ -43,21 +43,46 @@ export function bundledDocblocksToolset(): InstalledToolset {
 }
 
 /**
+ * A message that names an Office file ("bring `source/brand.pptx` in line",
+ * "fix the table in report.docx") asks for document work whether or not a
+ * craftbook runs it. Without this a designer asked to restyle a deck from a
+ * brand deck had no `infer_theme_from_file` (docblocks-theme-roundtrip, 0 of 6
+ * trials, 2026-10-29). PDFs are left out: reading one is `read_doc_as_markdown`'s
+ * job and making one is a craftbook's, neither worth 14,000 prompt tokens.
+ */
+const OFFICE_DOCUMENT_NAME_RE = /[\w-]\.(?:pptx|docx|xlsx)\b/i;
+
+/** Whether the person's side of a thread, the message being sent included, names an Office file. */
+export function threadNamesOfficeDocument(
+  messages: ReadonlyArray<{ role: string; content: string }>,
+  pendingUserText?: string,
+): boolean {
+  if (pendingUserText && OFFICE_DOCUMENT_NAME_RE.test(pendingUserText)) return true;
+  return messages.some(
+    (message) => message.role === 'user' && OFFICE_DOCUMENT_NAME_RE.test(message.content),
+  );
+}
+
+/**
  * Whether a session gets the bundled DocBlocks that nobody installed for it.
  * Its 19 tool schemas cost about 14,000 prompt tokens and a Node process, and
  * in 1.26299.99 every session paid that, the Meester's front door included,
  * whose first turn grew from 22.7k to 37.4k tokens. Only work that makes a
  * document needs it: a craftbook that declares DocBlocks (its steps that do
- * not make the file still drop it through `disallowToolsets`), and a
- * delegation whose expected deliverable is a binary document. A copy the
- * person installed at gezel, shared or project scope is not this one and
- * always joins.
+ * not make the file still drop it through `disallowToolsets`), a delegation
+ * whose expected deliverable is a binary document, and a thread whose person
+ * named an Office file. A copy
+ * installed at gezel, shared or project scope joins every session there,
+ * unless this one supersedes it (`Store.bundledToolsetSupersedes`), which
+ * makes it this one.
  */
 export function bundledDocblocksJoinsSession(session: {
   craftbookToolsetIds?: readonly string[];
   expectedDeliverablePath?: string;
+  namesOfficeDocument?: boolean;
 }): boolean {
   if (session.craftbookToolsetIds?.includes(BUNDLED_DOCBLOCKS_TOOLSET_ID)) return true;
+  if (session.namesOfficeDocument) return true;
   const path = session.expectedDeliverablePath?.trim();
   return !!path && isExpectedBinaryDocumentDeliverablePath(path);
 }

@@ -309,6 +309,11 @@ export const RemoteImageGenRequestSchema = z.object({
   seed: z.number().optional(),
   strength: z.number().optional(),
   inputImages: z.array(z.object({ data: z.string(), mimeType: z.string() })).optional(),
+  /**
+   * LoRAs by catalog id. The engine applies each from its own install; one
+   * that predates LoRAs drops the field and renders without them.
+   */
+  loras: z.array(z.object({ id: z.string() })).optional(),
 });
 export type RemoteImageGenRequest = z.infer<typeof RemoteImageGenRequestSchema>;
 

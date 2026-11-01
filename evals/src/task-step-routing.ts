@@ -20,6 +20,14 @@
  * next poll re-evaluates; a stray unbound session is not.
  */
 
+import {
+  type Task,
+  type TaskAssignee,
+  type TaskCraftbookStep,
+  isOwnerStep,
+  stepOwnerGezelId,
+} from '@bendyline/gezel';
+
 export interface TaskStepRoute {
   projectId: string;
   taskRef: string;
@@ -36,6 +44,9 @@ export interface TaskStepRouteTask {
   projectId?: string;
   status?: string;
   activeStepId?: string | null;
+  /** With `craftbook`, tells whether any gezel owns the active step. */
+  assignee?: TaskAssignee;
+  craftbook?: { steps?: ReadonlyArray<{ id: string } & Partial<TaskCraftbookStep>> };
 }
 
 export interface TaskStepRouteWaiting {
@@ -62,6 +73,12 @@ export type TaskStepDelivery =
  * The route for a craftbook task, or `undefined` when the task is not one a
  * step session can act on (finished, canceled, or never activated) — callers
  * then keep their ordinary routing.
+ *
+ * Also `undefined` when no gezel owns the active step and it is not the
+ * person's own step. Nothing will ever open a session for it, so holding the
+ * nudge until one exists held it for good: gemma4-12b's own recipe named no
+ * roles, its task sat on the first step, and every nudge waited on a session
+ * that never came (craftbook-export-generalize, 2026-10-31).
  */
 export function taskStepRouteFor(
   task: TaskStepRouteTask,
@@ -73,6 +90,7 @@ export function taskStepRouteFor(
   }
   const stepId = task.activeStepId ?? undefined;
   if (!stepId) return undefined;
+  if (activeStepWithoutOwner(task)) return undefined;
   const hold = waiting.find((entry) => entry.ref === task.ref);
   return {
     projectId: task.projectId ?? projectId,
@@ -80,6 +98,21 @@ export function taskStepRouteFor(
     stepId,
     ...(hold ? { runnerHold: hold.reason } : {}),
   };
+}
+
+/**
+ * The active step when no gezel owns it and it is not the person's own step:
+ * nothing will start it until someone is assigned. Same rule as the daemon's
+ * entry dispatch (core `stepOwnerGezelId`). Undefined without the task's
+ * `assignee` and steps, since ownership cannot be judged then.
+ */
+export function activeStepWithoutOwner(
+  task: TaskStepRouteTask,
+): ({ id: string } & Partial<TaskCraftbookStep>) | undefined {
+  if (!task.assignee || !task.craftbook?.steps || !task.activeStepId) return undefined;
+  const step = task.craftbook.steps.find((candidate) => candidate.id === task.activeStepId);
+  if (!step || isOwnerStep(step)) return undefined;
+  return stepOwnerGezelId(task as unknown as Task, step as TaskCraftbookStep) ? undefined : step;
 }
 
 /**

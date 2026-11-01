@@ -18,19 +18,18 @@ export const ENGAGEMENT_MODES: {
   {
     mode: 'reactive',
     label: 'Chat only',
-    description:
-      'Your gezellen answer when you ask. Tasks and schedules wait until you switch back.',
+    description: 'Your crew answers when you ask. Tasks and schedules wait until you switch back.',
   },
   {
     mode: 'scheduled',
     label: 'Tasks + chat',
     description:
-      'Your gezellen work through tasks and schedules and answer you in chat. Nobody starts anything unasked.',
+      'Your crew works through tasks and schedules and answers you in chat. Nobody starts anything unasked.',
   },
   {
     mode: 'proactive',
     label: 'Proactive',
     description:
-      'Your gezellen also take initiative: they start work, check in on projects, and hand work to each other.',
+      'Your crew also takes initiative: members start work, check in on projects, and hand work to each other.',
   },
 ];

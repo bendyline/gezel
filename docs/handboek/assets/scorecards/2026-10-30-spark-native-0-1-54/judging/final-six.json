@@ -1,0 +1,9 @@
+{
+  "judgeProvider": "codex-inline",
+  "judgeModel": "current-session",
+  "method": "Exact declared axes and fixed 0-10 rubric; review at most 20 KiB per artifact, integer scores, specific justifications. No declared axes in the final six: diagnostic inspection only, no invented qualitative ratings.",
+  "judgments": [],
+  "noArtifact": [],
+  "coverageSnapshotAt": "2026-10-30T17:10:46.095Z",
+  "updatedAt": "2026-10-30T17:10:46.286Z"
+}

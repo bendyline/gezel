@@ -1109,7 +1109,7 @@ export function NewProjectDialog({
                             {selectedType
                               ? 'Choose an existing folder to browse its files in place. Leave blank to use a new project workspace. '
                               : ''}
-                            Gezellen change nothing in this folder unless you allow it in the
+                            Crew members change nothing in this folder unless you allow it in the
                             project's settings.
                           </small>
                         </label>

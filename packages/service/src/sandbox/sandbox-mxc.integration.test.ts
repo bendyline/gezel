@@ -228,11 +228,13 @@ gezel.output({ total });
     const result = await runScript({
       useMxc: true,
       source: `import { gezel } from '@bendyline/gezel-sdk';
-console.log('quiet ' + gezel.runId);
+console.log('quiet ' + gezel.input.n);
 `,
     });
-    expect(result).toMatchObject({ exitCode: 0, timedOut: false });
-    expect(result.stdout).toContain('quiet');
+    expect(result, result.stderr).toMatchObject({ exitCode: 0, timedOut: false });
+    expect(result.stdout).toContain('quiet 42');
+    expect(result.requests).toEqual([]);
+    expect(result.notifications).toEqual([]);
   });
 
   it('refuses, before starting anything, a run whose folder contains the home folder', async () => {

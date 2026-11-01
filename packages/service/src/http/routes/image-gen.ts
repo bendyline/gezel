@@ -3,10 +3,13 @@ import {
   type ImageAspectRatio,
   ImageGenerationRequestSchema,
   type ImageInputSource,
+  type ImageLoraCandidate,
+  type ImageLoraChoice,
   type ImageModelManifest,
   type ImageQuality,
   type Question,
   type QuestionIntent,
+  chooseImageLoras,
   chooseImageModel,
   createLogger,
   imageModelDefaultSide,
@@ -16,7 +19,7 @@ import {
   resolveImageSize,
 } from '@bendyline/gezel';
 import { readImageMeta } from '@bendyline/gezel-inference/internal/utils/image-meta';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 
 import { capAgentImageSize } from '../../providers/image/agent-size.js';
 import { NoLocalImageModelError } from '../../providers/image/factory.js';
@@ -27,6 +30,12 @@ import {
   ImageSourceRequiredError,
 } from '../../providers/image/types.js';
 import { parseRemoteModelId } from '../../providers/remote/model-id.js';
+import {
+  CAMERA_PIXELS_CLOUD_ENGINE,
+  CAMERA_PIXELS_WITHHELD,
+  callerMaySeeFilePixels,
+  cameraKeepsFileLocal,
+} from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 import { imageModelEditFacts, imageModelRoutes, providerKind } from './image-models.js';
 
@@ -106,6 +115,14 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
     // shouldn't have to know about.
     let resolvedInputs: ImageInputBytes[] | undefined;
     if (req.inputImages && req.inputImages.length > 0) {
+      const withheld = await cameraInputWithheld(
+        ctx,
+        c,
+        projectId,
+        req.inputImages,
+        providerKind(provider.name),
+      );
+      if (withheld) return c.json({ error: withheld }, 403);
       try {
         resolvedInputs = await resolveInputImages(ctx, projectId, req.inputImages);
       } catch (err) {
@@ -121,10 +138,26 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
     // model's, and the machine broker or a paired server renders the same one.
     const kind = providerKind(provider.name);
     let model = req.model;
+    // Fast mode and a style ride on LoRAs the engine lists with the model.
+    // An engine that predates them lists none, so nothing is asked of it.
+    const askedSteps =
+      req.steps !== undefined && !req.capStepsAtRecommended ? req.steps : undefined;
+    let loraChoice: ImageLoraChoice = { loras: [], notes: [], styles: [] };
+    if (kind === 'cloud' && req.style?.trim()) {
+      loraChoice.notes.push('Styles work only with image models on this computer.');
+    }
     if (kind === 'local') {
       const choice = await chooseLocalImageModel(provider, req.model, hasSources);
       if (choice.refusal) return c.json(choice.refusal, 400);
       model = choice.model;
+      const bare = model ? (parseRemoteModelId(model)?.modelId ?? model) : undefined;
+      const fastOn =
+        req.fast ?? (bare ? (await ctx.store.readConfig()).imageFastMode?.[bare] !== false : true);
+      loraChoice = chooseImageLoras(choice.loras ?? [], {
+        style: req.style,
+        fast: fastOn,
+        askedSteps,
+      });
       if (req.requireEdit && choice.edits === false) {
         return c.json(
           {
@@ -211,8 +244,11 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
           ? await resolveImageModelManifest(ctx, provider, model)
           : undefined;
       const recommended = manifest?.recommendedSteps;
-      const resolvedSteps =
-        req.steps !== undefined && req.capStepsAtRecommended && recommended
+      // A LoRA with its own steps sets them in the engine, which also keeps an
+      // engine that drops the LoRA on its model's own steps.
+      const resolvedSteps = loraChoice.loras.some((l) => l.steps !== undefined)
+        ? askedSteps
+        : req.steps !== undefined && req.capStepsAtRecommended && recommended
           ? Math.min(req.steps, recommended)
           : (req.steps ?? recommended);
       const agentSize =
@@ -246,6 +282,9 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         ...(req.seed !== undefined ? { seed: req.seed } : {}),
         ...(resolvedInputs && resolvedInputs.length > 0 ? { inputImages: resolvedInputs } : {}),
         ...(req.strength !== undefined ? { strength: req.strength } : {}),
+        ...(loraChoice.loras.length > 0
+          ? { loras: loraChoice.loras.map((l) => ({ id: l.id })) }
+          : {}),
         // Forward sd-server's per-step sampling progress to the live
         // chat bubble. The provider parses lines like `|==> | 3/20 -
         // 18.20s/it` and invokes this for each step; cloud providers
@@ -310,18 +349,28 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
       // through the same persister + ToolCallImage pipeline that
       // Playwright screenshots use). Direct UI callers leave it false
       // to keep the response small.
+      const notes = [
+        ...(agentSize?.note ? [agentSize.note] : []),
+        ...loraChoice.notes,
+        ...(loraChoice.loras.length > 0 && !out.meta.loras && !out.meta.settingsNotes
+          ? [
+              "This computer's image engine drew without styles or fast mode; it is older than this app.",
+            ]
+          : []),
+        ...(out.meta.settingsNotes ?? []),
+      ];
       const respBody: {
         artifactPath: string;
         workspacePath: string | null;
         meta: typeof out.meta;
         b64Png?: string;
         promptGuide?: string;
+        styles?: Array<{ id: string; name: string }>;
       } = {
         artifactPath: writtenPath,
         workspacePath,
-        meta: agentSize?.note
-          ? { ...out.meta, settingsNotes: [agentSize.note, ...(out.meta.settingsNotes ?? [])] }
-          : out.meta,
+        meta: notes.length > 0 ? { ...out.meta, settingsNotes: notes } : out.meta,
+        ...(loraChoice.styles.length > 0 ? { styles: loraChoice.styles } : {}),
       };
       if (req.inline) respBody.b64Png = out.png.toString('base64');
       const promptGuide = renderedModelPromptGuide(
@@ -458,6 +507,33 @@ function buildPrompt(
   return `**${friendly}** is about to ${action} (model \`${model}\`). Use a credit?\n\n> ${trimmed}`;
 }
 
+/**
+ * Why a camera keyframe among `inputs` may not be used here, or null. A
+ * cloud engine receives the keyframe itself, whoever is asking, and the
+ * edited image goes back to the caller, so both the engine and the caller
+ * must be allowed to see the camera's pictures. Base64 inputs carry no path,
+ * so only the routes that hand out a keyframe's bytes guard them.
+ */
+async function cameraInputWithheld(
+  ctx: ServiceContext,
+  c: Context,
+  projectId: string,
+  inputs: ImageInputSource[],
+  engine: 'local' | 'cloud',
+): Promise<string | null> {
+  const project = await ctx.store.getProject(projectId).catch(() => null);
+  if (!project) return null;
+  for (const entry of inputs) {
+    if (!('artifactPath' in entry)) continue;
+    const stripped = entry.artifactPath.replace(/^artifacts\//, '');
+    const file = await ctx.store.resolveProjectArtifactReadPath(projectId, stripped);
+    if (!file || !(await cameraKeepsFileLocal(ctx, project, file))) continue;
+    if (engine === 'cloud') return CAMERA_PIXELS_CLOUD_ENGINE;
+    if (!(await callerMaySeeFilePixels(ctx, c, project, file))) return CAMERA_PIXELS_WITHHELD;
+  }
+  return null;
+}
+
 async function resolveInputImages(
   ctx: ServiceContext,
   projectId: string,
@@ -513,6 +589,8 @@ export async function chooseLocalImageModel(
 ): Promise<{
   model?: string;
   edits?: boolean;
+  /** The installed LoRAs that fit the chosen model, as its engine lists them. */
+  loras?: ImageLoraCandidate[];
   refusal?: { error: string; code: 'image_source_required' };
 }> {
   const installed = await provider.listInstalledModels().catch(() => []);
@@ -543,6 +621,7 @@ export async function chooseLocalImageModel(
   return {
     ...(model ? { model } : {}),
     ...(chosen ? { edits: chosen.editMode !== undefined } : {}),
+    ...(chosen?.loras?.length ? { loras: chosen.loras } : {}),
   };
 }
 

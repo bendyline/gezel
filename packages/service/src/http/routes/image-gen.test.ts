@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import type { ImageProvider } from '../../providers/image/types.js';
+import type { ImageGenerationInput, ImageProvider } from '../../providers/image/types.js';
 import { type RunningService, startService } from '../../service.js';
 import {
   renderedModelPromptGuide,
@@ -297,6 +297,105 @@ describe('POST /api/image-gen/generate', () => {
       expect(json.error).toMatch(/^Qwen Image Edit 2511 changes a picture/);
       expect(rendered).toEqual([]);
     }
+  });
+
+  /** One installed model listing these LoRAs, recording the LoRAs and steps each render asked for. */
+  async function withLoras(
+    loras: Array<{ id: string; name: string; purpose: 'style' | 'speed'; steps?: number }>,
+    body: Record<string, unknown>,
+    opts: { echo?: boolean } = {},
+  ) {
+    const mock = await svc.context.imageProvider.current();
+    const output = await mock.generate({ prompt: 'fixture', width: 8, height: 8 });
+    const rendered: Array<{ loras?: Array<{ id: string }>; steps?: number }> = [];
+    const routing = vi.spyOn(svc.context.imageProvider, 'providerForModel').mockResolvedValue({
+      name: 'mock',
+      listInstalledModels: async () => [
+        { id: 'sdxl-base-1.0', name: 'SDXL', approxSizeBytes: 1, installedAt: '', loras },
+      ],
+      resolveDefaultModelId: async () => 'sdxl-base-1.0',
+      generate: async (input: ImageGenerationInput) => {
+        rendered.push({
+          ...(input.loras ? { loras: input.loras } : {}),
+          ...(input.steps !== undefined ? { steps: input.steps } : {}),
+        });
+        const applied = (input.loras ?? []).map(({ id }) => ({
+          id,
+          name: loras.find((l) => l.id === id)?.name ?? id,
+        }));
+        return {
+          ...output,
+          meta: {
+            ...output.meta,
+            ...(opts.echo !== false && applied.length > 0 ? { loras: applied } : {}),
+          },
+        };
+      },
+    } as unknown as ImageProvider);
+    try {
+      const res = await api('POST', '/api/image-gen/generate', { prompt: 'a lighthouse', ...body });
+      const json = (await res.json()) as {
+        meta: { settingsNotes?: string[]; loras?: unknown };
+        styles?: Array<{ id: string; name: string }>;
+      };
+      return { status: res.status, json, rendered };
+    } finally {
+      routing.mockRestore();
+    }
+  }
+
+  const sdxlLoras = [
+    { id: 'sdxl-lightning-lora', name: 'Fast mode', purpose: 'speed' as const, steps: 4 },
+    { id: 'sdxl-pixel-art', name: 'Pixel art', purpose: 'style' as const },
+  ];
+
+  it("uses a model's fast mode by default, leaving its steps to the engine", async () => {
+    const { status, json, rendered } = await withLoras(sdxlLoras, {});
+    expect(status).toBe(200);
+    expect(rendered).toEqual([{ loras: [{ id: 'sdxl-lightning-lora' }] }]);
+    expect(json.meta.settingsNotes).toBeUndefined();
+    expect(json.styles).toEqual([{ id: 'sdxl-pixel-art', name: 'Pixel art' }]);
+  });
+
+  it('leaves fast mode off when the request or the setting says so, or more steps are asked', async () => {
+    const off = await withLoras(sdxlLoras, { fast: false });
+    expect(off.rendered[0]?.loras).toBeUndefined();
+
+    const put = await api('PUT', '/api/config', { imageFastMode: { 'sdxl-base-1.0': false } });
+    expect(put.status).toBe(200);
+    try {
+      expect((await withLoras(sdxlLoras, {})).rendered[0]?.loras).toBeUndefined();
+      expect((await withLoras(sdxlLoras, { fast: true })).rendered[0]?.loras).toEqual([
+        { id: 'sdxl-lightning-lora' },
+      ]);
+    } finally {
+      await api('PUT', '/api/config', { imageFastMode: {} });
+    }
+
+    const slow = await withLoras(sdxlLoras, { steps: 30 });
+    expect(slow.rendered).toEqual([{ steps: 30 }]);
+    expect(slow.json.meta.settingsNotes).toEqual([
+      'Fast mode was left off for the 30 steps asked.',
+    ]);
+  });
+
+  it('draws in a style named loosely, and names the styles when it has no match', async () => {
+    const styled = await withLoras(sdxlLoras, { style: 'pixel', fast: false });
+    expect(styled.rendered[0]?.loras).toEqual([{ id: 'sdxl-pixel-art' }]);
+
+    const unknown = await withLoras(sdxlLoras, { style: 'watercolor', fast: false });
+    expect(unknown.status).toBe(200);
+    expect(unknown.rendered[0]?.loras).toBeUndefined();
+    expect(unknown.json.meta.settingsNotes).toEqual([
+      'No "watercolor" style for this model, so it was drawn without one. Its styles: Pixel art.',
+    ]);
+  });
+
+  it('says so when the engine drew without the LoRAs it was handed', async () => {
+    const { json } = await withLoras(sdxlLoras, {}, { echo: false });
+    expect(json.meta.settingsNotes).toEqual([
+      "This computer's image engine drew without styles or fast mode; it is older than this app.",
+    ]);
   });
 
   it('rejects an empty prompt with 400', async () => {

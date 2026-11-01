@@ -50,6 +50,8 @@ export interface EngineContext {
   catalog: CatalogService;
   imageProvider: ImageProviderManager;
   imagePulls: ImageModelPullRegistry;
+  /** Style and fast-mode LoRA installs, kept apart so their ids never share keys with models. */
+  imageLoraPulls: ImageModelPullRegistry;
   chatInstalls: ChatModelInstallRegistries;
   videoProvider: VideoProviderManager;
   videoPulls: VideoModelPullRegistry;

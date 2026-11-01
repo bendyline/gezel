@@ -19,7 +19,12 @@
  */
 
 import type { Task } from '@bendyline/gezel';
-import { createLogger, projectAllowsAmbientWork, taskEffectiveStatus } from '@bendyline/gezel';
+import {
+  createLogger,
+  isOwnerStep,
+  projectAllowsAmbientWork,
+  taskEffectiveStatus,
+} from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import { stepOwnerGezelId } from './manager.js';
@@ -114,4 +119,24 @@ export async function dispatchTaskEntry(
     .catch(() => {});
 
   return { enqueued: true, gezelId, ...(assigneeName ? { assigneeName } : {}) };
+}
+
+/**
+ * Start the entry step an assignment just gave its first owner. A task whose
+ * recipe names no roles is created owned by the person, `dispatchTaskEntry`
+ * finds nobody, and nothing starts it; the stuck-step sweep only drives
+ * gezel-owned steps, and then only after `stallMs`. `invoke_craftbook` now
+ * tells the invoking gezel to `assign_task`, so the assignment itself starts
+ * the step. Returns null when the entry step already had an owner: that
+ * task was dispatched at create, and a reassignment must not start it twice.
+ */
+export async function dispatchNewlyOwnedEntry(
+  deps: EntryDispatchDeps,
+  before: Task,
+  after: Task,
+): Promise<EntryDispatchResult | null> {
+  const step = before.craftbook.steps.find((s) => s.id === before.activeStepId);
+  if (!step || step.id !== before.craftbook.entryStepId) return null;
+  if (isOwnerStep(step) || stepOwnerGezelId(before, step)) return null;
+  return dispatchTaskEntry(deps, after);
 }

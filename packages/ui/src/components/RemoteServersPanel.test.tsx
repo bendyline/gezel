@@ -202,7 +202,7 @@ describe('RemoteServersPanel — connecting', () => {
     });
     render(<RemoteServersPanel />);
     expect(
-      await screen.findByText(/not reachable — gezellen answer without it until it's back/),
+      await screen.findByText(/not reachable — crew members answer without it until it's back/),
     ).toBeTruthy();
     expect(api.listRemotes).toHaveBeenCalledWith({ check: true });
   });

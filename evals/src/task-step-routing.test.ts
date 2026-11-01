@@ -27,6 +27,32 @@ describe('taskStepRouteFor', () => {
     expect(taskStepRouteFor({ ...task, activeStepId: undefined }, 'p')).toBeUndefined();
   });
 
+  it('has no route when no gezel owns the active step, so nothing waits on its session', () => {
+    const steps = [{ id: 'apply', name: 'Apply', createdAt: '2026-10-31T00:00:00Z' }];
+    const unowned = { ...task, assignee: { kind: 'user' as const }, craftbook: { steps } };
+    expect(taskStepRouteFor(unowned, 'p')).toBeUndefined();
+    // A gezel on the task, a role resolved to one, or the person's own step
+    // keeps the route: a session will open, or the person acts.
+    expect(
+      taskStepRouteFor({ ...unowned, assignee: { kind: 'gezel', gezelId: 'reza' } }, 'p')?.stepId,
+    ).toBe('apply');
+    expect(
+      taskStepRouteFor(
+        { ...unowned, craftbook: { steps: [{ ...steps[0]!, suggestedGezelId: 'katarzyna' }] } },
+        'p',
+      )?.stepId,
+    ).toBe('apply');
+    expect(
+      taskStepRouteFor(
+        {
+          ...unowned,
+          craftbook: { steps: [{ ...steps[0]!, assignee: { kind: 'user' as const } }] },
+        },
+        'p',
+      )?.stepId,
+    ).toBe('apply');
+  });
+
   it('marks the route held while the runner has the task on its queue', () => {
     expect(
       taskStepRouteFor(task, 'p', [

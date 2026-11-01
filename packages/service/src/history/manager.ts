@@ -34,6 +34,21 @@ function historyOrderFloor(at: string): string | undefined {
   return Number.isFinite(ms) ? new Date(ms - HISTORY_ORDER_SLACK_MS).toISOString() : undefined;
 }
 
+/**
+ * `log` writes `id` then `at` first, so a stored line names its time before
+ * anything a caller supplied. Reading it from there lets a bounded scan stop,
+ * and skip lines that cannot match, without parsing every line in the window:
+ * gate evidence read back an hour of tool calls, about 20k lines, on every
+ * step completion (2026-10-27). A line in any other shape is parsed in full.
+ */
+const LINE_HEAD = /^\{"id":"(?:[^"\\]|\\.)*","at":"([^"\\]*)"/;
+
+/** Internal narrowing a caller already applies to what it reads back. */
+export interface HistoryReadScope {
+  /** Only events whose details name this task (`details.taskRef`). */
+  taskRef?: string;
+}
+
 async function* readLinesForward(path: string): AsyncGenerator<string> {
   const stream = createReadStream(path, { encoding: 'utf8' });
   yield* createInterface({ input: stream, crlfDelay: Number.POSITIVE_INFINITY });
@@ -249,8 +264,11 @@ export class HistoryManager {
    * evidence asks for the current step's tool calls this way on every
    * completion, and project logs reach hundreds of megabytes.
    */
-  async listEvents(filter: HistoryFilter = {}): Promise<HistoryEvent[]> {
-    if (filter.q && this.queryBackend) {
+  async listEvents(
+    filter: HistoryFilter = {},
+    scope: HistoryReadScope = {},
+  ): Promise<HistoryEvent[]> {
+    if (filter.q && this.queryBackend && !scope.taskRef) {
       try {
         const found = await this.queryBackend(filter);
         if (found !== null) {
@@ -270,6 +288,11 @@ export class HistoryManager {
     // A line can only be one of these kinds if it spells the kind as a JSON
     // string, so cheaper `includes` checks spare most lines the full parse.
     const kindNeedles = filter.kinds?.map((kind) => JSON.stringify(kind));
+    // Likewise a task's events spell `"taskRef":"<ref>"` in their details.
+    const taskNeedle = scope.taskRef ? `"taskRef":${JSON.stringify(scope.taskRef)}` : undefined;
+    const cannotMatch = (line: string) =>
+      (kindNeedles !== undefined && !kindNeedles.some((needle) => line.includes(needle))) ||
+      (taskNeedle !== undefined && !line.includes(taskNeedle));
     const fromFloor = filter.from ? historyOrderFloor(filter.from) : undefined;
     for (const path of files) {
       // Once this file alone has `limit` matches, nothing older than the
@@ -280,8 +303,10 @@ export class HistoryManager {
       try {
         for await (const line of bounded ? readLinesBackward(path) : readLinesForward(path)) {
           if (!line.trim()) continue;
-          if (!bounded && kindNeedles && !kindNeedles.some((needle) => line.includes(needle)))
-            continue;
+          // A bounded read must see each line's time before skipping it.
+          const at = bounded ? LINE_HEAD.exec(line)?.[1] : undefined;
+          if (stopBelow !== undefined && at !== undefined && at < stopBelow) break;
+          if ((!bounded || at !== undefined) && cannotMatch(line)) continue;
           let ev: HistoryEvent;
           try {
             ev = JSON.parse(line) as HistoryEvent;
@@ -290,6 +315,7 @@ export class HistoryManager {
           }
           if (stopBelow !== undefined && typeof ev.at === 'string' && ev.at < stopBelow) break;
           if (!this.matches(ev, filter)) continue;
+          if (scope.taskRef && ev.details?.taskRef !== scope.taskRef) continue;
           events.push(ev);
           if (bounded && filter.limit) {
             matched += 1;

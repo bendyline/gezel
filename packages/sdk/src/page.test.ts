@@ -50,8 +50,22 @@ describe('Output Pane page API contract', () => {
         url: (path) => `/api/page/read/${path}`,
       },
       ui: {
+        layout: { fullscreen: false, width: 800, height: 600 },
+        onLayout: () => () => {},
         components: {
           version: 1,
+          appLayout: () => {
+            throw new Error('unused');
+          },
+          actionForm: () => {
+            throw new Error('unused');
+          },
+          collectionFilter: () => {
+            throw new Error('unused');
+          },
+          chat: () => {
+            throw new Error('DOM unavailable in this type fixture');
+          },
           fileCard: () => {
             throw new Error('DOM unavailable in this type fixture');
           },

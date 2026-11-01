@@ -149,6 +149,35 @@ function requiresReadsBeforeWrite(prompt: string): boolean {
   );
 }
 
+// A write the prompt makes conditional is not an instruction to write now.
+// Refactor-module's kickoff reads "run the suite and record it green … — and
+// where the code about to be reshaped has no tests, write characterization
+// tests FIRST", which clamped the baseline turn to write_file alone, so the
+// suite its gate requires could never run and every stepwise and generalist
+// trial paused within two minutes (strategy benchmark, 2026-10-28). The
+// condition opens the clause the write sits in, so look back to the nearest
+// clause boundary rather than to the sentence start; a colon is not one, since
+// "If the brief is missing: write it now" keeps its condition.
+const CONDITIONAL_CLAUSE_LEAD_RE =
+  /^(?:(?:and|but|or|then|so)\s+)?(?:if|when|whenever|where|wherever|unless|only if|in case|otherwise)\b/i;
+const CLAUSE_BOUNDARY_RE = /[.!?;](?=\s)|[—\n]/g;
+const URGENT_WRITE_RE =
+  /\b(?:write|create|save|produce)\b(?=[\s\S]{0,100}\b(?:now|immediately|first)\b)/gi;
+
+function isConditionalClauseAt(prose: string, index: number): boolean {
+  const before = prose.slice(0, index);
+  let start = 0;
+  for (const m of before.matchAll(CLAUSE_BOUNDARY_RE)) start = m.index + m[0].length;
+  return CONDITIONAL_CLAUSE_LEAD_RE.test(before.slice(start).trim());
+}
+
+function hasUnconditionalUrgentWrite(prose: string): boolean {
+  for (const m of prose.matchAll(URGENT_WRITE_RE)) {
+    if (!isConditionalClauseAt(prose, m.index)) return true;
+  }
+  return false;
+}
+
 export function isImmediateFileWritePrompt(
   prompt: string,
   context: { toolSurfaceIsWriteFileOnly: boolean },
@@ -171,7 +200,7 @@ export function isImmediateFileWritePrompt(
   // (Gemma 4 E4B, 2026-09-30).
   const prose = prompt.replace(/`[^`\n]*`/g, ' ');
   const urgentWrite =
-    /\b(?:write|create|save|produce)\b[\s\S]{0,100}\b(?:now|immediately|first)\b/i.test(prose) ||
+    hasUnconditionalUrgentWrite(prose) ||
     /\b(?:first (?:move|step|action)|next tool call)\s*:\s*(?:write|create|save|produce)\b/i.test(
       prose,
     ) ||

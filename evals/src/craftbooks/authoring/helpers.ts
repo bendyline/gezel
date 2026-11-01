@@ -8,8 +8,13 @@ import {
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { postSniffFeedback } from '../../sniff-feedback.ts';
+import {
+  type TaskStepRoute,
+  activeStepWithoutOwner,
+  taskStepRouteFor,
+} from '../../task-step-routing.ts';
 import type { EvalContext, SuccessCheckResult } from '../../types.ts';
-import { findProjectIdByName } from '../shared.ts';
+import { findProjectIdByName, taskProgressFingerprint } from '../shared.ts';
 
 /**
  * Shared plumbing for the craftbook AUTHORING scenarios (the format A/B
@@ -389,6 +394,33 @@ export interface AuthoringPollArgs {
    * run restarts the stall clock.
    */
   milestones?: number;
+  /** A counted unit has started and not finished; see `recordSniff`. */
+  unitsUnderway?: boolean;
+  /**
+   * The graded task's live position (`runningTaskProgress`), passed while
+   * that task is still running. The repair ladder then counts a nudge as
+   * failed only when the task did not move after it, instead of counting each
+   * write to `repairPath`.
+   *
+   * Without it, route-multi charged the recipe's own steps as failed repairs:
+   * four gezels each wrote the press release in their step, every write read
+   * as a completed post-nudge mutation with the "not finished" failure
+   * unchanged, and the ladder ended two qwen3.8-27b trials while the task was
+   * still walking its steps, one 80 seconds into the last (2026-10-29).
+   */
+  taskProgress?: string;
+  /**
+   * The graded task, passed only when every failure left is that task's work
+   * (its steps or its deliverables) rather than the recipe's authoring.
+   * Nudges then go into the active step's session, and hold while the runner
+   * is queueing that step, the way the craftbook scenarios route them.
+   *
+   * Without it a nudge went to whichever gezel was active last. On
+   * route-multi (qwen3.8-27b, 2026-10-31) that was the drafter, whose step was
+   * over: four nudges took the one engine slot the queued review step was
+   * waiting for, and the ladder ran out on the drafter's replies.
+   */
+  executingTask?: { task: Task; projectId: string } | null;
   /** Virtual surface named in the feedback message (not a real file). */
   repairPath: string;
   /**
@@ -425,6 +457,7 @@ export async function finishAuthoringPoll(
       ? {}
       : { deliverableMissing: args.deliverableMissing }),
     ...(args.milestones !== undefined ? { milestones: args.milestones } : {}),
+    ...(args.unitsUnderway ? { unitsUnderway: true } : {}),
     ...(args.failures[0] !== undefined ? { failReason: args.failures[0] } : {}),
   });
   // `bytes` belongs in the line even though the craftbook variant is what
@@ -440,6 +473,12 @@ export async function finishAuthoringPoll(
   if (args.failures.length === 0) {
     return { done: true, success: true, reason: args.successReason };
   }
+  const taskStep = args.executingTask
+    ? await executingTaskStepRoute(ctx.client, args.executingTask)
+    : undefined;
+  const targetGezelId = args.executingTask
+    ? (unownedTaskCreator(args.executingTask.task) ?? args.targetGezelId)
+    : args.targetGezelId;
   await postSniffFeedback(
     ctx,
     args.repairPath,
@@ -452,12 +491,42 @@ export async function finishAuthoringPoll(
     },
     {
       projectId: args.projectId,
-      targetGezelId: args.targetGezelId,
+      targetGezelId,
       expectedDeliverable: null,
       repairDirective: args.repairDirective,
+      ...(args.taskProgress !== undefined ? { progressSourceText: args.taskProgress } : {}),
+      ...(taskStep ? { taskStep } : {}),
     },
   );
   return { done: false };
+}
+
+/**
+ * Who should hear about a task whose active step no gezel owns: the gezel
+ * that started it. `invoke_craftbook` told that gezel to assign the step,
+ * while the most recently active gezel may know nothing about the task.
+ */
+function unownedTaskCreator(task: Task): string | undefined {
+  if (!activeStepWithoutOwner(task)) return undefined;
+  return task.createdBy?.kind === 'gezel' ? task.createdBy.gezelId : undefined;
+}
+
+/**
+ * The executing task's active-step route, read fresh with the runner's
+ * `waiting` list. `undefined` (ordinary routing) once the task has finished,
+ * or when the listing fails.
+ */
+async function executingTaskStepRoute(
+  client: GezelClient,
+  executing: { task: Task; projectId: string },
+): Promise<TaskStepRoute | undefined> {
+  try {
+    const listed = await client.listProjectTasks(executing.projectId);
+    const live = listed.tasks.find((task) => task.ref === executing.task.ref) ?? executing.task;
+    return taskStepRouteFor(live, executing.projectId, listed.waiting ?? []);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -496,9 +565,31 @@ export function unfinishedTaskFailure(args: {
   status: string;
   /** Parenthetical provenance, e.g. `from craftbook "csv-order-cleanup"`. */
   source?: string;
+  /**
+   * The active step, when no gezel owns it (`activeStepWithoutOwner`). Then
+   * "advance it" is the wrong move: gemma4-12b's own recipe named no roles,
+   * the nudge went to an unrelated gezel, and it advanced a step it never
+   * worked on until the gate paused the task (2026-10-31).
+   */
+  unownedStep?: { id: string; name?: string };
 }): string {
   const source = args.source ? ` (${args.source})` : '';
-  return `task ${args.ref}${source} has status "${args.status}" — advance THIS task to a terminal step with advance_task_step/set_task_status. Do NOT invoke the recipe again or create a second task: a new task starts the work over and does not count.`;
+  const again =
+    'Do NOT invoke the recipe again or create a second task: a new task starts the work over and does not count.';
+  if (args.unownedStep) {
+    const step = args.unownedStep.name ?? args.unownedStep.id;
+    return `task ${args.ref}${source} is waiting on its step "${step}", which no gezel owns, so nobody is working on it — assign it with assign_task({ ref: "${args.ref}", assignee: "<a gezel's name or a role>" }), which starts the step. Do not complete the step yourself. ${again}`;
+  }
+  return `task ${args.ref}${source} has status "${args.status}" — advance THIS task to a terminal step with advance_task_step/set_task_status. ${again}`;
+}
+
+/**
+ * The graded task's live position while it is unfinished — the authoring
+ * scenarios' `taskProgress`. A finished task has nothing left to walk, so its
+ * repairs are judged on the deliverable again.
+ */
+export function runningTaskProgress(task: Task | null | undefined): string | undefined {
+  return task && task.status !== 'complete' ? taskProgressFingerprint([task]) : undefined;
 }
 
 /**

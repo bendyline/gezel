@@ -98,18 +98,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** The destination object, also when a model sent it as a JSON string. */
+/** The destination object, also when a model sent it as a JSON string or a bare path. */
 function destinationOf(value: unknown): Record<string, unknown> | null {
   if (isRecord(value)) return value;
-  if (typeof value === 'string' && value.trim().startsWith('{')) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (text.startsWith('{')) {
     try {
-      const parsed: unknown = JSON.parse(value);
+      const parsed: unknown = JSON.parse(text);
       return isRecord(parsed) ? parsed : null;
     } catch {
       return null;
     }
   }
-  return null;
+  return text ? { path: text } : null;
+}
+
+function replaceHint(path: string, label: string, sha: string): string {
+  return `"${path}" already exists in the ${label} folder; its sha256 is ${sha}. To overwrite it, call save_artifact again with destination.ifExists "replace" and destination.expectedSha256 "${sha}" (the file being replaced, not the new artifact). Or save under a new file name.`;
 }
 
 async function sha256Of(path: string): Promise<string | null> {
@@ -145,7 +151,16 @@ export const DocblocksSaveArtifact: McpToolWrapper = {
       };
     }
 
-    const next: Record<string, unknown> = { ...destination, rootId: write.id };
+    // `ifExists` has no default in DocBlocks' schema, and "error" never
+    // overwrites anything. gemma4-12b sent a bare path string three times and
+    // an object without `ifExists` three more, then tried "replace", which
+    // demanded the checksum of a file that did not exist yet; nine saves, no
+    // deck (docblocks-theme-roundtrip, 2026-10-31).
+    const next: Record<string, unknown> = {
+      ...destination,
+      rootId: write.id,
+      ifExists: destination.ifExists ?? 'error',
+    };
     if (typeof destination.path === 'string') {
       const path = normalizeArtifactPath(destination.path.trim());
       if (!isRootRelativePath(path)) return { kind: 'allow', args: { ...args, destination: next } };
@@ -157,6 +172,15 @@ export const DocblocksSaveArtifact: McpToolWrapper = {
         };
       }
       next.path = path;
+      if (next.ifExists === 'replace' && typeof next.expectedSha256 !== 'string') {
+        const physical = safeJoin(write.physical, path);
+        const current = physical ? await sha256Of(physical) : null;
+        // Nothing there to replace: a plain create. Something there: the
+        // replace stays the model's decision, so it gets the checksum now
+        // rather than a bare "Required" from the schema.
+        if (!current) next.ifExists = 'error';
+        else return { kind: 'reject', error: replaceHint(path, write.label, current) };
+      }
       const parent = dirname(path);
       const physicalParent = parent === '.' ? null : safeJoin(write.physical, parent);
       if (physicalParent) await mkdir(physicalParent, { recursive: true }).catch(() => {});
@@ -179,6 +203,6 @@ export const DocblocksSaveArtifact: McpToolWrapper = {
     const physical = isRootRelativePath(path) ? safeJoin(write.physical, path) : null;
     const sha = physical ? await sha256Of(physical) : null;
     if (!sha) return errorText;
-    return `${errorText}\n\n"${path}" already exists in the ${write.label} folder; its sha256 is ${sha}. To overwrite it, call save_artifact again with destination.ifExists "replace" and destination.expectedSha256 "${sha}" (the file being replaced, not the new artifact). Or save under a new file name.`;
+    return `${errorText}\n\n${replaceHint(path, write.label, sha)}`;
   },
 };

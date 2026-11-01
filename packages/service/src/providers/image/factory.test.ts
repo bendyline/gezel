@@ -203,6 +203,12 @@ describe('buildSdServerArgs — aux role mapping', () => {
     expect(ckpt).not.toContain('--diffusion-model');
   });
 
+  it('points the engine at the LoRA folder, applied per request, only when given one', () => {
+    const args = buildSdServerArgs(modelWithAux([]), 1234, { loraDir: '/tmp/loras' });
+    expect(args.join(' ')).toContain('--lora-model-dir /tmp/loras --lora-apply-mode at_runtime');
+    expect(buildSdServerArgs(modelWithAux([]), 1234)).not.toContain('--lora-model-dir');
+  });
+
   it('turns on EasyCache step reuse for MOSS only', () => {
     const moss = buildSdServerArgs({ ...modelWithAux([]), id: 'moss-image-sft-q4' }, 1234);
     expect(moss.join(' ')).toContain('--cache-mode easycache');

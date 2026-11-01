@@ -72,3 +72,17 @@ describe('RemoteImageProvider default model', () => {
     expect(server.generated[0]?.model).toBe('animagine-xl-4');
   });
 });
+
+describe('RemoteImageProvider LoRAs', () => {
+  it("hands the server the LoRA ids, leaving their recipe to the server's engine", async () => {
+    const server = fakeServer(['sdxl-base-1.0']);
+    await provider(server.fetchImpl).generate({
+      prompt: 'a sign',
+      model: 'sdxl-base-1.0',
+      loras: [{ id: 'sdxl-pixel-art' }],
+    });
+    await provider(server.fetchImpl).generate({ prompt: 'a sign', model: 'sdxl-base-1.0' });
+    expect(server.generated[0]?.loras).toEqual([{ id: 'sdxl-pixel-art' }]);
+    expect(server.generated[1]).not.toHaveProperty('loras');
+  });
+});

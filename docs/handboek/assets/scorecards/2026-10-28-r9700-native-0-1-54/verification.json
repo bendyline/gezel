@@ -1,0 +1,35 @@
+{
+  "counts": {
+    "baselineTrials": 258,
+    "baselinePasses": 185,
+    "baselineTaskFailures": 67,
+    "baselineRawExclusions": 6,
+    "correctionTrials": 6,
+    "correctionPasses": 2,
+    "correctionTaskFailures": 4,
+    "inlineJudged": 99,
+    "inlineNoArtifact": 3,
+    "cliJudged": 124,
+    "cliNoArtifact": 140,
+    "pendingReviews": 0,
+    "tableJudged": 111,
+    "tableNoArtifact": 3,
+    "tableExcludedReviews": 150
+  },
+  "uniqueTrials": 264,
+  "baselineModelScenarioCells": 86,
+  "correctionModelScenarioCells": 2,
+  "repetitions": 3,
+  "exactRepetitions": true,
+  "originalEvidenceModified": false,
+  "newInferenceCalls": 0,
+  "newJudgeCalls": 0,
+  "rawClassificationCorrections": 0,
+  "baselineIdentityUnchanged": true,
+  "correctionMerged": false,
+  "evidenceFilesVerified": 1340,
+  "schemas": [
+    "ScorecardDatasetSchema v1"
+  ],
+  "reportsAndFinalAuditsVerified": true
+}

@@ -21,12 +21,18 @@ import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
+  type ImageLoraPrompt,
+  ImageLoraPromptSchema,
+  type ImageLoraPurpose,
+  ImageLoraPurposeSchema,
+  type ImageLoraRender,
+  ImageLoraRenderSchema,
   chooseImageModel,
   createAwakeTimeout,
   createLogger,
   imageModelDefaultSide,
 } from '@bendyline/gezel';
-import { resolveModelDirectory } from '../../models/model-id.js';
+import { isSafeModelId, resolveModelDirectory } from '../../models/model-id.js';
 import {
   MODEL_HASH_READ_BUFFER_BYTES,
   type ModelStorageRoots,
@@ -37,6 +43,7 @@ import {
   makeSharedModelReadable,
   modelExistsOnlyReadOnly,
   readOnlyModelError,
+  removeModelDir,
   verifyReadOnlyModelPayload,
 } from '../../models/storage-roots.js';
 import { downloadWithRetry } from '../../utils/download-with-retry.js';
@@ -51,11 +58,14 @@ import {
   type ImageGenerationInput,
   type ImageGenerationOutput,
   type ImageGenerationProgress,
+  type ImageLoraPullSpec,
   type ImageModelAuxiliaryPullSpec,
   type ImageModelPullEvent,
   type ImageModelPullSpec,
   type ImageProvider,
   ImageSourceRequiredError,
+  type InstalledImageLoraInfo,
+  type InstalledImageLoraSummary,
   type InstalledImageModelInfo,
 } from './types.js';
 
@@ -68,6 +78,13 @@ export interface StableDiffusionCppProviderOptions {
   modelsRoot: string;
   /** Optional read-only machine-store overlay. */
   storageRoots?: ModelStorageRoots;
+  /**
+   * Where LoRAs install (`modelStorageRoots({ engine: 'sd-cpp-loras' })`).
+   * Only the writable root reaches the engine, which takes one
+   * `--lora-model-dir`. Absent when the engine is someone else's server
+   * (`GEZEL_SD_SERVER_URL`): renders then go without LoRAs, with a note.
+   */
+  loraRoots?: ModelStorageRoots;
   /** Awake-time budget for one render request, in ms. Defaults to 30 minutes. */
   timeoutMs?: number;
   /** Injected for tests. Defaults to global fetch. */
@@ -291,6 +308,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
   private readonly baseUrl: string;
   private readonly modelsRoot: string;
   private readonly storageRoots: ModelStorageRoots;
+  private readonly loraRoots?: ModelStorageRoots;
   private readonly timeoutMs: number;
   private readonly fetchImpl: typeof fetch;
   private readonly supervisor?: NativeEngineSupervisor;
@@ -308,6 +326,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
       writableRoot: opts.modelsRoot,
       readOnlyRoots: [],
     };
+    if (opts.loraRoots) this.loraRoots = opts.loraRoots;
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.fetchImpl = opts.fetchImpl ?? fetch;
     this.supervisor = opts.supervisor;
@@ -384,11 +403,17 @@ export class StableDiffusionCppProvider implements ImageProvider {
     const defaultDimension = imageModelDefaultSide(modelId);
     const width = input.width ?? defaultDimension;
     const height = input.height ?? defaultDimension;
-    const steps = input.steps ?? (await this.defaultSampleSteps(modelId));
+    const resolvedLoras = await this.resolveLoras(modelId, input.loras ?? []);
+    let loras = resolvedLoras.loras;
+    // A speed LoRA's recipe is what makes its few steps valid, so it wins
+    // over a style's.
+    const render =
+      loras.find((l) => l.purpose === 'speed')?.render ?? loras.find((l) => l.render)?.render;
+    const steps = input.steps ?? render?.steps ?? (await this.defaultSampleSteps(modelId));
     const seed = input.seed ?? Math.floor(Math.random() * 2_147_483_647);
     const started = Date.now();
     log.info(
-      `[sd-cpp] generate model=${modelId ?? 'default'} steps=${steps} explicitSteps=${input.steps !== undefined} size=${width}x${height}`,
+      `[sd-cpp] generate model=${modelId ?? 'default'} steps=${steps} explicitSteps=${input.steps !== undefined} size=${width}x${height}${loras.length > 0 ? ` loras=${loras.map((l) => l.id).join(',')}` : ''}`,
     );
 
     // Model selection: sd-server serves one model per process. When a
@@ -450,7 +475,11 @@ export class StableDiffusionCppProvider implements ImageProvider {
       // `seed`, `cfg_scale`, and `negative_prompt`, so caller overrides
       // actually take effect. `cfg_scale` is set per model (distilled /
       // Flux-flow models need CFG 1; others inherit the server default).
-      const cfg = modelId ? MODEL_CFG_DEFAULTS.get(modelId) : undefined;
+      const cfg = render?.cfg ?? (modelId ? MODEL_CFG_DEFAULTS.get(modelId) : undefined);
+      const settingsNotes: string[] = [...resolvedLoras.notes];
+      if (loras.length > 0) {
+        loras = await this.lorasTheEngineHas(baseUrl, loras, request.signal, settingsNotes);
+      }
       let inputImages = input.inputImages ?? [];
       // Capability gate: models whose architecture doesn't honor init
       // latents on the pinned sd-server fall back to txt2img instead of
@@ -458,7 +487,6 @@ export class StableDiffusionCppProvider implements ImageProvider {
       // is reported on meta so every caller (route, MCP tool, chat
       // bubble) can say so honestly.
       let img2imgSkippedReason: string | undefined;
-      const settingsNotes: string[] = [];
       if (inputImages.length > 0) {
         const max = capability.maxSourceImages ?? 1;
         if (!capability.editMode) {
@@ -476,18 +504,32 @@ export class StableDiffusionCppProvider implements ImageProvider {
           inputImages = inputImages.slice(0, max);
         }
       }
+      // A LoRA's trigger words or trained instruction go around the prompt
+      // here, so neither the person nor a gezel ever writes them.
+      const prompt = [
+        ...loras.map((l) => l.prompt?.prefix),
+        withoutEngineDirectives(input.prompt),
+        ...loras.map((l) => l.prompt?.suffix),
+      ]
+        .filter((part): part is string => Boolean(part?.trim()))
+        .join(' ');
       const body: Record<string, unknown> = {
-        prompt: input.prompt,
-        negative_prompt: input.negativePrompt ?? '',
+        prompt,
+        negative_prompt: withoutEngineDirectives(input.negativePrompt ?? ''),
         width,
         height,
         steps,
         seed,
         batch_size: 1,
+        // Always present: the server's `lora` field replaces any LoRA list a
+        // prompt directive slipped past the strip above.
+        lora: loras.map((l) => ({ path: `${l.id}/${l.filename}`, multiplier: l.strength })),
       };
       if (cfg !== undefined) body.cfg_scale = cfg;
-      const sampler = modelId ? MODEL_SAMPLER_DEFAULTS.get(modelId) : undefined;
+      const sampler =
+        render?.sampler ?? (modelId ? MODEL_SAMPLER_DEFAULTS.get(modelId) : undefined);
       if (sampler) body.sampler_name = sampler;
+      if (render?.scheduler) body.scheduler = render.scheduler;
       let endpoint = `${baseUrl}/sdapi/v1/txt2img`;
       if (inputImages.length > 0 && capability.editMode === 'reference') {
         // A reference editor reads the sources beside the instruction
@@ -564,6 +606,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
           durationMs: Date.now() - started,
           ...(img2imgSkippedReason ? { img2imgSkippedReason } : {}),
           ...(settingsNotes.length > 0 ? { settingsNotes } : {}),
+          ...(loras.length > 0 ? { loras: loras.map((l) => ({ id: l.id, name: l.name })) } : {}),
         },
       };
     } catch (err) {
@@ -583,6 +626,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
   async listInstalledModels(): Promise<InstalledImageModelInfo[]> {
     const entries = await listOverlayModelIds(this.storageRoots);
     const out: InstalledImageModelInfo[] = [];
+    const installedLoras = await this.listLoras();
     for (const id of entries) {
       const root = await findModelRoot(this.storageRoots, id);
       if (!root) continue;
@@ -624,6 +668,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
             ? { editMode: capability.editMode, maxSourceImages: capability.maxSourceImages }
             : {}),
           ...(capability.editOnly ? { editOnly: true } : {}),
+          ...lorasFitting(installedLoras, parsed.id),
         });
       } catch {
         /* skip malformed entries */
@@ -631,6 +676,169 @@ export class StableDiffusionCppProvider implements ImageProvider {
     }
     out.sort((a, b) => a.name.localeCompare(b.name));
     return out;
+  }
+
+  /** Installed LoRAs, from the root the engine reads; none when this engine takes none. */
+  async listLoras(): Promise<InstalledImageLoraInfo[]> {
+    if (!this.loraRoots) return [];
+    const out: InstalledImageLoraInfo[] = [];
+    for (const lora of await readInstalledLoras(this.loraRoots.writableRoot)) {
+      out.push({
+        id: lora.id,
+        name: lora.name,
+        purpose: lora.purpose,
+        ...(lora.render?.steps !== undefined ? { steps: lora.render.steps } : {}),
+        baseModels: lora.baseModels,
+        approxSizeBytes: lora.approxSizeBytes,
+        installedAt: lora.installedAt,
+      });
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /**
+   * Install one LoRA: a single safetensors file, sha256-checked like a model,
+   * beside a `manifest.json` that keeps the catalog's recipe so the engine can
+   * apply it without the catalog.
+   */
+  async *pullLora(
+    id: string,
+    spec: ImageLoraPullSpec,
+    signal?: AbortSignal,
+  ): AsyncIterable<ImageModelPullEvent> {
+    const fail = (error: string): ImageModelPullEvent[] => [
+      { type: 'error', error },
+      { type: 'done', id },
+    ];
+    // A fixed short name, not the upstream one: sd-server lists a file it
+    // cannot open past Windows' 260-character path limit, then draws without
+    // it, so a long name in a deep home made a style silently do nothing.
+    const filename = 'lora.safetensors';
+    if (!this.loraRoots) {
+      yield* fail('This image engine does not take styles or fast mode.');
+      return;
+    }
+    if (!isSafeModelId(id) || !/\.safetensors$/i.test(extractFilename(spec.downloadUrl))) {
+      yield* fail('Styles and fast mode install only as safetensors files.');
+      return;
+    }
+    const root = this.loraRoots.writableRoot;
+    const itemDir = join(root, id);
+    await mkdir(root, { recursive: true });
+    await assertModelStorePathSafe(root, itemDir);
+    await mkdir(itemDir, { recursive: true });
+    await assertModelStorePathSafe(root, itemDir);
+
+    const result = yield* this.downloadFile({
+      url: spec.downloadUrl,
+      destPath: join(itemDir, filename),
+      expectedSha256: spec.sha256,
+      approxSizeBytes: spec.approxSizeBytes,
+      writtenSoFar: 0,
+      totalAllBytes: spec.approxSizeBytes,
+      // The size is pinned beside the sha256: nothing larger is this file.
+      maxBytes: spec.approxSizeBytes + 1024 * 1024,
+      ...(signal ? { signal } : {}),
+    });
+    if (result.kind === 'error') {
+      yield* fail(result.error);
+      return;
+    }
+    await writeFile(
+      join(itemDir, 'manifest.json'),
+      JSON.stringify(
+        {
+          id,
+          name: spec.name,
+          filename,
+          approxSizeBytes: result.actualSize,
+          sha256: spec.sha256.toLowerCase(),
+          baseModels: spec.baseModels,
+          purpose: spec.purpose,
+          strength: spec.strength,
+          ...(spec.prompt ? { prompt: spec.prompt } : {}),
+          ...(spec.render ? { render: spec.render } : {}),
+          fileSha256: await hashModelPayloadFiles(itemDir),
+          installedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+    await makeSharedModelReadable(itemDir);
+    yield { type: 'progress', bytesWritten: result.writtenAll, totalBytes: spec.approxSizeBytes };
+    yield { type: 'done', id };
+  }
+
+  async deleteLora(id: string): Promise<void> {
+    if (!this.loraRoots) return;
+    const root = this.loraRoots.writableRoot;
+    await removeModelDir(resolveModelDirectory(root, id), root);
+  }
+
+  /**
+   * The LoRAs a render asked for that this engine can apply to `modelId`:
+   * installed in the root the engine reads and checked on that model. The
+   * rest are dropped with a note, never an error.
+   */
+  private async resolveLoras(
+    modelId: string | undefined,
+    requested: ReadonlyArray<{ id: string }>,
+  ): Promise<{ loras: InstalledLora[]; notes: string[] }> {
+    if (requested.length === 0) return { loras: [], notes: [] };
+    if (!this.loraRoots) {
+      return { loras: [], notes: ['This image engine takes no styles or fast mode.'] };
+    }
+    const loras: InstalledLora[] = [];
+    const notes: string[] = [];
+    for (const { id } of requested) {
+      if (loras.some((l) => l.id === id)) continue;
+      const lora = await this.readInstalledLora(id);
+      if (!lora) {
+        notes.push(`${id} is not installed here, so the picture was drawn without it.`);
+      } else if (!modelId || !lora.baseModels.includes(modelId)) {
+        notes.push(`${lora.name} does not fit ${modelId ?? 'this model'}, so it was left out.`);
+      } else {
+        loras.push(lora);
+      }
+    }
+    return { loras, notes };
+  }
+
+  /**
+   * Keep the LoRAs the running engine can see. sd-server fills its LoRA list
+   * only when it is asked for it, and answers `invalid lora path` for any LoRA
+   * named before then, so the list is read before every LoRA render.
+   */
+  private async lorasTheEngineHas(
+    baseUrl: string,
+    loras: InstalledLora[],
+    signal: AbortSignal,
+    notes: string[],
+  ): Promise<InstalledLora[]> {
+    let listed: Set<string>;
+    try {
+      const res = await this.fetchImpl(`${baseUrl}/sdapi/v1/loras`, { signal });
+      const body = res.ok ? ((await res.json()) as Array<{ path?: unknown }>) : [];
+      listed = new Set(
+        (Array.isArray(body) ? body : []).flatMap((e) =>
+          typeof e.path === 'string' ? [e.path] : [],
+        ),
+      );
+    } catch (err) {
+      if (signal.aborted) throw err;
+      listed = new Set();
+    }
+    return loras.filter((l) => {
+      if (listed.has(`${l.id}/${l.filename}`)) return true;
+      notes.push(`The image engine could not load ${l.name}, so it was left out.`);
+      return false;
+    });
+  }
+
+  private async readInstalledLora(id: string): Promise<InstalledLora | undefined> {
+    return this.loraRoots ? readInstalledLora(this.loraRoots.writableRoot, id) : undefined;
   }
 
   async *pullModel(
@@ -743,6 +951,8 @@ export class StableDiffusionCppProvider implements ImageProvider {
     approxSizeBytes: number;
     writtenSoFar: number;
     totalAllBytes: number;
+    /** Hard ceiling for a file whose size is pinned. */
+    maxBytes?: number;
     signal?: AbortSignal;
   }): AsyncGenerator<
     ImageModelPullEvent,
@@ -756,6 +966,7 @@ export class StableDiffusionCppProvider implements ImageProvider {
       destPath,
       approxSizeBytes,
       fetchImpl: this.fetchImpl,
+      ...(opts.maxBytes !== undefined ? { maxBytes: opts.maxBytes } : {}),
       ...(signal ? { signal } : {}),
     });
     let writtenThisFile = 0;
@@ -994,6 +1205,111 @@ const RECENT_ENGINE_LINES = 40;
  */
 const ENGINE_MEMORY_SHORTFALL =
   /cannot make enough memory available|out of (?:device )?memory|ErrorOutOfDeviceMemory|failed to allocate/i;
+
+/**
+ * sd-server reads `<sd_cpp_extra_args>{json}</sd_cpp_extra_args>` out of a
+ * prompt and applies the JSON as generation parameters, including LoRA and
+ * ADetailer model paths it never checks. Prompts come from gezels reading
+ * untrusted content and from other apps, so the tag never reaches the engine.
+ * Repeated until stable: removing one tag can join the pieces around it into
+ * another.
+ */
+export function withoutEngineDirectives(text: string): string {
+  const tag = /<\s*\/?\s*sd_cpp_extra_args\s*>/gi;
+  let out = text;
+  let previous: string;
+  do {
+    previous = out;
+    out = out.replace(tag, '');
+  } while (out !== previous);
+  return out;
+}
+
+/** An installed LoRA with the recipe its catalog entry gave it. */
+export interface InstalledLora {
+  id: string;
+  name: string;
+  filename: string;
+  purpose: ImageLoraPurpose;
+  strength: number;
+  baseModels: string[];
+  prompt?: ImageLoraPrompt;
+  render?: ImageLoraRender;
+  approxSizeBytes: number;
+  installedAt: string;
+}
+
+/**
+ * Read an installed LoRA's manifest, or nothing when it is malformed. The
+ * filename must be a bare `.safetensors` name: the engine resolves it inside
+ * its LoRA folder, and it also loads pickle files.
+ */
+function parseInstalledLora(id: string, raw: unknown): InstalledLora | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const m = raw as Record<string, unknown>;
+  const purpose = ImageLoraPurposeSchema.safeParse(m.purpose);
+  if (
+    typeof m.name !== 'string' ||
+    typeof m.filename !== 'string' ||
+    !/^[^/\\]+\.safetensors$/i.test(m.filename) ||
+    !purpose.success ||
+    !Array.isArray(m.baseModels)
+  ) {
+    return undefined;
+  }
+  const prompt = ImageLoraPromptSchema.safeParse(m.prompt);
+  const render = ImageLoraRenderSchema.safeParse(m.render);
+  return {
+    id,
+    name: m.name,
+    filename: m.filename,
+    purpose: purpose.data,
+    strength: typeof m.strength === 'number' && m.strength > 0 ? m.strength : 1,
+    baseModels: m.baseModels.filter((b): b is string => typeof b === 'string'),
+    ...(m.prompt !== undefined && prompt.success ? { prompt: prompt.data } : {}),
+    ...(m.render !== undefined && render.success ? { render: render.data } : {}),
+    approxSizeBytes: typeof m.approxSizeBytes === 'number' ? m.approxSizeBytes : 0,
+    installedAt: typeof m.installedAt === 'string' ? m.installedAt : '',
+  };
+}
+
+async function readInstalledLora(loraRoot: string, id: string): Promise<InstalledLora | undefined> {
+  if (!isSafeModelId(id)) return undefined;
+  try {
+    const raw = await readFile(join(loraRoot, id, 'manifest.json'), 'utf8');
+    return parseInstalledLora(id, JSON.parse(raw));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Every LoRA installed under `loraRoot`, skipping malformed ones. */
+export async function readInstalledLoras(loraRoot: string): Promise<InstalledLora[]> {
+  const ids = await listOverlayModelIds({ writableRoot: loraRoot, readOnlyRoots: [] }).catch(
+    () => [] as string[],
+  );
+  const out: InstalledLora[] = [];
+  for (const id of ids) {
+    const lora = await readInstalledLora(loraRoot, id);
+    if (lora) out.push(lora);
+  }
+  return out;
+}
+
+function lorasFitting(
+  installed: readonly InstalledImageLoraInfo[],
+  modelId: string,
+): { loras?: InstalledImageLoraSummary[] } {
+  const loras = installed
+    .filter((l) => l.baseModels.includes(modelId))
+    .map(({ id, name, purpose, steps }) => ({
+      id,
+      name,
+      purpose,
+      ...(steps !== undefined ? { steps } : {}),
+    }));
+  return loras.length > 0 ? { loras } : {};
+}
 
 function parseReferenceImages(value: unknown): { max: number } | undefined {
   const max = (value as { max?: unknown } | null)?.max;

@@ -123,6 +123,7 @@ import {
   askUserQuestionText,
   assertCraftbookGraph,
   asyncHandoffReleaseInstruction,
+  binaryDocumentWriteRefusalText,
   coerceDeliverableKind,
   composeCraftbookLaunch,
   craftbookDocFormatFromEnv,
@@ -137,6 +138,7 @@ import {
   getTaskText,
   inferDeliverableKind,
   inferScriptScope,
+  isBinaryDocumentPath,
   isOwnerStep,
   isReservedShadowArtifactPath,
   isTrustedConstrainedToolset,
@@ -224,6 +226,7 @@ import {
   normalizeDocumentOutputPath,
 } from './document-routing.js';
 import { createEntityResolvers } from './entity-resolvers.js';
+import { entryStepStart } from './entry-step-start.js';
 import { registerGitHubTools } from './github-tools.js';
 import {
   installedScriptMissHint,
@@ -2211,6 +2214,24 @@ function rasterImageWriteRefusal(path: string) {
   };
 }
 
+/**
+ * Text written to a .docx, .pptx, .xlsx or .pdf path makes a file that will not
+ * open. Gemma 4 12B wrote the JSON that `convert_document` returned into
+ * `tasks/eval/report.docx` with write_artifact, and the step's container check
+ * rejected it four times (research-to-document, 2026-10-30). The local-model
+ * write guard saw only write_file; this covers every provider and both drawers.
+ * DocBlocks runs as its own server, so its tools are named only when the
+ * session's authorized list carries them.
+ */
+function binaryDocumentWriteRefusal(path: string, drawer: 'workspace' | 'artifacts') {
+  if (!isBinaryDocumentPath(path)) return null;
+  const hasTool = (name: string) =>
+    name === 'copy_artifact_to_workspace'
+      ? toolIsAuthorizedForThisSession(name)
+      : authorizedToolNames?.has(canonicalToolName(name)) === true;
+  return errorResult(binaryDocumentWriteRefusalText(path, { drawer, hasTool }));
+}
+
 server.tool(
   'write_file',
   GEZEL_TOOL_DESCRIPTIONS.write_file,
@@ -2232,7 +2253,7 @@ server.tool(
         content: [{ type: 'text' as const, text: notice }, ...written.content],
       };
     }
-    const raster = rasterImageWriteRefusal(path);
+    const raster = rasterImageWriteRefusal(path) ?? binaryDocumentWriteRefusal(path, 'workspace');
     if (raster) return raster;
     const scoped = await taskScopedWriteRefusal(path, 'workspace');
     if (scoped) return scoped;
@@ -2395,7 +2416,7 @@ server.tool(
   async ({ path, content, create }) => {
     const stale = await staleStepMutationResult();
     if (stale) return stale;
-    const raster = rasterImageWriteRefusal(path);
+    const raster = rasterImageWriteRefusal(path) ?? binaryDocumentWriteRefusal(path, 'workspace');
     if (raster) return raster;
     const scoped = await taskScopedWriteRefusal(path, 'workspace');
     if (scoped) return scoped;
@@ -4127,7 +4148,7 @@ async function writeArtifactToolCall({
 }) {
   const stale = await staleStepMutationResult();
   if (stale) return stale;
-  const raster = rasterImageWriteRefusal(path);
+  const raster = rasterImageWriteRefusal(path) ?? binaryDocumentWriteRefusal(path, 'artifacts');
   if (raster) return raster;
   const scoped = await taskScopedWriteRefusal(path, 'artifacts');
   if (scoped) return scoped;
@@ -4867,11 +4888,26 @@ function craftbookSetupRequiredText(craftbookId: string, missing: CraftbookTools
 async function autoInstallTrustedCraftbookToolsets(
   project: string,
   requirements: CraftbookToolsetNeed[],
+  missing: readonly CraftbookToolsetNeed[],
 ): Promise<string[]> {
   const installed: string[] = [];
   const scope = { kind: 'project' as const, projectId: project };
   const roster = await api.listInstalledToolsets(scope);
+  const machineWide = new Set(
+    (
+      await api.listInstalledToolsets({ kind: 'system' }).catch(() => ({ toolsets: [] }))
+    ).toolsets.map((entry) => entry.toolsetId),
+  );
+  const missingIds = new Set(missing.map((need) => need.toolsetId));
   for (const need of requirements) {
+    // A toolset that serves the whole machine, as the DocBlocks shipped with
+    // Gezel does, already satisfies the book: a project copy beside it is a
+    // second, often older copy that joined every session in the project
+    // (1.26300.100 audit). Otherwise install a missing toolset, or refresh a
+    // project copy that has fallen behind the catalog.
+    if (machineWide.has(need.toolsetId)) continue;
+    const projectCopy = roster.toolsets.some((entry) => entry.toolsetId === need.toolsetId);
+    if (!projectCopy && !missingIds.has(need.toolsetId)) continue;
     const detail = await api.getCatalogItem('toolset', need.toolsetId, {
       ...(need.sourceId ? { source: need.sourceId } : {}),
     });
@@ -5060,6 +5096,7 @@ async function launchCraftbookTask(args: {
   const installed = await autoInstallTrustedCraftbookToolsets(
     args.project,
     declaredRequirements.filter((need) => !need.optional),
+    missing,
   );
   if (installed.length > 0) {
     projectCraftbooks = await api.listProjectCraftbooks(args.project);
@@ -5482,6 +5519,7 @@ async function runInvokeCraftbook({
     }
     const created = launch.task;
     const stepCount = created.craftbook.steps.length;
+    const start = entryStepStart(created);
     const installedText =
       launch.installed.length > 0
         ? ` Installed or upgraded project toolset${launch.installed.length === 1 ? '' : 's'}: ${launch.installed.join(', ')}.`
@@ -5512,7 +5550,7 @@ async function runInvokeCraftbook({
         },
       },
       {
-        text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). Active step ${created.activeStepId ?? '(none)'} was dispatched to the recipe-selected specialist.${installedText}${versionText}${idempotentText} Tell the person that ${taskPersonNoun(created)} is underway. ${PLAIN_WORDS_RELAY}`,
+        text: `Invoked craftbook "${craftbookId}" — task ${created.ref} (${stepCount} step(s)). ${start.text}${installedText}${versionText}${idempotentText}${start.underway ? ` Tell the person that ${taskPersonNoun(created)} is underway.` : ''} ${PLAIN_WORDS_RELAY}`,
       },
     );
   } catch (err) {
@@ -5568,6 +5606,18 @@ async function resolveCraftbookTarget(args: {
   task?: string;
   craftbook?: string;
 }): Promise<CraftbookTarget> {
+  const target = await resolveOptionalCraftbookTarget(args);
+  if (target) return target;
+  throw new Error(
+    'no craftbook target: pass `craftbook` (a local template id) or `task` (a task ref), or run inside a craftbook-editing or task session.',
+  );
+}
+
+/** {@link resolveCraftbookTarget}, but null when nothing names a target. */
+async function resolveOptionalCraftbookTarget(args: {
+  task?: string;
+  craftbook?: string;
+}): Promise<CraftbookTarget | null> {
   if (args.task) {
     const parsed = await parseRef(args.task);
     const target: CraftbookTarget = {
@@ -5595,9 +5645,7 @@ async function resolveCraftbookTarget(args: {
     const parsed = await parseRef(sessionTaskRef);
     return { kind: 'task', projectId: parsed.projectId, num: parsed.num, ref: sessionTaskRef };
   }
-  throw new Error(
-    'no craftbook target: pass `craftbook` (a local template id) or `task` (a task ref), or run inside a craftbook-editing or task session.',
-  );
+  return null;
 }
 
 function describeTarget(t: CraftbookTarget): string {
@@ -5773,13 +5821,16 @@ server.tool(
   },
   async ({ task, craftbook, create, content, format }) => {
     try {
-      if (create) {
+      // No target at all creates, as the description promises. It used to
+      // throw "no craftbook target", and gemma4-12b sent a complete new book
+      // without `create` four times (craftbook-author-gate-script, 2026-10-31).
+      const t = create ? null : await resolveOptionalCraftbookTarget({ task, craftbook });
+      if (!t) {
         const res = await api.createCraftbookDocument({ content, ...(format ? { format } : {}) });
         return cbResult(
           `Created craftbook "${res.craftbook.name}" (${res.craftbook.id}) — ${res.gatedSteps} of ${res.stepCount} steps are gated. Invoke it with invoke_craftbook({ craftbookId: "${res.craftbook.id}" }).`,
         );
       }
-      const t = await resolveCraftbookTarget({ task, craftbook });
       if (t.kind === 'task') {
         const res = await api.putTaskCraftbookDocument(t.projectId, t.num, {
           content,
@@ -10409,6 +10460,8 @@ function inferGeneratedImageSaveAs(prompt: string): string | undefined {
 
 /** Image models whose prompt guide this session's model has already been shown. */
 const promptGuidesShown = new Set<string>();
+/** Image models whose styles this session's model has already been told. */
+const imageStylesShown = new Set<string>();
 
 // ── Network + search + archive + git (Phase 2/3) ──
 
@@ -10498,6 +10551,12 @@ server.tool(
       .describe(
         'Set true when the result must be a change to `inputImages`: fail instead of drawing from the prompt alone when no installed model can edit.',
       ),
+    style: z
+      .string()
+      .optional()
+      .describe(
+        'A look to draw in, by name. Use only when the person asked for one; the result names the styles this model has. With a style, leave medium words such as "photo" out of the prompt: they work against it.',
+      ),
     saveAs: z
       .string()
       .optional()
@@ -10523,6 +10582,7 @@ server.tool(
           : {}),
         ...(args.strength !== undefined ? { strength: args.strength } : {}),
         ...(args.requireEdit ? { requireEdit: true } : {}),
+        ...(args.style ? { style: args.style } : {}),
         ...(saveAs ? { saveAs } : {}),
         capStepsAtRecommended: true,
         // The daemon holds the size to about a megapixel only when a local
@@ -10542,7 +10602,7 @@ server.tool(
         // Playwright `browser_screenshot` tools use.
         inline: true,
       });
-      const { meta, artifactPath, workspacePath, b64Png, promptGuide } = res;
+      const { meta, artifactPath, workspacePath, b64Png, promptGuide, styles } = res;
       // Surface the path + remind the model that the user already sees
       // the image inline (the bridge attaches a thumbnail to this same
       // tool result). Without the explicit "do not embed" line, models
@@ -10593,7 +10653,15 @@ server.tool(
           ? ` For your next prompt: ${promptGuide}`
           : '';
       if (promptGuide) promptGuidesShown.add(meta.model);
-      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${settingsLine}${skippedLine}${guideLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
+      // After "ms)." — the follow-up threading parses "image with <model> (seed".
+      const appliedStyle = meta.loras?.find((l) => styles?.some((s) => s.id === l.id));
+      const styleLine = appliedStyle ? ` Style: ${appliedStyle.name}.` : '';
+      const stylesLine =
+        styles?.length && !imageStylesShown.has(meta.model)
+          ? ` Styles this model has: ${styles.map((s) => s.name).join(', ')}.`
+          : '';
+      if (styles?.length) imageStylesShown.add(meta.model);
+      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${styleLine}${settingsLine}${skippedLine}${guideLine}${stylesLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];

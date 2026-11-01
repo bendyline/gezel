@@ -1,3 +1,4 @@
+import { activeStepWithoutOwner } from '../../task-step-routing.ts';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../../types.ts';
 import { findProjectIdByName, workspaceFromClient } from '../shared.ts';
 import {
@@ -14,6 +15,7 @@ import {
   noDeliverableWritten,
   parseJsonRecords,
   progressBytes,
+  runningTaskProgress,
   sendWorkerKickoff,
   unfinishedTaskFailure,
 } from './helpers.ts';
@@ -341,6 +343,7 @@ async function assessRecipe(
           unfinishedTaskFailure({
             ref: found.task.ref,
             status: found.task.status,
+            unownedStep: activeStepWithoutOwner(found.task),
             source: `from craftbook "${book.craftbook.id}"`,
           }),
         );
@@ -423,6 +426,9 @@ async function assessRecipe(
       book ? JSON.stringify(book.craftbook.steps.map((step) => step.id)) : null,
     ),
     milestones: completedTaskSteps(found?.task),
+    taskProgress: runningTaskProgress(found?.task),
+    // The Q1 pass is chat work done before the recipe exists, never a step's.
+    executingTask: book && q1Failures.length === 0 ? found : null,
     deliverableMissing: noDeliverableWritten(q1Report, q1Clean, q2Report, q2Clean),
     repairPath: 'craftbook: supplier intake recipe',
     repairDirective: [

@@ -34,7 +34,17 @@ export type DesktopImageAccess = 'granted' | 'needs-approval' | 'no-engine' | 'u
 export interface DesktopEmbeddingImages
   extends Pick<
     ImagesClient,
-    'models' | 'ensure' | 'ensureEvents' | 'cancelEnsure' | 'remove' | 'generate'
+    | 'models'
+    | 'ensure'
+    | 'ensureEvents'
+    | 'cancelEnsure'
+    | 'remove'
+    | 'generate'
+    | 'styles'
+    | 'ensureStyle'
+    | 'styleEnsureEvents'
+    | 'cancelStyleEnsure'
+    | 'removeStyle'
   > {
   access(opts?: { signal?: AbortSignal }): Promise<DesktopImageAccess>;
   /**
@@ -139,6 +149,11 @@ export async function connectDesktopEmbedding(
   const client = gezel.openai.images;
   const imageSurface: DesktopEmbeddingImages = {
     models: (opts) => client.models(opts),
+    styles: (opts) => client.styles(opts),
+    ensureStyle: (style, opts) => client.ensureStyle(style, opts),
+    styleEnsureEvents: (jobId, opts) => client.styleEnsureEvents(jobId, opts),
+    cancelStyleEnsure: (jobId, opts) => client.cancelStyleEnsure(jobId, opts),
+    removeStyle: (style, opts) => client.removeStyle(style, opts),
     ensure: (model, opts) => client.ensure(model, opts),
     ensureEvents: (jobId, opts) => client.ensureEvents(jobId, opts),
     cancelEnsure: (jobId, opts) => client.cancelEnsure(jobId, opts),

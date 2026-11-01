@@ -138,6 +138,7 @@ export function buildEngineApp(
         current: () => ctx.imageProvider.localProvider(),
         reset: () => ctx.imageProvider.reset(),
         pulls: ctx.imagePulls,
+        loraPulls: ctx.imageLoraPulls,
       },
     }),
   );

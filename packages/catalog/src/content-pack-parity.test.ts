@@ -30,6 +30,7 @@ const KINDS: CatalogKind[] = [
   'connector-type',
   'chat-model',
   'image-model',
+  'image-lora',
   'video-model',
   'knowledge-catalog',
 ];

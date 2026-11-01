@@ -68,7 +68,7 @@ describe('fitness coach recap', () => {
       (await resolvePageTools(catalog, await store.getProject(project.id)))?.tools.map(
         (t) => t.name,
       ),
-    ).toEqual(['page_log_workout', 'request_recap']);
+    ).toEqual(['page_log_workout', 'request_recap', 'page_set_target']);
 
     const chat = new ChatManager({
       store,

@@ -23,7 +23,7 @@ export function SocialModeToggle({ describe = true }: { describe?: boolean }) {
     <>
       {describe && (
         <p className="muted" style={{ marginTop: 0 }}>
-          Gezellen show their own character in how they talk, their growth is on display, and
+          Crew members show their own character in how they talk, their growth is on display, and
           opening a chat shows what is waiting for you.
         </p>
       )}

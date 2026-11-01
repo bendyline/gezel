@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { mergeImageSizeSettings, parseImageSettingsFromText } from './image-cues.js';
+import {
+  imageSizeSettingsFrom,
+  mergeImageSizeSettings,
+  parseImageSettingsFromText,
+  withoutImageSizeKeys,
+} from './image-cues.js';
 
 const parse = (text: string) => {
   const { settings, prompt } = parseImageSettingsFromText(text);
@@ -103,5 +108,17 @@ describe('mergeImageSizeSettings', () => {
         undefined,
       ),
     ).toEqual({ aspectRatio: '16:9', quality: 'high' });
+  });
+
+  it('lets an explicit "No style" replace a style below it', () => {
+    expect(mergeImageSizeSettings({ style: 'anime' }, { aspectRatio: '1:1' })).toEqual({
+      style: 'anime',
+      aspectRatio: '1:1',
+    });
+    expect(mergeImageSizeSettings({ style: 'anime' }, { style: '' })).toEqual({ style: '' });
+    expect(withoutImageSizeKeys({ style: 'anime', negativePrompt: 'blur' })).toEqual({
+      negativePrompt: 'blur',
+    });
+    expect(imageSizeSettingsFrom({ style: ' pixel art ' })).toEqual({ style: 'pixel art' });
   });
 });

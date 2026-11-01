@@ -11,6 +11,7 @@ import {
   matchProjectTypeForBrief,
   projectTypesMentionedByBrief,
   rankWorkOptions,
+  resolveSecurityPolicy,
   scoreCandidate,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -29,6 +30,7 @@ import {
 import { type ProjectGitStatusReader, listProjectCraftbookOffer } from '../craftbook/applicable.js';
 import { rankCraftbookSuggestions, suggestCraftbooks } from '../craftbook/suggest.js';
 import type { Store } from '../fs/store.js';
+import { PACKAGE_SCRIPTS_SETTING_LABEL } from '../tasks/package-commands-off.js';
 
 /**
  * Gather the candidates of every kind for one request and rank them with
@@ -89,6 +91,13 @@ const VAGUE_MAX_WORDS = 8;
 const VAGUE_TOP_SCORE = 0.45;
 const MAX_CRAFTBOOKS = 3;
 /**
+ * How deep to rank before dropping the books a message cannot start. A fix to
+ * existing code may start only a code book, and with six ranked the code
+ * shelf was often crowded out by books about the code's subject: a CSV export
+ * bug ranked six spreadsheet and data books first (2026-10-30).
+ */
+const RANKED_POOL = 40;
+/**
  * A routing turn waits this long for an embedder that is still loading, then
  * ranks on words. A cached model loads in about a second; a first download
  * held the first reply about 45 s (S1, 2026-10-17).
@@ -146,17 +155,31 @@ export async function suggestWork(
       ...(deps.git ? { git: deps.git } : {}),
     },
   ).catch(() => null);
-  const setupFor = (craftbookId: string): string[] =>
-    (offer?.missingToolsets[craftbookId] ?? []).map((need) => need.toolsetId);
+  // A book that proves its work by running project commands pauses on that
+  // step while package scripts are off, so the option says so up front.
+  const runsCommands = new Set<string>();
+  const setupFor = (craftbookId: string): string[] => [
+    ...(offer?.missingToolsets[craftbookId] ?? []).map((need) => need.toolsetId),
+    ...(runsCommands.has(craftbookId) ? [`the "${PACKAGE_SCRIPTS_SETTING_LABEL}" setting`] : []),
+  ];
   const paramSchemas = new Map<string, unknown>();
   const softwareBooks = new Set<string>();
   for (const item of offer?.items ?? []) {
     if (item.manifest.kind === 'craftbook-template') {
+      if (item.manifest.commands?.some((need) => need.optional !== true)) {
+        runsCommands.add(item.manifest.id);
+      }
       paramSchemas.set(item.manifest.id, item.manifest.paramSchema);
       if (interestAreasForCraftbook(item.manifest).includes('software')) {
         softwareBooks.add(item.manifest.id);
       }
     }
+  }
+  if (
+    runsCommands.size > 0 &&
+    resolveSecurityPolicy(await deps.store.readConfig()).allowPackageScriptExecution
+  ) {
+    runsCommands.clear();
   }
   // Work on code that already exists is the developer's, or a code recipe's:
   // never a new project, a project type, or a recipe matched on what the code
@@ -298,8 +321,9 @@ async function rankedCraftbooks(
     {
       projectId: input.projectId,
       query: request,
-      topK: MAX_CRAFTBOOKS * 2,
+      topK: RANKED_POOL,
       coldEmbedderBudgetMs: COLD_EMBEDDER_BUDGET_MS,
+      passages: true,
     },
   ).catch(() => []);
   // Unlaunchable books leave before the trailing cut, so the best book a

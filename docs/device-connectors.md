@@ -134,8 +134,15 @@ a camera's keyframes reach the person's own app and sessions on an on-device
 model. A cloud-model session gets a local description instead — in
 `read_image_as_base64` (403 with a pointer to the record), in chat image refs
 (`resolveTurnImages`' `withholdPixels`), and in `look_at_camera` — unless the
-binding's `allowCloudModels` is on. Session tokens can't reach `/preview`,
-`/captures…`, bind, sync, patch, or unbind (`scope-guard.ts`).
+binding's `allowCloudModels` is on. Every route that opens an artifact image
+for a caller asks `callerMaySeeFilePixels` ([http/caller-location.ts](../packages/service/src/http/caller-location.ts))
+on the real file: copy-to-workspace, `render_image` layers, and the input
+images of `generate_image` and `generate_video`, because a render, an edit or
+a first frame carries the keyframe's pixels. A cloud image engine never
+receives a keyframe, whoever asks (`cameraKeepsFileLocal`); base64 inputs
+carry no path, so only the routes that hand out a keyframe's bytes guard them.
+A new route that opens artifact images joins this list. Session tokens can't
+reach `/preview`, `/captures…`, bind, sync, patch, or unbind (`scope-guard.ts`).
 
 ## Adding another device family
 

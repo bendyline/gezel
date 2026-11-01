@@ -215,7 +215,7 @@ export function ProjectChat({
   if (gezels.length === 0) {
     return (
       <p className="muted project-chat-empty">
-        No gezellen available to chat with yet. Create one from the Gezellen tab.
+        No crew members available to chat with yet. Create one from the Crew tab.
       </p>
     );
   }

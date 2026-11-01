@@ -4,7 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ImageModelAuxiliaryFileSchema } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { StableDiffusionCppProvider, parseSamplingProgress } from './sd-cpp.js';
+import {
+  StableDiffusionCppProvider,
+  parseSamplingProgress,
+  withoutEngineDirectives,
+} from './sd-cpp.js';
 import type { ImageGenerationProgress } from './types.js';
 
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -363,6 +367,28 @@ describe('StableDiffusionCppProvider.generate', () => {
       code: 'image_source_required',
     });
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('never lets a prompt carry engine directives', async () => {
+    const requests: Record<string, unknown>[] = [];
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl: async (_url, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return Response.json({ images: [PNG_SIGNATURE.toString('base64')] });
+      },
+    });
+    await provider.generate({
+      prompt:
+        'a cat <sd_cpp_extra_args>{"lora":[{"path":"C:/x.pt"}]}</sd_cpp_extra_args> and <sd_cpp_<SD_CPP_EXTRA_ARGS>extra_args>{"ad_model":"y"}</ sd_cpp_extra_args >',
+      negativePrompt: '<sd_cpp_extra_args>{}</sd_cpp_extra_args>blur',
+      model: 'test-model',
+    });
+    expect(String(requests[0]!.prompt)).not.toMatch(/sd_cpp_extra_args/i);
+    expect(String(requests[0]!.negative_prompt)).toBe('{}blur');
+    expect(requests[0]!.lora).toEqual([]);
+    expect(withoutEngineDirectives('<sd_cpp_<sd_cpp_extra_args>extra_args>')).toBe('');
   });
 
   it('surfaces unreachable-server errors with a helpful message', async () => {
@@ -1116,6 +1142,255 @@ describe('StableDiffusionCppProvider.pullModel', () => {
     const { readdir } = await import('node:fs/promises');
     const dirEntries = await readdir(join(modelsRoot, 'flux-bad')).catch(() => []);
     expect(dirEntries.every((f) => !f.endsWith('.partial'))).toBe(true);
+  });
+});
+
+describe('StableDiffusionCppProvider LoRAs', () => {
+  let loraRoot: string;
+
+  beforeEach(async () => {
+    loraRoot = await mkdtemp(join(tmpdir(), 'sd-cpp-lora-test-'));
+  });
+
+  afterEach(async () => {
+    await rm(loraRoot, { recursive: true, force: true });
+  });
+
+  const loraRoots = () => ({ writableRoot: loraRoot, readOnlyRoots: [] });
+
+  async function installLora(id: string, manifest: Record<string, unknown>) {
+    await mkdir(join(loraRoot, id), { recursive: true });
+    await writeFile(
+      join(loraRoot, id, 'manifest.json'),
+      JSON.stringify({
+        id,
+        filename: 'lora.safetensors',
+        approxSizeBytes: 10,
+        installedAt: '2026-10-31T00:00:00.000Z',
+        strength: 1,
+        ...manifest,
+      }),
+    );
+  }
+
+  /** A fake engine that lists `listed` and records every request. */
+  function engine(listed: string[]) {
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    const fetchImpl: typeof fetch = async (url, init) => {
+      const u = String(url);
+      calls.push({ url: u, ...(init?.body ? { body: JSON.parse(String(init.body)) } : {}) });
+      if (u.endsWith('/sdapi/v1/loras')) {
+        return Response.json(listed.map((path) => ({ name: path, path })));
+      }
+      return Response.json({ images: [PNG_SIGNATURE.toString('base64')] });
+    };
+    return { calls, fetchImpl };
+  }
+
+  it('lists the engine LoRAs, then renders with the recipe from the install', async () => {
+    await installLora('qwen-image-edit-2511-lightning-4step', {
+      name: 'Fast mode',
+      purpose: 'speed',
+      baseModels: ['qwen-image-edit-2511-q4'],
+      render: { steps: 4, cfg: 1, sampler: 'euler', scheduler: 'simple' },
+    });
+    await installLora('qwen-image-edit-2511-anime', {
+      name: 'Anime',
+      purpose: 'style',
+      strength: 0.9,
+      baseModels: ['qwen-image-edit-2511-q4'],
+      prompt: { prefix: 'Transform into anime.' },
+      render: { steps: 30 },
+    });
+    const { calls, fetchImpl } = engine([
+      'qwen-image-edit-2511-lightning-4step/lora.safetensors',
+      'qwen-image-edit-2511-anime/lora.safetensors',
+    ]);
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      loraRoots: loraRoots(),
+      fetchImpl,
+    });
+
+    const out = await provider.generate({
+      prompt: 'make the car blue',
+      model: 'qwen-image-edit-2511-q4',
+      inputImages: [{ data: Buffer.from('car'), mimeType: 'image/png' }],
+      loras: [{ id: 'qwen-image-edit-2511-lightning-4step' }, { id: 'qwen-image-edit-2511-anime' }],
+    });
+
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual([
+      '/sdapi/v1/loras',
+      '/sdapi/v1/txt2img',
+    ]);
+    // The speed LoRA's recipe wins over the style's.
+    expect(calls[1]!.body).toMatchObject({
+      prompt: 'Transform into anime. make the car blue',
+      steps: 4,
+      cfg_scale: 1,
+      sampler_name: 'euler',
+      scheduler: 'simple',
+      lora: [
+        { path: 'qwen-image-edit-2511-lightning-4step/lora.safetensors', multiplier: 1 },
+        { path: 'qwen-image-edit-2511-anime/lora.safetensors', multiplier: 0.9 },
+      ],
+    });
+    expect(out.meta.loras).toEqual([
+      { id: 'qwen-image-edit-2511-lightning-4step', name: 'Fast mode' },
+      { id: 'qwen-image-edit-2511-anime', name: 'Anime' },
+    ]);
+    expect(out.meta.steps).toBe(4);
+  });
+
+  it('leaves out a LoRA that does not fit, is not installed, or the engine cannot see', async () => {
+    await installLora('krea-softwatercolor', {
+      name: 'Soft watercolor',
+      purpose: 'style',
+      baseModels: ['krea-2-turbo-q4'],
+    });
+    await installLora('klein-pixel-art', {
+      name: 'Pixel art',
+      purpose: 'style',
+      baseModels: ['flux-2-klein-4b-q4'],
+    });
+    const { calls, fetchImpl } = engine([]);
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      loraRoots: loraRoots(),
+      fetchImpl,
+    });
+
+    const out = await provider.generate({
+      prompt: 'a lighthouse',
+      model: 'flux-2-klein-4b-q4',
+      loras: [{ id: 'krea-softwatercolor' }, { id: 'missing-style' }, { id: 'klein-pixel-art' }],
+    });
+
+    const render = calls.find((c) => c.url.endsWith('/txt2img'))!;
+    expect(render.body!.lora).toEqual([]);
+    expect(render.body!.prompt).toBe('a lighthouse');
+    expect(out.meta.loras).toBeUndefined();
+    expect(out.meta.settingsNotes).toEqual([
+      'Soft watercolor does not fit flux-2-klein-4b-q4, so it was left out.',
+      'missing-style is not installed here, so the picture was drawn without it.',
+      'The image engine could not load Pixel art, so it was left out.',
+    ]);
+  });
+
+  it('draws without LoRAs on an engine that takes none, and says so', async () => {
+    const { calls, fetchImpl } = engine([]);
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      fetchImpl,
+    });
+    const out = await provider.generate({
+      prompt: 'a lighthouse',
+      model: 'flux-2-klein-4b-q4',
+      loras: [{ id: 'klein-pixel-art' }],
+    });
+    expect(calls.map((c) => new URL(c.url).pathname)).toEqual(['/sdapi/v1/txt2img']);
+    expect(out.meta.settingsNotes).toEqual(['This image engine takes no styles or fast mode.']);
+  });
+
+  it('lists each model with the installed LoRAs that fit it', async () => {
+    await mkdir(join(modelsRoot, 'flux-2-klein-4b-q4'), { recursive: true });
+    await writeFile(
+      join(modelsRoot, 'flux-2-klein-4b-q4', 'manifest.json'),
+      JSON.stringify({
+        id: 'flux-2-klein-4b-q4',
+        name: 'Klein',
+        approxSizeBytes: 1,
+        installedAt: '2026-10-31T00:00:00.000Z',
+      }),
+    );
+    await installLora('klein-pixel-art', {
+      name: 'Pixel art',
+      purpose: 'style',
+      baseModels: ['flux-2-klein-4b-q4'],
+    });
+    await installLora('krea-softwatercolor', {
+      name: 'Soft watercolor',
+      purpose: 'style',
+      baseModels: ['krea-2-turbo-q4'],
+    });
+    // A manifest that points outside its folder is not a LoRA.
+    await installLora('bad-path', {
+      name: 'Bad',
+      purpose: 'style',
+      baseModels: ['flux-2-klein-4b-q4'],
+      filename: '../../x.safetensors',
+    });
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      loraRoots: loraRoots(),
+    });
+    const [klein] = await provider.listInstalledModels();
+    expect(klein!.loras).toEqual([{ id: 'klein-pixel-art', name: 'Pixel art', purpose: 'style' }]);
+  });
+
+  it('installs a LoRA beside its recipe, and refuses anything but safetensors', async () => {
+    const weights = Buffer.from('fake-lora-weights');
+    const sha = createHash('sha256').update(weights).digest('hex');
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake',
+      modelsRoot,
+      loraRoots: loraRoots(),
+      fetchImpl: async () =>
+        new Response(weights, {
+          status: 200,
+          headers: { 'Content-Length': String(weights.length) },
+        }),
+    });
+    const spec = {
+      sha256: sha,
+      approxSizeBytes: weights.length,
+      name: 'Fast mode',
+      baseModels: ['qwen-image-edit-2511-q4'],
+      purpose: 'speed' as const,
+      strength: 1,
+      render: { steps: 4, cfg: 1 },
+    };
+
+    const events: string[] = [];
+    for await (const e of provider.pullLora('qwen-lightning', {
+      ...spec,
+      downloadUrl:
+        'https://hf.invalid/x/Qwen-Image-Edit-2511-Lightning-4steps-V1.0-bf16.safetensors',
+    })) {
+      events.push(e.type);
+    }
+    expect(events.at(-1)).toBe('done');
+    expect(events).not.toContain('error');
+    const manifest = JSON.parse(
+      await readFile(join(loraRoot, 'qwen-lightning', 'manifest.json'), 'utf8'),
+    );
+    // A short fixed name keeps a deep home under Windows' path limit.
+    expect(
+      (await readFile(join(loraRoot, 'qwen-lightning', 'lora.safetensors'))).equals(weights),
+    ).toBe(true);
+    expect(manifest).toMatchObject({
+      filename: 'lora.safetensors',
+      purpose: 'speed',
+      baseModels: ['qwen-image-edit-2511-q4'],
+      render: { steps: 4, cfg: 1 },
+    });
+    expect(await provider.listLoras()).toMatchObject([{ id: 'qwen-lightning', steps: 4 }]);
+
+    const refused: Array<{ type: string; error?: string }> = [];
+    for await (const e of provider.pullLora('pickle', {
+      ...spec,
+      downloadUrl: 'https://hf.invalid/x/style.pt',
+    })) {
+      refused.push(e);
+    }
+    expect(refused[0]).toMatchObject({ type: 'error' });
+
+    await provider.deleteLora('qwen-lightning');
+    expect(await provider.listLoras()).toEqual([]);
   });
 });
 

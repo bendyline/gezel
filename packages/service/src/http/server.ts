@@ -727,6 +727,7 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
         current: () => ctx.imageProvider.localProvider(),
         reset: () => ctx.imageProvider.reset(),
         pulls: ctx.imagePulls,
+        loraPulls: ctx.imageLoraPulls,
       },
     }),
   );

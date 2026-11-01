@@ -98,7 +98,7 @@ export function ProjectCrewRoster({
       id="project-about-crew"
       className="project-about-anchor project-crew-settings"
       title="Crew"
-      hint="The gezellen on this project. Anyone you give a task or a conversation here joins automatically."
+      hint="The crew members on this project. Anyone you give a task or a conversation here joins automatically."
       actions={
         onAddGezel &&
         onCreateTemplateGezel && (
@@ -142,7 +142,7 @@ export function ProjectCrewRoster({
         </ul>
       ) : (
         <p className="muted small project-crew-empty">
-          No gezellen are assigned to this project yet.
+          No crew members are assigned to this project yet.
         </p>
       )}
       {children}

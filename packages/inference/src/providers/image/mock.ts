@@ -10,9 +10,11 @@ import type {
   ImageEngineHealth,
   ImageGenerationInput,
   ImageGenerationOutput,
+  ImageLoraPullSpec,
   ImageModelPullEvent,
   ImageModelPullSpec,
   ImageProvider,
+  InstalledImageLoraInfo,
   InstalledImageModelInfo,
 } from './types.js';
 
@@ -20,25 +22,37 @@ export class MockImageProvider implements ImageProvider {
   readonly name = 'mock';
 
   private readonly installed = new Map<string, InstalledImageModelInfo>();
+  private readonly loras = new Map<string, InstalledImageLoraInfo>();
   /** Internal counter driving deterministic seed generation on "random" seeds. */
   private nextSeed = 1;
 
-  constructor(opts: { preinstalled?: InstalledImageModelInfo[] } = {}) {
+  constructor(
+    opts: { preinstalled?: InstalledImageModelInfo[]; loras?: InstalledImageLoraInfo[] } = {},
+  ) {
     for (const m of opts.preinstalled ?? []) {
       this.installed.set(m.id, m);
     }
+    for (const l of opts.loras ?? []) this.loras.set(l.id, l);
   }
 
   /** Number of input images received on the most recent generate(). Tests use this. */
   lastInputImageCount = 0;
+  /** The most recent generate() input. Tests use this. */
+  lastInput: ImageGenerationInput | undefined;
 
   async generate(input: ImageGenerationInput): Promise<ImageGenerationOutput> {
     this.lastInputImageCount = input.inputImages?.length ?? 0;
+    this.lastInput = input;
     const width = clamp(input.width ?? 16, 1, 512);
     const height = clamp(input.height ?? 16, 1, 512);
     const steps = clamp(input.steps ?? 1, 1, 100);
     const seed = input.seed ?? this.nextSeed++;
     const model = input.model ?? [...this.installed.keys()][0] ?? 'mock-model';
+    // Applied as the real engine applies them: installed, and fitting the model.
+    const loras = (input.loras ?? []).flatMap(({ id }) => {
+      const lora = this.loras.get(id);
+      return lora?.baseModels.includes(model) ? [{ id: lora.id, name: lora.name }] : [];
+    });
     const rgba = solidFill(width, height, colourForPrompt(input.prompt));
     const png = encodePng(rgba, width, height);
     return {
@@ -50,12 +64,49 @@ export class MockImageProvider implements ImageProvider {
         widthPx: width,
         heightPx: height,
         durationMs: 1,
+        ...(loras.length > 0 ? { loras } : {}),
       },
     };
   }
 
   async listInstalledModels(): Promise<InstalledImageModelInfo[]> {
-    return [...this.installed.values()];
+    return [...this.installed.values()].map((m) => {
+      const loras = [...this.loras.values()]
+        .filter((l) => l.baseModels.includes(m.id))
+        .map(({ id, name, purpose, steps }) => ({
+          id,
+          name,
+          purpose,
+          ...(steps !== undefined ? { steps } : {}),
+        }));
+      return loras.length > 0 ? { ...m, loras } : m;
+    });
+  }
+
+  async listLoras(): Promise<InstalledImageLoraInfo[]> {
+    return [...this.loras.values()];
+  }
+
+  async *pullLora(id: string, spec: ImageLoraPullSpec): AsyncIterable<ImageModelPullEvent> {
+    yield {
+      type: 'progress',
+      bytesWritten: spec.approxSizeBytes,
+      totalBytes: spec.approxSizeBytes,
+    };
+    this.loras.set(id, {
+      id,
+      name: spec.name,
+      purpose: spec.purpose,
+      ...(spec.render?.steps !== undefined ? { steps: spec.render.steps } : {}),
+      baseModels: spec.baseModels,
+      approxSizeBytes: spec.approxSizeBytes,
+      installedAt: new Date().toISOString(),
+    });
+    yield { type: 'done', id };
+  }
+
+  async deleteLora(id: string): Promise<void> {
+    this.loras.delete(id);
   }
 
   async *pullModel(

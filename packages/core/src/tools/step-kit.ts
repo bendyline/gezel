@@ -151,6 +151,16 @@ function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>, path: string | n
       case 'imageEvidence':
         out.add('read_image_as_base64');
         break;
+      // The gate counts only these runners' receipts. The code books name the
+      // runner solely in "if it is not among your tools", which reads as a
+      // fallback, so without this a repair step could never pass on a local
+      // model and told the person to turn on a setting that was already on.
+      // The security policy still withholds the runner when package scripts
+      // are off: the kit only narrows the roster.
+      case 'commandEvidence':
+        if (check.script) out.add('run_package_script');
+        if (check.bin) out.add('run_npx');
+        break;
       case 'corpusCoverage':
         out.add('search');
         out.add('list_artifacts');

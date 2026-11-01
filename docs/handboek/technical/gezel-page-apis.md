@@ -104,6 +104,124 @@ For standalone demos, the website publisher, local preview server, or offline ex
 
 Pages have no daemon credentials, Node filesystem, unrestricted SQL connection, or arbitrary-path write API. Imports are a narrow exception for explicitly declared destinations. Stay on this shared surface.
 
+## Fullscreen layout and embedded chat
+
+Read `gezel.ui.layout` at boot and subscribe with `gezel.ui.onLayout(callback)`.
+The snapshot contains `fullscreen`, `width`, and `height` in CSS pixels.
+In the Output pane, fullscreen means the page is maximized inside the Gezel
+window's main workspace. The project sidebar stays available on its configured
+side, expanded or collapsed as the user left it. Each project remembers whether
+its page is closed, open, or fullscreen when revisited, including after a restart.
+It does not mean that the operating system window is maximized. The
+same page stays mounted across maximize/restore; game state and drafts survive.
+The initial fullscreen value is false until the host handshake arrives.
+Browser, serve, and demo pages follow the browser Fullscreen API instead.
+The root also receives `data-gezel-fullscreen="true"` or `"false"` for CSS.
+
+Mount native chat with `gezel.ui.components.chat(element, options)`. Give the
+mount an explicit height. The handle has `element`, `update(partialOptions)`,
+`destroy()`, and `ready` (a promise that rejects when the host cannot mount it).
+Keep the mount in the document and hide it with CSS to preserve its current
+conversation. Destroy it when permanently discarding it.
+
+```js
+const chat = gezel.ui.components.chat('#game-chat', {
+  gezelRole: 'Opponent', // resolve a role from this project's crew
+  lockRecipient: true,
+  showAddress: false,
+  showThreads: false,
+  placeholder: 'Ask about a move…',
+});
+const arrange = ({ fullscreen, width }) => {
+  document.querySelector('#game').classList.toggle('with-chat', fullscreen && width >= 800);
+};
+arrange(gezel.ui.layout);
+const stopLayout = gezel.ui.onLayout(arrange);
+window.addEventListener('pagehide', () => { stopLayout(); chat.destroy(); });
+```
+
+```css
+#game { display: grid; min-height: 0; }
+#game-chat { display: none; height: 70vh; min-width: 0; }
+#game.with-chat { grid-template-columns: minmax(0, 1fr) minmax(300px, 360px); gap: 16px; }
+#game.with-chat #game-chat { display: block; }
+```
+
+Use `gezelId` for an exact crew member, `gezelRole` for a role, or omit both to
+use the project's crew lead (then its first member). An unavailable requested
+recipient displays an error rather than silently choosing someone else.
+`lockRecipient` defaults to true and disables recipient switching and mention
+fan-out. `showAddress` and `showThreads` default to true. `variant: 'composer'`
+omits the timeline; the default `'chat'` shows that recipient's project history.
+`attachments`, `dictation`, `promptAssist`, and `expand` default to false and
+can be enabled individually, subject to the host's capabilities.
+
+Chat currently requires the embedded Gezel host. Browser previews, app-serve
+visitors, and standalone demos show an explicit unavailable message; demos
+never call a model. The parent owns the native chat and composer, including
+their theme, accessibility, sessions, and ordinary permission prompts. Page
+scripts receive no transcript, input text, credentials, or programmatic send
+method. Options change presentation, not the gezel's tool authority.
+
+The slot follows layout, scrolling, and hidden containers. Keep it rectangular
+and untransformed; the host clips it to the page viewport. Page CSS cannot
+restyle chat internals, and page popovers cannot cover native chat: hide the
+slot while showing a page dialog that overlaps it. At most four slots can be
+mounted per page. Removing a slot from the document destroys it; create a new
+handle if you need to mount it again.
+
+## Building a full-page workspace
+
+`gezel.ui.components.appLayout(main, options)` wraps an existing content element
+without replacing its DOM. In fullscreen it opens a companion beside the content;
+below 900 CSS pixels the conversation stacks beneath it. Restoring the pane,
+hiding the conversation, or opening a native page dialog retains the conversation
+and its draft. The component hides the native slot while a visible page dialog is
+open, since iframe content cannot cover host-owned chat.
+
+```js
+const workspace = gezel.ui.components.appLayout('main', {
+  title: 'Practice with your tutor',
+  description: 'Choose a scene, then talk here.',
+  chat: { showAddress: false, lockRecipient: true, dictation: true },
+});
+```
+
+`chat: false` gives a file-only application room to expand without recruiting a
+companion. Multi-person crews can use `lockRecipient: false, showAddress: true`.
+The page still owns its content, typography choices, and domain layout. Feature
+detect `appLayout` when supporting older hosts. Retain the handle and call
+`destroy()` if discarding the workspace; it also cleans up on `pagehide`.
+
+Use `actionForm` for a compact, accessible form that invokes one declared page
+tool. It validates required fields, numbers and dates; serializes one save at a
+time; and retains entered values after a failure. Fields can be text, number,
+date, URL, multiline text, or a selection. `mapInput` can map a simple form into
+the tool's input schema. It does not change the page's authority.
+
+```js
+const form = gezel.ui.components.actionForm('#add-guest', {
+  title: 'Add a guest', tool: 'page_add_guest',
+  fields: [
+    { name: 'name', label: 'Guest or household', required: true },
+    { name: 'party', label: 'Party size', type: 'number', min: 1, step: 1, required: true },
+  ],
+  onSaved: () => refreshGuests(),
+});
+```
+
+Give the page its own alias when a model already uses the action: `page_add_guest`
+and `add_guest` share the same script and bindings, while only the former appears
+in `pages.tools`. Workspace policy, tool schema validation, and script
+permissions still apply. Forms do not write files directly. Standalone demos
+provide in-memory handlers for the same aliases.
+
+`collectionFilter('#search', { container: '#guests', selector: 'li', label:
+'Find a guest' })` adds accent-insensitive search over rendered records. It
+updates when the collection changes and preserves existing buttons and controls.
+It searches only those rendered items; describe pagination or truncation honestly.
+Keep the handle and destroy it with the view.
+
 ## File cards and adding files
 
 The host injects `gezel.ui.components` with the page API. It works with ordinary HTML and has no React dependency. Pass a selector or an element; the component appends its own custom element with a shadow root. Retain its handle and call `destroy()` before discarding it. `update(partialOptions)` updates an existing instance. File adder handles also provide `refresh()` to recheck destination availability after a settings change.

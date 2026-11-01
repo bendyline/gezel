@@ -8,12 +8,15 @@ import {
   type AppImageModel,
   AppImageModelListSchema,
   type AppImagePhase,
+  type AppImageStyle,
+  AppImageStyleListSchema,
 } from '@bendyline/gezel-client/app-models';
 import { GezelSdkError, errorFromResponse } from './errors.js';
 import { readSseDataChunks } from './sse.js';
 import type { RequestOptions } from './types.js';
 
 export type ImageModel = AppImageModel;
+export type ImageStyle = AppImageStyle;
 export type ImageModelEnsureEvent = AppEnsureEvent;
 
 /** Where a render is. Weights load inside the first render after the engine starts. */
@@ -34,6 +37,8 @@ export interface ImageGenerateInput {
   aspectRatio?: AppImageGenerationRequest['aspect_ratio'];
   quality?: AppImageGenerationRequest['quality'];
   seed?: number;
+  /** An installed style id from styles(), compatible with this model. */
+  style?: string;
 }
 
 export interface ImageGenerateOptions extends RequestOptions {
@@ -147,11 +152,60 @@ export class ImagesClient {
     return parsed.data.data;
   }
 
+  async styles(opts: RequestOptions = {}): Promise<ImageStyle[]> {
+    const raw = await this.json('/v1/images/styles', { method: 'GET' }, opts).catch(
+      (error: unknown) => {
+        if (error instanceof GezelSdkError && error.status === 404) {
+          throw new GezelSdkError('Update Gezel to add image styles.', {
+            code: 'styles_unsupported',
+            status: 404,
+            cause: error,
+          });
+        }
+        throw error;
+      },
+    );
+    const parsed = AppImageStyleListSchema.safeParse(raw);
+    if (!parsed.success) throw invalid('Invalid image style list', parsed.error);
+    return parsed.data.data;
+  }
+
+  ensureStyle(style: string, opts: RequestOptions = {}): Promise<ImageModelEnsureResult> {
+    return this.ensureAsset('styles', { style }, opts);
+  }
+
+  styleEnsureEvents(
+    jobId: string,
+    opts: RequestOptions = {},
+  ): AsyncIterable<ImageModelEnsureEvent> {
+    return this.assetEnsureEvents('styles', jobId, opts);
+  }
+
+  async cancelStyleEnsure(jobId: string, opts: RequestOptions = {}): Promise<void> {
+    await this.json(
+      `/v1/images/styles/ensure/${encodeURIComponent(jobId)}`,
+      { method: 'DELETE' },
+      opts,
+    );
+  }
+
+  removeStyle(style: string, opts: RequestOptions = {}): Promise<void> {
+    return this.removeAsset('styles', style, opts);
+  }
+
   /** Make a model ready, downloading it in the background when needed. */
   async ensure(model: string, opts: RequestOptions = {}): Promise<ImageModelEnsureResult> {
+    return this.ensureAsset('models', { model }, opts);
+  }
+
+  private async ensureAsset(
+    kind: 'models' | 'styles',
+    body: { model: string } | { style: string },
+    opts: RequestOptions,
+  ): Promise<ImageModelEnsureResult> {
     const raw = await this.json(
-      '/v1/images/models/ensure',
-      { method: 'POST', body: JSON.stringify({ model }) },
+      `/v1/images/${kind}/ensure`,
+      { method: 'POST', body: JSON.stringify(body) },
       opts,
     );
     const parsed = AppEnsureResultSchema.safeParse(raw);
@@ -169,8 +223,16 @@ export class ImagesClient {
     jobId: string,
     opts: RequestOptions = {},
   ): AsyncIterable<ImageModelEnsureEvent> {
+    yield* this.assetEnsureEvents('models', jobId, opts);
+  }
+
+  private async *assetEnsureEvents(
+    kind: 'models' | 'styles',
+    jobId: string,
+    opts: RequestOptions,
+  ): AsyncIterable<ImageModelEnsureEvent> {
     const response = await this.fetchFn(
-      `${this.baseUrl}/v1/images/models/ensure/${encodeURIComponent(jobId)}/events`,
+      `${this.baseUrl}/v1/images/${kind}/ensure/${encodeURIComponent(jobId)}/events`,
       { headers: this.headers(), ...(opts.signal ? { signal: opts.signal } : {}) },
     );
     if (!response.ok) throw await errorFromResponse(response);
@@ -203,8 +265,16 @@ export class ImagesClient {
 
   /** Remove an installed model. A model shared from another store refuses with `shared_model`. */
   async remove(model: string, opts: RequestOptions = {}): Promise<void> {
+    return this.removeAsset('models', model, opts);
+  }
+
+  private async removeAsset(
+    kind: 'models' | 'styles',
+    model: string,
+    opts: RequestOptions,
+  ): Promise<void> {
     const response = await this.fetchFn(
-      `${this.baseUrl}/v1/images/models/${encodeURIComponent(model)}`,
+      `${this.baseUrl}/v1/images/${kind}/${encodeURIComponent(model)}`,
       {
         method: 'DELETE',
         headers: this.headers(),
@@ -231,6 +301,7 @@ export class ImagesClient {
       ...(input.aspectRatio ? { aspect_ratio: input.aspectRatio } : {}),
       ...(input.quality ? { quality: input.quality } : {}),
       ...(input.seed !== undefined ? { seed: input.seed } : {}),
+      ...(input.style ? { style: input.style } : {}),
     };
     const response = await this.fetchFn(`${this.baseUrl}/v1/images/generations`, {
       method: 'POST',

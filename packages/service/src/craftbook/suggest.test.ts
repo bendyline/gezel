@@ -49,6 +49,31 @@ const books = [
 ];
 
 describe('rankCraftbookSuggestions', () => {
+  // dev-craftbook-routing, 2026-10-30: the subject filled most of the message
+  // and buried the one sentence that named the procedure.
+  it('ranks a book by its best sentence when asked to score passages', async () => {
+    const message =
+      'Our nightly data export to csv files lost rows in the index folder again. ' +
+      'Please get someone to review the pull request diff that caused it.';
+    const semantic = (ranked: Awaited<ReturnType<typeof rankCraftbookSuggestions>>) =>
+      ranked.find((r) => r.id === 'pull-request-review')?.semantic ?? 0;
+    const whole = await rankCraftbookSuggestions(message, books, { embedder: fakeEmbedder });
+    expect(semantic(whole)).toBeLessThan(0.75);
+    const passages = await rankCraftbookSuggestions(message, books, {
+      embedder: fakeEmbedder,
+      passages: true,
+    });
+    expect(semantic(passages)).toBeGreaterThan(0.9);
+    expect(passages.find((r) => r.id === 'arcade-game')).toBeUndefined();
+  });
+
+  it('scores a one-sentence query the same either way', async () => {
+    const query = 'review the pull request diff for the arcade game';
+    expect(
+      await rankCraftbookSuggestions(query, books, { embedder: fakeEmbedder, passages: true }),
+    ).toEqual(await rankCraftbookSuggestions(query, books, { embedder: fakeEmbedder }));
+  });
+
   it('ranks by semantic similarity, surfacing a book that shares no words with the query', async () => {
     const res = await rankCraftbookSuggestions('make a space shooter', books, {
       embedder: fakeEmbedder,

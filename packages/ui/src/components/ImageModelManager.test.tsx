@@ -225,3 +225,88 @@ describe('ImageModelManager downloads', () => {
     expect(screen.getByText('needs ~52 GB memory')).toBeInTheDocument();
   });
 });
+
+describe('ImageModelManager styles and fast mode', () => {
+  const pixelArt = {
+    sourceId: 'bundled',
+    source: { id: 'bundled', label: 'Bundled' },
+    manifest: {
+      schemaVersion: 1,
+      kind: 'image-lora',
+      id: 'klein-pixel-art',
+      name: 'Pixel art',
+      version: '1.0.0',
+      description: 'Draws in chunky pixels.',
+      tags: [],
+      maintainer: { name: 'Tester' },
+      baseModels: ['flux-2-klein-4b-q4'],
+      purpose: 'style',
+      strength: 1,
+      commercialUse: true,
+      downloadUrl: 'https://example.com/pixel-art.safetensors',
+      sha256: 'b'.repeat(64),
+      approxSizeBytes: 160 * 1024 ** 2,
+      availableVersions: ['1.0.0'],
+    },
+  };
+  const otherModelStyle = {
+    ...pixelArt,
+    manifest: { ...pixelArt.manifest, id: 'sd15-ink', name: 'Ink', baseModels: ['sd-1.5'] },
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(api.listInstalledImageModels).mockResolvedValue({
+      models: [
+        {
+          ...TWO_INSTALLED.models[0],
+          loras: [{ id: 'klein-lightning', name: 'Fast mode', purpose: 'speed', steps: 4 }],
+        },
+        TWO_INSTALLED.models[1],
+      ],
+    } as never);
+    vi.mocked(api.listActiveImagePulls).mockResolvedValue({ pulls: [] } as never);
+    vi.mocked(api.listActiveImageLoraPulls).mockResolvedValue({ pulls: [] } as never);
+    vi.mocked(api.listInstalledImageLoras).mockResolvedValue({ loras: [] } as never);
+    vi.mocked(api.listCatalogItems).mockImplementation((async (kind: string) => ({
+      items: kind === 'image-lora' ? [pixelArt, otherModelStyle] : [],
+    })) as never);
+  });
+
+  it('switches fast mode per model, on unless the person turned it off', async () => {
+    const onFastModeChange = vi.fn();
+    render(<ImageModelManager fastMode={{}} onFastModeChange={onFastModeChange} />);
+
+    const fast = await screen.findByRole('checkbox', {
+      name: 'Fast mode for FLUX.2 Klein 4B (Q4)',
+    });
+    expect(fast).toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: /Krea/ })).toBeNull();
+    await userEvent.click(fast);
+    expect(onFastModeChange).toHaveBeenCalledWith('flux-2-klein-4b-q4', false);
+  });
+
+  it('offers only the styles that fit an installed model, through their own downloads', async () => {
+    render(<ImageModelManager />);
+
+    expect(await screen.findByText('Pixel art')).toBeInTheDocument();
+    expect(screen.queryByText('Ink')).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'Get' }));
+    expect(api.pullImageLora).toHaveBeenCalledWith(
+      'klein-pixel-art',
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(api.pullImageModel).not.toHaveBeenCalled();
+  });
+
+  it('says to update Gezel when the image engine predates styles', async () => {
+    const { GezelApiError } = await import('@bendyline/gezel-client');
+    vi.mocked(api.listInstalledImageLoras).mockRejectedValue(new GezelApiError('not_found', 404));
+    render(<ImageModelManager />);
+
+    expect(
+      await screen.findByText(/older than this app\. Update Gezel to add styles/),
+    ).toBeInTheDocument();
+  });
+});

@@ -303,6 +303,8 @@ export const ChatSessionSchema = z.object({
       /** The shape and tier the person asked for, when they named one. */
       aspectRatio: ImageAspectRatioSchema.optional(),
       quality: ImageQualitySchema.optional(),
+      /** The style the picture was drawn in, so a follow-up keeps it. */
+      style: z.string().optional(),
       at: z.string(),
     })
     .optional(),
@@ -742,6 +744,8 @@ export const QueuedMessageSchema = z.object({
   enqueuedAt: z.string(),
   /** True when the entry was queued as a mid-turn nudge (merges on drain). */
   nudge: z.boolean(),
+  hidden: ChatMessageSchema.shape.hidden,
+  origin: ChatMessageSchema.shape.origin,
 });
 export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
 
@@ -873,11 +877,13 @@ export const TimelineMessageSchema = z.object({
   /**
    * Mirrors `ChatMessage.origin` — the machinery authored this user turn
    * (task dispatch seed, step handoff, reaction seed), so the bubble is
-   * labelled **System** rather than "You". Also set at read time for
+   * visible only in debug mode and labelled **System**. Also set at read time for
    * sessions written before the field existed: the opening user message
    * of a task-scoped session is always the dispatch seed.
    */
   origin: z.enum(['system']).optional(),
+  /** Internal prompts are visible only in debug mode. */
+  hidden: ChatMessageSchema.shape.hidden,
   /**
    * Mirrors `ChatMessage.referencedFiles` — validated artifact and
    * workspace paths the assistant reply mentioned. Populated on write

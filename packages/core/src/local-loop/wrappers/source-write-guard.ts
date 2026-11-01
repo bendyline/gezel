@@ -1,3 +1,4 @@
+import { binaryDocumentWriteRefusalText } from '../../binary-document.js';
 import { isGezelMcp } from '../gezel-mcp.js';
 import type { McpServerSpec } from '../mcp-spec.js';
 import type { McpToolWrapper } from '../mcp-wrapper-types.js';
@@ -19,15 +20,7 @@ const SOURCE_EXT_RE = /\.(?:html?|css|mjs|cjs|js|jsx|ts|tsx|json|md)$/i;
 const BINARY_CONTAINER_EXT_RE = /\.(?:pptx|docx|xlsx|odp|ods|odt|zip|pdf|epub)$/i;
 
 function binaryContainerWriteError(path: string, hasTool: (name: string) => boolean): string {
-  const ext = path.slice(path.lastIndexOf('.') + 1).toLowerCase();
-  const base = `ERROR: Refusing to write text to \`${path}\` — a .${ext} file is a binary container, and text bytes there produce a corrupt file that will not open.`;
-  if (hasTool('copy_artifact_to_workspace')) {
-    const produce = hasTool('convert_document')
-      ? 'Produce the real file with `convert_document` and `save_artifact`; if the converted file is already saved in the artifacts drawer, do not convert again.'
-      : 'Produce the real file with the document-production toolset; if it is already saved in the artifacts drawer, do not produce it again.';
-    return `${base} ${produce} Then make exactly one call: \`copy_artifact_to_workspace({ source: "<artifact path>", dest: "${path}" })\` to land the saved bytes at this path.`;
-  }
-  return `${base} Produce it through the document-production workflow and copy the real converted bytes to this path instead.`;
+  return `ERROR: ${binaryDocumentWriteRefusalText(path, { drawer: 'workspace', hasTool })}`;
 }
 
 /**
@@ -131,7 +124,7 @@ export const SourceWriteGuard: McpToolWrapper = {
     ) {
       return {
         kind: 'reject',
-        error: `ERROR: Refusing to replace \`${path}\` with a much shorter source file (${normalizedContent.length} bytes vs existing ${existing.length} bytes). If this is intentional, rewrite the complete file; otherwise use a focused edit tool.`,
+        error: `ERROR: Not written: this is a much shorter source file (${normalizedContent.length} bytes) than \`${path}\` (${existing.length} bytes), so it reads as part of the file, not all of it. The file is unchanged. ${ctx.hasTool('replace_lines') ? 'To change part of it, edit only those lines with `replace_lines`. ' : ''}To replace it, read it first and send every line of the new version.`,
       };
     }
 

@@ -280,7 +280,7 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
           {project.readOnly && (
             <span
               className="office-pane-badge"
-              title="Gezellen cannot change files in this folder. They edit this document through the pane."
+              title="Crew members cannot change files in this folder. They edit this document through the pane."
             >
               Read-only folder
             </span>

@@ -34,6 +34,7 @@ import {
 import {
   TRANSFORMERS_MODULE,
   TransformersDependencyMissingError,
+  disableOnnxRuntimeTelemetry,
   unresolvedSpecifier,
 } from './transformers-import.js';
 
@@ -309,6 +310,7 @@ async function settleBoth<R extends { dispose?: () => Promise<unknown> }, T>(
 }
 
 async function loadTransformers(): Promise<TransformersModule> {
+  disableOnnxRuntimeTelemetry();
   try {
     const specifier: string = TRANSFORMERS_MODULE;
     return (await import(specifier)) as unknown as TransformersModule;

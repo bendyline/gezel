@@ -19,6 +19,15 @@ To change a picture rather than make a new one, add an **Image editor** gezel fr
 
 On this computer, editing needs a model that can do it. **Qwen Image Edit 2511** is made for editing and does nothing else. **FLUX.2 Klein** draws new pictures and edits too. Whenever a picture comes with the request, from the Image editor or from any gezel, Gezel picks an installed model that can edit it, and the result keeps the picture's shape unless you choose another. Download them in **Settings → Image generation**.
 
+## Styles and fast mode
+
+Models on this computer can take two kinds of add-on, both from **Settings → Image generation → Styles and fast mode**. Each works only with the models it names, so Settings offers only the ones that fit a model you have.
+
+- **Fast mode** draws a picture in a few steps instead of dozens. Once you get it, it is on for that model; switch it off in the model's row. Asking for more steps than fast mode uses leaves it off for that picture.
+- **A style** gives a picture a set look, such as pixel art or watercolor. Pick it in the **Style** menu above the message, or ask a gezel for it by name. A style that doesn't match leaves the picture without one, and the result names the styles the model has.
+
+A few styles carry their model's license, which restricts commercial use. Their license button says so.
+
 ## Using GitHub Copilot
 
 Choose **GitHub Copilot CLI** in **Settings → Image generation → Engine** to use Copilot's experimental image generator. Install or update the Copilot runtime there if needed. Gezel uses your existing Copilot sign-in, or the GitHub token configured in Gezel; no separate image API key is required. Your account's image access, organization policies, and usage limits still apply. Being signed in does not guarantee image generation is available.

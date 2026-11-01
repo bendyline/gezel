@@ -3040,3 +3040,19 @@ describe('craftbook step milestones', () => {
     }
   });
 });
+
+describe('package scripts in the trial home', () => {
+  it('turns them on only for a book that declares package commands', async () => {
+    const { loadCraftbookTestSpecsSync } = await import('./test-spec-loader.ts');
+    const { evalSpecFromTestSpec } = await import('./adapter.ts');
+    const scenarioFor = (id: string) => {
+      const loaded = loadCraftbookTestSpecsSync().find((spec) => spec.craftbookId === id);
+      expect(loaded, id).toBeDefined();
+      return craftbookScenarioFromSpec(evalSpecFromTestSpec(loaded!));
+    };
+    for (const id of ['bug-fix-tdd', 'codemod-sweep', 'refactor-module']) {
+      expect(scenarioFor(id).packageScripts, id).toBe(true);
+    }
+    expect(scenarioFor('press-release').packageScripts).toBeUndefined();
+  });
+});

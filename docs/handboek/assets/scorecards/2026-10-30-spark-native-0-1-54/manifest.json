@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "publicationId": "2026-10-30-spark-native-0-1-54",
+  "regenerate": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-spark-native-054-scorecard.mjs",
+  "check": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-spark-native-054-scorecard.mjs --check",
+  "files": [
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-28-spark-native-0-1-54-original.json",
+      "bytes": 38987,
+      "sha256": "9aca4ba940b1d472fdb24210842e61058191198d647bffff2b3110e3ad15b8b7"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/runs/2026-10-28-spark-native-0-1-54-original.json",
+      "bytes": 38987,
+      "sha256": "9aca4ba940b1d472fdb24210842e61058191198d647bffff2b3110e3ad15b8b7"
+    },
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-29-spark-native-0-1-54-continuation.json",
+      "bytes": 38662,
+      "sha256": "59b7504e99a95ca99006a83e593aa3404fcd19fadc06775d795c3a34d1b1aaf6"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/runs/2026-10-29-spark-native-0-1-54-continuation.json",
+      "bytes": 38662,
+      "sha256": "59b7504e99a95ca99006a83e593aa3404fcd19fadc06775d795c3a34d1b1aaf6"
+    },
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-30-spark-native-0-1-54-final-six.json",
+      "bytes": 6721,
+      "sha256": "1d9fcb8a26d23e382a95d73d646814111fcdd7bb7c5ed39c8dd062939f25344b"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/runs/2026-10-30-spark-native-0-1-54-final-six.json",
+      "bytes": 6721,
+      "sha256": "1d9fcb8a26d23e382a95d73d646814111fcdd7bb7c5ed39c8dd062939f25344b"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/scorecard.json",
+      "bytes": 84250,
+      "sha256": "f112302cd624b5e762ef8247ac0db5bc8bfac9d8ff80f0e34a45af41e236e34d"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/overall-scorecard.json",
+      "bytes": 500613,
+      "sha256": "0586b3862a89cf3ad6e450065a269ec0369df5ef389422af0505664c6cdb9952"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/scorecard-details.json",
+      "bytes": 15115090,
+      "sha256": "2b1714d4bf92584bbf7f7633a7e1e8eae01033320362e847eeac7546d8c4a884"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/verification.json",
+      "bytes": 733,
+      "sha256": "cc34026955370f025bce2d030c5beed5159da1fdfc02102de337491c31e6f3a0"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/report.md",
+      "bytes": 22610,
+      "sha256": "b4a7e0d26e6d6866f7c3d2a319283adaf8b8bde580c5a0097dd5137b0b36fd71"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/scenario-comparison.md",
+      "bytes": 12124,
+      "sha256": "14bd51d452563ea9c86783c2f14b858eb8290d826536bd7772531d3a38dd336e"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/final-coverage-audit.md",
+      "bytes": 3580,
+      "sha256": "e30fbf8e873829d123d2fbd117ca6f78d84d7d610f8c588a1ffb27f735233a1a"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/overall-trials.csv",
+      "bytes": 127239,
+      "sha256": "49c27257a2896a56b9ae435f2ae210632594196d3ad3b7f7f3b7840e91969c83"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/judging/original.json",
+      "bytes": 164354,
+      "sha256": "ca1b177eac4459f3b61e56505b3af8463fa8ba2497a7f60c8fb24a77c1064266"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/judging/continuation.json",
+      "bytes": 88715,
+      "sha256": "03471ff6ed221e2c2ab51dd7f0bbf53baa84decc7e32ee4b1de83ad669f8253e"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-30-spark-native-0-1-54/judging/final-six.json",
+      "bytes": 438,
+      "sha256": "eff218d93ef986c7c26a74a8f6f88a45ef2aacc814844a67e8a550ce18581f46"
+    }
+  ]
+}

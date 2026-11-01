@@ -13,8 +13,8 @@ export function KnowledgeCatalogsCard() {
       <p className="muted" style={{ marginTop: 0 }}>
         Knowledge catalogs are searchable, citable reference libraries — encyclopedias, manuals,
         your own notes — packaged as .gezk files. Installed catalogs appear in the Knowledge area
-        and your gezellen can search them and cite their sources. Catalogs are stored and searched
-        on this device.
+        and your crew can search them and cite their sources. Catalogs are stored and searched on
+        this device.
       </p>
       <KnowledgeCatalogManager />
     </section>

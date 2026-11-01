@@ -24,6 +24,8 @@ import {
   buildSuiteScoreboard,
   createLogger,
   describeProvenance,
+  hardwareSummary,
+  inferredScorecardDeviceClass,
   plainRoleTitle,
   provenanceDifferences,
   resolveRoleId,
@@ -36,7 +38,7 @@ import {
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { computeToolAllowlist, expandToolsetGroups } from '../chat/role-tool-filter.js';
-import type { ReleaseNoteEntry } from './content.js';
+import type { ReleaseNoteEntry, ScorecardRoundNote } from './content.js';
 import type { HandboekDeviceInfo, HandboekGezelInfo, HandboekModelInfo } from './device.js';
 import { taskMeasurementsHtml, taskMeasurementsMarkdown } from './scorecard-measurements.js';
 import { unwrapSoftBreaks } from './unwrap.js';
@@ -59,6 +61,11 @@ export interface MacroContext {
    * stays a pure renderer and the tests can stub a release history.
    */
   releases: ReleaseNoteEntry[];
+  /**
+   * Hand-written notes on scorecard rounds, newest first, supplied by the
+   * engine from the curated tree like `releases`. Absent means none.
+   */
+  roundNotes?: ScorecardRoundNote[];
   /** Figures referenced by expanded markdown accumulate here. */
   figures: HandboekFigure[];
 }
@@ -85,6 +92,7 @@ export const MACROS: Record<string, MacroFn> = {
   'device-hardware': deviceHardware,
   'installed-models': installedModels,
   'model-scorecard': modelScorecard,
+  'scorecard-notes': scorecardNotes,
   'project-type-composition': projectTypeComposition,
   'suggested-work': suggestedWork,
   'whats-new-list': whatsNewList,
@@ -587,10 +595,14 @@ async function modelScorecard(attrs: Record<string, string>, ctx: MacroContext):
     .filter(Boolean);
   if (suiteIds && suiteIds.length > 0) {
     // The site is the only surface with somewhere to put controls and a URL
-    // to carry them, so only it gets the filterable stack. App and agent
-    // readers keep the fixed markdown rounds below.
+    // to carry them, so only it gets the filterable list — each round a link
+    // to its own page (see renderScorecardRoundPage). App and agent readers
+    // keep the fixed markdown rounds below.
     if (ctx.mode === 'site') {
-      return renderScorecardFilterHtml(SCORECARD, suiteIds, { includeTaskCount: false });
+      return renderScorecardFilterHtml(SCORECARD, suiteIds, {
+        includeTaskCount: false,
+        roundLinks: true,
+      });
     }
     return renderScorecardRunsMarkdown(SCORECARD, suiteIds, {
       includeTaskCount: true,
@@ -605,6 +617,22 @@ async function modelScorecard(attrs: Record<string, string>, ctx: MacroContext):
     // noise the model can quote back as part of the model name.
     breakLabels: ctx.mode !== 'agent',
   });
+}
+
+/**
+ * `::handboek-scorecard-notes` — the hand-written round notes, where the
+ * article places them. The site renders nothing here: each round has its
+ * own page there, and its notes travel with it. App and agent readers have
+ * one fixed page, so they get every note in it, newest first.
+ *
+ * A note's links are written relative to its own folder, one below the
+ * article's, so they climb one level fewer here.
+ */
+async function scorecardNotes(_attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
+  if (ctx.mode === 'site') return '';
+  return (ctx.roundNotes ?? [])
+    .map((note) => `## ${note.title}\n\n${note.body.replace(/\]\(\.\.\//g, '](')}`)
+    .join('\n\n');
 }
 
 /**
@@ -858,7 +886,15 @@ export function renderScorecardRunsMarkdown(
 export function renderScorecardFilterHtml(
   dataset: ScorecardDataset,
   suiteIds: readonly string[],
-  opts: { includeTaskCount: boolean },
+  opts: {
+    includeTaskCount: boolean;
+    /**
+     * Each round as a one-line link to its own page instead of its tables:
+     * the site, where the rounds read as a list under the all-results table
+     * and every round's detail lives at `model-scorecard/<run id>/`.
+     */
+    roundLinks?: boolean;
+  },
 ): string {
   const wanted = [...new Set(suiteIds.filter(Boolean))];
   const rounds = collectScorecardRounds(dataset, wanted);
@@ -873,19 +909,22 @@ export function renderScorecardFilterHtml(
   const attr = SCORECARD_DATA_ATTRS;
   const headline = (rounds.find((entry) => entry.run.scope !== 'subset') ?? rounds[0]!).run;
   const labels = roundLabels(rounds.map((entry) => entry.run));
+  const titles = scorecardRoundTitles(dataset.runs);
   const parts: string[] = [
     `<div class="hb-scorecard" ${attr.root}="1">`,
     `<div class="hb-scorecard-controls" ${attr.controls}="1"></div>`,
   ];
+  if (opts.roundLinks) {
+    parts.push(
+      '<h3 class="hb-scorecard-runs-title">Test rounds</h3>',
+      '<ul class="hb-scorecard-runs">',
+    );
+  }
 
   for (const entry of rounds) {
     const { run } = entry;
     const date = run.provenance.startedAt.slice(0, 10);
-    const engines = entry.suites.flatMap((suite) =>
-      suite.scores.map((score) => score.result.engine),
-    );
     const isHeadline = run.id === headline.id;
-    const why = isHeadline ? [] : provenanceDifferences(headline, run);
     const models = [
       ...new Set(
         entry.suites.flatMap((suite) =>
@@ -896,68 +935,204 @@ export function renderScorecardFilterHtml(
     const tiers = [
       ...new Set(entry.suites.flatMap((suite) => suite.scores.map((score) => score.result.tier))),
     ];
+    const stamps = [
+      `${attr.round}="${esc(run.id)}"`,
+      `${attr.roundLabel}="${esc(labels.get(run.id) ?? date)}"`,
+      `${attr.date}="${esc(date)}"`,
+      `${attr.hardware}="${esc(scorecardHardwareKey(run.provenance.device))}"`,
+      `${attr.hardwareLabel}="${esc(scorecardHardwareLabel(run.provenance.device))}"`,
+      `${attr.models}="${esc(models.join(' '))}"`,
+      `${attr.tiers}="${esc(tiers.join(' '))}"`,
+      ...(isHeadline ? [`${attr.latest}="1"`] : []),
+    ].join(' ');
+    const kind = isHeadline
+      ? 'Latest round'
+      : run.scope === 'subset'
+        ? 'Partial round'
+        : 'Earlier round';
 
-    parts.push(
-      `${[
-        '<div class="hb-scorecard-round"',
-        `${attr.round}="${esc(run.id)}"`,
-        `${attr.roundLabel}="${esc(labels.get(run.id) ?? date)}"`,
-        `${attr.date}="${esc(date)}"`,
-        `${attr.hardware}="${esc(scorecardHardwareKey(run.provenance.device))}"`,
-        `${attr.hardwareLabel}="${esc(scorecardHardwareLabel(run.provenance.device))}"`,
-        `${attr.models}="${esc(models.join(' '))}"`,
-        `${attr.tiers}="${esc(tiers.join(' '))}"`,
-        ...(isHeadline ? [`${attr.latest}="1"`] : []),
-      ].join(' ')}>`,
-      `<h4 class="hb-scorecard-round-title">${isHeadline ? 'Latest round' : run.scope === 'subset' ? 'Partial round' : 'Earlier round'} — ${esc(date)}</h4>`,
-      `<p class="hb-scorecard-stamp"><strong>${esc(describeProvenance(run, engines))}</strong>${
-        why.length > 0 ? ` — ${esc(why.join(', '))}` : ''
-      }</p>`,
-    );
-    const coverage = scorecardMemoryCoverage(run);
-    if (run.note) parts.push(`<p class="hb-scorecard-round-note">${esc(run.note)}</p>`);
-    const note = memoryCoverageNote(
-      coverage,
-      entry.suites.flatMap((suite) => suite.scores),
-    );
-    if (note) parts.push(`<p class="hb-scorecard-memory-note">${esc(note)}</p>`);
-
-    for (const suite of entry.suites) {
-      const publishable = suite.scores.filter((score) => score.unmeasuredScenarios.length === 0);
-      const withheld = suite.scores.filter((score) => score.unmeasuredScenarios.length > 0);
-      parts.push(`<div class="hb-scorecard-suite" ${attr.suite}="${esc(suite.suiteId)}">`);
-      parts.push(
-        `<h5 class="hb-scorecard-suite-title">${esc(
-          SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId,
-        )}</h5>`,
+    if (opts.roundLinks) {
+      const suites = entry.suites.map(
+        (suite) => SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId,
       );
-      if (publishable.length > 0) parts.push(scoreTableHtml(publishable, coverage));
-      const measurements = taskMeasurementsHtml(suite.scores);
-      if (measurements) parts.push(measurements);
-      if (withheld.length > 0) {
-        const names = withheld
-          .map(
-            (score) =>
-              `${score.result.label} (${score.unmeasuredScenarios.length} task(s) unmeasured)`,
-          )
-          .join('; ');
-        parts.push(
-          `<p class="hb-scorecard-withheld">Not published — some tasks could not be measured on this round: ${esc(names)}</p>`,
-        );
-      }
-      if (opts.includeTaskCount) {
-        const count = run.scenariosBySuite[suite.suiteId]?.length ?? 0;
-        parts.push(`<p class="hb-scorecard-taskcount">Tasks in this set: ${count}.</p>`);
-      }
-      parts.push('</div>');
+      parts.push(
+        `<li class="hb-scorecard-round hb-scorecard-run" ${stamps}>`,
+        `<a class="hb-scorecard-run-link" href="${esc(scorecardRoundPageHref(run.id))}">${esc(titles.get(run.id) ?? run.id)}</a>`,
+        `<span class="hb-scorecard-run-meta">${esc(
+          [
+            kind,
+            hardwareSummary(run.provenance.device),
+            plural(models.length, 'model'),
+            suites.join(', '),
+          ].join(' · '),
+        )}</span>`,
+        '</li>',
+      );
+      continue;
     }
-    parts.push('</div>');
+
+    const why = isHeadline ? [] : provenanceDifferences(headline, run);
+    parts.push(
+      `<div class="hb-scorecard-round" ${stamps}>`,
+      `<h4 class="hb-scorecard-round-title">${kind} — ${esc(date)}</h4>`,
+      ...roundCardHtml(entry, { why, includeTaskCount: opts.includeTaskCount }),
+      '</div>',
+    );
   }
 
+  if (opts.roundLinks) parts.push('</ul>');
   parts.push('</div>');
   // One HTML block, so no blank lines: a blank line ends the block and
   // leaves the closing tags orphaned, which the markdown parser drops.
   return parts.join('\n');
+}
+
+const plural = (count: number, noun: string): string => `${count} ${noun}${count === 1 ? '' : 's'}`;
+
+/**
+ * A round's stamp, notes, and one table per task set — everything but its
+ * heading, which differs between the stack (`Latest round — <date>`) and a
+ * round's own page (where the page title names it). `why` says how the
+ * round differs from the headline, where that comparison is on the page.
+ */
+function roundCardHtml(
+  entry: ScorecardRound,
+  opts: { why: readonly string[]; includeTaskCount: boolean },
+): string[] {
+  const attr = SCORECARD_DATA_ATTRS;
+  const { run } = entry;
+  const engines = entry.suites.flatMap((suite) => suite.scores.map((score) => score.result.engine));
+  const parts = [
+    `<p class="hb-scorecard-stamp"><strong>${esc(describeProvenance(run, engines))}</strong>${
+      opts.why.length > 0 ? ` — ${esc(opts.why.join(', '))}` : ''
+    }</p>`,
+  ];
+  const coverage = scorecardMemoryCoverage(run);
+  if (run.note) parts.push(`<p class="hb-scorecard-round-note">${esc(run.note)}</p>`);
+  const note = memoryCoverageNote(
+    coverage,
+    entry.suites.flatMap((suite) => suite.scores),
+  );
+  if (note) parts.push(`<p class="hb-scorecard-memory-note">${esc(note)}</p>`);
+
+  for (const suite of entry.suites) {
+    const publishable = suite.scores.filter((score) => score.unmeasuredScenarios.length === 0);
+    const withheld = suite.scores.filter((score) => score.unmeasuredScenarios.length > 0);
+    parts.push(`<div class="hb-scorecard-suite" ${attr.suite}="${esc(suite.suiteId)}">`);
+    parts.push(
+      `<h5 class="hb-scorecard-suite-title">${esc(
+        SCORECARD_SUITE_HEADINGS[suite.suiteId] ?? suite.suiteId,
+      )}</h5>`,
+    );
+    if (publishable.length > 0) parts.push(scoreTableHtml(publishable, coverage));
+    const measurements = taskMeasurementsHtml(suite.scores);
+    if (measurements) parts.push(measurements);
+    if (withheld.length > 0) {
+      const names = withheld
+        .map(
+          (score) =>
+            `${score.result.label} (${score.unmeasuredScenarios.length} task(s) unmeasured)`,
+        )
+        .join('; ');
+      parts.push(
+        `<p class="hb-scorecard-withheld">Not published — some tasks could not be measured on this round: ${esc(names)}</p>`,
+      );
+    }
+    if (opts.includeTaskCount) {
+      const count = run.scenariosBySuite[suite.suiteId]?.length ?? 0;
+      parts.push(`<p class="hb-scorecard-taskcount">Tasks in this set: ${count}.</p>`);
+    }
+    parts.push('</div>');
+  }
+  return parts;
+}
+
+/**
+ * Where each round's own page lives on the site: `model-scorecard/<run id>/`,
+ * beside the article that lists them. The export builds the pages
+ * (`renderScorecardRoundPage`); the list links to them from the article.
+ */
+export const SCORECARD_ROUND_PAGES = 'model-scorecard';
+
+/** A round page's Handboek id. */
+export const scorecardRoundPageId = (runId: string): string => `${SCORECARD_ROUND_PAGES}/${runId}`;
+
+/**
+ * The link to a round's page from a top-level article — the scorecard
+ * article itself, or any other that lists rounds.
+ */
+export const scorecardRoundPageHref = (runId: string): string =>
+  `../${scorecardRoundPageId(runId)}/`;
+
+/**
+ * A lasting name per round: its date and machine. Unlike the stack's
+ * "Latest round", a page title has to stay true after the next sweep.
+ * Machines are named by their recorded label unless the probe could not
+ * tell (`linux · unknown`); rounds sharing a date and machine fall back to
+ * the run id, which the schema guarantees is unique.
+ */
+export function scorecardRoundTitles(runs: readonly ScorecardRun[]): Map<string, string> {
+  const machine = (run: ScorecardRun): string => {
+    const device = run.provenance.device;
+    const label = device.label.trim();
+    const vague = !label || /\bunknown\b/i.test(label) || label === device.platform;
+    return vague ? (inferredScorecardDeviceClass(device) ?? hardwareSummary(device)) : label;
+  };
+  const named = runs.map((run) => ({
+    run,
+    title: `${run.provenance.startedAt.slice(0, 10)} · ${machine(run)}`,
+  }));
+  const out = new Map<string, string>();
+  for (const { run, title } of named) {
+    const shared = named.filter((other) => other.title === title).length > 1;
+    out.set(
+      run.id,
+      shared
+        ? `${run.provenance.startedAt.slice(0, 10)} · ${run.id.replace(/^\d{4}-\d{2}-\d{2}-/, '')}`
+        : title,
+    );
+  }
+  return out;
+}
+
+/** What a round's own page shows: its lasting title and its full card. */
+export interface ScorecardRoundPage {
+  runId: string;
+  title: string;
+  summary: string;
+  /** The round's stamp, notes, and tables, as one HTML block. */
+  html: string;
+}
+
+/**
+ * Every round's own page, newest first, for the site export. A page carries
+ * every task set its round ran, not only the ones a particular article lists,
+ * so each link from any list resolves.
+ */
+export function renderScorecardRoundPages(dataset: ScorecardDataset): ScorecardRoundPage[] {
+  const known = Object.keys(SCORECARD_SUITE_HEADINGS);
+  const suiteIds = [
+    ...known,
+    ...[...new Set(dataset.runs.flatMap((run) => run.suites))].filter((id) => !known.includes(id)),
+  ];
+  const titles = scorecardRoundTitles(dataset.runs);
+  return collectScorecardRounds(dataset, suiteIds).map((entry) => {
+    const { run } = entry;
+    const title = titles.get(run.id) ?? run.id;
+    const models = new Set(
+      entry.suites.flatMap((suite) => suite.scores.map((score) => score.result.modelId)),
+    );
+    return {
+      runId: run.id,
+      title,
+      summary: `${run.scope === 'subset' ? 'A focused rerun' : 'A model scorecard round'} on ${hardwareSummary(run.provenance.device)}: ${plural(models.size, 'model')} across ${plural(entry.suites.length, 'task set')}.`,
+      html: [
+        `<div class="hb-scorecard-round hb-scorecard-round-page">`,
+        ...roundCardHtml(entry, { why: [], includeTaskCount: true }),
+        '</div>',
+      ].join('\n'),
+    };
+  });
 }
 
 /**

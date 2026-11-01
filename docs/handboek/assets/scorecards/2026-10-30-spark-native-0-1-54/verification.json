@@ -1,0 +1,28 @@
+{
+  "counts": {
+    "trials": 258,
+    "rawPasses": 177,
+    "rawEligible": 256,
+    "rawExclusions": 2,
+    "publishedNonModelFailures": 3,
+    "publicationClassificationCorrections": 1,
+    "artifactJudgments": 119,
+    "producedDeclaredPaths": 125,
+    "primaryReviewedCells": 112,
+    "tableJudgedCells": 106,
+    "tableExcludedReviews": 6,
+    "noArtifact": 2,
+    "noDeclaredAxes": 144,
+    "pendingReviews": 0
+  },
+  "uniqueCells": 258,
+  "modelSuiteScenarioGroups": 86,
+  "repetitionsAllThree": true,
+  "originalEvidenceModified": false,
+  "frozenIdentityVerified": true,
+  "newInferenceCalls": 0,
+  "newJudgeCalls": 0,
+  "schema": "ScorecardDatasetSchema v1",
+  "segmentsKeptSeparate": true,
+  "sourceFilesVerified": 1711
+}

@@ -373,6 +373,7 @@ jobs:
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
       - name: Test shared product, QuickJS, persistence, and native inference in WKWebView
+        id: simulator-tests
         shell: bash
         run: |
           node --input-type=module <<'JS'
@@ -387,12 +388,47 @@ jobs:
               '-clonedSourcePackagesDirPath', path.join(process.env.RUNNER_TEMP, 'mobile-spm'),
               '-resultBundlePath', path.join(process.env.RUNNER_TEMP, 'mobile-native.xcresult'),
               '-disableAutomaticPackageResolution', '-onlyUsePackageVersionsFromResolvedFile', '-skipPackageUpdates',
+              // One retry, in a fresh app process: on 2026-10-30 the simulator shut
+              // down mid-test ("Test crashed with signal term"), and xcodebuild
+              // retries a test whose process died only when relaunch is enabled.
+              '-retry-tests-on-failure', '-test-iterations', '2', '-test-repetition-relaunch-enabled', 'YES',
               '-collect-test-diagnostics', 'never', 'CODE_SIGNING_ALLOWED=NO',
               `ARCHS=${process.arch === 'arm64' ? 'arm64' : 'x86_64'}`, 'ONLY_ACTIVE_ARCH=YES', 'test',
             ], { env: { ...process.env, ...leaseEnv }, stdio: 'inherit' });
             if (result.error) throw result.error;
             process.exitCode = result.status ?? 1;
           }, { command: 'iOS native CI simulator tests' });
+          JS
+      - name: Flag simulator tests that passed only on retry
+        id: simulator-retries
+        if: always() && steps.simulator-tests.outcome != 'skipped'
+        run: |
+          node --input-type=module <<'JS'
+          import { spawnSync } from 'node:child_process';
+          import { appendFileSync, existsSync } from 'node:fs';
+          import path from 'node:path';
+          // The summary counts a test that failed and then passed as passed,
+          // so a retry would otherwise hide the flake it absorbed.
+          const bundle = path.join(process.env.RUNNER_TEMP, 'mobile-native.xcresult');
+          if (!existsSync(bundle)) process.exit(0);
+          const listed = spawnSync('xcrun', ['xcresulttool', 'get', 'test-results', 'tests', '--path', bundle],
+            { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+          if (listed.status !== 0) {
+            console.log(`::warning::Could not read the simulator result bundle: ${(listed.stderr ?? '').trim()}`);
+            process.exit(0);
+          }
+          const retried = [];
+          const walk = (node) => {
+            const failedRuns = (node.children ?? []).filter((child) => child.nodeType === 'Repetition' && child.result === 'Failed');
+            if (node.nodeType === 'Test Case' && node.result === 'Passed' && failedRuns.length) {
+              const messages = failedRuns.flatMap((run) => (run.children ?? []).filter((child) => child.nodeType === 'Failure Message').map((child) => child.name));
+              retried.push(`${node.nodeIdentifier ?? node.name}: ${messages.join('; ').replace(/\s+/g, ' ')}`);
+            }
+            for (const child of node.children ?? []) walk(child);
+          };
+          for (const node of JSON.parse(listed.stdout).testNodes ?? []) walk(node);
+          for (const line of retried) console.log(`::warning title=Simulator test passed only on retry::${line}`);
+          appendFileSync(process.env.GITHUB_OUTPUT, `retried=${retried.length > 0}\n`);
           JS
       - name: Verify packaged offline authoring and recovery contracts
         env:
@@ -454,6 +490,23 @@ jobs:
           path: ${{ runner.temp }}/gezel-ios-app.xcarchive.tar.gz
           if-no-files-found: error
           retention-days: 14
+      - name: Collect simulator and host logs after a failure or retry
+        # A simulator that goes down mid-test reaches the result bundle only as
+        # "Test crashed with signal term". Why it went down is in CoreSimulator's
+        # log, the device's unified log and any crash reports, which removing
+        # the device below would discard.
+        if: env.GEZEL_CI_SIMULATOR != '' && (failure() || steps.simulator-retries.outputs.retried == 'true')
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/simulator-logs"
+          mkdir -p "$out/host-crashes"
+          cp ~/Library/Logs/CoreSimulator/CoreSimulator.log "$out/" || true
+          cp -R ~/Library/Logs/CoreSimulator/"$GEZEL_CI_SIMULATOR" "$out/device" || true
+          find ~/Library/Logs/DiagnosticReports /Library/Logs/DiagnosticReports -type f -mmin -120 -exec cp {} "$out/host-crashes/" \; || true
+          { sysctl hw.memsize hw.ncpu; vm_stat; top -l 1 -o mem -n 15 -stats pid,command,mem; } > "$out/host.txt" 2>&1 || true
+          # The device is this job's own, so its whole log is this run. A device
+          # that never came back up answers with the reason instead.
+          xcrun simctl spawn "$GEZEL_CI_SIMULATOR" log show --style compact 2>&1 | gzip > "$out/unified-log.txt.gz" || true
       - name: Preserve simulator and release verification results
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -463,6 +516,7 @@ jobs:
             ${{ runner.temp }}/mobile-native.xcresult
             ${{ runner.temp }}/mobile-product-contracts
             ${{ runner.temp }}/ios-archive-verification.json
+            ${{ runner.temp }}/simulator-logs
           if-no-files-found: ignore
           retention-days: 3
       - name: Remove the dedicated test simulator

@@ -79,8 +79,18 @@ export function imageSettingsReadout(
     size ? `${size.width}×${size.height}` : undefined,
     settings.quality && settings.quality !== 'standard' ? settings.quality : undefined,
     model?.name,
+    settings.style ? imageModelStyles(model).find((s) => s.id === settings.style)?.name : undefined,
   ];
   return parts.filter(Boolean).join(' · ');
+}
+
+/** The styles installed for a model, as the strip offers them. */
+export function imageModelStyles(
+  model: InstalledImageModel | undefined,
+): Array<{ id: string; name: string }> {
+  return (model?.loras ?? [])
+    .filter((l) => l.purpose === 'style')
+    .map(({ id, name }) => ({ id, name }));
 }
 
 /** The send-body fields for the current picks and the text being sent. */

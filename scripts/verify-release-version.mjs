@@ -15,6 +15,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { coreEntryPath, readCoreBuiltEntry } from './core-built-entry.mjs';
+import { CORE_VERSION_SOURCE, readCoreVersionStamp } from './core-version-stamp.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
@@ -43,10 +44,12 @@ for (const relativePath of packagePaths) {
   assertVersion(relativePath, pkg.version, expected);
 }
 
-const coreSourcePath = resolve(repoRoot, 'packages/core/src/browser.ts');
-const coreSource = await readFile(coreSourcePath, 'utf8');
-const sourceMatch = /export const GEZEL_VERSION = '([^']*)';/.exec(coreSource);
-assertVersion('packages/core/src/browser.ts GEZEL_VERSION', sourceMatch?.[1], expected);
+const coreSource = await readFile(resolve(repoRoot, CORE_VERSION_SOURCE), 'utf8');
+assertVersion(
+  `${CORE_VERSION_SOURCE} GEZEL_VERSION`,
+  readCoreVersionStamp(coreSource).version,
+  expected,
+);
 
 const builtCorePath = coreEntryPath(repoRoot);
 if (existsSync(builtCorePath)) {

@@ -1344,7 +1344,9 @@ async function connectOrStartPrepared(opts: ConnectOptions): Promise<SupervisedS
       );
       if (developmentCandidates.length > 0 || installedCandidates.length > 0) {
         try {
-          const { reuseVerifiedElectronNativeBinaries } = await import('@bendyline/gezel-service');
+          const { reuseVerifiedElectronNativeBinaries } = await import(
+            '@bendyline/gezel-service/native-verification'
+          );
           const cacheFile = nativePayloadVerificationPath(opts.home);
           let reuse =
             developmentCandidates.length > 0

@@ -259,6 +259,7 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
       ...(body.steps ? { steps: body.steps } : {}),
       ...(body.seed !== undefined ? { seed: body.seed } : {}),
       ...(body.strength !== undefined ? { strength: body.strength } : {}),
+      ...(body.loras && body.loras.length > 0 ? { loras: body.loras } : {}),
       ...(body.inputImages && body.inputImages.length > 0
         ? {
             inputImages: body.inputImages.map((i) => ({

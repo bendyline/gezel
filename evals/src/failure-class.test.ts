@@ -1,5 +1,12 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { classifyTrial, summarizeNativeEngineIncidents } from './failure-class.ts';
+import {
+  classifyTrial,
+  readTrialAuthoredTaskRefs,
+  summarizeNativeEngineIncidents,
+} from './failure-class.ts';
 
 describe('classifyTrial — terminal classes', () => {
   it('success → pass', () => {
@@ -204,6 +211,31 @@ describe('classifyTrial — log-signature rules (stall-gated)', () => {
       '2026-09-23T03:00:00Z WARN [gate] p/4 step "verify" could not be evaluated — pausing without consuming an attempt: unresolved {{reviewId}}';
     const c = classifyTrial({ ...stall, daemonLog: log });
     expect(c).toMatchObject({ failureClass: 'infra', rule: 'gate-unevaluable' });
+  });
+
+  it('an unevaluable gate in a recipe the model wrote this trial → model authored-gate-unevaluable', () => {
+    const log = [
+      '2026-10-30T18:06:48Z ERROR [tasks] [gate] supplier-intake/1 step "scope" could not be evaluated — pausing without consuming an attempt: Gate configuration error: checks[0] minBytes.file ({{workPath}})',
+      '2026-10-30T18:08:47Z ERROR [tasks] [gate] supplier-intake/1 step "scope" could not be evaluated — pausing without consuming an attempt: Gate configuration error: checks[0] minBytes.file ({{workPath}})',
+    ].join('\n');
+    const authored = classifyTrial({
+      ...stall,
+      daemonLog: log,
+      trialAuthoredTaskRefs: new Set(['supplier-intake/1']),
+    });
+    expect(authored).toMatchObject({ failureClass: 'model', rule: 'authored-gate-unevaluable' });
+    // A catalog recipe's gate, or any one gate outside the authored set, stays infra.
+    expect(
+      classifyTrial({ ...stall, daemonLog: log, trialAuthoredTaskRefs: new Set(['other/1']) }),
+    ).toMatchObject({ failureClass: 'infra', rule: 'gate-unevaluable' });
+    const mixed = `${log}\n2026-10-30T18:20:00Z ERROR [tasks] [gate] supplier-intake/2 step "scope" could not be evaluated — pausing without consuming an attempt: unresolved {{reviewId}}`;
+    expect(
+      classifyTrial({
+        ...stall,
+        daemonLog: mixed,
+        trialAuthoredTaskRefs: new Set(['supplier-intake/1']),
+      }),
+    ).toMatchObject({ failureClass: 'infra', rule: 'gate-unevaluable' });
   });
 
   it('a pause nothing recovered → model task-paused-unrecovered, not model-default', () => {
@@ -503,5 +535,34 @@ describe('qualification evidence alongside an artifact failure', () => {
         qualificationIssues: ['API provider returned 1 incomplete response(s): max_messages=1'],
       }),
     ).toMatchObject({ failureClass: 'operator' });
+  });
+});
+
+describe('readTrialAuthoredTaskRefs', () => {
+  it('names the tasks run from a recipe saved during the trial', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-eval-authored-'));
+    try {
+      await writeFile(
+        join(dir, 'history.jsonl'),
+        `${JSON.stringify({
+          kind: 'craftbook.created',
+          details: { id: 'inventory-health-report', name: 'Inventory Health Report' },
+        })}\n${JSON.stringify({ kind: 'gezel.created', details: {} })}\n`,
+      );
+      await mkdir(join(dir, 'project-history'));
+      const task = (ref: string, catalogId: string) =>
+        JSON.stringify({
+          kind: 'task.created',
+          details: { ref, sourceCraftbookIds: [{ role: 'main', catalogId, sourceId: 'local' }] },
+        });
+      await writeFile(
+        join(dir, 'project-history', 'inventory-health-check.jsonl'),
+        `${task('inventory-health-check/1', 'inventory-health-report')}\nnot json\n${task('inventory-health-check/2', 'press-release')}\n`,
+      );
+      expect([...readTrialAuthoredTaskRefs(dir)]).toEqual(['inventory-health-check/1']);
+      expect(readTrialAuthoredTaskRefs(join(dir, 'missing')).size).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

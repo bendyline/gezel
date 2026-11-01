@@ -12,6 +12,7 @@ import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import yazl from 'yazl';
+import { CORE_VERSION_SOURCE, readCoreVersionStamp } from '../../../scripts/core-version-stamp.mjs';
 
 const packageDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 const FIXED_MTIME = new Date('2020-01-01T00:00:00Z');
@@ -32,10 +33,10 @@ async function listFiles(root) {
 
 /** The product version core carries (stamped at release; 0.0.0 in development). */
 export async function productVersion(repoRoot = join(packageDir, '..', '..')) {
-  const source = await readFile(join(repoRoot, 'packages', 'core', 'src', 'browser.ts'), 'utf8');
-  const m = /export const GEZEL_VERSION = '([^']+)'/.exec(source);
-  if (!m) throw new Error('GEZEL_VERSION not found in packages/core/src/browser.ts');
-  return m[1].split(/[-+]/)[0];
+  const source = await readFile(join(repoRoot, CORE_VERSION_SOURCE), 'utf8');
+  const { version } = readCoreVersionStamp(source);
+  if (!version) throw new Error(`GEZEL_VERSION not found in ${CORE_VERSION_SOURCE}`);
+  return version.split(/[-+]/)[0];
 }
 
 /** Every file META-INF/manifest.xml names. */

@@ -191,6 +191,8 @@ export interface CraftbookEvalSpec {
   craftbookId: string;
   /** A step is the image-generator's: the trial needs an image engine. */
   needsImageEngine?: boolean;
+  /** The book declares package commands it must run; see `EvalScenario.packageScripts`. */
+  needsPackageScripts?: boolean;
 
   /** Explicitly states whether this eval proves an artifact or the workflow. */
   mode: CraftbookEvalMode;

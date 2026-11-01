@@ -42,10 +42,10 @@
   color: var(--accent-text);
 }
 
-/* Home sits above the collapsible groups, so its house occupies the same
-   narrow leading column as the group chevrons directly beneath it. */
+/* Reserve the same inner spacing in both states so selection never moves
+   the house or label against the border. */
 .app-sidebar-home {
-  padding-left: 0;
+  padding-left: 0.45rem;
 }
 
 .app-sidebar-home .app-sidebar-item-icon {

@@ -115,7 +115,7 @@ function codexModeTitle(mode: CodexPermissionMode): string {
 
 function claudeModeTitle(mode: ProjectClaudePermissionMode): string {
   if (mode === 'mixed')
-    return 'Claude: assigned gezellen currently use different permission modes.';
+    return 'Claude: assigned crew members currently use different permission modes.';
   const option = CLAUDE_MODE_OPTIONS.find((item) => item.value === mode);
   return `Claude ${option?.label ?? mode}: ${option?.hint ?? ''}`;
 }

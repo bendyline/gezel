@@ -7,6 +7,9 @@ import { api } from '../api.js';
 import { gezelChatTheme } from './chat-theme.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 
+/** Squisq blocks unknown link schemes; `gezel-nav:` links open in place, so they may render. */
+const FILE_LINK_SCHEMES = ['gezel-nav'] as const;
+
 /** Inline code that names a file: a path with an extension and no spaces or scheme. */
 export function looksLikeFilePath(text: string): boolean {
   return text.length < 300 && !text.includes('://') && /^[^\s`'"]+\.[A-Za-z0-9]{1,10}$/.test(text);
@@ -134,6 +137,8 @@ export function ReportDocument({
           thinMargins
           imageDisplayMode="thumbnail"
           fenceRenderers={fenceRenderers}
+          // Only where a click is caught: otherwise the browser would follow the scheme.
+          {...(onOpenPath ? { linkSchemes: FILE_LINK_SCHEMES } : {})}
         />
       ) : error ? (
         <p className="error small">{error}</p>

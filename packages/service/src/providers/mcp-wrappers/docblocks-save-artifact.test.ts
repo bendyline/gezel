@@ -156,6 +156,49 @@ describe('DocblocksSaveArtifact', () => {
     }
   });
 
+  // gemma4-12b's nine failed saves, by shape (docblocks-theme-roundtrip,
+  // 2026-10-31): a bare path, an object without `ifExists`, and "replace"
+  // with no checksum for a file that did not exist yet.
+  it('accepts a bare path and a missing ifExists as a save that never overwrites', async () => {
+    const ctx = await context();
+    const artifactsId = docblocksRootId(await realpath(artifacts));
+    const expected = {
+      kind: 'allow',
+      args: {
+        artifactUri: URI,
+        destination: { rootId: artifactsId, path: 'deliverables/review.pptx', ifExists: 'error' },
+      },
+    };
+    for (const destination of [
+      'deliverables/review.pptx',
+      { path: 'deliverables/review.pptx' },
+      { path: 'deliverables/review.pptx', ifExists: 'replace' },
+    ]) {
+      expect(
+        await DocblocksSaveArtifact.preProcess!(
+          'save_artifact',
+          { artifactUri: URI, destination },
+          ctx,
+        ),
+      ).toEqual(expected);
+    }
+  });
+
+  it('answers a replace without a checksum with the checksum of the file there', async () => {
+    const ctx = await context();
+    await writeFile(join(artifacts, 'tasks', '1', 'deck.pptx'), 'first deck');
+    const sha = createHash('sha256').update('first deck').digest('hex');
+    const verdict = await DocblocksSaveArtifact.preProcess!(
+      'save_artifact',
+      { artifactUri: URI, destination: { path: 'tasks/1/deck.pptx', ifExists: 'replace' } },
+      ctx,
+    );
+    expect(verdict.kind).toBe('reject');
+    expect(verdict.kind === 'reject' && verdict.error).toContain(
+      `destination.expectedSha256 "${sha}"`,
+    );
+  });
+
   it('leaves other errors and other tools alone', async () => {
     const ctx = await context();
     const args = {

@@ -44,7 +44,9 @@ export async function buildTimeline(
   },
 ): Promise<ListTimelineResponse> {
   const limit = clampLimit(opts.rawLimit);
+  const { debugMode } = await ctx.store.readConfig();
   const result = await ctx.store.listTimeline({
+    ...(debugMode ? { includeHidden: true } : {}),
     ...(opts.projectId ? { projectId: opts.projectId } : {}),
     ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
     ...(opts.taskRef ? { taskRef: opts.taskRef } : {}),

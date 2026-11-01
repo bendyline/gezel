@@ -104,7 +104,7 @@ test('checkers: create from gallery, move on the board, the reaction summons the
   await page.getByRole('button', { name: /^Create/ }).click();
 
   // The pinned board renders the seeded opening: 24 pieces, red to move.
-  const board = page.frameLocator('iframe.project-output-iframe');
+  const board = page.frameLocator('.page-preview-host.project-output-iframe > iframe');
   await expect(board.locator('.piece')).toHaveCount(24, { timeout: 20_000 });
   await expect(board.getByText('Your move')).toBeVisible();
   await expect(board.getByText('{{')).toHaveCount(0);
@@ -217,7 +217,7 @@ test('checkers: create from gallery, move on the board, the reaction summons the
   // the preview explicitly instead of racing its next background poll. The
   // old frame can observe the file write before React finishes minting the
   // replacement capability, so wait for the iframe URL itself to change.
-  const previewFrame = page.locator('iframe.project-output-iframe');
+  const previewFrame = page.locator('.page-preview-host.project-output-iframe > iframe');
   const previewSrcBeforeReload = await previewFrame.getAttribute('src');
   expect(previewSrcBeforeReload).toBeTruthy();
   const inlineReload = page.getByRole('button', { name: 'Reload the preview' });

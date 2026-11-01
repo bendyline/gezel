@@ -63,6 +63,7 @@ export class RemoteImageProvider implements ImageProvider {
         ...(input.steps ? { steps: input.steps } : {}),
         ...(input.seed !== undefined ? { seed: input.seed } : {}),
         ...(input.strength !== undefined ? { strength: input.strength } : {}),
+        ...(input.loras && input.loras.length > 0 ? { loras: input.loras } : {}),
         ...(input.inputImages && input.inputImages.length > 0
           ? {
               inputImages: input.inputImages.map((i) => ({

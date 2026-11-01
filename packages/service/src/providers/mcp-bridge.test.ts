@@ -297,6 +297,55 @@ describe('McpBridge', () => {
     expect(task?.assignee).toEqual({ kind: 'gezel', gezelId: 'ada' });
   });
 
+  // gemma4-12b's path through its own role-less recipe (2026-10-31): a whole
+  // new book with no `create` and no target, an invocation that nobody could
+  // start, and the assignment that should start it.
+  it('creates a book from a bare craftbook_write and starts its unowned entry once assigned', async () => {
+    const content = JSON.stringify({
+      name: 'Roleless intake',
+      steps: [
+        { id: 'analyze', name: 'Analyze the list', prompt: 'Read the list.', next: 'report' },
+        { id: 'report', name: 'Write the report', prompt: 'Write it.', terminal: true },
+      ],
+    });
+    const created = await bridge.callTool('craftbook_write', { content, format: 'json' });
+    expect(created).toContain('Created craftbook "Roleless intake"');
+    const bookId = created.match(/\(([^)]+)\)/)?.[1];
+    expect(bookId).toBeDefined();
+
+    // As in the trial: a project with no lead (Default hands unowned steps to
+    // its lead) and stepwise execution (generalist mode pins every step on
+    // one recruited gezel, and the mock provider counts as hosted).
+    const project = await svc.context.store.createProject({ name: 'Roleless intake run' });
+    const prior = (await svc.context.store.readConfig()).generalistMode;
+    await svc.context.store.writeConfig({ generalistMode: 'off' });
+    let invoked: string;
+    try {
+      invoked = await bridge.callTool('invoke_craftbook', {
+        craftbookId: bookId!,
+        project: project.id,
+        description: 'Run the role-less intake recipe so its first step needs an owner.',
+      });
+    } finally {
+      await svc.context.store.writeConfig({ generalistMode: prior ?? 'auto' });
+    }
+    expect(invoked).toContain('Nobody was assigned to start its first step "Analyze the list"');
+    expect(invoked).not.toContain('is underway');
+    const ref = invoked.match(/task (\S+\/\d+)/)?.[1];
+    expect(ref).toBeDefined();
+    const dispatched = async () =>
+      (
+        await svc.context.history.listEvents({
+          projectId: project.id,
+          kinds: ['task.entry.dispatched'],
+        })
+      ).filter((event) => (event.details as { ref?: string } | undefined)?.ref === ref);
+    expect(await dispatched()).toEqual([]);
+
+    await bridge.callTool('assign_task', { ref: ref!, assignee: 'ada' });
+    expect(await dispatched()).toHaveLength(1);
+  });
+
   it('reads the whole task-note feed by default from a step-scoped session', async () => {
     const task = await svc.context.tasks.create('default', {
       title: 'Cross-step notes',
@@ -499,6 +548,29 @@ describe('McpBridge', () => {
         content: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"></svg>\n',
       }),
     ).toMatch(/logo\.svg/);
+  });
+
+  it('refuses text written to an office document path in either drawer', async () => {
+    const artifact = await bridge.callTool('write_artifact', {
+      path: 'tasks/eval/report.docx',
+      content: '{ "id": "fdf6f8d7", "artifactUri": "docblocks://artifact/1" }',
+    });
+    expect(artifact).toContain('Not written: `tasks/eval/report.docx` is a .docx file');
+    expect(artifact).not.toContain('copy_artifact_to_workspace');
+    expect(await bridge.callTool('list_artifacts', { path: 'tasks/eval' })).not.toContain(
+      'report.docx',
+    );
+    const workspace = await bridge.callTool('write_file', {
+      path: 'deliverables/deck.pptx',
+      content: '# Quarterly review\n\n---\n\n## Revenue',
+    });
+    expect(workspace).toContain('`deliverables/deck.pptx` is a .pptx file');
+    expect(workspace).toContain(
+      'copy_artifact_to_workspace({ source: "<artifact path>", dest: "deliverables/deck.pptx" })',
+    );
+    expect(
+      await bridge.callTool('append_to_file', { path: 'notes.pdf', content: 'more' }),
+    ).toContain('`notes.pdf` is a .pdf file');
   });
 
   it('says a listed folder does not exist instead of calling it empty', async () => {

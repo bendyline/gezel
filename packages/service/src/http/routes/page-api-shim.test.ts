@@ -33,7 +33,12 @@ interface Harness {
       watch(path: string, cb: (ev: unknown) => void, opts?: object): () => void;
       url(path: string, opts?: object): string;
     };
-    ui: { theme: { mode: string }; onTheme(cb: (t: unknown) => void): () => void };
+    ui: {
+      theme: { mode: string };
+      onTheme(cb: (t: unknown) => void): () => void;
+      layout: { fullscreen: boolean; width: number; height: number };
+      onLayout(cb: (layout: unknown) => void): () => void;
+    };
     tables: {
       list(): Promise<unknown[]>;
       describe(table: string): Promise<unknown>;
@@ -74,6 +79,9 @@ function boot(
     Promise,
     String,
     Uint8Array,
+    innerWidth: 800,
+    innerHeight: 600,
+    document: { documentElement: { setAttribute() {} }, addEventListener() {} },
     setTimeout,
     clearTimeout,
     atob: (b64: string) => Buffer.from(b64, 'base64').toString('binary'),
@@ -120,6 +128,23 @@ function lastPosted<T>(h: Harness, kind: string): T {
 }
 
 describe('buildPageApiShim', () => {
+  it('tracks the host fullscreen state and ignores foreign layout messages', () => {
+    const h = boot();
+    const changed = vi.fn();
+    const stop = h.gezel.ui.onLayout(changed);
+    expect(h.gezel.ui.layout).toEqual({ fullscreen: false, width: 800, height: 600 });
+    h.deliver({ __gezelPage: 1, kind: 'layout', layout: { fullscreen: true } }, {});
+    expect(changed).not.toHaveBeenCalled();
+    h.deliver({ __gezelPage: 1, kind: 'init', layout: { fullscreen: true } });
+    expect(h.gezel.ui.layout.fullscreen).toBe(true);
+    h.deliver({ __gezelPage: 1, kind: 'layout', layout: { fullscreen: true } });
+    expect(changed).toHaveBeenCalledTimes(1);
+    h.deliver({ __gezelPage: 1, kind: 'layout', layout: { fullscreen: false } });
+    expect(h.gezel.ui.layout.fullscreen).toBe(false);
+    stop();
+    h.deliver({ __gezelPage: 1, kind: 'layout', layout: { fullscreen: true } });
+    expect(changed).toHaveBeenCalledTimes(2);
+  });
   it('relays table discovery, schemas and queries and ignores non-parent replies', async () => {
     const h = boot();
     const listed = h.gezel.tables.list();

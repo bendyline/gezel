@@ -290,6 +290,14 @@ export interface GezelPageTheme {
 /** Host UI state the page can mirror. */
 export interface GezelPageUiApi {
   components: GezelPageComponents;
+  /** Fullscreen means the app's Output pane fills the Gezel window. */
+  readonly layout: {
+    readonly fullscreen: boolean;
+    readonly width: number;
+    readonly height: number;
+  };
+  /** Apply ui.layout at boot; subscribe to subsequent layout/size changes. */
+  onLayout(cb: (layout: GezelPageUiApi['layout']) => void): () => void;
   /** The current theme. Live — reflects the host's latest pushed value. */
   theme: GezelPageTheme;
   /**
@@ -334,8 +342,71 @@ export interface GezelPageComponent<T> {
   update(options: Partial<T>): void;
   destroy(): void;
 }
+export interface GezelAppLayoutOptions {
+  /** Heading and useful context above the fullscreen conversation. */
+  title?: string;
+  description?: string;
+  /** False for a file-only app; otherwise chat appears when fullscreen. */
+  chat?: GezelChatOptions | false;
+}
+export interface GezelActionField {
+  name: string;
+  label: string;
+  type?: 'text' | 'number' | 'date' | 'url';
+  required?: boolean;
+  multiline?: boolean;
+  options?: Array<string | { value: string; label: string }>;
+  placeholder?: string;
+  value?: string | number;
+  min?: number;
+  max?: number;
+  step?: number;
+  maxLength?: number;
+  /** Hide and omit this field unless another field has this value. */
+  when?: { field: string; equals: string };
+}
+export interface GezelActionFormOptions {
+  title: string;
+  description?: string;
+  /** A declared page tool; ordinary validation and write policy still apply. */
+  tool: string;
+  fields: GezelActionField[];
+  submitLabel?: string;
+  successMessage?: string;
+  open?: boolean;
+  clearOnSave?: boolean;
+  /** Map form fields into the tool's declared input, for example one card into a cards array. */
+  mapInput?: (values: Record<string, string | number>) => Record<string, unknown>;
+  onSaved?: (result: GezelPageToolResult) => void | Promise<void>;
+}
+export interface GezelCollectionFilterOptions {
+  container: string | HTMLElement;
+  selector: string;
+  label?: string;
+  placeholder?: string;
+}
 export interface GezelPageComponents {
   version: 1;
+  /** Searches rendered items, retaining their controls and refreshing after data updates. */
+  collectionFilter(
+    target: string | HTMLElement,
+    options: GezelCollectionFilterOptions,
+  ): GezelPageComponent<GezelCollectionFilterOptions>;
+  /** Wrap existing content, retaining its DOM, and add a responsive fullscreen companion. */
+  appLayout(
+    content: string | HTMLElement,
+    options?: GezelAppLayoutOptions,
+  ): GezelPageComponent<GezelAppLayoutOptions>;
+  /** Accessible, validated form invoking one declared action, with busy/error/success states. */
+  actionForm(
+    target: string | HTMLElement,
+    options: GezelActionFormOptions,
+  ): GezelPageComponent<GezelActionFormOptions>;
+  /** Native, project-bound chat. No transcript or send API is exposed to page scripts. */
+  chat(
+    target: string | HTMLElement,
+    options?: GezelChatOptions,
+  ): GezelPageComponent<GezelChatOptions> & { ready: Promise<void> };
   fileCard(
     target: string | HTMLElement,
     options: GezelFileCardOptions,
@@ -346,6 +417,23 @@ export interface GezelPageComponents {
   ): GezelPageComponent<GezelFileAdderOptions> & { refresh(): Promise<void> };
   /** Present only in standalone demo mode; releases imported object URLs on reset. */
   demo?: { files(): GezelPageFile[]; reset(): void };
+}
+
+export interface GezelChatOptions {
+  /** Exact recipient, or resolve gezelRole among this project's crew. Otherwise use its lead. */
+  gezelId?: string;
+  gezelRole?: string;
+  /** Defaults to true; also disables mention fan-out. */
+  lockRecipient?: boolean;
+  variant?: 'chat' | 'composer';
+  showAddress?: boolean;
+  showThreads?: boolean;
+  placeholder?: string;
+  /** Optional composer features are off by default in page components. */
+  attachments?: boolean;
+  dictation?: boolean;
+  promptAssist?: boolean;
+  expand?: boolean;
 }
 
 /**

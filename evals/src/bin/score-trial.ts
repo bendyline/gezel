@@ -34,6 +34,7 @@ import {
   type RetrievalOracle,
   summarizeRetrievalForRunDir,
 } from '../retrieval-facts.ts';
+import { bareToolName } from '../tool-names.ts';
 import type { NativeEngineIncidentSummary, TrialFinalSniff } from '../types.ts';
 
 export interface TrialFacts {
@@ -284,6 +285,19 @@ const FILE_WRITE_TOOLS = new Set([
   'appendToFile',
 ]);
 
+/**
+ * Tools that also put the deliverable somewhere addressable, so a long reply
+ * in the same turn is a summary of it, not a substitute: a saved recipe, a
+ * DocBlocks save, a copy into the workspace, or a started task.
+ */
+const DELIVERABLE_TOOLS = new Set([
+  'craftbook_write',
+  'save_artifact',
+  'copy_artifact_to_workspace',
+  'start_work',
+  'invoke_craftbook',
+]);
+
 const PROSE_AS_DELIVERABLE_MIN_CHARS = 800;
 const PROSE_AS_DELIVERABLE_MIN_H2_COUNT = 2;
 
@@ -312,13 +326,17 @@ const SESSION_RED_FLAGS: Array<{
         // Structured-document shape: H1 at the start (or near it) plus
         // at least N H2 subheadings. A long numbered plan in chat
         // (acceptable consultation reply) won't fire; a multi-section
-        // markdown report will.
-        const startsWithH1 = /^[\s#]*#\s+\S/m.test(txt.slice(0, 200));
+        // markdown report will. Exactly one `#`: the pattern once accepted
+        // `## What I built`, and all 23 hits on the 2026-10-28 DGX Spark
+        // scorecard were status reports with H2 sections and no title.
+        const startsWithH1 = /^[ \t]*#[ \t]+\S/m.test(txt.slice(0, 200));
         const h2Matches = txt.match(/^##\s+\S/gim) ?? [];
         if (!startsWithH1 || h2Matches.length < PROSE_AS_DELIVERABLE_MIN_H2_COUNT) return;
         // No file-writing call in the same assistant message.
         const calls = msg.toolCalls ?? [];
-        const wrote = calls.some((c) => FILE_WRITE_TOOLS.has(c.name));
+        const wrote = calls.some(
+          (c) => FILE_WRITE_TOOLS.has(c.name) || DELIVERABLE_TOOLS.has(bareToolName(c.name)),
+        );
         if (wrote) return;
         const preview = txt.slice(0, 120).replace(/\n/g, ' ');
         hits.push({

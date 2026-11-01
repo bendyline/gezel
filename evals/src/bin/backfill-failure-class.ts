@@ -26,7 +26,11 @@ import { cp, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { classifyTrial, readDaemonLogTailSync } from '../failure-class.ts';
+import {
+  classifyTrial,
+  readDaemonLogTailSync,
+  readTrialAuthoredTaskRefs,
+} from '../failure-class.ts';
 import type { FailureClassification } from '../failure-class.ts';
 import { verifyFixSquisqWorkspaceDir } from '../scenarios/fix-squisq-bugs.ts';
 import {
@@ -36,7 +40,7 @@ import {
 } from '../success-check.ts';
 import type { FailureClass, TrialResult } from '../types.ts';
 
-const CLASSIFIER_VERSION = 2;
+const CLASSIFIER_VERSION = 3;
 
 interface SidecarShape extends FailureClassification {
   trialId: string;
@@ -169,6 +173,7 @@ async function classifyTrialDir(trialDir: string, result: TrialResult): Promise<
     reason: result.reason,
     failureMode: result.failureMode ?? null,
     daemonLog,
+    trialAuthoredTaskRefs: readTrialAuthoredTaskRefs(trialDir),
   });
   // Grader re-judgment only where the model would otherwise be blamed —
   // operator/infra causes are more proximate even when the workspace

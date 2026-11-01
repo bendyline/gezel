@@ -2,6 +2,7 @@ import type { SuggestedWorkItem } from '@bendyline/gezel';
 import { paramFormSchema, paramProjectProperty } from '@bendyline/gezel';
 import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { GezelJsonEditor } from './GezelJsonEditor.js';
 import { seedableParamDefault } from './craftbook-command.js';
@@ -38,7 +39,7 @@ export function SuggestedNightWork({
       const res = await api.listSuggestedWork(projectId);
       setItems(res.items);
     } catch (err) {
-      setError((err as Error).message);
+      setError(apiErrorMessage(err));
     }
   }, [projectId]);
 
@@ -54,7 +55,7 @@ export function SuggestedNightWork({
       await fn();
       await reload();
     } catch (err) {
-      setError((err as Error).message);
+      setError(apiErrorMessage(err));
     } finally {
       setBusyKey(null);
     }

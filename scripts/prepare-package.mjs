@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Prepare one package after multi-semantic-release has computed its next
- * version: restore local dependency declarations to `workspace:*`, then stamp
- * the product version into `packages/core/src/browser.ts` when preparing core.
+ * version: restore local dependency declarations to `workspace:*`, then
+ * rebuild core with the product version stamped in when preparing core.
  *
  * WHY THIS EXISTS: `GEZEL_VERSION` is a source constant, not a read of
  * `package.json`, because core is bundled for the browser too and cannot reach
@@ -18,21 +18,26 @@
  * package. Dependency normalization is required for every package because
  * multi-semantic-release replaces workspace ranges with concrete versions
  * before calling configured prepare plugins. Only `packages/core` performs
- * the additional source stamp and rebuild.
+ * the additional stamped rebuild.
  *
- * The stamped source is NOT committed — `.releaserc.json`'s git assets are
- * `CHANGELOG.md` and `package.json` only. That matches
- * `scripts/stamp-version.mjs`, which stamps the Electron scheme the same way:
- * the checkout stays at `0.0.0` and every release re-stamps from scratch.
+ * The stamp goes into core's build, never into `packages/core/src/browser.ts`
+ * (see scripts/core-version-stamp.mjs): the checkout stays at `0.0.0`, so
+ * nothing stamped can reach a commit, including one made while
+ * rehearse-npm-release.mjs runs this script inside `pnpm all`.
  *
  * Env:
  *   GEZEL_RELEASE_DRY_RUN=1  print what would happen instead of doing it.
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { calVerPrefix } from './calver.mjs';
 import { coreEntryPath, readCoreBuiltEntry } from './core-built-entry.mjs';
+import {
+  CORE_VERSION_SOURCE,
+  missingCoreVersionDeclaration,
+  releaseStampEnv,
+} from './core-version-stamp.mjs';
 import { spawnPnpmSync } from './pnpm-cli.mjs';
 import { writeReleasePackageState } from './release-package-state.mjs';
 import {
@@ -102,13 +107,12 @@ if (!dryRun && dependencyChanges.length > 0)
 
 if (basename(packageDir) !== 'core') process.exit(0);
 
-const sourcePath = resolve(repoRoot, 'packages/core/src/browser.ts');
-const source = readFileSync(sourcePath, 'utf8');
-const pattern = /export const GEZEL_VERSION = '[^']*';/;
-const compatPattern = /export const GEZEL_CONTENT_COMPAT = '[^']*';/;
-
-if (!pattern.test(source)) {
-  console.error(`prepare-package: could not find GEZEL_VERSION declaration in ${sourcePath}`);
+// Checked here, before the build, so a drifted declaration fails with its
+// name rather than as a tsup plugin error.
+const sourcePath = resolve(repoRoot, CORE_VERSION_SOURCE);
+const missing = missingCoreVersionDeclaration(readFileSync(sourcePath, 'utf8'));
+if (missing) {
+  console.error(`prepare-package: could not find ${missing} declaration in ${sourcePath}`);
   process.exit(1);
 }
 
@@ -116,29 +120,17 @@ if (!pattern.test(source)) {
 // floors are authored as `1.YYDDD`. Stamp today's calendar line alongside the
 // published version so floors are compared on the axis they were written for;
 // see GEZEL_CONTENT_COMPAT in packages/core/src/browser.ts.
-if (!compatPattern.test(source)) {
-  console.error(
-    `prepare-package: could not find GEZEL_CONTENT_COMPAT declaration in ${sourcePath}`,
-  );
-  process.exit(1);
-}
 const contentCompat = calVerPrefix();
 
 if (dryRun) {
   console.log(
-    `prepare-package: [dry run] would stamp GEZEL_VERSION = '${version}', GEZEL_CONTENT_COMPAT = '${contentCompat}' and rebuild core`,
+    `prepare-package: [dry run] would stamp GEZEL_VERSION = '${version}', GEZEL_CONTENT_COMPAT = '${contentCompat}' into a core rebuild`,
   );
   process.exit(0);
 }
 
-writeFileSync(
-  sourcePath,
-  source
-    .replace(pattern, `export const GEZEL_VERSION = '${version}';`)
-    .replace(compatPattern, `export const GEZEL_CONTENT_COMPAT = '${contentCompat}';`),
-);
 console.log(
-  `prepare-package: stamped GEZEL_VERSION = '${version}', GEZEL_CONTENT_COMPAT = '${contentCompat}'`,
+  `prepare-package: rebuilding core with GEZEL_VERSION = '${version}', GEZEL_CONTENT_COMPAT = '${contentCompat}'`,
 );
 
 // Rebuild so the tarball packed by publish-package.mjs carries the stamp. The
@@ -146,6 +138,7 @@ console.log(
 const result = spawnPnpmSync(['--filter', '@bendyline/gezel', 'run', 'build'], {
   cwd: repoRoot,
   stdio: 'inherit',
+  env: { ...process.env, ...releaseStampEnv({ version, contentCompat }) },
 });
 
 if (result.error) {

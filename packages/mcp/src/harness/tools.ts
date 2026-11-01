@@ -755,6 +755,7 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
           .max(4)
           .optional()
           .describe('Images to edit or combine: absolute paths, or paths relative to this folder.'),
+        style: z.string().max(100).optional().describe('A look to draw in, by name.'),
       },
     },
     async (args) =>
@@ -780,6 +781,7 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
             ...(args.quality ? { quality: args.quality } : {}),
             ...(args.negativePrompt ? { negativePrompt: args.negativePrompt } : {}),
             ...(inputs.length > 0 ? { inputImages: inputs } : {}),
+            ...(args.style ? { style: args.style } : {}),
           }),
         );
         const artifactsDir = binding.info?.artifactsDir;
@@ -794,9 +796,12 @@ export function registerHarnessTools(server: McpServer, session: HarnessSession)
         const settings = res.meta.settingsNotes?.length
           ? `Image settings: ${res.meta.settingsNotes.join(' ')} `
           : '';
+        const styles = res.styles?.length
+          ? ` Styles this model has: ${res.styles.map((s) => s.name).join(', ')}.`
+          : '';
         content.push({
           type: 'text',
-          text: `${skipped}${settings}Saved to ${saved} (${res.meta.widthPx}x${res.meta.heightPx}, ${res.meta.model}). Copy it into the folder with your own file tools if it belongs there.`,
+          text: `${skipped}${settings}Saved to ${saved} (${res.meta.widthPx}x${res.meta.heightPx}, ${res.meta.model}). Copy it into the folder with your own file tools if it belongs there.${styles}`,
         });
         return { content };
       }),

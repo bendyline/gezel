@@ -14,7 +14,7 @@ test.describe('app shell', () => {
     await expect(page.getByTestId('app-sidebar')).toBeVisible();
     await expect(page.getByTestId('app-header')).toBeVisible();
 
-    const connectedTabs = [
+    const destinations = [
       {
         trigger: null,
         tab: page.getByTestId('sidebar-meester'),
@@ -22,6 +22,10 @@ test.describe('app shell', () => {
       {
         trigger: page.getByTestId('sidebar-area-history'),
         tab: page.getByTestId('sidebar-area-history'),
+      },
+      {
+        trigger: page.locator('.app-sidebar-proj-row > .app-sidebar-item[title="Fixture Project"]'),
+        tab: page.locator('.app-sidebar-proj-row').filter({ hasText: 'Fixture Project' }),
       },
       {
         trigger: page.getByTestId('sidebar-group-documents'),
@@ -33,30 +37,35 @@ test.describe('app shell', () => {
       },
     ];
 
-    for (const { trigger, tab } of connectedTabs) {
+    for (const { trigger, tab } of destinations) {
       await trigger?.click();
       await expect(tab).toHaveClass(/active/);
       for (const side of ['right', 'left'] as const) {
         await page.evaluate((nextSide) => {
           document.documentElement.dataset.sidebarSide = nextSide;
         }, side);
-        const connectedEdge = await tab.evaluate((element, currentSide) => {
+        const selection = await tab.evaluate((element, currentSide) => {
           const sidebar = document.querySelector<HTMLElement>('[data-testid="app-sidebar"]');
           if (!sidebar) throw new Error('Sidebar not found');
           const tabRect = element.getBoundingClientRect();
           const sidebarRect = sidebar.getBoundingClientRect();
+          const style = getComputedStyle(element);
           return {
-            seamOffset:
+            panelGap:
               currentSide === 'right'
                 ? tabRect.left - sidebarRect.left
-                : tabRect.right - sidebarRect.right,
-            pseudoDisplay: getComputedStyle(element, '::after').display,
+                : sidebarRect.right - tabRect.right,
+            borderLeftColor: style.borderLeftColor,
+            borderRightColor: style.borderRightColor,
+            borderTopColor: style.borderTopColor,
+            pseudoContent: getComputedStyle(element, '::after').content,
           };
         }, side);
-        /* The inset divider itself is 1px wide, so either edge may resolve to
-           that boundary depending on the mirrored sidebar direction. */
-        expect(Math.abs(connectedEdge.seamOffset)).toBeLessThan(1.1);
-        expect(connectedEdge.pseudoDisplay).toBe('none');
+        expect(selection.panelGap).toBeGreaterThan(4);
+        expect(selection.borderLeftColor).toBe(selection.borderTopColor);
+        expect(selection.borderRightColor).toBe(selection.borderTopColor);
+        expect(selection.borderTopColor).not.toBe('rgba(0, 0, 0, 0)');
+        expect(selection.pseudoContent).toBe('none');
       }
     }
     await page.getByTestId('sidebar-meester').click();
@@ -95,9 +104,9 @@ test.describe('app shell', () => {
         boxShadow: style.boxShadow,
       };
     });
-    expect(focusedHome.borderLeftColor).toBe('rgba(0, 0, 0, 0)');
+    expect(focusedHome.borderLeftColor).toBe(focusedHome.borderTopColor);
     expect(focusedHome.borderTopColor).not.toBe(unfocusedHome.borderTopColor);
-    expect(focusedHome.boxShadow).toBe(unfocusedHome.boxShadow);
+    expect(focusedHome.boxShadow).not.toBe(unfocusedHome.boxShadow);
     await expect
       .poll(() =>
         workshopPaper.evaluate((element) =>

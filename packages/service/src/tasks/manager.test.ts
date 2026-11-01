@@ -253,6 +253,36 @@ describe('TaskManager', () => {
     expect(created.craftbook.steps[0]?.advanceWhen?.file).toBe('marne-battle.pptx');
   });
 
+  it('creates a book whose built-in tool groups its roles already carry', async () => {
+    // Codebase Refactoring Review names builtin.code-intel and builtin.git.
+    // Reviewers and developers get both by default and nothing installs a
+    // built-in group, so counting installs alone refused it every time.
+    const book = (role: string) => ({
+      craftbook: {
+        id: 'refactoring-review',
+        name: 'Refactoring Review',
+        steps: [{ id: 'scan', name: 'Scan', prompt: 'Rank the hotspots.', suggestedRole: role }],
+        entryStepId: 'scan',
+        toolsets: [{ toolsetId: 'builtin.code-intel' }, { toolsetId: 'builtin.git' }],
+        createdAt: '2026-10-30T00:00:00Z',
+        updatedAt: '2026-10-30T00:00:00Z',
+      },
+      sourceId: 'bundled',
+    });
+    const create = () =>
+      tasks.create('website', {
+        title: 'Refactoring review',
+        assignee: { kind: 'user' },
+        craftbookId: 'refactoring-review',
+      });
+
+    tasks.setCraftbookResolver({ resolve: async () => book('reviewer') });
+    expect((await create()).craftbook.id).toBe('refactoring-review');
+
+    tasks.setCraftbookResolver({ resolve: async () => book('writer') });
+    await expect(create()).rejects.toThrow(/SETUP REQUIRED.*builtin\.git/);
+  });
+
   it('interpolates launch params everywhere inside a gate, not just check.file', async () => {
     // A gate buries its params below its own top level. The old
     // field-by-field walk touched `checks[].file` only, so Pull Request
@@ -1138,6 +1168,91 @@ describe('TaskManager spawn craftbooks & children', () => {
       depth: 'thorough',
       includeMetrics: 'true',
     });
+  });
+
+  it('launches a scheduled run of a catalog book as a full launch, with its params resolved', async () => {
+    // squisq/22 and squisq/23: cloned from the host's snapshot, a night run
+    // kept `{{workPath}}` in its gate and paused as a configuration error.
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Nightly Fix Sweep',
+            description: 'Turn open findings into change proposals.',
+            steps: [
+              {
+                id: 'triage',
+                name: 'Triage',
+                prompt: 'Sweep {{leads}}, then write `{{workPath}}/clusters.json`.',
+                advanceWhen: { file: '{{workPath}}/clusters.json', minBytes: 2, artifact: true },
+                gate: {
+                  at: 'completion' as const,
+                  checks: [
+                    {
+                      kind: 'minBytes' as const,
+                      file: '{{workPath}}/clusters.json',
+                      bytes: 2,
+                      artifact: true,
+                    },
+                  ],
+                  onReject: 'triage',
+                  maxAttempts: 3,
+                },
+                next: 'fanout',
+              },
+              { id: 'fanout', name: 'Draft', spawnFanout: true, terminal: true },
+            ],
+            entryStepId: 'triage',
+            paramSchema: {
+              type: 'object',
+              properties: {
+                workPath: { type: 'string', default: '{{task.dir}}' },
+                leads: { type: 'string', default: '' },
+              },
+            },
+            spawn: {
+              overFile: '{{workPath}}/clusters.json',
+              overArtifact: true,
+              steps: [{ id: 'draft', name: 'Draft {{slug}}', terminal: true }],
+            },
+            diffpackCapable: true,
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+    const host = await tasks.create('website', {
+      title: 'Night shift: Nightly Fix Sweep',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Wait' }],
+      spawnsCraftbookId: 'nightly-fix-sweep',
+      spawnsCraftbookParams: { leads: 'BW-3,BW-8' },
+      cron: { expression: '*/30 * * * *', overlap: 'skip' },
+      nightShift: { enabled: true, onceADay: true },
+    });
+    const activations: Array<{ kind?: string; ref: string; stepId: string }> = [];
+    tasks.setStepActivatedHook(async ({ kind, task, newStep }) => {
+      activations.push({ kind, ref: task.ref, stepId: newStep.id });
+    });
+
+    const run = await tasks.launchScheduledRun(host.ref);
+    const dir = `tasks/${run.num}`;
+    const triage = run.craftbook.steps.find((s) => s.id === 'triage')!;
+    expect(run.parentTaskRef).toBe(host.ref);
+    expect(run.artifactDir).toBe(dir);
+    expect(run.craftbookParams).toEqual({ workPath: dir, leads: 'BW-3,BW-8' });
+    expect(triage.prompt).toBe(`Sweep BW-3,BW-8, then write \`${dir}/clusters.json\`.`);
+    expect(triage.advanceWhen?.file).toBe(`${dir}/clusters.json`);
+    expect(triage.gate?.checks?.[0]).toMatchObject({ file: `${dir}/clusters.json` });
+    expect(run.craftbook.spawn?.overFile).toBe(`${dir}/clusters.json`);
+    expect(run.spawnsCraftbook?.steps[0]?.name).toBe('Draft {{slug}}');
+    expect(run.diffpackId).toBe(String(run.num));
+    expect(run.nightShift).toEqual({ enabled: true });
+    expect(activations).toEqual([{ kind: 'entry', ref: run.ref, stepId: 'triage' }]);
+    expect((await tasks.listChildren(host.ref)).map((t) => t.ref)).toEqual([run.ref]);
   });
 
   it('binds every shard of a proposal-drafting host to its own proposal', async () => {

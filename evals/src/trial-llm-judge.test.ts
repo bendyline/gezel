@@ -39,7 +39,11 @@ afterEach(async () => {
 
 describe('single-trial LLM judge facts refresh', () => {
   it('regenerates facts.json after persisting llm-judge.json', async () => {
-    await writeFile(join(tempRoot, 'workspace', 'index.html'), '<html><h1>Game</h1></html>');
+    await mkdir(join(tempRoot, 'workspace', 'tic-tac-toe'), { recursive: true });
+    await writeFile(
+      join(tempRoot, 'workspace', 'tic-tac-toe', 'index.html'),
+      '<html><h1>Game</h1></html>',
+    );
     await writeTrialFacts(tempRoot);
     const before = JSON.parse(await readFile(join(tempRoot, 'facts.json'), 'utf8'));
     expect(before.judge).toBeUndefined();
@@ -65,6 +69,7 @@ describe('single-trial LLM judge facts refresh', () => {
         id: 'tictactoe',
         prompt: 'Build a game.',
         description: 'A playable game.',
+        htmlDeliverable: 'index.html',
       },
       runDir: tempRoot,
       log: vi.fn(),
@@ -93,6 +98,7 @@ describe('single-trial LLM judge facts refresh', () => {
         id: 'tictactoe',
         prompt: 'Build a game.',
         description: 'A playable game.',
+        htmlDeliverable: 'index.html',
       },
       runDir: tempRoot,
       log,
@@ -101,9 +107,32 @@ describe('single-trial LLM judge facts refresh', () => {
     expect(wrote).toBe(false);
     expect(runLlmJudgeMock).not.toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith(
-      '[llm-judge] no HTML artifact in trial dir — skipping advisory judge',
+      '[llm-judge] no index.html in trial dir — skipping advisory judge',
     );
     expect(await readFile(join(tempRoot, 'facts.json'), 'utf8')).toBe(factsBefore);
+  });
+
+  it('does not judge a page the scenario did not ask the model to build', async () => {
+    // craftbook-find-vs-create seeds a shop site; the default rubric graded
+    // that seed at 0.8 in every trial.
+    await mkdir(join(tempRoot, 'workspace', 'shop-site', 'pages'), { recursive: true });
+    await writeFile(
+      join(tempRoot, 'workspace', 'shop-site', 'pages', 'index.html'),
+      '<html></html>',
+    );
+    const log = vi.fn();
+
+    const wrote = await maybeJudgeTrial({
+      scenario: { id: 'craftbook-find-vs-create', prompt: 'Add metadata.', description: 'Route.' },
+      runDir: tempRoot,
+      log,
+    });
+
+    expect(wrote).toBe(false);
+    expect(runLlmJudgeMock).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith(
+      '[llm-judge] scenario declares no judged deliverable — skipping advisory judge',
+    );
   });
 
   it('judges a named Markdown artifact with scenario-specific axes and context', async () => {

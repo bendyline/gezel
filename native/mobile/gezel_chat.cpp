@@ -246,7 +246,8 @@ json chat_params_parse(json body, const chat_config & opt, const common_chat_tem
     inputs.json_schema = json_schema.is_null() ? "" : json_schema.dump();
     inputs.grammar = grammar;
     inputs.use_jinja = true;
-    inputs.parallel_tool_calls = json_value(body, "parallel_tool_calls", caps["supports_parallel_tool_calls"]);
+    inputs.parallel_tool_calls =
+        json_value(body, "parallel_tool_calls", caps.at("supports_parallel_tool_calls").get<bool>());
     inputs.add_generation_prompt = json_value(body, "add_generation_prompt", true);
     inputs.continue_final_message = body.contains("continue_final_message")
         ? common_chat_continuation_parse(body.at("continue_final_message"))

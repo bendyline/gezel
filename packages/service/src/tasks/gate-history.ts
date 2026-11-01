@@ -122,11 +122,14 @@ export function gateHistoryEvidence(
   return {
     imageEvidence: async (artifact = false) => {
       if (!history) return { observable: false, paths: [] };
-      const events = await history.listEvents({
-        projectId,
-        kinds: ['tool.called'],
-        ...(stepEvidenceSince(step) ? { from: stepEvidenceSince(step) } : {}),
-      });
+      const events = await history.listEvents(
+        {
+          projectId,
+          kinds: ['tool.called'],
+          ...(stepEvidenceSince(step) ? { from: stepEvidenceSince(step) } : {}),
+        },
+        { taskRef: task.ref },
+      );
       const paths = events.flatMap((event) => {
         const d = event.details;
         return d?.success === true &&
@@ -149,11 +152,14 @@ export function gateHistoryEvidence(
       if (!history) return { observable: false, matches: [] };
       const taskWide = window === 'task';
       const since = taskWide ? task.createdAt : stepEvidenceSince(step);
-      const events = await history.listEvents({
-        projectId,
-        kinds: ['tool.called'],
-        ...(since ? { from: since } : {}),
-      });
+      const events = await history.listEvents(
+        {
+          projectId,
+          kinds: ['tool.called'],
+          ...(since ? { from: since } : {}),
+        },
+        { taskRef: task.ref },
+      );
       const allowed = new Set(tools);
       const expectedPath = normalizeSourcePath(sourcePath);
       const matches: Array<{
@@ -200,11 +206,14 @@ export function gateHistoryEvidence(
     },
     corpusReadEvidence: async () => {
       if (!history) return { observable: false, slices: [] };
-      const events = await history.listEvents({
-        projectId,
-        kinds: ['tool.called'],
-        ...(step.createdAt ? { from: step.createdAt } : {}),
-      });
+      const events = await history.listEvents(
+        {
+          projectId,
+          kinds: ['tool.called'],
+          ...(step.createdAt ? { from: step.createdAt } : {}),
+        },
+        { taskRef: task.ref },
+      );
       const slices: Array<{
         path: string;
         startLine: number;
@@ -246,11 +255,14 @@ export function gateHistoryEvidence(
       if (!history) return { observable: false, runs: [] };
       const taskWide = window === 'task';
       const since = taskWide ? task.createdAt : stepEvidenceSince(step);
-      const events = await history.listEvents({
-        projectId,
-        kinds: [scope === 'script' ? 'workspace.script.run' : 'workspace.npx.run'],
-        ...(since ? { from: since } : {}),
-      });
+      const events = await history.listEvents(
+        {
+          projectId,
+          kinds: [scope === 'script' ? 'workspace.script.run' : 'workspace.npx.run'],
+          ...(since ? { from: since } : {}),
+        },
+        { taskRef: task.ref },
+      );
       const sameArgs = (value: unknown): boolean => {
         const eventArgs = Array.isArray(value)
           ? value.filter((v): v is string => typeof v === 'string')

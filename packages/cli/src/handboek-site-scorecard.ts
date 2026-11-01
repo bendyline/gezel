@@ -30,11 +30,31 @@ import {
 const ATTRS = SCORECARD_DATA_ATTRS;
 const PARAMS = SCORECARD_QUERY_PARAMS;
 
+/**
+ * Dispatched on the scorecard root after every render, with the view as its
+ * detail (and kept on the root as `hbScorecardView` for late listeners):
+ * `{ rounds, hardware, model, modelClass }`, where `rounds` holds the ids the
+ * round picker put in scope. Anything that follows the pickers — the
+ * all-results table — narrows from this instead of re-deriving the rules.
+ */
+export const SCORECARD_VIEW_EVENT = 'hb-scorecard-view';
+
+/**
+ * The reply: the all-results table dispatches this on the scorecard root
+ * after every render, with `{ rounds, filtering }` — the round ids its
+ * visible rows belong to, and whether its own column filters are on. While
+ * they are, the round list keeps only those rounds, so it always names the
+ * rounds behind what the table shows.
+ */
+export const SCORECARD_TABLE_EVENT = 'hb-scorecard-table';
+
 export const SCORECARD_FILTER_JS = `(function () {
   'use strict';
 
   var ATTR = ${JSON.stringify(ATTRS)};
   var PARAM = ${JSON.stringify(PARAMS)};
+  var VIEW_EVENT = ${JSON.stringify(SCORECARD_VIEW_EVENT)};
+  var TABLE_EVENT = ${JSON.stringify(SCORECARD_TABLE_EVENT)};
   var ROUND_LATEST = ${JSON.stringify(SCORECARD_ROUND_LATEST)};
   var ROUND_ALL = ${JSON.stringify(SCORECARD_ROUND_ALL)};
   var TIER_ORDER = ${JSON.stringify(MODEL_TIER_ORDER)};
@@ -295,44 +315,83 @@ export const SCORECARD_FILTER_JS = `(function () {
     bar.appendChild(reset);
 
     var state = readState();
+    // Rounds the all-results table still shows rows for while its column
+    // filters are on; null while they are off. Narrows the list, never widens it.
+    var tableRounds = null;
+    var picked = {};
 
     function render() {
       var scope = scopeFor(state, rounds);
       var inScope = {};
       for (var s = 0; s < scope.length; s++) inScope[scope[s].id] = true;
 
-      var shown = 0;
+      picked = {};
       for (var r = 0; r < rounds.length; r++) {
         var entry = rounds[r];
-        var visible =
+        picked[entry.id] =
           !!inScope[entry.id] &&
           (!state.hardware || entry.hardware === state.hardware) &&
-          rowsMatch(entry.el);
-        entry.el.hidden = !visible;
-        if (visible) shown++;
+          rowsMatch(entry);
       }
+      paint();
 
       hardware.select.value = state.hardware;
       model.select.value = state.model;
       modelClass.select.value = state.modelClass;
       round.select.value = roundSelection(state, rounds);
       reset.hidden = !state.hardware && !state.model && !state.modelClass && !state.round && !state.date;
+      writeState(state, rounds);
 
+      var view = {
+        rounds: scope.map(function (entry) {
+          return entry.id;
+        }),
+        hardware: state.hardware,
+        model: state.model,
+        modelClass: state.modelClass
+      };
+      root.hbScorecardView = view;
+      root.dispatchEvent(new CustomEvent(VIEW_EVENT, { detail: view }));
+    }
+
+    /* Show the rounds the pickers kept and the table's filters still reach. */
+    function paint() {
+      var shown = 0;
+      for (var r = 0; r < rounds.length; r++) {
+        var entry = rounds[r];
+        var visible = !!picked[entry.id] && (!tableRounds || tableRounds.indexOf(entry.id) !== -1);
+        entry.el.hidden = !visible;
+        if (visible) shown++;
+      }
       status.textContent = shown === 0
         ? 'No test rounds match these filters.'
         : 'Showing ' + shown + ' of ' + rounds.length + ' test ' + (rounds.length === 1 ? 'round' : 'rounds') + '.';
-      writeState(state, rounds);
     }
+
+    // Repaints only: answering with another view event would loop.
+    root.addEventListener(TABLE_EVENT, function (event) {
+      tableRounds = event.detail.filtering ? event.detail.rounds : null;
+      paint();
+    });
 
     /*
      * Rows and whole suite tables hide together with what they contain: a
      * suite whose every row was filtered out would otherwise leave a
      * heading over an empty table, which reads as "measured nothing" rather
      * than "not what you asked for". Returns whether the round kept
-     * anything at all.
+     * anything at all. A round listed as a link to its own page has no
+     * tables here, so it answers from the models and classes it is stamped
+     * with.
      */
-    function rowsMatch(roundEl) {
+    function rowsMatch(round) {
+      var roundEl = round.el;
       var suites = roundEl.querySelectorAll('[' + ATTR.suite + ']');
+      if (suites.length === 0) {
+        return (
+          (!state.model || round.models.indexOf(state.model) !== -1) &&
+          (!state.modelClass || round.tiers.indexOf(state.modelClass) !== -1)
+        );
+      }
       var kept = 0;
       for (var i = 0; i < suites.length; i++) {
         var rows = suites[i].querySelectorAll('[' + ATTR.model + ']');

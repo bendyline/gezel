@@ -38,8 +38,20 @@ import type { ProvenanceToolCall } from './tool-provenance.ts';
 const PROJECT_NAME = 'Brand Theme Alignment';
 const DESIGNER_NAME = 'Wieke';
 export const THEME_REPORT_PATH = 'theme-report.md';
-/** In the artifacts drawer: DocBlocks writes nowhere else. */
-export const THEMED_DECK_PATH = 'deliverables/quarterly-review.pptx';
+/**
+ * In the artifacts drawer: DocBlocks writes nowhere else. Its `deliverables`
+ * root IS that drawer, so the path inside the root is the drawer path.
+ *
+ * This used to be `deliverables/quarterly-review.pptx` "in the artifacts
+ * folder", which reads two ways. qwen3.8-27b saved to root `deliverables`,
+ * path `quarterly-review.pptx` — a correct save the grader looked for one
+ * folder down and booked as missing; gemma4-12b put the prefix in the path
+ * (2026-10-31). The kickoff now names the root and the path separately, and
+ * the grader still accepts the prefixed spelling.
+ */
+export const THEMED_DECK_ROOT = 'deliverables';
+export const THEMED_DECK_PATH = 'quarterly-review.pptx';
+const THEMED_DECK_PATHS = [THEMED_DECK_PATH, `${THEMED_DECK_ROOT}/${THEMED_DECK_PATH}`];
 export const BRAND_DECK_PATH = 'source/brand-reference.pptx';
 export const REVIEW_SOURCE_PATH = 'source/quarterly-review.md';
 
@@ -87,8 +99,8 @@ export const THEME_KICKOFF = [
   '1. `infer_theme_from_file` on the brand deck to read its theme.',
   '2. `apply_inferred_theme` with the quarterly review as the source and the brand deck as',
   '   the theme source.',
-  '3. `convert_document` on the themed result to PowerPoint, then `save_artifact` to',
-  `   \`${THEMED_DECK_PATH}\` in the artifacts folder.`,
+  '3. `convert_document` on the themed result to PowerPoint, then `save_artifact` into the',
+  `   \`${THEMED_DECK_ROOT}\` root (the artifacts folder) at path \`${THEMED_DECK_PATH}\`.`,
   '4. `inspect_document` on the saved deck for its slide count.',
   `5. \`compare_documents\` between \`${REVIEW_SOURCE_PATH}\` and the saved deck.`,
   '',
@@ -341,6 +353,18 @@ async function readArtifactBytes(
   }
 }
 
+/** The saved deck at either accepted spelling, the plain path first. */
+async function readThemedDeck(
+  client: EvalContext['client'],
+  projectId: string,
+): Promise<{ path: string; bytes: Uint8Array } | null> {
+  for (const path of THEMED_DECK_PATHS) {
+    const bytes = await readArtifactBytes(client, projectId, path);
+    if (bytes !== null) return { path, bytes };
+  }
+  return null;
+}
+
 async function setup(ctx: EvalContext): Promise<void> {
   const { client, log } = ctx;
   let projectId = await findProjectId(client);
@@ -481,9 +505,10 @@ export const docblocksThemeRoundtripScenario: EvalScenario = {
       return { done: false };
     }
 
-    const deckBytes = await readArtifactBytes(ctx.client, projectId, THEMED_DECK_PATH);
-    const deckReal =
-      deckBytes !== null && verifyBinaryDocumentBytes(THEMED_DECK_PATH, deckBytes).ok;
+    const deck = await readThemedDeck(ctx.client, projectId);
+    const deckBytes = deck?.bytes ?? null;
+    const deckPath = deck?.path ?? THEMED_DECK_PATH;
+    const deckReal = deckBytes !== null && verifyBinaryDocumentBytes(deckPath, deckBytes).ok;
     const compare = compareEvidence(trace);
     const contentCheck = checkThemeReport(markdown, {
       slideCount: deckReal ? pptxSlideCount(deckBytes) : null,
@@ -502,12 +527,14 @@ export const docblocksThemeRoundtripScenario: EvalScenario = {
         (name) => `${name} never succeeded; call it — describing the step does not count`,
       ),
       ...(deckBytes === null
-        ? [`${THEMED_DECK_PATH} was never saved — call save_artifact with that destination path`]
+        ? [
+            `${THEMED_DECK_PATH} was never saved — call save_artifact into the ${THEMED_DECK_ROOT} root at that path`,
+          ]
         : !deckReal
-          ? [verifyBinaryDocumentBytes(THEMED_DECK_PATH, deckBytes).detail]
+          ? [verifyBinaryDocumentBytes(deckPath, deckBytes).detail]
           : !pptxCarriesBrandFonts(deckBytes)
             ? [
-                `${THEMED_DECK_PATH} does not use the brand fonts — convert the result of apply_inferred_theme, not the plain source`,
+                `${deckPath} does not use the brand fonts — convert the result of apply_inferred_theme, not the plain source`,
               ]
             : []),
     ];
@@ -559,7 +586,7 @@ export const docblocksThemeRoundtripScenario: EvalScenario = {
         expectedDeliverable: needsToolCall ? null : undefined,
         postReadMutationTarget: needsToolCall ? THEME_REPORT_PATH : undefined,
         repairDirective: needsToolCall
-          ? `Call the named DocBlocks tool(s) now and save the themed deck through save_artifact to ${THEMED_DECK_PATH} — writing about a step does not count. Then rewrite ${THEME_REPORT_PATH} from the values the tools returned.`
+          ? `Call the named DocBlocks tool(s) now and save the themed deck through save_artifact into the ${THEMED_DECK_ROOT} root at ${THEMED_DECK_PATH} — writing about a step does not count. Then rewrite ${THEME_REPORT_PATH} from the values the tools returned.`
           : `Patch ${THEME_REPORT_PATH} to carry the exact values the DocBlocks tools returned. Do not estimate a font, color, slide count or percentage — re-read the tool responses.`,
       });
     }

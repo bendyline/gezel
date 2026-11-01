@@ -20,7 +20,7 @@ import type { OpenSessionIntent } from './pending-open-session.js';
  */
 const GROUP_ORDER: Array<{ kind: UnifiedSearchResultKind; label: string }> = [
   { kind: 'project', label: 'Projects' },
-  { kind: 'gezel', label: 'Gezellen' },
+  { kind: 'gezel', label: 'Crew' },
   { kind: 'task', label: 'Tasks' },
   { kind: 'mail', label: 'Mail' },
   { kind: 'file', label: 'Files' },

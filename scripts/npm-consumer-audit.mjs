@@ -5,16 +5,20 @@
  * WHY a separate module: the consumer check does all of its work at import
  * time, so its decision logic could not be tested.
  *
- * Critical only for the separate clean npm-consumer graph. The desktop
- * production gate blocks high advisories and verifies its applied patches;
- * those pnpm patches do not apply to external npm consumers. Keep the clean
- * consumer check independent rather than transferring desktop exceptions.
+ * High and critical, stricter than the workspace gates the CI workflows run at
+ * critical: the published packages exact-pin their dependencies, so a consumer
+ * cannot take a fixed version on their own, and only our release clears a high
+ * advisory here. The desktop gate's reviewed pnpm patches and exceptions do not
+ * reach external npm consumers, so this check keeps its own allowlist. It
+ * blocked critical only until the 2026-10-27 npm ship audit, when such pins
+ * left every consumer's `npm audit` with 12 high advisories marked "No fix
+ * available" and this gate passed them.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BLOCKING = new Set(['critical']);
+const BLOCKING = new Set(['high', 'critical']);
 
 export const AUDIT_ALLOWLIST_PATH = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -41,7 +45,7 @@ export function readAuditAllowlist(path = AUDIT_ALLOWLIST_PATH) {
 }
 
 /**
- * Critical advisories that no unexpired allowlist entry
+ * High and critical advisories that no unexpired allowlist entry
  * covers. Advisory ids come from the GHSA URL npm reports.
  *
  * @param {any} report parsed `npm audit --json`

@@ -120,6 +120,8 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     totalRamBytes: 128 * 1024 ** 3,
     models: [],
   },
+  listInstalledImageLoras: { loras: [] },
+  listActiveImageLoraPulls: { pulls: [] },
   listIncompleteLlamaCppModels: { incomplete: [] },
   listIncompleteDs4Models: { incomplete: [] },
   listIncompleteMlxModels: { incomplete: [] },

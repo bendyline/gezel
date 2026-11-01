@@ -34,22 +34,22 @@ const TOGGLES: ReadonlyArray<{
   {
     key: 'allowExternalServices',
     label: 'External services',
-    help: 'Let gezellen reach the open web and let project previews load external resources. Off blocks those paths; cloud chat has its own switch, and manual GitHub pulls and model downloads are unaffected.',
+    help: 'Let crew members reach the open web and let project previews load external resources. Off blocks those paths; cloud chat has its own switch, and manual GitHub pulls and model downloads are unaffected.',
   },
   {
     key: 'allowScriptExecution',
     label: 'Execute scripts',
-    help: 'Let gezellen run scripts they write and run craftbook script steps. These run in a sandbox. Off still lets the app itself run npm / Node CLIs / MCP servers.',
+    help: 'Let crew members run scripts they write and run craftbook script steps. These run in a sandbox. Off still lets the app itself run npm / Node CLIs / MCP servers.',
   },
   {
     key: 'allowPackageScriptExecution',
     label: 'Run package scripts',
-    help: "Let gezellen run a project's npm scripts and installed command-line tools, such as npm run test. These run outside the sandbox, as your account, with network access. Gezel still asks you before each new or changed command. Coding craftbooks that check their work by running tests need this.",
+    help: "Let crew members run a project's npm scripts and installed command-line tools, such as npm run test. These run outside the sandbox, as your account, with network access. Gezel still asks you before each new or changed command. Coding craftbooks that check their work by running tests need this.",
   },
   {
     key: 'allowPackageScriptEdits',
     label: 'Edit package scripts',
-    help: "Let gezellen add or change the scripts in a project's package.json. A script runs later, from Gezel or your own terminal, with your whole account. Gezellen can still edit the rest of the file.",
+    help: "Let crew members add or change the scripts in a project's package.json. A script runs later, from Gezel or your own terminal, with your whole account. Crew members can still edit the rest of the file.",
   },
   {
     key: 'allowAppNetwork',
@@ -113,14 +113,14 @@ export function SecurityComplianceSettings({
     <section className={`engagement-mode-panel engagement-mode-${level}`}>
       <h3>Security &amp; Compliance</h3>
       <p className="muted" style={{ marginTop: 0 }}>
-        One control over what gezellen are allowed to do — edits, cloud providers, the open web, and
-        script execution. Slide toward lockdown to make Gezel safe to try; loosen it as you build
-        trust. Locked-down work still flows into the artifacts sandbox, so reviews, prototypes, and
-        documents keep working.
+        One control over what crew members are allowed to do — edits, cloud providers, the open web,
+        and script execution. Slide toward lockdown to make Gezel safe to try; loosen it as you
+        build trust. Locked-down work still flows into the artifacts sandbox, so reviews,
+        prototypes, and documents keep working.
       </p>
       <p className="muted small" style={{ marginTop: '-0.35rem' }}>
-        Changing the posture restarts open chat sessions so gezellen pick up the new rules on their
-        next message. A gezel that is answering right now finishes that answer first.
+        Changing the posture restarts open chat sessions so crew members pick up the new rules on
+        their next message. A gezel that is answering right now finishes that answer first.
       </p>
 
       <div
@@ -288,9 +288,9 @@ function WindowsSandboxSetting({
         <strong>Windows sandbox</strong>
         <br />
         <span className="muted small">
-          Run the scripts gezellen write inside Windows&rsquo; process container, which limits them
-          to their project folder and blocks the network for scripts that shouldn&rsquo;t use it.
-          Off, those scripts don&rsquo;t run.
+          Run the scripts crew members write inside Windows&rsquo; process container, which limits
+          them to their project folder and blocks the network for scripts that shouldn&rsquo;t use
+          it. Off, those scripts don&rsquo;t run.
         </span>
         <br />
         <span className="muted small" aria-live="polite">

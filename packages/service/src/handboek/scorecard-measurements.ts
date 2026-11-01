@@ -40,6 +40,7 @@ function tables(scores: ModelScore[]) {
   const judges = [
     ...new Set(groups.flatMap(({ group }) => group.judgments.map((judge) => judge.judgeModel))),
   ];
+  const hasNotApplicable = groups.some(({ group }) => (group.notApplicableReviews ?? 0) > 0);
   return [
     {
       title: 'Task performance',
@@ -70,13 +71,14 @@ function tables(scores: ModelScore[]) {
     },
     {
       title: 'Artifact reviews',
-      note: `Advisory means out of 10, with eligible artifact counts. Rubrics are separate and are not a combined model score. A dash means no eligible artifact was scored under that rubric. Missing artifacts have no score; excluded reviews do not enter these means. Judge: ${judges.join(', ') || 'none recorded'}. Review identity and limitations are recorded with the evaluation.`,
+      note: `Advisory means out of 10, with eligible artifact counts. Rubrics are separate and are not a combined model score. A dash means no eligible artifact was scored under that rubric. Missing artifacts have no score; excluded reviews do not enter these means.${hasNotApplicable ? ' Not applicable means the task had no applicable qualitative rubric.' : ''} Judge: ${judges.join(', ') || 'none recorded'}. Review identity and limitations are recorded with the evaluation.`,
       headers: [
         'Model',
         'Period',
         ...rubricIds.map((id) => RUBRICS[id] ?? id),
         'No artifact',
         'Excluded reviews',
+        ...(hasNotApplicable ? ['Not applicable'] : []),
       ],
       rows: groups.map(({ result, group }) => ({
         result,
@@ -89,6 +91,7 @@ function tables(scores: ModelScore[]) {
           }),
           String(group.noArtifact),
           String(group.excludedReviews),
+          ...(hasNotApplicable ? [String(group.notApplicableReviews ?? 0)] : []),
         ],
       })),
     },

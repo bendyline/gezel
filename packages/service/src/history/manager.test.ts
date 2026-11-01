@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ChatSession, HistoryEvent } from '@bendyline/gezel';
 import { gezelSessionsDir, globalHistoryFile, projectHistoryFile } from '@bendyline/gezel/paths';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HISTORY_ORDER_SLACK_MS, HistoryManager } from './manager.js';
 
 let home: string;
@@ -404,6 +404,99 @@ describe('HistoryManager', () => {
       ]);
       const events = await history.listEvents({ projectId: 'p', kinds: ['tool.called'] });
       expect(events.map((event) => event.id)).toEqual(['e1']);
+    });
+
+    // Lines as `log` writes them: `id`, then `at`, then the rest. Gate
+    // evidence read back an hour of every task's tool calls on each step
+    // completion, parsing all of them (2026-10-27).
+    async function writeLoggedEvents(
+      projectId: string,
+      events: Array<Partial<HistoryEvent> & { at: string }>,
+    ): Promise<void> {
+      const file = projectHistoryFile(home, projectId);
+      await mkdir(dirname(file), { recursive: true });
+      const lines = events.map(({ at, ...event }, i) =>
+        JSON.stringify({
+          id: `e${i}`,
+          at,
+          kind: 'tool.called',
+          summary: `event ${i}`,
+          projectId,
+          ...event,
+        }),
+      );
+      await writeFile(file, `${lines.join('\n')}\n`);
+    }
+
+    const calls = (i: number) => ({
+      at: minute(i),
+      kind: (i % 3 === 0 ? 'task.step.gated' : 'tool.called') as HistoryEvent['kind'],
+      details: { taskRef: `p/${i % 7}`, stepId: 'work' },
+    });
+
+    it('a task-scoped bounded read parses only that task’s lines and returns the same events', async () => {
+      await writeLoggedEvents(
+        'p',
+        Array.from({ length: 2100 }, (_, i) => calls(i)),
+      );
+      const from = minute(1400);
+      const everything = await history.listEvents({ projectId: 'p' });
+      const expected = everything.filter(
+        (event) =>
+          event.at >= from && event.kind === 'tool.called' && event.details?.taskRef === 'p/3',
+      );
+      const parse = vi.spyOn(JSON, 'parse');
+      const scoped = await history.listEvents(
+        { projectId: 'p', kinds: ['tool.called'], from },
+        { taskRef: 'p/3' },
+      );
+      const parsed = parse.mock.calls.length;
+      parse.mockRestore();
+      expect(scoped.map((event) => event.id)).toEqual(expected.map((event) => event.id));
+      // The window holds 760 lines (700 after `from` plus the 60-minute slack).
+      expect(parsed).toBeLessThanOrEqual(Math.ceil(760 / 7));
+    });
+
+    it('a bounded kinds read stops and skips by the logged time without parsing', async () => {
+      await writeLoggedEvents(
+        'p',
+        Array.from({ length: 2100 }, (_, i) => calls(i)),
+      );
+      const from = minute(2000);
+      const parse = vi.spyOn(JSON, 'parse');
+      const gated = await history.listEvents({ projectId: 'p', kinds: ['task.step.gated'], from });
+      const parsed = parse.mock.calls.length;
+      parse.mockRestore();
+      expect(gated.map((event) => event.at)).toEqual(
+        Array.from({ length: 100 }, (_, i) => minute(2099 - i)).filter((at) => {
+          const n = (Date.parse(at) - Date.parse(minute(0))) / 60_000;
+          return n % 3 === 0;
+        }),
+      );
+      expect(parsed).toBeLessThanOrEqual(Math.ceil(160 / 3));
+    });
+
+    it('still reads a line in another shape inside the window', async () => {
+      await writeLoggedEvents(
+        'p',
+        Array.from({ length: 200 }, (_, i) => calls(i)),
+      );
+      const file = projectHistoryFile(home, 'p');
+      const odd = JSON.stringify({
+        kind: 'tool.called',
+        summary: 'odd shape',
+        id: 'odd',
+        at: minute(199),
+        projectId: 'p',
+        details: { taskRef: 'p/3' },
+      });
+      await writeFile(file, `${odd}\n`, { flag: 'a' });
+      const scoped = await history.listEvents(
+        { projectId: 'p', kinds: ['tool.called'], from: minute(150) },
+        { taskRef: 'p/3' },
+      );
+      expect(scoped[0]?.id).toBe('odd');
+      expect(scoped.every((event) => event.details?.taskRef === 'p/3')).toBe(true);
     });
   });
 

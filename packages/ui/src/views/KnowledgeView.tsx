@@ -390,7 +390,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
           <h2>Knowledge</h2>
           <p className="muted">
             No knowledge catalogs are installed yet. A catalog is a searchable, citable reference
-            library — install one and your gezellen can look things up and cite their sources.
+            library — install one and your crew can look things up and cite their sources.
           </p>
           <button type="button" onClick={() => setManagingCatalogs(true)}>
             Browse knowledge catalogs

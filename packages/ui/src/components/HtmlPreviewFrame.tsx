@@ -11,6 +11,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useEffectiveTheme } from '../theme.js';
+import { PageChatSlots } from './PageChatSlots.js';
 
 export type HtmlPreviewSource = 'artifacts' | 'workspace' | 'type';
 
@@ -62,6 +63,7 @@ export interface PageScriptErrorDetails {
 }
 
 interface HtmlPreviewFrameProps {
+  fullscreen?: boolean;
   projectId: string;
   path: string;
   source: HtmlPreviewSource;
@@ -151,6 +153,7 @@ type PreviewLoadState =
  * though the sentinel is already distinctive; belt-and-suspenders.
  */
 export function HtmlPreviewFrame({
+  fullscreen = false,
   projectId,
   path,
   source,
@@ -170,6 +173,8 @@ export function HtmlPreviewFrame({
   const theme = useEffectiveTheme();
   const themeRef = useRef(theme);
   themeRef.current = theme;
+  const fullscreenRef = useRef(fullscreen);
+  fullscreenRef.current = fullscreen;
   const [securityPolicyRevision, setSecurityPolicyRevision] = useState(0);
   const bridgeRequestKey = useRef('');
   const requestKey = JSON.stringify([
@@ -456,6 +461,11 @@ export function HtmlPreviewFrame({
           kind: 'init',
           api: 1,
           theme: { mode: themeRef.current },
+          layout: {
+            fullscreen: fullscreenRef.current,
+            width: iframeRef.current?.clientWidth ?? 0,
+            height: iframeRef.current?.clientHeight ?? 0,
+          },
           limits: { maxInflight: MAX_INFLIGHT_INVOKES, maxReadBytes: MAX_READ_BYTES },
         });
         return;
@@ -787,11 +797,26 @@ export function HtmlPreviewFrame({
     );
   }, [theme]);
 
+  useEffect(() => {
+    iframeRef.current?.contentWindow?.postMessage(
+      {
+        __gezelPage: 1,
+        kind: 'layout',
+        layout: {
+          fullscreen,
+          width: iframeRef.current.clientWidth,
+          height: iframeRef.current.clientHeight,
+        },
+      },
+      '*',
+    );
+  }, [fullscreen]);
+
   if (loadError) {
     return <div className={className}>Preview unavailable: {loadError}</div>;
   }
 
-  return (
+  const frame = (
     <iframe
       ref={iframeRef}
       key={`${requestKey}:${src ?? 'loading'}`}
@@ -799,13 +824,26 @@ export function HtmlPreviewFrame({
       {...(src ? { src } : {})}
       sandbox="allow-scripts"
       referrerPolicy="no-referrer"
+      className={source === 'type' ? undefined : className}
       {...(window.__GEZEL__?.createHtmlPreview
         ? {
             allow:
               "camera 'none'; microphone 'none'; geolocation 'none'; accelerometer 'none'; gyroscope 'none'; magnetometer 'none'; clipboard-read 'none'; clipboard-write 'none'; payment 'none'",
           }
         : {})}
-      {...(className ? { className } : {})}
     />
+  );
+  if (source !== 'type') return frame;
+  return (
+    <div className={`page-preview-host ${className ?? ''}`}>
+      {frame}
+      {src && (
+        <PageChatSlots
+          key={`chat:${requestKey}:${src}`}
+          frameRef={iframeRef}
+          projectId={projectId}
+        />
+      )}
+    </div>
   );
 }

@@ -71,6 +71,7 @@ import {
   totalWorkspaceFileCount,
   trialHardProgressTimeoutMs,
   trialMaxDurationMs,
+  turnLastToolCallAgoMs,
   usesDeliverableAnchoredCeiling,
   workspacePathSignature,
 } from './runner.ts';
@@ -718,6 +719,78 @@ describe('soft watchdog inflight handling', () => {
     ).toBe(false);
   });
 
+  it('the STALL path keeps waiting on a turn past its budget while it still calls tools', () => {
+    // craftbook-author-gate-script / qwen3.8-27b, 2026-10-31: a 100k-token
+    // authoring chat and the review step shared one slot, each swap re-read
+    // the long context for minutes, and the trial was failed at 17 minutes
+    // into a turn whose last tool call was 97s old.
+    const longTurn = {
+      sessionId: 'cdcdcdcd-8888',
+      gezelId: 'narges',
+      projectId: 'inventory-health-check',
+      elapsedMs: 17 * 60_000,
+    };
+    const stall = {
+      fastPathTripped: false,
+      longPathTripped: false,
+      stallPathTripped: true,
+      chatterPathTripped: false,
+      inflightDeferMs: inflightDeferMsForEngine('llama-cpp'),
+    };
+    expect(
+      shouldDeferRetryLoopForInflight({
+        ...stall,
+        inflightTurns: [{ ...longTurn, lastToolCallAgoMs: 97_000 }],
+      }),
+    ).toBe(true);
+    // No tool call this turn, or none for the whole budget: stalled.
+    expect(shouldDeferRetryLoopForInflight({ ...stall, inflightTurns: [longTurn] })).toBe(false);
+    expect(
+      shouldDeferRetryLoopForInflight({
+        ...stall,
+        inflightTurns: [{ ...longTurn, lastToolCallAgoMs: 16 * 60_000 }],
+      }),
+    ).toBe(false);
+    // The count-based fast path still fails a looping turn, tool calls or not.
+    expect(
+      shouldDeferRetryLoopForInflight({
+        ...stall,
+        fastPathTripped: true,
+        inflightTurns: [{ ...longTurn, lastToolCallAgoMs: 5_000 }],
+      }),
+    ).toBe(false);
+    expect(summarizeInflightTurnsForLog([{ ...longTurn, lastToolCallAgoMs: 97_000 }])).toBe(
+      'narges/cdcdcdcd in inventory-health-check for 1020s, last tool call 97s ago',
+    );
+  });
+
+  it('counts only tool calls the running turn made', () => {
+    const telemetry = (row: Record<string, unknown>) => ({
+      capturedAt: 1_000_000,
+      sessions: [{ sessionId: 's1', ...row }] as never,
+    });
+    const turn = { startedAt: 900_000, toolCalls: 2 };
+    expect(
+      turnLastToolCallAgoMs(telemetry({ currentTurn: turn, lastToolActivityAt: 940_000 }), 's1'),
+    ).toBe(60_000);
+    // A call from an earlier turn, no call yet, no turn, another session.
+    expect(
+      turnLastToolCallAgoMs(telemetry({ currentTurn: turn, lastToolActivityAt: 800_000 }), 's1'),
+    ).toBeUndefined();
+    expect(
+      turnLastToolCallAgoMs(
+        telemetry({ currentTurn: { ...turn, toolCalls: 0 }, lastToolActivityAt: 940_000 }),
+        's1',
+      ),
+    ).toBeUndefined();
+    expect(
+      turnLastToolCallAgoMs(telemetry({ currentTurn: null, lastToolActivityAt: 940_000 }), 's1'),
+    ).toBeUndefined();
+    expect(
+      turnLastToolCallAgoMs(telemetry({ currentTurn: turn, lastToolActivityAt: 940_000 }), 's2'),
+    ).toBeUndefined();
+  });
+
   it('never queues a pre-trigger retry-loop nudge behind an active turn', () => {
     expect(shouldDeferRetryLoopNudgeForInflight([])).toBe(false);
     expect(
@@ -767,6 +840,34 @@ describe('soft watchdog inflight handling', () => {
         fastPathTripped: true,
         chatterPathTripped: false,
       }),
+    ).toBe(false);
+  });
+
+  it('the fast path waits on an in-flight turn only while a declared unit is underway', () => {
+    const storeRun = [
+      { sessionId: 'abababab-7777', gezelId: 'zara', projectId: 'stores', elapsedMs: 9 * 60_000 },
+    ];
+    const fast = {
+      fastPathTripped: true,
+      longPathTripped: false,
+      stallPathTripped: false,
+      chatterPathTripped: false,
+      inflightTurns: storeRun,
+      inflightDeferMs: inflightDeferMsForEngine('llama-cpp'),
+    };
+    expect(shouldDeferRetryLoopForInflight({ ...fast, unitsUnderway: true })).toBe(true);
+    expect(shouldDeferRetryLoopForInflight(fast)).toBe(false);
+    // Bounded by the stall budget, like the stall path.
+    expect(
+      shouldDeferRetryLoopForInflight({
+        ...fast,
+        unitsUnderway: true,
+        inflightTurns: [{ ...storeRun[0]!, elapsedMs: 20 * 60_000 }],
+      }),
+    ).toBe(false);
+    // Chatter never waits, unit or not.
+    expect(
+      shouldDeferRetryLoopForInflight({ ...fast, chatterPathTripped: true, unitsUnderway: true }),
     ).toBe(false);
   });
 

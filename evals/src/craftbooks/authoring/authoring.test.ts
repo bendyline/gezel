@@ -1,6 +1,8 @@
 import type { Task } from '@bendyline/gezel';
-import { describe, expect, it } from 'vitest';
+import type { GezelClient } from '@bendyline/gezel-client/node';
+import { describe, expect, it, vi } from 'vitest';
 import { SCENARIOS, getScenario, listScenarios } from '../../scenarios/index.ts';
+import type { EvalContext } from '../../types.ts';
 import { ORDERS_CSV } from './author-linear.ts';
 import {
   countTasksForCraftbook,
@@ -13,9 +15,11 @@ import {
   checkGateScriptSubstance,
   completedTaskSteps,
   craftbookGateScriptRefs,
+  finishAuthoringPoll,
   isStepGated,
   parseJsonRecords,
   parseJsonValue,
+  runningTaskProgress,
   taskReferencesCraftbook,
   unfinishedTaskFailure,
   ungatedBuildStepIds,
@@ -501,6 +505,18 @@ describe('unfinishedTaskFailure', () => {
     expect(text).toContain('task quarterly-brief/1 has status "paused"');
     expect(text).not.toContain('(');
   });
+
+  it('asks for an assignment, not an advance, when no gezel owns the active step', () => {
+    const text = unfinishedTaskFailure({
+      ref: 'supplier-intake/3',
+      status: 'active',
+      unownedStep: { id: 'analyze-lead-times', name: 'Analyze Lead Times' },
+    });
+    expect(text).toContain('waiting on its step "Analyze Lead Times", which no gezel owns');
+    expect(text).toContain('assign_task({ ref: "supplier-intake/3"');
+    expect(text).not.toContain('advance THIS task');
+    expect(text).toMatch(/do NOT invoke the recipe again or create a second task/i);
+  });
 });
 
 describe('completedTaskSteps', () => {
@@ -523,5 +539,138 @@ describe('completedTaskSteps', () => {
   it('reports nothing when there is no task to count', () => {
     expect(completedTaskSteps(null)).toBeUndefined();
     expect(completedTaskSteps({})).toBeUndefined();
+  });
+});
+
+describe('runningTaskProgress', () => {
+  // The repair ladder reads this to tell a recipe walking its steps from a
+  // frozen one; the press-release writes of route-multi's steps are not
+  // failed repairs.
+  const task = (status: Task['status'], activeStepId: string, reviewAttempts: number) =>
+    ({
+      ref: 'fieldstone-launch-comms/1',
+      status,
+      activeStepId,
+      craftbook: {
+        steps: [
+          { id: 'draft', attemptCount: 1 },
+          { id: 'review', attemptCount: reviewAttempts },
+        ],
+      },
+    }) as unknown as Task;
+
+  it('moves when the task advances a step or re-enters one', () => {
+    const drafting = runningTaskProgress(task('active', 'draft', 0));
+    const reviewing = runningTaskProgress(task('active', 'review', 1));
+    const revising = runningTaskProgress(task('active', 'review', 2));
+    expect(drafting).toBeDefined();
+    expect(new Set([drafting, reviewing, revising]).size).toBe(3);
+    expect(runningTaskProgress(task('active', 'review', 1))).toBe(reviewing);
+  });
+
+  it('stops once the task is finished or absent', () => {
+    expect(runningTaskProgress(task('complete', 'review', 1))).toBeUndefined();
+    expect(runningTaskProgress(null)).toBeUndefined();
+  });
+});
+
+describe('finishAuthoringPoll routing', () => {
+  // Nudges about a running recipe belong to its active step. Without the
+  // route, route-multi's nudges went to the finished drafter while the review
+  // step queued for the one engine slot those nudges took (2026-10-31).
+  const reviewTask = {
+    ref: 'fieldstone-launch-comms/1',
+    status: 'active',
+    activeStepId: 'review',
+    craftbook: { steps: [{ id: 'draft', completedAt: '2026-10-31T16:00:00Z' }, { id: 'review' }] },
+  } as unknown as Task;
+
+  function harness(waiting: Array<{ ref: string; reason: string }> = []) {
+    const client = {
+      listProjectTasks: vi.fn().mockResolvedValue({ tasks: [reviewTask], waiting }),
+      listChatSessions: vi.fn().mockResolvedValue({
+        sessions: [
+          {
+            id: 'sess-review',
+            gezelId: 'editor-1',
+            projectId: 'fieldstone',
+            taskRef: reviewTask.ref,
+            stepId: 'review',
+            lastActivityAt: '2026-10-31T16:01:00Z',
+          },
+          {
+            id: 'sess-draft',
+            gezelId: 'writer-1',
+            projectId: 'fieldstone',
+            taskRef: reviewTask.ref,
+            stepId: 'draft',
+            lastActivityAt: '2026-10-31T16:02:00Z',
+          },
+        ],
+      }),
+      listInflightTurns: vi.fn().mockResolvedValue({ inflight: [] }),
+      listGezels: vi.fn().mockResolvedValue({ gezels: [] }),
+      sendToChatSession: vi.fn().mockResolvedValue({ accepted: true, sessionId: 'sess-review' }),
+      messageGezel: vi.fn().mockResolvedValue({ accepted: true }),
+      sendChatMessage: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const ctx = {
+      client: client as unknown as GezelClient,
+      meesterId: 'meester-1',
+      log: () => {},
+      logChanged: () => {},
+    } as unknown as EvalContext;
+    const poll = (executingTask: { task: Task; projectId: string } | null) =>
+      finishAuthoringPoll(ctx, {
+        scenarioId: 'craftbook-route-multi',
+        projectId: 'fieldstone',
+        totalChecks: 11,
+        failures: ['task fieldstone-launch-comms/1 has status "active"'],
+        bytes: 900,
+        executingTask,
+        repairPath: 'out/press-release.md',
+        repairDirective: 'Finish the task.',
+        successReason: 'done',
+      });
+    return { client, poll };
+  }
+
+  it('delivers into the active step session, not the most recent one', async () => {
+    const { client, poll } = harness();
+    await poll({ task: reviewTask, projectId: 'fieldstone' });
+    expect(client.messageGezel).not.toHaveBeenCalled();
+    expect(client.sendToChatSession).toHaveBeenCalledTimes(1);
+    expect(client.sendToChatSession.mock.calls[0]![0]).toBe('sess-review');
+  });
+
+  it('holds while the runner is queueing the step', async () => {
+    const { client, poll } = harness([{ ref: reviewTask.ref, reason: 'provider-busy' }]);
+    await poll({ task: reviewTask, projectId: 'fieldstone' });
+    expect(client.sendToChatSession).not.toHaveBeenCalled();
+    expect(client.messageGezel).not.toHaveBeenCalled();
+  });
+
+  it('nudges the gezel that started a task no gezel owns', async () => {
+    // invoke_craftbook told the starter to assign the step; the most recently
+    // active gezel knew nothing about the task (gemma4-12b, 2026-10-31).
+    const { client, poll } = harness();
+    const unowned = {
+      ...reviewTask,
+      assignee: { kind: 'user' },
+      createdBy: { kind: 'gezel', gezelId: 'laxmi' },
+    } as unknown as Task;
+    client.listProjectTasks.mockResolvedValue({ tasks: [unowned], waiting: [] });
+    await poll({ task: unowned, projectId: 'fieldstone' });
+    expect(client.sendToChatSession).not.toHaveBeenCalled();
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+    expect(client.messageGezel.mock.calls[0]![0]).toBe('laxmi');
+  });
+
+  it('keeps ordinary routing when the failures are not the task’s to fix', async () => {
+    const { client, poll } = harness();
+    await poll(null);
+    expect(client.listProjectTasks).not.toHaveBeenCalled();
+    expect(client.messageGezel).toHaveBeenCalledTimes(1);
+    expect(client.messageGezel.mock.calls[0]![0]).toBe('writer-1');
   });
 });

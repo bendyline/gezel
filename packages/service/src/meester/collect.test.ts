@@ -6,7 +6,7 @@ import type { ActivityTracker } from '../fs/activity-tracker.js';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import { TaskManager } from '../tasks/manager.js';
-import { collectProjectContexts } from './collect.js';
+import { collectProjectContexts, renderProjectContextSections } from './collect.js';
 
 let home: string;
 let store: Store;
@@ -60,5 +60,24 @@ describe('what the Meester status line sees', () => {
     const titles = contexts.flatMap((c) => c.openTasks.map((t) => t.title));
     expect(titles).toContain('Plan the launch');
     expect(titles).not.toContain('Nightly fixes — 40 open issues');
+  });
+
+  // "Project Default is waiting for your input!" (2026-10-31).
+  it('introduces Default as the person’s everyday requests, never as a project', async () => {
+    const named = await store.createProject({ name: 'Squisq', description: 'Docs editor.' });
+    const contexts = await collectProjectContexts(
+      {
+        store,
+        history,
+        activity: { lastActivityAt: async () => null } as unknown as ActivityTracker,
+      },
+      { now: new Date(), excludeEventKinds: [] },
+    );
+    const sections = renderProjectContextSections(contexts);
+    const everyday = sections.find((s) => s.includes('(id: default)'))!;
+    expect(everyday.split('\n')[0]).toBe('## Everyday requests (id: default)');
+    expect(everyday).not.toContain('default project');
+    expect(everyday).not.toContain('Project "Default"');
+    expect(sections.find((s) => s.includes(`(id: ${named.id})`))).toContain('## Project "Squisq"');
   });
 });

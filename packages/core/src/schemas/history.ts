@@ -7,7 +7,7 @@ import { ProviderNameSchema } from './gezel.js';
  * from the existing ChatSession records on disk — no duplicate storage.
  */
 
-export const HistoryEventKindSchema = z.enum([
+const HistoryEventKinds = [
   'gezel.created',
   'gezel.deleted',
   'gezel.renamed',
@@ -343,7 +343,16 @@ export const HistoryEventKindSchema = z.enum([
   'knowledge.catalog.disabled',
   'knowledge.catalog.removed',
   'knowledge.catalog.install_failed',
-]);
+] as const;
+/**
+ * Named so the declarations that embed a history kind (every history event,
+ * craftbook test expectation and response that carries one) print this name
+ * rather than every kind again. They held nine copies, against the package's
+ * size budget.
+ */
+export interface HistoryEventKindZodSchema
+  extends z.ZodEnum<z.core.util.ToEnum<(typeof HistoryEventKinds)[number]>> {}
+export const HistoryEventKindSchema: HistoryEventKindZodSchema = z.enum(HistoryEventKinds);
 export type HistoryEventKind = z.infer<typeof HistoryEventKindSchema>;
 
 export const HistoryEventSchema = z.object({

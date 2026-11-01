@@ -130,6 +130,8 @@ export async function writeQualificationMetadata(
     keurmeester: opts.keurmeester ?? null,
     imageModelId: opts.imageModelId ?? null,
     modelNetworkAccess: scenario.modelNetworkAccess ?? null,
+    // Only when on, so the treatment hash of every other scenario is unchanged.
+    ...(scenario.packageScripts ? { packageScripts: true } : {}),
     autoRecallEnabled: false,
     reasoningEffortOverride: opts.llamaCppReasoningEffort ?? null,
     timeoutMs: opts.timeoutMs ?? scenario.timeoutMs ?? null,

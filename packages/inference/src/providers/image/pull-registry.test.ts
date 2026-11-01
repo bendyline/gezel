@@ -13,6 +13,7 @@ import {
   ImageModelPullRegistry,
   type ImageProviderSource,
   UnknownImageModelError,
+  imageLoraPullResolver,
 } from './pull-registry.js';
 import type {
   ImageEngineHealth,
@@ -318,5 +319,111 @@ describe('ImageModelPullRegistry', () => {
   it('subscribe() returns null when no pull exists for that id', () => {
     const { registry } = buildRegistry();
     expect(registry.subscribe('not-there', () => {})).toBeNull();
+  });
+});
+
+describe('image LoRA pulls', () => {
+  const lora = {
+    kind: 'image-lora',
+    id: 'sdxl-pixel-art',
+    name: 'Pixel art',
+    downloadUrl: 'https://example.com/pixel-art.safetensors',
+    sha256: FAKE_SHA,
+    approxSizeBytes: 170,
+    baseModels: ['sdxl-base-1.0'],
+    purpose: 'style',
+    strength: 0.9,
+    prompt: { prefix: 'pixel art,' },
+  };
+  const catalog = {
+    get: async (kind: CatalogKind, id: string) =>
+      kind === 'image-lora' && id === lora.id ? { manifest: lora } : null,
+  } as unknown as CatalogService;
+
+  it('installs a catalog LoRA through the provider with its recipe, under its own kind', async () => {
+    const pulled: Array<{ id: string; spec: unknown }> = [];
+    const registry = new ImageModelPullRegistry({
+      resolve: imageLoraPullResolver(
+        {
+          current: async () => ({
+            async *pullLora(id: string, spec: unknown) {
+              pulled.push({ id, spec });
+              yield { type: 'done' as const, id };
+            },
+          }),
+        },
+        catalog,
+      ),
+      kind: 'image-lora',
+    });
+    await expect(registry.start('test-model')).rejects.toThrow('unknown image-lora: test-model');
+    expect((await registry.start(lora.id)).snapshot.totalBytes).toBe(170);
+    await flush();
+    expect(pulled).toEqual([
+      {
+        id: lora.id,
+        spec: {
+          downloadUrl: lora.downloadUrl,
+          sha256: FAKE_SHA,
+          approxSizeBytes: 170,
+          name: 'Pixel art',
+          baseModels: ['sdxl-base-1.0'],
+          purpose: 'style',
+          strength: 0.9,
+          prompt: { prefix: 'pixel art,' },
+        },
+      },
+    ]);
+    expect(registry.get(lora.id)).toMatchObject({ finished: true });
+    expect(registry.get(lora.id)?.error).toBeUndefined();
+  });
+
+  it('fails the pull plainly on an engine that cannot take LoRAs', async () => {
+    const registry = new ImageModelPullRegistry({
+      resolve: imageLoraPullResolver({ current: async () => ({}) }, catalog),
+      kind: 'image-lora',
+    });
+    await registry.start(lora.id);
+    await flush();
+    expect(registry.get(lora.id)?.error).toBe('This image engine cannot add styles or fast mode.');
+  });
+});
+
+describe('terminal pull snapshot ordering', () => {
+  it('replays completion while the generator is still cleaning up', async () => {
+    let cleanup!: () => void;
+    let reachedCleanup!: () => void;
+    const cleaning = new Promise<void>((resolve) => {
+      reachedCleanup = resolve;
+    });
+    const cleaned = new Promise<void>((resolve) => {
+      cleanup = resolve;
+    });
+    const pulls = new ImageModelPullRegistry({
+      kind: 'image-lora',
+      resolve: async (id) => ({
+        totalBytes: 1,
+        run: async function* () {
+          try {
+            yield { type: 'done', id };
+          } finally {
+            reachedCleanup();
+            await cleaned;
+          }
+        },
+      }),
+    });
+    try {
+      await pulls.start('style');
+      await cleaning;
+      expect(pulls.get('style')?.finished).toBe(true);
+      const events: ImageModelPullEvent[] = [];
+      const unsubscribe = pulls.subscribe('style', (event) => events.push(event));
+      expect(events.at(-1)).toEqual({ type: 'done', id: 'style' });
+      unsubscribe?.();
+    } finally {
+      cleanup();
+      pulls.clear();
+    }
   });
 });

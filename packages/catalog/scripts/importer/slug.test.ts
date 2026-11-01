@@ -61,6 +61,27 @@ describe('SlugAllocator', () => {
     expect(a.assign('io.github.foo--bar').slug).toBe('foo-bar-3');
   });
 
+  it('keeps the collision suffix when the base is already at the length cap', () => {
+    const a = new SlugAllocator();
+    const prefix = 'com.trycloudflare.emails-ship-peninsula-deliver/registry-verifier-target';
+    const first = a.assign(`${prefix}-a`).slug;
+    const second = a.assign(`${prefix}-b`).slug;
+    const third = a.assign(`${prefix}-c`).slug;
+    expect(first).toHaveLength(63);
+    expect(second).toBe(`${first.slice(0, 61)}-2`);
+    expect(third).toBe(`${first.slice(0, 61)}-3`);
+    for (const slug of [first, second, third]) expect(isValidSlug(slug)).toBe(true);
+  });
+
+  it('does not leave a doubled dash where the shortened base ended on one', () => {
+    const a = new SlugAllocator();
+    // The 61-char cut lands right after a dash.
+    const base = `${'a'.repeat(60)}-bc`;
+    expect(a.assign(base).slug).toBe(base);
+    const second = a.assign(`${base}/`).slug;
+    expect(second).toBe(`${'a'.repeat(60)}-2`);
+  });
+
   it('honors a seeded slug map verbatim, even when collision-prone', () => {
     // The seeded entry holds the bare slug; the colliding one gets a
     // suffix instead of stealing the bare form back.

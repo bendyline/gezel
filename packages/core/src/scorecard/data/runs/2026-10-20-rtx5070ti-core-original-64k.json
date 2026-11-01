@@ -300,133 +300,6 @@
       ]
     },
     {
-      "modelId": "qwen3.5-9b-q4",
-      "label": "Qwen 3.5 (9B, Q4)",
-      "engine": "llama-cpp",
-      "tier": "small",
-      "parameterSize": "9B",
-      "quantization": "Q4_K_M",
-      "grantedContextTokens": 65536,
-      "runId": "2026-10-20-rtx5070ti-core-original-64k",
-      "suiteId": "core",
-      "runtime": {
-        "contextTokens": 65536,
-        "peakMemoryMb": 13330,
-        "kvCacheType": "f16"
-      },
-      "taskMeasurements": [
-        {
-          "id": "A",
-          "label": "A · 10-20 02:30–10-20 14:14 UTC",
-          "trials": 7,
-          "source": "engine-log",
-          "outputTokensPerSec": {
-            "samples": 7,
-            "median": 83.87,
-            "min": 65.36,
-            "max": 95.53
-          },
-          "prefillTokensPerSec": {
-            "samples": 7,
-            "median": 2428.44,
-            "min": 2291.21,
-            "max": 2635.94
-          },
-          "durationMs": {
-            "samples": 7,
-            "median": 171032,
-            "min": 69629,
-            "max": 416410
-          },
-          "peakRssMb": {
-            "samples": 7,
-            "median": 13330,
-            "min": 7479,
-            "max": 15098
-          },
-          "peakGpuMemMb": {
-            "samples": 7,
-            "median": 8100,
-            "min": 8100,
-            "max": 8104
-          },
-          "judgments": [
-            {
-              "meanScore": 3.5,
-              "artifacts": 3,
-              "judgeModel": "codex-inline/current-session",
-              "rubricId": "default-html-v1"
-            },
-            {
-              "meanScore": 4.083333333333333,
-              "artifacts": 3,
-              "judgeModel": "codex-inline/current-session",
-              "rubricId": "campaign-code-v1"
-            },
-            {
-              "meanScore": 4.25,
-              "artifacts": 1,
-              "judgeModel": "codex-inline/current-session",
-              "rubricId": "campaign-data-v1"
-            }
-          ],
-          "noArtifact": 0,
-          "excludedReviews": 0
-        }
-      ],
-      "cells": [
-        {
-          "scenarioId": "tictactoe",
-          "trials": 1,
-          "successes": 0,
-          "nonModelFailures": 0,
-          "medianDurationMs": 203168
-        },
-        {
-          "scenarioId": "petshop",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 359162
-        },
-        {
-          "scenarioId": "tankcombat",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 112458
-        },
-        {
-          "scenarioId": "schema-migration",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 171032
-        },
-        {
-          "scenarioId": "failing-tests-spec",
-          "trials": 1,
-          "successes": 0,
-          "nonModelFailures": 0,
-          "medianDurationMs": 153142
-        },
-        {
-          "scenarioId": "symptom-debug",
-          "trials": 1,
-          "successes": 1,
-          "nonModelFailures": 0,
-          "medianDurationMs": 69629
-        },
-        {
-          "scenarioId": "data-wrangle",
-          "trials": 1,
-          "successes": 0,
-          "nonModelFailures": 0,
-          "medianDurationMs": 416410
-        }
-      ]
-    },
-    {
       "modelId": "ornith1.5-9b-q4",
       "label": "Ornith 1.5 (9B, Q4)",
       "engine": "llama-cpp",
@@ -681,65 +554,65 @@
       ]
     },
     {
-      "modelId": "underdog-saluki-27b-iq2-mix",
-      "label": "Underdog Saluki 1.0 (27B, IQ2 mix)",
+      "modelId": "qwen3.5-9b-q4",
+      "label": "Qwen 3.5 (9B, Q4)",
       "engine": "llama-cpp",
-      "tier": "medium",
-      "parameterSize": "27B",
-      "quantization": "IQ2-mix",
+      "tier": "small",
+      "parameterSize": "9B",
+      "quantization": "Q4_K_M",
       "grantedContextTokens": 65536,
       "runId": "2026-10-20-rtx5070ti-core-original-64k",
       "suiteId": "core",
       "runtime": {
         "contextTokens": 65536,
-        "peakMemoryMb": 13508,
+        "peakMemoryMb": 13330,
         "kvCacheType": "f16"
       },
       "taskMeasurements": [
         {
           "id": "A",
-          "label": "A · 10-20 03:40–10-20 12:53 UTC",
+          "label": "A · 10-20 02:30–10-20 14:14 UTC",
           "trials": 7,
           "source": "engine-log",
           "outputTokensPerSec": {
             "samples": 7,
-            "median": 12.89,
-            "min": 12.31,
-            "max": 13.09
+            "median": 83.87,
+            "min": 65.36,
+            "max": 95.53
           },
           "prefillTokensPerSec": {
             "samples": 7,
-            "median": 669.43,
-            "min": 548.21,
-            "max": 691.39
+            "median": 2428.44,
+            "min": 2291.21,
+            "max": 2635.94
           },
           "durationMs": {
             "samples": 7,
-            "median": 386273,
-            "min": 142015,
-            "max": 3315829
+            "median": 171032,
+            "min": 69629,
+            "max": 416410
           },
           "peakRssMb": {
             "samples": 7,
-            "median": 13508,
-            "min": 9853,
-            "max": 18590
+            "median": 13330,
+            "min": 7479,
+            "max": 15098
           },
           "peakGpuMemMb": {
             "samples": 7,
-            "median": 10626,
-            "min": 10626,
-            "max": 10628
+            "median": 8100,
+            "min": 8100,
+            "max": 8104
           },
           "judgments": [
             {
-              "meanScore": 4.25,
-              "artifacts": 2,
+              "meanScore": 3.5,
+              "artifacts": 3,
               "judgeModel": "codex-inline/current-session",
               "rubricId": "default-html-v1"
             },
             {
-              "meanScore": 4.666666666666667,
+              "meanScore": 4.083333333333333,
               "artifacts": 3,
               "judgeModel": "codex-inline/current-session",
               "rubricId": "campaign-code-v1"
@@ -752,58 +625,58 @@
             }
           ],
           "noArtifact": 0,
-          "excludedReviews": 1
+          "excludedReviews": 0
         }
       ],
       "cells": [
         {
           "scenarioId": "tictactoe",
           "trials": 1,
-          "successes": 1,
+          "successes": 0,
           "nonModelFailures": 0,
-          "medianDurationMs": 308011
+          "medianDurationMs": 203168
         },
         {
           "scenarioId": "petshop",
           "trials": 1,
           "successes": 1,
           "nonModelFailures": 0,
-          "medianDurationMs": 2097539
+          "medianDurationMs": 359162
         },
         {
           "scenarioId": "tankcombat",
           "trials": 1,
           "successes": 1,
           "nonModelFailures": 0,
-          "medianDurationMs": 439924
+          "medianDurationMs": 112458
         },
         {
           "scenarioId": "schema-migration",
           "trials": 1,
           "successes": 1,
           "nonModelFailures": 0,
-          "medianDurationMs": 386273
+          "medianDurationMs": 171032
         },
         {
           "scenarioId": "failing-tests-spec",
           "trials": 1,
-          "successes": 1,
+          "successes": 0,
           "nonModelFailures": 0,
-          "medianDurationMs": 145847
+          "medianDurationMs": 153142
         },
         {
           "scenarioId": "symptom-debug",
           "trials": 1,
           "successes": 1,
           "nonModelFailures": 0,
-          "medianDurationMs": 142015
+          "medianDurationMs": 69629
         },
         {
           "scenarioId": "data-wrangle",
           "trials": 1,
           "successes": 0,
           "nonModelFailures": 0,
-          "medianDurationMs": 3315829
+          "medianDurationMs": 416410
         }
       ]
     },
@@ -931,6 +804,133 @@
           "successes": 1,
           "nonModelFailures": 0,
           "medianDurationMs": 3556090
+        }
+      ]
+    },
+    {
+      "modelId": "underdog-saluki-27b-iq2-mix",
+      "label": "Underdog Saluki 1.0 (27B, IQ2 mix)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "IQ2-mix",
+      "grantedContextTokens": 65536,
+      "runId": "2026-10-20-rtx5070ti-core-original-64k",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 13508,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "A",
+          "label": "A · 10-20 03:40–10-20 12:53 UTC",
+          "trials": 7,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 7,
+            "median": 12.89,
+            "min": 12.31,
+            "max": 13.09
+          },
+          "prefillTokensPerSec": {
+            "samples": 7,
+            "median": 669.43,
+            "min": 548.21,
+            "max": 691.39
+          },
+          "durationMs": {
+            "samples": 7,
+            "median": 386273,
+            "min": 142015,
+            "max": 3315829
+          },
+          "peakRssMb": {
+            "samples": 7,
+            "median": 13508,
+            "min": 9853,
+            "max": 18590
+          },
+          "peakGpuMemMb": {
+            "samples": 7,
+            "median": 10626,
+            "min": 10626,
+            "max": 10628
+          },
+          "judgments": [
+            {
+              "meanScore": 4.25,
+              "artifacts": 2,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "default-html-v1"
+            },
+            {
+              "meanScore": 4.666666666666667,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-code-v1"
+            },
+            {
+              "meanScore": 4.25,
+              "artifacts": 1,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "campaign-data-v1"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 1
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 308011
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2097539
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 439924
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 386273
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 145847
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 142015
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3315829
         }
       ]
     }

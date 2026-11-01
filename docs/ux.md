@@ -29,10 +29,11 @@ Three words that should describe any screen:
 3. **Historic** — Gezel is a guild. The vocabulary (gezel, meester) is Dutch
    apprenticeship terminology; the visuals should echo the world those words
    come from. A guild hall, an apprentice's bench, a master's ledger — not a
-   SaaS dashboard. The plural follows the Dutch: **gezellen** (possessive
-   "gezellen's") in anything a person reads. Technical names keep **gezels** —
-   the `gezels/` folder, routes, ids, API and tool names — and so does text
-   written only for a model.
+   SaaS dashboard. Call the group **Crew** in navigation and headings, and
+   **your crew** in prose. Use **crew members** when referring to individuals
+   in the plural; a single companion is still a **gezel**. Technical names
+   keep **gezels** — the `gezels/` folder, routes, ids, API and tool names —
+   and so does text written only for a model.
 
    **Roles are plain English; the Meester is the one Dutch title.** A
    newcomer met a crew of Voormannen and Ceremoniemeesters and could not tell
@@ -277,7 +278,7 @@ Rules:
 ### Crew activity: one tray, read left to right
 
 The titlebar's **Crew activity** menu is the product's most-used dropdown,
-so it stays simple: a heading, one line ("How much your gezellen do on their
+so it stays simple: a heading, one line ("How much your crew does on its
 own."), and one described tray of four keys ordered from paused to most
 independent: **Off → Chat only → Tasks + chat → Proactive**. Each key is the
 mode's icon over its label, so the row reads as one story, the crew coming
@@ -334,6 +335,60 @@ All of this wording is decided in one place, `nightShiftSummary` in
 Name times plainly ("Instead of waiting until 10:00 PM", "It starts again
 tomorrow at 10:00 PM") and never the machinery ("deferred indexing",
 "scheduled window").
+
+### The titlebar: one line of keys
+
+The titlebar is keys in trays on a dark bench. It used to mix three
+heights and three shapes: a capsule search field, flat outlined tags, and
+borderless 34px squares. It read as parts from different kits, so it
+follows five rules now.
+
+- **One height.** Everything on the bar stands `--titlebar-control-h`
+  (28px): the search well, every status pill, the quota meter, and the
+  header tray. The header centers one line (`align-items: center`). On
+  Windows the whole line drops 1px to sit with the native caption buttons,
+  which is done with header padding, never a transform: a transformed
+  ancestor would capture the fixed-position header popovers. Never size a bar
+  control by its content. A nested badge once made the engine pill taller
+  than Activity beside it.
+- **Keys are raised; readouts are flat.** Anything you press wears the
+  titlebar key recipe in
+  [app-shell.css](../packages/ui/src/styles/app-shell.css) ("Titlebar
+  keys"), built from the `--titlebar-key-*` tokens in
+  [foundation.css](../packages/ui/src/styles/foundation.css). The face is a
+  few percent darker than the sage, with a cream top highlight for lift. An
+  open or pressed key sinks 1px with an inset shadow, like a latched key.
+  Faces go darker, never lighter: a lighter face drops the cream labels below
+  4.5:1. Something on the bar that cannot be pressed keeps the silhouette
+  but not the lift. A new bar control
+  joins the recipe's selector list rather than styling a face of its own.
+- **The search well is a slot, not a light.** At rest it is a recessed
+  `--titlebar-well-*` slot with cream text, a `--radius-md` rectangle (never
+  a capsule), and it turns cream only on focus. It is the widest thing on the
+  bar, so it must not also be the brightest while nobody is searching. The
+  quick-open shortcut sits at its far end as a keycap
+  (`.titlebar-search-shortcut`), shown only while the well is empty. The
+  input names the shortcut in `aria-keyshortcuts`, so the keycap stays
+  `aria-hidden`.
+- **Icon actions share the header tray.** The crew-activity key, and
+  Output's restore key while that pane is maximized, sit in one
+  `.app-header-tray`: a recessed slot the pills' height, with keys a size
+  smaller inside it, the same way keys rest in every other tray. The tray
+  closes the cluster, just before the window controls. The native caption
+  buttons are not ours to restyle: drawing our own would lose the Windows 11
+  Snap Layouts flyout.
+- **State shows on the key itself, never in a box inside it.** A warm or
+  cooling engine gets an amber rim (`.engine-pill-warning`) and a paused one
+  a red rim (`.engine-pill-danger`); the word stays cream and bold. A box
+  inside a key is visual noise, and it changes the key's height. Live work
+  breathes. While the crew works, the Activity dot lights cream and pulses
+  slowly (`.is-working`). When a working gezel is known, Activity shows their
+  face, name, and three thinking dots in place of the working count, with
+  stacked portraits and `+N` for additional working gezels. A face is not a
+  word, so the density ladder never sheds it. Role-only names hide it, the
+  way the queue chips do. The
+  compact header's 44px keys keep their own lighter face and the corner
+  status light; none of this desktop styling applies there.
 
 ## Controls: checkbox cards
 
@@ -857,6 +912,11 @@ and the meester's lines in the chat register (serif body). Rules:
 
 What the meester's thread shows after the person asks for something:
 
+- **Internal prompts stay in debug mode.** System-authored task instructions,
+  page reactions (such as a game's board state), and hidden retry prompts stay
+  out of ordinary chat, including queued previews. Debug mode reveals them for
+  inspection. The model still receives them; the person's messages and the
+  gezel's replies remain visible in both modes.
 - **The crew arrives as cards** (`CrewIntroCard`, a `crew-introduction`
   message carrying `crewIntroduction`): a headshot, the name in the serif,
   their role in plain words ("Trip Planner", "Crew Lead"), what they start
@@ -888,8 +948,14 @@ What the meester's thread shows after the person asks for something:
   thread shows a task's finished card, the chat rail leaves the deliverable
   off that task's card, so the board does not appear twice side by side.
 - **Open opens the board, full window.** Opening a project-type deliverable
-  takes the project's Output page to full window (`requestOutputPaneFullWindow`),
-  not a half pane beside the chat. A project with one page shows no page
+  takes the project's Output page to fill the workspace (`requestOutputPaneFullWindow`).
+  The main project sidebar stays visible on its configured side, at its current
+  width and expanded or collapsed state. Each project remembers its page mode
+  (closed, open beside the conversation, or fullscreen) across navigation and
+  restarts, so a project can reopen directly into its app. Maximize and restore
+  keep the same page mounted. Expanded pages hide their own toolbar and bottom
+  screenshot strip; the main titlebar keeps the restore control. A project with
+  one page shows no page
   picker: a select with one choice is a label pretending to be a control.
 - **The board reads like the plan, not like the tool.** A type page labels
   what the person would: "Day 1" when there is no date yet (and the date
@@ -1104,6 +1170,27 @@ always waiting, so a count there would only send the person looking for nothing.
 The key uses the title bar's sage face, cream ink, and subtle border, matching
 its neighboring status controls in both themes. A small indicator light carries
 attention in amber; the whole key does not change color when something needs you.
+Activity owns crew identity and work across local and cloud models. When no
+question needs attention, a working gezel's portrait, name, and three dots
+replace the generic working count. Attention and unavailable status take
+precedence. The Activity label also disappears while the working gezel is shown;
+the accessible name still identifies the control as Activity. Parallel work
+shows up to three stacked portraits and the first name followed by `+N`, counting
+distinct working gezels rather than jobs. The engine key describes the device's
+phase, progress, and health; it has no crew portrait or name and stays hidden
+for cloud-only work when no local engine is active.
+The header reads every running queue owner, including background indexing jobs
+without a chat session. Waiting jobs never enter the portrait stack. If work
+has no known crew identity yet, show **Working…** and the thinking dots;
+never fall back to **Activity · N working** in the visible key.
+
+Background scanning, studying, reviewing, and digest progress belongs here too,
+never in a separate Librarian key. Live index work joins **Working** and the
+crew portrait stack, with its project and progress in the panel. A finished
+scan briefly appears under **Ready**, labeled finished rather than continuing
+to pulse as working. Batch-only progress and completion messages fade after
+eight quiet seconds; a scan with an explicit start stays working until it ends.
+Index rows open their project or Librarian.
 
 Question choices and text fields are visible inline. Keep drafts when the panel
 closes or changes project, keep cards in a stable order during refresh, and
@@ -1787,7 +1874,10 @@ sits where a task strip would, in the same frame. The image strip holds:
   drawn in that ratio (1:1, 4:5, 3:2, 16:9, 9:16), with "More" for the rest;
 - a Draft / Standard / High tray;
 - a model picker when more than one model is installed;
-- a one-line readout of what will render (`9:16 · 768×1344 · FLUX.2 Klein`).
+- a Style picker, starting at "No style", only when the chosen model has a
+  style installed; picking another model drops a style it lacks;
+- a one-line readout of what will render (`9:16 · 768×1344 · FLUX.2 Klein`),
+  ending with the style when one is picked.
 
 Shapes and tiers, never pixel fields: a person thinks "phone wallpaper", and
 the daemon turns it into the model's own trained size. The strip follows four
@@ -1915,7 +2005,7 @@ Photos is where a describer is fetched; a chat turn never starts a download.
 **Watching cameras.** A camera connected to a project (Connections → Webcam)
 watches continuously, so watching must always be visible and stopping it is
 one click. While any camera is on, the titlebar shows a "Camera on" pill
-(`WatchingIndicator`, the Librarian pill's (`BoekwachterPill`) recipe with a danger-red dot);
+(`WatchingIndicator`, using the titlebar key recipe with a danger-red dot);
 its menu pauses each camera where the person noticed it. The camera's card
 shows a small live view that refreshes only while the card is on screen and
 is served from memory, a status line in plain words ("Something is in view.",
@@ -2631,14 +2721,14 @@ just the parent screen. When a signal can also be dismissed, put the
 dismissal in that entity's `⋯` menu (e.g. "Clear error indicator"), gated
 so the item only appears while there's something to clear.
 
-**Selected navigation tabs join the canvas.** The current destination in
-the main sidebar is a raised piece of canvas-colored paper, not a pressed
-choice key. Its inner edge bridges across the rail seam into the open canvas,
-while its remaining edges keep a quiet border and directional drop shadow.
-Mirror the bridge and shadow when the sidebar changes sides, and put
-row-level status/actions on the same raised surface. Reserve this treatment
-for the one destination currently shown; hover and expand/collapse states
-remain flat in the rail.
+**Selected navigation items stay inside the rail.** The current destination
+has a canvas-colored fill and a solid border around all four sides, with
+`--radius-md` corners. Leave a 0.75rem gutter to the main panel in the expanded
+desktop rail; selection never bridges across its edge. Row-level status/actions
+sit inside the same rectangle.
+The main panel casts a narrow, soft shadow into the rail, mirrored when the
+sidebar changes sides. Reserve the outline for the destination currently shown;
+hover and expand/collapse states remain flat in the rail.
 
 **Install and update notices.** Conditions about the *installation* rather than
 the user's work — the background service did not start, an update could not be
@@ -2681,7 +2771,7 @@ unreadable smear rather than a smaller pill. Drop *text* instead, in one
 ladder measured for the whole cluster at once so every pill compacts on the
 same beat: first the machine name ("This Mac" — every local engine wears it,
 so it stops distinguishing anything the moment a second pill appears) and the
-queue chip's activity phrase, then the gezel's name in an engine pill. What
+queue chip's activity phrase, then the gezel's name in Activity. What
 survives is what is unique to that pill: the engine, the phase, the model, the
 count. Nothing is lost outright — every dropped string stays in the pill's
 tooltip and its popover, which is the price of being allowed to drop it. A
@@ -2725,7 +2815,7 @@ other screen. The code is shown only on request, in the large spaced
 `.device-code` recipe with its countdown, because it is read off one screen and
 typed into another. Port, interface, limits, and the identity code older
 versions still compare sit in **Advanced**. A remembered server that can't be
-reached is a state, not an error: its row says "not reachable — gezellen answer
+reached is a state, not an error: its row says "not reachable — crew members answer
 without it until it's back", pickers keep its models listed as "(offline)", and
 a reply that ran on the fallback carries one line saying which server was away
 and what answered instead.

@@ -305,6 +305,30 @@ describe('ChatManager — fixed-function gezels', () => {
     expect(followArgs).not.toContain('width: 1024');
   }, 30_000);
 
+  it('draws in the strip style, keeps it for a follow-up, and "No style" leaves it out', async () => {
+    const gezel = await store.createGezel({
+      name: 'Eduardo',
+      role: 'Image generator',
+      frontmatter: { fixedFunction: { tool: 'generate_image', promptKey: 'prompt' } },
+    });
+    const session = await manager.ensureOrCreateSession({ gezelId: gezel.id });
+    const first = await manager.send(session.id, 'a red tram in the rain', {
+      imageSettings: { style: 'pixel-art' },
+    });
+    expect(first.toolCalls?.[0]?.argsFull ?? '').toContain('style: pixel-art');
+    expect((await store.getSession(gezel.id, session.id))?.lastImageGeneration).toMatchObject({
+      style: 'pixel-art',
+    });
+
+    mock.script('PROMPT: a red tram in the rain, at night\nAVOID: none');
+    const followUp = await manager.send(session.id, 'make it night');
+    expect(followUp.toolCalls?.[0]?.argsFull ?? '').toContain('style: pixel-art');
+
+    mock.script('PROMPT: a red tram in the rain, at dawn\nAVOID: none');
+    const plain = await manager.send(session.id, 'make it dawn', { imageSettings: { style: '' } });
+    expect(plain.toolCalls?.[0]?.argsFull ?? '').not.toContain('pixel-art');
+  }, 30_000);
+
   it('threads a removal follow-up as a seed-stable revise with a negative prompt', async () => {
     const gezel = await store.createGezel({
       name: 'Eduardo',

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PageChatMessageSchema, PageLayoutSchema } from './page-chat.js';
 import { PageImportRequestSchema } from './page-imports.js';
 import { PageTableRequestSchema, PageTableResponseSchema } from './page-tables.js';
 
@@ -90,6 +91,7 @@ export const PageTableMessageSchema = z.object({
 });
 
 export const PageToParentMessageSchema = z.discriminatedUnion('kind', [
+  ...PageChatMessageSchema.options,
   z.object({ ...envelopeBase, kind: z.literal('import-targets'), id: z.string().min(1).max(64) }),
   z.object({ ...envelopeBase, kind: z.literal('import-cancel'), id: z.string().min(1).max(64) }),
   PageImportRequestSchema.extend({
@@ -127,6 +129,7 @@ export const ParentInitMessageSchema = z.object({
   kind: z.literal('init'),
   api: z.literal(PAGE_BRIDGE_VERSION),
   theme: z.object({ mode: z.enum(['light', 'dark']) }),
+  layout: PageLayoutSchema.optional(),
   limits: z.object({
     maxInflight: z.number().int().positive(),
     maxReadBytes: z.number().int().positive(),
@@ -212,6 +215,15 @@ export const ParentTableResultMessageSchema = z.object({
 });
 
 export const ParentToPageMessageSchema = z.discriminatedUnion('kind', [
+  z.object({ ...envelopeBase, kind: z.literal('layout'), layout: PageLayoutSchema }),
+  z.object({
+    ...envelopeBase,
+    kind: z.literal('chat-result'),
+    id: z.string(),
+    ok: z.boolean(),
+    error: z.string().optional(),
+    errorCode: PageBridgeErrorCodeSchema.optional(),
+  }),
   z.object({
     ...envelopeBase,
     kind: z.literal('import-result'),

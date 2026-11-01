@@ -54,6 +54,7 @@ export {
   type ImageGenerateInput,
   type ImageGenerateOptions,
   type ImageModel,
+  type ImageStyle,
   type ImageModelEnsureEvent,
   type ImageModelEnsureResult,
   type ImageProgress,

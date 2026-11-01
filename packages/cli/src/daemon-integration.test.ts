@@ -39,6 +39,9 @@ let gezelHome: string;
  * with a Zone OOM, failing every later case (2026-09-25).
  */
 let workspaceCwd: string;
+// The shared daemon can retain workspace handles after a CLI exits. Windows
+// cleanup must wait for daemon shutdown, including when a test fails.
+const daemonWorkspaceDirs: string[] = [];
 let spawned: DiscoverOrSpawnResult;
 let client: GezelClient;
 /** The daemon's recent output, printed when a case fails; its home is deleted afterwards. */
@@ -63,7 +66,7 @@ async function runCli(...args: string[]): Promise<{ stdout: string; stderr: stri
 function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   // On Windows a fresh home downloads the MXC launcher at boot, and once it
   // lands `--strict-sandbox` stops refusing — so the suite's outcome depended
-  // on how fast npm answered. Keep every platform but macOS without isolation.
+  // on how fast npm answered. Keep Windows isolation disabled for this suite.
   const env: NodeJS.ProcessEnv = { ...process.env, GEZEL_MXC: 'off', ...extra };
   for (const key of Object.keys(env)) {
     if (key.startsWith('VITEST')) delete env[key];
@@ -142,6 +145,9 @@ afterEach(({ task }) => {
 
 afterAll(async () => {
   await stopOwnedDaemon(spawned?.child);
+  for (const folder of daemonWorkspaceDirs) {
+    await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
   if (gezelHome) await rm(gezelHome, { recursive: true, force: true });
   if (workspaceCwd) await rm(workspaceCwd, { recursive: true, force: true });
 });
@@ -381,22 +387,43 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
       await expect(
         runCli('--project', folder, 'do', 'batch-meta', 'dp04', '--strict-sandbox'),
       ).rejects.toMatchObject({ code: 1 });
-      if (process.platform !== 'darwin') {
-        await expect(
-          runCli(
-            '--project',
-            folder,
-            'do',
-            'batch-smoke',
-            'c2',
-            '--strict-sandbox',
-            '--wait',
-            '--json',
-          ),
-        ).rejects.toMatchObject({ code: 2 });
+      // Linux can enforce denyNet through systemd on some hosts. Probe the
+      // actual runner; Windows is explicitly disabled in childEnv above.
+      let boundaryAvailable = false;
+      if (process.platform !== 'win32') {
+        const { runInSandbox } = await import('@bendyline/gezel-service');
+        await writeFile(join(folder, 'sandbox-probe.mjs'), "console.log('sandbox probe');\n");
+        const probe = await runInSandbox({
+          entry: 'sandbox-probe.mjs',
+          timeoutMs: 10_000,
+          cwd: folder,
+          input: '',
+          denyNet: true,
+        });
+        boundaryAvailable = probe.exitCode === 0;
+        if (!boundaryAvailable) {
+          expect(probe.stderr).toContain('denyNet requires an enforceable OS network boundary');
+        }
+      }
+      const strictRun = runCli(
+        '--project',
+        folder,
+        'do',
+        'batch-smoke',
+        'c2',
+        '--strict-sandbox',
+        '--wait',
+        '--json',
+      );
+      if (boundaryAvailable) {
+        const strict = JSON.parse((await strictRun).stdout);
+        expect(strict.outcome).toBe('complete');
+        expect(strict.task.cliTrustedScriptHashes ?? []).toEqual([]);
+      } else {
+        await expect(strictRun).rejects.toMatchObject({ code: 2 });
       }
     } finally {
-      await rm(folder, { recursive: true, force: true });
+      daemonWorkspaceDirs.push(folder);
     }
   }, 90_000);
 
@@ -878,7 +905,7 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
       );
       expect(noop.stdout).toContain('already applied');
     } finally {
-      await rm(folder, { recursive: true, force: true });
+      daemonWorkspaceDirs.push(folder);
     }
 
     const disabled = await runCli('app', 'disable', 'just-chat');

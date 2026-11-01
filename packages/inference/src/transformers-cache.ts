@@ -20,6 +20,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { isPathInside } from './fs/safe-paths.js';
 
 const log = createLogger('service');
@@ -436,6 +437,7 @@ export interface TransformersEnv {
 export type LoadTransformersEnv = () => Promise<TransformersEnv>;
 
 async function defaultLoadEnv(): Promise<TransformersEnv> {
+  disableOnnxRuntimeTelemetry();
   const mod = (await import('@huggingface/transformers')) as unknown as { env: TransformersEnv };
   return mod.env;
 }

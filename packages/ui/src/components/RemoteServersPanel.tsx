@@ -109,7 +109,7 @@ function formatRelative(ms?: number): string {
 function remoteStatusText(remote: PairedRemoteInfo, seenOnNetwork: boolean): string {
   if (remote.status === 'offline' && !seenOnNetwork) {
     const since = remote.lastSeenAt ? ` (last reached ${formatRelative(remote.lastSeenAt)})` : '';
-    return `not reachable${since} — gezellen answer without it until it's back`;
+    return `not reachable${since} — crew members answer without it until it's back`;
   }
   if (seenOnNetwork) return 'on your network now';
   if (remote.status === 'online') return 'reachable';

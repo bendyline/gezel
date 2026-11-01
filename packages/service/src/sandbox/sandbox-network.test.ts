@@ -167,6 +167,85 @@ await writeFile(${JSON.stringify(marker)}, fetchError);
     expect(childEnv.GEZEL_TEST_SHOULD_NOT_LEAK).toBeUndefined();
     expect(childEnv.WINDOWPATH).toBeUndefined();
   });
+
+  it('carries script RPC over the standard pipes inside the Linux systemd boundary', async () => {
+    if (process.platform !== 'linux' || !(await canApplyLinuxSystemdSandbox())) return;
+
+    // The SDK's stdio transport, inlined: init is stdin's first line, a call
+    // goes to stdout behind the per-run marker, and the reply follows on stdin.
+    const entry = join(scratch, 'linux-rpc.mjs');
+    await writeFile(
+      entry,
+      `import net from 'node:net';
+const marker = '\\u001egezel-rpc:' + process.env.GEZEL_SCRIPT_RPC_NONCE + ':';
+let buffer = '';
+const lines = [];
+let wake = null;
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  let nl;
+  while ((nl = buffer.indexOf('\\n')) >= 0) {
+    lines.push(buffer.slice(0, nl));
+    buffer = buffer.slice(nl + 1);
+  }
+  wake?.();
+});
+const nextLine = async () => {
+  while (lines.length === 0) await new Promise((resolve) => { wake = resolve; });
+  return lines.shift();
+};
+const init = JSON.parse(await nextLine());
+const blocked = await new Promise((resolve) => {
+  try {
+    const socket = net.connect({ host: '127.0.0.1', port: 9 });
+    socket.once('connect', () => resolve('connected'));
+    socket.once('error', (err) => resolve(err.code ?? String(err.message)));
+  } catch (err) {
+    resolve(String(err.message));
+  }
+});
+process.stdout.write('plain output\\n');
+process.stdout.write(marker + JSON.stringify({ id: 1, method: 'echo', params: { word: init.word, blocked } }) + '\\n');
+const reply = JSON.parse(await nextLine());
+process.stdout.write('reply=' + reply.result + '\\n');
+process.exit(0);
+`,
+      'utf8',
+    );
+
+    const frames: string[] = [];
+    const result = await runInSandbox({
+      entry,
+      cwd: scratch,
+      input: JSON.stringify({ word: 'ping' }),
+      denyNet: true,
+      timeoutMs: 20_000,
+      rpcChannel: {
+        onLine: (line) => frames.push(line),
+        onOpen: (send) => {
+          const poll = setInterval(() => {
+            if (frames.length === 0) return;
+            clearInterval(poll);
+            send(`${JSON.stringify({ id: 1, result: 'pong' })}\n`);
+          }, 20);
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ exitCode: 0, timedOut: false });
+    expect(result.stderr).not.toContain('denyNet requires an enforceable OS network boundary');
+    expect(frames).toHaveLength(1);
+    const call = JSON.parse(frames[0]!) as {
+      method: string;
+      params: { word: string; blocked: string };
+    };
+    expect(call).toMatchObject({ method: 'echo', params: { word: 'ping' } });
+    expect(call.params.blocked).not.toBe('connected');
+    expect(result.stdout).toContain('plain output');
+    expect(result.stdout).toContain('reply=pong');
+    expect(result.stdout).not.toContain('gezel-rpc');
+  });
 });
 
 describe('trusted macOS Seatbelt startup fallback classifier', () => {

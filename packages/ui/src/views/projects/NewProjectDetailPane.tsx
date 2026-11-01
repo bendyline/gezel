@@ -152,7 +152,7 @@ export function NewProjectBrief({ selection }: { selection: PaneSelection }) {
       <p className="gz-npd-brief-lede">{description}</p>
       {hasGive && (
         <div className="gz-npd-give">
-          <p className="gz-npd-give-eyebrow">Gezellen and Tools</p>
+          <p className="gz-npd-give-eyebrow">Crew and Tools</p>
           {crew.length > 0 && (
             <div className="gz-npd-crew">
               {crew.map((member) => {

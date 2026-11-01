@@ -1,0 +1,1832 @@
+{
+  "runId": "2026-10-28-dgx-spark-class",
+  "judgedAt": "2026-10-30T22:31:15.507Z",
+  "judgeModels": [
+    "claude-sonnet-4-6"
+  ],
+  "trials": 121,
+  "skipped": 137,
+  "cells": [
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "complex-work",
+      "rubric": "default-html",
+      "trials": 4,
+      "meanScore": 1.35
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "complex-work",
+      "rubric": "scenario",
+      "trials": 3,
+      "meanScore": 4.93
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "core",
+      "rubric": "default-html",
+      "trials": 9,
+      "meanScore": 6.88
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "rubric": "scenario",
+      "trials": 18,
+      "meanScore": 5.47
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "rubric": "scenario",
+      "trials": 27,
+      "meanScore": 6.94
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "complex-work",
+      "rubric": "default-html",
+      "trials": 3,
+      "meanScore": 0.8
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "complex-work",
+      "rubric": "scenario",
+      "trials": 3,
+      "meanScore": 6.47
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "core",
+      "rubric": "default-html",
+      "trials": 9,
+      "meanScore": 8.23
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "rubric": "scenario",
+      "trials": 18,
+      "meanScore": 7.92
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "rubric": "scenario",
+      "trials": 27,
+      "meanScore": 8.39
+    }
+  ],
+  "perTrial": [
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-author-gate-script",
+      "trialId": "craftbook-author-gate-script-gemma4-12b-q4-2026-10-30T20-23-46-258Z-kiv9",
+      "rubric": "default-html",
+      "meanScore": 3,
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 1,
+        "codeQuality": 4,
+        "polish": 2
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-find-vs-create",
+      "trialId": "craftbook-find-vs-create-gemma4-12b-q4-2026-10-30T16-31-29-264Z-eaco",
+      "rubric": "default-html",
+      "meanScore": 0.8,
+      "scoreAxes": {
+        "visualQuality": 1,
+        "functionalCompleteness": 0,
+        "codeQuality": 2,
+        "polish": 0
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-find-vs-create",
+      "trialId": "craftbook-find-vs-create-gemma4-12b-q4-2026-10-30T16-32-40-200Z-owz3",
+      "rubric": "default-html",
+      "meanScore": 0.8,
+      "scoreAxes": {
+        "visualQuality": 1,
+        "functionalCompleteness": 0,
+        "codeQuality": 2,
+        "polish": 0
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-find-vs-create",
+      "trialId": "craftbook-find-vs-create-gemma4-12b-q4-2026-10-30T16-36-17-383Z-hdnl",
+      "rubric": "default-html",
+      "meanScore": 0.8,
+      "scoreAxes": {
+        "visualQuality": 1,
+        "functionalCompleteness": 0,
+        "codeQuality": 2,
+        "polish": 0
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-gemma4-12b-q4-2026-10-30T16-58-52-710Z-qv48",
+      "rubric": "scenario",
+      "meanScore": 3.8,
+      "scoreAxes": {
+        "numeric integrity": 4,
+        "numbering continuity": 9,
+        "professionalism": 2,
+        "completeness": 3,
+        "print-polish": 1
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-gemma4-12b-q4-2026-10-30T17-02-50-169Z-il2n",
+      "rubric": "scenario",
+      "meanScore": 5.8,
+      "scoreAxes": {
+        "numeric integrity": 5,
+        "numbering continuity": 9,
+        "professionalism": 6,
+        "completeness": 6,
+        "print-polish": 3
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-gemma4-12b-q4-2026-10-30T17-06-46-497Z-xkav",
+      "rubric": "scenario",
+      "meanScore": 5.2,
+      "scoreAxes": {
+        "numeric integrity": 6,
+        "numbering continuity": 10,
+        "professionalism": 4,
+        "completeness": 5,
+        "print-polish": 1
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-gemma4-12b-q4-2026-10-30T06-06-20-376Z-w7vy",
+      "rubric": "default-html",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 6,
+        "codeQuality": 7,
+        "polish": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-gemma4-12b-q4-2026-10-30T06-08-24-161Z-dkir",
+      "rubric": "default-html",
+      "meanScore": 7,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 8,
+        "codeQuality": 7,
+        "polish": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-gemma4-12b-q4-2026-10-30T06-13-42-098Z-vkgr",
+      "rubric": "default-html",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 6,
+        "codeQuality": 7,
+        "polish": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-gemma4-12b-q4-2026-10-30T06-19-08-755Z-whr8",
+      "rubric": "default-html",
+      "meanScore": 6.8,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 8,
+        "codeQuality": 7,
+        "polish": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-gemma4-12b-q4-2026-10-30T06-20-14-277Z-oouu",
+      "rubric": "default-html",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 7,
+        "codeQuality": 5,
+        "polish": 4
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-gemma4-12b-q4-2026-10-30T06-21-12-837Z-3tkz",
+      "rubric": "default-html",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 8,
+        "codeQuality": 6,
+        "polish": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-gemma4-12b-q4-2026-10-30T06-03-28-529Z-bqu3",
+      "rubric": "default-html",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 10,
+        "codeQuality": 8,
+        "polish": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-gemma4-12b-q4-2026-10-30T06-04-23-029Z-1r04",
+      "rubric": "default-html",
+      "meanScore": 7.8,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 10,
+        "codeQuality": 9,
+        "polish": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-gemma4-12b-q4-2026-10-30T06-05-22-782Z-7ri6",
+      "rubric": "default-html",
+      "meanScore": 7.8,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 10,
+        "codeQuality": 9,
+        "polish": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-gemma4-12b-q4-2026-10-30T11-06-58-089Z-a28j",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-gemma4-12b-q4-2026-10-30T11-11-18-704Z-fv2d",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-gemma4-12b-q4-2026-10-30T11-20-59-231Z-iq9e",
+      "rubric": "scenario",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "workflow fidelity": 7,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-gemma4-12b-q4-2026-10-30T14-57-01-957Z-jhea",
+      "rubric": "scenario",
+      "meanScore": 6.7,
+      "scoreAxes": {
+        "Repro-first discipline": 6,
+        "Fix minimality": 9,
+        "Honest verification": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-gemma4-12b-q4-2026-10-30T15-35-15-181Z-eb77",
+      "rubric": "scenario",
+      "meanScore": 4.7,
+      "scoreAxes": {
+        "Repro-first discipline": 3,
+        "Fix minimality": 8,
+        "Honest verification": 3
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-gemma4-12b-q4-2026-10-30T16-13-30-081Z-i05k",
+      "rubric": "scenario",
+      "meanScore": 4.3,
+      "scoreAxes": {
+        "Repro-first discipline": 3,
+        "Fix minimality": 8,
+        "Honest verification": 2
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-gemma4-12b-q4-2026-10-30T10-58-56-735Z-x6pa",
+      "rubric": "scenario",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "workflow fidelity": 7,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-gemma4-12b-q4-2026-10-30T11-00-55-085Z-460e",
+      "rubric": "scenario",
+      "meanScore": 8,
+      "scoreAxes": {
+        "workflow fidelity": 7,
+        "usefulness": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-gemma4-12b-q4-2026-10-30T11-02-49-267Z-d7ed",
+      "rubric": "scenario",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "workflow fidelity": 7,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-gemma4-12b-q4-2026-10-30T12-54-29-544Z-0gh4",
+      "rubric": "scenario",
+      "meanScore": 3.3,
+      "scoreAxes": {
+        "Enumeration completeness": 3,
+        "Invariant discipline": 5,
+        "Reconciled verification": 2
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-gemma4-12b-q4-2026-10-30T13-10-58-400Z-vca3",
+      "rubric": "scenario",
+      "meanScore": 3.3,
+      "scoreAxes": {
+        "Enumeration completeness": 3,
+        "Invariant discipline": 4,
+        "Reconciled verification": 3
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-gemma4-12b-q4-2026-10-30T13-29-08-939Z-15yu",
+      "rubric": "scenario",
+      "meanScore": 4.7,
+      "scoreAxes": {
+        "Enumeration completeness": 5,
+        "Invariant discipline": 6,
+        "Reconciled verification": 3
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-gemma4-12b-q4-2026-10-30T11-27-40-068Z-higt",
+      "rubric": "scenario",
+      "meanScore": 6.7,
+      "scoreAxes": {
+        "verification": 8,
+        "systemic analysis": 7,
+        "remediation": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-gemma4-12b-q4-2026-10-30T11-32-29-167Z-ng4d",
+      "rubric": "scenario",
+      "meanScore": 7.7,
+      "scoreAxes": {
+        "verification": 8,
+        "systemic analysis": 7,
+        "remediation": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-gemma4-12b-q4-2026-10-30T11-37-53-941Z-skco",
+      "rubric": "scenario",
+      "meanScore": 7.7,
+      "scoreAxes": {
+        "verification": 8,
+        "systemic analysis": 7,
+        "remediation": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-gemma4-12b-q4-2026-10-30T13-40-02-407Z-xr30",
+      "rubric": "scenario",
+      "meanScore": 1.3,
+      "scoreAxes": {
+        "Guardrail-first discipline": 1,
+        "Reversible-stage execution": 2,
+        "Genuine deduplication": 1
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-gemma4-12b-q4-2026-10-30T14-19-48-914Z-ji04",
+      "rubric": "scenario",
+      "meanScore": 3.3,
+      "scoreAxes": {
+        "Guardrail-first discipline": 2,
+        "Reversible-stage execution": 3,
+        "Genuine deduplication": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-gemma4-12b-q4-2026-10-30T14-41-00-782Z-hq8h",
+      "rubric": "scenario",
+      "meanScore": 1.3,
+      "scoreAxes": {
+        "Guardrail-first discipline": 1,
+        "Reversible-stage execution": 2,
+        "Genuine deduplication": 1
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T08-47-40-241Z-kf1n",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "safety": 5,
+        "mapping": 7,
+        "signals": 8,
+        "containment": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T09-51-42-474Z-3z3m",
+      "rubric": "scenario",
+      "meanScore": 5,
+      "scoreAxes": {
+        "safety": 5,
+        "mapping": 5,
+        "signals": 7,
+        "containment": 3
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-gemma4-12b-q4-2026-10-30T09-58-00-599Z-hpy5",
+      "rubric": "scenario",
+      "meanScore": 5.8,
+      "scoreAxes": {
+        "safety": 4,
+        "mapping": 5,
+        "signals": 6,
+        "containment": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-gemma4-12b-q4-2026-10-30T10-09-29-607Z-qbyd",
+      "rubric": "scenario",
+      "meanScore": 7.8,
+      "scoreAxes": {
+        "accuracy": 7,
+        "grounding": 8,
+        "structure": 9,
+        "actionability": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-gemma4-12b-q4-2026-10-30T10-11-59-808Z-2t3y",
+      "rubric": "scenario",
+      "meanScore": 8,
+      "scoreAxes": {
+        "accuracy": 9,
+        "grounding": 9,
+        "structure": 8,
+        "actionability": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-gemma4-12b-q4-2026-10-30T10-16-05-452Z-qtr9",
+      "rubric": "scenario",
+      "meanScore": 7.3,
+      "scoreAxes": {
+        "accuracy": 7,
+        "grounding": 9,
+        "structure": 7,
+        "actionability": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-gemma4-12b-q4-2026-10-30T08-06-25-122Z-rktr",
+      "rubric": "scenario",
+      "meanScore": 7,
+      "scoreAxes": {
+        "source-acquisition": 7,
+        "outline-parity": 5,
+        "grounding": 8,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-gemma4-12b-q4-2026-10-30T08-09-28-368Z-yw0s",
+      "rubric": "scenario",
+      "meanScore": 7.3,
+      "scoreAxes": {
+        "source-acquisition": 7,
+        "outline-parity": 6,
+        "grounding": 8,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-gemma4-12b-q4-2026-10-30T08-12-32-649Z-s9tf",
+      "rubric": "scenario",
+      "meanScore": 7.8,
+      "scoreAxes": {
+        "source-acquisition": 8,
+        "outline-parity": 6,
+        "grounding": 8,
+        "convertibility": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-gemma4-12b-q4-2026-10-30T10-18-04-075Z-ta2f",
+      "rubric": "scenario",
+      "meanScore": 8.7,
+      "scoreAxes": {
+        "grounding": 9,
+        "structure": 9,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-gemma4-12b-q4-2026-10-30T10-24-36-282Z-ump6",
+      "rubric": "scenario",
+      "meanScore": 7.7,
+      "scoreAxes": {
+        "grounding": 6,
+        "structure": 8,
+        "convertibility": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-gemma4-12b-q4-2026-10-30T10-30-38-820Z-r7tk",
+      "rubric": "scenario",
+      "meanScore": 7.7,
+      "scoreAxes": {
+        "grounding": 6,
+        "structure": 8,
+        "convertibility": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-gemma4-12b-q4-2026-10-30T07-21-53-575Z-od50",
+      "rubric": "scenario",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "workflow fidelity": 7,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-gemma4-12b-q4-2026-10-30T07-27-12-549Z-2pm7",
+      "rubric": "scenario",
+      "meanScore": 8,
+      "scoreAxes": {
+        "workflow fidelity": 8,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-gemma4-12b-q4-2026-10-30T07-34-22-540Z-n3s0",
+      "rubric": "scenario",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "workflow fidelity": 8,
+        "usefulness": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-gemma4-12b-q4-2026-10-30T08-27-17-490Z-44kb",
+      "rubric": "scenario",
+      "meanScore": 4.8,
+      "scoreAxes": {
+        "coverage": 4,
+        "prioritization": 6,
+        "conflict-handling": 6,
+        "realism": 3
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-gemma4-12b-q4-2026-10-30T08-33-32-751Z-nbgo",
+      "rubric": "scenario",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "coverage": 5,
+        "prioritization": 6,
+        "conflict-handling": 7,
+        "realism": 4
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-gemma4-12b-q4-2026-10-30T08-41-56-009Z-prk9",
+      "rubric": "scenario",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "coverage": 5,
+        "prioritization": 6,
+        "conflict-handling": 6,
+        "realism": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-30T07-47-21-961Z-31en",
+      "rubric": "scenario",
+      "meanScore": 5.3,
+      "scoreAxes": {
+        "grounding": 7,
+        "candor": 6,
+        "usefulness": 3
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-30T07-56-16-327Z-b5jm",
+      "rubric": "scenario",
+      "meanScore": 4,
+      "scoreAxes": {
+        "grounding": 4,
+        "candor": 6,
+        "usefulness": 2
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-30T08-01-29-876Z-0kcp",
+      "rubric": "scenario",
+      "meanScore": 5,
+      "scoreAxes": {
+        "grounding": 7,
+        "candor": 5,
+        "usefulness": 3
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-gemma4-12b-q4-2026-10-30T07-13-26-255Z-73ho",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "decisionClarity": 8,
+        "grounding": 7,
+        "actionability": 9,
+        "brevity": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-gemma4-12b-q4-2026-10-30T07-16-08-848Z-ylfm",
+      "rubric": "scenario",
+      "meanScore": 8,
+      "scoreAxes": {
+        "decisionClarity": 8,
+        "grounding": 7,
+        "actionability": 8,
+        "brevity": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-gemma4-12b-q4-2026-10-30T07-18-51-486Z-kcjb",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "decisionClarity": 8,
+        "grounding": 7,
+        "actionability": 9,
+        "brevity": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-gemma4-12b-q4-2026-10-30T08-15-20-013Z-35kz",
+      "rubric": "scenario",
+      "meanScore": 7,
+      "scoreAxes": {
+        "synthesis": 6,
+        "grounding": 7,
+        "citationQuality": 8,
+        "calibration": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-gemma4-12b-q4-2026-10-30T08-18-24-988Z-9nj8",
+      "rubric": "scenario",
+      "meanScore": 7.8,
+      "scoreAxes": {
+        "synthesis": 8,
+        "grounding": 7,
+        "citationQuality": 8,
+        "calibration": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-gemma4-12b-q4-2026-10-30T08-23-01-151Z-xy4p",
+      "rubric": "scenario",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "synthesis": 7,
+        "grounding": 8,
+        "citationQuality": 8,
+        "calibration": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-find-vs-create",
+      "trialId": "craftbook-find-vs-create-qwen3-8-27b-q4-2026-10-29T15-57-49-034Z-0d4k",
+      "rubric": "default-html",
+      "meanScore": 0.8,
+      "scoreAxes": {
+        "visualQuality": 1,
+        "functionalCompleteness": 0,
+        "codeQuality": 2,
+        "polish": 0
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-find-vs-create",
+      "trialId": "craftbook-find-vs-create-qwen3-8-27b-q4-2026-10-29T15-59-25-337Z-imou",
+      "rubric": "default-html",
+      "meanScore": 0.8,
+      "scoreAxes": {
+        "visualQuality": 1,
+        "functionalCompleteness": 0,
+        "codeQuality": 2,
+        "polish": 0
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-find-vs-create",
+      "trialId": "craftbook-find-vs-create-qwen3-8-27b-q4-2026-10-29T16-00-45-267Z-ynlx",
+      "rubric": "default-html",
+      "meanScore": 0.8,
+      "scoreAxes": {
+        "visualQuality": 1,
+        "functionalCompleteness": 0,
+        "codeQuality": 2,
+        "polish": 0
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-qwen3-8-27b-q4-2026-10-29T16-49-59-529Z-os3h",
+      "rubric": "scenario",
+      "meanScore": 5.8,
+      "scoreAxes": {
+        "numeric integrity": 6,
+        "numbering continuity": 9,
+        "professionalism": 7,
+        "completeness": 5,
+        "print-polish": 2
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-qwen3-8-27b-q4-2026-10-29T16-59-10-379Z-3n1s",
+      "rubric": "scenario",
+      "meanScore": 7.2,
+      "scoreAxes": {
+        "numeric integrity": 8,
+        "numbering continuity": 9,
+        "professionalism": 7,
+        "completeness": 7,
+        "print-polish": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-qwen3-8-27b-q4-2026-10-29T17-08-46-599Z-vd9c",
+      "rubric": "scenario",
+      "meanScore": 6.4,
+      "scoreAxes": {
+        "numeric integrity": 6,
+        "numbering continuity": 9,
+        "professionalism": 7,
+        "completeness": 7,
+        "print-polish": 3
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-qwen3-8-27b-q4-2026-10-28T19-19-28-909Z-2i1u",
+      "rubric": "default-html",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "visualQuality": 9,
+        "functionalCompleteness": 8,
+        "codeQuality": 9,
+        "polish": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-qwen3-8-27b-q4-2026-10-28T19-28-16-126Z-l2fb",
+      "rubric": "default-html",
+      "meanScore": 8,
+      "scoreAxes": {
+        "visualQuality": 8,
+        "functionalCompleteness": 7,
+        "codeQuality": 9,
+        "polish": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-qwen3-8-27b-q4-2026-10-28T19-35-30-711Z-gsiy",
+      "rubric": "default-html",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "visualQuality": 9,
+        "functionalCompleteness": 7,
+        "codeQuality": 9,
+        "polish": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-qwen3-8-27b-q4-2026-10-28T19-42-38-575Z-gl8t",
+      "rubric": "default-html",
+      "meanScore": 7.3,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 8,
+        "codeQuality": 8,
+        "polish": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-qwen3-8-27b-q4-2026-10-28T19-45-33-926Z-ebo6",
+      "rubric": "default-html",
+      "meanScore": 8,
+      "scoreAxes": {
+        "visualQuality": 8,
+        "functionalCompleteness": 9,
+        "codeQuality": 8,
+        "polish": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-qwen3-8-27b-q4-2026-10-28T19-49-20-530Z-9bc4",
+      "rubric": "default-html",
+      "meanScore": 8,
+      "scoreAxes": {
+        "visualQuality": 8,
+        "functionalCompleteness": 9,
+        "codeQuality": 8,
+        "polish": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-qwen3-8-27b-q4-2026-10-28T19-13-44-651Z-reac",
+      "rubric": "default-html",
+      "meanScore": 9,
+      "scoreAxes": {
+        "visualQuality": 9,
+        "functionalCompleteness": 10,
+        "codeQuality": 9,
+        "polish": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-qwen3-8-27b-q4-2026-10-28T19-15-59-367Z-z3up",
+      "rubric": "default-html",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "visualQuality": 8,
+        "functionalCompleteness": 10,
+        "codeQuality": 9,
+        "polish": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-qwen3-8-27b-q4-2026-10-28T19-17-54-653Z-vca7",
+      "rubric": "default-html",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "visualQuality": 8,
+        "functionalCompleteness": 10,
+        "codeQuality": 9,
+        "polish": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-qwen3-8-27b-q4-2026-10-29T04-22-05-115Z-0xh4",
+      "rubric": "scenario",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "workflow fidelity": 8,
+        "usefulness": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-qwen3-8-27b-q4-2026-10-29T04-41-21-736Z-ijnk",
+      "rubric": "scenario",
+      "meanScore": 9,
+      "scoreAxes": {
+        "workflow fidelity": 9,
+        "usefulness": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-qwen3-8-27b-q4-2026-10-29T05-01-04-280Z-zm5z",
+      "rubric": "scenario",
+      "meanScore": 9,
+      "scoreAxes": {
+        "workflow fidelity": 9,
+        "usefulness": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-10-29T12-40-19-444Z-riim",
+      "rubric": "scenario",
+      "meanScore": 7.7,
+      "scoreAxes": {
+        "Repro-first discipline": 7,
+        "Fix minimality": 10,
+        "Honest verification": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-10-29T13-45-14-342Z-8uub",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "Repro-first discipline": 5,
+        "Fix minimality": 9,
+        "Honest verification": 4
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-10-29T14-46-23-692Z-6z12",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "Repro-first discipline": 4,
+        "Fix minimality": 9,
+        "Honest verification": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-qwen3-8-27b-q4-2026-10-29T04-09-56-255Z-wzae",
+      "rubric": "scenario",
+      "meanScore": 9,
+      "scoreAxes": {
+        "workflow fidelity": 9,
+        "usefulness": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-qwen3-8-27b-q4-2026-10-29T04-13-00-066Z-1kgm",
+      "rubric": "scenario",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "workflow fidelity": 8,
+        "usefulness": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-qwen3-8-27b-q4-2026-10-29T04-18-21-982Z-sf6u",
+      "rubric": "scenario",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "workflow fidelity": 8,
+        "usefulness": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-qwen3-8-27b-q4-2026-10-29T06-53-37-073Z-1flp",
+      "rubric": "scenario",
+      "meanScore": 7.7,
+      "scoreAxes": {
+        "Enumeration completeness": 8,
+        "Invariant discipline": 9,
+        "Reconciled verification": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-qwen3-8-27b-q4-2026-10-29T07-55-00-152Z-6y4p",
+      "rubric": "scenario",
+      "meanScore": 7.3,
+      "scoreAxes": {
+        "Enumeration completeness": 9,
+        "Invariant discipline": 8,
+        "Reconciled verification": 5
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-qwen3-8-27b-q4-2026-10-29T09-03-21-770Z-bc69",
+      "rubric": "scenario",
+      "meanScore": 7.7,
+      "scoreAxes": {
+        "Enumeration completeness": 8,
+        "Invariant discipline": 9,
+        "Reconciled verification": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-qwen3-8-27b-q4-2026-10-29T05-18-26-452Z-wxzx",
+      "rubric": "scenario",
+      "meanScore": 9,
+      "scoreAxes": {
+        "verification": 9,
+        "systemic analysis": 9,
+        "remediation": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-qwen3-8-27b-q4-2026-10-29T05-23-42-080Z-aog4",
+      "rubric": "scenario",
+      "meanScore": 9,
+      "scoreAxes": {
+        "verification": 9,
+        "systemic analysis": 9,
+        "remediation": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-qwen3-8-27b-q4-2026-10-29T05-29-34-492Z-v6b6",
+      "rubric": "scenario",
+      "meanScore": 8.7,
+      "scoreAxes": {
+        "verification": 9,
+        "systemic analysis": 8,
+        "remediation": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-qwen3-8-27b-q4-2026-10-29T09-53-10-084Z-qh4j",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "Guardrail-first discipline": 5,
+        "Reversible-stage execution": 7,
+        "Genuine deduplication": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-qwen3-8-27b-q4-2026-10-29T10-49-35-663Z-tab3",
+      "rubric": "scenario",
+      "meanScore": 7.7,
+      "scoreAxes": {
+        "Guardrail-first discipline": 7,
+        "Reversible-stage execution": 8,
+        "Genuine deduplication": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-qwen3-8-27b-q4-2026-10-29T11-14-45-186Z-5hat",
+      "rubric": "scenario",
+      "meanScore": 7,
+      "scoreAxes": {
+        "Guardrail-first discipline": 6,
+        "Reversible-stage execution": 7,
+        "Genuine deduplication": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-qwen3-8-27b-q4-2026-10-29T01-58-33-764Z-63wh",
+      "rubric": "scenario",
+      "meanScore": 8,
+      "scoreAxes": {
+        "safety": 7,
+        "mapping": 8,
+        "signals": 8,
+        "containment": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-qwen3-8-27b-q4-2026-10-29T02-27-39-299Z-axey",
+      "rubric": "scenario",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "safety": 7,
+        "mapping": 8,
+        "signals": 9,
+        "containment": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-qwen3-8-27b-q4-2026-10-29T02-44-31-769Z-6dbk",
+      "rubric": "scenario",
+      "meanScore": 7.8,
+      "scoreAxes": {
+        "safety": 7,
+        "mapping": 8,
+        "signals": 7,
+        "containment": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-10-29T03-03-04-295Z-5we8",
+      "rubric": "scenario",
+      "meanScore": 8.8,
+      "scoreAxes": {
+        "accuracy": 9,
+        "grounding": 9,
+        "structure": 10,
+        "actionability": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-10-29T03-11-49-965Z-t4mp",
+      "rubric": "scenario",
+      "meanScore": 9.3,
+      "scoreAxes": {
+        "accuracy": 9,
+        "grounding": 10,
+        "structure": 10,
+        "actionability": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-10-29T03-17-51-689Z-1bi0",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "accuracy": 8,
+        "grounding": 9,
+        "structure": 9,
+        "actionability": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-10-28T22-31-29-305Z-8mh0",
+      "rubric": "scenario",
+      "meanScore": 7,
+      "scoreAxes": {
+        "source-acquisition": 7,
+        "outline-parity": 5,
+        "grounding": 8,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-10-28T22-45-31-139Z-piqc",
+      "rubric": "scenario",
+      "meanScore": 7,
+      "scoreAxes": {
+        "source-acquisition": 7,
+        "outline-parity": 5,
+        "grounding": 8,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-10-28T22-53-50-441Z-8rdo",
+      "rubric": "scenario",
+      "meanScore": 7.8,
+      "scoreAxes": {
+        "source-acquisition": 8,
+        "outline-parity": 7,
+        "grounding": 9,
+        "convertibility": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-qwen3-8-27b-q4-2026-10-29T03-25-08-578Z-rs7h",
+      "rubric": "scenario",
+      "meanScore": 8.7,
+      "scoreAxes": {
+        "grounding": 9,
+        "structure": 9,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-qwen3-8-27b-q4-2026-10-29T03-31-58-162Z-q3l0",
+      "rubric": "scenario",
+      "meanScore": 8.7,
+      "scoreAxes": {
+        "grounding": 9,
+        "structure": 9,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-qwen3-8-27b-q4-2026-10-29T03-40-24-309Z-ozy9",
+      "rubric": "scenario",
+      "meanScore": 8.7,
+      "scoreAxes": {
+        "grounding": 9,
+        "structure": 9,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-10-28T21-23-36-650Z-ykgj",
+      "rubric": "scenario",
+      "meanScore": 8,
+      "scoreAxes": {
+        "workflow fidelity": 8,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-10-28T21-32-06-532Z-p8vm",
+      "rubric": "scenario",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "workflow fidelity": 8,
+        "usefulness": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-10-28T21-55-31-317Z-3uw5",
+      "rubric": "scenario",
+      "meanScore": 9,
+      "scoreAxes": {
+        "workflow fidelity": 9,
+        "usefulness": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-qwen3-8-27b-q4-2026-10-28T23-23-33-979Z-k7u5",
+      "rubric": "scenario",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "coverage": 9,
+        "prioritization": 8,
+        "conflict-handling": 9,
+        "realism": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-qwen3-8-27b-q4-2026-10-29T00-04-53-145Z-t4ff",
+      "rubric": "scenario",
+      "meanScore": 8.8,
+      "scoreAxes": {
+        "coverage": 9,
+        "prioritization": 8,
+        "conflict-handling": 9,
+        "realism": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-qwen3-8-27b-q4-2026-10-29T00-28-18-791Z-sat6",
+      "rubric": "scenario",
+      "meanScore": 9,
+      "scoreAxes": {
+        "coverage": 9,
+        "prioritization": 9,
+        "conflict-handling": 9,
+        "realism": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-28T22-19-35-176Z-68rz",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "grounding": 9,
+        "candor": 10,
+        "usefulness": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-28T22-23-20-519Z-f6nd",
+      "rubric": "scenario",
+      "meanScore": 8.7,
+      "scoreAxes": {
+        "grounding": 10,
+        "candor": 10,
+        "usefulness": 6
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-28T22-27-04-485Z-pbn8",
+      "rubric": "scenario",
+      "meanScore": 8.7,
+      "scoreAxes": {
+        "grounding": 9,
+        "candor": 10,
+        "usefulness": 7
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-qwen3-8-27b-q4-2026-10-28T21-16-06-326Z-jpne",
+      "rubric": "scenario",
+      "meanScore": 8.8,
+      "scoreAxes": {
+        "decisionClarity": 9,
+        "grounding": 8,
+        "actionability": 9,
+        "brevity": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-qwen3-8-27b-q4-2026-10-28T21-18-33-694Z-gw2u",
+      "rubric": "scenario",
+      "meanScore": 8.8,
+      "scoreAxes": {
+        "decisionClarity": 9,
+        "grounding": 8,
+        "actionability": 9,
+        "brevity": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-qwen3-8-27b-q4-2026-10-28T21-21-01-112Z-a7mh",
+      "rubric": "scenario",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "decisionClarity": 9,
+        "grounding": 8,
+        "actionability": 9,
+        "brevity": 8
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-qwen3-8-27b-q4-2026-10-28T23-02-18-309Z-gn5p",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "synthesis": 8,
+        "grounding": 7,
+        "citationQuality": 9,
+        "calibration": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-qwen3-8-27b-q4-2026-10-28T23-07-48-567Z-t3wg",
+      "rubric": "scenario",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "synthesis": 8,
+        "grounding": 8,
+        "citationQuality": 9,
+        "calibration": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-qwen3-8-27b-q4-2026-10-28T23-15-42-091Z-wz1v",
+      "rubric": "scenario",
+      "meanScore": 8.5,
+      "scoreAxes": {
+        "synthesis": 8,
+        "grounding": 8,
+        "citationQuality": 9,
+        "calibration": 9
+      },
+      "judgeModel": "claude-sonnet-4-6"
+    }
+  ]
+}

@@ -73,14 +73,18 @@ test('hundreds of plain messages share attachment reads, including on older page
     await gotoHome(page);
     attachmentReads = 0;
     await openProject(page, world!.projectId);
-    await expect(page.getByText('Performance message 299', { exact: true })).toBeAttached();
-    await page.waitForTimeout(500);
+    // Home can still show the same messages while the project mounts. The
+    // project then renders its first page before its trailing read finishes;
+    // pagination ignores scrolls until that initial load is complete.
+    const timeline = page.locator('.project-chat').getByTestId('chat-timeline');
+    await expect(timeline).toHaveAttribute('aria-busy', 'false');
+    await expect(timeline.getByText('Performance message 299', { exact: true })).toBeAttached();
     expect(attachmentReads).toBeLessThanOrEqual(2);
-    await page.getByTestId('chat-timeline').evaluate((element) => {
-      element.scrollTop = 0;
+    await timeline.evaluate((element) => {
+      element.scrollTo({ top: 0, behavior: 'instant' });
       element.dispatchEvent(new Event('scroll'));
     });
-    await expect(page.getByText('Performance message 150', { exact: true })).toBeAttached();
+    await expect(timeline.getByText('Performance message 150', { exact: true })).toBeAttached();
     expect(attachmentReads).toBeLessThanOrEqual(3);
   } finally {
     await writeFile(path, original);

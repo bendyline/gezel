@@ -467,6 +467,24 @@ describe('projects', () => {
     expect((await store.getProject(created.id))?.outputPaneVisible).toBeUndefined();
   });
 
+  it('remembers fullscreen separately for each project and clears it without changing visibility', async () => {
+    const board = await store.createProject({ name: 'Board' });
+    const notes = await store.createProject({ name: 'Notes' });
+    await store.updateProject(board.id, { outputPaneVisible: true, outputPaneMaximized: true });
+    await store.updateProject(notes.id, { outputPaneVisible: false });
+
+    const reopened = new Store({ home });
+    expect(await reopened.getProject(board.id)).toMatchObject({
+      outputPaneVisible: true,
+      outputPaneMaximized: true,
+    });
+    expect((await reopened.getProject(notes.id))?.outputPaneMaximized).toBeUndefined();
+    await reopened.updateProject(board.id, { outputPaneMaximized: null });
+    const restored = await reopened.getProject(board.id);
+    expect(restored?.outputPaneVisible).toBe(true);
+    expect(restored?.outputPaneMaximized).toBeUndefined();
+  });
+
   it('keeps the Views tab choice as view state: no history, no activity', async () => {
     const history = new HistoryManager(home);
     const wired = new Store({ home, history });

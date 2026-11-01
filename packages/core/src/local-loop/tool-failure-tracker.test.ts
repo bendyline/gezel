@@ -409,6 +409,46 @@ describe('ToolFailureTracker', () => {
   });
 });
 
+describe('ToolFailureTracker — a refused fragment write', () => {
+  const refusal =
+    'ERROR: Not written: this is a much shorter source file (676 bytes) than `index.html` (5921 bytes), so it reads as part of the file, not all of it. The file is unchanged.';
+
+  it('says nothing was written from the first refusal and never claims corruption', () => {
+    const t = new ToolFailureTracker({ surgicalEditsAvailable: true });
+    const first = t.recordResult('write_file', refusal);
+    expect(first).toMatchObject({ shouldAbort: false, sourceFailureKind: 'fragment' });
+    expect(first.output).toContain('Nothing was written, and the file on disk is unchanged');
+    expect(first.output).toContain('replace_lines');
+    expect(first.output).not.toMatch(/corrupt/i);
+  });
+
+  it('stops at the third identical refusal instead of the fifth', () => {
+    const t = new ToolFailureTracker();
+    expect(t.recordResult('write_file', refusal).shouldAbort).toBe(false);
+    expect(t.recordResult('write_file', refusal).shouldAbort).toBe(false);
+    const third = t.recordResult('write_file', refusal);
+    expect(third).toMatchObject({ shouldAbort: true, sourceFailureKind: 'fragment' });
+    const abort = ToolFailureTracker.buildAbort({
+      providerLabel: 'llama.cpp',
+      toolName: 'write_file',
+      count: third.count,
+      sourceFailureKind: 'fragment',
+    });
+    expect(abort.message).toContain('was refused 3 times');
+    expect(abort.message).not.toContain('replace_lines');
+    expect(abort.message).not.toMatch(/corrupt/i);
+    expect(abort.userMessage).toContain('Nothing was overwritten');
+  });
+
+  it('keeps going while each refused fragment differs', () => {
+    const t = new ToolFailureTracker();
+    for (const bytes of [676, 702, 731]) {
+      const result = t.recordResult('write_file', refusal.replace('676', String(bytes)));
+      expect(result.shouldAbort).toBe(false);
+    }
+  });
+});
+
 describe('ToolFailureTracker — reads of a path that does not exist', () => {
   const notFound = 'ERROR: read_file "tasks/1/scope.md": not found';
 

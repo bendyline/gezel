@@ -42,6 +42,14 @@ describe('composer image settings', () => {
         { ...flux, kind: 'cloud', defaultSidePx: undefined, name: 'GPT Image 2' },
       ),
     ).toBe('9:16 · GPT Image 2');
+    const styled: InstalledImageModel = {
+      ...flux,
+      loras: [{ id: 'klein-pixel-art', name: 'Pixel art', purpose: 'style' }],
+    };
+    expect(imageSettingsReadout({ style: 'klein-pixel-art' }, styled)).toBe(
+      '1:1 · 1024×1024 · FLUX.2 Klein · Pixel art',
+    );
+    expect(imageSettingsReadout({ style: '' }, styled)).toBe('1:1 · 1024×1024 · FLUX.2 Klein');
   });
 
   it('sends the picks, and says when the person dismissed what the message named', () => {

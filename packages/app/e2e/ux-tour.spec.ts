@@ -129,7 +129,7 @@ test('03 - sidebar groups expand and list entities', async () => {
 test('04 - new-gezel dialog creates a gezel; its detail tab opens', async () => {
   test.setTimeout(60_000);
   await page.locator('[aria-label="New gezel"]').click();
-  const dialog = page.locator('[role="dialog"]');
+  const dialog = page.getByRole('dialog', { name: 'New Gezel', exact: true });
   await expect(dialog).toBeVisible();
   await shot('05-new-gezel-dialog.png');
 

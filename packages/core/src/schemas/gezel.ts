@@ -24,7 +24,7 @@ export * from './referenced-file.js';
  * identity and model configuration. Everything is optional except the name —
  * Gezel fills in reasonable defaults elsewhere.
  */
-export const ProviderNameSchema = z.enum([
+const ProviderNameEnum = z.enum([
   'copilot',
   'openai',
   'anthropic',
@@ -48,6 +48,9 @@ export const ProviderNameSchema = z.enum([
   // forward-pass is remoted — so `remote` is NOT a local provider.
   'remote',
 ]);
+// Retain this shared enum's name instead of expanding it in every declaration.
+export interface ProviderNameZodSchema extends z.ZodEnum<(typeof ProviderNameEnum)['enum']> {}
+export const ProviderNameSchema: ProviderNameZodSchema = ProviderNameEnum;
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
 /**
@@ -330,7 +333,7 @@ export const ParsedGezelSchema = z.object({
 });
 export type ParsedGezel = z.infer<typeof ParsedGezelSchema>;
 
-export const GezelSummarySchema = z.object({
+const GezelSummaryObject = z.object({
   id: EntityIdSchema,
   name: z.string(),
   description: z.string().optional(),
@@ -421,9 +424,12 @@ export const GezelSummarySchema = z.object({
   growth: GezelGrowthSummarySchema.optional(),
   updatedAt: z.string(),
 });
+// Keep API response declarations referring to these shared shapes by name.
+export interface GezelSummaryZodSchema extends z.ZodObject<(typeof GezelSummaryObject)['shape']> {}
+export const GezelSummarySchema: GezelSummaryZodSchema = GezelSummaryObject;
 export type GezelSummary = z.infer<typeof GezelSummarySchema>;
 
-export const GezelDetailSchema = GezelSummarySchema.extend({
+const GezelDetailObject = GezelSummarySchema.extend({
   parsed: ParsedGezelSchema,
   about: z.string(),
   /**
@@ -437,6 +443,8 @@ export const GezelDetailSchema = GezelSummarySchema.extend({
    */
   toolsMd: z.string().nullable().default(null),
 });
+export interface GezelDetailZodSchema extends z.ZodObject<(typeof GezelDetailObject)['shape']> {}
+export const GezelDetailSchema: GezelDetailZodSchema = GezelDetailObject;
 export type GezelDetail = z.infer<typeof GezelDetailSchema>;
 
 /**
@@ -748,7 +756,7 @@ export type ContextCompaction = z.infer<typeof ContextCompactionSchema>;
  * unchanged, but the UI uses this metadata to render the bubble as an
  * inter-gezel handoff rather than a human composer turn.
  */
-export const ChatMessageSchema = z.object({
+const ChatMessageObject = z.object({
   /** Stable per-message identity and durable foreground turn state, when supplied by the host. */
   id: z.string().optional(),
   status: z.enum(['complete', 'streaming', 'interrupted', 'error']).optional(),
@@ -954,14 +962,13 @@ export const ChatMessageSchema = z.object({
   makerGezelId: z.string().optional(),
   /**
    * Display flag: the model sees this message as normal history, but the
-   * chat transcript UI never renders a bubble for it. Set on
+   * chat transcript UI only renders it in debug mode. Set on
    * machine-authored facilitation seeds that would only be noise to the
    * reader — e.g. a project-type page's `reaction` seed ("[Checkers page]:
    * Your opponent played c3-d4. Board now: …") when the reaction opts in
    * via `hideSeed`. Unlike `synthetic` (a muted-but-visible bubble), a
-   * `hidden` message is dropped entirely: `Store.listTimeline` filters it
-   * from loaded transcripts and the live-timeline handler skips its bubble
-   * while still opening the assistant's streaming slot.
+   * `hidden` message is omitted from ordinary timelines while still
+   * opening the assistant's streaming slot.
    */
   hidden: z.boolean().optional(),
   /**
@@ -986,7 +993,7 @@ export const ChatMessageSchema = z.object({
    * will accept mid-conversation, but the person never typed them.
    *
    * Display-only marker: the model still sees an ordinary user turn, and
-   * the UI labels the bubble **System** instead of "You". Without it the
+   * the UI hides it outside debug mode and labels it **System** there. Without it the
    * flagship Home thread opened with "YOU · call `advance_task_step` to
    * hand off" — internal plumbing quoted back at the user in their own
    * voice, which reads as a bug and undoes the warm-companion framing the
@@ -1077,6 +1084,14 @@ export const ChatMessageSchema = z.object({
    */
   sentPreamble: z.string().optional(),
 });
+/**
+ * Named so the declarations that embed a message (sessions, stream events and
+ * the responses that carry them) print this name rather than the whole shape
+ * again. They held six copies, against the package's size budget. Named
+ * through the object for the reason `GezelConfigZodSchema` (./api.ts) is.
+ */
+export interface ChatMessageZodSchema extends z.ZodObject<(typeof ChatMessageObject)['shape']> {}
+export const ChatMessageSchema: ChatMessageZodSchema = ChatMessageObject;
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 /**
@@ -1125,7 +1140,7 @@ export type ChatTurnErrorDetail = z.infer<typeof ChatTurnErrorDetailSchema>;
  * `delta` messages land while the model is still streaming; `complete`
  * marks the final assistant message; `done` closes the stream.
  */
-export const ChatEventSchema = z.discriminatedUnion('type', [
+const ChatEventVariants = [
   z.object({ type: z.literal('delta'), content: z.string() }),
   /**
    * Live private-reasoning tokens (ds4's think phase), streamed on their
@@ -1317,6 +1332,8 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     queueId: z.string(),
     preview: z.string(),
     enqueuedAt: z.string(),
+    hidden: ChatMessageSchema.shape.hidden,
+    origin: ChatMessageSchema.shape.origin,
     /**
      * The entry was queued as a mid-turn nudge — the ghost bubble labels
      * it "nudge" and contiguous nudges merge into one turn on drain.
@@ -1846,7 +1863,14 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     type: z.literal('lookouts_updated'),
     projectId: z.string(),
   }),
-]);
+] as const;
+/**
+ * Named so {@link ChatEventEnvelopeSchema} prints this name rather than every
+ * event again, about 28 KB of the declarations.
+ */
+export interface ChatEventZodSchema
+  extends z.ZodDiscriminatedUnion<typeof ChatEventVariants, 'type'> {}
+export const ChatEventSchema: ChatEventZodSchema = z.discriminatedUnion('type', ChatEventVariants);
 export type ChatEvent = z.infer<typeof ChatEventSchema>;
 
 /**

@@ -206,7 +206,9 @@
 
 .app-header {
   display: flex;
-  align-items: flex-end;
+  /* Every control on the bar stands `--titlebar-control-h`, so one centered
+     line holds them all. */
+  align-items: center;
   gap: 1.5rem;
   padding: 0 1rem 0 1rem;
   /* Containing block for the cordon rule (`::after`) drawn at the edge of
@@ -276,14 +278,12 @@
 }
 
 /* Windows' native titlebar controls sit a touch lower optically than the
-   centered web content. Nudge only the search well and logo mark to match;
-   keep the macOS/Linux alignment and the surrounding hit targets unchanged. */
-:root[data-platform="win32"] .titlebar-search {
-  top: 1px;
-}
-
-:root[data-platform="win32"] .app-nav-home-logotype {
-  transform: translateY(1px);
+   centered web content. Shift the whole centered line down 1px to match, so
+   brand, search and status cluster move together; macOS and Linux keep the
+   true center. Padding rather than a transform: a transformed ancestor would
+   capture the fixed-position header popovers. */
+:root[data-platform="win32"] .app-header {
+  padding-top: 2px;
 }
 
 /* Keep the rightmost pill a clear step away from the native window
@@ -344,14 +344,11 @@
    hamburger is the last child so it always ends up pinned to the
    rightmost edge of the cluster. */
 .app-header-right {
-  /* The Windows overlay is 39px tall and these controls are 34px. With the
-     cluster's bottom bias, only 3px remain above them; the global 4px focus
-     ring is therefore clipped by the top edge of the window. Keep the same
-     2px accent band while reducing the separator from 2px to 1px so the
-     complete ring fits without shifting or shrinking the controls. */
+  /* A 28px control centered in the 39px Windows overlay leaves about 5px
+     above it. Keep the global ring's 2px accent band but thin its separator
+     to 1px, so the ring clears the window's top edge with room to spare. */
   --focus-ring: 0 0 0 1px var(--bg), 0 0 0 3px var(--accent);
   margin-left: auto;
-  margin-bottom: 2px;
   display: flex;
   align-items: center;
   gap: 0.45rem;
@@ -360,27 +357,18 @@
   flex-shrink: 0;
 }
 
-/* Center the meters vertically — the header itself uses flex-end so
-   nav tabs can flush with the canvas below, but these pills don't
-   have that baseline constraint. */
-.app-header .quota-meter,
-.app-header .queue-meter,
-.narration-stop {
-  align-self: center;
-}
-
 /* In the sage header, the accent orange doesn't hold enough contrast
-   against the brand green. Override the ring + border + label to use
-   the same cream (`--titlebar-ink`) as the header text so the meter
-   reads as part of the bar. The `warn`/`critical` states keep their
-   amber/red stroke so elevated usage still pops. */
+   against the brand green. Override the ring + label to use the same cream
+   (`--titlebar-ink`) as the header text so the meter reads as part of the
+   bar; its face is the shared titlebar key below. The `warn`/`critical`
+   states keep their amber/red stroke so elevated usage still pops. */
 .app-header .quota-meter {
-  border-color: rgba(243, 237, 224, 0.45);
   color: var(--titlebar-ink);
 }
 
-.app-header .quota-meter:hover {
-  border-color: var(--titlebar-ink);
+.app-header .quota-ring-wrap {
+  width: 20px;
+  height: 20px;
 }
 
 .app-header .quota-ring-bg {
@@ -402,6 +390,144 @@
   -webkit-app-region: no-drag;
 }
 
+/* ── Titlebar keys ───────────────────────────────────────────────────────
+   One recipe for everything you press on the bar: the status pills, the
+   quota meter, and the icon keys in the header tray. The bar's own version
+   of keys in trays (docs/ux.md, "The titlebar: one line of keys"): a face a
+   touch darker than
+   the sage, a cream top highlight for lift, and an open or pressed key sunk
+   1px with an inset shadow. One height for all of them is what lets the
+   cluster read as a toolbar rather than a row of differently-sized tags.
+   Colors stay with each control (the Off crew glyph is red). The compact
+   header's 44px keys override size and face. */
+.app-header
+  :is(
+    .activity-control,
+    .engine-pill,
+    .queue-meter-button,
+    .narration-stop,
+    .quota-meter,
+    .boekwachter-pill,
+    .app-engagement-trigger,
+    .app-output-restore
+  ) {
+  height: var(--titlebar-control-h);
+  padding-block: 0;
+  border: 1px solid var(--titlebar-key-border);
+  border-radius: var(--radius-md);
+  background: var(--titlebar-key-bg);
+  box-shadow: var(--titlebar-key-shadow);
+  transition: background 0.15s, box-shadow 0.15s, transform 0.08s ease-out;
+}
+
+/* `:where(button)` keeps these at the open state's specificity, so a key
+   that is open stays pressed while the pointer rests on it. */
+.app-header
+  :is(
+    .activity-control,
+    .engine-pill,
+    .queue-meter-button,
+    .narration-stop,
+    .quota-meter,
+    .boekwachter-pill:where(button),
+    .app-engagement-trigger,
+    .app-output-restore
+  ):hover {
+  background: var(--titlebar-key-bg-hover);
+}
+
+.app-header
+  :is(
+    .activity-control,
+    .engine-pill,
+    .queue-meter-button,
+    .narration-stop,
+    .quota-meter,
+    .boekwachter-pill:where(button),
+    .app-engagement-trigger,
+    .app-output-restore
+  ):active,
+.app-header
+  :is(
+    .activity-control[data-state="open"],
+    .engine-pill[aria-expanded="true"],
+    .queue-meter-button-open,
+    .quota-meter[aria-expanded="true"],
+    .boekwachter-pill[data-state="open"],
+    .app-engagement-trigger[data-state="open"]
+  ) {
+  background: var(--titlebar-key-pressed-bg);
+  box-shadow: var(--titlebar-key-pressed-shadow);
+  transform: translateY(1px);
+}
+
+/* A busy engine's key keeps a brighter rim, so the one doing work stands out
+   from an idle sibling even between pulses of its dot. */
+.app-header .engine-pill-busy {
+  border-color: color-mix(in srgb, var(--titlebar-ink) 38%, var(--titlebar-key-border));
+}
+
+/* Health speaks through the key's own rim and dot, never through a second
+   box inside it: the label stays cream (4.5:1 on the face), and the warning
+   is the amber rim the eye catches first. */
+.app-header .engine-pill.engine-pill-warning {
+  border-color: color-mix(in srgb, var(--warning) 78%, black);
+  box-shadow: var(--titlebar-key-shadow), inset 0 -2px 0
+    color-mix(in srgb, var(--warning) 55%, transparent);
+}
+
+.app-header .engine-pill.engine-pill-danger {
+  border-color: color-mix(in srgb, var(--danger) 80%, black);
+  box-shadow: var(--titlebar-key-shadow), inset 0 -2px 0
+    color-mix(in srgb, var(--danger) 60%, transparent);
+}
+
+/* The header tray: a slot routed into the bar holding its icon keys (the
+   crew activity menu, and Output's restore while that pane is maximized).
+   Outer height matches the pills; the keys inside sit a size smaller, the
+   way keys rest in every other tray. */
+.app-header-tray {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--titlebar-control-h);
+  padding: 2px;
+  border: 1px solid var(--titlebar-well-border);
+  border-radius: var(--radius-lg);
+  background: var(--titlebar-well-bg);
+  box-shadow: var(--titlebar-well-shadow);
+}
+
+.app-header-tray > :is(.app-engagement-trigger, .app-output-restore) {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 100%;
+}
+
+.app-header-tray :is(.app-engagement-mode-icon, .app-output-restore > svg) {
+  width: 17px;
+  height: 17px;
+}
+
+.app-header-tray .app-nightshift-glyph {
+  width: 20px;
+  height: 15px;
+}
+
+.app-header .app-engagement-trigger-off:hover {
+  background: linear-gradient(rgba(192, 57, 43, 0.28), rgba(192, 57, 43, 0.28)),
+    var(--titlebar-key-bg-hover);
+}
+
+/* The global ring (a --bg gap plus an accent ring outside the element)
+   reads as a dark band inside the tray and runs into its walls. Keep the
+   ring inside the key, in the titlebar ink. */
+.app-header-tray > :is(.app-engagement-trigger, .app-output-restore):focus-visible {
+  outline: none;
+  box-shadow: var(--titlebar-key-shadow), inset 0 0 0 2px
+    color-mix(in srgb, var(--titlebar-ink) 75%, transparent);
+}
+
 /* ── Unified titlebar search ──────────────────────────────────────────────
    An in-flow flex item anchored near the brand rather than centered in the
    changing space between the brand and status pills. The header's 24px gap
@@ -419,9 +545,8 @@
      flex slot when the status cluster consumes the remaining titlebar room,
      otherwise the white search well overlaps the first queue chip. */
   overflow: hidden;
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   margin-left: clamp(8px, 4vw, 40px);
-  align-self: center;
   /* Positioning context for the absolutely-placed magnifier glyph (was the
      element's own `position: absolute` before it moved into flow). */
   position: relative;
@@ -432,29 +557,44 @@
   -webkit-app-region: no-drag; /* the control itself is clickable */
   box-sizing: border-box;
   width: 100%;
-  height: 28px;
-  border-radius: 14px;
-  padding: 0 10px 0 30px; /* leading room for the magnifier glyph */
+  height: var(--titlebar-control-h);
+  border-radius: var(--radius-md);
+  padding: 0 52px 0 30px; /* room for the magnifier glyph and the keycap */
   font-size: 0.82rem;
-  /* Solid, slightly-recessed well: a near-white field reading as carved into
-     the sage bar (top inner shadow = depth, hairline bottom highlight = lip),
-     with the darker brand ink for typed text so it stays legible on white. */
-  color: #2c352a;
-  background: #f3ede0;
-  border: 1px solid rgba(44, 53, 42, 0.28);
+  /* At rest the well is a slot routed into the bench: darker sage, cream
+     ink, an inset shadow for depth and a hairline lip below. It is the
+     widest thing on the bar, so it must not also be the brightest while
+     nobody is searching. Focus lifts it to the cream field typed text has
+     always had. */
+  color: var(--titlebar-ink);
+  background: var(--titlebar-well-bg);
+  border: 1px solid var(--titlebar-well-border);
   outline: none;
-  box-shadow: inset 0 1px 2px rgba(44, 53, 42, 0.3), inset 0 2px 4px rgba(44, 53, 42, 0.12), 0 1px 0
-    rgba(243, 237, 224, 0.25);
+  box-shadow: var(--titlebar-well-shadow);
+  transition: background 0.15s, color 0.15s;
 }
 
 .titlebar-search-input::placeholder {
-  color: rgba(44, 53, 42, 0.5);
+  color: color-mix(in srgb, var(--titlebar-ink) 74%, transparent);
+}
+
+.titlebar-search-input:not(:placeholder-shown) {
+  padding-right: 10px;
+}
+
+.titlebar-search-input:hover:not(:focus) {
+  background: color-mix(in srgb, black 18%, var(--titlebar));
 }
 
 .titlebar-search-input:focus {
+  color: #2c352a;
   background: #fffdf8;
   border-color: rgba(44, 53, 42, 0.45);
-  box-shadow: inset 0 1px 2px rgba(44, 53, 42, 0.28), var(--focus-ring);
+  box-shadow: inset 0 1px 2px rgba(44, 53, 42, 0.28);
+}
+
+.titlebar-search-input:focus::placeholder {
+  color: rgba(44, 53, 42, 0.5);
 }
 
 .titlebar-search-icon {
@@ -464,9 +604,46 @@
   transform: translateY(-50%);
   width: 14px;
   height: 14px;
+  color: var(--titlebar-ink);
+  opacity: 0.7;
+  pointer-events: none;
+}
+
+.titlebar-search:focus-within .titlebar-search-icon {
   color: #2c352a;
   opacity: 0.55;
+}
+
+/* The quick-open shortcut as a keycap resting at the well's far end: a key
+   in a tray, read as one. Shown only while the well is empty, so typed text
+   never runs under it. */
+.titlebar-search-shortcut {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid color-mix(in srgb, var(--titlebar-ink) 32%, transparent);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--titlebar-ink) 8%, transparent);
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.28);
+  color: color-mix(in srgb, var(--titlebar-ink) 86%, transparent);
+  font-family: inherit;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1;
   pointer-events: none;
+}
+
+.titlebar-search:focus-within .titlebar-search-shortcut {
+  border-color: rgba(44, 53, 42, 0.28);
+  background: rgba(44, 53, 42, 0.06);
+  box-shadow: inset 0 -1px 0 rgba(44, 53, 42, 0.2);
+  color: rgba(44, 53, 42, 0.7);
 }
 
 /* On phone-width windows, spend the scarce titlebar room on the search well
@@ -830,23 +1007,17 @@ button.search-palette-group-more:hover {
   align-self: center;
 }
 
+/* Face, height and states come from the titlebar key recipe. */
 .quota-meter {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 0.25rem 0.7rem 0.25rem 0.35rem;
+  padding-inline: 0.35rem 0.7rem;
   color: inherit;
   cursor: pointer;
-  font-size: 0.78rem;
+  font-family: inherit;
+  font-size: 0.72rem;
   white-space: nowrap;
-  transition: border-color 0.15s;
-}
-
-.quota-meter:hover {
-  border-color: var(--accent);
 }
 
 .quota-ring-wrap {
@@ -943,14 +1114,12 @@ button.search-palette-group-more:hover {
   align-items: center;
   align-self: center;
 }
+/* Face, height and states come from the titlebar key recipe. */
 .engine-pill {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
-  padding: 0.2rem 0.6rem;
-  border-radius: var(--radius-md);
-  border: 1px solid color-mix(in srgb, var(--titlebar-ink) 25%, transparent);
-  background: var(--titlebar);
+  padding-inline: 0.6rem;
   color: var(--titlebar-ink);
   font-size: 0.72rem;
   font-family: inherit;
@@ -958,16 +1127,6 @@ button.search-palette-group-more:hover {
   max-width: 26rem;
   overflow: hidden;
   white-space: nowrap;
-  transition: border-color 0.15s, background 0.15s;
-}
-/* Pills darken rather than lighten on hover, as Activity does: a lighter
-   fill would drop the cream label below 4.5:1 on the brand sage. */
-.engine-pill:hover {
-  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
-  background: color-mix(in srgb, black 10%, var(--titlebar));
-}
-.engine-pill-busy {
-  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
 }
 .engine-pill-dot {
   width: 7px;
@@ -1014,19 +1173,15 @@ button.search-palette-group-more:hover {
   font-variant-numeric: tabular-nums;
   opacity: 0.82;
 }
+/* The amber rim and dot (`.engine-pill-warning`) carry the alarm; the word
+   stays cream and bold so it keeps 4.5:1 on the key face. */
 .engine-pill-health-warning {
-  display: inline-flex;
-  align-items: center;
-  margin-left: 0.1rem;
-  padding: 0.05rem 0.25rem;
-  border-radius: var(--radius-sm);
-  color: var(--titlebar-ink);
-  border: 1px solid color-mix(in srgb, var(--warning) 72%, var(--titlebar-ink));
-  background: linear-gradient(rgba(0, 0, 0, 0.44), rgba(0, 0, 0, 0.44)), var(--warning);
+  font-weight: 600;
   opacity: 1;
 }
 .engine-pill-health-danger {
-  color: var(--danger-text);
+  font-weight: 600;
+  opacity: 1;
 }
 .engine-pill-health-muted {
   opacity: 0.58;
@@ -1035,9 +1190,6 @@ button.search-palette-group-more:hover {
    simultaneous local-engine pills never become anonymous progress bars. */
 .engine-pill-kind {
   margin-right: 0.4rem;
-}
-.engine-pill-actor {
-  font-weight: 600;
 }
 /* Compact prefill progress bar — replaces the verbose "X / Y tokens
    · Z tok/s" label when an `engine_phase` event carries a progress
@@ -1626,33 +1778,21 @@ button.machine-memory-unload-button {
   align-self: center;
 }
 
+/* Face, height and states come from the titlebar key recipe. */
 .queue-meter-button,
 .narration-stop {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: var(--radius-md);
-  border: 1px solid color-mix(in srgb, var(--titlebar-ink) 25%, transparent);
-  background: var(--titlebar);
+  padding-inline: 0.55rem;
   color: var(--titlebar-ink);
   font-size: 0.72rem;
   cursor: pointer;
-  transition: border-color 0.15s, background 0.15s;
-}
-.queue-meter-button:hover,
-.narration-stop:hover {
-  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
-  background: color-mix(in srgb, black 10%, var(--titlebar));
 }
 /* The compact header's face for this button (glyph + one total); the desktop
    bar shows the per-engine chips instead. */
 .queue-meter-key {
   display: none;
-}
-.queue-meter-button-open {
-  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
-  background: color-mix(in srgb, black 10%, var(--titlebar));
 }
 
 .queue-meter-chip,
@@ -2697,9 +2837,7 @@ button.machine-memory-unload-button {
   overflow: hidden;
   position: relative;
   background: var(--panel);
-  /* Use an inset divider instead of a physical border. Active navigation
-     tabs sit above this paint layer, so their canvas bridge can erase the
-     seam locally while the rest of the rail keeps its crisp edge. */
+  /* Keep the divider inside the rail so resizing preserves its content width. */
   border-right: none;
   box-shadow: inset -1px 0 var(--border);
   user-select: none;
@@ -2719,7 +2857,7 @@ button.machine-memory-unload-button {
   top: 0;
   left: 0;
   right: 0;
-  height: 10px;
+  height: 6px;
   z-index: 1;
   pointer-events: none;
   background: linear-gradient(to bottom, var(--sidebar-seam-shadow), transparent);
@@ -2731,10 +2869,10 @@ button.machine-memory-unload-button {
   top: 0;
   bottom: 0;
   right: 0;
-  width: 10px;
+  width: 8px;
   z-index: 1;
   pointer-events: none;
-  background: linear-gradient(to left, var(--sidebar-seam-shadow), transparent);
+  background: linear-gradient(to left, var(--sidebar-pane-shadow), transparent);
 }
 
 /* Keep the native scrollbar on the sidebar's outside edge. Chromium follows
@@ -2777,8 +2915,7 @@ button.machine-memory-unload-button {
   min-width: 0;
   padding-left: 0.45rem;
 }
-/* Keep the selected-row surface anchored to the sidebar seam while nudging
-   the project's actions and status signal into alignment. */
+/* Align the project's actions and status signal with the group header. */
 .app-sidebar-proj-row > .project-actions-trigger,
 .app-sidebar-proj-row > .app-sidebar-proj-signal {
   position: relative;
@@ -3350,19 +3487,21 @@ button.machine-memory-unload-button {
   gap: 0;
 }
 
-/* The current destination is a raised paper tab joined to the open canvas,
-   rather than a tinted button floating inside the navigation rail. Root tabs
-   and row/header wrappers extend their own border boxes through the rail
-   padding so their edge is continuous at every display scale. Document-tree
-   rows retain a small pseudo-element bridge because their tree indentation is
-   independent of the rail; square inner corners join either form to the pane. */
+/* Selected destinations stay inside the rail, with a complete perimeter.
+   Project/gezel wrappers include the row's status and action controls. */
 .app-sidebar-scroll {
-  /* Rail padding + the tab's transparent inner border. The sidebar divider
-     is inset, so including it again makes the bridge overshoot by 1px. */
-  --sidebar-tab-rail-inset: 0.4rem;
-  --sidebar-tab-bridge-size: calc(var(--sidebar-tab-rail-inset) + 1px);
-  --sidebar-tab-border: color-mix(in srgb, var(--accent) 38%, var(--border));
+  --sidebar-tab-border: color-mix(in srgb, var(--accent) 55%, var(--border));
   --sidebar-tab-surface: var(--bg);
+}
+
+.app-sidebar .app-sidebar-scroll {
+  /* The scrollbar direction puts inline-start against the main pane. */
+  padding-inline-start: 0.75rem;
+}
+
+.app-sidebar:not(.collapsed) .app-sidebar-home {
+  width: calc(100% - 0.35rem);
+  margin-left: 0.35rem;
 }
 
 .app-sidebar-item.active,
@@ -3371,83 +3510,13 @@ button.machine-memory-unload-button {
 .app-sidebar-gezel-row.active,
 .app-sidebar-tree .tree-row.tree-row-selected {
   position: relative;
-  z-index: 2;
   background: var(--sidebar-tab-surface);
   border: 1px solid var(--sidebar-tab-border);
-  border-right-color: transparent;
-  border-radius: var(--radius-md) 0 0 var(--radius-md);
-  /* The bridge is part of the tab's visible silhouette. A filter shadow
-     follows that combined row + pseudo-element shape; box-shadow would stop
-     at the wrapper edge and leave the bridge outline floating above it. */
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 10%, transparent);
-  filter: drop-shadow(-1px 2px 3px var(--sidebar-seam-shadow))
-    drop-shadow(-3px 5px 9px var(--sidebar-seam-shadow));
-}
-
-.app-sidebar-item.active::after,
-.app-sidebar-tree .tree-row.tree-row-selected::after {
-  content: "";
-  position: absolute;
-  /* The pseudo-element is positioned from the tab's padding box. */
-  top: 0;
-  bottom: 0;
-  right: calc(-1 * var(--sidebar-tab-bridge-size));
-  width: var(--sidebar-tab-bridge-size);
-  background: var(--sidebar-tab-surface);
-  border-top: 1px solid var(--sidebar-tab-border);
-  border-bottom: 1px solid var(--sidebar-tab-border);
-  pointer-events: none;
-}
-
-/* At high pixel densities Chromium rasterizes the padding-box bridge one CSS
-   pixel inside each horizontal border. The 1x Electron surface aligns without
-   an extension; only dense displays need to include the tab borders. */
-@media (min-resolution: 1.5dppx) {
-  .app-sidebar-item.active::after {
-    top: -1px;
-    bottom: -1px;
-  }
-}
-
-/* Root destinations (Home plus Tasks/Craftbooks/History/Handboek/Settings)
-   are full-width children of the padded rail. Let their own border boxes cross
-   that padding instead of attaching separately bordered bridges. The extension
-   is the rail inset only (the old pseudo-element also needed the button's 1px
-   border), while compensating padding holds their content still. */
-.app-sidebar-item-root.active {
-  width: calc(100% + var(--sidebar-tab-rail-inset));
-  margin-right: calc(-1 * var(--sidebar-tab-rail-inset));
-  padding-right: calc(0.45rem + var(--sidebar-tab-rail-inset));
-}
-
-.app-sidebar-item-root.active::after {
-  display: none;
-}
-
-/* Active group headers own the caret, title, and add action, so extend that
-   wrapper across the rail inset just like the root destination buttons. */
-.app-sidebar-group-header.active {
-  margin-right: calc(-1 * var(--sidebar-tab-rail-inset));
-  padding-right: var(--sidebar-tab-rail-inset);
-}
-
-.app-sidebar-group-header.active::after {
-  display: none;
-}
-
-/* Project/gezel selections include status and action controls, so the wrapper
-   owns their connected surface. Extend that wrapper's actual border box across
-   the rail padding; compensating padding keeps every child at its original x.
-   Unlike a separately painted pseudo-element border, one box cannot acquire a
-   different physical-pixel thickness at fractional display scales. */
-.app-sidebar-proj-row.active,
-.app-sidebar-gezel-row.active {
-  margin-right: calc(-1 * var(--sidebar-tab-bridge-size));
-  padding-right: var(--sidebar-tab-bridge-size);
+  border-radius: var(--radius-md);
 }
 
 /* Wrapper-owned selections suppress the old button-shaped selection inside
-   them. Keeping one elevation layer avoids a doubled border/shadow while the
+   them. Keeping one perimeter avoids a doubled border while the
    nested button retains its full hit target. */
 /* The border goes transparent rather than away: dropping the box entirely
    would pull the mark and label 1px left the moment a row is selected. */
@@ -3459,11 +3528,6 @@ button.machine-memory-unload-button {
   border-color: transparent;
   border-radius: 0;
   box-shadow: none;
-}
-
-.app-sidebar-proj-row.active > .app-sidebar-item.active::after,
-.app-sidebar-gezel-row.active > .app-sidebar-item.active::after {
-  display: none;
 }
 
 .app-sidebar-group-header.active .app-sidebar-group-toggle {
@@ -3559,7 +3623,7 @@ button.machine-memory-unload-button {
 :root[data-sidebar-side="right"] .app-sidebar::after {
   right: auto;
   left: 0;
-  background: linear-gradient(to right, var(--sidebar-seam-shadow), transparent);
+  background: linear-gradient(to right, var(--sidebar-pane-shadow), transparent);
 }
 
 :root[data-sidebar-side="right"] .app-sidebar-footer {
@@ -3622,121 +3686,20 @@ button.machine-memory-unload-button {
   background: var(--scrollbar-thumb);
 }
 
-/* Mirror the connected tab when the navigation rail lives on the right.
-   Nested project/gezel rows also span the group's 0.9rem indent so their
-   paper bridge still reaches the canvas seam. */
-:root[data-sidebar-side="right"] .app-sidebar-item.active,
-:root[data-sidebar-side="right"] .app-sidebar-group-header.active,
-:root[data-sidebar-side="right"] .app-sidebar-proj-row.active,
-:root[data-sidebar-side="right"] .app-sidebar-gezel-row.active,
-:root[data-sidebar-side="right"] .app-sidebar-tree .tree-row.tree-row-selected {
-  border-right-color: var(--sidebar-tab-border);
-  border-left-color: transparent;
-  border-radius: 0 var(--radius-md) var(--radius-md) 0;
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 10%, transparent);
-  filter: drop-shadow(1px 2px 3px var(--sidebar-seam-shadow))
-    drop-shadow(3px 5px 9px var(--sidebar-seam-shadow));
-}
-
-/* Project tabs sit in a dense list where the shared inset highlight and
-   drop-shadow can rasterize as a second gray contour just inside the orange
-   perimeter. Keep these rows flat: the connected border alone distinguishes
-   the active project from its neighbours. */
-.app-sidebar-proj-row.active,
-:root[data-sidebar-side="right"] .app-sidebar-proj-row.active {
-  box-shadow: none;
-  filter: none;
-}
-
-/* The nested name button matches the mirrored rule above at exactly the same
-   specificity (`:root` + the attribute + two classes), so being later that rule
-   beats the wrapper-owned reset and hands the button back its own pane-side
-   border, corner radius and inset highlight — a curved edge stranded between
-   the label and the status light. Repeat the whole reset after the mirror so
-   the wrapper stays the only painted tab silhouette on either sidebar side. */
-.app-sidebar-proj-row.active > .app-sidebar-item.active,
-.app-sidebar-gezel-row.active > .app-sidebar-item.active,
-:root[data-sidebar-side="right"] .app-sidebar-proj-row.active > .app-sidebar-item.active,
-:root[data-sidebar-side="right"] .app-sidebar-gezel-row.active > .app-sidebar-item.active {
-  border-color: transparent;
-  border-radius: 0;
-  box-shadow: none;
-  filter: none;
-}
-
-:root[data-sidebar-side="right"] .app-sidebar-item.active::after,
-:root[data-sidebar-side="right"] .app-sidebar-tree .tree-row.tree-row-selected::after {
-  right: auto;
-  left: calc(-1 * var(--sidebar-tab-bridge-size));
-}
-
-:root[data-sidebar-side="right"] .app-sidebar-proj-row.active,
-:root[data-sidebar-side="right"] .app-sidebar-gezel-row.active {
-  --sidebar-tab-bridge-size: calc(1.3rem + 1px);
-  margin-right: 0;
-  padding-right: 0;
-  margin-left: calc(-1 * var(--sidebar-tab-bridge-size));
-  padding-left: var(--sidebar-tab-bridge-size);
-}
-
-:root[data-sidebar-side="right"] .app-sidebar-item-root.active {
-  margin-right: 0;
-  padding-right: 0.45rem;
-  margin-left: calc(-1 * var(--sidebar-tab-rail-inset));
-  padding-left: calc(0.45rem + var(--sidebar-tab-rail-inset));
-}
-
-:root[data-sidebar-side="right"] .app-sidebar-group-header.active {
-  margin-right: 0;
-  padding-right: 0;
-  margin-left: calc(-1 * var(--sidebar-tab-rail-inset));
-  padding-left: var(--sidebar-tab-rail-inset);
-}
-
-/* The elevation shadow must not swallow the app-wide keyboard focus ring. */
-.app-sidebar-item.active:focus-visible,
-:root[data-sidebar-side="right"] .app-sidebar-item.active:focus-visible {
-  box-shadow: var(--focus-ring);
-}
-
-/* Root-tab focus follows the connected, open-sided border. An outer focus
-   shadow would reintroduce a pane-side edge and visually widen the tab. */
+/* Focus follows the selected row's complete perimeter. Keep the ring on
+   the wrapper when its name button has focus, so status/actions stay inside
+   the same selection rectangle. */
 .app-sidebar-item-root.active:focus-visible,
-:root[data-sidebar-side="right"] .app-sidebar-item-root.active:focus-visible {
-  --sidebar-tab-border: var(--accent);
-  box-shadow: inset 0 1px 0 color-mix(in srgb, white 10%, transparent);
-}
-
-/* Group selection belongs to the header wrapper, not its nested title button.
-   Promote keyboard focus to that connected perimeter and suppress the inner
-   rectangular ring. */
-.app-sidebar-group-header.active:has(> .app-sidebar-group-toggle:focus-visible) {
-  --sidebar-tab-border: var(--accent);
-}
-
-.app-sidebar-group-header.active > .app-sidebar-group-toggle:focus-visible,
-:root[data-sidebar-side="right"]
-  .app-sidebar-group-header.active
-  > .app-sidebar-group-toggle:focus-visible {
-  box-shadow: none;
-}
-
-/* Project/gezel rows own the connected tab surface, so their focus treatment
-   must follow that surface too. Strengthen the wrapper + bridge border and
-   leave the pane-side edge open instead of outlining the nested name button. */
+.app-sidebar-group-header.active:has(> .app-sidebar-group-toggle:focus-visible),
 .app-sidebar-proj-row.active:has(> .app-sidebar-item.active:focus-visible),
 .app-sidebar-gezel-row.active:has(> .app-sidebar-item.active:focus-visible) {
   --sidebar-tab-border: var(--accent);
+  box-shadow: var(--focus-ring);
 }
 
+.app-sidebar-group-header.active > .app-sidebar-group-toggle:focus-visible,
 .app-sidebar-proj-row.active > .app-sidebar-item.active:focus-visible,
-.app-sidebar-gezel-row.active > .app-sidebar-item.active:focus-visible,
-:root[data-sidebar-side="right"]
-  .app-sidebar-proj-row.active
-  > .app-sidebar-item.active:focus-visible,
-:root[data-sidebar-side="right"]
-  .app-sidebar-gezel-row.active
-  > .app-sidebar-item.active:focus-visible {
+.app-sidebar-gezel-row.active > .app-sidebar-item.active:focus-visible {
   box-shadow: none;
 }
 
@@ -3761,8 +3724,6 @@ button.machine-memory-unload-button {
 }
 
 .app-sidebar.collapsed .app-sidebar-scroll {
-  --sidebar-tab-rail-inset: 0.2rem;
-  --sidebar-tab-bridge-size: calc(0.2rem + 1px);
   padding-left: 0.2rem;
   padding-right: 0.2rem;
 }
@@ -3881,16 +3842,15 @@ body.app-resizing webview {
   margin: var(--space-sm) 0 0;
 }
 
-/* ── Boekwachter live indicator ───────────────────────────────────────── */
+/* ── Camera activity key ─────────────────────────────────────────────── */
+/* Face, height and states come from the titlebar key recipe; the label size
+   matches its neighbours so the cluster reads as one set. */
 .boekwachter-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
-  padding: 2px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid color-mix(in srgb, var(--titlebar-ink) 25%, transparent);
-  background: var(--titlebar);
+  font-size: 0.72rem;
+  padding-inline: 0.6rem;
   color: var(--titlebar-ink, #f3ede0);
   white-space: nowrap;
   min-width: 0;
@@ -3902,10 +3862,6 @@ body.app-resizing webview {
 button.boekwachter-pill {
   cursor: pointer;
 }
-button.boekwachter-pill:hover {
-  border-color: color-mix(in srgb, var(--titlebar-ink) 55%, transparent);
-  background: color-mix(in srgb, black 10%, var(--titlebar));
-}
 button.boekwachter-pill:focus-visible {
   outline: 2px solid var(--focus-ring, var(--accent));
   outline-offset: 2px;
@@ -3914,35 +3870,6 @@ button.boekwachter-pill:focus-visible {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.boekwachter-pill-label-short {
-  display: none;
-}
-.boekwachter-pill-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent, #c9722e);
-  animation: boekwachter-pulse 1.6s ease-in-out infinite;
-  flex: 0 0 auto;
-}
-.boekwachter-pill-avatar {
-  display: inline-flex;
-  flex: 0 0 auto;
-  width: 18px;
-  height: 18px;
-  overflow: hidden;
-  border-radius: 50%;
-  animation: boekwachter-pulse 1.6s ease-in-out infinite;
-}
-@keyframes boekwachter-pulse {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 1;
-  }
 }
 
 /* Compact status content when the titlebar gets narrow. This must come after
@@ -3962,11 +3889,5 @@ button.boekwachter-pill:focus-visible {
   }
   .boekwachter-pill {
     max-width: none;
-  }
-  .boekwachter-pill-label-full {
-    display: none;
-  }
-  .boekwachter-pill-label-short {
-    display: inline;
   }
 }

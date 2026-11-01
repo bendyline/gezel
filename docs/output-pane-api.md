@@ -1,5 +1,63 @@
 # Output Pane API (`window.gezel`)
 
+## Layout and native chat
+
+`ui.layout` is a read-only `{ fullscreen, width, height }` snapshot. Subscribe
+with `ui.onLayout(callback)` and retain the returned unsubscribe function.
+Fullscreen describes the Output pane filling the main workspace while the
+project sidebar keeps its side, width, and expanded or collapsed state. Each
+project remembers whether its page is closed, open, or fullscreen across
+navigation and restarts. Viewport dimensions
+are CSS pixels. Init and subsequent `layout` messages update fullscreen without
+reloading the iframe. The shim observes local resizes and exposes the same
+state as `data-gezel-fullscreen` on the document root. Outside embedded mode,
+fullscreen follows `document.fullscreenElement`.
+
+`ui.components.chat(mount, options?)` returns `{ element, ready, update, destroy }`.
+See the [fullscreen and chat authoring example](handboek/technical/gezel-page-apis.md#fullscreen-layout-and-embedded-chat)
+for options, defaults, layout constraints, and lifecycle. Native chat is supported
+in the embedded host; other modes display an unavailable state. `ready` resolves
+when the host accepts the slot, not when the crew or session has finished loading.
+
+Transport: `chat-mount` and `chat-update` carry validated presentation options;
+`chat-position` carries a bounded rectangle; `chat-destroy` releases a slot.
+The parent acknowledges a mount with `chat-result`. Requests authenticate the
+iframe window identity, and the host supplies the current project. Pages cannot
+choose a different project, inspect chat DOM/history/drafts, or submit messages.
+Only the user's interactions with native chat call the existing authenticated
+session API. Native UI is clipped inside the preview wrapper, below shell
+controls. The host accepts at most four slots and discards them on navigation.
+
+## Application workspace components
+
+`ui.components.appLayout(content, { title?, description?, chat? })` wraps an
+existing element, expands its content width in fullscreen, and mounts one native
+conversation alongside it. `chat` accepts the usual chat options or `false`.
+The conversation stacks below the content at narrow widths. Hide/show and
+restore preserve its handle; visible `dialog[open]` or `[aria-modal="true"]`
+elements suppress its slot until closed. Its handle supports `update` and
+`destroy`; destroying restores the content to its original parent and styling.
+
+`actionForm(mount, { title, tool, fields, ... })` invokes a declared page tool.
+Fields support required values, numbers with bounds/steps, dates, URLs,
+multiline text, options, and conditional visibility through
+`when: { field, equals }`. Hidden fields are omitted. `mapInput(values)` maps
+the fields to the tool's schema; `onSaved(result)` refreshes the page after a
+successful call. Duplicate saves are blocked while pending, failed values are
+retained, and a failed refresh is distinguished from a failed save. Updating
+options preserves entered values where still valid. This adds no new transport
+or file-write capability.
+
+`collectionFilter(mount, { container, selector, label?, placeholder? })` filters
+rendered elements by their text, ignoring case and accents. A mutation observer
+reapplies the filter after data updates; it never replaces record controls.
+Destroying it restores the filtered elements. This is presentation filtering,
+not a query over unrendered or unreadable data.
+
+All three return `{ element, update, destroy }`. The SDK's page types contain
+their complete option contracts; see the
+[application authoring example](handboek/technical/gezel-page-apis.md#building-a-full-page-workspace).
+
 ## Shared file UI and scoped imports
 
 `gezel.ui.components.fileCard(mount, options)` and `fileAdder(mount, options)`

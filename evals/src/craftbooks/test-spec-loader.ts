@@ -38,6 +38,12 @@ export interface LoadedCraftbookTestSpec {
    */
   hasImageStep: boolean;
   /**
+   * True when `craftbook.json` declares a required package command
+   * (`commands[]` without `optional`). Its gates then need receipts from
+   * `run_package_script` / `run_npx`, which exist only with package scripts on.
+   */
+  runsPackageCommands: boolean;
+  /**
    * Backticked slash-containing tokens from the book's own step prompts —
    * the procedure's boundary examples (e.g. "an earlier `notes/outline.md`").
    * The RUNTIME forgives these as task-supplied metadata when a citation
@@ -75,6 +81,16 @@ function craftbookHasImageStep(versionDir: string): boolean {
     const raw = readFileSync(join(versionDir, CRAFTBOOK_FILENAME), 'utf8');
     const doc = JSON.parse(raw) as { steps?: Array<{ suggestedRole?: unknown }> };
     return (doc.steps ?? []).some((step) => step.suggestedRole === 'image-generator');
+  } catch {
+    return false;
+  }
+}
+
+function craftbookRunsPackageCommands(versionDir: string): boolean {
+  try {
+    const raw = readFileSync(join(versionDir, CRAFTBOOK_FILENAME), 'utf8');
+    const doc = JSON.parse(raw) as { commands?: Array<{ optional?: unknown }> };
+    return (doc.commands ?? []).some((command) => command.optional !== true);
   } catch {
     return false;
   }
@@ -146,6 +162,7 @@ export function loadCraftbookTestSpecsSync(): LoadedCraftbookTestSpec[] {
       spec: parsed.spec,
       hasSpawn: craftbookHasSpawn(versionDir),
       hasImageStep: craftbookHasImageStep(versionDir),
+      runsPackageCommands: craftbookRunsPackageCommands(versionDir),
       stepPathTokens: craftbookStepPathTokens(versionDir),
     });
   }

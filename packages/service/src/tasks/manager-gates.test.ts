@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { GATE_MAX_PROGRESS_ATTEMPTS, type Task } from '@bendyline/gezel';
+import { GATE_MAX_PROGRESS_ATTEMPTS, type Task, securityPolicyForLevel } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
@@ -2552,6 +2552,7 @@ describe('delivery-mode resolution (diffpackCapable)', () => {
 
 describe('completion gates — commandEvidence receipts', () => {
   it('verifies runs by task/step attribution and activation window', async () => {
+    await store.writeConfig({ securityPolicy: securityPolicyForLevel('free') });
     const { HistoryManager } = await import('../history/manager.js');
     const history = new HistoryManager(home);
     tasks = new TaskManager(store, history);
@@ -2635,5 +2636,77 @@ describe('completion gates — commandEvidence receipts', () => {
       task.craftbook.steps[0]!.id,
     );
     expect(outcome.status).toBe('advanced');
+  });
+});
+
+// DGX Spark scorecard, 2026-10-28: at lockdown no session has
+// `run_package_script`, and every bug-fix-tdd, codemod-sweep and
+// refactor-module trial looped on its command gate until something killed it.
+describe('completion gates — a command run while package scripts are off', () => {
+  const commandGate = {
+    at: 'completion' as const,
+    checks: [{ kind: 'commandEvidence' as const, script: 'test', expect: 'fail' as const }],
+  };
+
+  it('pauses the step at activation instead of dispatching it', async () => {
+    const needsHelp: Array<{ reason: string; detail: string }> = [];
+    tasks.setTaskNeedsHelpHook(async ({ reason, detail }) => {
+      needsHelp.push({ reason, detail });
+    });
+    const task = await tasks.create('default', {
+      title: 'Reproduce first',
+      description: 'The entry step proves the bug with a failing test run.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps(commandGate),
+    });
+    expect(task.status).toBe('paused');
+    const notes = await tasks.listNotes('default', task.num);
+    const note = notes.find((n) => n.text.includes('Step needs package scripts'));
+    expect(note?.text).toContain('`npm run test`');
+    expect(note?.text).toContain('"Run package scripts" is off');
+    expect(note?.text).toContain('The step was not started.');
+    expect(needsHelp).toEqual([
+      { reason: 'gate_unsatisfiable', detail: expect.stringContaining('npm run test') },
+    ]);
+  });
+
+  it('pauses a rejected gate without consuming an attempt when the policy changed mid-step', async () => {
+    await store.writeConfig({ securityPolicy: securityPolicyForLevel('free') });
+    const task = await tasks.create('default', {
+      title: 'Reproduce first',
+      description: 'The entry step proves the bug with a failing test run.',
+      assignee: { kind: 'user' },
+      steps: gatedSteps(commandGate),
+    });
+    expect(task.status).toBe('active');
+    await store.writeConfig({ securityPolicy: securityPolicyForLevel('lockdown') });
+    const stepId = task.craftbook.steps[0]!.id;
+    const outcome = await tasks.completeStepChecked('default', task.num, stepId);
+    expect(outcome.status).toBe('held');
+    if (outcome.status === 'held') {
+      expect(outcome.gate).toMatchObject({ paused: true, unsatisfiable: true, attempt: 0 });
+      expect(outcome.gate.message).toContain('running package scripts is off');
+      expect(outcome.gate.message).not.toContain('run_package_script');
+    }
+    expect((await tasks.get('default', task.num))?.status).toBe('paused');
+    const notes = await tasks.listNotes('default', task.num);
+    expect(notes.some((n) => n.text.includes('No completion attempt was consumed.'))).toBe(true);
+  });
+
+  it('leaves a drafting task alone, since its command check defers', async () => {
+    const task = await tasks.create(
+      'default',
+      {
+        title: 'Propose a fix',
+        description: 'A proposal cannot be verified by running the unmodified tree.',
+        assignee: { kind: 'user' },
+        steps: gatedSteps({
+          at: 'completion',
+          checks: [{ kind: 'commandEvidence', script: 'test', expect: 'pass' }],
+        }),
+      },
+      { draftsDiffpack: true },
+    );
+    expect(task.status).toBe('active');
   });
 });

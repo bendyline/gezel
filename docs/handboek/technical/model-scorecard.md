@@ -39,92 +39,15 @@ work**, which is developer work such as reviewing a change and proving a fix
 with tests, and **Complex workflows**, which asks a model to write and repair
 reusable recipes of its own.
 
+### Every result in one table {[dataTable src=../assets/scorecards/all-results.csv previewRows=5000 follow=scorecard group=run_id columns=model,suite,pass_rate_pct,judge_score,decode_tok_s,prefill_tok_s,device,started_at,run_id,successes,attributable_trials,rate_quotable,engine,perf_source,scope]}
+
+Every round laid end to end, one row per round, task set, and model, grouped
+by round, newest first. [Download every result as CSV](../assets/scorecards/all-results.csv);
+the file adds per-rubric judge scores, memory, context, and build details.
+
 ::handboek-model-scorecard{suites=core,productivity,developer,complex-work}
 
-## October 25 M5 Max Bolt comparison and review data
-
-The five-model core campaign completed all 165 trials: 11 scenarios, three
-repeats, five models. Bolt and Gemma E4B each passed 26/33, Gemma E2B 14/33,
-Gemma 12B 23/33 and Qwen 9B 21/33. Every trial was reviewed, including failed
-outputs: 158 artifacts have advisory scores and seven missing outputs have
-no invented score. HTML, code, data and document quality remain separate.
-
-Download the [scorecard data](../assets/scorecards/2026-10-25-m5max-bolt-five/scorecard.json)
-and [full report JSON with judging and performance](../assets/scorecards/2026-10-25-m5max-bolt-five/scorecard-details.json).
-The full report preserves exact review axes and rationales, per-trial timings,
-token coverage, fixed-score breakdowns, model identities and 32 documented
-framework/evaluator findings. Some gate passes contained incomplete or broken
-artifacts; some gates also rejected valid outputs. Raw verdicts remain
-unchanged, and these findings do not establish when a defect was introduced.
-
-Bolt ran on llama.cpp Metal using NVIDIA's October 23 revision; the other
-models used MLX. The **Task performance** rows show task medians, ranges and
-sample counts, including failed attempts and recovery. Bolt throughput is
-request-derived; MLX decode is an active-stream estimate and MLX prefill is
-unavailable. Token streams have incomplete coverage, first-write latency is
-not completed-output latency, and process RSS is not GPU telemetry.
-[Download notes and validation](../assets/scorecards/2026-10-25-m5max-bolt-five/README.md)
-explain the frozen comparison, measurement limits and excluded older trials.
-
-## October 2026 Windows results and review data
-
-The eight-model core evaluation completed all 264 requested attempts on an
-RTX 5070 Ti laptop: 182 passed, 70 failed their tasks, and 12 were excluded
-after exceeding Nanbeige's 32K context. These were context failures, not GPU
-out-of-memory failures. Every attempt has been reviewed.
-
-The tables preserve three runtime rounds: 49 original trials, 182 trials
-after a runtime correction, and the separate 33-trial Nanbeige 32K rerun.
-The original and continuation rounds show counts because neither alone has
-three repeats of every task. Nanbeige's full-suite score is withheld because
-some tasks have no attributable results. Its 12 passes, nine model failures
-and 12 infrastructure exclusions remain available in the data.
-
-Download the [scorecard data](../assets/scorecards/2026-10-19-windows-small-model-core/scorecard.json)
-and [full judging and performance data](../assets/scorecards/2026-10-19-windows-small-model-core/scorecard-details.json).
-The companion preserves all 254 artifact reviews: 247 eligible reviews,
-six infrastructure diagnostics and one excluded review that exceeded its
-input limit. Ten attempts produced no artifact to score. The four task
-rubrics stay separate: the **Artifact reviews** tables show HTML, code, data
-and document quality means with eligible artifact counts, plus counts for
-missing artifacts and excluded reviews. These were unblinded reviews by
-`codex-inline/current-session`; no combined quality score is calculated.
-
-The **Task performance** tables show output and prefill speed, wall time,
-peak system RSS and peak GPU memory as per-trial medians with ranges and
-sample counts. They include available observations from all attempts,
-including failures. These engine-log measurements are separate from
-admission probes. GPU performance changed during the run, so each journal
-keeps its own measurement period, including Nanbeige's slower and later
-faster periods. [Download notes](../assets/scorecards/2026-10-19-windows-small-model-core/README.md)
-explain provenance, exclusions, memory headroom and validation.
-
-## October 2026 Mac results and review data
-
-The Apple M5 Max campaign closed at 601 recorded attempts: 476 passed,
-119 failed their tasks, and six were excluded for infrastructure problems.
-LFM 2.5, Qwen 3.6, Qwen 3.8 and BTL4 each completed 129 attempts. Ornith
-completed 85 of 129 planned attempts; Nemotron and MiniCPM were not run.
-
-The tables retain 600 attempts in two separate rounds: four complete model
-arms and the partial Ornith round. One additional failed Ornith attempt had
-comparison-identity drift and remains in the evidence download with its
-original classification, outside the comparison tables.
-
-The [scorecard data](../assets/scorecards/2026-10-16-m5max-local-seven/scorecard.json)
-and [full judging and performance data](../assets/scorecards/2026-10-16-m5max-local-seven/scorecard-details.json)
-are available as JSON. The companion includes all 601 observations, 248
-artifact reviews, each task's rubric and sample counts, and per-trial speed
-and memory measurements. Four declared artifacts were missing, 14 reviews
-had a mismatched rubric, and 335 tasks had no applicable declared rubric.
-No review is pending. Different task rubrics are kept separate, so this
-round has no combined quality score in the tables.
-
-All nine admission probes generated fewer than 256 output tokens; Ornith's
-single probe generated 84. Treat the table's speeds as preliminary. The
-companion also records engine-derived speeds during the actual tasks and
-their sample counts. [Download notes and validation details](../assets/scorecards/2026-10-16-m5max-local-seven/README.md)
-explain the populations and caveats.
+::handboek-scorecard-notes
 
 ## Reading the table
 
@@ -178,6 +101,18 @@ without any model changing.
 **Size** is the model's parameter count where we know it. Bigger is often but
 not always better: on office work in particular, some smaller models beat
 larger ones, and a model family's habits matter more than its size.
+
+**Every result in one table** sets every round's rows side by side, under the
+column names the download uses. `pass_rate_pct` counts only the attempts the
+model was responsible for, and `rate_quotable` is `no` where a job ran fewer
+than three times, so read that figure as a count. `judge_score` is the one
+place task rubrics are averaged: a summary across a round's rubrics, weighted
+by how many pieces each covered, and fair to compare only within one judge;
+the download keeps each rubric's own score. Speeds are the median of each
+attempt's engine log where a round recorded them and the older probe
+otherwise, as `perf_source` says, and a round measured across separate
+hardware periods has no single speed, so those cells stay empty. Focused
+reruns show `subset` under `scope`.
 
 ## Choosing from this
 

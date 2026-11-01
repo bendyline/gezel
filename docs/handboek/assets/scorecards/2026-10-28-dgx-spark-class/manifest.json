@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "publicationId": "2026-10-28-dgx-spark-class",
+  "regenerate": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-dgx-spark-class-scorecard.mjs",
+  "check": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-dgx-spark-class-scorecard.mjs --check",
+  "files": [
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-28-dgx-spark-class.json",
+      "bytes": 36859,
+      "sha256": "b03e2571eb922f83079897a625f37f1f9dda4fd5d90c99916b755ae41e1c6d66"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/runs/2026-10-28-dgx-spark-class.json",
+      "bytes": 36859,
+      "sha256": "b03e2571eb922f83079897a625f37f1f9dda4fd5d90c99916b755ae41e1c6d66"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/scorecard.json",
+      "bytes": 36859,
+      "sha256": "b03e2571eb922f83079897a625f37f1f9dda4fd5d90c99916b755ae41e1c6d66"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/scorecard-details.json",
+      "bytes": 6741583,
+      "sha256": "e5e704cec4d7f9cbf9374d93d5d5de45cc9d81173ead82a7a2221133e8ea73ea"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/judging/judge-report.json",
+      "bytes": 53923,
+      "sha256": "30f280cd5b087fc00799bd37e0fe9226ae9af44e98d0be78c0c54b1fc3ff9662"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/trials.csv",
+      "bytes": 56372,
+      "sha256": "ef6a30f9055fd73aee20d124a143b43cb22df55d035f9746db853e6eed9bb9b7"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/report.md",
+      "bytes": 24306,
+      "sha256": "0b92756bb35003087a1af007b81f411fd634e6a1c1be28cb5d3125747146d6f7"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-28-dgx-spark-class/verification.json",
+      "bytes": 905,
+      "sha256": "f2f4a271aef5226b5f9228eca753adb9bffe2691ea154dd524c908b298ca1a84"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import { type ImageModelPullEvent, createLogger } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import type { ImageModelPullSpec, ImageProvider } from './types.js';
+import type { ImageLoraPullSpec, ImageModelPullSpec, ImageProvider } from './types.js';
 
 const log = createLogger('image-pulls');
 
@@ -40,6 +40,15 @@ interface Entry {
   listeners: Set<Listener>;
 }
 
+/** One download the registry runs: its expected size and the event stream. */
+export interface ImagePullJob {
+  totalBytes: number;
+  run(signal: AbortSignal): AsyncIterable<ImageModelPullEvent>;
+}
+
+/** Turns a catalog id into a pull, or `null` for an id the catalog lacks. */
+export type ImagePullResolver = (id: string) => Promise<ImagePullJob | null>;
+
 /**
  * How long a finished pull (done OR error) stays in the registry after
  * the terminal event. Long enough that a client polling once per second
@@ -66,12 +75,25 @@ const FINISHED_TTL_MS = 8_000;
 export class ImageModelPullRegistry {
   private readonly entries = new Map<string, Entry>();
   private readonly controllers = new Map<string, AbortController>();
-  private readonly imageProvider: ImageProviderSource;
-  private readonly catalog: CatalogService;
+  private readonly resolve: ImagePullResolver;
+  private readonly kind: string;
 
-  constructor(opts: { imageProvider: ImageProviderSource; catalog: CatalogService }) {
-    this.imageProvider = opts.imageProvider;
-    this.catalog = opts.catalog;
+  /**
+   * Image models by default; `resolve` makes it a registry for another kind
+   * of download (LoRAs), whose ids then never share keys with models.
+   */
+  constructor(
+    opts:
+      | { imageProvider: ImageProviderSource; catalog: CatalogService }
+      | { resolve: ImagePullResolver; kind: string },
+  ) {
+    if ('resolve' in opts) {
+      this.resolve = opts.resolve;
+      this.kind = opts.kind;
+    } else {
+      this.resolve = imageModelPullResolver(opts.imageProvider, opts.catalog);
+      this.kind = 'image-model';
+    }
   }
 
   /**
@@ -91,19 +113,14 @@ export class ImageModelPullRegistry {
 
     // Resolve the catalog entry up-front so we can fail fast with a
     // proper 404 rather than emitting a 200 + error SSE for "unknown id".
-    const item = await this.catalog.get('image-model', id);
-    if (!item || item.manifest.kind !== 'image-model') {
-      throw new UnknownImageModelError(id);
-    }
-    const manifest = item.manifest;
+    const job = await this.resolve(id);
+    if (!job) throw new UnknownImageModelError(id, this.kind);
 
     const snapshot: ActiveImagePull = {
       id,
       startedAt: new Date().toISOString(),
       bytesWritten: 0,
-      totalBytes:
-        manifest.approxSizeBytes +
-        manifest.auxiliaryFiles.reduce((n, f) => n + f.approxSizeBytes, 0),
+      totalBytes: job.totalBytes,
       finished: false,
     };
     const entry: Entry = { snapshot, listeners: new Set() };
@@ -112,26 +129,7 @@ export class ImageModelPullRegistry {
     const controller = new AbortController();
     this.controllers.set(id, controller);
 
-    const spec: ImageModelPullSpec = {
-      downloadUrl: manifest.downloadUrl,
-      sha256: manifest.sha256,
-      approxSizeBytes: manifest.approxSizeBytes,
-      name: manifest.name,
-      weightsKind: manifest.weightsKind,
-      ...(manifest.supportsImg2Img !== undefined
-        ? { supportsImg2Img: manifest.supportsImg2Img }
-        : {}),
-      ...(manifest.referenceImages ? { referenceImages: manifest.referenceImages } : {}),
-      ...(manifest.editOnly !== undefined ? { editOnly: manifest.editOnly } : {}),
-      auxiliaryFiles: manifest.auxiliaryFiles.map((aux) => ({
-        role: aux.role,
-        downloadUrl: aux.downloadUrl,
-        sha256: aux.sha256,
-        approxSizeBytes: aux.approxSizeBytes,
-      })),
-    };
-
-    void this.consume(id, spec, controller.signal);
+    void this.consume(id, job, controller.signal);
 
     return { snapshot: { ...snapshot }, alreadyRunning: false };
   }
@@ -201,12 +199,11 @@ export class ImageModelPullRegistry {
     if (snapshot.finished && !snapshot.error) listener({ type: 'done', id: snapshot.id });
   }
 
-  private async consume(id: string, spec: ImageModelPullSpec, signal: AbortSignal): Promise<void> {
+  private async consume(id: string, job: ImagePullJob, signal: AbortSignal): Promise<void> {
     const entry = this.entries.get(id);
     if (!entry) return;
     try {
-      const provider = await this.imageProvider.current();
-      for await (const event of provider.pullModel(id, spec, signal)) {
+      for await (const event of job.run(signal)) {
         this.applyEvent(entry, event);
         this.broadcast(entry, event);
         if (event.type === 'done' || event.type === 'error') break;
@@ -220,7 +217,7 @@ export class ImageModelPullRegistry {
     } finally {
       entry.snapshot.finished = true;
       // Drop the controller — cancel() should be a no-op once finished.
-      this.controllers.delete(id);
+      if (this.entries.get(id) === entry) this.controllers.delete(id);
       // Keep the snapshot around briefly so a client mid-reconnect still
       // sees the terminal state on `list()` / `subscribe()`. Then garbage
       // collect.
@@ -233,6 +230,8 @@ export class ImageModelPullRegistry {
 
   private applyEvent(entry: Entry, event: ImageModelPullEvent): void {
     const s = entry.snapshot;
+    // Publish terminal state before generator cleanup can yield to a new subscriber.
+    if (event.type === 'done' || event.type === 'error') s.finished = true;
     if (event.type === 'progress') {
       s.bytesWritten = event.bytesWritten;
       if (event.totalBytes !== undefined) s.totalBytes = event.totalBytes;
@@ -264,8 +263,86 @@ export class ImageModelPullRegistry {
 }
 
 export class UnknownImageModelError extends Error {
-  constructor(public readonly id: string) {
-    super(`unknown image-model: ${id}`);
+  constructor(
+    public readonly id: string,
+    kind = 'image-model',
+  ) {
+    super(`unknown ${kind}: ${id}`);
     this.name = 'UnknownImageModelError';
   }
+}
+
+function imageModelPullResolver(
+  imageProvider: ImageProviderSource,
+  catalog: CatalogService,
+): ImagePullResolver {
+  return async (id) => {
+    const item = await catalog.get('image-model', id);
+    if (!item || item.manifest.kind !== 'image-model') return null;
+    const manifest = item.manifest;
+    const spec: ImageModelPullSpec = {
+      downloadUrl: manifest.downloadUrl,
+      sha256: manifest.sha256,
+      approxSizeBytes: manifest.approxSizeBytes,
+      name: manifest.name,
+      weightsKind: manifest.weightsKind,
+      ...(manifest.supportsImg2Img !== undefined
+        ? { supportsImg2Img: manifest.supportsImg2Img }
+        : {}),
+      ...(manifest.referenceImages ? { referenceImages: manifest.referenceImages } : {}),
+      ...(manifest.editOnly !== undefined ? { editOnly: manifest.editOnly } : {}),
+      auxiliaryFiles: manifest.auxiliaryFiles.map((aux) => ({
+        role: aux.role,
+        downloadUrl: aux.downloadUrl,
+        sha256: aux.sha256,
+        approxSizeBytes: aux.approxSizeBytes,
+      })),
+    };
+    return {
+      totalBytes:
+        manifest.approxSizeBytes +
+        manifest.auxiliaryFiles.reduce((n, f) => n + f.approxSizeBytes, 0),
+      async *run(signal) {
+        const provider = await imageProvider.current();
+        yield* provider.pullModel(id, spec, signal);
+      },
+    };
+  };
+}
+
+/**
+ * LoRA pulls: the catalog's `image-lora` entries, installed by whichever
+ * provider owns the engine. A provider without LoRA support fails the pull
+ * with a plain message.
+ */
+export function imageLoraPullResolver(
+  imageProvider: { current(): Promise<Pick<ImageProvider, 'pullLora'>> },
+  catalog: CatalogService,
+): ImagePullResolver {
+  return async (id) => {
+    const item = await catalog.get('image-lora', id);
+    if (!item || item.manifest.kind !== 'image-lora') return null;
+    const manifest = item.manifest;
+    const spec: ImageLoraPullSpec = {
+      downloadUrl: manifest.downloadUrl,
+      sha256: manifest.sha256,
+      approxSizeBytes: manifest.approxSizeBytes,
+      name: manifest.name,
+      baseModels: manifest.baseModels,
+      purpose: manifest.purpose,
+      strength: manifest.strength,
+      ...(manifest.prompt ? { prompt: manifest.prompt } : {}),
+      ...(manifest.render ? { render: manifest.render } : {}),
+    };
+    return {
+      totalBytes: manifest.approxSizeBytes,
+      async *run(signal) {
+        const provider = await imageProvider.current();
+        if (!provider.pullLora) {
+          throw new Error('This image engine cannot add styles or fast mode.');
+        }
+        yield* provider.pullLora(id, spec, signal);
+      },
+    };
+  };
 }

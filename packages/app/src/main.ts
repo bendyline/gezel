@@ -37,6 +37,7 @@ import {
   streamAllChatEvents,
   writeModelBundleResponse,
 } from '@bendyline/gezel-client/node';
+import { gezelPaths } from '@bendyline/gezel/paths';
 import {
   registerAmbientDisplayIpc,
   setAmbientApplyEnabled,
@@ -95,6 +96,8 @@ import {
   shouldPublishDownloadState,
   updateErrorStage,
 } from './updater/update-state.js';
+import { createUpdaterLog } from './updater/updater-log.js';
+import { verifyWindowsUpdateSignature } from './updater/windows-signature.js';
 
 /**
  * Electron's OS-integration boundary. Product state and model execution stay
@@ -2539,8 +2542,19 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
   // electron-updater, keeping its elevating DEB/RPM installers unreachable.
   if (!delivery.initializeElectronUpdater) return null;
   try {
-    const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
-    autoUpdater.logger = { info: console.log, warn: console.warn, error: console.error } as never;
+    const electronUpdater = require('electron-updater') as typeof import('electron-updater');
+    const { autoUpdater, NsisUpdater } = electronUpdater;
+    // The installed app hosts gezeld as a service, so its console reaches no
+    // log file; keep the updater's own record beside the service logs.
+    autoUpdater.logger = createUpdaterLog(gezelPaths(resolveLaunch().home).logs, {
+      echo: { info: console.log, warn: console.warn, error: console.error },
+    });
+    // electron-updater's own Windows signature check times out after 20 s,
+    // which a freshly downloaded 1 GB installer can exceed — the download is
+    // then discarded on every launch. See updater/windows-signature.ts.
+    if (autoUpdater instanceof NsisUpdater) {
+      autoUpdater.verifyUpdateCodeSignature = verifyWindowsUpdateSignature;
+    }
     autoUpdater.on('checking-for-update', () => {
       setUpdateState({ kind: 'checking' });
     });

@@ -61,10 +61,24 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // type (`ScriptRefZodSchema`) took out ~100 written-out copies of the
   // step-hook shape. It tripped at 2.14 MB after the app image schemas; naming
   // GateCheckSchema's type (`GateCheckZodSchema`) took out 65 copies of the
-  // gate-check union, ~800 KB unpacked. Name another embedded schema the same
-  // way next time: the step shape, written out 23 times, is the largest repeat
-  // left in the shared `.d.ts` chunk.)
-  '@bendyline/gezel': 2_100_000, //                    2.08 MB
+  // gate-check union, ~800 KB unpacked. It tripped at 2.10 MB again; naming
+  // the three step shapes (`CraftbookStepZodSchema`, `NewCraftbookStepZodSchema`,
+  // `TaskCraftbookStepZodSchema`) took out 23 copies, ~160 KB unpacked but only
+  // 5 KB packed, because gzip already folds repeats that sit close together.
+  // It tripped at 2.10 MB again; naming HistoryEventKindSchema's type
+  // (`HistoryEventKindZodSchema`) took out 8 copies of the kind enum, ~5 KB
+  // packed. It tripped at 2.11 MB again; naming ChatModelTuningSchema,
+  // ChatMessageSchema and GezelConfigSchema (UpdateConfigRequestSchema
+  // extends it, and wrote all 33 KB of settings out again) took out ~16 KB
+  // packed. Name a large schema through its `z.object` value, not a bare
+  // shape const: a shape const carries every property's doc comment into the
+  // `.d.ts`, and for the config that cost more than the copy it removed.
+  // It tripped at 2.104 MB again; naming QuestionSchema (6 copies, 5 KB each)
+  // and CraftbookContractSchema (7) took out ~7 KB packed, and naming
+  // ChatEventSchema, which the envelope wrote out again, ~2 KB more. A repeat
+  // within gzip's 32 KB window costs little packed: count unpacked bytes
+  // between copies before expecting a win.)
+  '@bendyline/gezel': 2_100_000, //                    2.10 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,

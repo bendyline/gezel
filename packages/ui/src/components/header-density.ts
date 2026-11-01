@@ -18,8 +18,8 @@
  *   compact  the machine name ("This Mac" — every local engine wears it,
  *            so it says nothing once a second pill is on screen) and the
  *            queue chip's activity phrase go
- *   tight    the gezel name in an engine pill goes too, leaving the
- *            phase and the clock
+ *   tight    Activity's gezel name goes too, leaving the portrait,
+ *            working dots and count
  *
  * Nothing is lost outright — every dropped string stays in the pill's
  * `title` and in its popover.
@@ -125,12 +125,16 @@ export function clearHeaderDensityBlocks(state: HeaderDensityState): HeaderDensi
 /**
  * A cheap stand-in for "how many things are in the cluster", used to
  * notice structural change between measurements. It counts only elements
- * that exist at every density — pill roots and queue chips, never the
- * inner spans compaction removes — so compacting can't be mistaken for
- * the content itself changing.
+ * that exist at every density — pill roots, the header tray's keys and
+ * queue chips, never the inner spans compaction removes — so compacting
+ * can't be mistaken for the content itself changing.
  */
 export function headerClusterSignature(cluster: Element): number {
-  return cluster.childElementCount * 100 + cluster.querySelectorAll('.queue-meter-chip').length;
+  const trayKeys = cluster.querySelectorAll('.app-header-tray > *').length;
+  return (
+    (cluster.childElementCount + trayKeys) * 100 +
+    cluster.querySelectorAll('.queue-meter-chip').length
+  );
 }
 
 /**

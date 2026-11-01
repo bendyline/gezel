@@ -39,7 +39,7 @@ interface Wave1Row {
   seeds: string[];
   craftbooks: string[];
   /** Tools that are page-only (excluded from the model surface). */
-  pageTools?: string[];
+  pageTools: string[];
   /** Seed keys that must render as JSON numbers (unquoted `{{param}}`). */
   numericSeedKeys?: Array<{ file: string; key: string }>;
 }
@@ -53,7 +53,7 @@ const WAVE1: Wave1Row[] = [
     script: 'budget-store',
     seeds: ['ledger.json'],
     craftbooks: ['subscription-audit', 'month-close'],
-    pageTools: ['record_expense'],
+    pageTools: ['record_expense', 'page_add_income'],
   },
   {
     typeId: 'freelance-office',
@@ -63,6 +63,7 @@ const WAVE1: Wave1Row[] = [
     script: 'office-store',
     seeds: ['invoices.json'],
     craftbooks: ['proposal-sow', 'weekly-review'],
+    pageTools: ['page_record_invoice', 'page_invoice_sent', 'page_invoice_paid'],
   },
   {
     typeId: 'life-binder',
@@ -72,6 +73,7 @@ const WAVE1: Wave1Row[] = [
     script: 'binder-store',
     seeds: ['documents.json'],
     craftbooks: ['annual-document-review'],
+    pageTools: ['page_record_document', 'page_mark_reviewed', 'page_mark_missing'],
   },
   {
     typeId: 'household-manual',
@@ -81,6 +83,7 @@ const WAVE1: Wave1Row[] = [
     script: 'house-store',
     seeds: ['systems.json'],
     craftbooks: ['seasonal-maintenance-sweep'],
+    pageTools: ['page_record_system', 'page_log_maintenance', 'page_flag_attention'],
   },
   {
     typeId: 'meal-planner',
@@ -90,6 +93,7 @@ const WAVE1: Wave1Row[] = [
     script: 'kitchen-store',
     seeds: ['menu.json', 'pantry.json'],
     craftbooks: ['weekly-menu-plan'],
+    pageTools: ['page_set_menu', 'page_pantry_add', 'page_pantry_level'],
   },
   {
     typeId: 'caregiving-binder',
@@ -99,6 +103,7 @@ const WAVE1: Wave1Row[] = [
     script: 'care-store',
     seeds: ['meds.json', 'care.json'],
     craftbooks: ['visit-prep'],
+    pageTools: ['page_log_entry', 'page_log_appointment'],
   },
   {
     typeId: 'event-planner',
@@ -108,6 +113,7 @@ const WAVE1: Wave1Row[] = [
     script: 'event-store',
     seeds: ['guests.json', 'budget.json'],
     craftbooks: ['runbook'],
+    pageTools: ['page_add_guest', 'page_guest_status', 'page_record_spend'],
   },
   {
     typeId: 'trip-planner',
@@ -117,7 +123,7 @@ const WAVE1: Wave1Row[] = [
     script: 'trip-store',
     seeds: ['trip.json', 'packing.json', 'journal.json'],
     craftbooks: ['pre-departure-countdown'],
-    pageTools: ['mark_packed'],
+    pageTools: ['mark_packed', 'page_plan_day', 'page_pack_add', 'page_journal_entry'],
   },
   {
     typeId: 'fundraiser-hq',
@@ -127,6 +133,7 @@ const WAVE1: Wave1Row[] = [
     script: 'drive-store',
     seeds: ['donations.json'],
     craftbooks: ['social-thread', 'drive-wrap-up'],
+    pageTools: ['page_record_donation', 'page_mark_thanked'],
     numericSeedKeys: [{ file: 'donations.json', key: 'goalCents' }],
   },
   {
@@ -137,7 +144,7 @@ const WAVE1: Wave1Row[] = [
     script: 'training-store',
     seeds: ['training.json'],
     craftbooks: ['training-recap'],
-    pageTools: ['page_log_workout', 'request_recap'],
+    pageTools: ['page_log_workout', 'request_recap', 'page_set_target'],
     numericSeedKeys: [{ file: 'training.json', key: 'weeklyTarget' }],
   },
   {
@@ -148,6 +155,7 @@ const WAVE1: Wave1Row[] = [
     script: 'manuscript-store',
     seeds: ['sessions.json', 'chapters.json'],
     craftbooks: ['copy-review', 'ebook-compile'],
+    pageTools: ['page_log_session', 'page_add_chapter', 'page_chapter_stage'],
     numericSeedKeys: [{ file: 'sessions.json', key: 'weeklyWordGoal' }],
   },
 ];
@@ -190,11 +198,11 @@ describe.each(WAVE1)('Wave-1 bundled project type: $typeId', (row) => {
       expect(typeof tool.bind?.action).toBe('string');
     }
     // Reactions only fire via page invokes — any reaction-bearing tool must be
-    // page-listed (Wave 1 currently ships none; the invariant still holds).
+    // page-listed, including the fitness coach recap reaction.
     for (const tool of detail.manifest.tools) {
       if (tool.reaction) expect(detail.manifest.pages?.tools).toContain(tool.name);
     }
-    expect(detail.manifest.pages?.tools ?? []).toEqual(row.pageTools ?? []);
+    expect(detail.manifest.pages?.tools ?? []).toEqual(row.pageTools);
   });
 
   it('applies: voorman role, provenance-marked script, rendered seeds, craftbooks', async () => {
@@ -277,12 +285,10 @@ describe.each(WAVE1)('Wave-1 bundled project type: $typeId', (row) => {
 
     const modelTools = (await resolveProjectScriptTools(catalog, detail)).map((t) => t.name);
     const pageTools = await resolvePageTools(catalog, detail);
-    for (const name of row.pageTools ?? []) {
+    expect(modelTools.length).toBeGreaterThan(0);
+    expect(pageTools?.tools.map((t) => t.name) ?? []).toEqual(row.pageTools);
+    for (const name of row.pageTools) {
       expect(modelTools).not.toContain(name);
-      expect(pageTools?.tools.map((t) => t.name)).toContain(name);
-    }
-    if (!row.pageTools?.length) {
-      expect(pageTools?.tools ?? []).toEqual([]);
     }
   });
 });

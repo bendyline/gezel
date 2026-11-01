@@ -19,11 +19,13 @@ const DEBOUNCE_MS = 150;
  */
 const PER_GROUP_LIMIT = 5;
 
-function quickOpenShortcutLabel(): string {
+function quickOpenShortcut(): { label: string; aria: string } {
   const platform =
     window.__GEZEL__?.platform ??
     (typeof navigator === 'undefined' ? '' : navigator.platform || navigator.userAgent);
-  return platform === 'darwin' || /Mac/i.test(platform) ? '⌘P' : 'Ctrl+P';
+  return platform === 'darwin' || /Mac/i.test(platform)
+    ? { label: '⌘P', aria: 'Meta+P' }
+    : { label: 'Ctrl+P', aria: 'Control+P' };
 }
 
 /**
@@ -50,7 +52,7 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const wellRef = useRef<HTMLDivElement>(null);
   const modeRef = useRef<SearchMode>('search');
-  const quickOpenShortcut = quickOpenShortcutLabel();
+  const shortcut = quickOpenShortcut();
   const resultsId = useId();
   const paletteOpen = open && query.trim().length > 0;
 
@@ -240,8 +242,9 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
               type="text"
               className="titlebar-search-input"
               data-testid="titlebar-search-input"
-              placeholder={`Search projects, files, docs…  ${quickOpenShortcut}`}
+              placeholder="Search projects, files, docs…"
               aria-label="Search"
+              aria-keyshortcuts={shortcut.aria}
               role="combobox"
               aria-autocomplete="list"
               aria-expanded={paletteOpen}
@@ -259,6 +262,11 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
                 if (query.trim() && results.length > 0) setOpen(true);
               }}
             />
+            {!compact && query === '' && (
+              <span className="titlebar-search-shortcut" aria-hidden="true">
+                {shortcut.label}
+              </span>
+            )}
             {compact && (
               <button
                 type="button"

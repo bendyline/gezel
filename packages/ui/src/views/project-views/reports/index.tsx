@@ -104,10 +104,13 @@ export default function ReportsProjectView({
       const res = await api.generateProjectReport(projectId, kind);
       if (res.path) await load(res.path);
       if (!res.wrote) {
+        const answers = res.unimportedAnswers ?? 0;
         setNote(
-          res.path
-            ? `The ${WRITE_LABEL[kind].title.toLowerCase()} is already up to date.`
-            : `Nothing new to put in a ${WRITE_LABEL[kind].title.toLowerCase()} yet.`,
+          answers > 0
+            ? `Left as it is: it holds ${answers} answer${answers === 1 ? '' : 's'} you haven't imported yet. Import them, and the next batch can be written.`
+            : res.path
+              ? `The ${WRITE_LABEL[kind].title.toLowerCase()} is already up to date.`
+              : `Nothing new to put in a ${WRITE_LABEL[kind].title.toLowerCase()} yet.`,
         );
       }
     } catch (e: unknown) {
@@ -149,7 +152,7 @@ export default function ReportsProjectView({
         <p className="reports-view-empty">
           {writable.length > 0
             ? 'No reports yet. Gezel writes them overnight, or you can write one now.'
-            : 'No reports yet. Reports Gezel or its gezellen write for this project appear here.'}
+            : 'No reports yet. Reports Gezel or its crew members write for this project appear here.'}
         </p>
       )}
       {reports.length > 0 && (
@@ -192,6 +195,9 @@ export default function ReportsProjectView({
                 <IssueHandoffActions
                   projectId={projectId}
                   path={current.path}
+                  {...(current.unimportedAnswers
+                    ? { unimportedAnswers: current.unimportedAnswers }
+                    : {})}
                   onImported={() => void load(current.path)}
                 />
               )}

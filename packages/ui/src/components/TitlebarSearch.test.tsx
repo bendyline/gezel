@@ -52,14 +52,28 @@ async function typeQuery(value: string) {
 }
 
 describe('TitlebarSearch', () => {
-  it('uses the native platform modifier in the shortcut hint', () => {
-    const { unmount } = render(<TitlebarSearch />);
-    expect(screen.getByPlaceholderText(/Ctrl\+P$/)).toBeInTheDocument();
+  it('uses the native platform modifier in the shortcut keycap', () => {
+    const { container, unmount } = render(<TitlebarSearch />);
+    const input = screen.getByTestId('titlebar-search-input');
+    expect(container.querySelector('.titlebar-search-shortcut')).toHaveTextContent('Ctrl+P');
+    expect(input).toHaveAttribute('aria-keyshortcuts', 'Control+P');
+    expect(input).toHaveAttribute('placeholder', 'Search projects, files, docs…');
     unmount();
 
     window.__GEZEL__ = { ...window.__GEZEL__!, platform: 'darwin' };
-    render(<TitlebarSearch />);
-    expect(screen.getByPlaceholderText(/⌘P$/)).toBeInTheDocument();
+    const mac = render(<TitlebarSearch />);
+    expect(mac.container.querySelector('.titlebar-search-shortcut')).toHaveTextContent('⌘P');
+    expect(screen.getByTestId('titlebar-search-input')).toHaveAttribute(
+      'aria-keyshortcuts',
+      'Meta+P',
+    );
+  });
+
+  it('puts the keycap away while the well holds a query', async () => {
+    const { container } = render(<TitlebarSearch />);
+    expect(container.querySelector('.titlebar-search-shortcut')).not.toBeNull();
+    await typeQuery('space');
+    expect(container.querySelector('.titlebar-search-shortcut')).toBeNull();
   });
 
   it('renders grouped results after typing', async () => {

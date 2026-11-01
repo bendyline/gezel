@@ -8,6 +8,7 @@
 
 import { Worker } from 'node:worker_threads';
 import { createLogger } from '@bendyline/gezel';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { findServiceWorkerEntry } from '../utils/service-worker-entry.js';
 import { type KnowledgeCatalogHost, createInProcessCatalogHost } from './catalog-host.js';
 
@@ -75,6 +76,7 @@ export function createWorkerCatalogHost(): KnowledgeCatalogHost {
       return null;
     }
     try {
+      disableOnnxRuntimeTelemetry();
       const w = new Worker(entry);
       w.on('message', (msg: { id: number; result?: unknown; error?: string }) => {
         const p = pending.get(msg.id);

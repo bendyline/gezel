@@ -214,6 +214,7 @@ export function ticTacToeAssertions(): RuntimeAssertion[] {
 
 export const ticTacToeScenario: EvalScenario = {
   id: 'tictactoe',
+  htmlDeliverable: 'index.html',
   description:
     'Meester creates a project, recruits a developer, and ships a working tic-tac-toe HTML game.',
   prompt:

@@ -1,0 +1,21 @@
+{
+  "sourceReportSha256": "f0163178da0cff20aaa89523348cb4b3e230840d8733dffefc7b2aaad0388120",
+  "counts": {
+    "planned": 129,
+    "recorded": 129,
+    "rawPasses": 89,
+    "capabilityExclusions": 13,
+    "judged": 59,
+    "notApplicable": 70,
+    "noArtifact": 0,
+    "excludedReviews": 3,
+    "performanceRecords": 129,
+    "pending": 0
+  },
+  "cells": 43,
+  "trialsPerCell": 3,
+  "runtimePassed": 9,
+  "evidenceFilesVerified": 820,
+  "sourceEvidenceModified": false,
+  "newInferenceCalls": 0
+}

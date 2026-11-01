@@ -4,7 +4,7 @@ import type {
   Question,
   TimelineMessage,
 } from '@bendyline/gezel';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -100,19 +100,29 @@ describe('ChatTimelineView — canonical completion reconciliation', () => {
     vi.mocked(api.listQuestions).mockResolvedValue({ questions: [] });
   });
 
-  it('closes the initial snapshot-to-subscription race with a trailing canonical read', async () => {
-    let call = 0;
-    const loadTimeline = vi.fn(async (): Promise<ListTimelineResponse> => {
-      call += 1;
-      return {
-        messages: call === 1 ? [userMessage] : [userMessage, assistantMessage],
-        hasMore: false,
-      } as ListTimelineResponse;
+  it('stays busy until the trailing canonical read closes the snapshot-to-subscription race', async () => {
+    let release!: (value: ListTimelineResponse) => void;
+    const pending = new Promise<ListTimelineResponse>((resolve) => {
+      release = resolve;
     });
+    const loadTimeline = vi
+      .fn<() => Promise<ListTimelineResponse>>()
+      .mockResolvedValueOnce({ messages: [userMessage], hasMore: false })
+      .mockImplementation(() => pending);
 
     renderTimeline(loadTimeline);
 
-    await screen.findByText('The playable space war game is ready.');
+    await screen.findByText(userMessage.content);
+    const timeline = screen.getByTestId('chat-timeline');
+    try {
+      expect(timeline).toHaveAttribute('aria-busy', 'true');
+    } finally {
+      await act(async () => {
+        release({ messages: [userMessage, assistantMessage], hasMore: false });
+      });
+    }
+    await screen.findByText(assistantMessage.content);
+    await waitFor(() => expect(timeline).toHaveAttribute('aria-busy', 'false'));
     expect(loadTimeline).toHaveBeenCalledTimes(2);
   });
 

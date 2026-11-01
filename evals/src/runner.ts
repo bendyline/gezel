@@ -20,6 +20,7 @@ import {
   classifyTrial,
   describePreProviderStall,
   readDaemonLogTailSync,
+  readTrialAuthoredTaskRefs,
   summarizeNativeEngineIncidents,
 } from './failure-class.ts';
 import { evalFetchUrlMockOriginEnv } from './fetch-url-mock-origins.ts';
@@ -1247,6 +1248,22 @@ export async function runTrial(
             },
           }
         : {}),
+      // Listed before the wider postures below, which allow package
+      // scripts already and so win when a scenario asks for both.
+      ...(scenario.packageScripts
+        ? {
+            securityPolicy: {
+              level: 'custom' as const,
+              allowFileEdits: true,
+              allowExternalChat: true,
+              allowExternalServices: false,
+              allowScriptExecution: true,
+              allowAppNetwork: true,
+              allowPackageScriptEdits: false,
+              allowPackageScriptExecution: true,
+            },
+          }
+        : {}),
       ...(scenario.modelNetworkAccess === 'wikipedia'
         ? {
             // Eval homes default to lockdown, where every model-initiated
@@ -1311,7 +1328,7 @@ export async function runTrial(
       );
     }
     log(
-      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.generalistMode ? ` generalistMode=${opts.generalistMode}` : ''}${opts.taskStrategy ? ` taskStrategy=${opts.taskStrategy.arm}` : ''}${scenario.repairPolicy ? ` repairPolicy=${scenario.repairPolicy}` : ''}${scenario.modelNetworkAccess ? ` modelNetwork=${scenario.modelNetworkAccess}` : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
+      `[trial] provider=${engine}${evalLlamaSpecType ? ` llamaSpec=${evalLlamaSpecType}` : ''}${imageModelId ? ' imageProvider=sd-cpp' : ''}${opts.generalistMode ? ` generalistMode=${opts.generalistMode}` : ''}${opts.taskStrategy ? ` taskStrategy=${opts.taskStrategy.arm}` : ''}${scenario.repairPolicy ? ` repairPolicy=${scenario.repairPolicy}` : ''}${scenario.modelNetworkAccess ? ` modelNetwork=${scenario.modelNetworkAccess}` : ''}${scenario.packageScripts ? ' packageScripts=on' : ''}${opts.keurmeester ? ` keurmeester=${opts.keurmeester.providerName}${opts.keurmeester.model ? `/${opts.keurmeester.model}` : ''}` : ''} configured, firstRunCompleted=true`,
     );
 
     // Phase 5: ensure Meester exists.
@@ -2742,6 +2759,7 @@ export async function pollUntilDone(
     runtimePassed?: number;
     runtimeFailed?: number;
     milestones?: number;
+    unitsUnderway?: boolean;
   } | null;
   let latestSniff = null as SniffRef;
   const scoredSniffKeys = new Set<string>();
@@ -2755,6 +2773,7 @@ export async function pollUntilDone(
     runtimePassed?: number;
     runtimeFailed?: number;
     milestones?: number;
+    unitsUnderway?: boolean;
   }): void => {
     latestSniff = state;
     // Sticky, so a transient re-read of 0 does not disarm a guard that a
@@ -3686,9 +3705,12 @@ export async function pollUntilDone(
           // STALL joins LONG here: both are wall-clock-only triggers, so both
           // have to check whether a turn is still running before calling it
           // stuck. FAST and CHATTER stay out — they are count-based and hold
-          // regardless of decode speed. See shouldDeferRetryLoopForInflight.
+          // regardless of decode speed — except FAST while a declared unit of
+          // work is underway. See shouldDeferRetryLoopForInflight.
+          const unitsUnderway = latestSniff?.unitsUnderway === true;
           const shouldWaitForInflightTurns =
-            (longPathTripped || stallPathTripped) && !fastPathTripped && !chatterPathTripped;
+            !chatterPathTripped &&
+            (fastPathTripped ? unitsUnderway : longPathTripped || stallPathTripped);
           const retryLoopInflightTurns = shouldWaitForInflightTurns
             ? await listInflightTurnsForWatchdog(args.client).catch(() => [])
             : [];
@@ -3698,6 +3720,7 @@ export async function pollUntilDone(
               longPathTripped,
               stallPathTripped,
               chatterPathTripped,
+              unitsUnderway,
               inflightTurns: retryLoopInflightTurns,
               ...(args.inflightDeferMs === undefined
                 ? {}
@@ -3970,6 +3993,8 @@ export interface InflightTurnSnapshot {
   gezelId: string;
   projectId: string;
   elapsedMs: number;
+  /** Time since this turn's latest tool call; absent until it has made one. */
+  lastToolCallAgoMs?: number;
 }
 
 interface WatchdogSessionSnapshot {
@@ -4000,7 +4025,30 @@ export function canDispatchPoisonedSessionRecovery(
 
 async function listInflightTurnsForWatchdog(client: GezelClient): Promise<InflightTurnSnapshot[]> {
   const { inflight } = await client.listInflightTurns();
-  return inflight ?? [];
+  if (!inflight?.length) return [];
+  const telemetry = await client.listSessionTelemetry().catch(() => null);
+  return inflight.map((turn) => {
+    const ago = telemetry ? turnLastToolCallAgoMs(telemetry, turn.sessionId) : undefined;
+    return ago === undefined ? turn : { ...turn, lastToolCallAgoMs: ago };
+  });
+}
+
+/**
+ * How long ago the session's RUNNING turn last called a tool, on the daemon's
+ * own clock. Undefined when that turn has made no tool call yet: a call left
+ * over from an earlier turn says nothing about this one.
+ */
+export function turnLastToolCallAgoMs(
+  telemetry: Pick<SessionTelemetryListResponse, 'capturedAt' | 'sessions'>,
+  sessionId: string,
+): number | undefined {
+  const row = telemetry.sessions.find((session) => session.sessionId === sessionId);
+  const turn = row?.currentTurn;
+  const lastToolAt = row?.lastToolActivityAt;
+  if (!turn || turn.toolCalls === 0 || lastToolAt == null || lastToolAt < turn.startedAt) {
+    return undefined;
+  }
+  return Math.max(0, telemetry.capturedAt - lastToolAt);
 }
 
 async function listPoisonedSessionsForWatchdog(
@@ -4421,18 +4469,44 @@ export function shouldDeferRetryLoopForInflight(args: {
   longPathTripped: boolean;
   stallPathTripped: boolean;
   chatterPathTripped: boolean;
+  /**
+   * The scenario reports a declared unit of work started and unfinished
+   * (`recordSniff`'s `unitsUnderway`). Only then does FAST wait, on the STALL
+   * budget: a unit's own writes climb FAST's counter while the scored
+   * checks cannot move until the unit lands. craftbook-author-fanout on
+   * qwen3.8-27b (2026-10-30) was failed as "5 re-writes ... stuck 8m" at 3
+   * of 4 store runs, while the fourth run was mid-turn; each run took about
+   * 15 minutes.
+   */
+  unitsUnderway?: boolean;
   inflightTurns: InflightTurnSnapshot[];
   inflightDeferMs?: number;
   /** A turn's age includes its queue wait, which grows as decode slows. */
   throughputScale?: number;
 }): boolean {
-  if (args.fastPathTripped || args.chatterPathTripped) return false;
-  if (!args.longPathTripped && !args.stallPathTripped) return false;
+  if (args.chatterPathTripped) return false;
+  if (args.fastPathTripped && !args.unitsUnderway) return false;
+  if (!args.fastPathTripped && !args.longPathTripped && !args.stallPathTripped) return false;
   const base = args.inflightDeferMs ?? WATCHDOG_INFLIGHT_DEFER_MS;
-  const deferMs = args.stallPathTripped
-    ? Math.max(base, Math.round(STALL_INFLIGHT_DEFER_MS * (args.throughputScale ?? 1)))
-    : base;
-  return shouldDeferSoftWatchdog(args.inflightTurns, deferMs);
+  const deferMs =
+    args.stallPathTripped || args.fastPathTripped
+      ? Math.max(base, Math.round(STALL_INFLIGHT_DEFER_MS * (args.throughputScale ?? 1)))
+      : base;
+  if (shouldDeferSoftWatchdog(args.inflightTurns, deferMs)) return true;
+  // The stall path is wall-clock only, so it also waits on a turn past its
+  // budget that is still calling tools: that turn is working, slowly. A
+  // 27B's 100k-token authoring chat and a review step shared one slot, each
+  // swap re-read the long context for 3-8 minutes, and both turns passed 15
+  // minutes; the trial was failed while the review step was still calling
+  // tools (craftbook-author-gate-script, qwen3.8-27b, 2026-10-31). The
+  // in-turn loop guards still bound one turn's tool calls.
+  return (
+    args.stallPathTripped &&
+    !args.fastPathTripped &&
+    args.inflightTurns.some(
+      (turn) => turn.lastToolCallAgoMs !== undefined && turn.lastToolCallAgoMs < deferMs,
+    )
+  );
 }
 
 export function summarizeInflightTurnsForLog(inflightTurns: InflightTurnSnapshot[]): string {
@@ -4441,7 +4515,11 @@ export function summarizeInflightTurnsForLog(inflightTurns: InflightTurnSnapshot
   const top = sorted[0]!;
   const seconds = Math.max(0, Math.round(top.elapsedMs / 1000));
   const suffix = sorted.length > 1 ? ` (+${sorted.length - 1} more)` : '';
-  return `${top.gezelId}/${top.sessionId.slice(0, 8)} in ${top.projectId} for ${seconds}s${suffix}`;
+  const lastTool =
+    top.lastToolCallAgoMs === undefined
+      ? ''
+      : `, last tool call ${Math.round(top.lastToolCallAgoMs / 1000)}s ago`;
+  return `${top.gezelId}/${top.sessionId.slice(0, 8)} in ${top.projectId} for ${seconds}s${lastTool}${suffix}`;
 }
 
 /**
@@ -5200,6 +5278,7 @@ async function finalize(args: {
       daemonLog,
       nativeIncidentLog,
       sessionTelemetry: sessionTelemetry?.sessions,
+      trialAuthoredTaskRefs: readTrialAuthoredTaskRefs(args.runDir),
     });
     // Granted-context provenance (Theme E / E4): the engine's actual
     // context window per slot, plus any clamp/denial/swa-decline evidence,

@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-10-30-r9700-docblocks-activation",
+      "provenance": {
+        "startedAt": "2026-10-30T01:28:17.595Z",
+        "device": {
+          "label": "Windows · Ryzen 9 7950X3D · Radeon AI PRO R9700",
+          "platform": "win32",
+          "arch": "x64",
+          "memoryGb": 64,
+          "osRelease": "win32 10.0.26300",
+          "cpuModel": "AMD Ryzen 9 7950X3D 16-Core Processor",
+          "gpuModel": "AMD Radeon AI PRO R9700"
+        },
+        "harnessCommit": "22fec99111a5",
+        "sourceHash": "10a41de112c12aa33f12715ea0e1f30666cce2a8bf657064944820ed9f92b2e4",
+        "serviceBuildHash": "a2895bfd70f4977c900dd7b8b22d6e85bae493da5eb380a73eb791778a2f111d",
+        "catalogHash": "2f12c2abbb9c4b216cda840c89d5683e7798b35e27fd683ea1f9bd864aa93e19",
+        "gildeVersion": "0.3.1",
+        "count": 3,
+        "judgeModelId": null,
+        "engineBuilds": {
+          "llama-cpp": "Gezel native 0.1.54 · Vulkan"
+        }
+      },
+      "scope": "subset",
+      "memoryCoverage": "system-only",
+      "suites": [
+        "productivity"
+      ],
+      "scenariosBySuite": {
+        "productivity": [
+          "docblocks-theme-roundtrip"
+        ]
+      },
+      "note": "Separate six-trial DocBlocks activation condition, three repetitions per model. The supported binary expectedDeliverable contract exposed all 19 DocBlocks tools, changing the session/tool condition; it does not replace the 258-trial baseline. Qwen passed 2/3 and Gemma 0/3. Binary messageGezel repair was rejected before delivery, so these are not clean model-only failures or ignored nudges. Initial tool-schema and grounding errors are analyzed separately. Three Qwen reports were judged; three Gemma reports were absent. Original prompts, gates, generalist auto and native 0.1.54 were retained. See the separate condition postmortem in the R9700 download."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-30-r9700-docblocks-activation",
+      "suiteId": "productivity",
+      "runtime": {
+        "contextTokens": 142336,
+        "peakMemoryMb": 22657,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "activation-correction",
+          "label": "Separate activation condition · all attempts",
+          "trials": 3,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 3,
+            "median": 55.72,
+            "min": 54.59,
+            "max": 56.53
+          },
+          "prefillTokensPerSec": {
+            "samples": 3,
+            "median": 780.47,
+            "min": 779.01,
+            "max": 786.13
+          },
+          "durationMs": {
+            "samples": 3,
+            "median": 130113,
+            "min": 111632,
+            "max": 418200
+          },
+          "peakRssMb": {
+            "samples": 3,
+            "median": 22657,
+            "min": 22491,
+            "max": 22994
+          },
+          "peakGpuMemMb": {
+            "samples": 3,
+            "median": 29168,
+            "min": 29162,
+            "max": 29170
+          },
+          "judgments": [
+            {
+              "meanScore": 5.433333333333334,
+              "artifacts": 3,
+              "judgeModel": "codex-inline/current-session",
+              "rubricId": "docblocks-theme-roundtrip"
+            }
+          ],
+          "noArtifact": 0,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 130113
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-30-r9700-docblocks-activation",
+      "suiteId": "productivity",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 17640,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "activation-correction",
+          "label": "Separate activation condition · all attempts",
+          "trials": 3,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 3,
+            "median": 118.92,
+            "min": 117.91,
+            "max": 124.89
+          },
+          "prefillTokensPerSec": {
+            "samples": 3,
+            "median": 1199.86,
+            "min": 1093.31,
+            "max": 1206.24
+          },
+          "durationMs": {
+            "samples": 3,
+            "median": 363917,
+            "min": 356805,
+            "max": 405681
+          },
+          "peakRssMb": {
+            "samples": 3,
+            "median": 17640,
+            "min": 15597,
+            "max": 17829
+          },
+          "peakGpuMemMb": {
+            "samples": 3,
+            "median": 15039,
+            "min": 15039,
+            "max": 15054
+          },
+          "judgments": [],
+          "noArtifact": 3,
+          "excludedReviews": 0
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 3,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 363917
+        }
+      ]
+    }
+  ]
+}

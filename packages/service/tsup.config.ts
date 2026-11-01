@@ -128,6 +128,8 @@ export default defineConfig({
     // native engine release as data, for hosts that ship engines beside the
     // daemon. A leaf — importing it loads no daemon code.
     'native-release': 'src/native-release-entry.ts',
+    // Electron's startup verifier must not import the daemon on the UI thread.
+    'native-verification': 'src/native-verification-entry.ts',
     // Standalone subpath (`@bendyline/gezel-service/media`): multimodal
     // embedding for catalog builds and the media bench, without the daemon.
     media: 'src/media-entry.ts',
@@ -145,6 +147,7 @@ export default defineConfig({
       gezapp: 'src/gezapp-entry.ts',
       handboek: 'src/handboek/engine.ts',
       'native-release': 'src/native-release-entry.ts',
+      'native-verification': 'src/native-verification-entry.ts',
       media: 'src/media-entry.ts',
     },
   },

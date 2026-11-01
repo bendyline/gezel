@@ -355,22 +355,26 @@ export type EngineConfig = z.infer<typeof EngineConfigSchema>;
  * {@link ChatModelTuningSchema} (with profiles); profile *values* typed
  * as {@link ChatModelTuningBaseSchema} partials (no nested profiles).
  */
-export const ChatModelTuningBaseSchema = z
-  .object({
-    sampling: SamplingBlockSchema.optional(),
-    samplingWhenThinking: SamplingBlockSchema.optional().describe(
-      'Sparse override of `sampling` applied when the runtime determines reasoning is engaged. Used by Qwen3+ (different sampling for /think mode) and Nemotron Nano (different sampling for thinking vs instruct).',
+const ChatModelTuningBaseShape = {
+  sampling: SamplingBlockSchema.optional(),
+  samplingWhenThinking: SamplingBlockSchema.optional().describe(
+    'Sparse override of `sampling` applied when the runtime determines reasoning is engaged. Used by Qwen3+ (different sampling for /think mode) and Nemotron Nano (different sampling for thinking vs instruct).',
+  ),
+  reasoning: ReasoningBlockSchema.optional(),
+  output: StructuredOutputSchema.optional(),
+  toolChoice: z
+    .enum(['auto', 'required', 'none'])
+    .optional()
+    .describe(
+      'Tool selection mode (cloud + llama.cpp + MLX). `auto` lets the model decide; `required` forces a tool call this turn; `none` disables tools.',
     ),
-    reasoning: ReasoningBlockSchema.optional(),
-    output: StructuredOutputSchema.optional(),
-    toolChoice: z
-      .enum(['auto', 'required', 'none'])
-      .optional()
-      .describe(
-        'Tool selection mode (cloud + llama.cpp + MLX). `auto` lets the model decide; `required` forces a tool call this turn; `none` disables tools.',
-      ),
-    promptTags: PromptTagsSchema.optional(),
-  })
+  promptTags: PromptTagsSchema.optional(),
+};
+/** Named for the reason {@link ChatModelTuningZodSchema} is. */
+export interface ChatModelTuningBaseZodSchema
+  extends z.ZodObject<typeof ChatModelTuningBaseShape> {}
+export const ChatModelTuningBaseSchema: ChatModelTuningBaseZodSchema = z
+  .object(ChatModelTuningBaseShape)
   .describe('Per-model sampling, reasoning, and output defaults (without profiles).');
 export type ChatModelTuningBase = z.infer<typeof ChatModelTuningBaseSchema>;
 
@@ -386,7 +390,7 @@ export type ChatModelTuningBase = z.infer<typeof ChatModelTuningBaseSchema>;
  * profile via its `tuningProfile` frontmatter field. See
  * `tuning-profile-registry.ts` for the canonical id set and fallback chains.
  */
-export const ChatModelTuningSchema = ChatModelTuningBaseSchema.extend({
+const ChatModelTuningProfilesShape = {
   engine: EngineConfigSchema.optional().describe(
     'Per-model ENGINE launch-flag defaults (llama.cpp `--n-gpu-layers`, `--cpu-moe`, `--spec-type`, …). Applied once at model load, not per request — so it lives on the top-level tuning object, not inside per-request `profiles`.',
   ),
@@ -396,5 +400,18 @@ export const ChatModelTuningSchema = ChatModelTuningBaseSchema.extend({
     .describe(
       'Named tuning presets this model implements. Gezel frontmatter `tuningProfile` selects one; the resolver applies the profile as a layer between installDefault and catalog base. Missing requested profiles walk the canonical fallback chain.',
     ),
-}).describe('Per-model sampling, reasoning, and output defaults.');
+};
+/**
+ * Named so the declarations that embed a tuning block (config, gezel
+ * frontmatter, catalog entries and the responses that carry them) print this
+ * name rather than the whole shape again. They held ten copies, each with
+ * the base shape twice over, against the package's size budget.
+ */
+export interface ChatModelTuningZodSchema
+  extends z.ZodObject<
+    z.core.util.Extend<ChatModelTuningBaseZodSchema['shape'], typeof ChatModelTuningProfilesShape>
+  > {}
+export const ChatModelTuningSchema: ChatModelTuningZodSchema = ChatModelTuningBaseSchema.extend(
+  ChatModelTuningProfilesShape,
+).describe('Per-model sampling, reasoning, and output defaults.');
 export type ChatModelTuning = z.infer<typeof ChatModelTuningSchema>;

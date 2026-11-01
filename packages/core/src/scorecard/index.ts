@@ -4,6 +4,7 @@ import { mergeShards } from './shards.js';
 
 export * from './schema.js';
 export * from './report.js';
+export * from './csv.js';
 export * from './filter.js';
 export * from './shards.js';
 

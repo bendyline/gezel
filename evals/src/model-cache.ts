@@ -774,6 +774,42 @@ export async function linkDrafterIntoTrial(opts: {
   return true;
 }
 
+/**
+ * Materialize a cached image LoRA (a style or fast mode) into the trial home.
+ * False when the cache lacks it; the image bench then installs it through the
+ * trial daemon and keeps it with {@link cacheLoraFromTrial}.
+ */
+export async function linkLoraIntoTrial(opts: {
+  cacheRoot: string;
+  trialHome: string;
+  loraId: string;
+}): Promise<boolean> {
+  const target = loraDirInHome(opts.cacheRoot, opts.loraId);
+  if (!existsSync(join(target, 'manifest.json'))) return false;
+  const link = loraDirInHome(opts.trialHome, opts.loraId);
+  if (existsSync(link)) return true;
+  await mkdir(dirname(link), { recursive: true });
+  await cloneDirectory(target, link);
+  return true;
+}
+
+/** Keep a LoRA a trial daemon installed, so the next run links it instead of downloading. */
+export async function cacheLoraFromTrial(opts: {
+  cacheRoot: string;
+  trialHome: string;
+  loraId: string;
+}): Promise<void> {
+  const installed = loraDirInHome(opts.trialHome, opts.loraId);
+  const cached = loraDirInHome(opts.cacheRoot, opts.loraId);
+  if (!existsSync(join(installed, 'manifest.json')) || existsSync(cached)) return;
+  await mkdir(dirname(cached), { recursive: true });
+  await cloneDirectory(installed, cached);
+}
+
+function loraDirInHome(home: string, loraId: string): string {
+  return join(home, 'engines', 'sd-cpp-loras', 'models', loraId);
+}
+
 const execFileAsync = promisify(execFile);
 
 /**

@@ -10,6 +10,7 @@ import {
   bundledGildeDataDir,
   createHandboekEngine,
   findHandboekContent,
+  loadScorecardRoundNotes,
   ogKicker,
   readOgHeadlines,
   resolveOgHeadline,
@@ -20,9 +21,18 @@ import { generateExternalHtml, markdownDocToPlainHtml } from '@bendyline/squisq-
 import { PLAYER_BUNDLE } from '@bendyline/squisq-react/standalone-source';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
+import {
+  DATA_TABLE_ATTR,
+  DATA_TABLE_JS,
+  DATA_TABLE_SCRIPT,
+  dataTableMounts,
+  insertDataTables,
+} from './handboek-data-tables.js';
 import type { OgCardPlan, OgCardsResult } from './handboek-og-cards.js';
 import { ogCardPath, writeOgCards } from './handboek-og-cards.js';
+import { scorecardRoundSitePages } from './handboek-scorecard-rounds.js';
 import {
+  CATALOG_COUNTS_FILE,
   CRAFTBOOK_ART_FILE,
   type SiteCatalogPage,
   buildSiteCatalog,
@@ -55,11 +65,16 @@ import { writePageDemo, writePageDemoAssets } from './page-demo-export.js';
  * client-side from a JSON blob, so any hiccup loading the bundle yields a
  * blank page with no content and nothing for a crawler to index. Only
  * `watch.html` — where the slideshow *is* the point — keeps the player.
+ * The one exception is an article's sidecar data table (see
+ * handboek-data-tables.ts): the page around it stays semantic HTML, and the
+ * player only adds the table beside a download link that works without it.
  */
 export interface HandboekExportResult {
   out: string;
   pages: number;
   skipped: string[];
+  /** Data tables that could not be published as written, one line each. */
+  warnings: string[];
   /** Card-generation tally, absent when no `ogOut` was configured. */
   cards?: OgCardsResult;
 }
@@ -114,6 +129,9 @@ const NAV_INLINE_MAX = 40;
 /** Filter for the model scorecard, linked only where a scorecard renders. */
 const SCORECARD_SCRIPT = 'scorecard.js';
 
+/** The squisq player: every watch page, and article pages with a data table. */
+const PLAYER_SCRIPT = 'squisq-player.js';
+
 /**
  * Behavior scripts a rendered page needs, decided from the markup it
  * actually produced rather than from its article id — the scorecard macro
@@ -121,7 +139,11 @@ const SCORECARD_SCRIPT = 'scorecard.js';
  * stop linking the filter when it did.
  */
 export function pageScripts(body: string): string[] {
-  return body.includes(SCORECARD_DATA_ATTRS.root) ? [SCORECARD_SCRIPT] : [];
+  return [
+    ...(body.includes(SCORECARD_DATA_ATTRS.root) ? [SCORECARD_SCRIPT] : []),
+    // Deferred scripts run in order: the player must exist before the mount.
+    ...(body.includes(DATA_TABLE_ATTR) ? [PLAYER_SCRIPT, DATA_TABLE_SCRIPT] : []),
+  ];
 }
 
 const AREA_BLURBS: Record<HandboekArea, string> = {
@@ -159,6 +181,7 @@ export async function runHandboekExport(
 
   const toc = await engine.toc();
   const site = await buildSiteCatalog(catalog);
+  site.pages.push(...scorecardRoundSitePages(loadScorecardRoundNotes(contentDir)));
   const sitePages = new Map<string, SiteCatalogPage>(site.pages.map((p) => [p.entry.id, p]));
   const demos = new Map(site.demos.map((d) => [`project-type/${d.projectTypeId}`, d]));
   const demoAssetsDirectory = join(out, '_gezel-demo');
@@ -186,9 +209,11 @@ export async function runHandboekExport(
   }
 
   await mkdir(join(out, 'assets'), { recursive: true });
-  await writeFile(join(out, 'assets', 'squisq-player.js'), PLAYER_BUNDLE, 'utf8');
+  await writeFile(join(out, 'assets', PLAYER_SCRIPT), PLAYER_BUNDLE, 'utf8');
   await writeFile(join(out, 'assets', SCORECARD_SCRIPT), SCORECARD_FILTER_JS, 'utf8');
+  await writeFile(join(out, 'assets', DATA_TABLE_SCRIPT), DATA_TABLE_JS, 'utf8');
   const skipped: string[] = [];
+  const warnings: string[] = [];
   let pages = 0;
 
   // Headlines are read from the committed lockfile only. Distilling is a
@@ -220,6 +245,10 @@ export async function runHandboekExport(
       existsSync(join(contentDir, asset)),
     );
     const parsed = parseMarkdown(markdown);
+    const doc = markdownToDoc(parsed, {
+      articleId: article.id,
+      defaultDuration: article.defaultDuration ?? 6,
+    });
 
     const demo = demos.get(entry.id);
     const art = entry.id.startsWith('craftbook/')
@@ -228,13 +257,17 @@ export async function runHandboekExport(
     let rendered = wrapTables(
       extractBody(markdownDocToPlainHtml(parsed, { title: article.title })),
     );
+    rendered = insertDataTables(
+      rendered,
+      await dataTableMounts(doc, contentDir, (note) => warnings.push(`${entry.id}: ${note}`)),
+    );
     if (sitePage?.html) rendered = `${rendered}\n${sitePage.html}`;
     if (demo) rendered = insertDemoSection(rendered, demoSectionHtml(demo, entry.title));
-    if (art) rendered = insertAfterTitle(rendered, craftbookArtHtml(entry.title));
+    if (art) rendered = insertAfterTitle(rendered, craftbookArtHtml(entry.title, art.ground));
     const { html: body, headings } = withHeadingIds(rendered);
     const dir = join(out, ...entry.id.split('/'));
     await mkdir(dir, { recursive: true });
-    if (art) await writeFile(join(dir, CRAFTBOOK_ART_FILE), art);
+    if (art) await writeFile(join(dir, CRAFTBOOK_ART_FILE), art.bytes);
     if (demo) {
       await writePageDemo(
         join(dir, 'demo'),
@@ -276,14 +309,10 @@ export async function runHandboekExport(
       'utf8',
     );
 
-    const doc = markdownToDoc(parsed, {
-      articleId: article.id,
-      defaultDuration: article.defaultDuration ?? 6,
-    });
     await writeFile(
       join(dir, 'watch.html'),
       generateExternalHtml(doc, {
-        playerScriptPath: `${up(depth)}assets/squisq-player.js`,
+        playerScriptPath: `${up(depth)}assets/${PLAYER_SCRIPT}`,
         mode: 'slideshow',
         title: article.title,
         autoPlay: true,
@@ -316,6 +345,11 @@ export async function runHandboekExport(
     await cp(assetsSrc, join(out, 'assets'), { recursive: true });
   }
   await writeFile(join(out, 'assets', 'handboek.css'), BASELINE_CSS, 'utf8');
+  await writeFile(
+    join(out, CATALOG_COUNTS_FILE),
+    `${JSON.stringify(site.counts, null, 2)}\n`,
+    'utf8',
+  );
 
   // Last, and never fatal: the pages above are the deliverable, and a page
   // whose card is missing still unfurls with its title, description, and the
@@ -329,7 +363,7 @@ export async function runHandboekExport(
         })
       : undefined;
 
-  return { out, pages, skipped, cards };
+  return { out, pages, skipped, warnings, cards };
 }
 
 /** The Handboek landing page's own card, written beside the article cards. */

@@ -78,9 +78,8 @@ reviewer model) as it read when judged. The issue record keeps only
     issues, against 23 for the triage batch.
   - Handing issues to an app leases them to it for two hours, so the night
     shift does not start fixing them meanwhile.
-- **The handoff document** (`reports/issue-handoff.md`, rewritten nightly when
-  its issues change; also "Write now" in Reports) lists the batch with a
-  response block per issue:
+- **The handoff document** (`reports/issue-handoff.md`, written nightly and by
+  "Write now" in Reports) lists the batch with a response block per issue:
 
   ```
   <!-- gezel:response BW-17 -->
@@ -90,11 +89,31 @@ reviewer model) as it read when judged. The issue record keeps only
   <!-- /gezel:response -->
   ```
 
+  Each file heading carries the index's one-line summary of the file. Each
+  issue leads with the reviewer's claim in bold, then its location: a
+  `gezel-nav:` link that opens the line in Gezel, around the absolute path
+  an outside app reads. Below that is an excerpt, three lines either side
+  as the file reads now, with the flagged line marked `>`. A stale issue
+  gets no excerpt, because its line has moved.
+
+  A rewrite keeps the issues the document already lists that nobody has
+  settled, in its order, and picks afresh only for the freed slots (`keep`
+  in `buildIssueHandoffQueue`). The count of issues left out is a snapshot
+  and never causes a rewrite on its own, so the file changes only when one
+  of its issues does. A document holding answers Gezel has not recorded
+  (`countUnimportedAnswers`: no verdict-log entry with that issue, verdict
+  and note) is never rewritten, because an app may have filled it in place.
+  Reports then offers "Import N answers" from the report itself, and Write
+  now says why it held. An answer an import would refuse never holds the
+  document.
+
   Reports → Issues for review offers Copy, Save… and Import answers….
   `parseIssueHandoffResponses` finds blocks by their comments, falls back to
   `BW-n` headings when an app dropped them, accepts everyday words ("won't
-  fix", "false positive", "by design"), and skips empty blocks. A document
-  made for another project is refused.
+  fix", "false positive", "by design"), and skips empty blocks. Markers and
+  headings inside fenced code are ignored, so an excerpt of code that writes
+  this format cannot answer for another issue. A document made for another
+  project is refused.
 
 ## The morning
 

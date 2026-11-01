@@ -95,9 +95,34 @@ describe('the issue handoff queue', () => {
       issue({ supersededBy: 'BW-1' }),
     ];
     packs = [{ status: 'ready', files: [{ path: 'src/proposed.ts' }] }];
-    const res = await buildIssueHandoffQueue(deps(), PROJECT, {}, { client: 'claude-code' });
+    const res = await buildIssueHandoffQueue(
+      deps(),
+      PROJECT,
+      {},
+      {
+        lease: { client: 'claude-code' },
+      },
+    );
     expect(refs(res)).toEqual(['BW-1']);
     expect(res.remaining).toBe(0);
+  });
+
+  it('keeps a batch already handed over, picking afresh only for the issues settled since', async () => {
+    issues = Array.from({ length: 12 }, (_, i) => issue({ category: `c${i % 4}` }));
+    const handed = refs(await buildIssueHandoffQueue(deps(), PROJECT, { limit: 4 }));
+    const reshuffled = { ...deps(), random: () => 0.99 };
+    expect(
+      refs(await buildIssueHandoffQueue(reshuffled, PROJECT, { limit: 4 }, { keep: handed })),
+    ).toEqual(handed);
+
+    const settled = handed[1];
+    issues = issues.map((i) => (i.ref === settled ? { ...i, status: 'dismissed' as const } : i));
+    const next = refs(
+      await buildIssueHandoffQueue(reshuffled, PROJECT, { limit: 4 }, { keep: handed }),
+    );
+    expect(next.slice(0, 3)).toEqual(handed.filter((ref) => ref !== settled));
+    expect(next).toHaveLength(4);
+    expect(handed).not.toContain(next[3]);
   });
 
   it('gives a new project a sampled first batch: majors, then a spread of categories', async () => {
@@ -186,7 +211,7 @@ describe('the issue handoff queue', () => {
       },
     ]);
     issues = [issue({ path: 'src/file1.ts' })];
-    await buildIssueHandoffQueue(deps(), PROJECT, {}, { client: 'claude-code' });
+    await buildIssueHandoffQueue(deps(), PROJECT, {}, { lease: { client: 'claude-code' } });
     const [record] = await store.listProjectBoekwachterIssues(PROJECT);
     expect(record?.handoffLease?.client).toBe('claude-code');
   });

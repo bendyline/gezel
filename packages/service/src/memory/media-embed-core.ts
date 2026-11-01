@@ -28,6 +28,7 @@ import {
   verifyMediaArtifacts,
   verifyProfileArtifacts,
 } from '@bendyline/gezel-knowledge';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import {
   type RgbImage,
   gemmaVisionTargetSize,
@@ -151,6 +152,7 @@ function sentenceEmbedding(outputs: Record<string, TensorLike>): number[] {
 }
 
 async function loadTransformers(): Promise<MediaTransformers> {
+  disableOnnxRuntimeTelemetry();
   try {
     return (await import(TRANSFORMERS_MODULE)) as unknown as MediaTransformers;
   } catch (err) {

@@ -144,14 +144,103 @@ const PLAIN_VERBS: Readonly<Record<string, string>> = {
 
 /** "write" → "writing", "map" → "mapping", "verify" → "verifying". */
 export function gerund(verb: string): string {
+  return PLAIN_VERBS[verb.toLowerCase()] ?? literalGerund(verb);
+}
+
+function literalGerund(verb: string): string {
   const word = verb.toLowerCase();
-  const plain = PLAIN_VERBS[word];
-  if (plain) return plain;
   if (word.endsWith('ie')) return `${word.slice(0, -2)}ying`;
   if (word.endsWith('e') && !/(ee|ye|oe)$/.test(word)) return `${word.slice(0, -1)}ing`;
   const last = word.split('-').at(-1) ?? word;
   if (DOUBLING.has(last)) return `${word}${word.at(-1)}ing`;
   return `${word}ing`;
+}
+
+/**
+ * Verbs a step name joins to its first one: "Acquire and verify sources",
+ * "Gather & triage changes", "Implement the fix and verify it". Only these
+ * turn, because the same position also holds nouns ("Extract actions &
+ * decisions", "Review for completeness and tone").
+ */
+const COORDINATED_VERBS = new Set([
+  'analyze',
+  'annotate',
+  'apply',
+  'assemble',
+  'assess',
+  'bound',
+  'build',
+  'capture',
+  'characterize',
+  'check',
+  'cite',
+  'classify',
+  'collect',
+  'compare',
+  'compile',
+  'confirm',
+  'deliver',
+  'draft',
+  'edit',
+  'evaluate',
+  'export',
+  'extract',
+  'fix',
+  'format',
+  'gather',
+  'inspect',
+  'label',
+  'map',
+  'measure',
+  'merge',
+  'organize',
+  'outline',
+  'parse',
+  'polish',
+  'prioritize',
+  'prove',
+  'publish',
+  'rank',
+  'rate',
+  'read',
+  'reconcile',
+  'record',
+  'refine',
+  'render',
+  'repair',
+  'report',
+  'review',
+  'revise',
+  'rewrite',
+  'run',
+  'save',
+  'scope',
+  'score',
+  'select',
+  'send',
+  'sort',
+  'stage',
+  'summarize',
+  'tag',
+  'test',
+  'transcribe',
+  'translate',
+  'triage',
+  'update',
+  'validate',
+  'verify',
+  'write',
+]);
+
+/** "verify sources and record the result" → "… and recording the result". */
+function turnCoordinatedVerbs(text: string): string {
+  return text.replace(
+    /(^|\s)(and|or|then|&)(\s+)([A-Za-z-]+)/gi,
+    (match, before: string, joiner: string, space: string, word: string) =>
+      COORDINATED_VERBS.has(word.toLowerCase())
+        ? `${before}${joiner}${space}${literalGerund(word)}`
+        : match,
+  );
 }
 
 /**
@@ -182,7 +271,9 @@ export function stepPersonLabel(
     .trim();
   const [first, ...rest] = cleaned.split(' ');
   if (first && rest.length > 0 && !NOT_VERBS.has(first.toLowerCase()) && !MACHINERY.test(cleaned)) {
-    const phrase = `${gerund(first)} ${rest.join(' ')}`;
+    // A second verb turns too: 1.26300.100 showed "Soren is acquiring and
+    // verify sources" on every PowerPoint request.
+    const phrase = `${gerund(first)} ${turnCoordinatedVerbs(rest.join(' '))}`;
     if (phrase.length <= 60) return phrase;
   }
   if (step.terminal && stage === 'check') return 'wrapping up';

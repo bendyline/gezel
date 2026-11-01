@@ -197,9 +197,12 @@ describe('Activity', () => {
         <ActivityControl />
       </ActivityProvider>,
     );
-    expect(
-      await screen.findByRole('button', { name: 'Activity — 1 working · automatic work paused' }),
-    ).toBeVisible();
+    const trigger = await screen.findByRole('button', {
+      name: 'Activity — 1 working · automatic work paused',
+    });
+    expect(within(trigger).getByText('Working…')).toBeVisible();
+    expect(within(trigger).queryByText('Activity')).toBeNull();
+    expect(within(trigger).queryByText(/1 working/)).toBeNull();
   });
   it('lists scheduled work under Next without counting it on the key', async () => {
     const current = snapshot([]);
@@ -629,6 +632,71 @@ describe('Activity human steps without a question card', () => {
 });
 
 describe('Activity crew rows', () => {
+  it.each([1, 4])(
+    'names %i background workers before the panel opens, without chat sessions',
+    async (count) => {
+      const current = snapshot([]);
+      const crew = ['Saara', 'Maya', 'Liesel', 'Dejan'].slice(0, count);
+      const active = [...crew, 'Saara'].map((name) => ({
+        gezelId: name.toLowerCase(),
+        projectId: 'shop',
+        job: 'Indexing e2e/document-import.spec.ts',
+        runningForMs: 12_000,
+      }));
+      current.queues.providers = {
+        'llama-cpp': {
+          running: active.length,
+          queuedInteractive: 0,
+          queuedBackground: 1,
+          concurrency: active.length,
+          active,
+          pending: [{ id: 1, lane: 'background', gezelId: 'noor', waitedMs: 1000 }],
+        },
+      };
+      current.items = [
+        {
+          id: 'background:running',
+          section: 'working',
+          title: 'Background work',
+          detail: `${active.length} background operations running.`,
+          questionIds: [],
+        },
+      ];
+      vi.mocked(api.getActivityStatus).mockResolvedValue(current);
+      vi.mocked(api.listGezels).mockResolvedValue({
+        gezels: [...crew, 'Noor'].map((name) => ({ id: name.toLowerCase(), name })),
+      } as never);
+      render(
+        <ActivityProvider>
+          <ActivityControl />
+        </ActivityProvider>,
+      );
+
+      const trigger = await screen.findByRole('button', {
+        name: `Activity — 1 working · ${crew.join(', ')}`,
+      });
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(within(trigger).getByText('Saara')).toBeVisible();
+      expect(trigger.querySelectorAll('.activity-control-avatar')).toHaveLength(Math.min(3, count));
+      expect(within(trigger).queryByText('Activity')).toBeNull();
+      expect(within(trigger).queryByText('1 working')).toBeNull();
+      expect(trigger).not.toHaveAccessibleName(/Noor/);
+      if (count > 1) expect(within(trigger).getByText(`+${count - 1}`)).toBeVisible();
+      else expect(within(trigger).queryByText(/^\+/)).toBeNull();
+
+      await userEvent.click(trigger);
+      const working = screen.getByRole('region', { name: 'Working' });
+      expect(within(working).getAllByText('Saara')).toHaveLength(2);
+      expect(within(trigger).getByText('Saara')).toBeVisible();
+
+      current.items = [];
+      current.queues.providers = {};
+      await refresh();
+      expect(trigger).toHaveAccessibleName('Activity — All quiet');
+      expect(trigger.querySelector('.activity-control-avatar')).toBeNull();
+    },
+  );
+
   function crewSnapshot(): ActivityStatusResponse {
     const current = snapshot([]);
     current.queues.providers = {
@@ -721,7 +789,12 @@ describe('Activity crew rows', () => {
         <ActivityControl />
       </ActivityProvider>,
     );
-    await userEvent.click(await screen.findByRole('button', { name: /Activity — 1 working/ }));
+    const trigger = await screen.findByRole('button', { name: 'Activity — 1 working · Maya' });
+    expect(within(trigger).getByText('Maya')).toBeVisible();
+    expect(within(trigger).queryByText('Activity')).toBeNull();
+    expect(within(trigger).queryByText('1 working')).toBeNull();
+    expect(trigger.querySelector('.activity-control-avatar')).not.toBeNull();
+    await userEvent.click(trigger);
     return screen.getByRole('dialog', { name: 'What’s going on' });
   }
 
@@ -776,12 +849,12 @@ describe('Activity — a request is one row', () => {
       crew: [],
       questionIds: [],
     };
-    vi.mocked(api.getActivityStatus).mockResolvedValue({
+    const current = {
       ...base,
       items: [
         {
           id: `request:${track.key}`,
-          section: 'working',
+          section: 'working' as const,
           title: track.summary,
           detail: 'Drafting the invoices.',
           projectId: 'default',
@@ -793,7 +866,8 @@ describe('Activity — a request is one row', () => {
         },
       ],
       requests: [track],
-    });
+    };
+    vi.mocked(api.getActivityStatus).mockResolvedValue(current);
     render(
       <ActivityProvider>
         <ActivityControl />
@@ -805,5 +879,38 @@ describe('Activity — a request is one row', () => {
     expect(within(tracker).getByText('Making it')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: 'Open chat' })).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: 'View task details' })).toBeNull();
+
+    // One request can have several cloud turns; repeated jobs by the same
+    // gezel must not inflate the crew count or add duplicate portraits.
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: ['saara', 'maya', 'liesel', 'dejan'].map((id) => ({
+        id,
+        name: id[0]!.toUpperCase() + id.slice(1),
+      })),
+    } as never);
+    current.queues.providers = {
+      copilot: {
+        running: 5,
+        queuedInteractive: 0,
+        queuedBackground: 0,
+        concurrency: 5,
+        active: ['saara', 'maya', 'liesel', 'dejan', 'saara'].map((gezelId, i) => ({
+          gezelId,
+          sessionId: `parallel-${i}`,
+          runningForMs: 1000,
+        })),
+        pending: [],
+      },
+    };
+    track.liveSessionIds = current.queues.providers.copilot!.active.map((row) => row.sessionId!);
+    act(() => window.dispatchEvent(new Event('gezel:gezels-changed')));
+    await refresh();
+    const trigger = await screen.findByRole('button', {
+      name: 'Activity — 1 working · Saara, Maya, Liesel, Dejan',
+    });
+    expect(within(trigger).getByText('Saara')).toBeVisible();
+    expect(within(trigger).getByText('+3')).toBeVisible();
+    expect(trigger.querySelectorAll('.activity-control-avatar')).toHaveLength(3);
+    expect(within(trigger).queryByText('Activity')).toBeNull();
   });
 });

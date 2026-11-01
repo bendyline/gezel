@@ -429,12 +429,13 @@ binary wrapped in:
 2. **The platform's OS sandbox** around every run: macOS Seatbelt (`sandbox-exec`) with a
    `deny default` profile, or on Windows the MXC process container (below).
 3. **Network egress block** (`denyNet`, **fail closed**): Seatbelt `(deny network*)`, the
-   container's denied egress, or (Linux, scripts without RPC) a systemd user service
-   restricted to `AF_UNIX`. The JS `--import` preload also blocks fetch/WebSocket,
+   container's denied egress, or (Linux) a systemd user service restricted to `AF_UNIX`.
+   The JS `--import` preload also blocks fetch/WebSocket,
    net/dgram, callback + promise DNS, named built-in exports, and Resolver instances, but is
    defense-in-depth rather than a malicious-code boundary. Where no boundary applies the run
    exits 126; no platform retries a failed denyNet launch unsandboxed. Script RPC uses fd 3,
-   or stdio inside the Windows container, and never opens a socket.
+   or stdio inside the Windows container and the Linux systemd unit (`systemd-run --pipe`
+   passes only the standard pipes), and never opens a socket.
 4. **Resource cap** — `--max-old-space-size` bounds heap so a runaway allocation can't OOM the
    host; wall-clock timeout + SIGKILL.
 5. **Env scrub** — `sandboxEnv` allowlists only `PATH`/`HOME`/`NODE_*`/locale; strips
@@ -781,7 +782,7 @@ privileged service identity or putting the daemon root token on disk.
 | Broker LAN-serving administration via `machine-models` | PRODUCT CHOICE | The broker's `/v1/remote/manage/serving` surface (enable LAN serving, show a connect code, approve/deny device pairings, revoke devices) is authorized by the same shared runtime credential — until installer membership exists, any local account can administer LAN serving for the machine. The scope stays never-grantable via `/v1/apps/register`, so LAN peers can never obtain it. |
 | Remote product UI/API access | INTERIM — tunnel recipe | The product `/api` + web UI stay loopback-only by three independent layers (bind, host guard, cert/auth). The supported interim is a loopback-preserving tunnel (SSH `-L` / Tailscale toward loopback) with the schema-declared `service:{url,token}` supervisor mode; first-class remote access is designed in `docs/remote-access.md` and gated on the accounts ADR (0004). |
 | External user working directories from a machine daemon | NEEDS BROKER/GRANT | Dedicated service identities cannot safely inherit arbitrary user-profile access. Add an explicit ACL grant or user-context broker when linking such a folder; do not restore a privileged daemon identity. |
-| `denyNet` execution without an OS boundary | FAIL CLOSED | Windows runs it in the MXC container when the probe passes; Linux runs scripts without RPC under systemd. Elsewhere (Windows with the container off or unavailable, Linux RPC scripts) model/gate scripts return exit 126. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |
+| `denyNet` execution without an OS boundary | FAIL CLOSED | Windows runs it in the MXC container when the probe passes; Linux runs it under a systemd user unit when the probe passes, carrying script RPC over stdio. Elsewhere (Windows with the container off or unavailable, Linux without a usable systemd user manager) model/gate scripts return exit 126. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |
 | SSRF connect-time IP pin | DEFERRED | Current guard validates at DNS-resolution time (rebinding-window residual). |
 | Egress tripwire coverage (§11.1) | PARTIAL | Lexical and easy to evade on purpose: it targets trained-in habits, not an adversary. Provider-native shells (Claude CLI, Codex CLI, an unsandboxed Copilot) and MCP toolsets those providers call directly never pass the bridge, so their calls are not read. The next layer is a Gezel-owned egress proxy that logs and filters the connections themselves. |
 | Package-script edits by sandboxed scripts | PARTIAL | `run_nodejs_script` / `derive_file` write through Node's permission model, not the Store, so only the workspace's root manifests are snapshotted and put back. A nested workspace package's `scripts` can still change that way while `allowPackageScriptEdits` is off. |

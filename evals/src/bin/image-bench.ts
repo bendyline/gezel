@@ -30,6 +30,11 @@
  *   --quality <tier>     draft | standard | high
  *   --steps <n>          override the catalog's recommended steps
  *   --label <name>       arm label for A/B runs (default "default")
+ *   --arms <a,b>         render each prompt and seed once per arm, alternating, on
+ *                        one engine: base (fast mode off), fast, style:<lora id>,
+ *                        or fast+style:<lora id>. Fast mode and styles are LoRAs,
+ *                        linked from the cache or installed through the trial
+ *                        daemon. Without it, no LoRA is installed
  *   --runs-dir <path>    output (default evals/runs/image-bench-<ts>)
  *   --hf-cache <dir>     transformers cache holding the media-search model
  *                        (default GEZEL_HF_CACHE_DIR, else ~/.gezel/engines/hf-cache)
@@ -79,7 +84,12 @@ import {
   sanityFlags,
 } from '../image-bench/sanity.ts';
 import { type SdServerLog, parseSdServerLog } from '../image-bench/sd-log.ts';
-import { defaultCacheRoot, linkModelIntoTrial } from '../model-cache.ts';
+import {
+  cacheLoraFromTrial,
+  defaultCacheRoot,
+  linkLoraIntoTrial,
+  linkModelIntoTrial,
+} from '../model-cache.ts';
 import { repoRoot, resolveSdBinary } from '../native-bin.ts';
 import { findTrialNativeChildren, shutdownTrialDaemon, spawnTrialDaemon } from '../spawn.ts';
 import { parseArgs } from './args.ts';
@@ -105,6 +115,9 @@ interface ImageRecord {
   judgeError?: string;
   /** Peak memory drop so far, read after this image: a rising series across images is a leak. */
   peakSoFarBytes?: number;
+  /** The styles and fast mode the engine applied. */
+  loras?: string[];
+  settingsNotes?: string[];
 }
 
 interface ModelRecord {
@@ -117,7 +130,29 @@ interface ModelRecord {
   steadySeconds?: number;
   memory: MemoryPeak;
   engine: SdServerLog;
+  /** Times the engine loaded weights; above one, switching arms reloaded the model. */
+  engineLoads: number;
   flagged: Record<string, number>;
+}
+
+/** One way to render: fast mode on or off, and a style. Unset fields send nothing. */
+interface BenchArm {
+  label: string;
+  fast?: boolean;
+  style?: string;
+}
+
+function parseArm(spec: string, label: string): BenchArm {
+  const parts = spec.split('+');
+  const style = parts.find((p) => p.startsWith('style:'))?.slice('style:'.length);
+  if (!parts.every((p) => p === 'base' || p === 'fast' || p.startsWith('style:')) || style === '') {
+    throw new Error(`unknown arm "${spec}": use base, fast, style:<id> or fast+style:<id>`);
+  }
+  return {
+    label: `${label}-${spec.replace(/[+:]/g, '-')}`,
+    fast: parts.includes('fast'),
+    ...(style ? { style } : {}),
+  };
 }
 
 const list = (v: unknown) =>
@@ -152,6 +187,7 @@ function defaultHfCache(): string | undefined {
 async function runModel(opts: {
   model: string;
   label: string;
+  arms?: string[];
   cache: string;
   sdBin: string;
   sdLibDir?: string;
@@ -163,12 +199,16 @@ async function runModel(opts: {
   steps?: number;
   rewrites?: Record<string, string>;
   outDir: string;
-}): Promise<{ model: ModelRecord; images: ImageRecord[] }> {
+}): Promise<{ models: ModelRecord[]; images: ImageRecord[] }> {
   const { model, label, outDir } = opts;
+  const arms: BenchArm[] = opts.arms?.length
+    ? opts.arms.map((spec) => parseArm(spec, label))
+    : [{ label }];
   const modelDir = join(outDir, label, model);
   const home = join(outDir, 'homes', `${label}-${model}`);
   await rm(home, { recursive: true, force: true });
   await mkdir(modelDir, { recursive: true });
+  for (const arm of arms) await mkdir(join(outDir, arm.label, model), { recursive: true });
   await linkModelIntoTrial({
     cacheRoot: opts.cache,
     trialHome: home,
@@ -198,53 +238,16 @@ async function runModel(opts: {
     fit = (
       await daemon.client.getImageModelFit(opts.quality ? { quality: opts.quality } : {})
     ).models.find((m) => m.id === model);
+    if (opts.arms?.length) await installArmLoras(daemon.client, opts.cache, home, model, arms);
     // The baseline excludes the daemon itself: sd-server starts on the first generate.
     await watch.begin();
     for (const prompt of opts.prompts) {
       for (const seed of opts.seeds) {
-        const started = performance.now();
-        const record: ImageRecord = {
-          label,
-          model,
-          prompt: prompt.id,
-          category: prompt.category,
-          seed,
-          wallSeconds: 0,
-        };
-        try {
-          const res = await daemon.client.generateImage({
-            prompt: opts.rewrites?.[prompt.id] ?? prompt.prompt,
-            model,
-            seed,
-            ...(opts.size ? opts.size : {}),
-            ...(opts.aspectRatio ? { aspectRatio: opts.aspectRatio } : {}),
-            ...(opts.quality ? { quality: opts.quality } : {}),
-            ...(opts.steps ? { steps: opts.steps } : {}),
-            inline: true,
-          });
-          record.wallSeconds = (performance.now() - started) / 1000;
-          record.steps = res.meta.steps;
-          record.width = res.meta.widthPx;
-          record.height = res.meta.heightPx;
-          if (!res.b64Png) throw new Error('response carried no image bytes');
-          const png = Buffer.from(res.b64Png, 'base64');
-          const file = join(modelDir, `${prompt.id}-s${seed}.png`);
-          await writeFile(file, png);
-          record.file = relative(outDir, file);
-          record.stats = imageStats(decodeImage(png));
-          record.flags = sanityFlags(record.stats, {
-            width: res.meta.widthPx,
-            height: res.meta.heightPx,
-          });
-        } catch (err) {
-          record.wallSeconds = (performance.now() - started) / 1000;
-          record.error = err instanceof Error ? err.message : String(err);
+        // Arms alternate on one engine, so a LoRA change that reloads the
+        // model shows up as more than one weight load.
+        for (const arm of arms) {
+          images.push(await renderOne(daemon.client, opts, arm, prompt, seed, watch));
         }
-        record.peakSoFarBytes = (await watch.peak()).systemDropBytes ?? undefined;
-        images.push(record);
-        console.log(
-          `[image-bench] ${label} ${model} ${prompt.id} s${seed}: ${record.error ? `ERROR ${record.error.slice(0, 160)}` : `${record.wallSeconds.toFixed(1)}s ${record.width}x${record.height} ${record.steps} steps${record.flags?.length ? ` flags=${record.flags.join(',')}` : ''}`}`,
-        );
       }
     }
   } finally {
@@ -252,25 +255,135 @@ async function runModel(opts: {
     await shutdownTrialDaemon(daemon);
     await watch.end();
   }
-  const lines = (await readFile(logPath, 'utf8').catch(() => '')).split('\n');
-  const engine = parseSdServerLog(lines.filter((l) => l.includes('[sd-server]')));
-  const ok = images.filter((i) => !i.error);
-  const flagged: Record<string, number> = {};
-  for (const i of ok) for (const f of i.flags ?? []) flagged[f] = (flagged[f] ?? 0) + 1;
-  const record: ModelRecord = {
-    label,
+  const lines = (await readFile(logPath, 'utf8').catch(() => ''))
+    .split('\n')
+    .filter((l) => l.includes('[sd-server]'));
+  const engine = parseSdServerLog(lines);
+  const engineLoads = lines.filter((l) => l.includes('total params memory size')).length;
+  // One engine serves every arm, so they share its memory and log; the cold
+  // start lands on the first arm.
+  const records = arms.map((arm): ModelRecord => {
+    const own = images.filter((i) => i.label === arm.label);
+    const ok = own.filter((i) => !i.error);
+    const flagged: Record<string, number> = {};
+    for (const i of ok) for (const f of i.flags ?? []) flagged[f] = (flagged[f] ?? 0) + 1;
+    return {
+      label: arm.label,
+      model,
+      ...(fit ? { fit } : {}),
+      images: ok.length,
+      failures: own.length - ok.length,
+      ...(ok[0] ? { coldSeconds: ok[0].wallSeconds } : {}),
+      ...(ok.length > 1 ? { steadySeconds: median(ok.slice(1).map((i) => i.wallSeconds)) } : {}),
+      memory,
+      engine,
+      engineLoads,
+      flagged,
+    };
+  });
+  for (const record of records) {
+    await writeFile(
+      join(outDir, record.label, model, 'model.json'),
+      JSON.stringify(record, null, 2),
+    );
+  }
+  return { models: records, images };
+}
+
+type TrialClient = Awaited<ReturnType<typeof spawnTrialDaemon>>['client'];
+
+async function renderOne(
+  client: TrialClient,
+  opts: Parameters<typeof runModel>[0],
+  arm: BenchArm,
+  prompt: ImageBenchPrompt,
+  seed: number,
+  watch: MemoryWatch,
+): Promise<ImageRecord> {
+  const { model, outDir } = opts;
+  const started = performance.now();
+  const record: ImageRecord = {
+    label: arm.label,
     model,
-    ...(fit ? { fit } : {}),
-    images: ok.length,
-    failures: images.length - ok.length,
-    ...(ok[0] ? { coldSeconds: ok[0].wallSeconds } : {}),
-    ...(ok.length > 1 ? { steadySeconds: median(ok.slice(1).map((i) => i.wallSeconds)) } : {}),
-    memory,
-    engine,
-    flagged,
+    prompt: prompt.id,
+    category: prompt.category,
+    seed,
+    wallSeconds: 0,
   };
-  await writeFile(join(modelDir, 'model.json'), JSON.stringify(record, null, 2));
-  return { model: record, images };
+  try {
+    const res = await client.generateImage({
+      prompt: opts.rewrites?.[prompt.id] ?? prompt.prompt,
+      model,
+      seed,
+      ...(opts.size ? opts.size : {}),
+      ...(opts.aspectRatio ? { aspectRatio: opts.aspectRatio } : {}),
+      ...(opts.quality ? { quality: opts.quality } : {}),
+      ...(opts.steps ? { steps: opts.steps } : {}),
+      ...(arm.fast !== undefined ? { fast: arm.fast } : {}),
+      ...(arm.style ? { style: arm.style } : {}),
+      inline: true,
+    });
+    record.wallSeconds = (performance.now() - started) / 1000;
+    record.steps = res.meta.steps;
+    record.width = res.meta.widthPx;
+    record.height = res.meta.heightPx;
+    if (res.meta.loras?.length) record.loras = res.meta.loras.map((l) => l.id);
+    if (res.meta.settingsNotes?.length) record.settingsNotes = res.meta.settingsNotes;
+    if (!res.b64Png) throw new Error('response carried no image bytes');
+    const png = Buffer.from(res.b64Png, 'base64');
+    const file = join(outDir, arm.label, model, `${prompt.id}-s${seed}.png`);
+    await writeFile(file, png);
+    record.file = relative(outDir, file);
+    record.stats = imageStats(decodeImage(png));
+    record.flags = sanityFlags(record.stats, {
+      width: res.meta.widthPx,
+      height: res.meta.heightPx,
+    });
+  } catch (err) {
+    record.wallSeconds = (performance.now() - started) / 1000;
+    record.error = err instanceof Error ? err.message : String(err);
+  }
+  record.peakSoFarBytes = (await watch.peak()).systemDropBytes ?? undefined;
+  console.log(
+    `[image-bench] ${arm.label} ${model} ${prompt.id} s${seed}: ${record.error ? `ERROR ${record.error.slice(0, 160)}` : `${record.wallSeconds.toFixed(1)}s ${record.width}x${record.height} ${record.steps} steps${record.loras ? ` loras=${record.loras.join(',')}` : ''}${record.flags?.length ? ` flags=${record.flags.join(',')}` : ''}`}`,
+  );
+  return record;
+}
+
+/**
+ * The LoRAs the arms use: the model's fast mode for a fast arm, and each
+ * named style. Linked from the cache, or installed through the trial daemon
+ * and kept in the cache for the next run.
+ */
+async function installArmLoras(
+  client: TrialClient,
+  cache: string,
+  home: string,
+  model: string,
+  arms: BenchArm[],
+): Promise<void> {
+  const ids = new Set(arms.flatMap((a) => (a.style ? [a.style] : [])));
+  if (arms.some((a) => a.fast)) {
+    const { items } = await client.listCatalogItems('image-lora');
+    const speed = items.find(
+      (i) =>
+        i.manifest.kind === 'image-lora' &&
+        i.manifest.purpose === 'speed' &&
+        i.manifest.baseModels.includes(model),
+    );
+    if (!speed) throw new Error(`the catalog has no fast mode for ${model}`);
+    ids.add(speed.manifest.id);
+  }
+  for (const loraId of ids) {
+    if (await linkLoraIntoTrial({ cacheRoot: cache, trialHome: home, loraId })) continue;
+    console.log(`[image-bench] installing ${loraId}`);
+    let failure: string | undefined;
+    await client.pullImageLora(loraId, (event) => {
+      if (event.type === 'error') failure = event.error;
+    });
+    if (failure) throw new Error(`${loraId} did not install: ${failure}`);
+    await cacheLoraFromTrial({ cacheRoot: cache, trialHome: home, loraId });
+  }
 }
 
 const gb = (bytes: number | null | undefined) =>
@@ -304,6 +417,7 @@ function reportMarkdown(models: ModelRecord[], images: ImageRecord[]): string {
       est && measured ? (measured / est).toFixed(2) : '-',
       m.fit?.verdict ?? '-',
       m.engine.paramsMiB !== undefined ? (m.engine.paramsMiB / 1024).toFixed(1) : '-',
+      m.engineLoads ?? '-',
       top1 === undefined ? '-' : `${Math.round(top1 * 100)}%`,
       cos === undefined ? '-' : cos.toFixed(3),
       judgeScore === undefined ? '-' : judgeScore.toFixed(1),
@@ -316,8 +430,8 @@ function reportMarkdown(models: ModelRecord[], images: ImageRecord[]): string {
     ].join(' | ');
   });
   return [
-    '| arm | model | ok | cold s | steady s/img | peak GB | estimate GB | peak/est | fit | params GB | align top-1 | align cos | judge 1-5 | text right | flags |',
-    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
+    '| arm | model | ok | cold s | steady s/img | peak GB | estimate GB | peak/est | fit | params GB | loads | align top-1 | align cos | judge 1-5 | text right | flags |',
+    '|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|',
     ...rows.map((r) => `| ${r} |`),
     '',
   ].join('\n');
@@ -396,6 +510,7 @@ async function main(): Promise<void> {
       ? undefined
       : ImageQualitySchema.parse(String(args.flags.quality));
   const steps = args.flags.steps ? Number(args.flags.steps) : undefined;
+  const arms = list(args.flags.arms);
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
   const outDir = resolve(
     String(args.flags['runs-dir'] ?? join(repoRoot(), 'evals', 'runs', `image-bench-${ts}`)),
@@ -447,6 +562,7 @@ async function main(): Promise<void> {
       const result = await runModel({
         model,
         label,
+        ...(arms.length ? { arms } : {}),
         cache,
         sdBin,
         ...(sdLibDir ? { sdLibDir } : {}),
@@ -459,7 +575,7 @@ async function main(): Promise<void> {
         ...(rewrites ? { rewrites } : {}),
         outDir,
       });
-      allModels.push(result.model);
+      allModels.push(...result.models);
       allImages.push(...result.images);
       await rm(join(outDir, 'homes', `${label}-${model}`), { recursive: true, force: true });
     }

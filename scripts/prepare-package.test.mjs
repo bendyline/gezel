@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { CORE_VERSION_SOURCE, readCoreVersionStamp } from './core-version-stamp.mjs';
 import { clearReleasePackageState, readReleasePackageState } from './release-package-state.mjs';
 
 const execFileP = promisify(execFile);
@@ -34,6 +35,10 @@ async function fixture() {
   await copyFile(join(here, 'calver.mjs'), join(root, 'scripts', 'calver.mjs'));
   await copyFile(join(here, 'pnpm-cli.mjs'), join(root, 'scripts', 'pnpm-cli.mjs'));
   await copyFile(join(here, 'core-built-entry.mjs'), join(root, 'scripts', 'core-built-entry.mjs'));
+  await copyFile(
+    join(here, 'core-version-stamp.mjs'),
+    join(root, 'scripts', 'core-version-stamp.mjs'),
+  );
   await writeFile(join(root, 'packages', 'core', 'src', 'browser.ts'), DECLARATION);
   await writeFile(
     join(root, 'packages', 'core', 'package.json'),
@@ -219,6 +224,15 @@ test('dry run reports both stamps without writing or rebuilding', async () => {
   }
 });
 
+// Stands in for core's tsup build, which takes the stamp from the environment.
+const STAMPED_BUILD_PREAMBLE = [
+  "import { mkdirSync, writeFileSync } from 'node:fs';",
+  "import { resolve } from 'node:path';",
+  'const version = process.env.GEZEL_RELEASE_VERSION;',
+  'const compat = process.env.GEZEL_RELEASE_CONTENT_COMPAT;',
+  "mkdirSync(resolve('packages/core/dist'), { recursive: true });",
+];
+
 test('core preparation rebuilds through the cross-platform pnpm JavaScript launcher', async () => {
   const root = await fixture();
   const pnpmCli = join(root, 'pnpm.mjs');
@@ -226,12 +240,7 @@ test('core preparation rebuilds through the cross-platform pnpm JavaScript launc
     await writeFile(
       pnpmCli,
       [
-        "import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';",
-        "import { resolve } from 'node:path';",
-        "const source = readFileSync(resolve('packages/core/src/browser.ts'), 'utf8');",
-        "const version = source.match(/GEZEL_VERSION = '([^']+)'/)?.[1];",
-        "const compat = source.match(/GEZEL_CONTENT_COMPAT = '([^']+)'/)?.[1];",
-        "mkdirSync(resolve('packages/core/dist'), { recursive: true });",
+        ...STAMPED_BUILD_PREAMBLE,
         'writeFileSync(resolve(\'packages/core/dist/index.js\'), `var GEZEL_VERSION = "${version}";\\nvar GEZEL_CONTENT_COMPAT = "${compat}";\\n`);',
       ].join('\n'),
     );
@@ -239,10 +248,8 @@ test('core preparation rebuilds through the cross-platform pnpm JavaScript launc
       GEZEL_PNPM_CLI: pnpmCli,
     });
     assert.match(stdout, /core dist carries 1\.2\.3/);
-    assert.match(
-      await readFile(join(root, 'packages/core/src/browser.ts'), 'utf8'),
-      /GEZEL_VERSION = '1\.2\.3'/,
-    );
+    // The stamp reaches the build only: a commit made meanwhile must not carry it.
+    assert.equal(await readFile(join(root, 'packages/core/src/browser.ts'), 'utf8'), DECLARATION);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -257,12 +264,7 @@ test('core preparation finds the stamp in a chunk the split build imports', asyn
     await writeFile(
       pnpmCli,
       [
-        "import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';",
-        "import { resolve } from 'node:path';",
-        "const source = readFileSync(resolve('packages/core/src/browser.ts'), 'utf8');",
-        "const version = source.match(/GEZEL_VERSION = '([^']+)'/)?.[1];",
-        "const compat = source.match(/GEZEL_CONTENT_COMPAT = '([^']+)'/)?.[1];",
-        "mkdirSync(resolve('packages/core/dist'), { recursive: true });",
+        ...STAMPED_BUILD_PREAMBLE,
         "writeFileSync(resolve('packages/core/dist/index.js'), 'import { a } from \"./chunk-A.js\";\\nexport { a };\\n');",
         "writeFileSync(resolve('packages/core/dist/chunk-A.js'), 'import { GEZEL_VERSION as a } from \"./chunk-B.js\";\\nexport { a };\\n');",
         'writeFileSync(resolve(\'packages/core/dist/chunk-B.js\'), `var GEZEL_VERSION = "${version}";\\nvar GEZEL_CONTENT_COMPAT = "${compat}";\\nexport { GEZEL_VERSION };\\n`);',
@@ -318,11 +320,10 @@ test('the release config normalizes package state before committing without crea
 // The root manifest is the baseline, not a literal: stamp-version.mjs writes it
 // together with these constants, and the Electron release runs this suite on
 // the stamped tree. A checkout reads 0.0.0 in both places, so a source-only stamp
-// leaked into a commit (prepare-package never touches the root manifest) still fails.
+// that reached a commit (f2126241 carried one from a mid-rehearsal commit,
+// before prepare-package stopped writing the source) still fails.
 test('the real core source keeps release stamps in step with the root manifest', async () => {
   const { version } = JSON.parse(await readFile(join(here, '..', 'package.json'), 'utf8'));
-  const source = await readFile(join(here, '..', 'packages', 'core', 'src', 'browser.ts'), 'utf8');
-  const declared = (name) => source.match(new RegExp(`export const ${name} = '([^']*)';`))?.[1];
-  assert.equal(declared('GEZEL_VERSION'), version);
-  assert.equal(declared('GEZEL_CONTENT_COMPAT'), version);
+  const source = await readFile(join(here, '..', CORE_VERSION_SOURCE), 'utf8');
+  assert.deepEqual(readCoreVersionStamp(source), { version, contentCompat: version });
 });

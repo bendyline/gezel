@@ -117,7 +117,8 @@
   /* Shadow the elevated main pane casts onto the recessed navigation rail
      along their shared seam. Darker in dark mode where a faint black
      gradient would vanish into the near-black panel. */
-  --sidebar-seam-shadow: rgba(0, 0, 0, 0.1);
+  --sidebar-seam-shadow: rgba(0, 0, 0, 0.08);
+  --sidebar-pane-shadow: rgba(0, 0, 0, 0.12);
   /* The titlebar sits above the main project pane. Keep this shadow separate
      from the sidebar seam so the top edge can carry more depth without
      making the vertical divider feel heavy. */
@@ -146,6 +147,30 @@
      outside the renderer (titlebar-color.test.ts). */
   --titlebar: var(--gezel-sage);
   --titlebar-ink: var(--gezel-cream-ink);
+  /* Titlebar keys and wells. Every control on the bar stands one height, so
+     pills, keys, trays and the search well share a single silhouette line.
+     Faces sit a few percent darker than the bar and take their lift from a
+     cream top highlight: a lighter face would drop the cream labels below
+     4.5:1 on the brand sage. The bar is sage in every theme, so these are
+     theme-independent. */
+  --titlebar-control-h: 28px;
+  --titlebar-key-bg: linear-gradient(
+    to bottom,
+    color-mix(in srgb, black 2%, var(--titlebar)),
+    color-mix(in srgb, black 11%, var(--titlebar))
+  );
+  --titlebar-key-bg-hover: linear-gradient(
+    to bottom,
+    color-mix(in srgb, black 7%, var(--titlebar)),
+    color-mix(in srgb, black 16%, var(--titlebar))
+  );
+  --titlebar-key-border: color-mix(in srgb, black 34%, var(--titlebar));
+  --titlebar-key-shadow: inset 0 1px 0 rgba(243, 237, 224, 0.17), 0 1px 0 rgba(0, 0, 0, 0.2);
+  --titlebar-key-pressed-bg: color-mix(in srgb, black 24%, var(--titlebar));
+  --titlebar-key-pressed-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.38);
+  --titlebar-well-bg: color-mix(in srgb, black 24%, var(--titlebar));
+  --titlebar-well-border: color-mix(in srgb, black 42%, var(--titlebar));
+  --titlebar-well-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.34), 0 1px 0 rgba(243, 237, 224, 0.14);
   /* Fill colour the home-tab gezel logotype flips to when active.
      Light mode: dark forest green that complements the sage titlebar
      and contrasts strongly with the cream-tan tab background. Dark
@@ -285,7 +310,8 @@
     --chat-handoff-bg: rgba(176, 114, 76, 0.08);
     --chat-handoff-border: rgba(176, 114, 76, 0.45);
     --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
-    --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
+    --sidebar-seam-shadow: rgba(0, 0, 0, 0.16);
+    --sidebar-pane-shadow: rgba(0, 0, 0, 0.24);
     --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
     --sage-ink: #a9c294;
     --sage-soft: #3a4634;
@@ -374,7 +400,8 @@
   --chat-handoff-bg: rgba(176, 114, 76, 0.08);
   --chat-handoff-border: rgba(176, 114, 76, 0.45);
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
-  --sidebar-seam-shadow: rgba(0, 0, 0, 0.28);
+  --sidebar-seam-shadow: rgba(0, 0, 0, 0.16);
+  --sidebar-pane-shadow: rgba(0, 0, 0, 0.24);
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
   --sage-ink: #a9c294;
   --sage-soft: #3a4634;

@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs';
 import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import { transformersGraphOptions } from '@bendyline/gezel-knowledge';
+import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { PipelineLoadError } from '../memory/embed-core.js';
 
 /**
@@ -81,6 +82,7 @@ const MAX_LOADED = 2;
 const loaded = new Map<string, Promise<LoadedRelevanceModel>>();
 
 async function importTransformers(): Promise<RelevanceTransformers> {
+  disableOnnxRuntimeTelemetry();
   return (await import('@huggingface/transformers')) as unknown as RelevanceTransformers;
 }
 

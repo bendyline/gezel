@@ -98,7 +98,7 @@ export const ContractGroundingSchema = z
   .strict();
 export type ContractGrounding = z.infer<typeof ContractGroundingSchema>;
 
-export const CraftbookContractSchema = z
+const CraftbookContractObject = z
   .object({
     /** The final goal and the bar it must clear, in one or two sentences. */
     goal: z.string().min(1).max(400),
@@ -138,6 +138,15 @@ export const CraftbookContractSchema = z
       });
     }
   });
+/**
+ * Named so the declarations that embed a contract (craftbooks, their
+ * templates and docs, every task and its craftbook snapshot) print this name
+ * rather than the whole shape again. Named through the object for the reason
+ * `GezelConfigZodSchema` (./api.ts) is.
+ */
+export interface CraftbookContractZodSchema
+  extends z.ZodObject<(typeof CraftbookContractObject)['shape']> {}
+export const CraftbookContractSchema: CraftbookContractZodSchema = CraftbookContractObject;
 export type CraftbookContract = z.infer<typeof CraftbookContractSchema>;
 
 export function criterionEnforce(

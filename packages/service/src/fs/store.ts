@@ -101,6 +101,7 @@ import {
   type TimelineMessage,
   type ToolsetConfig,
   type ToolsetsScope,
+  compareSemver,
   createLogger,
   decodeProjectGezelId,
   deriveThreadTitleFromMessages,
@@ -3342,6 +3343,8 @@ export class Store {
        * view in noise.
        */
       outputPaneVisible?: boolean | null;
+      /** Output-page expansion; `null` resets it. Also view state, without history. */
+      outputPaneMaximized?: boolean | null;
       /** The Views tab's view; `null` resets it. View state, like the above. */
       selectedView?: string | null;
       /** Project shape — `solo` (a single-gezel job/game) vs `crew`. */
@@ -3499,6 +3502,9 @@ export class Store {
         : patch.outputPaneVisible !== undefined
           ? { outputPaneVisible: patch.outputPaneVisible }
           : {}),
+      ...(patch.outputPaneMaximized !== undefined
+        ? { outputPaneMaximized: patch.outputPaneMaximized ?? undefined }
+        : {}),
       ...(patch.selectedView !== undefined
         ? { selectedView: patch.selectedView ?? undefined }
         : {}),
@@ -5856,8 +5862,8 @@ export class Store {
     const summaries: ChatSessionSummary[] = [];
     for (const gezelId of gezelIds) {
       const dir = gezelSessionsDir(this.home, gezelId, this.external);
-      const files = await safeReaddir(dir);
-      for (const file of files) {
+      const files = await readdirIfReadable(dir);
+      for (const file of files ?? []) {
         if (!file.endsWith('.json')) continue;
         const scanned = await this.scanSessionFile(join(dir, file), `${gezelId}/${file}`);
         if (!scanned) continue;
@@ -5865,7 +5871,9 @@ export class Store {
         if (opts?.projectId && scanned.summary.projectId !== opts.projectId) continue;
         summaries.push({ ...scanned.summary });
       }
-      this.taskSessions.markComplete(gezelId);
+      // A listing that failed (a busy or locked folder) leaves the gezel to be
+      // listed in full again, rather than its task sessions looking absent.
+      if (files) this.taskSessions.markComplete(gezelId);
     }
     return sortSessionSummaries(summaries);
   }
@@ -5891,8 +5899,14 @@ export class Store {
       if (!wanted.has(gezelId)) continue;
       const path = gezelSessionFile(this.home, gezelId, sessionId, this.external);
       const scanned = await this.scanSessionFile(path, `${gezelId}/${sessionId}.json`);
-      this.taskSessions.note(gezelId, sessionId, scanned?.summary.taskRef);
-      if (!scanned || scanned.summary.taskRef !== taskRef) continue;
+      if (!scanned) {
+        // Only a session that is gone leaves the index. One that could not be
+        // read right now would otherwise be replaced by a new empty thread.
+        if (await isMissingFile(path)) this.taskSessions.forget(gezelId, sessionId);
+        continue;
+      }
+      this.taskSessions.note(gezelId, sessionId, scanned.summary.taskRef);
+      if (scanned.summary.taskRef !== taskRef) continue;
       if (opts.projectId && scanned.summary.projectId !== opts.projectId) continue;
       summaries.push({ ...scanned.summary });
     }
@@ -5933,6 +5947,8 @@ export class Store {
     limit: number;
     before?: string;
     includeArchived?: boolean;
+    /** Include internal prompts for the debug transcript. */
+    includeHidden?: boolean;
     /**
      * Leave out scheduled runs' sessions (`isScheduledRunSession`) and every
      * session opened beneath one. Home's conversation passes this.
@@ -6123,7 +6139,7 @@ export class Store {
       session.messages.filter(
         (message) =>
           (message.role === 'user' || message.role === 'assistant') &&
-          !message.hidden &&
+          (!message.hidden || opts.includeHidden) &&
           (!before || message.at < before),
       ),
     );
@@ -6196,10 +6212,7 @@ export class Store {
       for (const m of s.messages) {
         if (!pageMessages.has(m)) continue;
         if (m.role !== 'user' && m.role !== 'assistant') continue;
-        // Hidden facilitation seeds (e.g. a project-type page reaction with
-        // `hideSeed`) stay in the session file for the model but never
-        // surface a transcript bubble.
-        if (m.hidden) continue;
+        if (m.hidden && !opts.includeHidden) continue;
         if (before && m.at >= before) continue;
         // Assistant-only: either forward the persisted list or compute one
         // on the fly from the project's current file inventory. A message
@@ -6254,6 +6267,7 @@ export class Store {
           ...(m.from ? { from: m.from } : {}),
           ...(m.nudge ? { nudge: true } : {}),
           ...(m.draftId ? { draftId: m.draftId } : {}),
+          ...(m.hidden ? { hidden: true } : {}),
           ...(m.origin === 'system' || (legacySeedAt !== undefined && m.at === legacySeedAt)
             ? { origin: 'system' as const }
             : {}),
@@ -7132,6 +7146,26 @@ export class Store {
     return this.bundledToolsets.some((entry) => entry.toolsetId === id);
   }
 
+  /**
+   * Whether the copy this build ships replaces `version` of `id` installed
+   * anywhere else: same toolset, at the shipped version or older. Before
+   * DocBlocks shipped with Gezel, launching a document craftbook installed it
+   * into the project, and from 1.26300 the same launch still downloaded an
+   * older copy beside the shipped one. That copy joined every session in the
+   * project, so one PowerPoint request put ~17k tokens of tool schemas back
+   * into each Meester turn (1.26300.100 audit). A version that does not parse
+   * is never replaced.
+   */
+  bundledToolsetSupersedes(id: string, version: string): boolean {
+    const bundled = this.bundledToolsets.find((entry) => entry.toolsetId === id);
+    if (!bundled) return false;
+    try {
+      return compareSemver(version, bundled.version) <= 0;
+    } catch {
+      return false;
+    }
+  }
+
   async listInstalledToolsets(scope: ToolsetsScope): Promise<InstalledToolset[]> {
     const stored = await this.listStoredToolsets(scope);
     if (scope.kind !== 'system') return stored;
@@ -7299,6 +7333,29 @@ async function safeReaddir(dir: string): Promise<string[]> {
   } catch {
     return [];
   }
+}
+
+/** A directory's entries: [] when it does not exist, null when it could not be read. */
+async function readdirIfReadable(dir: string): Promise<string[] | null> {
+  try {
+    return await readdir(dir);
+  } catch (err) {
+    return isMissingError(err) ? [] : null;
+  }
+}
+
+async function isMissingFile(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return false;
+  } catch (err) {
+    return isMissingError(err);
+  }
+}
+
+function isMissingError(err: unknown): boolean {
+  const code = (err as NodeJS.ErrnoException).code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
 }
 
 /**

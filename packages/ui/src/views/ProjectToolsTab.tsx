@@ -121,8 +121,8 @@ export function ProjectToolsTab({ project, onProjectChange }: ProjectToolsTabPro
   return (
     <div className="project-tools">
       <p className="project-tools-lede">
-        The packages and scripts your gezellen can use in this project. A gezel asks before it
-        installs a package or runs a script for the first time, and your answer is remembered here.
+        The packages and scripts your crew can use in this project. A gezel asks before it installs
+        a package or runs a script for the first time, and your answer is remembered here.
       </p>
 
       <section className="project-tools-section" aria-labelledby="project-tools-packages">

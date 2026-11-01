@@ -140,6 +140,23 @@ export function ImageEngineSettings({ onModelsChanged }: Props) {
     [config?.defaultImageModel],
   );
 
+  // The config write merges top-level keys only, so the whole map goes back.
+  const onFastModeChange = useCallback(
+    async (id: string, on: boolean) => {
+      setStatus('saving…');
+      try {
+        const updated = await api.updateConfig({
+          imageFastMode: { ...config?.imageFastMode, [id]: on },
+        });
+        setConfig(updated);
+        setStatus(null);
+      } catch (err) {
+        setStatus(`save failed: ${(err as Error).message}`);
+      }
+    },
+    [config?.imageFastMode],
+  );
+
   const onConfirmationChange = useCallback(async (mode: 'ask' | 'always-allow') => {
     setStatus('saving…');
     try {
@@ -230,6 +247,8 @@ export function ImageEngineSettings({ onModelsChanged }: Props) {
               ? { configuredDefaultModelId: config.defaultImageModel['sd-cpp'] }
               : {})}
             onSetActiveModel={onActiveModelChange}
+            {...(config?.imageFastMode ? { fastMode: config.imageFastMode } : {})}
+            onFastModeChange={onFastModeChange}
             onModelsChanged={() => {
               setRefreshTick((n) => n + 1);
               onModelsChanged?.();

@@ -3,7 +3,7 @@ import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import { ProviderLifecycle } from '../provider-lifecycle.js';
 import { createLocalImageProvider } from './local-factory.js';
-import { ImageModelPullRegistry } from './pull-registry.js';
+import { ImageModelPullRegistry, imageLoraPullResolver } from './pull-registry.js';
 import type { ImageProvider } from './types.js';
 
 export interface LocalImageEngineOptions {
@@ -24,14 +24,19 @@ export interface LocalImageEngineOptions {
  */
 export class LocalImageEngine {
   readonly pulls: ImageModelPullRegistry;
+  readonly loraPulls: ImageModelPullRegistry;
   // Only promise-returning operations can be tracked; a pull is an async
   // iterable and is cancelled through its own registry instead.
   private readonly lifecycle = new ProviderLifecycle<ImageProvider>(
-    new Set(['generate', 'deleteModel']),
+    new Set(['generate', 'deleteModel', 'deleteLora']),
   );
 
   constructor(private readonly opts: LocalImageEngineOptions) {
     this.pulls = new ImageModelPullRegistry({ imageProvider: this, catalog: opts.catalog });
+    this.loraPulls = new ImageModelPullRegistry({
+      resolve: imageLoraPullResolver(this, opts.catalog),
+      kind: 'image-lora',
+    });
   }
 
   /** Whether this host can render at all: an engine binary, a server URL, or the mock. */
@@ -63,6 +68,7 @@ export class LocalImageEngine {
 
   async shutdown(): Promise<void> {
     this.pulls.clear();
+    this.loraPulls.clear();
     await this.lifecycle.reset();
   }
 }

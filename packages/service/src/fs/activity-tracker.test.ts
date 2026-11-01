@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { type MockInstance, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatEventBus } from '../chat/events.js';
 import { HistoryManager } from '../history/manager.js';
 import { ActivityTracker } from './activity-tracker.js';
@@ -38,14 +38,19 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
   return { promise, resolve };
 }
 
-async function waitForPersistedActivity(projectId: string, expectedAt?: string) {
-  const deadline = Date.now() + 1_000;
-  do {
-    const activity = await store.readProjectActivity(projectId);
-    if (activity && (!expectedAt || activity.lastActivityAt === expectedAt)) return activity;
-    await settle();
-  } while (Date.now() < deadline);
-  return store.readProjectActivity(projectId);
+/**
+ * Resolves once the tracker has made `count` activity writes and each has
+ * finished, rethrowing a write's own error. Tests wait on the writes instead
+ * of polling activity.json: Windows refuses a rename over a file a reader
+ * holds open (EPERM), and in a loaded full-suite run the poll outlasted the
+ * writer's rename retries, so the stamp under test was never written.
+ */
+async function writesSettled(
+  writes: MockInstance<Store['writeProjectActivity']>,
+  count: number,
+): Promise<void> {
+  await vi.waitFor(() => expect(writes).toHaveBeenCalledTimes(count), { timeout: 10_000 });
+  await Promise.all(writes.mock.results.map((result) => result.value));
 }
 
 describe('ActivityTracker', () => {
@@ -67,8 +72,10 @@ describe('ActivityTracker', () => {
       // Let the second stamp reach the already-running writer before release.
       await new Promise<void>((resolve) => setImmediate(resolve));
       release.resolve();
-      const latestAt = new Date(t0 + 6 * 60_000).toISOString();
-      expect((await waitForPersistedActivity(project.id, latestAt))?.lastActivityAt).toBe(latestAt);
+      await writesSettled(spy, 2);
+      expect((await store.readProjectActivity(project.id))?.lastActivityAt).toBe(
+        new Date(t0 + 6 * 60_000).toISOString(),
+      );
     } finally {
       release.resolve();
       await tracker.stop();
@@ -119,13 +126,15 @@ describe('ActivityTracker', () => {
 
   it('stamps activity from project-scoped history events', async () => {
     const project = await store.createProject({ name: 'Vogelhuis' });
+    const writes = vi.spyOn(store, 'writeProjectActivity');
     tracker.start();
     await history.log({ kind: 'task.created', projectId: project.id, summary: 'Task made' });
     await settle();
     const at = await tracker.lastActivityAt(project.id);
     expect(at).not.toBeNull();
     // First stamp persists immediately (nothing on disk yet).
-    expect(await waitForPersistedActivity(project.id)).not.toBeNull();
+    await writesSettled(writes, 1);
+    expect(await store.readProjectActivity(project.id)).not.toBeNull();
   });
 
   it('stamps activity from chat event envelopes', async () => {
@@ -158,11 +167,13 @@ describe('ActivityTracker', () => {
 
   it('debounces disk writes until the stamp moves past the threshold', async () => {
     const project = await store.createProject({ name: 'Zaag' });
+    const writes = vi.spyOn(store, 'writeProjectActivity');
     const t0 = Date.parse('2026-07-18T10:00:00Z');
-    const firstAt = new Date(t0).toISOString();
     tracker.stamp(project.id, t0);
-    const first = await waitForPersistedActivity(project.id, firstAt);
-    expect(first?.lastActivityAt).toBe(firstAt);
+    await writesSettled(writes, 1);
+    expect((await store.readProjectActivity(project.id))?.lastActivityAt).toBe(
+      new Date(t0).toISOString(),
+    );
 
     // Two minutes later — in memory only, disk unchanged.
     tracker.stamp(project.id, t0 + 2 * 60_000);
@@ -174,8 +185,10 @@ describe('ActivityTracker', () => {
 
     // Past the 5-minute threshold — persisted.
     tracker.stamp(project.id, t0 + 6 * 60_000);
-    const latestAt = new Date(t0 + 6 * 60_000).toISOString();
-    expect((await waitForPersistedActivity(project.id, latestAt))?.lastActivityAt).toBe(latestAt);
+    await writesSettled(writes, 2);
+    expect((await store.readProjectActivity(project.id))?.lastActivityAt).toBe(
+      new Date(t0 + 6 * 60_000).toISOString(),
+    );
   });
 
   it('flushes pending stamps on stop', async () => {

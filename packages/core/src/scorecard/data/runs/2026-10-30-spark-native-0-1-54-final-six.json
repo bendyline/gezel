@@ -1,0 +1,205 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-10-30-spark-native-0-1-54-final-six",
+      "provenance": {
+        "startedAt": "2026-10-30T14:37:12.781Z",
+        "device": {
+          "label": "Windows ARM64 · NVIDIA RTX Spark N1X",
+          "platform": "win32",
+          "arch": "arm64",
+          "memoryGb": 23,
+          "osRelease": "win32 10.0.28000",
+          "cpuModel": "NVIDIA RTX Spark N1X (6144-core GPU, 20-core CPU)",
+          "gpuModel": "NVIDIA RTX Spark N1X (6144-core Blackwell RTX GPU)"
+        },
+        "harnessCommit": "22fec99111a5",
+        "sourceHash": "10a41de112c12aa33f12715ea0e1f30666cce2a8bf657064944820ed9f92b2e4",
+        "serviceBuildHash": "87d8d6ab0713469e349a095576806258d0dcc4e87dafda71902958971b63cc1a",
+        "catalogHash": "2f12c2abbb9c4b216cda840c89d5683e7798b35e27fd683ea1f9bd864aa93e19",
+        "gildeVersion": "0.3.1",
+        "count": 3,
+        "judgeModelId": "codex-inline/current-session",
+        "engineBuilds": {
+          "llama-cpp": "Gezel native 0.1.54 · CUDA 13.4 · 620d2225cc436ab0b001e3200e590e3b286ef9ab"
+        }
+      },
+      "scope": "subset",
+      "memoryCoverage": "system-only",
+      "suites": [
+        "complex-work"
+      ],
+      "scenariosBySuite": {
+        "complex-work": [
+          "craftbook-author-params",
+          "craftbook-author-gate-script",
+          "craftbook-author-fanout"
+        ]
+      },
+      "note": "Final six previously unstarted complex-work attempts: one automatic pass and five raw failures. The passing Gemma parameter report contained incorrect totals. Gemma fanout never reached inference because model capacity remained reserved; the published table attributes that attempt to infrastructure, preserving the raw verdict in the download. Its model-token usage is unavailable. This segment uses the same verified script-isolation condition as the continuation, with no retries. Part of the 258-attempt Spark comparison across four task sets, three repetitions overall. Segments retain separate rounds and counts because neither execution condition has three repeats of every task. Native 0.1.54, llama.cpp CUDA, generalist auto. Task performance includes all attempts; artifact reviews retain separate rubrics. Source reviews can expose incorrect outputs accepted by automatic checks. The downloadable Spark report preserves all raw fixed scores, 119 artifact judgments, exact axes, exclusions, latency, tokens, RAM/GPU samples and review diagnostics."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "UD-Q4_K_M",
+      "runId": "2026-10-30-spark-native-0-1-54-final-six",
+      "suiteId": "complex-work",
+      "runtime": {
+        "contextTokens": 256000,
+        "peakMemoryMb": 5735,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "final-six",
+          "label": "Separate continuation condition · all attempts",
+          "trials": 3,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 3,
+            "median": 22.86,
+            "min": 15.54,
+            "max": 24.37
+          },
+          "prefillTokensPerSec": {
+            "samples": 3,
+            "median": 518.5,
+            "min": 349.22,
+            "max": 540.48
+          },
+          "durationMs": {
+            "samples": 3,
+            "median": 962406,
+            "min": 840747,
+            "max": 1459730
+          },
+          "peakRssMb": {
+            "samples": 3,
+            "median": 5735,
+            "min": 5492,
+            "max": 8718
+          },
+          "peakGpuMemMb": {
+            "samples": 3,
+            "median": 36033,
+            "min": 36027,
+            "max": 36548
+          },
+          "judgments": [],
+          "noArtifact": 0,
+          "excludedReviews": 0,
+          "notApplicableReviews": 3
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 962406
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 840747
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1459730
+        }
+      ]
+    },
+    {
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "12B",
+      "quantization": "UD-Q4_K_XL",
+      "runId": "2026-10-30-spark-native-0-1-54-final-six",
+      "suiteId": "complex-work",
+      "runtime": {
+        "contextTokens": 262144,
+        "peakMemoryMb": 10184,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "final-six",
+          "label": "Separate continuation condition · all attempts",
+          "trials": 3,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 2,
+            "median": 62.89,
+            "min": 62.05,
+            "max": 63.73
+          },
+          "prefillTokensPerSec": {
+            "samples": 2,
+            "median": 1142.62,
+            "min": 1115.16,
+            "max": 1170.08
+          },
+          "durationMs": {
+            "samples": 3,
+            "median": 788712,
+            "min": 332953,
+            "max": 1584345
+          },
+          "peakRssMb": {
+            "samples": 3,
+            "median": 10184,
+            "min": 1216,
+            "max": 11172
+          },
+          "peakGpuMemMb": {
+            "samples": 3,
+            "median": 13392,
+            "min": 1228,
+            "max": 13687
+          },
+          "judgments": [],
+          "noArtifact": 0,
+          "excludedReviews": 0,
+          "notApplicableReviews": 3
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1584345
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 788712
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 1,
+          "successes": 0,
+          "nonModelFailures": 1,
+          "medianDurationMs": 332953
+        }
+      ]
+    }
+  ]
+}

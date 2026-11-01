@@ -94,6 +94,13 @@ function preview(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 3)}…` : text;
 }
 
+function displayFlags(opts: QueuedSendOptions): Pick<QueuedMessage, 'hidden' | 'origin'> {
+  return {
+    ...(opts.hidden ? { hidden: true } : {}),
+    ...(opts.messageOrigin === 'system' ? { origin: 'system' as const } : {}),
+  };
+}
+
 /**
  * User-initiated sends (no `from`) share a bucket, and so do sends from
  * one sender gezel. A user follow-up never merges into a gezel→gezel
@@ -425,6 +432,7 @@ export class SessionSendQueue<R, O extends QueuedSendOptions = QueuedSendOptions
           preview: preview(e.text, ENTRY_PREVIEW_CHARS),
           enqueuedAt: new Date(e.enqueuedAt).toISOString(),
           ...(e.opts.nudge === true ? { nudge: true } : {}),
+          ...displayFlags(e.opts),
         })),
       });
     }
@@ -438,6 +446,7 @@ export class SessionSendQueue<R, O extends QueuedSendOptions = QueuedSendOptions
       preview: preview(entry.text, ENTRY_PREVIEW_CHARS),
       enqueuedAt: new Date(entry.enqueuedAt).toISOString(),
       nudge: entry.opts.nudge === true,
+      ...displayFlags(entry.opts),
     };
   }
 
@@ -448,6 +457,7 @@ export class SessionSendQueue<R, O extends QueuedSendOptions = QueuedSendOptions
       preview: preview(entry.text, ENTRY_PREVIEW_CHARS),
       enqueuedAt: new Date(entry.enqueuedAt).toISOString(),
       ...(entry.opts.nudge === true ? { nudge: true } : {}),
+      ...displayFlags(entry.opts),
     });
   }
 

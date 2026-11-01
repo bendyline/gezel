@@ -1156,7 +1156,7 @@ export function Sidebar({
         {/* Gezels — name + role + poppetje */}
         <Group
           id="gezels"
-          label="Gezellen"
+          label="Crew"
           area="gezels"
           expanded={groups.gezels}
           collapsed={collapsed}
@@ -1168,7 +1168,7 @@ export function Sidebar({
           addTitle="New gezel"
         >
           {gezels.length === 0 ? (
-            <li className="app-sidebar-empty">No gezellen yet.</li>
+            <li className="app-sidebar-empty">No crew members yet.</li>
           ) : (
             gezels.map((g) => {
               const gezelTab = toRecentTab({ kind: 'gezel', id: g.id });

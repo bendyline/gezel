@@ -202,6 +202,39 @@ describe('explicitlyRequestsSeparateProject', () => {
     );
     expect(explicitlyRequestsSeparateProject('Build it in a separate workspace.')).toBe(true);
   });
+
+  it.each([
+    'Do ALL work inside THIS project — never create another project for this job (do not call start_project).',
+    "Please don't start a new project for this.",
+    'Please don’t start a new project for this.',
+    'I do not want to open a new project for a one-page memo.',
+    'No need for a separate workspace, just fix the title.',
+    'Add it here rather than a new project.',
+    'Without creating a new project, write the release notes.',
+  ])('reads a ruled-out project as no request for one: %s', (text) => {
+    expect(explicitlyRequestsSeparateProject(text)).toBe(false);
+  });
+
+  it.each([
+    'No, put it in a new project.',
+    "I don't care where, just make a new project.",
+    "Don't touch this one; create a new project for the garden plan.",
+    'Make it a new project instead of using this one.',
+    'I want a new project for this.',
+  ])('still hears a project the clause asks for: %s', (text) => {
+    expect(explicitlyRequestsSeparateProject(text)).toBe(true);
+  });
+
+  it('keeps the prelude out of a scoped project when the person rules a new one out', () => {
+    const out = PromptMeesterBuildPrelude.userPromptPrelude!(
+      turnCtx({
+        projectId: 'cli',
+        userText: "Build a space war game here, please don't start a new project for it.",
+      }),
+      undefined,
+    );
+    expect(out).toBeNull();
+  });
 });
 
 describe('looksLikeNewBuildRequest — positive matches', () => {

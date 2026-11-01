@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "publicationId": "2026-10-27-windows-gemma4-12b-native-0-1-54",
+  "regenerate": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-gemma4-native-054-scorecard.mjs",
+  "check": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-gemma4-native-054-scorecard.mjs --check",
+  "files": [
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-27-windows-gemma4-12b-native-0-1-54.json",
+      "bytes": 22145,
+      "sha256": "fbc240121bf41b62a3c86b16d1d60f840f459e2b538e39af69e024a64e279dcf"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-windows-gemma4-12b-native-0-1-54/scorecard.json",
+      "bytes": 22145,
+      "sha256": "fbc240121bf41b62a3c86b16d1d60f840f459e2b538e39af69e024a64e279dcf"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-windows-gemma4-12b-native-0-1-54/scorecard-details.json",
+      "bytes": 1737103,
+      "sha256": "405fe5be4dd4a7b8217158882bd25eb84db0f36d46a05eb2d9aec2f0e3449260"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-windows-gemma4-12b-native-0-1-54/verification.json",
+      "bytes": 498,
+      "sha256": "533b6995d63d87568458c62449012854ec48b859bc18b6ea9a9d3e7e16129e24"
+    }
+  ]
+}
