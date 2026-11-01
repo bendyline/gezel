@@ -439,7 +439,7 @@ export const QuestionIntentSchema = z.discriminatedUnion('kind', [
 ]);
 export type QuestionIntent = z.infer<typeof QuestionIntentSchema>;
 
-export const QuestionSchema = z.object({
+const QuestionObject = z.object({
   id: z.string(),
   projectId: z.string(),
   gezelId: z.string(),
@@ -488,4 +488,12 @@ export const QuestionSchema = z.object({
   /** Set once the user has answered (or declined). */
   answer: QuestionAnswerSchema.optional(),
 });
+/**
+ * Named so the declarations that embed a question (the chat events, their
+ * envelope, the question list response) print this name rather than the whole
+ * shape again, about 5 KB each. Named through the object for the reason
+ * `GezelConfigZodSchema` (./api.ts) is.
+ */
+export interface QuestionZodSchema extends z.ZodObject<(typeof QuestionObject)['shape']> {}
+export const QuestionSchema: QuestionZodSchema = QuestionObject;
 export type Question = z.infer<typeof QuestionSchema>;

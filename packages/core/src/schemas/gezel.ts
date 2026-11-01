@@ -1132,7 +1132,7 @@ export type ChatTurnErrorDetail = z.infer<typeof ChatTurnErrorDetailSchema>;
  * `delta` messages land while the model is still streaming; `complete`
  * marks the final assistant message; `done` closes the stream.
  */
-export const ChatEventSchema = z.discriminatedUnion('type', [
+const ChatEventVariants = [
   z.object({ type: z.literal('delta'), content: z.string() }),
   /**
    * Live private-reasoning tokens (ds4's think phase), streamed on their
@@ -1855,7 +1855,14 @@ export const ChatEventSchema = z.discriminatedUnion('type', [
     type: z.literal('lookouts_updated'),
     projectId: z.string(),
   }),
-]);
+] as const;
+/**
+ * Named so {@link ChatEventEnvelopeSchema} prints this name rather than every
+ * event again, about 28 KB of the declarations.
+ */
+export interface ChatEventZodSchema
+  extends z.ZodDiscriminatedUnion<typeof ChatEventVariants, 'type'> {}
+export const ChatEventSchema: ChatEventZodSchema = z.discriminatedUnion('type', ChatEventVariants);
 export type ChatEvent = z.infer<typeof ChatEventSchema>;
 
 /**

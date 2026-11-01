@@ -73,8 +73,11 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // packed. Name a large schema through its `z.object` value, not a bare
   // shape const: a shape const carries every property's doc comment into the
   // `.d.ts`, and for the config that cost more than the copy it removed.
-  // Next time: QuestionSchema (4 copies in the chat events, 5 KB each) and
-  // CraftbookContractSchema (6) are the largest repeats left.)
+  // It tripped at 2.104 MB again; naming QuestionSchema (6 copies, 5 KB each)
+  // and CraftbookContractSchema (7) took out ~7 KB packed, and naming
+  // ChatEventSchema, which the envelope wrote out again, ~2 KB more. A repeat
+  // within gzip's 32 KB window costs little packed: count unpacked bytes
+  // between copies before expecting a win.)
   '@bendyline/gezel': 2_100_000, //                    2.10 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
