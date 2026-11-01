@@ -6,15 +6,19 @@ import { projectScriptFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
 import { applyProjectType } from './apply.js';
+import { resolvePageTools, resolveProjectScriptTools } from './script-tools.js';
 
 /**
  * End-to-end exercise of the SHIPPED Job Hunt bundled project type
- * (packages/catalog/data/project-types/jo/job-hunt) against the real default
+ * from the pinned Gilde package against the real default
  * CatalogService. The full-rails exemplar: the first two-gezel crew, named
  * script-tools with binds, craftbook copy-install, and a consent-gated
  * schedule — a break in any committed piece fails here. See
  * docs/project-types.md.
  */
+
+const MODEL_TOOLS = ['record_application', 'advance_stage', 'log_activity', 'pipeline_status'];
+const PAGE_TOOLS = ['page_record_application', 'page_advance_stage'];
 
 const CRAFTBOOKS = [
   'tailor-resume',
@@ -51,12 +55,8 @@ describe('Job Hunt bundled project type', () => {
       { templateId: 'mock-interviewer', voorman: false },
     ]);
     expect(Object.keys(detail.manifest.scripts ?? {})).toContain('application-store');
-    expect(detail.manifest.tools.map((t) => t.name)).toEqual([
-      'record_application',
-      'advance_stage',
-      'log_activity',
-      'pipeline_status',
-    ]);
+    expect(detail.manifest.tools.map((t) => t.name)).toEqual([...MODEL_TOOLS, ...PAGE_TOOLS]);
+    expect(detail.manifest.pages?.tools).toEqual(PAGE_TOOLS);
     // Every tool binds an action — the script multiplexes on it.
     for (const tool of detail.manifest.tools) {
       expect(tool.script).toBe('application-store');
@@ -150,12 +150,12 @@ describe('Job Hunt bundled project type', () => {
     );
 
     // Named script-tools: type-owned references bound live per-session.
-    expect(applied.toolsBound).toEqual([
-      'record_application',
-      'advance_stage',
-      'log_activity',
-      'pipeline_status',
-    ]);
+    expect(applied.toolsBound).toEqual([...MODEL_TOOLS, ...PAGE_TOOLS]);
+    const detail = await store.getProject(project.id);
+    expect((await resolveProjectScriptTools(catalog, detail)).map((t) => t.name)).toEqual(
+      MODEL_TOOLS,
+    );
+    expect((await resolvePageTools(catalog, detail))?.tools.map((t) => t.name)).toEqual(PAGE_TOOLS);
 
     // Craftbooks: all five copy-installed project-local with provenance.
     expect(applied.craftbooksInstalled).toEqual(CRAFTBOOKS);
@@ -194,7 +194,6 @@ describe('Job Hunt bundled project type', () => {
     expect(approval?.taskRef).toBe(hosts[0]?.ref);
 
     // Taxonomy inheritance + provenance + nudge default.
-    const detail = await store.getProject(project.id);
     expect(detail?.projectTypeId).toBe('job-hunt');
     expect(detail?.projectType?.id).toBe('job-hunt');
     expect(detail?.nudgeConfig?.enabled).toBe(false);

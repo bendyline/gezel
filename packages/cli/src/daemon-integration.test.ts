@@ -39,6 +39,9 @@ let gezelHome: string;
  * with a Zone OOM, failing every later case (2026-09-25).
  */
 let workspaceCwd: string;
+// The shared daemon can retain workspace handles after a CLI exits. Windows
+// cleanup must wait for daemon shutdown, including when a test fails.
+const daemonWorkspaceDirs: string[] = [];
 let spawned: DiscoverOrSpawnResult;
 let client: GezelClient;
 /** The daemon's recent output, printed when a case fails; its home is deleted afterwards. */
@@ -142,6 +145,9 @@ afterEach(({ task }) => {
 
 afterAll(async () => {
   await stopOwnedDaemon(spawned?.child);
+  for (const folder of daemonWorkspaceDirs) {
+    await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
   if (gezelHome) await rm(gezelHome, { recursive: true, force: true });
   if (workspaceCwd) await rm(workspaceCwd, { recursive: true, force: true });
 });
@@ -396,7 +402,7 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
         ).rejects.toMatchObject({ code: 2 });
       }
     } finally {
-      await rm(folder, { recursive: true, force: true });
+      daemonWorkspaceDirs.push(folder);
     }
   }, 90_000);
 
@@ -878,7 +884,7 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
       );
       expect(noop.stdout).toContain('already applied');
     } finally {
-      await rm(folder, { recursive: true, force: true });
+      daemonWorkspaceDirs.push(folder);
     }
 
     const disabled = await runCli('app', 'disable', 'just-chat');
