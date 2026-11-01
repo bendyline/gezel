@@ -1,11 +1,9 @@
 import {
-  type AppEnsureEvent,
   type AppImageGenerationEvent,
   AppImageGenerationRequestSchema,
   type AppImageModel,
   type GezelConfig,
   type ImageModelManifest,
-  type ImageModelPullEvent,
   createLogger,
   imageModelDefaultSide,
   resolveImageSize,
@@ -21,16 +19,15 @@ import {
   modelStorageRoots,
 } from '../../models/storage-roots.js';
 import { NoLocalImageModelError } from '../../providers/image/local-factory.js';
-import type {
-  ActiveImagePull,
-  ImageModelPullRegistry,
-} from '../../providers/image/pull-registry.js';
+import type { ImageModelPullRegistry } from '../../providers/image/pull-registry.js';
 import {
   ImageCapacityError,
   ImageGenerationCancelledError,
   type ImageGenerationProgress,
   type ImageProvider,
 } from '../../providers/image/types.js';
+import { registerImageEnsureRoutes } from './image-ensure-routes.js';
+import { v1ImageStylesRoutes } from './v1-image-styles.js';
 
 const log = createLogger('v1-images');
 
@@ -48,6 +45,7 @@ export interface ImagesRouteContext {
     /** Stop the engine, draining renders, before its model files change. */
     reset(): Promise<void>;
     pulls: ImageModelPullRegistry;
+    loraPulls?: ImageModelPullRegistry;
   };
 }
 
@@ -83,6 +81,7 @@ function describeManifest(manifest: ImageModelManifest): Partial<AppImageModel> 
     description: manifest.description,
     download_bytes: downloadBytes(manifest),
     ...(license ? { license } : {}),
+    ...(manifest.licenseUrl ? { license_url: manifest.licenseUrl } : {}),
     commercial_use: manifest.commercialUse,
     ...(manifest.rendersText !== undefined ? { renders_text: manifest.rendersText } : {}),
     ...(manifest.promptStyle ? { prompt_style: manifest.promptStyle } : {}),
@@ -95,41 +94,6 @@ function describeManifest(manifest: ImageModelManifest): Partial<AppImageModel> 
       ? { supports_img2img: manifest.supportsImg2Img }
       : {}),
   };
-}
-
-function ensureEvent(
-  jobId: string,
-  event: ImageModelPullEvent,
-  totalBytes: number,
-): AppEnsureEvent {
-  const job = { jobId, modelId: qualified(jobId) };
-  switch (event.type) {
-    case 'progress':
-      return {
-        ...job,
-        type: 'progress',
-        bytesWritten: event.bytesWritten,
-        totalBytes: event.totalBytes ?? totalBytes,
-      };
-    case 'retrying':
-      return {
-        ...job,
-        type: 'retrying',
-        attempt: event.attempt,
-        maxAttempts: event.maxAttempts,
-        delayMs: event.delayMs,
-        reason: event.reason,
-      };
-    case 'error':
-      return { ...job, type: 'error', error: event.error };
-    case 'done':
-      return { ...job, type: 'done' };
-  }
-}
-
-function pullStatus(pull: ActiveImagePull): 'running' | 'done' | 'error' {
-  if (!pull.finished) return 'running';
-  return pull.error ? 'error' : 'done';
 }
 
 function generationError(err: unknown): { code: string; message: string } {
@@ -167,6 +131,7 @@ function generationError(err: unknown): { code: string; message: string } {
  */
 export function v1ImagesRoutes(ctx: ImagesRouteContext): Hono {
   const app = new Hono();
+  if (ctx.images.loraPulls) app.route('/styles', v1ImageStylesRoutes(ctx, ctx.images.loraPulls));
   const fitContext = { catalog: ctx.catalog, readConfig: () => ctx.store.readConfig() };
 
   app.get('/models', async (c) => {
@@ -251,64 +216,7 @@ export function v1ImagesRoutes(ctx: ImagesRouteContext): Hono {
     return c.json({ status: 'downloading', model_id: qualified(id), job_id: id }, 202);
   });
 
-  app.get('/models/ensure/:jobId', (c) => {
-    const pull = ctx.images.pulls.get(c.req.param('jobId'));
-    if (!pull) return c.json(apiError('job_not_found', 'job not found'), 404);
-    return c.json({
-      job_id: pull.id,
-      model_id: qualified(pull.id),
-      status: pullStatus(pull),
-      started_at: Date.parse(pull.startedAt),
-      bytes_written: pull.bytesWritten,
-      total_bytes: pull.totalBytes,
-      ...(pull.error ? { error: pull.error } : {}),
-    });
-  });
-
-  app.get('/models/ensure/:jobId/events', (c) => {
-    const jobId = c.req.param('jobId');
-    const snapshot = ctx.images.pulls.get(jobId);
-    if (!snapshot) return c.json(apiError('job_not_found', 'job not found'), 404);
-    return streamSSE(c, async (stream) => {
-      let closed = false;
-      let sawError = false;
-      const unsubscribe = ctx.images.pulls.subscribe(jobId, (event) => {
-        // A failed pull ends with an error and then its done; the error is terminal.
-        if (sawError) return;
-        if (event.type === 'error') sawError = true;
-        const terminal = event.type === 'done' || event.type === 'error';
-        void stream
-          .writeSSE({ data: JSON.stringify(ensureEvent(jobId, event, snapshot.totalBytes)) })
-          .then(() => {
-            if (terminal) closed = true;
-          })
-          .catch(() => {
-            closed = true;
-          });
-      });
-      if (!unsubscribe) return;
-      stream.onAbort(() => {
-        closed = true;
-        unsubscribe();
-      });
-      while (!closed) {
-        await stream.sleep(1000);
-        try {
-          await stream.writeSSE({ event: 'ping', data: '' });
-        } catch {
-          closed = true;
-        }
-      }
-      unsubscribe();
-    });
-  });
-
-  app.delete('/models/ensure/:jobId', (c) => {
-    if (!ctx.images.pulls.cancel(c.req.param('jobId'))) {
-      return c.json(apiError('job_not_found', 'No download in progress for that job'), 404);
-    }
-    return c.json({ cancelled: true });
-  });
+  registerImageEnsureRoutes(app, '/models/ensure', ctx.images.pulls, qualified);
 
   app.delete('/models/:id', async (c) => {
     const id = catalogIdOf(decodeURIComponent(c.req.param('id')));
@@ -354,6 +262,17 @@ export function v1ImagesRoutes(ctx: ImagesRouteContext): Hono {
         : apiError('no_local_image_model', new NoLocalImageModelError().message);
       return c.json(error, 409);
     }
+    const style = request.style
+      ? installed
+          .find((model) => model.id === modelId)
+          ?.loras?.find((lora) => lora.id === request.style && lora.purpose === 'style')
+      : undefined;
+    if (request.style && !style) {
+      return c.json(
+        apiError('style_not_available', 'That style is not installed for this image model.'),
+        409,
+      );
+    }
     const item = await ctx.catalog.get('image-model', modelId).catch(() => null);
     const manifest = item?.manifest.kind === 'image-model' ? item.manifest : undefined;
     const { width, height } = resolveImageSize(
@@ -394,6 +313,7 @@ export function v1ImagesRoutes(ctx: ImagesRouteContext): Hono {
           prompt: request.prompt,
           ...(request.negative_prompt ? { negativePrompt: request.negative_prompt } : {}),
           model: modelId,
+          ...(style ? { loras: [{ id: style.id }] } : {}),
           width,
           height,
           ...(request.seed !== undefined ? { seed: request.seed } : {}),

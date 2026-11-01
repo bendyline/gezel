@@ -23,7 +23,7 @@ if (gilde.version !== pinned) {
     `[stage-assets] staging the inference catalog from linked Gilde ${gilde.version} (${link.spec}), not the pinned ${pinned}`,
   );
 }
-const CATALOG_KINDS = ['chat-models', 'image-models', 'knowledge-catalogs'];
+const CATALOG_KINDS = ['chat-models', 'image-models', 'image-loras', 'knowledge-catalogs'];
 await mkdir('dist/catalog', { recursive: true });
 for (const kind of CATALOG_KINDS)
   await cp(join(gildeRoot, 'data', kind), join('dist/catalog', kind), { recursive: true });

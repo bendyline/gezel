@@ -32,6 +32,7 @@ export const AppImageModelSchema = z
     shared: z.boolean().optional(),
     download_bytes: bytes.optional(),
     license: z.string().max(256).optional(),
+    license_url: z.string().url().max(4096).optional(),
     /** False when the license forbids commercial use. */
     commercial_use: z.boolean().optional(),
     /** Draws legible text, which design graphics depend on. */
@@ -61,6 +62,27 @@ export const AppImageModelListSchema = z.object({
 export type AppImageModel = z.infer<typeof AppImageModelSchema>;
 export type AppImageModelList = z.infer<typeof AppImageModelListSchema>;
 
+/** Downloadable rendering styles; base model ids use the same namespace as models(). */
+export const AppImageStyleSchema = z
+  .object({
+    id,
+    object: z.literal('image_style'),
+    name: z.string().min(1).max(512),
+    description: z.string().max(4096).optional(),
+    availability: z.enum(['available', 'download-required', 'downloading']),
+    download_bytes: bytes.optional(),
+    license: z.string().max(256).optional(),
+    license_url: z.string().url().max(4096).optional(),
+    commercial_use: z.boolean().optional(),
+    base_models: z.array(id).min(1).max(1000),
+  })
+  .passthrough();
+export const AppImageStyleListSchema = z.object({
+  object: z.literal('list'),
+  data: z.array(AppImageStyleSchema).max(1000),
+});
+export type AppImageStyle = z.infer<typeof AppImageStyleSchema>;
+
 export const AppImageGenerationRequestSchema = z
   .object({
     prompt: z.string().min(1).max(8000),
@@ -70,6 +92,8 @@ export const AppImageGenerationRequestSchema = z
     /** The host picks pixels inside the model's range. Square when absent. */
     aspect_ratio: ImageAspectRatioSchema.optional(),
     quality: ImageQualitySchema.optional(),
+    /** An installed style id compatible with the selected model. */
+    style: id.optional(),
     seed: z.number().int().min(0).max(2_147_483_647).optional(),
   })
   .strict();

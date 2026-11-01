@@ -602,3 +602,33 @@ reports what it added (`status`, `reason`, `passages`). Pass `query` to search
 for what the person asked rather than the last user message, and
 `citations: 'numbered'` to have passages cited as `[n]`; check the result with
 `groundText()` from `@bendyline/gezel/grounding`.
+
+
+### Downloadable image rendering styles
+
+`app.images.styles()` lists catalog and installed styles with `base_models`,
+`availability`, download size and license metadata (`license_url` links to the
+license text). `base_models` uses the same qualified ids as `images.models()`.
+Offer styles for an installed compatible model; a style is downloaded only after
+an explicit user action:
+
+```ts
+const download = await app.images.ensureStyle(style.id);
+if (download.status === 'downloading') {
+  for await (const event of app.images.styleEnsureEvents(download.jobId)) {
+    // Show progress; an error is terminal. Cancelling the watcher alone does not stop the download.
+  }
+}
+const image = await app.images.generate({ prompt: 'A lighthouse', model, style: style.id });
+```
+
+`cancelStyleEnsure(jobId)` stops a download; `removeStyle(id)` removes an installed
+style. These methods also exist on `DesktopEmbeddingConnection.images`. They use
+the existing `images` scope, the engine's verified safetensors downloader and a
+separate download registry. No arbitrary file path or download URL is accepted.
+A missing/incompatible style refuses generation with `style_not_available`.
+An older daemon reports `styles_unsupported`; ordinary image models remain usable.
+
+Download pickers may hide models whose `fit.verdict` is `wont-run` or `over-limit`.
+Keep installed models available for management, and display `fit.reason` for tight
+or uncertain fits. Model listings also carry the catalog's optional `license_url`.

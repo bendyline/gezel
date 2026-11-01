@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -9,7 +12,9 @@ import {
   missingTypeEntries,
   parseLatestVersion,
   readPinnedDependency,
+  treeMatchesVersion,
   updatePinnedDependency,
+  verifyInstalledVersion,
 } from './update-gilde.mjs';
 
 test('parses an npm latest-version response', () => {
@@ -64,27 +69,8 @@ test('detects a local Gilde override', () => {
   );
 });
 
-test('verifies the catalog importer and all Gilde lockfile entries', () => {
-  const lockfile = `importers:
-
-  packages/catalog:
-    dependencies:
-      '@bendyline/gilde':
-        specifier: 1.2.3
-        version: 1.2.3
-
-  packages/client:
-    dependencies: {}
-
-packages:
-
-  '@bendyline/gilde@1.2.3':
-    resolution: {integrity: sha512-example}
-
-snapshots:
-
-  '@bendyline/gilde@1.2.3': {}
-`;
+test('verifies both consumer importers and all Gilde lockfile entries', () => {
+  const lockfile = gildeLockfile();
   assert.doesNotThrow(() => assertLockfileVersion(lockfile, '1.2.3'));
   assert.throws(() => assertLockfileVersion(lockfile, '1.2.4'), /not pinned/);
 
@@ -113,4 +99,87 @@ test('reports unbuilt core type declarations before anything is mutated', () => 
     missingTypeEntries(entries, (entry) => entry.endsWith('index.d.ts') && !entry.includes('svg')),
     ['/repo/packages/core/dist/svg/index.d.ts'],
   );
+});
+
+function gildeLockfile() {
+  return `importers:
+
+  packages/catalog:
+    dependencies:
+      '@bendyline/gilde':
+        specifier: 1.2.3
+        version: 1.2.3
+
+  packages/client:
+    dependencies: {}
+
+  packages/service:
+    dependencies:
+      '@bendyline/gilde':
+        specifier: 1.2.3
+        version: 1.2.3
+
+packages:
+
+  '@bendyline/gilde@1.2.3':
+    resolution: {integrity: sha512-example}
+
+snapshots:
+
+  '@bendyline/gilde@1.2.3': {}
+`;
+}
+
+test('rejects a stale or missing service lockfile importer even when the catalog is current', () => {
+  const lockfile = gildeLockfile();
+  const serviceStart = lockfile.indexOf('  packages/service:');
+  const stale =
+    lockfile.slice(0, serviceStart) +
+    lockfile.slice(serviceStart).replace('specifier: 1.2.3', 'specifier: 1.2.2');
+  assert.throws(() => assertLockfileVersion(stale, '1.2.3'), /service importer is not pinned/);
+  assert.throws(
+    () => assertLockfileVersion(lockfile.replace('packages/service:', 'packages/other:'), '1.2.3'),
+    /no packages\/service importer/,
+  );
+});
+
+test('requires both consumers to be installed at their pins before reporting an update complete', async (t) => {
+  const root = await mkdtemp(join(tmpdir(), 'gezel-gilde-update-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, 'pnpm-lock.yaml'), gildeLockfile());
+  const packageJson = (version) =>
+    JSON.stringify({ dependencies: { '@bendyline/gilde': version } }, null, 2);
+  for (const consumer of ['catalog', 'service']) {
+    const dir = join(root, 'packages', consumer);
+    const installed = join(dir, 'node_modules', '@bendyline', 'gilde');
+    await mkdir(installed, { recursive: true });
+    await writeFile(join(dir, 'package.json'), packageJson('1.2.3'));
+    await writeFile(join(installed, 'package.json'), JSON.stringify({ version: '1.2.3' }));
+  }
+  assert.equal(await treeMatchesVersion('1.2.3', root), true);
+  const serviceManifest = join(root, 'packages', 'service', 'package.json');
+  const installedManifest = join(
+    root,
+    'packages',
+    'service',
+    'node_modules',
+    '@bendyline',
+    'gilde',
+    'package.json',
+  );
+
+  await writeFile(installedManifest, JSON.stringify({ version: '1.2.2' }));
+  assert.equal(await treeMatchesVersion('1.2.3', root), false);
+  await assert.rejects(verifyInstalledVersion('1.2.3', root), /packages\/service resolves 1\.2\.2/);
+  await writeFile(installedManifest, JSON.stringify({ version: '1.2.3' }));
+  assert.equal(await treeMatchesVersion('1.2.3', root), true);
+
+  await writeFile(serviceManifest, packageJson('1.2.2'));
+  assert.equal(await treeMatchesVersion('1.2.3', root), false);
+  await assert.rejects(verifyInstalledVersion('1.2.3', root), /packages\/service pins 1\.2\.2/);
+  await writeFile(serviceManifest, packageJson('1.2.3'));
+  await writeFile(installedManifest, '{');
+  assert.equal(await treeMatchesVersion('1.2.3', root), false);
+  await rm(installedManifest);
+  assert.equal(await treeMatchesVersion('1.2.3', root), false);
 });

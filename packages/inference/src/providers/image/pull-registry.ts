@@ -217,7 +217,7 @@ export class ImageModelPullRegistry {
     } finally {
       entry.snapshot.finished = true;
       // Drop the controller — cancel() should be a no-op once finished.
-      this.controllers.delete(id);
+      if (this.entries.get(id) === entry) this.controllers.delete(id);
       // Keep the snapshot around briefly so a client mid-reconnect still
       // sees the terminal state on `list()` / `subscribe()`. Then garbage
       // collect.
@@ -230,6 +230,8 @@ export class ImageModelPullRegistry {
 
   private applyEvent(entry: Entry, event: ImageModelPullEvent): void {
     const s = entry.snapshot;
+    // Publish terminal state before generator cleanup can yield to a new subscriber.
+    if (event.type === 'done' || event.type === 'error') s.finished = true;
     if (event.type === 'progress') {
       s.bytesWritten = event.bytesWritten;
       if (event.totalBytes !== undefined) s.totalBytes = event.totalBytes;

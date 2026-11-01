@@ -388,3 +388,42 @@ describe('image LoRA pulls', () => {
     expect(registry.get(lora.id)?.error).toBe('This image engine cannot add styles or fast mode.');
   });
 });
+
+describe('terminal pull snapshot ordering', () => {
+  it('replays completion while the generator is still cleaning up', async () => {
+    let cleanup!: () => void;
+    let reachedCleanup!: () => void;
+    const cleaning = new Promise<void>((resolve) => {
+      reachedCleanup = resolve;
+    });
+    const cleaned = new Promise<void>((resolve) => {
+      cleanup = resolve;
+    });
+    const pulls = new ImageModelPullRegistry({
+      kind: 'image-lora',
+      resolve: async (id) => ({
+        totalBytes: 1,
+        run: async function* () {
+          try {
+            yield { type: 'done', id };
+          } finally {
+            reachedCleanup();
+            await cleaned;
+          }
+        },
+      }),
+    });
+    try {
+      await pulls.start('style');
+      await cleaning;
+      expect(pulls.get('style')?.finished).toBe(true);
+      const events: ImageModelPullEvent[] = [];
+      const unsubscribe = pulls.subscribe('style', (event) => events.push(event));
+      expect(events.at(-1)).toEqual({ type: 'done', id: 'style' });
+      unsubscribe?.();
+    } finally {
+      cleanup();
+      pulls.clear();
+    }
+  });
+});

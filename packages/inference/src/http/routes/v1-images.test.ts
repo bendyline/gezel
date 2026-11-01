@@ -5,6 +5,7 @@ import {
   AppEnsureEventSchema,
   AppImageGenerationEventSchema,
   AppImageModelListSchema,
+  AppImageStyleListSchema,
 } from '@bendyline/gezel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type RunningInferenceService, startService } from '../../inference-service.js';
@@ -109,6 +110,119 @@ describe('/v1/images on hosted inference', () => {
     expect(done).toMatchObject({ type: 'done', model: 'sd-cpp:sd-1.5', seed: 7 });
     if (done?.type !== 'done') throw new Error('expected a done event');
     expect(Buffer.from(done.b64_png, 'base64').subarray(0, 8)).toEqual(PNG_SIGNATURE);
+  });
+
+  it('downloads a compatible style and applies it to the render', async () => {
+    const provider = new MockImageProvider();
+    const generated = vi.spyOn(provider, 'generate');
+    const request = await start(provider);
+    const styles = AppImageStyleListSchema.parse(
+      await (await request('/v1/images/styles')).json(),
+    ).data;
+    expect(styles.length).toBeGreaterThan(0);
+    const style = styles[0]!;
+    expect(style.license_url).toMatch(/^https:\/\//);
+    expect(style.base_models[0]).toMatch(/^sd-cpp:/);
+    expect(
+      await (await request('/v1/images/styles/ensure', { body: { style: style.id } })).json(),
+    ).toMatchObject({ error: { code: 'style_model_required' } });
+    const model = style.base_models[0]!.replace('sd-cpp:', '');
+    for await (const _event of provider.pullModel(model, {
+      name: model,
+      downloadUrl: 'https://example.test/weights',
+      sha256: 'a'.repeat(64),
+      approxSizeBytes: 10,
+      weightsKind: 'checkpoint',
+      auxiliaryFiles: [],
+    })) {
+      /* synthetic weights only */
+    }
+    const download = (await (
+      await request('/v1/images/styles/ensure', { body: { style: style.id } })
+    ).json()) as { status: string; job_id: string };
+    expect(download.status).toBe('downloading');
+    if (download.status !== 'downloading') throw new Error('Expected a new style download');
+    const events = await sseEvents(
+      await request(`/v1/images/styles/ensure/${download.job_id}/events`),
+    );
+    expect(events.at(-1)).toMatchObject({ type: 'done', modelId: style.id });
+    expect(
+      await (await request('/v1/images/styles/ensure', { body: { style: style.id } })).json(),
+    ).toMatchObject({ status: 'ready' });
+    expect(
+      AppImageStyleListSchema.parse(await (await request('/v1/images/styles')).json()).data.find(
+        (s) => s.id === style.id,
+      )?.availability,
+    ).toBe('available');
+    const rendered = await request('/v1/images/generations', {
+      body: {
+        prompt: 'a lighthouse',
+        model: style.base_models[0],
+        style: style.id,
+        quality: 'draft',
+      },
+    });
+    expect((await sseEvents(rendered)).at(-1)).toMatchObject({ type: 'done' });
+    expect(generated.mock.calls.at(-1)?.[0].loras).toEqual([{ id: style.id }]);
+    expect((await request(`/v1/images/styles/${style.id}`, { method: 'DELETE' })).status).toBe(204);
+    expect((await provider.listLoras()).length).toBe(0);
+    expect(
+      await (
+        await request('/v1/images/generations', {
+          body: { prompt: 'a lighthouse', model: style.base_models[0], style: style.id },
+        })
+      ).json(),
+    ).toMatchObject({ error: { code: 'style_not_available' } });
+    expect(generated).toHaveBeenCalledTimes(1);
+    expect(
+      (await request('/v1/images/styles/ensure', { body: { style: '../outside' } })).status,
+    ).toBe(400);
+    expect(
+      (
+        await request('/v1/images/styles/ensure', {
+          body: { style: style.id, downloadUrl: 'https://example.test/untrusted' },
+        })
+      ).status,
+    ).toBe(400);
+    expect((await request('/v1/images/styles/missing', { method: 'DELETE' })).status).toBe(404);
+  });
+
+  it('cancels a style download and keeps it separate from model downloads', async () => {
+    const provider = new MockImageProvider();
+    let signal: AbortSignal | undefined;
+    (provider as ImageProvider).pullLora = async function* (_id, _spec, abort) {
+      signal = abort;
+      yield { type: 'progress', bytesWritten: 1, totalBytes: 10 };
+      await new Promise<void>((resolve) => abort?.addEventListener('abort', () => resolve()));
+      yield { type: 'error', error: 'cancelled' };
+    };
+    const request = await start(provider);
+    const styles = AppImageStyleListSchema.parse(await (await request('/v1/images/styles')).json());
+    const style = styles.data[0]!;
+    for await (const _event of provider.pullModel(style.base_models[0]!.replace('sd-cpp:', ''), {
+      name: 'Base',
+      downloadUrl: 'https://example.test/weights',
+      sha256: 'a'.repeat(64),
+      approxSizeBytes: 10,
+      weightsKind: 'checkpoint',
+      auxiliaryFiles: [],
+    })) {
+      /* synthetic weights only */
+    }
+    expect((await request('/v1/images/styles/ensure', { body: { style: style.id } })).status).toBe(
+      202,
+    );
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    expect((await request(`/v1/images/styles/${style.id}`, { method: 'DELETE' })).status).toBe(409);
+    expect(
+      (await request(`/v1/images/models/ensure/${style.id}`, { method: 'DELETE' })).status,
+    ).toBe(404);
+    expect(
+      (await request(`/v1/images/styles/ensure/${style.id}`, { method: 'DELETE' })).status,
+    ).toBe(200);
+    expect(signal?.aborted).toBe(true);
+    const events = await sseEvents(await request(`/v1/images/styles/ensure/${style.id}/events`));
+    expect(events.at(-1)).toMatchObject({ type: 'error' });
   });
 
   it('cancels the render when the client closes the stream', async () => {

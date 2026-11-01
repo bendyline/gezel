@@ -9,7 +9,7 @@ import { resolveNpmCli } from './pnpm-cli.mjs';
 import { runLockfileRefreshAndInstall, withPnpmInstallLock } from './pnpm-install.mjs';
 
 const GILDE_PACKAGE = '@bendyline/gilde';
-const CATALOG_PACKAGE = '@bendyline/gezel-catalog';
+const GILDE_CONSUMERS = ['catalog', 'service'];
 const VERSION_PATTERN =
   /^\d+\.\d+\.\d+(?:-[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?(?:\+[0-9A-Za-z]+(?:[.-][0-9A-Za-z]+)*)?$/;
 
@@ -18,8 +18,6 @@ const repoRoot = resolve(scriptsDir, '..');
 const catalogDir = join(repoRoot, 'packages', 'catalog');
 const catalogPackagePath = join(catalogDir, 'package.json');
 const workspacePath = join(repoRoot, 'pnpm-workspace.yaml');
-const lockfilePath = join(repoRoot, 'pnpm-lock.yaml');
-const installedPackagePath = join(catalogDir, 'node_modules', GILDE_PACKAGE, 'package.json');
 
 /**
  * Declaration files the catalog typecheck resolves `@bendyline/gezel`
@@ -65,9 +63,7 @@ export function readPinnedDependency(source) {
   ];
   const pins = matches.filter((match) => match[2] !== '*');
   if (pins.length !== 1) {
-    throw new Error(
-      `expected exactly one ${GILDE_PACKAGE} dependency in packages/catalog/package.json, found ${matches.length}`,
-    );
+    throw new Error(`expected exactly one ${GILDE_PACKAGE} dependency pin, found ${pins.length}`);
   }
   const version = pins[0][2];
   if (!VERSION_PATTERN.test(version)) {
@@ -104,21 +100,24 @@ export function assertLockfileVersion(source, version) {
   if (!VERSION_PATTERN.test(version)) {
     throw new Error(`cannot verify invalid ${GILDE_PACKAGE} version: ${version}`);
   }
-
-  const importerStart = source.indexOf('\n  packages/catalog:\n');
-  if (importerStart === -1) {
-    throw new Error('pnpm-lock.yaml has no packages/catalog importer');
-  }
-  const importerEnd = source.indexOf('\n  packages/', importerStart + 1);
-  const importer = source.slice(importerStart, importerEnd === -1 ? source.length : importerEnd);
   const escapedVersion = escapeRegExp(version);
   const importerPattern = new RegExp(
     `\\n      '${escapeRegExp(GILDE_PACKAGE)}':\\n        specifier: ${escapedVersion}\\n        version: ${escapedVersion}(?:\\n|$)`,
   );
-  if (!importerPattern.test(importer)) {
-    throw new Error(`pnpm-lock.yaml catalog importer is not pinned to ${GILDE_PACKAGE}@${version}`);
+  for (const consumer of GILDE_CONSUMERS) {
+    const importerStart = source.indexOf(`\n  packages/${consumer}:\n`);
+    if (importerStart === -1) {
+      throw new Error(`pnpm-lock.yaml has no packages/${consumer} importer`);
+    }
+    const rest = source.slice(importerStart + 1);
+    const nextImporter = rest.search(/\n(?: {2}\S|\S)/);
+    const importer = nextImporter === -1 ? rest : rest.slice(0, nextImporter);
+    if (!importerPattern.test(importer)) {
+      throw new Error(
+        `pnpm-lock.yaml ${consumer} importer is not pinned to ${GILDE_PACKAGE}@${version}`,
+      );
+    }
   }
-
   const lockedVersions = new Set(
     [...source.matchAll(/^ {2}'@bendyline\/gilde@([^']+)':/gm)].map((match) => match[1]),
   );
@@ -148,19 +147,13 @@ export function lockfileMatchesVersion(source, version) {
  * npm reported that state as "already current" and exited 0, turning one
  * failed run into a stale lockfile nobody was told about.
  */
-async function treeMatchesVersion(version) {
-  const [lockfileSource, installedSource] = await Promise.all([
-    readFile(lockfilePath, 'utf8').catch(() => null),
-    readFile(installedPackagePath, 'utf8').catch(() => null),
-  ]);
-  if (lockfileSource === null || installedSource === null) return false;
-  let installedVersion;
+export async function treeMatchesVersion(version, root = repoRoot) {
   try {
-    installedVersion = JSON.parse(installedSource).version;
+    await verifyInstalledVersion(version, root);
+    return true;
   } catch {
     return false;
   }
-  return installedVersion === version && lockfileMatchesVersion(lockfileSource, version);
 }
 
 async function main() {
@@ -231,7 +224,9 @@ async function main() {
 
       const servicePackagePath = join(repoRoot, 'packages/service/package.json');
       const serviceSource = await readFile(servicePackagePath, 'utf8');
-      await writeFile(servicePackagePath, updatePinnedDependency(serviceSource, latest));
+      const nextServiceSource = updatePinnedDependency(serviceSource, latest);
+      if (nextServiceSource !== serviceSource)
+        await writeFile(servicePackagePath, nextServiceSource);
       if (lockedCurrent === latest) {
         console.log(`[gilde:update] re-resolving ${GILDE_PACKAGE}@${latest} against the pin`);
       } else {
@@ -243,9 +238,10 @@ async function main() {
         console.log(`[gilde:update] updating ${lockedCurrent} -> ${latest}`);
       }
 
+      // A shared lockfile update must relink every consumer, including the
+      // service's runtime dependency; a catalog-only filter leaves it stale.
       const installStatus = await runLockfileRefreshAndInstall({
         repoRoot,
-        args: ['--filter', CATALOG_PACKAGE],
         setChildPid,
       });
       if (installStatus !== 0) {
@@ -320,25 +316,27 @@ function queryLatestVersion() {
   return parseLatestVersion(result.stdout);
 }
 
-async function verifyInstalledVersion(expected) {
-  const [catalogSource, lockfileSource, installedSource] = await Promise.all([
-    readFile(catalogPackagePath, 'utf8'),
-    readFile(lockfilePath, 'utf8'),
-    readFile(installedPackagePath, 'utf8'),
-  ]);
-  const manifestVersion = readPinnedDependency(catalogSource);
-  const installedVersion = JSON.parse(installedSource).version;
-  if (manifestVersion !== expected) {
-    throw new Error(
-      `catalog manifest resolved to ${manifestVersion}; expected ${GILDE_PACKAGE}@${expected}`,
-    );
+export async function verifyInstalledVersion(expected, root = repoRoot) {
+  assertLockfileVersion(await readFile(join(root, 'pnpm-lock.yaml'), 'utf8'), expected);
+  for (const consumer of GILDE_CONSUMERS) {
+    const dir = join(root, 'packages', consumer);
+    const [manifestSource, installedSource] = await Promise.all([
+      readFile(join(dir, 'package.json'), 'utf8'),
+      readFile(join(dir, 'node_modules', GILDE_PACKAGE, 'package.json'), 'utf8'),
+    ]);
+    const manifestVersion = readPinnedDependency(manifestSource);
+    const installedVersion = JSON.parse(installedSource).version;
+    if (manifestVersion !== expected) {
+      throw new Error(
+        `packages/${consumer} pins ${manifestVersion}; expected ${GILDE_PACKAGE}@${expected}`,
+      );
+    }
+    if (installedVersion !== expected) {
+      throw new Error(
+        `packages/${consumer} resolves ${installedVersion}; expected ${GILDE_PACKAGE}@${expected}`,
+      );
+    }
   }
-  if (installedVersion !== expected) {
-    throw new Error(
-      `installed package resolved to ${installedVersion}; expected ${GILDE_PACKAGE}@${expected}`,
-    );
-  }
-  assertLockfileVersion(lockfileSource, expected);
 }
 
 function run(command, args, { cwd, label }) {

@@ -40,7 +40,13 @@ describe('ImagesClient', () => {
     });
     const progress: unknown[] = [];
     const image = await app.images.generate(
-      { prompt: 'a lighthouse', model: 'sd-cpp:flux-2-klein-4b-q4', aspectRatio: '4:3', seed: 7 },
+      {
+        prompt: 'a lighthouse',
+        model: 'sd-cpp:flux-2-klein-4b-q4',
+        aspectRatio: '4:3',
+        seed: 7,
+        style: 'watercolor',
+      },
       { onProgress: (p) => progress.push(p) },
     );
     expect(image).toEqual({
@@ -63,6 +69,7 @@ describe('ImagesClient', () => {
       model: 'sd-cpp:flux-2-klein-4b-q4',
       aspect_ratio: '4:3',
       seed: 7,
+      style: 'watercolor',
     });
   });
 
@@ -91,6 +98,95 @@ describe('ImagesClient', () => {
         ),
     });
     await expect(unscoped.images.models()).rejects.toMatchObject({ code: 'missing_scope:images' });
+  });
+
+  it('uses the style download endpoints with validated events, cancellation and removal', async () => {
+    const calls: Array<{ path: string; method?: string; body?: string | null }> = [];
+    const app = new GezelApp({
+      baseUrl: 'http://127.0.0.1:1234',
+      token: 't',
+      fetch: async (url, init) => {
+        const path = new URL(String(url)).pathname;
+        calls.push({
+          path,
+          method: init?.method,
+          body: typeof init?.body === 'string' ? init.body : null,
+        });
+        if (path.endsWith('/events'))
+          return sse([
+            {
+              type: 'progress',
+              jobId: 'watercolor',
+              modelId: 'watercolor',
+              bytesWritten: 5,
+              totalBytes: 10,
+            },
+            { type: 'done', jobId: 'watercolor', modelId: 'watercolor' },
+          ]);
+        if (path.endsWith('/ensure'))
+          return Response.json({
+            status: 'downloading',
+            model_id: 'watercolor',
+            job_id: 'watercolor',
+          });
+        return Response.json({ cancelled: true });
+      },
+    });
+    expect(await app.images.ensureStyle('watercolor')).toEqual({
+      status: 'downloading',
+      modelId: 'watercolor',
+      jobId: 'watercolor',
+    });
+    const events = [];
+    for await (const event of app.images.styleEnsureEvents('watercolor')) events.push(event.type);
+    expect(events).toEqual(['progress', 'done']);
+    await app.images.cancelStyleEnsure('watercolor');
+    await app.images.removeStyle('watercolor');
+    expect(calls).toEqual([
+      { path: '/v1/images/styles/ensure', method: 'POST', body: '{"style":"watercolor"}' },
+      { path: '/v1/images/styles/ensure/watercolor/events', method: undefined, body: null },
+      { path: '/v1/images/styles/ensure/watercolor', method: 'DELETE', body: null },
+      { path: '/v1/images/styles/watercolor', method: 'DELETE', body: null },
+    ]);
+  });
+
+  it('rejects malformed style compatibility lists and preserves older-host errors', async () => {
+    const app = new GezelApp({
+      baseUrl: 'http://127.0.0.1:1234',
+      token: 't',
+      fetch: async () =>
+        Response.json({
+          object: 'list',
+          data: [
+            {
+              id: 'watercolor',
+              object: 'image_style',
+              name: 'Watercolor',
+              availability: 'available',
+              base_models: [],
+            },
+          ],
+        }),
+    });
+    await expect(app.images.styles()).rejects.toMatchObject({ code: 'invalid_response' });
+    const older = new GezelApp({
+      baseUrl: 'http://127.0.0.1:1234',
+      token: 't',
+      fetch: async () =>
+        Response.json(
+          { error: { code: 'styles_unsupported', message: 'Update Gezel' } },
+          { status: 409 },
+        ),
+    });
+    await expect(older.images.styles()).rejects.toMatchObject({ code: 'styles_unsupported' });
+    const missingRoute = new GezelApp({
+      baseUrl: 'http://127.0.0.1:1234',
+      token: 't',
+      fetch: async () => new Response('Not found', { status: 404 }),
+    });
+    await expect(missingRoute.images.styles()).rejects.toMatchObject({
+      code: 'styles_unsupported',
+    });
   });
 
   it('reports a Gezel that predates image generation as unsupported', async () => {
