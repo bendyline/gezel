@@ -15,6 +15,9 @@ const QUALITY_KEYS: ReadonlyArray<{ id: ImageQuality; label: string; hint: strin
   { id: 'high', label: 'High', hint: 'Larger and slower, held to what the model supports' },
 ];
 
+/** The Style picker's "No style" row: a Select item cannot carry an empty value. */
+const NO_STYLE = 'none';
+
 /** A small rectangle in the ratio's own proportions. */
 function AspectGlyph({ ratio }: { ratio: ImageAspectRatio }) {
   const value = aspectRatioValue(ratio);
@@ -44,7 +47,7 @@ function AspectGlyph({ ratio }: { ratio: ImageAspectRatio }) {
  * See docs/ux.md.
  */
 export function ComposerImageSettingsBar({ settings }: { settings: ComposerImageSettings }) {
-  const { effective, model, models, cues, picks } = settings;
+  const { effective, model, models, styles, cues, picks } = settings;
   const fromText = cues !== null;
   const aspect = effective.aspectRatio;
   const quality = effective.quality ?? 'standard';
@@ -150,6 +153,26 @@ export function ComposerImageSettingsBar({ settings }: { settings: ComposerImage
               {models.map((m) => (
                 <Select.Item key={m.id} value={m.id} textValue={m.name}>
                   {m.name}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select.Root>
+        )}
+        {styles.length > 0 && (
+          <Select.Root
+            value={styles.some((s) => s.id === effective.style) ? effective.style : NO_STYLE}
+            onValueChange={(next) => settings.pick({ style: next === NO_STYLE ? '' : next })}
+          >
+            <Select.Trigger className="chat-composer-image-bar-model" aria-label="Style">
+              {styles.find((s) => s.id === effective.style)?.name ?? 'No style'}
+            </Select.Trigger>
+            <Select.Content align="start">
+              <Select.Item value={NO_STYLE} textValue="No style">
+                No style
+              </Select.Item>
+              {styles.map((s) => (
+                <Select.Item key={s.id} value={s.id} textValue={s.name}>
+                  {s.name}
                 </Select.Item>
               ))}
             </Select.Content>

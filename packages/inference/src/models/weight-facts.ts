@@ -175,10 +175,16 @@ export async function localSdCppWeightFiles(model: {
   weightsKind: 'checkpoint' | 'diffusion-model';
   auxiliaryFiles: ReadonlyArray<{ role: string; path: string }>;
 }): Promise<MediaWeightFile[]> {
-  const entries = [
+  return localWeightFiles([
     { component: sdCppMainComponent(model.weightsKind), path: model.weightsPath },
     ...model.auxiliaryFiles.map((a) => ({ component: a.role, path: a.path })),
-  ];
+  ]);
+}
+
+/** Weight files on disk, priced from their headers where they are safetensors. */
+export async function localWeightFiles(
+  entries: ReadonlyArray<{ component: string; path: string }>,
+): Promise<MediaWeightFile[]> {
   const out: MediaWeightFile[] = [];
   for (const entry of entries) {
     const format = weightFileFormat(entry.path);

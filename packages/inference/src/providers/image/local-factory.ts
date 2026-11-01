@@ -16,8 +16,9 @@
  *      `not-configured` so the UI can say the engine is not installed.
  */
 
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import type { MediaWeightFile } from '@bendyline/gezel';
 import {
   imageMediaPool,
   sdServerLedgerClaim,
@@ -30,7 +31,7 @@ import {
   modelStorageRoots,
   verifyReadOnlyModelPayload,
 } from '../../models/storage-roots.js';
-import { localSdCppWeightFiles } from '../../models/weight-facts.js';
+import { localSdCppWeightFiles, localWeightFiles } from '../../models/weight-facts.js';
 import type { GpuArbiter } from '../gpu-arbiter.js';
 import { pressureIdleGraceMs } from '../native/capacity-broker.js';
 import type { NativeCapacityOptions } from '../native/device-capacity.js';
@@ -42,6 +43,7 @@ import { MockImageProvider } from './mock.js';
 import {
   MODEL_SAMPLE_STEP_DEFAULTS,
   StableDiffusionCppProvider,
+  readInstalledLoras,
   sdServerLoadProfile,
 } from './sd-cpp.js';
 import type { ImageProvider, InstalledImageModelInfo } from './types.js';
@@ -126,6 +128,8 @@ export async function createLocalImageProvider(
     // when it changes; resolveLaunch reads it on the next start.
     const launchState: { modelId: string | undefined } = { modelId: undefined };
     let launchedModel: ResolvedInstalledModel | undefined;
+    const loraRoots = modelStorageRoots({ home: opts.home, engine: 'sd-cpp-loras', env });
+    const loraDir = loraRoots.writableRoot;
     const supervisor = new NativeEngineSupervisor({
       capacity: {
         ...sdServerCapacity(opts.home),
@@ -138,7 +142,10 @@ export async function createLocalImageProvider(
           const requirement = sdServerRequirement({
             modelId: launchedModel.id,
             weightsKind: launchedModel.weightsKind,
-            files: await localSdCppWeightFiles(launchedModel),
+            files: [
+              ...(await localSdCppWeightFiles(launchedModel)),
+              ...(await launchedLoraWeightFiles(loraDir, launchedModel.id)),
+            ],
             pool: imageMediaPool(budget.kind),
           });
           return sdServerLedgerClaim(requirement, budget.fastBytes);
@@ -176,9 +183,11 @@ export async function createLocalImageProvider(
           (await findFirstInstalledModel(storageRoots));
         if (!model) throw new NoLocalImageModelError();
         launchedModel = model;
+        // sd-server ignores a LoRA folder that does not exist yet, then lists none.
+        await mkdir(loraDir, { recursive: true });
         return {
           command: binary,
-          args: buildSdServerArgs(model, port),
+          args: buildSdServerArgs(model, port, { loraDir }),
           baseUrl: `http://127.0.0.1:${port}`,
         };
       },
@@ -191,6 +200,7 @@ export async function createLocalImageProvider(
       storageRoots,
       supervisor,
       launchState,
+      loraRoots,
       fetchImpl: patientFetch(),
       ...(defaultLocalModelId ? { defaultModelId: defaultLocalModelId } : {}),
       ...(opts.arbiter ? { arbiter: opts.arbiter } : {}),
@@ -311,7 +321,11 @@ async function findFirstInstalledModel(
  * encoder runs once per image, so GPUs lose nothing. `--diffusion-fa` means
  * `--flash-attn off,diffusion=on`, so that branch already leaves it off.
  */
-export function buildSdServerArgs(model: ResolvedInstalledModel, port: number): string[] {
+export function buildSdServerArgs(
+  model: ResolvedInstalledModel,
+  port: number,
+  opts: { loraDir?: string } = {},
+): string[] {
   const args: string[] = [];
   if (model.weightsKind === 'diffusion-model') {
     args.push('--diffusion-model', model.weightsPath);
@@ -332,6 +346,33 @@ export function buildSdServerArgs(model: ResolvedInstalledModel, port: number): 
   if (profile.vaeDecode === 'tiled') args.push('--vae-tiling');
   if (profile.stepCache) args.push('--cache-mode', profile.stepCache);
   if (profile.modelArgs) args.push('--model-args', profile.modelArgs);
+  // At runtime for every model: a LoRA then changes per request without
+  // touching the weights. In auto mode an unquantized checkpoint (SD, SDXL)
+  // would merge it into the weights instead.
+  if (opts.loraDir) args.push('--lora-model-dir', opts.loraDir, '--lora-apply-mode', 'at_runtime');
   args.push('--listen-ip', '127.0.0.1', '--listen-port', String(port));
   return args;
+}
+
+/**
+ * The LoRA files a render of `modelId` can hold at once (its fast mode and
+ * its largest style), priced like weights. Read when the engine launches, so
+ * a LoRA installed later counts from the next launch.
+ */
+export async function launchedLoraWeightFiles(
+  loraRoot: string,
+  modelId: string,
+): Promise<MediaWeightFile[]> {
+  const fitting = (await readInstalledLoras(loraRoot)).filter((l) =>
+    l.baseModels.includes(modelId),
+  );
+  const largest = (purpose: 'speed' | 'style') =>
+    fitting
+      .filter((l) => l.purpose === purpose)
+      .sort((a, b) => b.approxSizeBytes - a.approxSizeBytes)[0];
+  return localWeightFiles(
+    [largest('speed'), largest('style')].flatMap((l) =>
+      l ? [{ component: 'lora', path: join(loraRoot, l.id, l.filename) }] : [],
+    ),
+  );
 }

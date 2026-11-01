@@ -177,7 +177,7 @@ import { catalogSampleReader } from './tasks/inputs/samples.js';
 import { InputStagingManager } from './tasks/inputs/staging.js';
 
 import { ImageProviderManager } from './providers/image/manager.js';
-import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
+import { ImageModelPullRegistry, imageLoraPullResolver } from './providers/image/pull-registry.js';
 
 import { ensureLlamaEngineStatus } from '@bendyline/gezel-inference/internal/providers/llama-cpp/build-provider';
 import type { LLMProvider } from '@bendyline/gezel-inference/internal/providers/types';
@@ -1144,6 +1144,10 @@ export async function startProductService(
   const imagePulls = new ImageModelPullRegistry({
     imageProvider: { current: () => imageProvider.localProvider() },
     catalog,
+  });
+  const imageLoraPulls = new ImageModelPullRegistry({
+    resolve: imageLoraPullResolver({ current: () => imageProvider.localProvider() }, catalog),
+    kind: 'image-lora',
   });
   // Chat-model install registries — same design for llama-cpp / ds4 / mlx:
   // the install runs as a background job owned by the registry, HTTP
@@ -2340,6 +2344,7 @@ export async function startProductService(
     renderer,
     imageProvider,
     imagePulls,
+    imageLoraPulls,
     chatInstalls,
     videoProvider,
     videoPulls,
@@ -2855,6 +2860,7 @@ export async function startProductService(
       });
       cacheController.stop();
       imagePulls.clear();
+      imageLoraPulls.clear();
       chatInstalls.llamaCpp.clear();
       chatInstalls.ds4.clear();
       chatInstalls.mlx.clear();

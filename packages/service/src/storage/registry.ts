@@ -77,10 +77,16 @@ const MODEL_ENGINES = [
   'mlx',
   'video',
   'sd-cpp',
+  'sd-cpp-loras',
   'whisper-cpp',
   'recognition',
   'kokoro',
 ] as const;
+
+/** What a person calls an engine's items where its id would mean nothing. */
+const MODEL_ENGINE_LABELS: Partial<Record<(typeof MODEL_ENGINES)[number], string>> = {
+  'sd-cpp-loras': 'image style or fast mode',
+};
 
 export interface StoragePathEntry {
   path: string;
@@ -193,7 +199,7 @@ export const STORAGE_CATEGORIES: StorageCategoryDef[] = [
             path: join(writableRoot, id),
             external: false,
             itemId: `${engine}/${id}`,
-            itemLabel: `${id} (${engine})`,
+            itemLabel: `${id} (${MODEL_ENGINE_LABELS[engine] ?? engine})`,
           });
         }
       }

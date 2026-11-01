@@ -10460,6 +10460,8 @@ function inferGeneratedImageSaveAs(prompt: string): string | undefined {
 
 /** Image models whose prompt guide this session's model has already been shown. */
 const promptGuidesShown = new Set<string>();
+/** Image models whose styles this session's model has already been told. */
+const imageStylesShown = new Set<string>();
 
 // ── Network + search + archive + git (Phase 2/3) ──
 
@@ -10549,6 +10551,12 @@ server.tool(
       .describe(
         'Set true when the result must be a change to `inputImages`: fail instead of drawing from the prompt alone when no installed model can edit.',
       ),
+    style: z
+      .string()
+      .optional()
+      .describe(
+        'A look to draw in, by name. Use only when the person asked for one; the result names the styles this model has. With a style, leave medium words such as "photo" out of the prompt: they work against it.',
+      ),
     saveAs: z
       .string()
       .optional()
@@ -10574,6 +10582,7 @@ server.tool(
           : {}),
         ...(args.strength !== undefined ? { strength: args.strength } : {}),
         ...(args.requireEdit ? { requireEdit: true } : {}),
+        ...(args.style ? { style: args.style } : {}),
         ...(saveAs ? { saveAs } : {}),
         capStepsAtRecommended: true,
         // The daemon holds the size to about a megapixel only when a local
@@ -10593,7 +10602,7 @@ server.tool(
         // Playwright `browser_screenshot` tools use.
         inline: true,
       });
-      const { meta, artifactPath, workspacePath, b64Png, promptGuide } = res;
+      const { meta, artifactPath, workspacePath, b64Png, promptGuide, styles } = res;
       // Surface the path + remind the model that the user already sees
       // the image inline (the bridge attaches a thumbnail to this same
       // tool result). Without the explicit "do not embed" line, models
@@ -10644,7 +10653,15 @@ server.tool(
           ? ` For your next prompt: ${promptGuide}`
           : '';
       if (promptGuide) promptGuidesShown.add(meta.model);
-      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${settingsLine}${skippedLine}${guideLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
+      // After "ms)." — the follow-up threading parses "image with <model> (seed".
+      const appliedStyle = meta.loras?.find((l) => styles?.some((s) => s.id === l.id));
+      const styleLine = appliedStyle ? ` Style: ${appliedStyle.name}.` : '';
+      const stylesLine =
+        styles?.length && !imageStylesShown.has(meta.model)
+          ? ` Styles this model has: ${styles.map((s) => s.name).join(', ')}.`
+          : '';
+      if (styles?.length) imageStylesShown.add(meta.model);
+      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${styleLine}${settingsLine}${skippedLine}${guideLine}${stylesLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];

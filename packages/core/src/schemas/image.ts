@@ -62,7 +62,37 @@ export const ImageSettingsSchema = z.object({
   aspectRatio: ImageAspectRatioSchema.optional(),
   quality: ImageQualitySchema.optional(),
   model: z.string().min(1).optional(),
+  /** An installed style's id; empty for "No style". */
+  style: z.string().optional(),
 });
+
+/** An installed LoRA, as a model listing and a render name it. */
+export const ImageLoraRefSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+});
+export type ImageLoraRef = z.infer<typeof ImageLoraRefSchema>;
+
+/** An installed style or fast mode, as a model listing names it. */
+export const InstalledImageLoraSummarySchema = ImageLoraRefSchema.extend({
+  purpose: z.enum(['style', 'speed']),
+  /** The steps a fast mode renders in. */
+  steps: z.number().int().positive().optional(),
+});
+export type InstalledImageLoraSummary = z.infer<typeof InstalledImageLoraSummarySchema>;
+
+/** An installed style or fast mode, as Settings lists it. */
+export const InstalledImageLoraSchema = InstalledImageLoraSummarySchema.extend({
+  baseModels: z.array(z.string()),
+  approxSizeBytes: z.number().int().nonnegative(),
+  installedAt: z.string(),
+});
+export type InstalledImageLora = z.infer<typeof InstalledImageLoraSchema>;
+
+export const ListInstalledImageLorasResponseSchema = z.object({
+  loras: z.array(InstalledImageLoraSchema),
+});
+export type ListInstalledImageLorasResponse = z.infer<typeof ListInstalledImageLorasResponseSchema>;
 export type ImageSettings = z.infer<typeof ImageSettingsSchema>;
 
 export const ImageGenerationRequestSchema = z.object({
@@ -102,6 +132,17 @@ export const ImageGenerationRequestSchema = z.object({
    * draw from the prompt alone. The image editor gezel sets this.
    */
   requireEdit: z.boolean().optional(),
+  /**
+   * An installed style to draw in, by id or name, among the styles that fit
+   * the model. An unknown style never fails the render: it draws without one,
+   * and the response lists the styles the model has.
+   */
+  style: z.string().optional(),
+  /**
+   * Whether to use the model's fast mode when one is installed. Absent: the
+   * person's setting (`config.imageFastMode`, on unless turned off).
+   */
+  fast: z.boolean().optional(),
   /** Project the output artifact belongs to. Defaults to 'default'. */
   projectId: z.string().optional(),
   /**
@@ -179,6 +220,8 @@ export const ImageGenerationMetaSchema = z.object({
   img2imgSkippedReason: z.string().optional(),
   /** Provider limits or adjustments to the requested image settings. */
   settingsNotes: z.array(z.string()).optional(),
+  /** The styles and fast mode the engine applied. */
+  loras: z.array(ImageLoraRefSchema).optional(),
 });
 export type ImageGenerationMeta = z.infer<typeof ImageGenerationMetaSchema>;
 
@@ -211,6 +254,8 @@ export const ImageGenerationResponseSchema = z.object({
    * the gezel that writes the next one. See core `imagePromptGuide`.
    */
   promptGuide: z.string().optional(),
+  /** The styles the rendering model has, for a caller that cannot read the model list. */
+  styles: z.array(ImageLoraRefSchema).optional(),
 });
 export type ImageGenerationResponse = z.infer<typeof ImageGenerationResponseSchema>;
 
@@ -245,6 +290,11 @@ export const InstalledImageModelSchema = z.object({
   maxSourceImages: z.number().int().positive().optional(),
   /** Made to change a picture: never drawn with for a fresh image. */
   editOnly: z.boolean().optional(),
+  /**
+   * The installed styles and fast mode that fit this model. Whether fast mode
+   * is on is the person's setting (`config.imageFastMode`), not the engine's.
+   */
+  loras: z.array(InstalledImageLoraSummarySchema).optional(),
   /**
    * Size facts for a local model, so a client can show the pixels a shape
    * and tier will render at (core `resolveImageSize`). Absent for cloud

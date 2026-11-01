@@ -43,7 +43,7 @@ import {
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
 import { TextToSpeechProviderManager } from './providers/audio/tts-manager.js';
 import { ImageProviderManager } from './providers/image/manager.js';
-import { ImageModelPullRegistry } from './providers/image/pull-registry.js';
+import { ImageModelPullRegistry, imageLoraPullResolver } from './providers/image/pull-registry.js';
 import { RecognitionManager } from './providers/recognition/manager.js';
 import { VideoProviderManager } from './providers/video/manager.js';
 import { VideoModelPullRegistry } from './providers/video/pull-registry.js';
@@ -212,6 +212,10 @@ export async function startEngineService(
       ]);
     });
     const imagePulls = new ImageModelPullRegistry({ imageProvider, catalog });
+    const imageLoraPulls = new ImageModelPullRegistry({
+      resolve: imageLoraPullResolver(imageProvider, catalog),
+      kind: 'image-lora',
+    });
     const videoPulls = new VideoModelPullRegistry({ videoProvider, catalog });
     const chatInstalls = buildChatModelInstallRegistries({
       home,
@@ -224,6 +228,7 @@ export async function startEngineService(
     });
     cleanup.push(() => {
       imagePulls.clear();
+      imageLoraPulls.clear();
       videoPulls.clear();
       for (const registry of Object.values(chatInstalls)) registry.clear();
     });
@@ -276,6 +281,7 @@ export async function startEngineService(
       stt,
       tts,
       imagePulls,
+      imageLoraPulls,
       videoPulls,
       chatInstalls,
       debug: new DebugFlag(bootConfig.debugMode === true),

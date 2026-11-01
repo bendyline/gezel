@@ -1169,6 +1169,12 @@ const GezelConfigObject = z.object({
     })
     .optional(),
   /**
+   * Fast mode per local image model id. A model renders with its installed
+   * speed LoRA unless this says `false`; absent means on. Read per request,
+   * so changing it resets nothing.
+   */
+  imageFastMode: z.record(z.string(), z.boolean()).optional(),
+  /**
    * Cost confirmation behaviour for cloud image generation. `'ask'`
    * (default) prompts the user before each cloud call; `'always-allow'`
    * skips the prompt; `'snooze'` (future) silences for a window. The

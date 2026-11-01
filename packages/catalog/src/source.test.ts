@@ -1117,6 +1117,78 @@ describe('BundledSource — knowledge-catalog kind', () => {
   });
 });
 
+describe('BundledSource — image-lora kind', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'catalog-image-lora-'));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const identity = {
+    schemaVersion: 1,
+    kind: 'image-lora',
+    id: 'qwen-image-edit-2511-lightning-4step',
+    name: 'Fast mode for Qwen Image Edit 2511',
+    description: 'Edits in four steps instead of twenty.',
+    tags: ['speed'],
+    maintainer: { name: 'lightx2v', url: 'https://huggingface.co/lightx2v' },
+    license: 'Apache 2.0',
+    licenseClass: 'open',
+    baseModels: ['qwen-image-edit-2511-q4'],
+    purpose: 'speed',
+    render: { steps: 4, cfg: 1, sampler: 'euler' },
+    commercialUse: true,
+    yankedVersions: [],
+  };
+  const version = (
+    v: string,
+    downloadUrl = 'https://huggingface.co/x/y/resolve/main/l.safetensors',
+  ) => ({
+    schemaVersion: 1,
+    version: v,
+    releasedAt: '2026-10-31T00:00:00.000Z',
+    downloadUrl,
+    sha256: 'c'.repeat(64),
+    approxSizeBytes: 849_608_296,
+    notes: 'RTX Spark N1X, 2026-10-31: 334 s to 45 s per edit.',
+  });
+
+  it('lists and resolves the newest version with every field carried through', async () => {
+    const dir = await writeIdentity(root, 'image-lora', identity.id, identity);
+    await writeVersion(dir, '1.0.0', version('1.0.0'));
+    await writeVersion(dir, '1.1.0', version('1.1.0'));
+    const items = await new BundledSource(root).list('image-lora');
+    expect(items).toHaveLength(1);
+    const manifest = items[0]?.manifest;
+    if (manifest?.kind !== 'image-lora') throw new Error('wrong kind');
+    expect(manifest).toMatchObject({
+      version: '1.1.0',
+      baseModels: ['qwen-image-edit-2511-q4'],
+      purpose: 'speed',
+      strength: 1,
+      render: { steps: 4, cfg: 1, sampler: 'euler' },
+      commercialUse: true,
+      sha256: 'c'.repeat(64),
+      notes: 'RTX Spark N1X, 2026-10-31: 334 s to 45 s per edit.',
+      availableVersions: ['1.1.0', '1.0.0'],
+    });
+  });
+
+  it('refuses anything but a safetensors file', async () => {
+    const dir = await writeIdentity(root, 'image-lora', identity.id, identity);
+    await writeVersion(
+      dir,
+      '1.0.0',
+      version('1.0.0', 'https://huggingface.co/x/y/resolve/main/l.pt'),
+    );
+    expect(await new BundledSource(root).list('image-lora')).toHaveLength(0);
+  });
+});
+
 describe('BundledSource — file-bundle index', () => {
   let root: string;
 

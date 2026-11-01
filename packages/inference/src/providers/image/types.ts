@@ -1,4 +1,11 @@
-import type { ImageAspectRatio, ImageModelAuxiliaryRole, ImageQuality } from '@bendyline/gezel';
+import type {
+  ImageAspectRatio,
+  ImageLoraPrompt,
+  ImageLoraPurpose,
+  ImageLoraRender,
+  ImageModelAuxiliaryRole,
+  ImageQuality,
+} from '@bendyline/gezel';
 
 export type { ImageModelAuxiliaryRole } from '@bendyline/gezel';
 
@@ -83,6 +90,12 @@ export interface ImageGenerationInput {
   /** Img2img strength (0 = keep source, 1 = ignore source). sd-cpp img2img only. */
   strength?: number;
   /**
+   * LoRAs to apply, by catalog id: a style, a fast mode. The engine reads each
+   * one's file, strength, prompt words and render settings from its own
+   * install, so an engine that predates LoRAs renders correctly without them.
+   */
+  loras?: Array<{ id: string }>;
+  /**
    * Optional callback fired as the engine advances through sampling
    * steps. Today only the local sd-cpp provider emits these; cloud
    * providers ignore the field. Errors thrown from the callback are
@@ -149,6 +162,8 @@ export interface ImageGenerationMeta {
   img2imgSkippedReason?: string;
   /** Provider limits or adjustments to the requested image settings. */
   settingsNotes?: string[];
+  /** The LoRAs the engine applied; absent when none. */
+  loras?: Array<{ id: string; name: string }>;
 }
 
 export interface ImageGenerationOutput {
@@ -173,6 +188,40 @@ export interface InstalledImageModelInfo {
   editMode?: 'reference' | 'img2img';
   maxSourceImages?: number;
   editOnly?: boolean;
+  /**
+   * Installed LoRAs that fit this model. Carried on the model listing because
+   * that listing already reaches the product daemon from a machine broker or
+   * a paired server; an engine that predates LoRAs lists none.
+   */
+  loras?: InstalledImageLoraSummary[];
+}
+
+/** An installed LoRA as the model listing names it. */
+export interface InstalledImageLoraSummary {
+  id: string;
+  name: string;
+  purpose: ImageLoraPurpose;
+  /** The steps a speed LoRA renders in. */
+  steps?: number;
+}
+
+export interface InstalledImageLoraInfo extends InstalledImageLoraSummary {
+  baseModels: string[];
+  approxSizeBytes: number;
+  installedAt: string;
+}
+
+/** What a LoRA install needs from its catalog entry; persisted beside the file. */
+export interface ImageLoraPullSpec {
+  downloadUrl: string;
+  sha256: string;
+  approxSizeBytes: number;
+  name: string;
+  baseModels: string[];
+  purpose: ImageLoraPurpose;
+  strength: number;
+  prompt?: ImageLoraPrompt;
+  render?: ImageLoraRender;
 }
 
 export type ImageModelPullEvent =
@@ -270,6 +319,18 @@ export interface ImageProvider {
     signal?: AbortSignal,
   ): AsyncIterable<ImageModelPullEvent>;
   deleteModel(id: string): Promise<void>;
+  /**
+   * LoRA management for an engine that applies them (the local sd-cpp
+   * engine). Rendering never needs these: the model listing carries the
+   * installed LoRAs and `generate` takes their ids.
+   */
+  pullLora?(
+    id: string,
+    spec: ImageLoraPullSpec,
+    signal?: AbortSignal,
+  ): AsyncIterable<ImageModelPullEvent>;
+  listLoras?(): Promise<InstalledImageLoraInfo[]>;
+  deleteLora?(id: string): Promise<void>;
   /**
    * Probe the underlying engine for reachability without doing real
    * work. Implementations should be fast (sub-second) and never throw

@@ -155,6 +155,7 @@ export const HARNESS_TOOL_DESCRIPTIONS: Record<HarnessToolName, string> = {
     'Make an image from a plain description, with the image engine the person chose in Gezel (on this computer unless they allowed cloud engines).',
     "Describe subject, setting, light and style in sentences; put any words the image must show in quotes. Set `aspectRatio` for its shape ('16:9' banner, '9:16' phone, '1:1' square).",
     'Pass `inputImages` (absolute paths) to edit or combine existing images.',
+    'Pass `style` only when the person asked for a look, and then leave medium words such as "photo" out of the prompt; the result names the styles the model has.',
     'Returns the image and the path Gezel saved it to. Copy it into the folder yourself if it belongs there; Gezel never writes into this folder.',
   ].join(' '),
   gezel_status: [

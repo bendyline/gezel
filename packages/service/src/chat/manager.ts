@@ -10131,6 +10131,7 @@ export class ChatManager extends LocalEngineRuntime {
               ? { width: prev.width, height: prev.height }
               : {}),
           ...(prev.model ? { model: prev.model } : {}),
+          ...(prev.style ? { style: prev.style } : {}),
         };
         if (plan === 'reshape') {
           promptValue = prev.prompt;
@@ -10316,6 +10317,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(size ?? {}),
       ...(asked.aspectRatio ? { aspectRatio: asked.aspectRatio } : {}),
       ...(asked.quality ? { quality: asked.quality } : {}),
+      ...(asked.style ? { style: asked.style } : {}),
       at: nowIso(),
     };
   }

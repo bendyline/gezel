@@ -81,7 +81,11 @@ function CatalogItemLogo({ item }: { item: CatalogItemSummary }) {
 
 function catalogModelAttribution(item: CatalogItemSummary): ModelAttribution | null {
   if (item.manifest.kind === 'chat-model') return modelAttribution(item.manifest);
-  if (item.manifest.kind === 'image-model' || item.manifest.kind === 'video-model') {
+  if (
+    item.manifest.kind === 'image-model' ||
+    item.manifest.kind === 'image-lora' ||
+    item.manifest.kind === 'video-model'
+  ) {
     return { maker: item.manifest.maintainer.name, customizers: [] };
   }
   return null;
@@ -100,7 +104,13 @@ function catalogModelReco(item: CatalogItemSummary): {
   tags?: readonly string[];
 } | null {
   const m = item.manifest;
-  if (m.kind === 'chat-model' || m.kind === 'image-model' || m.kind === 'video-model') return m;
+  if (
+    m.kind === 'chat-model' ||
+    m.kind === 'image-model' ||
+    m.kind === 'image-lora' ||
+    m.kind === 'video-model'
+  )
+    return m;
   return null;
 }
 
@@ -230,6 +240,7 @@ export function CatalogBrowser({
   const isModelCatalog =
     kind === 'chat-model' ||
     kind === 'image-model' ||
+    kind === 'image-lora' ||
     kind === 'video-model' ||
     kind === 'knowledge-catalog';
 

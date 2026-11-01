@@ -2350,6 +2350,137 @@ export const ImageModelManifestSchema = z.object({
 });
 export type ImageModelManifest = z.infer<typeof ImageModelManifestSchema>;
 
+// ─ Image LoRAs ──────────────────────────────────────────────────────
+
+/**
+ * What a LoRA does for the image models it fits: a `style` a person picks for
+ * a render, or `speed`, a distilled shortcut that renders in a few steps and is
+ * used whenever it is installed unless the person turns it off.
+ */
+export const ImageLoraPurposeSchema = z.enum(['style', 'speed']);
+export type ImageLoraPurpose = z.infer<typeof ImageLoraPurposeSchema>;
+
+/** The pinned sd-server's samplers and schedulers; it silently ignores any other name. */
+export const SD_CPP_SAMPLERS = [
+  'euler',
+  'euler_a',
+  'heun',
+  'dpm2',
+  'dpm++2s_a',
+  'dpm++2m',
+  'dpm++2mv2',
+  'ipndm',
+  'ipndm_v',
+  'lcm',
+  'ddim_trailing',
+  'tcd',
+  'res_multistep',
+  'lms',
+] as const;
+export const SD_CPP_SCHEDULERS = [
+  'discrete',
+  'karras',
+  'exponential',
+  'ays',
+  'gits',
+  'sgm_uniform',
+  'simple',
+  'smoothstep',
+  'kl_optimal',
+  'lcm',
+] as const;
+
+/** Render settings a LoRA needs over its base model's: a speed LoRA's few steps, a style's own recipe. */
+export const ImageLoraRenderSchema = z.object({
+  steps: z.number().int().positive().optional(),
+  cfg: z.number().nonnegative().optional(),
+  sampler: z.enum(SD_CPP_SAMPLERS).optional(),
+  scheduler: z.enum(SD_CPP_SCHEDULERS).optional(),
+});
+export type ImageLoraRender = z.infer<typeof ImageLoraRenderSchema>;
+
+/**
+ * Words the engine adds around the prompt it was given: a style's trigger
+ * words, or the instruction an edit model's style was trained on. People and
+ * gezels never write them.
+ */
+export const ImageLoraPromptSchema = z.object({
+  prefix: z.string().min(1).optional(),
+  suffix: z.string().min(1).optional(),
+});
+export type ImageLoraPrompt = z.infer<typeof ImageLoraPromptSchema>;
+
+const ImageLoraFitShape = {
+  /**
+   * Image-model ids the LoRA was checked on. A LoRA fits a base model's
+   * version, not its quantization, so each quantization is listed, and a
+   * LoRA never fits a model it was not listed for.
+   */
+  baseModels: z.array(z.string().regex(IdRegex)).min(1),
+  purpose: ImageLoraPurposeSchema,
+  /** The multiplier the engine applies. */
+  strength: z.number().positive().max(4).default(1),
+  prompt: ImageLoraPromptSchema.optional(),
+  render: ImageLoraRenderSchema.optional(),
+  upstream: z.string().url().optional(),
+  /** Whether the license permits commercial use; the UI badges it when not. */
+  commercialUse: z.boolean(),
+};
+
+export const ImageLoraIdentitySchema = IdentityCommonSchema.extend({
+  kind: z.literal('image-lora'),
+  ...ImageLoraFitShape,
+});
+export type ImageLoraIdentity = z.infer<typeof ImageLoraIdentitySchema>;
+
+/** Only safetensors: sd-server also loads pickle files from its LoRA folder. */
+const ImageLoraDownloadUrlSchema = z
+  .string()
+  .url()
+  .regex(/\.safetensors$/i);
+
+export const ImageLoraVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
+  schemaVersion: z.literal(1),
+  version: z.string().regex(SemverRegex),
+  releasedAt: z.string(),
+  downloadUrl: ImageLoraDownloadUrlSchema,
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  approxSizeBytes: z.number().int().positive(),
+  tensors: WeightTensorsSchema.optional(),
+  /** Where and when it was checked (hardware, date, what the bench showed). */
+  notes: z.string().optional(),
+});
+export type ImageLoraVersionManifest = z.infer<typeof ImageLoraVersionManifestSchema>;
+
+export const ImageLoraManifestSchema = z.object({
+  ...MinGezelVersionShape,
+  schemaVersion: z.literal(1),
+  kind: z.literal('image-lora'),
+  id: z.string().regex(IdRegex),
+  name: z.string().min(1),
+  description: z.string(),
+  tags: z.array(z.string()).default([]),
+  maintainer: z.object({
+    name: z.string(),
+    url: z.string().url().optional(),
+  }),
+  logo: z.string().optional(),
+  license: z.string().optional(),
+  ...LicenseMetaShape,
+  ...RecoMetaShape,
+  ...ImageLoraFitShape,
+  version: z.string(),
+  releasedAt: z.string(),
+  downloadUrl: ImageLoraDownloadUrlSchema,
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  approxSizeBytes: z.number().int().positive(),
+  tensors: WeightTensorsSchema.optional(),
+  notes: z.string().optional(),
+  availableVersions: z.array(z.string()).default([]),
+});
+export type ImageLoraManifest = z.infer<typeof ImageLoraManifestSchema>;
+
 // ─ Video models ─────────────────────────────────────────────────────
 
 /**
@@ -2777,7 +2908,7 @@ export function knowledgeKeywordArticle(line: string): { title: string; phrases:
 
 // The unions and the summary/detail shapes below carry explicit types so the
 // published declarations reference each member schema instead of writing all
-// nine manifests out again per schema. That repetition is what pushes
+// ten manifests out again per schema. That repetition is what pushes
 // `@bendyline/gezel` past its packed-size budget (tests/published).
 export const CatalogItemIdentitySchema: z.ZodDiscriminatedUnion<
   [
@@ -2788,6 +2919,7 @@ export const CatalogItemIdentitySchema: z.ZodDiscriminatedUnion<
     typeof ConnectorTypeIdentitySchema,
     typeof ChatModelIdentitySchema,
     typeof ImageModelIdentitySchema,
+    typeof ImageLoraIdentitySchema,
     typeof VideoModelIdentitySchema,
     typeof KnowledgeCatalogIdentitySchema,
   ],
@@ -2800,6 +2932,7 @@ export const CatalogItemIdentitySchema: z.ZodDiscriminatedUnion<
   ConnectorTypeIdentitySchema,
   ChatModelIdentitySchema,
   ImageModelIdentitySchema,
+  ImageLoraIdentitySchema,
   VideoModelIdentitySchema,
   KnowledgeCatalogIdentitySchema,
 ]);
@@ -2816,6 +2949,7 @@ export const CatalogItemManifestSchema: z.ZodDiscriminatedUnion<
     typeof ConnectorTypeManifestSchema,
     typeof ChatModelManifestSchema,
     typeof ImageModelManifestSchema,
+    typeof ImageLoraManifestSchema,
     typeof VideoModelManifestSchema,
     typeof KnowledgeCatalogItemManifestSchema,
   ],
@@ -2828,6 +2962,7 @@ export const CatalogItemManifestSchema: z.ZodDiscriminatedUnion<
   ConnectorTypeManifestSchema,
   ChatModelManifestSchema,
   ImageModelManifestSchema,
+  ImageLoraManifestSchema,
   VideoModelManifestSchema,
   KnowledgeCatalogItemManifestSchema,
 ]);
@@ -2841,6 +2976,7 @@ export const CatalogKindSchema = z.enum([
   'connector-type',
   'chat-model',
   'image-model',
+  'image-lora',
   'video-model',
   'knowledge-catalog',
 ]);

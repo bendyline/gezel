@@ -7,7 +7,11 @@ import {
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { effectiveImageSettings, imageSendFields } from './composer-image-settings.js';
+import {
+  effectiveImageSettings,
+  imageModelStyles,
+  imageSendFields,
+} from './composer-image-settings.js';
 import type { PromptDraftController } from './usePromptDraft.js';
 
 export interface UseComposerImageSettingsOptions {
@@ -30,6 +34,8 @@ export interface ComposerImageSettings {
   effective: ImageSizeSettings;
   model: InstalledImageModel | undefined;
   models: readonly InstalledImageModel[];
+  /** The styles installed for the model; the strip shows its picker only when there are some. */
+  styles: ReadonlyArray<{ id: string; name: string }>;
   /** Why High will not fit this model on this machine; null when it will. */
   highRefusal: string | null;
   pick: (patch: ImageSettings) => void;
@@ -121,10 +127,17 @@ export function useComposerImageSettings({
   const modelId =
     effective.model ?? (edits ? catalog?.defaultEditModel : catalog?.defaultModel) ?? models[0]?.id;
   const model = models.find((m) => m.id === modelId);
+  const modelsRef = useRef(models);
+  modelsRef.current = models;
 
   const pick = useCallback(
     (patch: ImageSettings) => {
       const next: ImageSettings = { ...picksRef.current, ...patch };
+      // A style belongs to one model: another model has no use for it.
+      if (patch.model !== undefined && next.style) {
+        const chosen = modelsRef.current.find((m) => m.id === patch.model);
+        if (!imageModelStyles(chosen).some((s) => s.id === next.style)) delete next.style;
+      }
       for (const key of Object.keys(next) as Array<keyof ImageSettings>) {
         if (next[key] === undefined) delete next[key];
       }
@@ -159,6 +172,7 @@ export function useComposerImageSettings({
     effective,
     model,
     models,
+    styles: imageModelStyles(model),
     highRefusal: model ? (highRefusals.get(model.id) ?? null) : null,
     pick,
     dismissCues,

@@ -16,7 +16,10 @@ import { streamSSE } from 'hono/streaming';
 import type { SSEStreamingApi } from 'hono/streaming';
 import { imageCatalogFits, imageModelFit, wontRunRefusal } from '../../models/media-fit.js';
 import { resolveImageEditCapability } from '../../providers/image/img2img-support.js';
-import { UnknownImageModelError } from '../../providers/image/pull-registry.js';
+import {
+  type ImageModelPullRegistry,
+  UnknownImageModelError,
+} from '../../providers/image/pull-registry.js';
 import type { InstalledImageModelInfo } from '../../providers/image/types.js';
 import type { EngineContext } from '../engine-context.js';
 import { mediaFitContext } from './media-fit-context.js';
@@ -117,7 +120,7 @@ export function imageModelRoutes(ctx: EngineContext): Hono {
       }
       throw err;
     }
-    return streamSSE(c, (stream) => subscribeToPullSse(ctx, id, stream));
+    return streamSSE(c, (stream) => subscribeToPullSse(ctx.imagePulls, id, stream));
   });
 
   /**
@@ -145,7 +148,7 @@ export function imageModelRoutes(ctx: EngineContext): Hono {
     if (!ctx.imagePulls.get(id)) {
       return c.json({ error: `no active pull for image-model: ${id}` }, 404);
     }
-    return streamSSE(c, (stream) => subscribeToPullSse(ctx, id, stream));
+    return streamSSE(c, (stream) => subscribeToPullSse(ctx.imagePulls, id, stream));
   });
 
   /** Explicitly cancel an in-flight pull. Disconnect alone does not cancel. */
@@ -171,17 +174,75 @@ export function imageModelRoutes(ctx: EngineContext): Hono {
     }
     return c.json({ ok: true as const });
   });
+
+  /**
+   * Styles and fast mode: LoRAs installed beside the local engine's models.
+   * Installs mirror model pulls, through their own registry. An engine that
+   * predates them answers these routes with a 404, which the UI reads as
+   * "update Gezel to add styles".
+   */
+  app.get('/loras', proxy, async (c) => {
+    const provider = await ctx.imageProvider.localProvider();
+    return c.json({ loras: (await provider.listLoras?.()) ?? [] });
+  });
+
+  app.post('/loras/:id/pull', proxy, async (c) => {
+    const id = c.req.param('id');
+    try {
+      await ctx.imageLoraPulls.start(id);
+    } catch (err) {
+      if (err instanceof UnknownImageModelError) {
+        return c.json({ error: err.message }, 404);
+      }
+      throw err;
+    }
+    return streamSSE(c, (stream) => subscribeToPullSse(ctx.imageLoraPulls, id, stream));
+  });
+
+  app.get('/lora-pulls', proxy, (c) => c.json({ pulls: ctx.imageLoraPulls.list() }));
+
+  app.get('/lora-pulls/:id/events', proxy, (c) => {
+    const id = c.req.param('id');
+    if (!ctx.imageLoraPulls.get(id)) {
+      return c.json({ error: `no active pull for image-lora: ${id}` }, 404);
+    }
+    return streamSSE(c, (stream) => subscribeToPullSse(ctx.imageLoraPulls, id, stream));
+  });
+
+  app.delete('/lora-pulls/:id', proxy, (c) => {
+    return c.json({ aborted: ctx.imageLoraPulls.cancel(c.req.param('id')) });
+  });
+
+  app.delete('/loras/:id', proxy, async (c) => {
+    const id = c.req.param('id');
+    if (!isSafeModelId(id)) {
+      return c.json({ error: INVALID_MODEL_ID_MESSAGE, code: INVALID_MODEL_ID_CODE }, 400);
+    }
+    const provider = await ctx.imageProvider.localProvider();
+    if (!provider.deleteLora) {
+      return c.json({ error: 'This image engine cannot add styles or fast mode.' }, 409);
+    }
+    try {
+      await provider.deleteLora(id);
+    } catch (err) {
+      if (err instanceof ReadOnlyModelError) {
+        return c.json({ error: err.message, code: err.code }, 409);
+      }
+      throw err;
+    }
+    return c.json({ ok: true as const });
+  });
   return app;
 }
 
 async function subscribeToPullSse(
-  ctx: EngineContext,
+  pulls: ImageModelPullRegistry,
   id: string,
   stream: SSEStreamingApi,
 ): Promise<void> {
   let done = false;
   const { promise, resolve } = withResolvers<void>();
-  const unsubscribe = ctx.imagePulls.subscribe(id, (event) => {
+  const unsubscribe = pulls.subscribe(id, (event) => {
     if (done) return;
     // A failed write means the socket is gone, which onAbort will also
     // fire — no need to surface it here.

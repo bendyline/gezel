@@ -25,6 +25,8 @@ export interface ImageSizeSettings {
   width?: number;
   height?: number;
   model?: string;
+  /** An installed style's id or name; '' is an explicit "No style" that overrides a lower layer. */
+  style?: string;
 }
 
 export interface ImageSettingCue {
@@ -229,10 +231,11 @@ export function imageSizeSettingsFrom(
   const tier = ImageQualitySchema.safeParse(record.quality);
   if (tier.success) out.quality = tier.data;
   if (typeof record.model === 'string' && record.model.trim()) out.model = record.model.trim();
+  if (typeof record.style === 'string') out.style = record.style.trim();
   return out;
 }
 
-const SIZE_KEYS = new Set(['width', 'height', 'aspectRatio', 'quality', 'model']);
+const SIZE_KEYS = new Set(['width', 'height', 'aspectRatio', 'quality', 'model', 'style']);
 
 /** A defaults record without its size settings, which merge separately. */
 export function withoutImageSizeKeys(

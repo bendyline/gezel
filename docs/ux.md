@@ -1874,7 +1874,10 @@ sits where a task strip would, in the same frame. The image strip holds:
   drawn in that ratio (1:1, 4:5, 3:2, 16:9, 9:16), with "More" for the rest;
 - a Draft / Standard / High tray;
 - a model picker when more than one model is installed;
-- a one-line readout of what will render (`9:16 · 768×1344 · FLUX.2 Klein`).
+- a Style picker, starting at "No style", only when the chosen model has a
+  style installed; picking another model drops a style it lacks;
+- a one-line readout of what will render (`9:16 · 768×1344 · FLUX.2 Klein`),
+  ending with the style when one is picked.
 
 Shapes and tiers, never pixel fields: a person thinks "phone wallpaper", and
 the daemon turns it into the model's own trained size. The strip follows four

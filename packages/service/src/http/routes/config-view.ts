@@ -124,6 +124,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     codexCli: config.codexCli,
     imageProvider: config.imageProvider,
     defaultImageModel: config.defaultImageModel,
+    imageFastMode: config.imageFastMode,
     imageGenerationConfirmation: config.imageGenerationConfirmation,
     videoProvider: config.videoProvider,
     defaultVideoModel: config.defaultVideoModel,

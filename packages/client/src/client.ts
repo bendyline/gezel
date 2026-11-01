@@ -46,6 +46,7 @@ import type {
   ListAudioCatalogResponse,
   ListAudioVoicesResponse,
   ListInstalledAudioModelsResponse,
+  ListInstalledImageLorasResponse,
   ListInstalledImageModelsResponse,
   ListInstalledVideoModelsResponse,
   LlamaCppBackendHealthResponse,
@@ -3479,6 +3480,50 @@ export class GezelClient {
    */
   cancelImagePull(id: string): Promise<{ aborted: boolean }> {
     return this.request('DELETE', `/api/image-gen/pulls/${encodeURIComponent(id)}`);
+  }
+
+  /** Styles and fast modes installed beside the local image engine's models. */
+  listInstalledImageLoras(): Promise<ListInstalledImageLorasResponse> {
+    return this.request('GET', '/api/image-gen/loras');
+  }
+
+  /** Install a catalog style or fast mode. Same contract as {@link pullImageModel}. */
+  async pullImageLora(
+    id: string,
+    onEvent: (event: ImageModelPullEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return this.consumeImagePullSse(
+      `${this.baseUrl}/api/image-gen/loras/${encodeURIComponent(id)}/pull`,
+      'POST',
+      onEvent,
+      signal,
+    );
+  }
+
+  listActiveImageLoraPulls(): Promise<ListActiveImagePullsResponse> {
+    return this.request('GET', '/api/image-gen/lora-pulls');
+  }
+
+  subscribeImageLoraPull(
+    id: string,
+    onEvent: (event: ImageModelPullEvent) => void,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    return this.consumeImagePullSse(
+      `${this.baseUrl}/api/image-gen/lora-pulls/${encodeURIComponent(id)}/events`,
+      'GET',
+      onEvent,
+      signal,
+    );
+  }
+
+  cancelImageLoraPull(id: string): Promise<{ aborted: boolean }> {
+    return this.request('DELETE', `/api/image-gen/lora-pulls/${encodeURIComponent(id)}`);
+  }
+
+  deleteImageLora(id: string): Promise<{ ok: true }> {
+    return this.request('DELETE', `/api/image-gen/loras/${encodeURIComponent(id)}`);
   }
 
   private async consumeImagePullSse(

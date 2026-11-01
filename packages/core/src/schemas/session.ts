@@ -303,6 +303,8 @@ export const ChatSessionSchema = z.object({
       /** The shape and tier the person asked for, when they named one. */
       aspectRatio: ImageAspectRatioSchema.optional(),
       quality: ImageQualitySchema.optional(),
+      /** The style the picture was drawn in, so a follow-up keeps it. */
+      style: z.string().optional(),
       at: z.string(),
     })
     .optional(),

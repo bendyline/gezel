@@ -21,6 +21,7 @@ function settings(overrides: Partial<ComposerImageSettings> = {}): ComposerImage
     effective: {},
     model: flux,
     models: [flux],
+    styles: [],
     highRefusal: null,
     pick: vi.fn(),
     dismissCues: vi.fn(),
@@ -72,5 +73,21 @@ describe('ComposerImageSettingsBar', () => {
     const high = screen.getByRole('radio', { name: 'High' });
     expect(high).toBeDisabled();
     expect(high).toHaveAttribute('title', 'Needs 24 GB; this computer has 16 GB.');
+  });
+
+  it("offers the model's styles only when it has some, and reads out the one picked", () => {
+    const { rerender } = render(<ComposerImageSettingsBar settings={settings()} />);
+    expect(screen.queryByRole('combobox', { name: 'Style' })).toBeNull();
+
+    const styles = [{ id: 'klein-pixel-art', name: 'Pixel art' }];
+    rerender(<ComposerImageSettingsBar settings={settings({ styles })} />);
+    expect(screen.getByRole('combobox', { name: 'Style' })).toHaveTextContent('No style');
+
+    rerender(
+      <ComposerImageSettingsBar
+        settings={settings({ styles, effective: { style: 'klein-pixel-art' } })}
+      />,
+    );
+    expect(screen.getByRole('combobox', { name: 'Style' })).toHaveTextContent('Pixel art');
   });
 });
