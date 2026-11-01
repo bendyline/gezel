@@ -66,7 +66,7 @@ async function runCli(...args: string[]): Promise<{ stdout: string; stderr: stri
 function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
   // On Windows a fresh home downloads the MXC launcher at boot, and once it
   // lands `--strict-sandbox` stops refusing — so the suite's outcome depended
-  // on how fast npm answered. Keep every platform but macOS without isolation.
+  // on how fast npm answered. Keep Windows isolation disabled for this suite.
   const env: NodeJS.ProcessEnv = { ...process.env, GEZEL_MXC: 'off', ...extra };
   for (const key of Object.keys(env)) {
     if (key.startsWith('VITEST')) delete env[key];
@@ -387,19 +387,40 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
       await expect(
         runCli('--project', folder, 'do', 'batch-meta', 'dp04', '--strict-sandbox'),
       ).rejects.toMatchObject({ code: 1 });
-      if (process.platform !== 'darwin') {
-        await expect(
-          runCli(
-            '--project',
-            folder,
-            'do',
-            'batch-smoke',
-            'c2',
-            '--strict-sandbox',
-            '--wait',
-            '--json',
-          ),
-        ).rejects.toMatchObject({ code: 2 });
+      // Linux can enforce denyNet through systemd on some hosts. Probe the
+      // actual runner; Windows is explicitly disabled in childEnv above.
+      let boundaryAvailable = false;
+      if (process.platform !== 'win32') {
+        const { runInSandbox } = await import('@bendyline/gezel-service');
+        await writeFile(join(folder, 'sandbox-probe.mjs'), "console.log('sandbox probe');\n");
+        const probe = await runInSandbox({
+          entry: 'sandbox-probe.mjs',
+          timeoutMs: 10_000,
+          cwd: folder,
+          input: '',
+          denyNet: true,
+        });
+        boundaryAvailable = probe.exitCode === 0;
+        if (!boundaryAvailable) {
+          expect(probe.stderr).toContain('denyNet requires an enforceable OS network boundary');
+        }
+      }
+      const strictRun = runCli(
+        '--project',
+        folder,
+        'do',
+        'batch-smoke',
+        'c2',
+        '--strict-sandbox',
+        '--wait',
+        '--json',
+      );
+      if (boundaryAvailable) {
+        const strict = JSON.parse((await strictRun).stdout);
+        expect(strict.outcome).toBe('complete');
+        expect(strict.task.cliTrustedScriptHashes ?? []).toEqual([]);
+      } else {
+        await expect(strictRun).rejects.toMatchObject({ code: 2 });
       }
     } finally {
       daemonWorkspaceDirs.push(folder);

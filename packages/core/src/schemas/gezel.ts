@@ -24,7 +24,7 @@ export * from './referenced-file.js';
  * identity and model configuration. Everything is optional except the name —
  * Gezel fills in reasonable defaults elsewhere.
  */
-export const ProviderNameSchema = z.enum([
+const ProviderNameEnum = z.enum([
   'copilot',
   'openai',
   'anthropic',
@@ -48,6 +48,9 @@ export const ProviderNameSchema = z.enum([
   // forward-pass is remoted — so `remote` is NOT a local provider.
   'remote',
 ]);
+// Retain this shared enum's name instead of expanding it in every declaration.
+export interface ProviderNameZodSchema extends z.ZodEnum<(typeof ProviderNameEnum)['enum']> {}
+export const ProviderNameSchema: ProviderNameZodSchema = ProviderNameEnum;
 export type ProviderName = z.infer<typeof ProviderNameSchema>;
 
 /**
@@ -330,7 +333,7 @@ export const ParsedGezelSchema = z.object({
 });
 export type ParsedGezel = z.infer<typeof ParsedGezelSchema>;
 
-export const GezelSummarySchema = z.object({
+const GezelSummaryObject = z.object({
   id: EntityIdSchema,
   name: z.string(),
   description: z.string().optional(),
@@ -421,9 +424,12 @@ export const GezelSummarySchema = z.object({
   growth: GezelGrowthSummarySchema.optional(),
   updatedAt: z.string(),
 });
+// Keep API response declarations referring to these shared shapes by name.
+export interface GezelSummaryZodSchema extends z.ZodObject<(typeof GezelSummaryObject)['shape']> {}
+export const GezelSummarySchema: GezelSummaryZodSchema = GezelSummaryObject;
 export type GezelSummary = z.infer<typeof GezelSummarySchema>;
 
-export const GezelDetailSchema = GezelSummarySchema.extend({
+const GezelDetailObject = GezelSummarySchema.extend({
   parsed: ParsedGezelSchema,
   about: z.string(),
   /**
@@ -437,6 +443,8 @@ export const GezelDetailSchema = GezelSummarySchema.extend({
    */
   toolsMd: z.string().nullable().default(null),
 });
+export interface GezelDetailZodSchema extends z.ZodObject<(typeof GezelDetailObject)['shape']> {}
+export const GezelDetailSchema: GezelDetailZodSchema = GezelDetailObject;
 export type GezelDetail = z.infer<typeof GezelDetailSchema>;
 
 /**

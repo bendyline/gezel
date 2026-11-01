@@ -107,7 +107,7 @@ test('gallery lists the Language Trainer type and creates a project with a pinne
   // After creation the project view shows the Output pane pinned to the
   // type's dashboard (served from the type source). The dashboard renders
   // "Level" / "Day streak" tiles inside the sandboxed iframe.
-  const outputFrame = page.frameLocator('iframe.project-output-iframe');
+  const outputFrame = page.frameLocator('.page-preview-host.project-output-iframe > iframe');
   await expect(outputFrame.getByText('Level', { exact: true })).toBeVisible({ timeout: 20_000 });
   await expect(outputFrame.getByText('Day streak')).toBeVisible();
   // The `language` param default ("Spanish") is substituted into the seeded
@@ -146,9 +146,9 @@ test('gallery creates a Job Hunt project: two-gezel crew and the pipeline board'
 
   // The pinned dashboard is the pipeline board: one column per stage, seeded
   // empty, with the coach-voiced empty state and no template placeholders.
-  const outputFrame = page.frameLocator('iframe.project-output-iframe');
-  await expect(outputFrame.getByText('Applied')).toBeVisible({ timeout: 20_000 });
-  await expect(outputFrame.getByText('Screening')).toBeVisible();
+  const outputFrame = page.frameLocator('.page-preview-host.project-output-iframe > iframe');
+  await expect(outputFrame.getByText('Applied', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(outputFrame.getByText('Screening', { exact: true })).toBeVisible();
   await expect(outputFrame.getByText('Interview', { exact: true })).toBeVisible();
   await expect(outputFrame.getByText('Offer', { exact: true })).toBeVisible();
   // Gilde 0.3 names the roles in plain English; either line passes.

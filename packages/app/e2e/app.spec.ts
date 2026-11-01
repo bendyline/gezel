@@ -150,7 +150,7 @@ test('05 - can create a gezel via the sidebar "+"', async () => {
   // The Gezels group "+" opens the Gezels view and pops the create dialog.
   await page.locator('[aria-label="New gezel"]').click();
   await page.waitForTimeout(300);
-  const dialog = page.locator('[role="dialog"]');
+  const dialog = page.getByRole('dialog', { name: 'New Gezel', exact: true });
   await expect(dialog).toBeVisible();
   // Clear the pre-filled random name and type ours.
   await dialog.locator('input').first().fill('TestBot');
