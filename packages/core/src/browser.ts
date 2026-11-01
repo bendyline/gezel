@@ -198,6 +198,7 @@ export * from './tasks/gate-scripts.js';
 export * from './tasks/gate-workspace-files.js';
 export * from './tasks/prompt-context.js';
 export * from './tasks/inferred-step-inputs.js';
+export * from './tasks/paused-card.js';
 export * from './tasks/step-activation.js';
 export * from './tasks/work-time.js';
 export * from './tasks/step-turn-steering.js';

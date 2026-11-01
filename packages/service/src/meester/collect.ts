@@ -126,11 +126,34 @@ export function hashProjectContexts(candidates: ProjectContext[]): string {
   return createHash('sha256').update(lines.join('\n')).digest('hex');
 }
 
+/**
+ * Default's name and seeded description ("The default project for
+ * general-purpose chats.") mean nothing to the person, and the status line
+ * repeated them: "Project Default is waiting for your input!" (2026-10-31).
+ * It holds what they asked for outside any project, so it is introduced as
+ * that.
+ */
+function projectIntro(project: Project): string[] {
+  if (project.id === 'default') {
+    return [
+      `## Everyday requests (id: ${project.id})`,
+      'What the user asked for outside any project. Call it "your everyday requests" or name the work itself, never a project and never "Default".',
+    ];
+  }
+  return [
+    `## Project "${project.name}" (id: ${project.id})`,
+    ...(project.description ? [project.description] : []),
+  ];
+}
+
+/** Ids and task refs are for the JSON fields; people know work by its title. */
+export const PERSON_FACING_IDS_RULE =
+  'Never show a project id or task ref (like "default" or "squisq/18") in text the user reads; name projects and work by their titles.';
+
 /** One markdown section per project — the shared prompt-input body. */
 export function renderProjectContextSections(candidates: ProjectContext[]): string[] {
   return candidates.map((c) => {
-    const lines: string[] = [`## Project "${c.project.name}" (id: ${c.project.id})`];
-    if (c.project.description) lines.push(c.project.description);
+    const lines: string[] = projectIntro(c.project);
     if (c.voormanName) lines.push(`Crew lead: ${c.voormanName}`);
     if (c.lastActivityAt) lines.push(`Last activity: ${c.lastActivityAt}`);
     if (c.pendingQuestions > 0) {

@@ -27,6 +27,7 @@ import {
   resolveSocialMode,
   startSuspendMonitor,
   stopSuspendMonitor,
+  taskPausedCardText,
 } from '@bendyline/gezel';
 import { type ExternalFolders, KeyedLock, resolveDistributionProfile } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
@@ -1499,7 +1500,7 @@ export async function startProductService(
   // card for the same task; a task that pauses again after the card was
   // answered files a fresh one. No live session — answering collapses
   // the card; the `taskRef` attachment gives the UI its "Open task" link.
-  tasks.setTaskNeedsHelpHook(async ({ projectId, task, stepId, reason, detail }) => {
+  tasks.setTaskNeedsHelpHook(async ({ projectId, task, stepId, reason }) => {
     // The nightly review is the runtime's own work: it resumes itself when the
     // next window opens and the morning card says so.
     if (isNightShiftOversightTask(task)) return;
@@ -1512,13 +1513,14 @@ export async function startProductService(
       return;
     }
     const config = await store.readConfig().catch(() => ({}) as GezelConfig);
-    const stepPart = stepId ? ` at step \`${stepId}\`` : '';
+    const stepName = stepId ? task.craftbook.steps.find((s) => s.id === stepId)?.name : undefined;
     await store.writeQuestion({
       id: randomUUID(),
       projectId,
       gezelId: config.meesterGezelId ?? '',
       sessionId: '',
-      prompt: `Task ${task.ref} ("${task.title}") paused for help${stepPart}: ${detail}`,
+      // `detail` is written for the gezel and already sits in the task's notes.
+      prompt: taskPausedCardText({ title: task.title, reason, ...(stepName ? { stepName } : {}) }),
       // "Try again" is a real choice, not only the desktop card's button, so
       // every client can restart the task. The eval harness and plain-choice
       // clients saw only "Dismiss": 213 paused trials dead-ended there and

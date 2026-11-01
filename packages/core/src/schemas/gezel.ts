@@ -748,7 +748,7 @@ export type ContextCompaction = z.infer<typeof ContextCompactionSchema>;
  * unchanged, but the UI uses this metadata to render the bubble as an
  * inter-gezel handoff rather than a human composer turn.
  */
-export const ChatMessageSchema = z.object({
+const ChatMessageObject = z.object({
   /** Stable per-message identity and durable foreground turn state, when supplied by the host. */
   id: z.string().optional(),
   status: z.enum(['complete', 'streaming', 'interrupted', 'error']).optional(),
@@ -1076,6 +1076,14 @@ export const ChatMessageSchema = z.object({
    */
   sentPreamble: z.string().optional(),
 });
+/**
+ * Named so the declarations that embed a message (sessions, stream events and
+ * the responses that carry them) print this name rather than the whole shape
+ * again. They held six copies, against the package's size budget. Named
+ * through the object for the reason `GezelConfigZodSchema` (./api.ts) is.
+ */
+export interface ChatMessageZodSchema extends z.ZodObject<(typeof ChatMessageObject)['shape']> {}
+export const ChatMessageSchema: ChatMessageZodSchema = ChatMessageObject;
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 
 /**

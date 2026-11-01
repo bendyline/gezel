@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { toolsetGroupsForRole } from '../roles/registry.js';
 import { MODEL_TIER_ORDER, type ModelTier } from '../roles/tier.js';
 import { type TaskAssignee, TaskAssigneeSchema } from './assignee.js';
 import { CraftbookContractSchema } from './craftbook-contract.js';
@@ -800,17 +801,35 @@ export const CraftbookCommandNeedSchema = z.object({
 export type CraftbookCommandNeed = z.infer<typeof CraftbookCommandNeedSchema>;
 
 /**
- * Returns the *required* (non-optional) toolset needs whose ids are not
- * present in `installedToolsetIds` — the set the launcher must offer to
- * install before the craftbook can run. Pure; both the listing route and
- * the UI's setup affordance derive from it.
+ * Returns the *required* (non-optional) toolset needs the project does not
+ * meet — the set the launcher must offer to install before the craftbook
+ * can run. A need is met when its toolset is installed. A built-in group
+ * (`builtin.<group>`) is also met when a role the book's `steps` name gets
+ * that group by default: that is how a crew gets built-in tools, and nothing
+ * installs them, so counting installs alone refused every book that names
+ * one. Pure; the listing route, the chat trigger tier and task creation all
+ * derive from it.
  */
 export function unmetToolsets(
   toolsets: CraftbookToolsetNeed[] | undefined,
   installedToolsetIds: ReadonlySet<string>,
+  steps: readonly { suggestedRole?: string }[] = [],
 ): CraftbookToolsetNeed[] {
-  return (toolsets ?? []).filter((t) => !t.optional && !installedToolsetIds.has(t.toolsetId));
+  const roleGroups = new Set(
+    steps.flatMap((step) => (step.suggestedRole ? toolsetGroupsForRole(step.suggestedRole) : [])),
+  );
+  return (toolsets ?? []).filter(
+    (t) =>
+      !t.optional &&
+      !installedToolsetIds.has(t.toolsetId) &&
+      !(
+        t.toolsetId.startsWith(BUILTIN_TOOLSET_PREFIX) &&
+        roleGroups.has(t.toolsetId.slice(BUILTIN_TOOLSET_PREFIX.length))
+      ),
+  );
 }
+
+const BUILTIN_TOOLSET_PREFIX = 'builtin.';
 
 /**
  * A connector (external source mirrored into the project's `artifacts/data/`

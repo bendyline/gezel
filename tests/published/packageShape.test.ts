@@ -67,9 +67,14 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // 5 KB packed, because gzip already folds repeats that sit close together.
   // It tripped at 2.10 MB again; naming HistoryEventKindSchema's type
   // (`HistoryEventKindZodSchema`) took out 8 copies of the kind enum, ~5 KB
-  // packed. Name another embedded schema the same way next time:
-  // ChatModelTuningSchema (10 copies) and ChatMessageSchema (7) are the
-  // largest repeats left in the `.d.ts` output.)
+  // packed. It tripped at 2.11 MB again; naming ChatModelTuningSchema,
+  // ChatMessageSchema and GezelConfigSchema (UpdateConfigRequestSchema
+  // extends it, and wrote all 33 KB of settings out again) took out ~16 KB
+  // packed. Name a large schema through its `z.object` value, not a bare
+  // shape const: a shape const carries every property's doc comment into the
+  // `.d.ts`, and for the config that cost more than the copy it removed.
+  // Next time: QuestionSchema (4 copies in the chat events, 5 KB each) and
+  // CraftbookContractSchema (6) are the largest repeats left.)
   '@bendyline/gezel': 2_100_000, //                    2.10 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB

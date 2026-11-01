@@ -10,7 +10,6 @@ import {
   type GateAttemptRecord,
   type GateScriptRef,
   type GezelConfig,
-  MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   MAX_RESTART_RESUMES,
   type NewCraftbookStep,
   type NormalizedStepGate,
@@ -20,7 +19,6 @@ import {
   type Task,
   type TaskAssignee,
   type TaskCraftbook,
-  type TaskCraftbookSource,
   type TaskCraftbookStep,
   type TaskExecutionMode,
   type TaskFanout,
@@ -66,12 +64,10 @@ import {
   taskEffectiveStatus,
   uniqueStepId,
   unmetConnectors,
-  unmetToolsets,
   withEffectiveTaskStatuses,
 } from '@bendyline/gezel';
 import { collapseCraftbookForTier as collapseCraftbookPass } from '@bendyline/gezel';
 import { evaluateDeliverableGate } from '../chat/deliverable-gate.js';
-import { installedToolsetIds } from '../craftbook/applicable.js';
 import type { DraftOverlayReader } from '../diffpack/draft-store.js';
 import type { Store } from '../fs/store.js';
 import { TaskWriteConflictError } from '../fs/task-files-store.js';
@@ -80,7 +76,6 @@ import type { ScriptRunner } from '../scripts/runner.js';
 import {
   assertCraftbookParamRequirements,
   craftbookParamDefaults,
-  inlineStepsToCraftbook,
   interpolateContext,
   interpolateContextDeep,
   interpolateLaunchRecipes,
@@ -128,7 +123,8 @@ import {
   writeTaskWithInputs,
 } from './inputs/resolve.js';
 import type { InputStagingManager } from './inputs/staging.js';
-import { ConnectorSetupRequiredError, CraftbookSetupRequiredError } from './launch-errors.js';
+import { resolveLaunchCraftbooks } from './launch-craftbooks.js';
+import { ConnectorSetupRequiredError } from './launch-errors.js';
 import type {
   ConnectorPrepHook,
   CurrentTurnStepReactivatedHook,
@@ -155,12 +151,7 @@ import {
 } from './step-completion-errors.js';
 import { type StepGateOutcome, evaluateStepGate, gateMessageFingerprint } from './step-gate.js';
 export { StepCompletionBlockedError };
-import {
-  packageCommandsOffDetail,
-  packageCommandsOffNote,
-  unrunnableGateCommands,
-  unrunnableStepCommands,
-} from './package-commands-off.js';
+import { holdUnsatisfiableGate, pauseIfStepUnsatisfiable } from './policy-blocked-step.js';
 import {
   bumpStepActivation,
   findBranchGoto,
@@ -169,11 +160,7 @@ import {
   shouldAutoAdvance,
   stepOwnerGezelId,
 } from './step-runtime.js';
-import {
-  allActiveStepsBlockedByWorkspaceWrites,
-  unsatisfiableStepWorkspaceFiles,
-  unsatisfiableWorkspaceGateFiles,
-} from './writes-off-deliverables.js';
+import { allActiveStepsBlockedByWorkspaceWrites } from './writes-off-deliverables.js';
 
 export { mainBookSource, stepOwnerGezelId };
 
@@ -952,122 +939,12 @@ export class TaskManager {
     // resolution, no fanout, no handoff — until `activate()` runs it.
     const isDraft = input.status === 'draft';
 
-    // ── resolve main craftbook ──────────────────────────────────────
-    let mainBook: Craftbook;
-    let mainBookSourceId: string | undefined;
-    const sources: TaskCraftbookSource[] = [];
-    if (input.craftbookId) {
-      if (!this.craftbookResolver) {
-        throw new Error(
-          `task ${projectId}/${num}: craftbookId provided but no CraftbookResolver wired`,
-        );
-      }
-      const resolved = await this.craftbookResolver.resolve(input.craftbookId, {
-        ...(input.craftbookVersion ? { version: input.craftbookVersion } : {}),
-        ...(input.craftbookSourceId ? { sourceId: input.craftbookSourceId } : {}),
-        projectId,
-      });
-      if (!resolved) {
-        throw new Error(`task ${projectId}/${num}: craftbook "${input.craftbookId}" not found`);
-      }
-      mainBook = resolved.craftbook;
-      mainBookSourceId = resolved.sourceId;
-      const missingToolsets = unmetToolsets(
-        mainBook.toolsets,
-        await installedToolsetIds(this.store, projectId),
-      );
-      if (missingToolsets.length > 0) {
-        throw new CraftbookSetupRequiredError(input.craftbookId, missingToolsets);
-      }
-      sources.push({
-        role: 'main',
-        catalogId: input.craftbookId,
-        ...(resolved.version ? { version: resolved.version } : {}),
-        sourceId: resolved.sourceId,
-      });
-    } else if (input.steps && input.steps.length > 0) {
-      mainBook = inlineStepsToCraftbook(input.steps, {
-        name: input.title,
-        ...(input.description ? { description: input.description } : {}),
-        ...(input.plan ? { plan: input.plan } : {}),
-        defaultAssignee: input.assignee,
-        ...(input.entryStepId ? { entryStepId: input.entryStepId } : {}),
-      });
-    } else {
-      throw new Error(
-        `task ${projectId}/${num}: exactly one of craftbookId or steps must be provided`,
-      );
-    }
-
-    // ── resolve spawn-side craftbook (optional) ─────────────────────
-    let spawnBook: Craftbook | undefined;
-    if (input.spawnsCraftbookId) {
-      if (!this.craftbookResolver) {
-        throw new Error(
-          `task ${projectId}/${num}: spawnsCraftbookId provided but no CraftbookResolver wired`,
-        );
-      }
-      const resolved = await this.craftbookResolver.resolve(input.spawnsCraftbookId, {
-        ...(input.spawnsCraftbookVersion ? { version: input.spawnsCraftbookVersion } : {}),
-        ...(input.spawnsCraftbookSourceId ? { sourceId: input.spawnsCraftbookSourceId } : {}),
-        projectId,
-      });
-      if (!resolved) {
-        throw new Error(
-          `task ${projectId}/${num}: spawn craftbook "${input.spawnsCraftbookId}" not found`,
-        );
-      }
-      spawnBook = resolved.craftbook;
-      const missingToolsets = unmetToolsets(
-        spawnBook.toolsets,
-        await installedToolsetIds(this.store, projectId),
-      );
-      if (missingToolsets.length > 0) {
-        throw new CraftbookSetupRequiredError(input.spawnsCraftbookId, missingToolsets);
-      }
-      sources.push({
-        role: 'spawn',
-        catalogId: input.spawnsCraftbookId,
-        ...(resolved.version ? { version: resolved.version } : {}),
-        sourceId: resolved.sourceId,
-      });
-    } else if (input.spawnsSteps && input.spawnsSteps.length > 0) {
-      spawnBook = inlineStepsToCraftbook(input.spawnsSteps, {
-        name: `${input.title} — spawn template`,
-        defaultAssignee: input.assignee,
-        ...(input.spawnsEntryStepId ? { entryStepId: input.spawnsEntryStepId } : {}),
-      });
-    } else if (mainBook.spawn) {
-      // Declarative fanout: the main craftbook carries a `spawn` block, so
-      // this task is a spawn host by construction — derive its spawn
-      // template from `mainBook.spawn` REGARDLESS of the create path. Doing
-      // it here (not only in the terminal `craftbookInvoker`) means the
-      // HTTP create route, the MCP `invoke_craftbook` tool, and the eval
-      // harness all produce a working spawn host — the `spawnFanout` step's
-      // runtime fanout needs `task.spawnsCraftbook` present to fire.
-      spawnBook = inlineStepsToCraftbook(mainBook.spawn.steps, {
-        name: `${mainBook.name} — spawn template`,
-        defaultAssignee: input.assignee,
-        ...(mainBook.spawn.entryStepId ? { entryStepId: mainBook.spawn.entryStepId } : {}),
-        // Children of a declarative fanout do the parent book's work on a
-        // slice of it, so they need the parent's tool + connector
-        // requirements. `inlineStepsToCraftbook` carries neither, and the
-        // chat session's auto-allow derivation reads `craftbook.toolsets`
-        // off the task — so children of a PR-review fanout would come up
-        // without the GitHub/code-intelligence toolset their steps name.
-        // The host already proved these are installed and bound at launch.
-        ...(mainBook.toolsets ? { toolsets: mainBook.toolsets } : {}),
-        ...(mainBook.connectors ? { connectors: mainBook.connectors } : {}),
-        // And the parent's embedded script sources, for the same reason.
-        // `embeddedScriptSource` resolves a shard's `scope: 'craftbook'` gate
-        // ref against the SHARD's own snapshot, so a spawn template without
-        // the map sends every shard to the project-installed copy — which,
-        // for a book written straight onto a task, does not exist. Every
-        // shard then pauses with a gate_infrastructure_error naming a path
-        // the model cannot create.
-        ...(mainBook.scripts ? { scripts: mainBook.scripts } : {}),
-      });
-    }
+    const { mainBook, mainBookSourceId, spawnBook, sources } = await resolveLaunchCraftbooks(
+      { resolver: this.craftbookResolver, store: this.store },
+      projectId,
+      num,
+      input,
+    );
 
     let cron: Task['cron'];
     if (input.cron?.expression) {
@@ -1454,7 +1331,10 @@ export class TaskManager {
       const entryStep = activatedTask.craftbook.steps.find(
         (s) => s.id === activatedTask.activeStepId,
       );
-      if (entryStep && (await this.pauseIfStepUnsatisfiable(projectId, activatedTask, entryStep))) {
+      if (
+        entryStep &&
+        (await pauseIfStepUnsatisfiable(this, this.store, projectId, activatedTask, entryStep))
+      ) {
         return this.withEffectiveStatus({ ...activatedTask, status: 'paused' });
       }
     }
@@ -2907,7 +2787,9 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
 
         // No auto-advance → fire the handoff hook so a gezel picks up,
         // unless nobody could satisfy the step under current policy.
-        if (await this.pauseIfStepUnsatisfiable(projectId, preparedTask, preparedStep)) {
+        if (
+          await pauseIfStepUnsatisfiable(this, this.store, projectId, preparedTask, preparedStep)
+        ) {
           return { status: 'advanced', task: { ...preparedTask, status: 'paused' } };
         }
         if (this.onStepActivated) {
@@ -3372,111 +3254,18 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       return { kind: 'approved', outcome };
     }
 
-    // Satisfiability pre-flight: a rejection no assignee can repair under
-    // current policy must not burn the attempt budget or climb the nudge
-    // ladder toward tools nobody has. The known case: a workspace-tree
-    // check failing while gezel workspace writes are OFF for the project
-    // (a workspace-path deliverable gate on a writes-off project). Pause
-    // like a gate-infrastructure failure — no attempt consumed, a note
-    // naming the real cause and the real fixes — instead of charging the
-    // budget and then demanding `write_file` from a roster it was
-    // stripped from.
-    const unsatFiles = await unsatisfiableWorkspaceGateFiles(
-      this.store,
+    // A rejection no assignee can repair under current policy pauses
+    // without charging an attempt (policy-blocked-step.ts).
+    const blocked = await holdUnsatisfiableGate(this, this.store, {
       projectId,
       task,
       step,
       gate,
       outcome,
-    );
-    if (unsatFiles) {
-      const fileList =
-        unsatFiles.length > 0 ? unsatFiles.map((f) => `\`${f}\``).join(', ') : 'files';
-      const message = `This gate cannot be met right now: it requires workspace ${fileList} to change, but managed workspace writes are OFF for this project. The task is paused for a human decision; do not retry. See the task notes for the fixes.`;
-      const paused = await this.setStatus(projectId, task.num, 'paused').catch(() => ({
-        ...task,
-        status: 'paused' as const,
-      }));
-      await this.appendNote(projectId, task.num, {
-        text: `# Gate unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) is gated on workspace ${fileList}, but managed workspace writes are OFF for this project — no managed task assignee can create or edit workspace files, so retrying cannot succeed. No completion attempt was consumed.\n\nFix one of these, then set the task active again:\n\n- Enable "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings.\n- Change the step's deliverable to the artifacts drawer (\`artifact: true\`, written with \`write_artifact\`) — the drawer stays writable when workspace writes are off.\n- Create or fix the file(s) by hand from the content in task notes.`,
-        author: { kind: 'user' },
-        stepId: step.id,
-      }).catch(() => {});
-      log.warn(
-        `[gate] ${task.ref} step "${step.id}" gate is unsatisfiable (workspace writes off) — pausing without consuming an attempt`,
-      );
-      await logGated('reject', priorAttempts, true, outcome);
-      // Activation already paused and reported an unwinnable step; the
-      // caller still gets the verdict below, but one blocked step must
-      // not raise a second needs-help.
-      if (task.status !== 'paused') {
-        await this.emitNeedsHelp({
-          projectId,
-          task,
-          stepId: step.id,
-          reason: 'gate_unsatisfiable',
-          detail: `The gate requires workspace ${fileList}, but managed workspace writes are off for this project.`,
-        });
-      }
-      return {
-        kind: 'held',
-        task: paused,
-        info: {
-          message,
-          messageFingerprint: gateMessageFingerprint(message),
-          attempt: priorAttempts,
-          maxAttempts: gate.maxAttempts,
-          paused: true,
-          cached: false,
-          unsatisfiable: true,
-          ...(outcome.checkResults ? { checkResults: outcome.checkResults } : {}),
-        },
-      };
-    }
-
-    // The same pre-flight for a command the step must see run while package
-    // scripts are off: the rejection names `run_package_script`, which no
-    // session has, so a retry can only repeat it.
-    const unrunnable = await unrunnableGateCommands(this.store, task, gate, outcome);
-    if (unrunnable) {
-      const message = `This gate cannot be met right now: it needs ${unrunnable.join(', ')} to run, and running package scripts is off in the security settings. The task is paused for a human decision; do not retry.`;
-      const paused = await this.setStatus(projectId, task.num, 'paused').catch(() => ({
-        ...task,
-        status: 'paused' as const,
-      }));
-      await this.appendNote(projectId, task.num, {
-        text: packageCommandsOffNote(step, unrunnable, true),
-        author: { kind: 'user' },
-        stepId: step.id,
-      }).catch(() => {});
-      log.warn(
-        `[gate] ${task.ref} step "${step.id}" needs ${unrunnable.join(', ')} but package scripts are off — pausing without consuming an attempt`,
-      );
-      await logGated('reject', priorAttempts, true, outcome);
-      if (task.status !== 'paused') {
-        await this.emitNeedsHelp({
-          projectId,
-          task,
-          stepId: step.id,
-          reason: 'gate_unsatisfiable',
-          detail: packageCommandsOffDetail(step, unrunnable),
-        });
-      }
-      return {
-        kind: 'held',
-        task: paused,
-        info: {
-          message,
-          messageFingerprint: gateMessageFingerprint(message),
-          attempt: priorAttempts,
-          maxAttempts: gate.maxAttempts,
-          paused: true,
-          cached: false,
-          unsatisfiable: true,
-          ...(outcome.checkResults ? { checkResults: outcome.checkResults } : {}),
-        },
-      };
-    }
+      attempt: priorAttempts,
+      recordVerdict: () => logGated('reject', priorAttempts, true, outcome),
+    });
+    if (blocked) return { kind: 'held', ...blocked };
 
     const rawMessage = outcome.message ?? 'Gate rejected the step.';
     // Plateau scoring: same failing-check identity set as the trailing
@@ -3808,58 +3597,6 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
   /** See the free function in writes-off-deliverables.ts; the scheduler reaches it here. */
   allActiveStepsBlockedByWorkspaceWrites(projectId: string, tasks: Task[]): Promise<boolean> {
     return allActiveStepsBlockedByWorkspaceWrites(this.store, projectId, tasks);
-  }
-
-  /**
-   * Pause a task whose newly-activated step targets an unwritable
-   * workspace deliverable, and report why. Returns true when the caller
-   * must skip the handoff — dispatching a gezel here cannot succeed.
-   */
-  private async pauseIfStepUnsatisfiable(
-    projectId: string,
-    task: Task,
-    step: Pick<TaskCraftbookStep, 'id' | 'name' | 'advanceWhen' | 'gate'>,
-  ): Promise<boolean> {
-    const commands = await unrunnableStepCommands(this.store, task, step);
-    if (commands) {
-      await this.setStatus(projectId, task.num, 'paused').catch(() => {});
-      await this.appendNote(projectId, task.num, {
-        text: packageCommandsOffNote(step, commands, false),
-        author: { kind: 'user' },
-        stepId: step.id,
-      }).catch(() => {});
-      log.warn(
-        `[tasks] ${task.ref} step "${step.id}" needs ${commands.join(', ')} but package scripts are off — pausing instead of dispatching`,
-      );
-      await this.emitNeedsHelp({
-        projectId,
-        task,
-        stepId: step.id,
-        reason: 'gate_unsatisfiable',
-        detail: packageCommandsOffDetail(step, commands),
-      });
-      return true;
-    }
-    const files = await unsatisfiableStepWorkspaceFiles(this.store, projectId, task, step);
-    if (!files) return false;
-    const fileList = files.map((f) => `\`${f}\``).join(', ');
-    await this.setStatus(projectId, task.num, 'paused').catch(() => {});
-    await this.appendNote(projectId, task.num, {
-      text: `# Step unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) must produce workspace ${fileList}, but managed workspace writes are OFF for this project — no managed task assignee has \`write_file\`, so the step cannot complete through this path. The step was not dispatched.\n\nFix one of these, then set the task active again:\n\n- Enable "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings.\n- Change the step's deliverable to the artifacts drawer (\`artifact: true\`, written with \`write_artifact\`) — the drawer stays writable when workspace writes are off.\n- Create the file(s) by hand and re-run the step.`,
-      author: { kind: 'user' },
-      stepId: step.id,
-    }).catch(() => {});
-    log.warn(
-      `[tasks] ${task.ref} step "${step.id}" targets workspace ${fileList} but workspace writes are off — pausing instead of dispatching`,
-    );
-    await this.emitNeedsHelp({
-      projectId,
-      task,
-      stepId: step.id,
-      reason: 'gate_unsatisfiable',
-      detail: `Step "${step.name}" must write workspace ${fileList}, but managed workspace writes are off for this project.`,
-    });
-    return true;
   }
 
   /**
@@ -4385,6 +4122,72 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     } catch (err) {
       log.error(`[tasks] re-dispatch hook failed for ${task.ref}:`, err);
     }
+  }
+
+  /**
+   * One fire of a schedule host. A host whose spawn template came from a
+   * catalog craftbook launches that book as a task of its own through
+   * `create()`, like any other launch; only an inline template is cloned
+   * by `spawnChild`.
+   *
+   * The clone skipped everything a launch resolves, because the host's own
+   * book is the placeholder step and declares no parameters. Every
+   * scheduled run of a book with `workPath: { default: '{{task.dir}}' }`
+   * carried a literal `{{workPath}}` into its prompts and gate paths, and
+   * paused at its first gate after the gezel had done the work (squisq/22
+   * and squisq/23, 2026-10-31). The clone also shared the host's folder
+   * across runs, never derived a book's own fanout, and never drafted a
+   * proposal for a `diffpackCapable` book that nobody was watching.
+   */
+  async launchScheduledRun(parentRef: string): Promise<Task> {
+    const parent = await this.getByRef(parentRef);
+    if (!parent) throw new Error(`task ${parentRef} not found`);
+    const source = parent.sourceCraftbookIds?.find((s) => s.role === 'spawn');
+    if (!source) return this.spawnChild(parentRef);
+    if (taskEffectiveStatus(parent) !== 'active') {
+      throw new Error(
+        `task ${parentRef}: cannot launch a scheduled run while its effective status is ${taskEffectiveStatus(parent)}`,
+      );
+    }
+    const template = parent.spawnsCraftbook;
+    // The current book, not the host's snapshot: that snapshot was
+    // interpolated with the host's context, and a fix to the book should
+    // reach the next scheduled run.
+    const run = await this.create(parent.projectId, {
+      title: parent.title,
+      ...(template?.description ? { description: template.description } : {}),
+      craftbookId: source.catalogId,
+      ...(source.sourceId ? { craftbookSourceId: source.sourceId } : {}),
+      ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
+      // A cron fire is as unattended as a night-shift one.
+      ...(template?.diffpackCapable ? { deliveryMode: 'propose' as const } : {}),
+      ...(parent.nightShift?.enabled ? { nightShift: { enabled: true } } : {}),
+      ...(parent.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: parent.roleBasedNameOnlyMode }
+        : {}),
+      parentTaskRef: parent.ref,
+      createdBy: parent.createdBy,
+    });
+    // `create()` hands only an auto-advanced entry to the activation hook;
+    // an ordinary entry is dispatched here, as `spawnChild` does.
+    const entryStep =
+      run.status === 'active' && run.activeStepId === run.craftbook.entryStepId
+        ? run.craftbook.steps.find((step) => step.id === run.activeStepId)
+        : undefined;
+    if (entryStep && this.onStepActivated) {
+      try {
+        await this.onStepActivated({
+          projectId: run.projectId,
+          task: run,
+          newStep: entryStep,
+          completedStep: entryStep,
+          kind: 'entry',
+        });
+      } catch (err) {
+        log.error('[tasks] onStepActivated hook failed on launchScheduledRun:', err);
+      }
+    }
+    return run;
   }
 
   /**

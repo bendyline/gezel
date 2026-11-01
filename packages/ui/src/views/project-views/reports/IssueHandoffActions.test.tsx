@@ -56,4 +56,33 @@ describe('the handoff report keys', () => {
     expect(importVerdicts).toHaveBeenCalledWith('p1', { markdown: 'Verdict: fixed' });
     expect(onImported).toHaveBeenCalled();
   });
+
+  it('imports answers an app filled into the report itself', async () => {
+    readArtifact.mockResolvedValue({ content: 'Verdict: nit' } as never);
+    importVerdicts.mockResolvedValue({
+      results: [{ ref: 'BW-1', outcome: 'applied', message: 'BW-1 is now dismissed.' }],
+      applied: 1,
+      refused: 0,
+      skipped: [],
+    });
+    const onImported = vi.fn();
+    render(
+      <IssueHandoffActions
+        projectId="p1"
+        path="reports/issue-handoff.md"
+        unimportedAnswers={1}
+        onImported={onImported}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Import 1 answer' }));
+    expect(await screen.findByRole('status')).toHaveTextContent('1 answer imported.');
+    expect(readArtifact).toHaveBeenCalledWith('p1', 'reports/issue-handoff.md');
+    expect(importVerdicts).toHaveBeenCalledWith('p1', { markdown: 'Verdict: nit' });
+    expect(onImported).toHaveBeenCalled();
+  });
+
+  it('offers no report import when every answer in it is recorded', () => {
+    renderActions();
+    expect(screen.queryByRole('button', { name: /^Import \d/ })).toBeNull();
+  });
 });

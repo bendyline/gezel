@@ -23,6 +23,7 @@ import type { ActivityTracker } from '../fs/activity-tracker.js';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import {
+  PERSON_FACING_IDS_RULE,
   type ProjectContext,
   collectProjectContexts,
   hashProjectContexts,
@@ -459,7 +460,8 @@ Rules:
 - Add one "Needs you" block when questions or draft tasks wait on the user (counts + project names).
 - Optionally one "Highlight" block quoting a great line or result from recent activity.
 - Each block is at most ~40 words. Short lists and small markdown tables are fine.
-- No images, no links, no code blocks. Ground every statement in the activity above; no speculation.`;
+- No images, no links, no code blocks. Ground every statement in the activity above; no speculation.
+- ${PERSON_FACING_IDS_RULE}`;
 }
 
 function describe(err: unknown): string {

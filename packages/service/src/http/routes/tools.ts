@@ -831,7 +831,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     // night shift doesn't start fixing what the app is still judging.
     const by = issueVerdictActorFor(c);
     const lease = by?.kind === 'app' ? { client: by.client } : undefined;
-    return c.json(await buildIssueHandoffQueue(ctx, id, body, lease));
+    return c.json(await buildIssueHandoffQueue(ctx, id, body, lease ? { lease } : {}));
   });
 
   app.post('/:id/tools/issue-handoff/document', async (c) => {

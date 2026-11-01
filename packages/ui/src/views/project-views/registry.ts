@@ -9,13 +9,6 @@ import type { ProjectViewDefinition, ProjectViewProps } from './types.js';
  */
 export const PROJECT_VIEWS: readonly ProjectViewDefinition[] = [
   {
-    id: 'village',
-    label: 'Village',
-    hint: 'Your files as a town you come to know',
-    icon: 'village',
-    load: () => import('./village/index.js'),
-  },
-  {
     id: 'guide',
     label: 'Guide',
     hint: 'What each folder is for, and what the rest leans on',
@@ -49,6 +42,13 @@ export const PROJECT_VIEWS: readonly ProjectViewDefinition[] = [
     hint: 'What changed when, week by week',
     icon: 'timeline',
     load: () => import('./timeline/index.js'),
+  },
+  {
+    id: 'village',
+    label: 'Village',
+    hint: 'Your files as a town you come to know',
+    icon: 'village',
+    load: () => import('./village/index.js'),
   },
 ];
 

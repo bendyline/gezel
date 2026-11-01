@@ -206,6 +206,8 @@ export const ProjectReportSchema = z.object({
   size: z.number().int().nonnegative(),
   /** Suggested actions written into it (gezel-action blocks). */
   actions: z.number().int().nonnegative(),
+  /** The issues document only: answers filled in it that Gezel has not recorded yet. */
+  unimportedAnswers: z.number().int().positive().optional(),
 });
 export type ProjectReport = z.infer<typeof ProjectReportSchema>;
 
@@ -227,6 +229,11 @@ export const GenerateProjectReportResponseSchema = z.object({
   path: z.string().nullable(),
   /** False when the report was already up to date or there was nothing to say. */
   wrote: z.boolean(),
+  /**
+   * The issues document was left as it is: it holds this many answers that
+   * Gezel has not recorded, and a new batch would have replaced them.
+   */
+  unimportedAnswers: z.number().int().positive().optional(),
 });
 export type GenerateProjectReportResponse = z.infer<typeof GenerateProjectReportResponseSchema>;
 

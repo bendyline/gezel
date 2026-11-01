@@ -13,6 +13,10 @@ import {
   enableSuggestedWork,
 } from '../../suggested-work/enable.js';
 import { resolveSuggestedWork } from '../../suggested-work/resolve.js';
+import {
+  ConnectorSetupRequiredError,
+  CraftbookSetupRequiredError,
+} from '../../tasks/launch-errors.js';
 import type { ServiceContext } from '../context.js';
 
 const log = createLogger('http');
@@ -57,6 +61,13 @@ export function suggestedWorkRoutes(ctx: ServiceContext): Hono {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn(`[suggested-work] enable failed for ${projectId}/${parsed.data.key}: ${message}`);
+      // The project is not ready for the book: the message is the fix, as on task create.
+      if (
+        err instanceof CraftbookSetupRequiredError ||
+        err instanceof ConnectorSetupRequiredError
+      ) {
+        return c.json({ error: message, code: err.code }, 409);
+      }
       return c.json({ error: message }, message.startsWith('unknown suggested-work') ? 404 : 500);
     }
   });

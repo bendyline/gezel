@@ -1012,7 +1012,7 @@ export type RemoteServingConfig = z.infer<typeof RemoteServingConfigSchema>;
 /** Balanced local-model retention: warm enough for follow-ups, short enough to return VRAM. */
 export const DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS = 5 * 60_000;
 
-export const GezelConfigSchema = z.object({
+const GezelConfigObject = z.object({
   /** Default LLM provider. Missing → 'copilot' for backwards compatibility. */
   provider: ProviderNameSchema.optional(),
   /**
@@ -3108,6 +3108,16 @@ export const GezelConfigSchema = z.object({
    */
   externalFolders: ExternalFoldersSchema.optional(),
 });
+/**
+ * Named so the declarations that build on the config ({@link
+ * UpdateConfigRequestSchema}) print this name rather than every setting
+ * again. Each copy was about 33 KB, too far apart for gzip to fold, against
+ * the package's size budget. Named through the object, not a bare shape
+ * const like CraftbookStepShape: a shape const carries every setting's doc
+ * comment into the declarations, which here is about 78 KB more.
+ */
+export interface GezelConfigZodSchema extends z.ZodObject<(typeof GezelConfigObject)['shape']> {}
+export const GezelConfigSchema: GezelConfigZodSchema = GezelConfigObject;
 
 export const RecentTabAreaSchema = z.enum([
   'projects',
@@ -3201,11 +3211,7 @@ export const RecentTabSchema = z.discriminatedUnion('kind', [
 export type RecentTab = z.infer<typeof RecentTabSchema>;
 export type GezelConfig = z.infer<typeof GezelConfigSchema>;
 
-/** Request shape for PUT /api/config. Mirrors `GezelConfig` but
- *  widens select fields to accept explicit `null` as a
- *  reset-to-default signal — the store treats null as "delete the
- *  key" so the on-disk read shape stays narrow. */
-export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
+const UpdateConfigRequestOverridesShape = {
   defaultSttModel: z.string().nullable().optional(),
   ollamaThink: z.boolean().nullable().optional(),
   firstRunInstallError: z.string().nullable().optional(),
@@ -3270,7 +3276,19 @@ export const UpdateConfigRequestSchema = GezelConfigSchema.extend({
     })
     .nullable()
     .optional(),
-});
+};
+/** Named for the reason {@link GezelConfigZodSchema} is. */
+export interface UpdateConfigRequestZodSchema
+  extends z.ZodObject<
+    z.core.util.Extend<GezelConfigZodSchema['shape'], typeof UpdateConfigRequestOverridesShape>
+  > {}
+/** Request shape for PUT /api/config. Mirrors `GezelConfig` but
+ *  widens select fields to accept explicit `null` as a
+ *  reset-to-default signal — the store treats null as "delete the
+ *  key" so the on-disk read shape stays narrow. */
+export const UpdateConfigRequestSchema: UpdateConfigRequestZodSchema = GezelConfigSchema.extend(
+  UpdateConfigRequestOverridesShape,
+);
 export type UpdateConfigRequest = z.infer<typeof UpdateConfigRequestSchema>;
 
 export const ListGezelsResponseSchema = z.object({

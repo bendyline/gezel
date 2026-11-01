@@ -70,7 +70,8 @@ The registry vets nothing, so every entry also passes gilde's community
 content policy (`tools/lib/community-policy.mjs` in the gilde checkout,
 loaded at run time — never vendored here): honeypots and injection demos,
 adult content, gambling, tools that ask for a wallet's private key,
-template/example servers, and garbled text are counted as
+template/example servers, garbled text, and remote servers on a throwaway
+tunnel address (trycloudflare, lhr.life, loca.lt, …) are counted as
 `rejected-content-policy` and never written. Gilde's `npm run fix` prunes
 any match already on disk and its validate fails CI on one that remains, so
 tighten the policy there, not here.

@@ -5,12 +5,12 @@ import { OFFERED_PROJECT_VIEWS, PROJECT_VIEWS } from './registry.js';
 describe('the project views this build offers', () => {
   it('offers a code project every view', () => {
     expect(availableProjectViews({}, OFFERED_PROJECT_VIEWS)).toEqual([
-      'village',
       'guide',
       'diagram',
       'reports',
       'gallery',
       'timeline',
+      'village',
     ]);
   });
 
@@ -23,7 +23,7 @@ describe('the project views this build offers', () => {
         { projectTypeId: 'content-writing', tabVisibility: { map: true } },
         OFFERED_PROJECT_VIEWS,
       ),
-    ).toEqual(['village', 'guide', 'diagram', 'reports', 'gallery', 'timeline']);
+    ).toEqual(['guide', 'diagram', 'reports', 'gallery', 'timeline', 'village']);
   });
 
   it('offers a picture folder its reports, gallery and timeline', () => {

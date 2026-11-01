@@ -775,7 +775,7 @@ export class TaskScheduler {
             });
             if (activeChildren.length > 0) continue;
           }
-          const child = await this.manager.spawnChild(task.ref);
+          const child = await this.manager.launchScheduledRun(task.ref);
           result.spawnedTaskRefs.push(child.ref);
           if (nightOnceKey !== null) {
             await this.manager.recordNightShiftSpawn(task.ref, nightOnceKey);

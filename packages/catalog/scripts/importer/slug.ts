@@ -59,7 +59,7 @@ export class SlugAllocator {
     while (true) {
       const owner = this.slugToName.get(candidate);
       if (!owner || owner === name) break;
-      candidate = truncate(`${base}-${n}`);
+      candidate = withCollisionSuffix(base, n);
       n += 1;
       if (n > 999) {
         throw new Error(`slug collision blowup for ${name}`);
@@ -103,11 +103,20 @@ export function baseSlug(name: string): string {
   return truncate(out);
 }
 
-function truncate(s: string): string {
-  // IdRegex max is 64 total (1 first char + 63 rest). Cap at 63 so we
-  // have headroom for collision suffixes without exceeding the limit.
-  if (s.length <= 63) return s;
-  return s.slice(0, 63).replace(/[.\-:]+$/, '');
+function truncate(s: string, max = 63): string {
+  // IdRegex max is 64 total (1 first char + 63 rest).
+  if (s.length <= max) return s;
+  return s.slice(0, max).replace(/[.\-:]+$/, '');
+}
+
+// Shorten the base, never the suffix. Truncating `${base}-${n}` as a whole
+// cut the suffix straight back off a 62- or 63-char base, so every
+// candidate equalled the base and the loop died at 999 — which is how two
+// `…/registry-verifier-target-a|b` probes sharing a 63-char prefix aborted
+// a whole registry sweep (2026-10-31).
+function withCollisionSuffix(base: string, n: number): string {
+  const suffix = `-${n}`;
+  return `${truncate(base, 63 - suffix.length)}${suffix}`;
 }
 
 export function isValidSlug(s: string): boolean {

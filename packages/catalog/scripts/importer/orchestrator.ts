@@ -85,7 +85,8 @@ export interface OrchestratorOptions {
   retainOnly?: boolean;
   /**
    * Gilde's community content policy (honeypots, adult content, gambling,
-   * wallet private keys, placeholders, garbled text). A match is never
+   * wallet private keys, placeholders, garbled text, throwaway tunnel
+   * hosts). A match is never
    * written. Unset = no content filtering, which is what a gilde checkout
    * without the policy module gets.
    */

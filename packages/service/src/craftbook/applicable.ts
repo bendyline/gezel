@@ -353,7 +353,7 @@ export async function missingToolsetsForCraftbooks(
   const out: Record<string, CraftbookToolsetNeed[]> = {};
   for (const it of items) {
     if (it.manifest.kind !== 'craftbook-template') continue;
-    const missing = unmetToolsets(it.manifest.toolsets, installed);
+    const missing = unmetToolsets(it.manifest.toolsets, installed, it.manifest.steps);
     if (missing.length > 0) out[it.manifest.id] = missing;
   }
   return out;

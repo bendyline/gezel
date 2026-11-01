@@ -31,6 +31,28 @@ describe('unmetToolsets', () => {
     const unmet = unmetToolsets(NEEDS, new Set(['usb-camera']));
     expect(unmet.map((t) => t.toolsetId)).toEqual(['weather']);
   });
+
+  it('meets a built-in group that a role in the book gets by default', () => {
+    const needs: CraftbookToolsetNeed[] = [
+      { toolsetId: 'builtin.code-intel' },
+      { toolsetId: 'builtin.git' },
+    ];
+    const steps = [{ suggestedRole: 'reviewer' }, { suggestedRole: 'developer' }, {}];
+    expect(unmetToolsets(needs, new Set(), steps)).toEqual([]);
+  });
+
+  it('still asks for a built-in group no role in the book gets', () => {
+    const needs: CraftbookToolsetNeed[] = [
+      { toolsetId: 'builtin.git' },
+      { toolsetId: 'builtin.no-such-group' },
+    ];
+    const writerOnly = [{ suggestedRole: 'writer' }];
+    expect(unmetToolsets(needs, new Set(), writerOnly).map((t) => t.toolsetId)).toEqual([
+      'builtin.git',
+      'builtin.no-such-group',
+    ]);
+    expect(unmetToolsets(needs, new Set(['builtin.git']), writerOnly)).toHaveLength(1);
+  });
 });
 
 describe('HookSpec script/decision exclusivity', () => {

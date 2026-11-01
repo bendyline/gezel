@@ -18,6 +18,7 @@ import { MIN_PHOTOS, writeNightlyPhotoReport } from '../index-store/photo-report
 import type { Store } from '../fs/store.js';
 import {
   ISSUE_HANDOFF_REPORT_PATH,
+  countUnimportedAnswers,
   writeIssueHandoffReport,
 } from '../issue-triage/handoff-report.js';
 import { isNightShiftReportArchive } from '../meester/night-shift-oversight.js';
@@ -57,6 +58,10 @@ export async function listProjectReports(
   for (const file of candidates.slice(0, LIST_LIMIT)) {
     const content = await deps.store.readProjectArtifact(projectId, file.path).catch(() => null);
     if (content === null) continue;
+    const unimportedAnswers =
+      file.path === ISSUE_HANDOFF_REPORT_PATH
+        ? await countUnimportedAnswers(deps, projectId, content).catch(() => 0)
+        : 0;
     reports.push({
       path: file.path,
       title:
@@ -65,6 +70,7 @@ export async function listProjectReports(
       mtimeMs: file.mtimeMs ?? 0,
       size: content.length,
       actions: parseReportActions(content).actions.length,
+      ...(unimportedAnswers > 0 ? { unimportedAnswers } : {}),
     });
   }
   return {
@@ -124,13 +130,7 @@ export async function generateProjectReport(
         .catch(() => null);
       return { path: existing === null ? null : CODEBASE_MAP_PATH, wrote: false };
     }
-    case 'issues': {
-      const path = await writeIssueHandoffReport(deps, projectId, now);
-      if (path) return { path, wrote: true };
-      const existing = await deps.store
-        .readProjectArtifact(projectId, ISSUE_HANDOFF_REPORT_PATH)
-        .catch(() => null);
-      return { path: existing === null ? null : ISSUE_HANDOFF_REPORT_PATH, wrote: false };
-    }
+    case 'issues':
+      return writeIssueHandoffReport(deps, projectId, now);
   }
 }

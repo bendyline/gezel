@@ -54,14 +54,18 @@ export interface IssueHandoffDeps {
  * rarely worth fixing: in trial t1 they left 12 of the 35 planted bugs the
  * review had flagged out of the first 40.
  *
- * Handing issues to an app leases them to it. See docs/issue-triage.md.
+ * Handing issues to an app leases them to it. `keep` names a batch already
+ * handed over: those of its issues still eligible come first, in its order,
+ * and only the slots the rest left are picked afresh, so a document is
+ * rewritten only when one of its issues was settled. See docs/issue-triage.md.
  */
 export async function buildIssueHandoffQueue(
   deps: IssueHandoffDeps,
   projectId: string,
   req: IssueHandoffRequest,
-  lease?: { client: string },
+  opts: { lease?: { client: string }; keep?: readonly string[] } = {},
 ): Promise<IssueHandoffResponse> {
+  const { lease } = opts;
   const now = deps.now?.() ?? new Date();
   const nowIso = now.toISOString();
   const limit = req.limit ?? DEFAULT_HANDOFF_LIMIT;
@@ -99,10 +103,14 @@ export async function buildIssueHandoffQueue(
   const decided = verdicts.filter((v) => issueVerdictClass(v.kind) !== 'undecided').length;
   const firstBatch = mode === 'triage' && decided < FIRST_BATCH_UNTIL_VERDICTS;
   const stats = issueVerdictStats(verdicts);
+  const byRef = new Map(eligible.map((i) => [i.ref, i]));
+  const kept = (opts.keep ?? []).flatMap((ref) => byRef.get(ref) ?? []).slice(0, limit);
+  const open = limit - kept.length;
+  const candidates = eligible.filter((i) => !kept.includes(i));
   // Categories the verdicts say are almost never real wait behind the rest;
   // one still goes in each batch, so a better reviewer would show up.
-  const setAside = eligible.filter((i) => isLowConfidence(stats, i));
-  const standing = eligible.filter((i) => !setAside.includes(i));
+  const setAside = candidates.filter((i) => isLowConfidence(stats, i));
+  const standing = candidates.filter((i) => !setAside.includes(i));
   const score = (i: BoekwachterIssue) =>
     mode === 'fix'
       ? expectedRealScore(stats, i, categoryPrior(i.category))
@@ -110,11 +118,14 @@ export async function buildIssueHandoffQueue(
   const ranked = [...standing].sort((a, b) => compareForHandoff(a, b, mode, score));
   // A fix batch takes the likeliest issues one by one and carries no
   // drift probe: the probe is triage's way of re-checking a set-aside category.
-  const selected = firstBatch
-    ? sampleFirstBatch(ranked, limit, deps.random ?? Math.random)
-    : mode === 'fix'
-      ? ranked.slice(0, limit)
-      : packByFile(ranked, setAside.length > 0 ? limit - 1 : limit);
+  const selected = [
+    ...kept,
+    ...(firstBatch
+      ? sampleFirstBatch(ranked, open, deps.random ?? Math.random)
+      : mode === 'fix'
+        ? ranked.slice(0, open)
+        : packByFile(ranked, setAside.length > 0 ? open - 1 : open)),
+  ];
   if (!firstBatch && mode === 'triage' && setAside.length > 0 && selected.length < limit) {
     const probe = setAside[Math.floor((deps.random ?? Math.random)() * setAside.length)];
     if (probe) selected.push(probe);
