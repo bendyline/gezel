@@ -27,6 +27,14 @@
  * models don't need this — they only invent IDs in the
  * pathological loop case, and the fabrication detector catches that
  * separately.
+ *
+ * Only gezel-mcp's own tools are policed. A project type's script tools
+ * share the bridge but resolve ids against their own store and name the
+ * missing record when one is wrong; their results carry ids in prose
+ * ("Food service permit (ob-1, permit…)") and the pre-turn state read
+ * reaches the model as a prelude this wrapper never sees. Policing them
+ * rejected every `complete_obligation({ id: "ob-1" })` on Gemma 4 12B,
+ * even after `list_obligations` had returned `ob-1` (2026-11-02).
  */
 
 import { isGezelMcp } from '../../local-loop/gezel-mcp.js';
@@ -36,6 +44,7 @@ import type {
   McpToolWrapper,
   McpToolWrapperContext,
 } from '../../local-loop/mcp-wrapper-types.js';
+import { BUILTIN_TOOL_NAMES, normalizeToolNameSpelling } from '../../tools/tool-inventory.js';
 import type { Behavior } from '../types.js';
 
 /**
@@ -72,6 +81,11 @@ const ALWAYS_ALLOW_VALUES: ReadonlySet<string> = new Set([
   'reviewer',
   'planner',
 ]);
+
+/** gezel-mcp's own tools, in the spelling forgiving dispatch matches. */
+const BUILTIN_SPELLINGS: ReadonlySet<string> = new Set(
+  BUILTIN_TOOL_NAMES.map(normalizeToolNameSpelling),
+);
 
 /**
  * Extract every string value from a parsed JSON-shaped object that
@@ -203,10 +217,11 @@ function buildValidateIdsWrapper(): McpToolWrapper {
       harvestIds(text, seenIds);
     },
     async preProcess(
-      _toolName: string,
+      toolName: string,
       args: Record<string, unknown>,
       _ctx: McpToolWrapperContext,
     ): Promise<McpPreProcessVerdict> {
+      if (!BUILTIN_SPELLINGS.has(normalizeToolNameSpelling(toolName))) return { kind: 'allow' };
       const violations = findFabricatedIds(args, seenIds);
       if (violations.length === 0) return { kind: 'allow' };
       const detail = violations.map((v) => `\`${v.field}=${JSON.stringify(v.value)}\``).join(', ');

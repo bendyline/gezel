@@ -89,7 +89,7 @@ const ENGINE_ENV_VAR: Record<NativeBinaryName, string> = {
   uv: 'GEZEL_UV_BIN',
   duckdb: 'GEZEL_DUCKDB_BIN',
   'apple-fm': 'GEZEL_APPLE_FM_BIN',
-  netjail: 'GEZEL_NETJAIL_BIN',
+  sandbox: 'GEZEL_SANDBOX_BIN',
 };
 
 /**

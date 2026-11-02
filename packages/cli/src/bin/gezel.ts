@@ -166,7 +166,7 @@ const connectForInspection = (opts: { start?: boolean }) =>
   opts.start === false ? connectRunning(cliGlobals()) : connectOwned(cliGlobals());
 
 registerSecretCommands(program, () => connectOwned(cliGlobals()));
-registerAccountCommands(program, () => connectOwned(cliGlobals()));
+registerAccountCommands(program, async () => (await connectOwned(cliGlobals())).accounts);
 registerIntegrationCommands(program, () => connectOwned(cliGlobals()));
 registerMcpCommands(program, () => connectOwned(cliGlobals()));
 registerBenchCommands(program, () => connectOwned(cliGlobals()));
@@ -383,7 +383,7 @@ program
           `gezeld running (version ${health.version}) on port ${new URL(result.baseUrl).port}`,
         );
         if (opts.web && opts.accounts) {
-          await printAccountsWebUrl(result.client, result.baseUrl, opts.open === true);
+          await printAccountsWebUrl(result.client.accounts, result.baseUrl, opts.open === true);
         } else if (opts.web) {
           await printWebUrl(result.baseUrl, opts.open === true);
         }
@@ -416,7 +416,7 @@ async function runtimeServes(
  * no account exists.
  */
 async function printAccountsWebUrl(
-  client: Pick<GezelClient, 'getSignInState' | 'createSetupLink'>,
+  client: Pick<GezelClient['accounts'], 'getSignInState' | 'createSetupLink'>,
   baseUrl: string,
   open: boolean,
 ): Promise<void> {

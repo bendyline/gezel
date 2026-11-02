@@ -1655,7 +1655,7 @@ function DaemonSettingsView() {
   const [accountsInUse, setAccountsInUse] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    api
+    api.accounts
       .getSignInState()
       .then((state) => {
         if (!cancelled) setAccountsInUse(state.accountsRequired || !state.setupRequired);

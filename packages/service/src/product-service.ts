@@ -88,8 +88,7 @@ import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/ho
 import { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/manager';
 import { createWorkerCatalogHost } from '@bendyline/gezel-inference/internal/knowledge/worker-host';
 import { warmEmbeddings } from '@bendyline/gezel-inference/internal/memory/embeddings';
-import { AccountManager } from './accounts/manager.js';
-import { seedOwnerFromEnvironment } from './accounts/seed.js';
+import { openAccounts } from './accounts/boot.js';
 import { deferBootWork } from './boot-work.js';
 import { FirstUseIndexingHold, defaultProviderCanAnswer } from './first-run/indexing-hold.js';
 import { OptionalDownloads } from './first-run/optional-downloads.js';
@@ -112,6 +111,7 @@ import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { HarnessToolsManager } from './harness-tools/manager.js';
 import { generateLoopbackCert } from './http/cert.js';
+import { closeListener } from './http/close-listener.js';
 import {
   bindContainerListener,
   containerHostPolicy,
@@ -499,56 +499,22 @@ export async function startProductService(
     rootToken: token,
     ephemeralTokens,
   });
-  // Accounts sign people in on network-facing surfaces (ADR 0029): the
-  // container listener, and `gezel start --web --accounts`. Sessions live in
-  // their own store; the token store consults it for tokens it does not hold,
-  // so every bearer-gated mount accepts a signed-in account.
+  // Accounts sign people in on network-facing surfaces (ADR 0029).
   const containerListener = resolveContainerListener();
   if (containerListener.refusedBecause) log.warn(`[service] ${containerListener.refusedBecause}`);
   const accountsRequired =
     containerListener.enabled ||
     (webUiEnabled && (opts.webAccounts ?? process.env.GEZEL_WEB_ACCOUNTS === '1'));
-  const accounts = await AccountManager.open({ home, history, warn: (m) => log.warn(m) });
-  tokenStore.setAccountResolver((supplied) => {
-    const resolved = accounts.resolve(supplied);
-    if (!resolved) return null;
-    return {
-      appId: `account:${resolved.account.id}`,
-      appName: resolved.account.name,
-      // What the desktop's own credential carries: the UI reaches knowledge
-      // and images through /v1 too.
-      scopes: ['ui', 'openai', 'knowledge', 'images'],
-      token: supplied,
-      createdAt: Date.parse(resolved.account.createdAt),
-      lastUsedAt: Date.now(),
-      kind: 'account',
-      account: resolved.principal,
-      accountSessionId: resolved.sessionId,
-    };
+  const { accounts, announceSetupLink } = await openAccounts({
+    home,
+    history,
+    tokenStore,
+    publicBase: () =>
+      process.env.GEZEL_PUBLIC_URL?.replace(/\/+$/, '') ??
+      (containerListener.enabled
+        ? `http://localhost:${containerBoundPort ?? containerListener.port}`
+        : `http://127.0.0.1:${boundPort}`),
   });
-  try {
-    if ((await seedOwnerFromEnvironment(accounts)) === 'created') {
-      log.info('[accounts] created the owner account from GEZEL_OWNER_PASSWORD_FILE');
-    }
-  } catch (err) {
-    log.error(
-      `[accounts] could not create the owner from GEZEL_OWNER_PASSWORD_FILE: ${err instanceof Error ? err.message : String(err)}`,
-    );
-  }
-  const setupLinkBase = (): string =>
-    process.env.GEZEL_PUBLIC_URL?.replace(/\/+$/, '') ??
-    (containerListener.enabled
-      ? `http://localhost:${containerBoundPort ?? containerListener.port}`
-      : `http://127.0.0.1:${boundPort}`);
-  const announceSetupLink = (): { code: string; url: string } | null => {
-    const code = accounts.mintSetupCode();
-    if (!code) return null;
-    const url = `${setupLinkBase()}/?setup=${code}`;
-    log.info('[accounts] No account exists yet. Open this link to create the first one.');
-    log.info('[accounts] It works once, for an hour:');
-    log.info(`[accounts]   ${url}`);
-    return { code, url };
-  };
   // GrantManager owns the `/v1/apps/register` consent state machine.
   // GEZEL_AUTOAPPROVE_APPS=appId1,appId2 is a CI/scripting bypass —
   // listed appIds get an immediate `approved` grant + token without
@@ -2982,87 +2948,17 @@ export async function startProductService(
       await shutdownStep('Office host', () => officeIntegrations.stop());
       await shutdownStep('machine engine', async () => machineEngine?.stop());
       await shutdownStep('paired remote fetches', () => closePairedRemoteFetches(remotes));
-      if (containerServer) {
-        const listening = containerServer;
-        await shutdownStep(
-          'container listener',
-          () =>
-            new Promise<void>((resolve) => {
-              let settled = false;
-              const finish = () => {
-                if (settled) return;
-                settled = true;
-                resolve();
-              };
-              listening.close(() => finish());
-              const s = listening as unknown as { closeAllConnections?: () => void };
-              s.closeAllConnections?.();
-              setTimeout(finish, 2_000).unref();
-            }),
-        );
-      }
+      const container = containerServer;
+      if (container) await shutdownStep('container listener', () => closeListener(container));
       await shutdownStep('account sessions', () => accounts.flush().catch(() => {}));
-      if (previewServer) {
-        await shutdownStep(
-          'preview server',
-          () =>
-            new Promise<void>((resolve) => {
-              let settled = false;
-              const finish = () => {
-                if (settled) return;
-                settled = true;
-                resolve();
-              };
-              previewServer?.close(() => finish());
-              const s = previewServer as unknown as { closeAllConnections?: () => void };
-              s.closeAllConnections?.();
-              setTimeout(finish, 2_000).unref();
-            }),
-        );
-      }
+      const preview = previewServer;
+      if (preview) await shutdownStep('preview server', () => closeListener(preview));
       // ChatManager.shutdown owns the one bounded background drain. Calling
       // drainBackground separately here used to spend the same 15-second
       // budget twice when one fire-and-forget task never settled, consuming
       // Electron's complete 30-second graceful-quit window.
       await shutdownStep('chat manager', () => chat.shutdown().catch(() => {}));
-      // Initiate graceful close, but don't block forever waiting for
-      // SSE streams to wind down. Active streams hold the server open
-      // until each handler's keepalive loop notices the disconnect —
-      // under load (full test suite with 150+ files) the cumulative
-      // settle time can exceed Vitest's `afterAll` hook budget. Force
-      // the issue: tell active HTTP/1 connections to close, destroy
-      // any active HTTP/2 sessions, and cap the wait.
-      await shutdownStep(
-        'HTTP server',
-        () =>
-          new Promise<void>((resolve) => {
-            let settled = false;
-            const finish = () => {
-              if (settled) return;
-              settled = true;
-              resolve();
-            };
-            server.close(() => finish());
-            const s = server as unknown as {
-              closeAllConnections?: () => void;
-              closeIdleConnections?: () => void;
-            };
-            s.closeIdleConnections?.();
-            s.closeAllConnections?.();
-            // http2: there's no closeAllConnections; iterate active sessions.
-            const http2Server = server as unknown as { _sessions?: Set<{ destroy?: () => void }> };
-            for (const sess of http2Server._sessions ?? []) {
-              try {
-                sess.destroy?.();
-              } catch {
-                /* ignore */
-              }
-            }
-            // Hard cap — sockets will be released by GC / OS when the
-            // process exits or the next test starts.
-            setTimeout(finish, 2_000).unref();
-          }),
-      );
+      await shutdownStep('HTTP server', () => closeListener(server));
       // Kill all persistent terminal shells. Without this, the bash
       // (or PowerShell) children spawned by the per-thread pool stay
       // resident past the daemon's exit until their idle timers

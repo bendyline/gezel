@@ -72,10 +72,15 @@ Five things stood in the way:
 3. **Lock identity.** The lock records pid, process start time, boot id,
    hostname and a heartbeat. A fresh lock from another host refuses to start
    with a pointer to `docker exec`; a stale heartbeat is reclaimed.
-4. **A second Linux network boundary.** `gezel-netjail`, a small native
-   helper, installs a seccomp filter that allows only `AF_UNIX` sockets (the
-   same property `RestrictAddressFamilies=AF_UNIX` gives systemd), then execs
-   the script. The runner probes it the way it probes `systemd-run`.
+4. **A second Linux network boundary.** `gezel-sandbox`, a small native
+   helper, starts a script under rules it cannot lift. Its `--deny-net` rule
+   installs a seccomp filter that allows only `AF_UNIX` sockets (the same
+   property `RestrictAddressFamilies=AF_UNIX` gives systemd), then execs the
+   script. Each rule is a flag, an unknown flag is refused rather than
+   ignored, and `--features` lists the rules a build has, so later rules
+   (Landlock, resource limits) join without changing what existing callers
+   get. The runner reads `--features`, then probes `--deny-net` the way it
+   probes `systemd-run`.
 5. **cgroup-aware sizing.** Memory reads `process.constrainedMemory()`;
    thread counts respect `cpu.max`.
 
@@ -107,4 +112,5 @@ Five things stood in the way:
 - An older token-store loader ignores the account files.
 - The lock: a fresh lock from another hostname refuses; a stale one is
   reclaimed; the same pid in a new container reclaims its own.
-- The netjail probe: an `AF_INET` socket fails and an `AF_UNIX` one works.
+- The gezel-sandbox probe: an `AF_INET` socket fails and an `AF_UNIX` one
+  works; a run with no rule, or a rule the build lacks, is refused.

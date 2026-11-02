@@ -129,12 +129,14 @@ exec`. A killed container's lock goes stale after 40 s and is reclaimed.
 ## Scripts with no network
 
 Containers have no `systemd-run --user`, so `denyNet` scripts run under
-`gezel-netjail` (`native/helpers/netjail`): a small helper that installs a
-seccomp filter allowing only `AF_UNIX` sockets, then execs. The runner
-probes it with a real `AF_INET` connect, exactly as it probes systemd, and
-prefers systemd where both work. It ships in the native release from
-0.1.56; until the pin reaches it, `denyNet` scripts in a container fail
-closed as before.
+`gezel-sandbox --deny-net` (`native/helpers/sandbox`): a small helper that
+installs a seccomp filter allowing only `AF_UNIX` sockets, then execs. The
+runner checks that `--features` lists `deny-net`, then probes it with a
+real `AF_INET` connect, exactly as it probes systemd, and prefers systemd
+where both work. It ships in the native release from 0.1.56; until the pin
+reaches it, `denyNet` scripts in a container fail closed as before. The
+helper does not confine files yet: that is the Node permission model's job,
+and Landlock is its planned next rule.
 
 ## Sizing
 

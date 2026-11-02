@@ -18,12 +18,13 @@ cmake -S "$helper_dir" -B "$build_dir" -G Ninja \
   "-DCMAKE_C_FLAGS=-ffile-prefix-map=$repo_root=gezel -fmacro-prefix-map=$repo_root=gezel -fdebug-prefix-map=$repo_root=gezel" \
   -DBUILD_TESTING=ON
 cmake --build "$build_dir" --parallel
-# The self-test installs the filter and proves AF_INET is refused while
-# AF_UNIX works. A runner whose kernel lacks seccomp fails here, loudly.
+# The self-test applies every rule and proves it holds (for --deny-net:
+# AF_INET refused, AF_UNIX working). A runner whose kernel lacks seccomp
+# fails here, loudly. The other tests pin the flag contract.
 ctest --test-dir "$build_dir" --output-on-failure
 
 mkdir -p "$output_dir"
-cp "$build_dir/gezel-netjail" "$output_dir/gezel-netjail"
-chmod +x "$output_dir/gezel-netjail"
-strip -s "$output_dir/gezel-netjail" 2>/dev/null || true
-echo "[netjail] wrote $output_dir/gezel-netjail"
+cp "$build_dir/gezel-sandbox" "$output_dir/gezel-sandbox"
+chmod +x "$output_dir/gezel-sandbox"
+strip -s "$output_dir/gezel-sandbox" 2>/dev/null || true
+echo "[sandbox] wrote $output_dir/gezel-sandbox"

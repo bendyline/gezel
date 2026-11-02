@@ -216,7 +216,6 @@ import {
 import {
   AnthropicCliProvider,
   CLAUDE_CLI_EXCLUDED_MCP_TOOLS,
-  DEFAULT_CLAUDE_POOL_SIZE,
   isClaudeReasoningEffort,
 } from '../providers/anthropic-cli/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
@@ -235,6 +234,7 @@ import {
   NON_SANDBOX_EXCLUDED_MCP_TOOLS,
 } from '../providers/copilot.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
+import { type AnthropicCliPoolView, describeAnthropicCliPool } from './anthropic-cli-pool-view.js';
 import {
   promptAppSubjectFor,
   readAppSubjectStateLine,
@@ -451,11 +451,7 @@ import {
   formatExpectedDeliverableAnnotation,
   normalizeExpectedDeliverablePath,
 } from './expected-deliverable.js';
-import {
-  fileHandoffIntentKey,
-  isSubstantiveExistingWorkspaceFile,
-  messageExpressesModifyIntent,
-} from './file-handoff-intent.js';
+import { fileHandoffIntentKey, staleWorkspaceFileRequest } from './file-handoff-intent.js';
 import {
   IMAGE_EDITOR_NEEDS_INSTRUCTION,
   IMAGE_EDITOR_NEEDS_PICTURE,
@@ -7329,7 +7325,11 @@ export class ChatManager extends LocalEngineRuntime {
     };
 
     if (ffRecord) {
-      const staleMissingPath = await this.staleWorkspaceFileRequest(ffRecord, userText);
+      const staleMissingPath = await staleWorkspaceFileRequest(
+        this.store,
+        ffRecord.projectId,
+        userText,
+      );
       if (staleMissingPath) {
         const message: ChatMessage = {
           role: 'assistant',
@@ -12414,41 +12414,7 @@ export class ChatManager extends LocalEngineRuntime {
     };
     const pool = cliProvider.pool;
     if (!pool) return null;
-    const snap = pool.snapshot();
-    const config = await this.store.readConfig();
-    const boringMode = config.roleBasedNameOnlyMode ?? false;
-    const workers: AnthropicCliPoolView['workers'] = [];
-    for (const w of snap.workers) {
-      // Resolve display names by reading the persisted ChatSession +
-      // gezel + project. Each lookup is a couple of small file reads;
-      // we tolerate misses (a session in flight whose record we can't
-      // find right now) by falling back to the id.
-      const record = await this.getSessionRecord(w.sessionId).catch(() => null);
-      const gezel = record ? await this.store.getGezel(record.gezelId).catch(() => null) : null;
-      const project = record
-        ? await this.store.getProject(record.projectId).catch(() => null)
-        : null;
-      workers.push({
-        sessionId: w.sessionId,
-        gezelId: record?.gezelId ?? '',
-        gezelName: gezel
-          ? displayName({ name: gezel.name, roleBasedName: gezel.roleBasedName }, boringMode)
-          : (record?.gezelId ?? 'unknown'),
-        projectId: record?.projectId ?? '',
-        projectName: project?.name ?? record?.projectId ?? 'unknown',
-        idle: w.idle,
-        alive: w.alive,
-        lastUsedAt: w.lastUsedAt,
-        claudeSessionId: w.claudeSessionId,
-      });
-    }
-    // Read the configured cap so the pill can show "2 / 10 warm".
-    const poolSize = config.anthropicCli?.poolSize ?? DEFAULT_CLAUDE_POOL_SIZE;
-    return {
-      size: snap.size,
-      poolSize,
-      workers,
-    };
+    return describeAnthropicCliPool(pool, this.store, (id) => this.getSessionRecord(id));
   }
 
   /**
@@ -14310,66 +14276,6 @@ export class ChatManager extends LocalEngineRuntime {
       config.anthropicCli?.defaultPermissionMode ??
       'acceptEdits'
     );
-  }
-
-  private async staleWorkspaceFileRequest(
-    record: ChatSession,
-    userText: string,
-  ): Promise<string | null> {
-    const explicitMissingFileMatch = userText.match(
-      /there is still\s+\*?\*?no\s+`([^`]+)`\*?\*?\s+in the workspace/i,
-    );
-    const explicitMissingFilePath = explicitMissingFileMatch?.[1]?.trim();
-    if (explicitMissingFilePath) {
-      try {
-        const content = await this.store.readProjectWorkspaceFile(
-          record.projectId,
-          explicitMissingFilePath,
-        );
-        return content !== null &&
-          isSubstantiveExistingWorkspaceFile(explicitMissingFilePath, content)
-          ? explicitMissingFilePath
-          : null;
-      } catch {
-        return null;
-      }
-    }
-
-    // A request to MODIFY an existing file ("update index.html so an alien
-    // reaching the bottom subtracts 50 points") names the same path a
-    // redundant "create it" request would — but it is real work, not a
-    // no-op. Never short-circuit it. Without this guard the change is
-    // silently dropped: the recipient's turn is skipped entirely and the
-    // synthetic "treat as delivered" reply below tells the voorman to close
-    // the task. Wild-caught (qwen3.6 voorman "Space Shooter
-    // Arcade"): a "subtract 50 points" change handoff was eaten here because
-    // it mentioned `workspace/index.html` and the file already existed.
-    if (messageExpressesModifyIntent(userText)) return null;
-
-    let filePath: string | undefined;
-    if (!filePath) {
-      const text = userText.trim();
-      const isQueuedGezelMessage = /^\[Message from [^\]]+\]:/i.test(text);
-      const isRepairMessage =
-        /\bworking-image\b/i.test(text) ||
-        /\bsuccess criteria\b/i.test(text) ||
-        /\breplace_in_file\b/i.test(text) ||
-        /\bpatch\b[\s\S]{0,160}\b(?:img|image|src)\b/i.test(text);
-      if (isQueuedGezelMessage && !isRepairMessage) {
-        filePath =
-          text.match(/\[Deliverable expected as a FILE at `([^`]+)`/i)?.[1]?.trim() ??
-          text.match(/\bworkspace\/(index\.html)\b/i)?.[1]?.trim();
-      }
-    }
-    if (!filePath) return null;
-    try {
-      const content = await this.store.readProjectWorkspaceFile(record.projectId, filePath);
-      return content !== null && isSubstantiveExistingWorkspaceFile(filePath, content)
-        ? filePath
-        : null;
-    } catch {
-      return null;
-    }
   }
 
   /**
@@ -17244,31 +17150,6 @@ export class ChatManager extends LocalEngineRuntime {
     }
     return env;
   }
-}
-
-/**
- * Wire shape for the Claude CLI worker pool snapshot exposed via
- * `/api/queues`. Drives the header `ClaudeCliPoolPill` — the
- * always-visible status indicator that lists warm workers per (gezel,
- * project) and lights up when one of them is mid-turn.
- */
-export interface AnthropicCliPoolView {
-  size: number;
-  /** Configured cap from `config.anthropicCli.poolSize` (default 4). */
-  poolSize: number;
-  workers: Array<{
-    sessionId: string;
-    gezelId: string;
-    gezelName: string;
-    projectId: string;
-    projectName: string;
-    idle: boolean;
-    alive: boolean;
-    /** ms-epoch of the worker's last turn entry/exit, used for LRU. */
-    lastUsedAt: number;
-    /** Captured Claude-side session id; null until system.init arrives. */
-    claudeSessionId: string | null;
-  }>;
 }
 
 /**

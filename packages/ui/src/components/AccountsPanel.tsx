@@ -21,10 +21,10 @@ export function AccountsPanel() {
 
   const refresh = useCallback(async () => {
     try {
-      const list = await api.listAccounts();
+      const list = await api.accounts.listAccounts();
       setAccounts(list.accounts);
       setMe(list.me ?? null);
-      setSessions(list.me ? (await api.listMySessions()).sessions : []);
+      setSessions(list.me ? (await api.accounts.listMySessions()).sessions : []);
     } catch (err) {
       setError(apiErrorMessage(err));
     }
@@ -53,7 +53,7 @@ export function AccountsPanel() {
   );
 
   const signOut = async () => {
-    await api.signOut().catch(() => undefined);
+    await api.accounts.signOut().catch(() => undefined);
     writeStoredToken(null);
     window.location.replace(`${window.location.origin}/`);
   };
@@ -82,7 +82,7 @@ export function AccountsPanel() {
             askCurrent
             busy={busy}
             onSubmit={(password, currentPassword) =>
-              act(() => api.changeMyPassword(password, currentPassword ?? ''))
+              act(() => api.accounts.changeMyPassword(password, currentPassword ?? ''))
             }
           />
         </SettingsSection>
@@ -113,7 +113,9 @@ export function AccountsPanel() {
                     busy={busy}
                     onCancel={() => setResetting(null)}
                     onSubmit={async (password) => {
-                      const ok = await act(() => api.setAccountPassword(account.id, password));
+                      const ok = await act(() =>
+                        api.accounts.setAccountPassword(account.id, password),
+                      );
                       if (ok) setResetting(null);
                       return ok;
                     }}
@@ -136,7 +138,7 @@ export function AccountsPanel() {
                     disabled={busy}
                     onClick={() =>
                       void act(() =>
-                        api.updateAccount(account.id, { disabled: !account.disabledAt }),
+                        api.accounts.updateAccount(account.id, { disabled: !account.disabledAt }),
                       )
                     }
                   >
@@ -148,7 +150,7 @@ export function AccountsPanel() {
                     disabled={busy}
                     onClick={() => {
                       if (window.confirm(`Remove ${account.name}? This cannot be undone.`)) {
-                        void act(() => api.removeAccount(account.id));
+                        void act(() => api.accounts.removeAccount(account.id));
                       }
                     }}
                   >
@@ -161,7 +163,7 @@ export function AccountsPanel() {
         </ul>
         <AddPersonForm
           busy={busy}
-          onAdd={(name, password) => act(() => api.createAccount(name, password))}
+          onAdd={(name, password) => act(() => api.accounts.createAccount(name, password))}
         />
       </SettingsSection>
 
@@ -191,7 +193,7 @@ export function AccountsPanel() {
                       type="button"
                       className="secondary"
                       disabled={busy}
-                      onClick={() => void act(() => api.revokeMySession(session.id))}
+                      onClick={() => void act(() => api.accounts.revokeMySession(session.id))}
                     >
                       Sign out
                     </button>

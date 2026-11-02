@@ -12,7 +12,7 @@ import { CliError } from './connection.js';
  */
 
 type AccountClient = Pick<
-  GezelClient,
+  GezelClient['accounts'],
   | 'listAccounts'
   | 'createAccount'
   | 'updateAccount'
