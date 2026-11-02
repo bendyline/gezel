@@ -1,5 +1,6 @@
 import {
   EVAL_JOB_MAX_TARGETS,
+  EVAL_SUBSET_NOTE,
   type EvalCatalog,
   type EvalCatalogScenario,
   type EvalEnvironment,
@@ -280,9 +281,7 @@ export function RunPlanner({
                   ? `Running ${suiteSubset.size} of its ${suite.scenarioIds.length} scenarios`
                   : `Choose which of its ${suite.scenarioIds.length} scenarios to run`}
               </summary>
-              <p className="muted small">
-                A subset is useful for a quick check, but it is not a suite score.
-              </p>
+              <p className="muted small">{EVAL_SUBSET_NOTE}</p>
               <ul className="bench-check-list">
                 {suite.scenarioIds.map((id) => {
                   const s = byId.get(id);

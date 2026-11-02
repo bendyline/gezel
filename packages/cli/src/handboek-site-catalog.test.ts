@@ -1,4 +1,4 @@
-import type { CatalogItemSummary, CatalogKind } from '@bendyline/gezel';
+import type { CatalogItemSummary, CatalogKind, ScorecardDataset } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   MODEL_CATALOG_ID,
@@ -10,6 +10,7 @@ import {
   demoSectionHtml,
   insertAfterTitle,
   insertDemoSection,
+  measuredResultsMarkdown,
 } from './handboek-site-catalog.js';
 
 function summary(kind: CatalogKind, manifest: Record<string, unknown>, sourceId = 'bundled') {
@@ -132,7 +133,7 @@ describe('buildSiteCatalog', () => {
     expect(index.markdown.indexOf('[Big](model/big-q4)')).toBeLessThan(
       index.markdown.indexOf('model/small-q4'),
     );
-    expect(index.markdown).toContain('[Small \\| Fast](model/small-q4) | 2.5 GB | 33K |');
+    expect(index.markdown).toContain('[Small \\| Fast](model/small-q4) | Not yet | 2.5 GB | 33K |');
     const page = pages.find((p) => p.entry.id === 'model/big-q4')!;
     expect(page.listed).toBe(false);
     expect(page.markdown).toContain('| Runs on | DwarfStar |');
@@ -193,6 +194,109 @@ describe('buildSiteCatalog', () => {
       'dashboard/app.js',
       'dashboard/index.html',
     ]);
+  });
+});
+
+/** One full round and one partial round, both on a Mac, for the `big` family. */
+const scorecard = {
+  schemaVersion: 1,
+  runs: [
+    {
+      id: '2026-10-30-mac-partial',
+      scope: 'subset',
+      provenance: {
+        startedAt: '2026-10-30T10:00:00.000Z',
+        device: {
+          label: 'Mac Studio',
+          platform: 'darwin',
+          arch: 'arm64',
+          cpuModel: 'Apple M4 Max',
+        },
+        harnessCommit: 'abc',
+        gildeVersion: '1.0.0',
+        count: 3,
+        judgeModelId: null,
+      },
+      suites: ['core'],
+      scenariosBySuite: { core: ['a'] },
+    },
+    {
+      id: '2026-10-20-mac-full',
+      provenance: {
+        startedAt: '2026-10-20T10:00:00.000Z',
+        device: {
+          label: 'Mac Studio',
+          platform: 'darwin',
+          arch: 'arm64',
+          cpuModel: 'Apple M4 Max',
+        },
+        harnessCommit: 'abc',
+        gildeVersion: '1.0.0',
+        count: 3,
+        judgeModelId: null,
+      },
+      suites: ['core'],
+      scenariosBySuite: { core: ['a', 'b'] },
+    },
+  ],
+  results: [
+    {
+      modelId: 'big-q8',
+      label: 'Big',
+      engine: 'llama-cpp',
+      tier: 'large',
+      runId: '2026-10-30-mac-partial',
+      suiteId: 'core',
+      cells: [{ scenarioId: 'a', trials: 1, successes: 1, nonModelFailures: 0 }],
+    },
+    {
+      modelId: 'big-q4',
+      label: 'Big',
+      engine: 'mlx',
+      tier: 'large',
+      runId: '2026-10-20-mac-full',
+      suiteId: 'core',
+      performance: { prefillTokensPerSec: 410.5, decodeTokensPerSec: 31.84, samples: 3 },
+      cells: [
+        { scenarioId: 'a', trials: 3, successes: 3, nonModelFailures: 0 },
+        { scenarioId: 'b', trials: 3, successes: 2, nonModelFailures: 0 },
+      ],
+    },
+  ],
+} as unknown as ScorecardDataset;
+
+describe('measured results', () => {
+  it('links the catalog table to each model page and quotes only full rounds', async () => {
+    const { pages } = await buildSiteCatalog(catalog, scorecard);
+    const index = pages.find((p) => p.entry.id === MODEL_CATALOG_ID)!;
+    expect(index.markdown).toContain(
+      '[Big](model/big-q4) | [83% general (M4 Max)](model/big-q4#measured-results) |',
+    );
+    expect(index.markdown).toContain('[Small \\| Fast](model/small-q4) | Not yet |');
+  });
+
+  it('lists every round for the family on the model page, newest first, with the caveat', () => {
+    const md = measuredResultsMarkdown(scorecard, 'big-q4').join('\n');
+    expect(md).toContain('## Measured results');
+    expect(md).toContain('rounds are not comparable with each other');
+    const partial = md.indexOf('(model-scorecard/2026-10-30-mac-partial) (partial)');
+    const full = md.indexOf('(model-scorecard/2026-10-20-mac-full)');
+    expect(partial).toBeGreaterThan(-1);
+    expect(full).toBeGreaterThan(partial);
+    expect(md).toContain(
+      '| big-q4 · MLX | General capability | 5/6 (83%) | 31.8 tok/s | 410.5 tok/s |',
+    );
+    expect(md).toContain(
+      '| big-q8 · llama.cpp | General capability | 1/1 (some tasks run once — count not rate) | — | — |',
+    );
+    expect(md).toContain('A partial round reran only some');
+  });
+
+  it('says not measured, and how to measure it, when no round has run the model', () => {
+    const md = measuredResultsMarkdown(scorecard, 'small-q4').join('\n');
+    expect(md).toContain('Not measured yet.');
+    expect(md).toContain('gezel bench --model small-q4');
+    expect(md).not.toContain('| Round |');
   });
 });
 

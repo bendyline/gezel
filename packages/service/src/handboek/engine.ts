@@ -53,6 +53,7 @@ export {
   parseAttrs,
   renderScorecardRoundPages,
   scorecardRoundPageId,
+  scorecardRoundTitles,
 } from './macros.js';
 export type { HandboekCatalog, ScorecardRoundPage } from './macros.js';
 export {

@@ -364,7 +364,7 @@ export const SUITES: Record<string, EvalSuite> = {
   // NOT duplicated from `core`. A scorecard that charges the same trial to
   // two suites reads as a bigger sample than it is.
   //
-  // Budget 5h40m at --count 1, ordered cheapest-first.
+  // Budget 10h at --count 1, ordered cheapest-first.
   developer: {
     id: 'developer',
     description:
@@ -428,7 +428,7 @@ export const SUITES: Record<string, EvalSuite> = {
   // other member can claim, and because the 45m it costs bought no axis the
   // nine below do not already cover.
   //
-  // Budget 5h40m at --count 1, ordered cheapest-first.
+  // Budget 11h25m at --count 1, ordered cheapest-first.
   'complex-work': {
     id: 'complex-work',
     description:

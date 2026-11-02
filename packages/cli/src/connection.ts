@@ -203,6 +203,34 @@ export async function connectOwned(
   return connected.client;
 }
 
+/** What `--no-start` says when there is nothing running to read from. */
+export const NO_RUNNING_SERVICE_MESSAGE =
+  'No Gezel service is running, and --no-start keeps this command from starting one. Run `gezel start` first, or leave out --no-start.';
+
+/**
+ * `--no-start`: use a service that is already running — the one named with
+ * `--connect`, the machine service, or this home's daemon — and never start
+ * one. For inspection commands someone runs to look, not to set anything up.
+ */
+export async function connectRunning(
+  globals: CliGlobals,
+  deps: {
+    readRuntime?: typeof readRuntime;
+    isAlive?: (pid: number) => boolean;
+    connectOwned?: typeof connectOwned;
+  } = {},
+): Promise<GezelClient> {
+  applyHome(globals);
+  const preferred = await connectPreferredService(globals);
+  if (preferred) return preferred.client;
+  const runtime = await (deps.readRuntime ?? readRuntime)();
+  if (!runtime || !(deps.isAlive ?? isProcessAlive)(runtime.pid)) {
+    throw new CliError(NO_RUNNING_SERVICE_MESSAGE);
+  }
+  // A live daemon is there, so connecting adopts it rather than spawning.
+  return (deps.connectOwned ?? connectOwned)(globals, { announceSpawn: false });
+}
+
 export type TuiConnection = {
   client: GezelClient;
   /** Present only when this TUI launched the daemon it is using. */

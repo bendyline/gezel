@@ -104,7 +104,6 @@ import {
   appToolsToolsetId,
   buildStepDispatchSeed,
   contractAsksForGrounding,
-  craftbookCheckup,
   createAwakeTimeout,
   createLogger,
   decodeProjectGezelId,
@@ -133,8 +132,6 @@ import {
   projectManagedWorkspaceWritable,
   pronounFormsForGender,
   redactCredentials,
-  renderCraftbookFocusBlock,
-  renderCraftbookTurnLine,
   resolveGeneralistKickoff,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
@@ -242,6 +239,7 @@ import {
   retrievalExclusionsFor,
   subjectBinding,
 } from './app-subject-session.js';
+import { craftbookFocusPromptBlock, readCraftbookStateLine } from './craftbook-focus-session.js';
 
 import {
   extractReasoning,
@@ -7840,10 +7838,11 @@ export class ChatManager extends LocalEngineRuntime {
       if (subjectStateLine) {
         promptForTurn = `${subjectStateLine}\n\n${promptForTurn}`;
       }
-      const craftbookStateLine = await this.readCraftbookStateForTurn(
-        state.record,
-        resolveTurnMessageOrigin(opts),
-      );
+      const craftbookStateLine = await readCraftbookStateLine({
+        store: this.store,
+        session: state.record,
+        origin: resolveTurnMessageOrigin(opts),
+      });
       if (craftbookStateLine) {
         promptForTurn = `${craftbookStateLine}\n\n${promptForTurn}`;
       }
@@ -13769,22 +13768,6 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
-   * The craftbook a thread is pinned to, as it stands for this turn, with its
-   * checkup. Read fresh on every turn of the person's, because they edit the
-   * book by hand in the editor beside the chat; a book that cannot be read
-   * costs the line, never the turn.
-   */
-  private async readCraftbookStateForTurn(
-    record: ChatSession,
-    origin: TurnMessageOrigin,
-  ): Promise<string | null> {
-    if (!record.craftbookRef) return null;
-    if (origin !== 'direct-user' && origin !== 'question-answer') return null;
-    const book = await this.store.getLocalCraftbookTemplate(record.craftbookRef).catch(() => null);
-    return book ? renderCraftbookTurnLine(book, craftbookCheckup(book)) : null;
-  }
-
-  /**
    * Get or build the live state for a session. On first use after process
    * start (or after a resetClient), this loads the persisted record and
    * attempts to resume the provider session; on resume failure, falls back
@@ -15549,19 +15532,14 @@ export class ChatManager extends LocalEngineRuntime {
     }
 
     // A session pinned to a craftbook (the editor's AI assist) gets the
-    // book's section: what the conversation is about and how to change it.
-    // Session-stable; the book's current state rides each turn instead
-    // (`renderCraftbookTurnLine`), because the person edits it by hand.
+    // book's section; its current state rides each turn instead.
     let systemMessage = systemInstructions.full;
     let volatileContext = systemInstructions.volatileContext;
     const extraSections: PromptSectionSize[] = [];
     if (record.craftbookRef) {
-      const book = await this.store
-        .getLocalCraftbookTemplate(record.craftbookRef)
-        .catch(() => null);
-      const craftbookBlock = `\n\n${renderCraftbookFocusBlock({
-        id: record.craftbookRef,
-        name: book?.name,
+      const craftbookBlock = `\n\n${await craftbookFocusPromptBlock({
+        store: this.store,
+        craftbookRef: record.craftbookRef,
         toolNames: availableBuiltinTools.map((tool) => tool.name),
       })}`;
       extraSections.push({

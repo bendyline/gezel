@@ -10,12 +10,13 @@
  * the window never stops one.
  */
 
-import type {
-  EvalCatalog,
-  EvalJob,
-  EvalJobSpec,
-  EvalTargetsResponse,
-  EvalTrialSummary,
+import {
+  type EvalCatalog,
+  type EvalJob,
+  type EvalJobSpec,
+  type EvalTargetsResponse,
+  type EvalTrialSummary,
+  describeEvalHost,
 } from '@bendyline/gezel/eval';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
@@ -49,6 +50,23 @@ export function BenchmarksView() {
   const [tab, setTab] = useState<ResultsTab>('scorecard');
   const [jobFilter, setJobFilter] = useState<{ id: string; title: string } | null>(null);
   const [openTrialId, setOpenTrialId] = useState<string | null>(null);
+  // The same stamp `gezel bench` prints before it starts: hardware, engine
+  // build, gezel version. A number without these is not a measurement.
+  const [hostLine, setHostLine] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSystemDiagnostics()
+      .then((d) => {
+        if (!cancelled) setHostLine(describeEvalHost(d));
+      })
+      .catch(() => {
+        /* the stamp is informational; the view works without it */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const refreshRuns = useCallback(async () => {
     try {
@@ -139,6 +157,11 @@ export function BenchmarksView() {
           gezel's own model scorecard uses. Runs continue in the background, so you can leave this
           page while one works.
         </p>
+        {hostLine && (
+          <p className="muted small" data-testid="bench-host">
+            Measuring on: {hostLine}
+          </p>
+        )}
         {targets?.environment && (
           <p className="muted small">
             {targets.environment.harness === 'source'

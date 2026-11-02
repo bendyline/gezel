@@ -17,6 +17,7 @@ import type {
   ScorecardRun,
 } from '@bendyline/gezel';
 import {
+  COMMUNITY_SCORECARD,
   MODEL_TIER_ORDER,
   ROLES,
   SCORECARD,
@@ -93,6 +94,7 @@ export const MACROS: Record<string, MacroFn> = {
   'installed-models': installedModels,
   'model-scorecard': modelScorecard,
   'scorecard-notes': scorecardNotes,
+  'community-scorecard': communityScorecard,
   'project-type-composition': projectTypeComposition,
   'suggested-work': suggestedWork,
   'whats-new-list': whatsNewList,
@@ -617,6 +619,47 @@ async function modelScorecard(attrs: Record<string, string>, ctx: MacroContext):
     // noise the model can quote back as part of the model name.
     breakLabels: ctx.mode !== 'agent',
   });
+}
+
+/**
+ * `::handboek-community-scorecard{suites=core,productivity}` — rounds people
+ * outside Bendyline ran with `gezel bench` and submitted. Rendered with the
+ * same honesty rules as the published rounds, under their own heading and
+ * never merged into them, in every mode: the site's filterable list and the
+ * per-round pages are Bendyline's rounds only.
+ */
+async function communityScorecard(
+  attrs: Record<string, string>,
+  ctx: MacroContext,
+): Promise<string> {
+  const suiteIds = (attrs.suites ?? 'core')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+  return renderCommunityScorecardMarkdown(COMMUNITY_SCORECARD, suiteIds, ctx.mode);
+}
+
+/** Pure renderer behind `::handboek-community-scorecard`, for fixture tests. */
+export function renderCommunityScorecardMarkdown(
+  dataset: ScorecardDataset,
+  suiteIds: readonly string[],
+  mode: HandboekRenderMode,
+): string {
+  if (dataset.runs.length === 0) {
+    return [
+      'No community rounds have been published yet.',
+      '',
+      'Run `gezel bench --json result.json` on your own machine, then `gezel bench submit result.json` to send the round in.',
+    ].join('\n');
+  }
+  return [
+    'Each round below was run and submitted by someone outside Bendyline, on the machine named in its stamp. We check that a submission is well formed and plausible; the results are theirs.',
+    '',
+    renderScorecardRunsMarkdown(dataset, suiteIds, {
+      includeTaskCount: true,
+      breakLabels: mode !== 'agent',
+    }),
+  ].join('\n');
 }
 
 /**

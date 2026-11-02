@@ -3,9 +3,11 @@ import {
   type SecurityCapabilities,
   type SecurityLevel,
   type SecurityPolicy,
+  type SecurityPresetLevel,
   classifySecurityLevel,
   resolveSecurityPolicy,
   securityCapabilitiesOf,
+  securityPolicyForLevel,
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import type { Command } from 'commander';
@@ -69,6 +71,50 @@ const SECURITY_SWITCHES: ReadonlyArray<{
   },
 ];
 
+/** What each capability lets happen, in the words `gezel security level` prints. */
+const CAPABILITY_LABELS: ReadonlyArray<[keyof SecurityCapabilities, string]> = [
+  ['allowExternalChat', 'Cloud models'],
+  ['allowFileEdits', 'File edits and the model’s Git tools'],
+  ['allowScriptExecution', 'Sandboxed scripts'],
+  ['allowAppNetwork', 'Update checks and the connector syncs you start'],
+  ['allowExternalServices', 'Web search, mail and other outside services'],
+  ['allowPackageScriptExecution', 'Run package scripts'],
+  ['allowPackageScriptEdits', 'Edit package scripts'],
+];
+
+/** Accepted names for each preset; `unrestricted` is the name Settings shows for `free`. */
+const LEVEL_ALIASES: Readonly<Record<string, SecurityPresetLevel>> = {
+  'super-lockdown': 'super-lockdown',
+  superlockdown: 'super-lockdown',
+  lockdown: 'lockdown',
+  free: 'free',
+  unrestricted: 'free',
+};
+
+/** Parse a preset name, or explain the choices. */
+export function parseSecurityLevel(input: string): SecurityPresetLevel {
+  const level = LEVEL_ALIASES[input.trim().toLowerCase()];
+  if (!level) {
+    throw new CliError(
+      `Unknown security level "${input}". Choose super-lockdown, lockdown, or free (shown as Unrestricted in Settings).`,
+    );
+  }
+  return level;
+}
+
+/** The level and every capability it allows, one per line. */
+export function describeSecurityLevel(policy: SecurityPolicy): string[] {
+  const caps = securityCapabilitiesOf(resolveSecurityPolicy({ securityPolicy: policy }));
+  const level = classifySecurityLevel(caps);
+  const width = Math.max(...CAPABILITY_LABELS.map(([, label]) => label.length));
+  return [
+    `Security level: ${SECURITY_LEVEL_LABELS[level]}${level === 'custom' ? '' : ` (${level})`}`,
+    ...CAPABILITY_LABELS.map(
+      ([key, label]) => `  ${label.padEnd(width)}  ${caps[key] ? 'on' : 'off'}`,
+    ),
+  ];
+}
+
 function enabledValue(state: string | undefined): boolean | undefined {
   if (state === undefined) return undefined;
   if (state === 'on') return true;
@@ -83,6 +129,44 @@ export function registerSecurityCommands(
   const security = program
     .command('security')
     .description('Inspect or explicitly change security settings');
+  security
+    .command('level [action] [level]')
+    .description(
+      'Show the security level, or set a preset: `level set super-lockdown|lockdown|free`',
+    )
+    .option('--json', 'Output the level and its capabilities as JSON')
+    .action(
+      async (
+        action: string | undefined,
+        requested: string | undefined,
+        options: { json?: boolean },
+      ) => {
+        if (action !== undefined && action !== 'show' && action !== 'set') {
+          throw new CliError('Use `gezel security level`, `level show`, or `level set <level>`.');
+        }
+        if (action === 'set' && requested === undefined) {
+          throw new CliError('Name a level: super-lockdown, lockdown, or free.');
+        }
+        if (action !== 'set' && requested !== undefined) {
+          throw new CliError('To change the level, use `gezel security level set <level>`.');
+        }
+        const next = action === 'set' ? parseSecurityLevel(requested!) : undefined;
+        const client = await connect();
+        const policy: SecurityPolicy = next
+          ? securityPolicyForLevel(next)
+          : {
+              level: 'custom',
+              ...securityCapabilitiesOf(resolveSecurityPolicy(await client.getConfig())),
+            };
+        if (next) await client.updateConfig({ securityPolicy: policy });
+        if (options.json) {
+          const caps = securityCapabilitiesOf(resolveSecurityPolicy({ securityPolicy: policy }));
+          console.log(JSON.stringify({ level: classifySecurityLevel(caps), ...caps }));
+          return;
+        }
+        for (const line of describeSecurityLevel(policy)) console.log(line);
+      },
+    );
   for (const setting of SECURITY_SWITCHES) {
     security
       .command(`${setting.command} [state]`)

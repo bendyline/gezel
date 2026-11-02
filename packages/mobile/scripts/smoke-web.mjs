@@ -371,7 +371,7 @@ try {
   await page.getByRole('button', { name: 'Create task', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'detached' });
   await page.getByRole('heading', { name: 'Review the field notes', exact: true }).waitFor();
-  await page.getByRole('button', { name: /^Fire (task|anyway)$/ }).waitFor();
+  await page.getByRole('button', { name: 'Start task', exact: true }).waitFor();
   await page
     .locator('.task-notes-composer [contenteditable="true"]')
     .fill('Use the saved field guide.');

@@ -13,7 +13,14 @@ subcategory:
 
 The `gezel` command drives the same service the desktop app uses — handy on servers, in scripts, or when you just live in a terminal.
 
-Install the command-line package with Node.js 24 or newer:
+The command line needs Node.js 24 or newer. Check with `node --version`; if it is older or missing, one line installs a current version:
+
+- macOS: `brew install node`
+- Windows: `winget install OpenJS.NodeJS.LTS`
+- Ubuntu or Debian: `curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs`
+- Anywhere, with [nvm](https://github.com/nvm-sh/nvm): `nvm install 24`
+
+Then install the command-line package:
 
 ```bash
 npm install -g @bendyline/gezel-cli
@@ -35,6 +42,8 @@ An explicit `--connect <url>` uses a separate CLI-scoped grant for that service.
 Rolling-upgrade compatibility may also select an older `legacy-full` machine service, which uses that approval path. Use `--standalone` to skip this compatibility choice; `--home <path>` or an explicit `GEZEL_HOME` also implies standalone operation. A modern machine service is an engine broker; your per-user daemon handles product data and connects to that broker for inference.
 
 A home you name with `--home` is also kept separate from what the Gezel desktop app's machine install publishes: its shared gezels and projects, and the models it downloaded. Set `GEZEL_DISABLE_MACHINE_SHARED=0` to include them anyway. Your default home, `~/.gezel`, still sees them.
+
+To run Gezel headless on a machine of its own, see [Gezel on a server](gezel-on-a-server.md).
 
 ## Everyday commands
 
@@ -58,6 +67,8 @@ gezel run "..."             one-shot: send a prompt, print the reply
 gezel doctor                check the installation
 ```
 
+A new install starts in `full-play`. For a server nobody is watching, `reactive+tasks` is the better fit: messages, tasks you start and schedules still run, without proactive nudges. [Gezel on a server](gezel-on-a-server.md) covers the rest of a headless setup.
+
 If the desktop app's machine-wide service is in use, `gezel stop` applies the emergency brake to it instead and says the service is managed by the operating system. It does the same for a service the Gezel app started for you, which the app would only start again: quit the app to shut that one down. `gezel stop` shuts a service down only after confirming the process is Gezel's. When the service has already exited, it removes the files the service left behind, and it never stops another program that happens to have reused the service's old process number. `gezel stop --daemon` still works and means the same as `gezel stop`.
 
 ## Which project a command uses
@@ -77,7 +88,8 @@ gezel task pause <ref>      pause one task without stopping the others
 gezel task resume <ref>     retry a paused task and wait for its result
 gezel craftbook list [words]
                             craftbooks you can start in this folder's project
-                            (words filter by command, title, and tags)
+                            (words filter by command, title, and tags;
+                            --no-start answers from a running service only)
 gezel do <craftbook>        start a craftbook as a task in this folder's project
                             (--wait to stay until it finishes)
 gezel skills list           SKILL.md skills found in this project's workspace
@@ -101,8 +113,10 @@ The full story — the source-folder format, both script forms, and the loop an 
 
 ```
 gezel model list            local chat models for this computer's engine
+                            (--no-start: answer from a running service only)
 gezel model list --available
-                            catalog models that fit this computer, with sizes
+                            catalog models that fit this computer, with sizes and
+                            the published scorecard's measured pass rate for each
 gezel model pull <id>       download a chat model from the catalog
 gezel model use <id>        make chats use a downloaded model
 gezel model context <id> [tokens]
@@ -115,6 +129,32 @@ gezel native install        download and verify the on-device engines
 gezel native status         engine release, platform, and backend
 gezel image models          local image-generation models (image pull / image rm)
 ```
+
+## Measuring a model
+
+The same tasks, checks and counting rules as the published
+[model scorecard](model-scorecard.md), run on your own computer through the
+service's benchmark runner. `gezel bench` and **Settings → Benchmarks** show
+the same runs.
+
+```
+gezel bench                 run the core set on the model chats use, one trial per task
+gezel bench --suite productivity|developer|complex-work|all
+                            another set, several, or all four
+gezel bench --smoke         the set's pulse check instead (fast; not a suite score)
+gezel bench --model <id> --count 3
+                            a particular model; three trials is what it takes to quote a rate
+gezel bench --json <file>   also write the results as a scorecard shard
+gezel bench list            every set, its size, and how long it can take
+gezel bench results         finished runs on this computer
+gezel bench submit <file>   share a results file as a GitHub issue (uses gh when installed)
+```
+
+A run that could take more than an hour asks before it starts; `--yes` skips
+the question. Below three trials a result prints as a count, never a rate,
+exactly as the scorecard does. The report ends with the run's provenance —
+hardware, engine build, gezel version, catalog version — because a number
+without those is not a measurement.
 
 ## Making media
 
@@ -149,6 +189,9 @@ gezel secret set <name> --env VARIABLE
                             store a key, read from an environment variable
                             (or --stdin to pipe it in)
 gezel secret remove <name>  forget a key
+gezel security level        the security level and what it allows
+gezel security level set <super-lockdown|lockdown|free>
+                            switch to a preset (free is Unrestricted in Settings)
 gezel security external-services [on|off]
                             let gezels use web search and other outside services
 gezel env indexing [on|off] pause or resume background indexing for this project

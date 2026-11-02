@@ -11,6 +11,7 @@ import {
   IMAGE_QUALITIES,
   ImageAspectRatioSchema,
   ImageQualitySchema,
+  SCORECARD,
   type StorageJob,
   evaluateApiCompat,
   getLogLevel,
@@ -18,7 +19,11 @@ import {
   setLogLevel,
   setLogOutput,
 } from '@bendyline/gezel';
-import { type KnowledgeInstallEvent, streamChatEvents } from '@bendyline/gezel-client';
+import {
+  type KnowledgeInstallEvent,
+  type ModelFitnessEntry,
+  streamChatEvents,
+} from '@bendyline/gezel-client';
 import {
   GezelClient,
   createTrustingFetch,
@@ -33,6 +38,7 @@ import {
 } from '@bendyline/gezel-client/node';
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Command, Option } from 'commander';
+import { registerBenchCommands } from '../bench-command.js';
 import { formatCliFailure, isNotFound } from '../cli-errors.js';
 import {
   CLI_CLIENT_LABEL,
@@ -42,6 +48,7 @@ import {
   connectForRun,
   connectForTui,
   connectOwned,
+  connectRunning,
   describeMachineEngineBroker,
   ensureCliProjectLead,
   findHealthySystemService,
@@ -71,6 +78,7 @@ import {
   workspaceCraftbookId,
 } from '../craftbook-shorthand.js';
 import { type DaemonStopHealth, planDaemonStop } from '../daemon-stop.js';
+import { doctorVerdict, renderDoctorModel } from '../doctor-report.js';
 import {
   CLI_ENGAGEMENT_MODE_USAGE,
   cliEngagementModeOption,
@@ -82,6 +90,7 @@ import { registerMcpCommands } from '../mcp-command.js';
 import {
   availableChatModels,
   formatAvailableChatModels,
+  measuredClaimsFor,
   pinPulledModel,
   useChatModel,
 } from '../model-choice.js';
@@ -120,6 +129,7 @@ import {
 import { craftbookStartRequest, normalizeCraftbooks } from '../tui/craftbook-start.js';
 import { unknownCommandMessage } from '../unknown-command.js';
 import { runWorkflow } from '../workflow-command.js';
+import { unsupportedNodeMessage } from './node-version.js';
 
 const program = new Command();
 program
@@ -149,8 +159,13 @@ program
 /** Global flags, read off the root program. */
 const cliGlobals = (): CliGlobals => program.opts() as CliGlobals;
 
+/** Read-only commands honour `--no-start`: a running service, or a clear error. */
+const connectForInspection = (opts: { start?: boolean }) =>
+  opts.start === false ? connectRunning(cliGlobals()) : connectOwned(cliGlobals());
+
 registerSecretCommands(program, () => connectOwned(cliGlobals()));
 registerMcpCommands(program, () => connectOwned(cliGlobals()));
+registerBenchCommands(program, () => connectOwned(cliGlobals()));
 registerSecurityCommands(program, () => connectOwned(cliGlobals()));
 registerGrowthCommand(program, () => connectOwned(cliGlobals()));
 
@@ -1048,8 +1063,9 @@ craftbook
     "List the craftbooks `gezel do` can start in this folder's project; words filter by command, title and tags",
   )
   .option('--json', 'emit the list as JSON')
-  .action(async (words: string[], opts: { json?: boolean }) => {
-    const client = await connectOwned(cliGlobals());
+  .option('--no-start', 'Use a running service only; never start one')
+  .action(async (words: string[], opts: { json?: boolean; start?: boolean }) => {
+    const client = await connectForInspection(opts);
     // Listing must not create a project: a folder that has none yet sees what
     // `gezel do` would offer there, the Default project's craftbooks.
     const preview = await previewRunProject(client, cliGlobals());
@@ -2404,16 +2420,30 @@ model
   .description('List downloaded chat models, or with --available the catalog models that fit')
   .option('-p, --provider <engine>', 'mlx | llama-cpp | ds4 (default: platform default)')
   .option('-a, --available', 'List catalog models for this machine, with download sizes')
-  .action(async (opts: { provider?: string; available?: boolean }) => {
-    const client = await connectOwned(cliGlobals());
+  .option('--no-start', 'Use a running service only; never start one')
+  .action(async (opts: { provider?: string; available?: boolean; start?: boolean }) => {
+    const client = await connectForInspection(opts);
     const provider = resolveModelProvider(opts.provider);
     if (opts.available) {
       const available = await availableChatModels(client, provider);
+      // What the published scorecard says, preferring rounds on this platform.
+      // The daemon may be remote (--connect); its platform is the one that counts.
+      const health = await client.health().catch(() => null);
+      const device = {
+        platform: health?.platform ?? process.platform,
+        arch: process.arch,
+        label: health?.platform ?? process.platform,
+      };
       console.log(
         formatAvailableChatModels({
           engine: provider,
           platformDefault: resolveOnDeviceProvider(process.platform, process.arch),
           ...available,
+          measured: measuredClaimsFor(
+            SCORECARD,
+            available.ranked.map((m) => m.id),
+            device,
+          ),
         }),
       );
       return;
@@ -2515,6 +2545,7 @@ program
       console.log('machine service: not installed');
     }
     console.log(`runtime file: ${runtime ? 'present' : 'missing'}`);
+    let serviceReachable = Boolean(system);
     if (runtime) {
       const alive = isProcessAlive(runtime.pid);
       console.log(`  port=${runtime.port} pid=${runtime.pid} alive=${alive}`);
@@ -2526,6 +2557,7 @@ program
             ...(runtime.cert ? { fetch: createTrustingFetch({ cert: runtime.cert }) } : {}),
           });
           const health = await client.health();
+          serviceReachable = true;
           const engineNote =
             health.machineEngineConnected !== undefined
               ? ` machine engine connected: ${health.machineEngineConnected ? 'yes' : 'no'}`
@@ -2536,6 +2568,58 @@ program
         }
       }
     }
+    // The model half: can the model chats will use actually do the work?
+    // Read through the running service, or an in-process one that stops
+    // with this command — doctor never leaves a daemon behind.
+    let modelId: string | undefined;
+    let fitnessAdmitted: boolean | null = null;
+    if (serviceReachable || globals.connect) {
+      try {
+        await withTransientConnection(globals, async (client) => {
+          const [config, fitness, health] = await Promise.all([
+            client.getConfig(),
+            client
+              .listModelFitness()
+              .catch((): { records: ModelFitnessEntry[]; probing: string[] } => ({
+                records: [],
+                probing: [],
+              })),
+            client.health().catch(() => null),
+          ]);
+          const provider = config.provider ?? 'llama-cpp';
+          modelId = config.defaultModel?.[provider as keyof typeof config.defaultModel];
+          const key = modelId ? `${provider}:${modelId}` : '';
+          const entry = fitness.records.find((r) => r.key === key);
+          if (entry?.record.status === 'probed' && !entry.stale)
+            fitnessAdmitted = entry.record.admitted;
+          const device = {
+            platform: health?.platform ?? process.platform,
+            arch: process.arch,
+            label: health?.platform ?? process.platform,
+          };
+          for (const line of renderDoctorModel({
+            provider,
+            modelId,
+            fitness: entry,
+            probing: fitness.probing.includes(key),
+            dataset: SCORECARD,
+            device,
+          })) {
+            console.log(line);
+          }
+        });
+      } catch {
+        /* the model section is best-effort too */
+      }
+    }
+    console.log(
+      doctorVerdict({
+        nodeOk: unsupportedNodeMessage(process.versions.node) === undefined,
+        serviceReachable,
+        modelId,
+        fitnessAdmitted,
+      }),
+    );
   });
 
 // ── Storage: see what Gezel is keeping, and reclaim it before uninstalling ──

@@ -276,7 +276,7 @@ describe('SettingsView', () => {
     }
   });
 
-  it('defaults very early work-in-progress features off and persists the toggle', async () => {
+  it('defaults preview features off and persists the toggle', async () => {
     vi.mocked(api.updateConfig).mockResolvedValue({
       provider: 'mock',
       showWorkInProgressFeatures: true,
@@ -285,7 +285,7 @@ describe('SettingsView', () => {
     render(<SettingsView />);
     fireEvent.click(await screen.findByTestId('settings-nav-about'));
     const checkbox = await screen.findByRole('checkbox', {
-      name: 'Show very early work-in-progress features',
+      name: 'Show preview features',
     });
     expect(checkbox).not.toBeChecked();
 

@@ -2,11 +2,26 @@
 
 Thank you for your interest in improving Gezel.
 
+## Open source, not open contribution
+
+Gezel is free to read, free to fork, and free to propose changes to. The code
+itself is written by one team. That is a deliberate choice, made for the same
+reason projects like SQLite make it: an agent runtime that runs model-authored
+scripts on people's own machines should have a single accountable author for
+every line, one set of conventions throughout, and no path by which a change
+reaches users without that team having written and reviewed it. The published
+builds carry a `SHA256SUMS` manifest and SLSA provenance so that what you
+install can be checked against what the pipeline produced. The Handboek's
+[Governance](https://gezel.com/docs/governance/) page explains the same model
+for people using Gezel rather than building it.
+
 ## What We Accept
 
 Code contributions are **not accepted**. Pull requests that add, modify, or
 remove source code, tests, build configuration, dependencies, or other
-implementation files will be closed.
+implementation files will be closed. Bug reports, security reports and
+proposals are all welcome, and the proposal path below is how ideas from
+outside the team reach a release.
 
 We welcome proposals describing fixes or new capabilities. To submit one:
 
@@ -24,7 +39,7 @@ implemented. For requests that do not need a full proposal, you may instead
 ## Commit Messages
 
 Commits on `main` follow [Conventional Commits](https://www.conventionalcommits.org/).
-Nothing checks them — there is no local git hook and no CI job.
+No hook or CI job checks them; the release tooling relies on them being right.
 
 This is not a style preference: `multi-semantic-release` derives every published
 npm version bump and changelog entry from these messages, so a malformed subject

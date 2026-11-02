@@ -524,8 +524,8 @@ export function nativePayloadComponents({
   helperSourceRefsForKey = () => [],
   cudaRuntimeRef,
 }) {
-  if (manifest?.schemaVersion !== 2 || !manifest.platforms) {
-    throw new Error('native-file-manifest.json must be schemaVersion 2 with platforms');
+  if (![2, 3].includes(manifest?.schemaVersion) || !manifest.platforms) {
+    throw new Error('native-file-manifest.json must be schemaVersion 2 or 3 with platforms');
   }
   const components = [];
   const dependencies = [];

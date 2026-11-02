@@ -161,8 +161,9 @@ const DEFAULT_GROUPS: Record<GroupId, boolean> = {
 
 // Top-level area links rendered below the groups (Settings is pulled out
 // last). Scripts/History live here as plain links per the nav design rather
-// than under a "More" group. Benchmarks is intentionally absent — it now
-// lives behind the debug-gated "Benchmarks" tab in Settings.
+// than under a "More" group. Benchmarks is intentionally absent — it is the
+// "Benchmarks" tab in Settings, where it sits beside the model settings it
+// measures.
 // Areas that render as an expandable Group rather than a plain link. They
 // already light their own header when selected, so the transient-row rule
 // below must skip them.

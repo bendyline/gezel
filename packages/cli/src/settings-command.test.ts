@@ -14,6 +14,74 @@ function program(): Command {
   });
 }
 
+describe('gezel security level', () => {
+  async function run(args: string[], config: Record<string, unknown> = {}) {
+    const client = {
+      getConfig: vi.fn().mockResolvedValue(config),
+      updateConfig: vi.fn().mockResolvedValue({}),
+    };
+    const lines: string[] = [];
+    const output = vi.spyOn(console, 'log').mockImplementation((line) => {
+      lines.push(String(line));
+    });
+    try {
+      const command = program();
+      registerSecurityCommands(
+        command,
+        (async () => client) as () => Promise<Pick<GezelClient, 'getConfig' | 'updateConfig'>>,
+      );
+      await command.parseAsync(['security', 'level', ...args], { from: 'user' });
+    } finally {
+      output.mockRestore();
+    }
+    return { client, lines };
+  }
+
+  it('shows the fail-safe default and what it allows when nothing is stored', async () => {
+    const { client, lines } = await run([]);
+    expect(client.updateConfig).not.toHaveBeenCalled();
+    expect(lines[0]).toBe('Security level: Lockdown (lockdown)');
+    expect(lines.join('\n')).toMatch(/Cloud models\s+on/);
+    expect(lines.join('\n')).toMatch(/Web search, mail and other outside services\s+off/);
+  });
+
+  it('writes every capability of a preset in one update', async () => {
+    const { client, lines } = await run(['set', 'super-lockdown']);
+    expect(client.updateConfig).toHaveBeenCalledWith({
+      securityPolicy: {
+        level: 'super-lockdown',
+        allowFileEdits: false,
+        allowExternalChat: false,
+        allowExternalServices: false,
+        allowScriptExecution: false,
+        allowAppNetwork: false,
+        allowPackageScriptEdits: false,
+        allowPackageScriptExecution: false,
+      },
+    });
+    expect(lines[0]).toBe('Security level: Super Lockdown (super-lockdown)');
+  });
+
+  it('accepts the Settings name for free and reports custom combinations as custom', async () => {
+    const set = await run(['set', 'unrestricted', '--json']);
+    expect(JSON.parse(set.lines[0]!)).toMatchObject({ level: 'free', allowExternalServices: true });
+    const shown = await run(['show', '--json'], {
+      securityPolicy: { ...{ level: 'lockdown' }, allowExternalChat: false },
+    });
+    expect(JSON.parse(shown.lines[0]!)).toMatchObject({
+      level: 'custom',
+      allowExternalChat: false,
+    });
+  });
+
+  it('refuses unknown levels and malformed commands before connecting', async () => {
+    await expect(run(['set', 'paranoid'])).rejects.toThrow(/Unknown security level "paranoid"/);
+    await expect(run(['set'])).rejects.toThrow(/Name a level/);
+    await expect(run(['lockdown'])).rejects.toThrow(/level show/);
+    await expect(run(['show', 'free'])).rejects.toThrow(/level set <level>/);
+  });
+});
+
 describe('explicit settings commands', () => {
   it('updates external-service access without dropping the rest of the security policy', async () => {
     const client = {

@@ -131,3 +131,10 @@ export const RUN_SHARDS: ScorecardDataset[] = [
   run_2026_10_30_r9700_docblocks_activation as unknown as ScorecardDataset,
   run_2026_10_30_spark_native_0_1_54_final_six as unknown as ScorecardDataset,
 ];
+
+/**
+ * Community rounds from `community/`: run by people outside Bendyline with
+ * `gezel bench`, checked, and published separately. Never merged into
+ * RUN_SHARDS.
+ */
+export const COMMUNITY_SHARDS: ScorecardDataset[] = [];

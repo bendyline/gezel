@@ -125,8 +125,8 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('sidebar-group-documents')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-group-gezels')).toBeInTheDocument();
     // Tasks / History are top-level links per the nav design.
-    // Benchmarks is intentionally NOT here — it lives behind the
-    // debug-gated "Benchmarks" tab in Settings (see AREA_LINKS in Sidebar.tsx).
+    // Benchmarks is intentionally NOT here — it is the "Benchmarks" tab in
+    // Settings (see AREA_LINKS in Sidebar.tsx).
     // Scripts is gated behind the "Show advanced features" flag (off here).
     expect(screen.getByTestId('sidebar-area-tasks')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-area-history')).toBeInTheDocument();

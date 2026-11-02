@@ -364,12 +364,12 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'audio', label: 'Audio', group: 'workloads' },
     { id: 'webSearch', label: 'Web search', group: 'workloads' },
     { id: 'knowledge', label: 'Knowledge', group: 'workloads' },
+    { id: 'benchmarks', label: 'Benchmarks' },
     { id: 'channels', label: 'Channels' },
     { id: 'connectedApps', label: 'Integrations' },
     { id: 'remoteServers', label: 'Remote Servers' },
     { id: 'toolsets', label: 'Shared Toolsets' },
     { id: 'about', label: 'About' },
-    { id: 'benchmarks', label: 'Benchmarks' },
   ];
 }
 
@@ -783,11 +783,7 @@ function DaemonSettingsView() {
         const res = await api.updateConfig({ showWorkInProgressFeatures });
         setConfig(res);
         window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-        setStatus(
-          showWorkInProgressFeatures
-            ? 'very early work-in-progress features ON'
-            : 'very early work-in-progress features OFF',
-        );
+        setStatus(showWorkInProgressFeatures ? 'preview features ON' : 'preview features OFF');
       } catch (err) {
         setStatus(`save failed: ${(err as Error).message}`);
       }
@@ -1676,9 +1672,6 @@ function DaemonSettingsView() {
       // a provider the daemon refuses to construct. The greyed pill on the
       // Artificial Intelligence tab carries the explanation.
       if (EXTERNAL_CHAT_SECTIONS.has(s.id) && externalChatBlocked) return false;
-      // Benchmarks is a debug-only surface — hidden until the user turns on
-      // Debug mode under the About tab.
-      if (s.id === 'benchmarks' && config?.debugMode !== true) return false;
       // Channels is in the work-in-progress bucket alongside connectors —
       // hidden until the user opts in under About.
       if (s.id === 'channels' && config?.showWorkInProgressFeatures !== true) return false;
@@ -4451,10 +4444,10 @@ function DaemonSettingsView() {
                     checked={config?.showWorkInProgressFeatures === true}
                     onChange={(e) => void saveShowWorkInProgressFeatures(e.target.checked)}
                   />
-                  <span>Show very early work-in-progress features</span>
+                  <span>Show preview features</span>
                 </label>
                 <p className="muted small">
-                  Very early features may be incomplete or change shape. The current preview is
+                  Preview features are usable but still changing shape. The current preview is
                   Connectors and the project types and craftbooks that use them.
                 </p>
               </section>
@@ -4505,7 +4498,7 @@ function DaemonSettingsView() {
             </>
           )}
 
-          {section === 'benchmarks' && config?.debugMode === true && <BenchmarksView />}
+          {section === 'benchmarks' && <BenchmarksView />}
         </Suspense>
 
         {error && <p className="error">{error}</p>}

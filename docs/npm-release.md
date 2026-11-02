@@ -356,8 +356,11 @@ bakes in `NATIVE_ENGINE_RELEASE` (the `native-v*` tag this build trusts) and
 `SHA256SUMS_DIGEST` (the sha256 of that release's `SHA256SUMS` asset).
 [`native-file-manifest.json`](../packages/inference/src/engines/native-file-manifest.json)
 also pins every executable and loadable regular file after
-signing/notarization. Schema 2 records symlinks separately, including their
-exact relative target text. Links may form ordinary internal SONAME chains,
+signing/notarization. Schema 3 adds runtime source files an engine compiles at
+startup, which no code signature covers (ds4's `metal/*.metal` on macOS),
+pinned `hash-only` by extension; schema 2 manifests, from native releases up
+to 0.1.55, still verify without them. Symlinks are recorded separately,
+including their exact relative target text. Links may form ordinary internal SONAME chains,
 but verification rejects absolute/escaping targets, dangling links, cycles,
 unexpected links, and links that do not terminate at a pinned regular native
 file. That second manifest lets a standalone CLI verify and reuse an Electron
