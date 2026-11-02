@@ -59,9 +59,9 @@ describe('published M5 Max dual-engine comparison', () => {
     const llama = results.filter((result) => result.engine === 'llama-cpp');
     expect(mlx.every((result) => !result.runtime)).toBe(true);
     expect(llama.every((result) => result.runtime?.kvCacheType === 'f16')).toBe(true);
-    expect(mlx.every((result) => !result.taskMeasurements?.[0].prefillTokensPerSec)).toBe(true);
+    expect(mlx.every((result) => !result.taskMeasurements?.[0]?.prefillTokensPerSec)).toBe(true);
     expect(
-      llama.reduce((n, result) => n + result.taskMeasurements![0].prefillTokensPerSec!.samples, 0),
+      llama.reduce((n, result) => n + result.taskMeasurements![0]!.prefillTokensPerSec!.samples, 0),
     ).toBe(258);
     const groups = results.flatMap((result) => result.taskMeasurements ?? []);
     expect(groups.reduce((n, group) => n + (group.outputTokensPerSec?.samples ?? 0), 0)).toBe(514);
