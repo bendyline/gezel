@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "publicationId": "2026-10-27-m5max-native-0-1-54",
+  "regenerate": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-m5max-native-054-scorecard.mjs",
+  "check": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-m5max-native-054-scorecard.mjs --check",
+  "files": [
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-10-27-m5max-native-0-1-54.json",
+      "bytes": 69516,
+      "sha256": "d45d223445ca9c1fe52666689c4f751c3beea303f62082862e4fb9ae58b5abab"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/scorecard.json",
+      "bytes": 69516,
+      "sha256": "d45d223445ca9c1fe52666689c4f751c3beea303f62082862e4fb9ae58b5abab"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/analysis.json",
+      "bytes": 920839,
+      "sha256": "a021a41f060f59510aec8ce59cdc05661c0c6a55f20fc9713f6d26eb01ef2f3d"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/judging.json",
+      "bytes": 1334348,
+      "sha256": "bfac42d03f31a2eaa8c2e702687eb62d920d121ff39130cddcb5e2077d9cbf1c"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/performance.json",
+      "bytes": 1971168,
+      "sha256": "789eb1c9ec0a89fccada36a345662e9ddbedb185c053a5324e8475e1e0e51a8a"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/completion-audit.json",
+      "bytes": 519970,
+      "sha256": "6dbe197d72c147414bebbfd3d63ad714cb967e95fb7e574da0a45c23a102c57c"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/native-provenance.json",
+      "bytes": 5403,
+      "sha256": "e34744acd625cc539b5372e26659048a7f428d543a26a4868cd3b5d8b3424adf"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/scorecard-details.json",
+      "bytes": 24771470,
+      "sha256": "e7168109a5adc07bfe7d43449198839eb7819a19252a363f66d9861c631302f0"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/verification.json",
+      "bytes": 516,
+      "sha256": "23bcefa36a88499778cbafa0af1e44315f8e2db467ab62ed0cc40ddfc6508f36"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/report.md",
+      "bytes": 35357,
+      "sha256": "fc3326de98b9e002327040be0c43812ef86b4861729d9fe2887f002ff590d02e"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/failure-evidence.md",
+      "bytes": 96884,
+      "sha256": "833a52c37a4a0d3c6af4690c9d29f5045149360296d970192bb2664a05e30146"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/judging.md",
+      "bytes": 104557,
+      "sha256": "dda528a5cdf8303948658a5a1efa1131225974658191613ccfc17ccb501e75a5"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/runner-report.md",
+      "bytes": 94882,
+      "sha256": "974e592b5dfa5ac90605f0f97bff9f30f96dc8a34f7f18a22c482273d180cf64"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/supervision-notes.md",
+      "bytes": 367577,
+      "sha256": "4860d8c842d19f60e697861750e2167b12104f1a4431d6ec0c86268effa9d680"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/trials.csv",
+      "bytes": 214685,
+      "sha256": "6f08178c2938630753206fce0b13c6841c28ba9ef5bff1488587a4ef2687ae7c"
+    }
+  ]
+}
