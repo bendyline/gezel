@@ -265,7 +265,12 @@ while they stream.
   Voorman exact-format turn is further clamped to `invoke_craftbook` alone — the model gets
   one required action, not a suggest/invoke menu. If it nevertheless denies the capability
   without attempting that invocation, the post-turn loop supplies one corrective
-  continuation and then stops retrying this detector.
+  continuation and then stops retrying this detector. Any other gezel holding DocBlocks
+  gets the same one-shot corrective (`officeDocumentDenialCorrection`) when it says it
+  cannot make the Office file the person asked for; DocBlocks joins such a session when
+  the message names an Office file or, outside a Meester or crew lead, asks for an Office
+  format by name (`threadWantsOfficeDocument` in
+  [bundled-docblocks.ts](../packages/service/src/toolsets/bundled-docblocks.ts)).
   A second, lower tier runs when no exact format matched: a craftbook's declared
   `triggers` found in the text on word boundaries ([`craftbook-trigger-route.ts`](../packages/service/src/chat/craftbook-trigger-route.ts)).
   It is advisory only — `reason: 'trigger-phrase'`, medium confidence, no `output`, so
@@ -346,6 +351,11 @@ while they stream.
   deliverable-edit re-prompts from the task system.
 - **Post-turn detectors** (fabrication detectors, tool-error auto-acknowledge, inline-JS
   validation) also re-prompt on this channel.
+- **Prose choice questions** take no model turn at all. A person's own chat whose reply
+  ends on a question about options it listed ("Which of these would you prefer?" over a
+  numbered list) gets that question posted as an `ask_user_question` card, and the turn
+  ends there ([prose-choice-question.ts](../packages/service/src/chat/prose-choice-question.ts)).
+  Task steps, consultations and delegated sessions are left alone.
 
 Rule of thumb: if the guidance depends on *this turn's* content or state, it goes on the
 user channel. The system prompt is for standing facts and standing conduct.

@@ -16,8 +16,8 @@ export const AccountNameSchema = z
   .trim()
   .min(1, 'Enter a name.')
   .max(ACCOUNT_NAME_MAX_LENGTH, `Use at most ${ACCOUNT_NAME_MAX_LENGTH} characters.`)
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
   .refine(
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: rejecting control characters is the point
     (name) => !/[\u0000-\u001f\u007f]/.test(name),
     'Names cannot contain control characters.',
   );

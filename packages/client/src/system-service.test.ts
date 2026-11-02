@@ -1,13 +1,15 @@
+import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   SYSTEM_SERVICE_PORT,
   electronNativeBinCandidates,
   readSystemServiceEndpoint,
   readSystemServiceRuntime,
   systemServiceHome,
+  systemServiceRuntimeIsStale,
   systemSharedAssetsDir,
 } from './system-service.js';
 
@@ -111,5 +113,64 @@ describe('system service runtime discovery', () => {
     const home = await runtimeHome();
     await writeFile(join(home, 'runtime', 'port'), '70000\n');
     await expect(readSystemServiceEndpoint(home)).resolves.toBeNull();
+  });
+});
+
+describe('runtime files left by a service that is gone', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  async function machineEngineHome(pid: number): Promise<string> {
+    const home = await runtimeHome();
+    await writeFile(join(home, 'runtime', 'port'), '6228\n');
+    await writeFile(join(home, 'runtime', 'auth-token'), 'engine-token\n');
+    await writeFile(join(home, 'runtime', 'service-role'), 'machine-engine\n');
+    await writeFile(join(home, 'runtime', 'pid'), `${pid}\n`);
+    return home;
+  }
+
+  function exitedPid(): number {
+    const child = spawnSync(process.execPath, ['-e', '']);
+    expect(child.pid).toBeGreaterThan(1);
+    return child.pid as number;
+  }
+
+  it('are not a broker, though the endpoint still reports the installed port', async () => {
+    const home = await machineEngineHome(exitedPid());
+
+    await expect(systemServiceRuntimeIsStale(home)).resolves.toBe(true);
+    await expect(readSystemServiceRuntime(home)).resolves.toBeNull();
+    await expect(readSystemServiceEndpoint(home)).resolves.toMatchObject({ port: 6228 });
+  });
+
+  it('still describe a live service', async () => {
+    const home = await machineEngineHome(process.pid);
+
+    await expect(systemServiceRuntimeIsStale(home)).resolves.toBe(false);
+    await expect(readSystemServiceRuntime(home)).resolves.toMatchObject({
+      serviceRole: 'machine-engine',
+    });
+  });
+
+  it('treat a process owned by another account as live', async () => {
+    const home = await machineEngineHome(4242);
+    vi.spyOn(process, 'kill').mockImplementation(() => {
+      throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' });
+    });
+
+    await expect(systemServiceRuntimeIsStale(home)).resolves.toBe(false);
+    await expect(readSystemServiceRuntime(home)).resolves.not.toBeNull();
+  });
+
+  it('prove nothing without a readable pid', async () => {
+    const home = await runtimeHome();
+    await writeFile(join(home, 'runtime', 'port'), '6228\n');
+    await writeFile(join(home, 'runtime', 'auth-token'), 'engine-token\n');
+    await expect(systemServiceRuntimeIsStale(home)).resolves.toBe(false);
+
+    await writeFile(join(home, 'runtime', 'pid'), 'not-a-pid\n');
+    await expect(systemServiceRuntimeIsStale(home)).resolves.toBe(false);
+    await expect(readSystemServiceRuntime(home)).resolves.not.toBeNull();
   });
 });

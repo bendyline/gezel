@@ -12,7 +12,6 @@
  * the helpers here.
  */
 
-import { totalMemoryBytes } from '../system/host-memory.js';
 import {
   type GezelConfig,
   type ImageModelManifest,
@@ -40,6 +39,7 @@ import {
   staticCapacityCeilings,
 } from '../providers/native/device-capacity.js';
 import { measuredCapacityBudget } from '../providers/native/measured-budget.js';
+import { totalMemoryBytes } from '../system/host-memory.js';
 import { detectMemoryProfileCached } from '../system/memory.js';
 import { imageCatalogWeightFiles, sdCppMainComponent } from './weight-facts.js';
 

@@ -205,6 +205,19 @@ describe('handboek engine', () => {
       expect(index!.markdown).not.toContain(`](${release.id})`);
     }
   });
+
+  // A gemma4-e2b Builder asked this on the Linux CLI and got "Where files
+  // live" and "CSV / Tabular Transformer" (2026-11-02).
+  it('answers a conversion question with the documents article', async () => {
+    const [first] = await makeEngine().howDoI('Can you convert JSON files to DOCX files?');
+    expect(first?.id).toBe('making-documents');
+    expect(first?.markdown).toContain('DocBlocks');
+  });
+
+  it('lets a rare word outweigh one most articles share', async () => {
+    const [first] = await makeEngine().howDoI('where does gezel store my files?');
+    expect(first?.id).toBe('where-files-live');
+  });
 });
 
 // Give each mode its own budget: the combined corpus pass exceeded 15s under

@@ -226,18 +226,42 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
       const curatedArticles = curated();
       const bodyById = new Map(curatedArticles.map((a) => [a.id, a.body.toLowerCase()]));
       const { areas } = await engine.toc();
-      const scored = areas
+      const docs = areas
         .flatMap((a) => a.entries)
-        .map((entry) => {
+        .map((entry) => ({
+          entry,
+          title: entry.title.toLowerCase(),
+          summary: entry.summary?.toLowerCase() ?? '',
+          body: bodyById.get(entry.id) ?? '',
+        }));
+      // A term most articles contain says little about which one answers:
+      // unweighted, "Can you convert JSON files to DOCX files?" ranked "Where
+      // files live" first on "files" and "json" (2026-11-02). Damped by the
+      // square root, because full inverse frequency let one rare word in a
+      // craftbook's title outrank the article ("what is social mode?" found
+      // "Draft Social Post"); on 25 sample questions this put the expected
+      // article first in 21 against 20 unweighted.
+      const weight = new Map(
+        terms.map((term) => {
+          const hits = docs.filter(
+            (d) =>
+              d.title.includes(term) ||
+              d.entry.id.includes(term) ||
+              d.summary.includes(term) ||
+              d.body.includes(term),
+          ).length;
+          return [term, Math.sqrt(Math.log(1 + docs.length / Math.max(hits, 1)))];
+        }),
+      );
+      const scored = docs
+        .map(({ entry, title, summary, body }) => {
           let score = 0;
-          const title = entry.title.toLowerCase();
-          const summary = entry.summary?.toLowerCase() ?? '';
-          const body = bodyById.get(entry.id) ?? '';
           for (const term of terms) {
-            if (title.includes(term)) score += 5;
-            if (entry.id.includes(term)) score += 2;
-            if (summary.includes(term)) score += 3;
-            if (body.includes(term)) score += 1;
+            const w = weight.get(term) ?? 0;
+            if (title.includes(term)) score += 5 * w;
+            if (entry.id.includes(term)) score += 2 * w;
+            if (summary.includes(term)) score += 3 * w;
+            if (body.includes(term)) score += w;
           }
           return { entry, score };
         })

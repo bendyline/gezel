@@ -43,6 +43,7 @@ import {
   readSystemServiceEndpoint,
   resolveDaemonEntry,
   stopOwnedDaemon,
+  systemServiceRuntimeIsStale,
   systemSharedAssetsDir,
 } from '@bendyline/gezel-client/node';
 import { gezelHome, gezelPaths, nativePayloadVerificationPath } from '@bendyline/gezel/paths';
@@ -576,6 +577,7 @@ export interface HealthySystemService {
 
 interface SystemServiceDiscoveryDeps {
   readEndpoint?: typeof readSystemServiceEndpoint;
+  isRuntimeStale?: typeof systemServiceRuntimeIsStale;
   probeHealth?: (input: {
     endpoint: NonNullable<Awaited<ReturnType<typeof readSystemServiceEndpoint>>>;
     fetch: typeof fetch;
@@ -656,6 +658,12 @@ export interface MachineEngineBrokerStatus {
   serviceRole?: ServiceRole;
   version?: string;
   startedAt?: string;
+  /**
+   * Set when the runtime files outlived their service (its pid is gone): an
+   * uninstall that kept the data, or a service that died. The directory that
+   * holds them, for the person to remove.
+   */
+  staleRuntimeDir?: string;
 }
 
 /**
@@ -697,7 +705,16 @@ export async function describeMachineEngineBroker(
       ...(health.startedAt !== undefined ? { startedAt: health.startedAt } : {}),
     };
   } catch {
-    return { present: true, healthy: false, baseUrl: endpoint.baseUrl, port: endpoint.port };
+    const stale = await (deps.isRuntimeStale ?? systemServiceRuntimeIsStale)(endpoint.home).catch(
+      () => false,
+    );
+    return {
+      present: true,
+      healthy: false,
+      baseUrl: endpoint.baseUrl,
+      port: endpoint.port,
+      ...(stale ? { staleRuntimeDir: join(endpoint.home, 'runtime') } : {}),
+    };
   } finally {
     clearTimeout(timeout);
   }

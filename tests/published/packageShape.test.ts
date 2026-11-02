@@ -83,8 +83,12 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // packed, naming ProjectSchema with its detail and list-entry extensions
   // ~2 KB, and annotating PortableStore's question, project and gezel
   // methods ~4 KB: a method that returns `this.run(helper)` infers its type
-  // and writes the whole shape out, where `Promise<Project>` prints a name.)
-  '@bendyline/gezel': 2_100_000, //                    2.10 MB
+  // and writes the whole shape out, where `Promise<Project>` prints a name.
+  // It tripped at 2.106 MB from the demo conversation script
+  // (`page-demo-chat.ts`, ~6.4 KB packed). That is runtime code, not
+  // declarations, and the largest written-out shape left saves ~1 KB packed,
+  // so the budget moved to 2.11 MB instead.)
+  '@bendyline/gezel': 2_110_000, //                    2.106 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,

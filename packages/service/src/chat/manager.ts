@@ -110,6 +110,7 @@ import {
   deriveThreadTitleFromMessages,
   displayName,
   effectiveGeneralistModeSetting,
+  errorMessageWithCause,
   isEngagementAllowed,
   isItemFocus,
   isLocalProvider,
@@ -132,6 +133,7 @@ import {
   projectManagedWorkspaceWritable,
   pronounFormsForGender,
   redactCredentials,
+  resolveAsk,
   resolveGeneralistKickoff,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
@@ -334,7 +336,7 @@ import { taskReferencesAsRetrieval } from '../tasks/references.js';
 import {
   BUNDLED_DOCBLOCKS_TOOLSET_ID,
   bundledDocblocksJoinsSession,
-  threadNamesOfficeDocument,
+  threadWantsOfficeDocument,
 } from '../toolsets/bundled-docblocks.js';
 import {
   discoverProjectMcpToolsets,
@@ -516,6 +518,7 @@ import {
   formatPromptToolContractFinding,
   lintPromptToolContract,
 } from './prompt-tool-contract.js';
+import { proseChoiceQuestion } from './prose-choice-question.js';
 import { providerUsesManagedMcpBridge } from './provider-capabilities.js';
 import { spliceIntoText } from './recognition-splice.js';
 import {
@@ -581,6 +584,7 @@ import { describeTurnError } from './turn-error.js';
 import {
   falseCapabilityDenialCorrection,
   isCoordinatorRole,
+  officeDocumentDenialCorrection,
   renderTurnIntentPrelude,
   resolveTurnIntentPlan,
 } from './turn-intent-plan.js';
@@ -978,9 +982,9 @@ interface LiveSessionState {
    */
   exactCraftbookConstrained: boolean;
   /**
-   * The person named an Office file in this thread, which brings the bundled
-   * DocBlocks into the session. It only ever turns on, so a thread rebuilds
-   * once, on the message that first names one.
+   * The person asked for Office document work in this thread, which brings
+   * the bundled DocBlocks into the session. It only ever turns on, so a
+   * thread rebuilds once, on the message that first asks.
    */
   officeDocumentThread: boolean;
   /**
@@ -5911,6 +5915,48 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Post the card a reply asked for in prose (`proseChoiceQuestion`). Only a
+   * person's own chat gets one: a task step or a gezel asking another gezel
+   * has nobody at the card, and the question route's unattended rules are
+   * not repeated here. A thread that already holds an unanswered card keeps
+   * that one.
+   */
+  private async postProseChoiceCard(
+    record: ChatSession,
+    assistantMessage: ChatMessage,
+    scope: PublishScope,
+  ): Promise<boolean> {
+    if (record.taskRef || record.consultationMode || record.parentSession) return false;
+    const asked = proseChoiceQuestion(assistantMessage.content);
+    if (!asked) return false;
+    const { question, deduped } = resolveAsk(
+      await this.store.listProjectQuestions(record.projectId),
+      {
+        projectId: record.projectId,
+        gezelId: record.gezelId,
+        sessionId: record.id,
+        prompt: asked.prompt,
+        choices: asked.choices,
+      },
+      { id: randomUUID(), at: nowIso() },
+    );
+    if (deduped) return false;
+    await this.store.writeQuestion(question);
+    assistantMessage.pendingQuestionId = question.id;
+    this.events.publish(scope, { type: 'question_asked', question });
+    await this.historyManager
+      ?.log({
+        kind: 'user.question.asked',
+        projectId: question.projectId,
+        gezelId: question.gezelId,
+        summary: `Question posted from the reply's own options: ${truncate(question.prompt, 80)}`,
+        details: { questionId: question.id, sessionId: question.sessionId },
+      })
+      .catch((err) => log.warn('[questions] history log failed:', err));
+    return true;
+  }
+
+  /**
    * Inject the user's structured answer into the gezel's session as a
    * synthetic user message. Rides on `sendWithBusyRetry` so a target
    * mid-turn doesn't drop the delivery, and so cross-gezel reply
@@ -8741,6 +8787,28 @@ export class ChatManager extends LocalEngineRuntime {
             );
           }
         }
+        if (
+          !detectorReprompt &&
+          !falseCapabilityDenialCorrected &&
+          messageOrigin === 'direct-user'
+        ) {
+          const correction = officeDocumentDenialCorrection({
+            userText,
+            assistantContent: assistantMessage.content,
+            toolCalls: toolsAcrossContinuations,
+            availableTools: liveTurnToolNames(liveSession),
+          });
+          if (correction) {
+            falseCapabilityDenialCorrected = true;
+            detectorReprompt = correctivePromptForLiveRoster(
+              correction,
+              'office document capability denial',
+            );
+            log.info(
+              `session ${sessionId}: denied an Office document while holding DocBlocks — re-prompting once`,
+            );
+          }
+        }
         // Observable-progress auto-advance: if this gezel just produced the
         // deliverable a craftbook step is waiting on, advance the workflow
         // without requiring the `advance_task_step` call the model omits.
@@ -8875,6 +8943,29 @@ export class ChatManager extends LocalEngineRuntime {
             }
           }
         }
+        // A reply that ends on options it wrote out as a list asked for the
+        // card it never posted. Post that card and end the turn, as a real
+        // `ask_user_question` would, so the pick comes back as the option's
+        // words rather than a bare number.
+        let proseChoiceCardPosted = false;
+        if (
+          !detectorReprompt &&
+          messageOrigin === 'direct-user' &&
+          liveTurnToolNames(liveSession).includes('ask_user_question') &&
+          !drained.some((call) => call.name === 'ask_user_question')
+        ) {
+          proseChoiceCardPosted = await this.postProseChoiceCard(
+            state.record,
+            assistantMessage,
+            scope,
+          ).catch((err) => {
+            log.warn(`session ${sessionId}: posting the reply's options as a card failed:`, err);
+            return false;
+          });
+          if (proseChoiceCardPosted) {
+            log.info(`session ${sessionId}: the reply asked for a choice in prose — posted a card`);
+          }
+        }
         // The turn succeeded — any prior "the server-side context was lost"
         // banner is now stale. Clear it. (Mid-conversation recovery above may
         // have set resumeFailed=true, but a successful send means the rebuilt
@@ -8972,6 +9063,7 @@ export class ChatManager extends LocalEngineRuntime {
         // an exhausted continuation budget.
         if (
           commandApprovalRaisedThisTurn ||
+          proseChoiceCardPosted ||
           drained.some((call) => call.name === 'ask_user_question' && call.success)
         ) {
           log.info(
@@ -9650,7 +9742,7 @@ export class ChatManager extends LocalEngineRuntime {
       }
       return lastAssistantMessage!;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessageWithCause(err);
       const intentionallyCancelled = inflightTurn.cancelled === true;
       // The tool-loop guards (failure / repeat / deliverable-pacing) throw a
       // `TurnAbortError` whose `message` is a model-facing corrective and
@@ -13822,9 +13914,10 @@ export class ChatManager extends LocalEngineRuntime {
         ? exactCraftbookConstraintActive(existing.record, gezel, pendingUserText)
         : false;
       const gateRepairConstrained = await gateRepairConstraintActive(this.store, existing.record);
-      const officeDocumentThread = threadNamesOfficeDocument(
+      const officeDocumentThread = threadWantsOfficeDocument(
         existing.record.messages,
         pendingUserText,
+        gezel?.role,
       );
       // Its paired server went away (or came back): rebuild so the turn goes
       // where it can be answered. Probed first when a turn is about to run.
@@ -13904,7 +13997,7 @@ export class ChatManager extends LocalEngineRuntime {
         }
         if (officeDocumentThread !== existing.officeDocumentThread) {
           log.info(
-            `session ${existing.record.id.slice(0, 8)}: an Office file was named; rebuilding with DocBlocks`,
+            `session ${existing.record.id.slice(0, 8)}: Office document work was asked for; rebuilding with DocBlocks`,
           );
         }
         if (codexPermissionMode !== existing.codexPermissionModeSnapshot) {
@@ -14169,7 +14262,7 @@ export class ChatManager extends LocalEngineRuntime {
       projectOrchestrationConstrained,
       exactCraftbookConstrained,
       gateRepairConstrained,
-      officeDocumentThread: threadNamesOfficeDocument(record.messages, pendingUserText),
+      officeDocumentThread: threadWantsOfficeDocument(record.messages, pendingUserText, gezel.role),
       ...(sessionOpts.modelTier ? { modelTier: sessionOpts.modelTier } : {}),
       ...(sessionOpts.profile ? { profile: sessionOpts.profile } : {}),
       ...(sessionOpts.toolCapWarnings && sessionOpts.toolCapWarnings.length > 0
@@ -15095,7 +15188,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(record.expectedDeliverable?.kind === 'file' && record.expectedDeliverable.filePath
         ? { expectedDeliverablePath: record.expectedDeliverable.filePath }
         : {}),
-      namesOfficeDocument: threadNamesOfficeDocument(record.messages, pendingUserText),
+      wantsOfficeDocument: threadWantsOfficeDocument(record.messages, pendingUserText, gezel?.role),
     });
     const activeSystem = activeToolsets(system).filter(
       (entry) =>

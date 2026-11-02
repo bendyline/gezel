@@ -118,11 +118,13 @@ export function pageDemoChatSource(): string {
     composer.className='composer';input.rows=1;input.setAttribute('aria-label','Message '+label);button.type='button';button.className='send';note.className='note';
     composer.append(input,button);list.append(pending);wrap.append(list,choices,composer,note);root.append(style,wrap);
     function placeholder(){input.placeholder=opts.placeholder||'Message '+label+'…';}
-    // Follow the conversation, but never past the start of a message taller than the view.
-    function follow(){var near=list.scrollHeight-list.scrollTop-list.clientHeight<120;return function(anchor){if(!near)return;var end=list.scrollHeight-list.clientHeight;list.scrollTop=anchor?Math.min(end,anchor.offsetTop-8):end;};}
+    // Follow the conversation, but never past the start of a message taller than the view. Every new
+    // entry answers the visitor's own send or page action, so it always comes into view; only a reply
+    // still streaming respects a reader who has scrolled away.
+    function follow(force){var near=force||list.scrollHeight-list.scrollTop-list.clientHeight<120;return function(anchor){if(!near)return;var end=list.scrollHeight-list.clientHeight;list.scrollTop=anchor?Math.min(end,anchor.offsetTop-8):end;};}
     function lastMessage(){for(var i=log.length-1;i>=0;i--)if(log[i].kind!=='step')return nodes.get(log[i]);return null;}
     function render(entry){
-      var keep=follow(),node=nodes.get(entry),fresh=!node;
+      var node=nodes.get(entry),fresh=!node,keep=follow(fresh);
       if(fresh){
         if(entry.kind==='step'){node=el('div');node.className='step';}
         else{node=el('div');node.className='msg '+(entry.kind==='you'?'you':'gezel');var before=log[log.indexOf(entry)-1];if(entry.kind==='gezel'&&!(before&&before.kind==='gezel')){var who=el('div');who.className='who';who.append(face(),el('b',name||role||label));if(name&&role)who.append(el('span',role));node.append(who);}var body=el('div');body.className='body';node.append(body);}
@@ -133,7 +135,7 @@ export function pageDemoChatSource(): string {
       keep(entry.kind==='step'?null:node);
     }
     function sync(){
-      var keep=follow();pending.hidden=!typing;button.disabled=busy;
+      var keep=follow(typing);pending.hidden=!typing;button.disabled=busy;
       choices.replaceChildren();var left=remaining();choices.hidden=!left.length;
       left.forEach(function(idea){var key=el('button',idea);key.type='button';key.disabled=busy;key.onclick=function(){if(send(idea))list.focus({preventScroll:true});};choices.append(key);});
       keep(typing?null:lastMessage());

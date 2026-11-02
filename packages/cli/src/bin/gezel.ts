@@ -2596,6 +2596,10 @@ program
       console.log(
         `machine engine: healthy (${broker.baseUrl}) version=${broker.version} — compute broker; the product API is the per-user daemon`,
       );
+    } else if (broker?.present && broker.healthy === false && broker.staleRuntimeDir) {
+      console.log(
+        `machine service: not running; its runtime files were left behind in ${broker.staleRuntimeDir} (remove them if you uninstalled the Gezel app)`,
+      );
     } else if (broker?.present && broker.healthy === false) {
       console.log(`machine service: runtime files present but unreachable (port ${broker.port})`);
     } else if (broker?.present) {

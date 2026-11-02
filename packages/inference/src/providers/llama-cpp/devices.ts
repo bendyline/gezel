@@ -18,11 +18,11 @@
 
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { totalMemoryBytes } from '../../system/host-memory.js';
 import { delimiter, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { gezelHome } from '@bendyline/gezel/paths';
+import { totalMemoryBytes } from '../../system/host-memory.js';
 
 const execFileAsync = promisify(execFile);
 

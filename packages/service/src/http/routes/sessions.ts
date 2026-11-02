@@ -12,6 +12,7 @@ import {
   UpdateQueuedMessageRequestSchema,
   composeCraftbookLaunch,
   createLogger,
+  errorMessageWithCause,
   getEngagementMode,
   isEngagementAllowed,
   isSafeEntityId,
@@ -311,8 +312,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
             ...(body.imageCues ? { imageCues: body.imageCues } : {}),
           })
           .catch((err) => {
-            const message = err instanceof Error ? err.message : String(err);
-            log.warn(`[sessions] send failed for ${id}: ${message}`);
+            log.warn(`[sessions] send failed for ${id}: ${errorMessageWithCause(err)}`);
           }),
       );
     }

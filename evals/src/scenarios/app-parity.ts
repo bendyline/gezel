@@ -1,5 +1,15 @@
 import type { GezelClient } from '@bendyline/gezel-client';
 import type { EvalContext, EvalScenario, SuccessCheckResult } from '../types.ts';
+import { BUSINESS_PARITY_CASES } from './app-parity-cases/index.ts';
+import { isoDaysAhead, lastReply, list, num, records } from './app-parity-helpers.ts';
+import { projectTurnInProgress } from './helpers.ts';
+
+/**
+ * How long a failing verdict must hold after the lead's turn ends before the
+ * case fails on it. Long enough for a runtime re-prompt to start, far shorter
+ * than the five-minute stall that would otherwise report "chat stalled".
+ */
+const SETTLED_FAIL_MS = 60_000;
 
 /**
  * App demo parity: what a Gezel app's website demo shows its companion doing,
@@ -34,30 +44,9 @@ export interface ParityCase {
   /** Workspace files the grader reads (JSON). */
   reads: string[];
   check: (docs: Docs, before: Docs) => ParityVerdict;
+  /** For a question: grade the crew lead's reply once the files pass. */
+  reply?: (text: string) => ParityVerdict;
   timeoutMs?: number;
-}
-
-interface StoreRecord {
-  status?: string;
-  fields?: Record<string, unknown>;
-}
-
-function records(doc: unknown): StoreRecord[] {
-  return list(doc, 'records') as StoreRecord[];
-}
-
-function list(doc: unknown, key: string): Array<Record<string, unknown>> {
-  const value = (doc as Record<string, unknown> | null)?.[key];
-  return Array.isArray(value) ? (value as Array<Record<string, unknown>>) : [];
-}
-
-function num(value: unknown): number | undefined {
-  const n = typeof value === 'string' ? Number(value) : value;
-  return typeof n === 'number' && Number.isFinite(n) ? n : undefined;
-}
-
-function isoDaysAhead(days: number): string {
-  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 }
 
 const PANTRY_SAMPLE = [
@@ -290,7 +279,9 @@ async function readDocs(client: GezelClient, projectId: string, paths: string[])
 function parityScenario(c: ParityCase): EvalScenario {
   const name = `Parity ${c.id}`;
   let projectId: string | null = null;
+  let leadId: string | null = null;
   let before: Docs = {};
+  let settled: { since: number; detail: string } | null = null;
   return {
     id: `app-parity-${c.id}`,
     description: `Demo parity for ${c.typeId}: ${c.message ? `"${c.message}"` : 'a page action whose reaction must answer'}`,
@@ -311,6 +302,7 @@ function parityScenario(c: ParityCase): EvalScenario {
         created.applied.gezelsCreated.find((g) => g.voorman)?.id ??
         (await client.getProject(projectId))?.voormanGezelId;
       if (!lead) throw new Error(`${c.id}: the ${c.typeId} project has no crew lead`);
+      leadId = lead;
       for (const step of c.prepare ?? []) {
         await client.invokeProjectPageTool(projectId, step);
       }
@@ -332,14 +324,35 @@ function parityScenario(c: ParityCase): EvalScenario {
     successCheck: async (ctx): Promise<SuccessCheckResult> => {
       if (!projectId) return { done: false };
       const docs = await readDocs(ctx.client, projectId, c.reads);
-      const verdict = c.check(docs, before);
+      let verdict = c.check(docs, before);
+      const text = leadId ? await lastReply(ctx.client, leadId, projectId) : null;
+      if (verdict.ok && c.reply) {
+        const answer = text ? c.reply(text) : { ok: false, detail: 'no reply yet' };
+        verdict = { ok: answer.ok, detail: `${verdict.detail}; reply: ${answer.detail}` };
+      }
       ctx.logChanged(
         'parity',
         `[scenario] ${c.id}: ${verdict.ok ? 'PASS' : 'waiting'} ${verdict.detail}`,
       );
-      return verdict.ok ? { done: true, success: true, reason: verdict.detail } : { done: false };
+      if (verdict.ok) return { done: true, success: true, reason: verdict.detail };
+      if (!text || (await projectTurnInProgress(ctx.client, projectId))) {
+        settled = null;
+        return { done: false };
+      }
+      if (settled?.detail !== verdict.detail)
+        settled = { since: Date.now(), detail: verdict.detail };
+      if (Date.now() - settled.since < SETTLED_FAIL_MS) return { done: false };
+      return {
+        done: true,
+        success: false,
+        reason: `the lead's turn ended without passing: ${verdict.detail}`,
+        failureMode: 'success-check-false',
+      };
     },
   };
 }
 
-export const appParityScenarios: EvalScenario[] = PARITY_CASES.map(parityScenario);
+/** Every case: the personal apps above plus each business app's own file. */
+export const ALL_PARITY_CASES: ParityCase[] = [...PARITY_CASES, ...BUSINESS_PARITY_CASES];
+
+export const appParityScenarios: EvalScenario[] = ALL_PARITY_CASES.map(parityScenario);

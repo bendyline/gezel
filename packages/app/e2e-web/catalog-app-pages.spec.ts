@@ -90,7 +90,8 @@ for (const app of catalogPages()) {
           );
         }
       }
-      await form.getByRole('button', { name: 'Save', exact: true }).click();
+      // An action form's one button submits it, whatever the app labels it.
+      await form.getByRole('button').click();
       await expect(form.getByRole('status')).toHaveText('Saved.');
       await form.locator('summary').click();
     }

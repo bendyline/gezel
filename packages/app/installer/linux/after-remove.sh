@@ -16,6 +16,8 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 UNIT_DST=/etc/systemd/system/gezeld.service
+DATA_DIR=/var/lib/gezel
+RUNTIME_DIR=/var/lib/gezel/runtime
 ELECTRON_EXE=/opt/Gezel/gezel
 COMMAND_LINK=/usr/bin/gezel
 APPARMOR_PROFILE_TARGET=/etc/apparmor.d/gezel
@@ -82,9 +84,38 @@ refresh_desktop_caches() (
   return 0
 )
 
+# The data stays, but the discovery files must not outlive the service. Every
+# later Gezel on this machine (the npm CLI, the VS Code extension, an app on the
+# app SDK) reads runtime/service-role, finds a machine engine, and will not
+# start local models while it fails to answer: after an uninstall, `npx gezel`
+# answered every message with "fetch failed". Same file list after-install
+# clears. Root deletes inside a directory the service account owns, so a
+# symlinked parent is refused rather than followed.
+clear_runtime_discovery() {
+  if command -v systemctl >/dev/null 2>&1 &&
+    systemctl is-active --quiet gezeld.service 2>/dev/null; then
+    echo "[gezel after-remove] WARNING: gezeld.service is still running; left its runtime files in place" >&2
+    return 0
+  fi
+  if [ -L "$DATA_DIR" ] || [ -L "$RUNTIME_DIR" ] || [ ! -d "$RUNTIME_DIR" ]; then
+    return 0
+  fi
+  rm -f \
+    "$RUNTIME_DIR/auth-token" \
+    "$RUNTIME_DIR/web-ui-token" \
+    "$RUNTIME_DIR/port" \
+    "$RUNTIME_DIR/pid" \
+    "$RUNTIME_DIR/cert.pem" \
+    "$RUNTIME_DIR/cert-fingerprint" \
+    "$RUNTIME_DIR/service-role" \
+    "$RUNTIME_DIR/lock"
+}
+
 if command -v systemctl >/dev/null 2>&1; then
   systemctl disable --now gezeld.service 2>/dev/null || true
 fi
+
+clear_runtime_discovery
 
 rm -f "$UNIT_DST"
 

@@ -1,4 +1,3 @@
-import { availableCpuCount } from '../system/host-memory.js';
 import {
   type GezelConfig,
   KNOWLEDGE_FILTER_MIN_RELEVANCE,
@@ -6,6 +5,7 @@ import {
   type RelevanceThresholds,
   type RetrievalTraceSurface,
 } from '@bendyline/gezel';
+import { availableCpuCount } from '../system/host-memory.js';
 import { relevanceModelDir } from './install.js';
 import { DEFAULT_RELEVANCE_MODEL_ID, findRelevanceModel } from './registry.js';
 import type { ResolvedRelevanceModel } from './relevance-core.js';

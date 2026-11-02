@@ -1,10 +1,10 @@
-import { totalMemoryBytes } from '../../system/host-memory.js';
 import {
   DS4_FULL_RESIDENCY_HEADROOM_BYTES,
   LLAMA_CPP_VISION_COMPUTE_BYTES,
   LLAMA_CPP_WEIGHTS_MULTIPLIER,
   ds4FitsFullResidency,
 } from '@bendyline/gezel';
+import { totalMemoryBytes } from '../../system/host-memory.js';
 
 const GB = 1024 ** 3;
 

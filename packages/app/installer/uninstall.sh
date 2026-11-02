@@ -325,6 +325,29 @@ stop_machine_service() {
   echo "[gezel uninstall] GezelService stopped (verified)"
 }
 
+# Kept data must not keep the discovery files: every later Gezel on this Mac
+# (the npm CLI, the VS Code extension, an app on the app SDK) reads
+# runtime/service-role, finds a machine engine, and will not start local models
+# while it fails to answer. Runs only after stop_machine_service verified the
+# exit. Same file list the postinstall clears; a symlinked parent is refused
+# rather than followed, since root deletes inside the service account's tree.
+clear_machine_runtime() {
+  runtime_dir="${DATA_DIR}/runtime"
+  if [ -L "$DATA_DIR" ] || [ -L "$runtime_dir" ] || [ ! -d "$runtime_dir" ]; then
+    return 0
+  fi
+  echo "[gezel uninstall] clearing runtime discovery files at ${runtime_dir}"
+  /bin/rm -f -- \
+    "${runtime_dir}/auth-token" \
+    "${runtime_dir}/web-ui-token" \
+    "${runtime_dir}/port" \
+    "${runtime_dir}/pid" \
+    "${runtime_dir}/cert.pem" \
+    "${runtime_dir}/cert-fingerprint" \
+    "${runtime_dir}/service-role" \
+    "${runtime_dir}/lock"
+}
+
 print_identity_remediation() {
   cat >&2 <<EOF
 [gezel uninstall] ERROR: Gezel was removed, but macOS retained part of the ${DAEMON_USER} service account.
@@ -551,6 +574,7 @@ if [ "$REMOVE_MACHINE_DATA" -eq 1 ]; then
   echo "[gezel uninstall] removing machine broker/engine data at ${DATA_DIR}"
   /bin/rm -rf -- "$DATA_DIR"
 else
+  clear_machine_runtime
   echo "[gezel uninstall] preserved machine broker/engine data at ${DATA_DIR}"
 fi
 

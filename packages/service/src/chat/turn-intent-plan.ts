@@ -39,6 +39,30 @@ export function looksLikeWorkRequest(text: string): boolean {
   return true;
 }
 
+/** A work request that asks for something to be made or changed. */
+export function looksLikeProductionRequest(text: string): boolean {
+  const normalized = text.trim();
+  if (!looksLikeWorkRequest(normalized)) return false;
+  return PRODUCTION_ACTION_RE.test(normalized) || USER_REQUEST_RE.test(normalized);
+}
+
+const OFFICE_FORMAT_RE =
+  /\b(?:docx|pptx|xlsx|power\s*point|word\s+(?:document|doc|file)s?|excel\s+(?:spreadsheet|workbook|sheet|file)s?)\b/i;
+// The bare product name counts only as a capitalized target ("to Word",
+// "into Excel"), so "help me word this" and "excel at" never do.
+const OFFICE_TARGET_RE =
+  /\b(?:[Tt]o|[Ii]nto|[Aa]s)\s+(?:an?\s+)?(?:Microsoft\s+|MS\s+)?(?:Word|Excel)\b/;
+
+/**
+ * A request for an Office document named by its format rather than by a
+ * file: "convert the JSON files here to DOCX files", "turn my notes into a
+ * Word document". A question about a format ("what is a DOCX?") is not one.
+ */
+export function asksForOfficeFormat(text: string): boolean {
+  if (!OFFICE_FORMAT_RE.test(text) && !OFFICE_TARGET_RE.test(text)) return false;
+  return looksLikeProductionRequest(text);
+}
+
 /** Meester or voorman: the roles a person asks for work through. */
 export function isCoordinatorRole(input: { isMeester: boolean; role?: string }): boolean {
   const roleId = resolveRoleId(input.role);
@@ -52,8 +76,7 @@ export function isCoordinatorRole(input: { isMeester: boolean; role?: string }):
  */
 export function detectExactArtifactRoute(text: string): ExactArtifactRoute | null {
   const normalized = text.trim();
-  if (!looksLikeWorkRequest(normalized)) return null;
-  if (!PRODUCTION_ACTION_RE.test(normalized) && !USER_REQUEST_RE.test(normalized)) return null;
+  if (!looksLikeProductionRequest(normalized)) return null;
 
   if (/\b(?:power\s*point|pptx?|slide\s+deck|presentation\s+deck)\b/i.test(normalized)) {
     return {
@@ -284,4 +307,28 @@ export function falseCapabilityDenialCorrection(args: {
 
   const call = requiredCraftbookCall(args.plan, args.workRouting === true);
   return `Correction: that capability is available through the preselected “${args.plan.craftbook.name}” procedure. Do not explain the tool boundary or ask to set up a project. Call \`${call}\` now, then briefly tell the user the ${args.plan.output.label} work has started.`;
+}
+
+/**
+ * The same denial from a gezel that holds DocBlocks itself, so no route
+ * applies: a gemma4-e2b Builder asked to "convert the JSON files here to DOCX
+ * files" said it had no conversion tool, offered Markdown, and ended on a
+ * prose menu (2026-11-02).
+ */
+export function officeDocumentDenialCorrection(args: {
+  userText: string;
+  assistantContent: string;
+  toolCalls: readonly ChatMessageToolCall[];
+  availableTools: readonly string[];
+}): string | null {
+  if (!args.availableTools.includes('convert_document')) return null;
+  if (!asksForOfficeFormat(args.userText)) return null;
+  if (!CAPABILITY_DENIAL_RE.test(args.assistantContent)) return null;
+  if (
+    args.toolCalls.some(
+      (call) => call.name === 'convert_document' || call.name.endsWith('__convert_document'),
+    )
+  )
+    return null;
+  return 'Correction: you can make that file. `convert_document` turns Markdown or a document into DOCX, PPTX or XLSX. Do not offer Markdown, plain text or a summary instead, and do not ask which option the person prefers. Read the files they pointed you at, pass the content as Markdown to `convert_document` in the format they asked for, save each result to the artifacts drawer with `save_artifact`, then say where the files are.';
 }

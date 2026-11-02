@@ -131,6 +131,32 @@ export async function readSystemServiceEndpoint(
 }
 
 /**
+ * Whether the runtime files name a service process that no longer exists.
+ * Only "no such process" counts: a live service runs as its own account, so
+ * probing it from a user's process answers EPERM, and a missing or unreadable
+ * pid file proves nothing. A recycled pid reads as alive, which keeps the
+ * caller's ordinary unreachable-broker handling.
+ */
+export async function systemServiceRuntimeIsStale(
+  home: string | null = systemServiceHome(),
+): Promise<boolean> {
+  if (!home) return false;
+  let pid: number;
+  try {
+    pid = Number.parseInt((await readFile(join(home, 'runtime', 'pid'), 'utf8')).trim(), 10);
+  } catch {
+    return false;
+  }
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+/**
  * Trusted local-broker path: endpoint metadata plus the scoped engine
  * credential. Kept alongside endpoint discovery so the supervisor and user
  * daemon cannot drift on platform paths or TLS handling.
@@ -140,6 +166,13 @@ export async function readSystemServiceRuntime(
 ): Promise<SystemServiceRuntime | null> {
   const endpoint = await readSystemServiceEndpoint(home);
   if (!endpoint) return null;
+  // Files a stopped or uninstalled service left behind are not a broker.
+  // Callers adopt this runtime as the machine's engine and memory authority,
+  // and an unreachable authority is an outage they wait out — so stale files
+  // kept every local model on the machine from starting. The endpoint reader
+  // above deliberately keeps reporting them: a stopped-but-installed service
+  // still owns its port.
+  if (await systemServiceRuntimeIsStale(endpoint.home)) return null;
   try {
     const token = (await readFile(join(endpoint.home, 'runtime', 'auth-token'), 'utf8')).trim();
     if (!token) return null;

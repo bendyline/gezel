@@ -37,11 +37,6 @@
 .startup-sidebar {
   width: 240px;
 }
-/* Holding only Home, this rail never scrolls; reserve the scrollbar gutter
-   the full rail carries so Home keeps the same margins after handoff. */
-.startup-sidebar .app-sidebar-scroll {
-  scrollbar-gutter: stable;
-}
 .startup-reading:focus {
   outline: none;
 }
