@@ -102,7 +102,18 @@ export function buildTimeline(
  * marketing cut must not headline the harness poking the model.
  */
 export function isHarnessNudge(scene: RunRecordingScene): boolean {
-  return /^\s*\[scenario check\]/i.test(scene.excerpt ?? '');
+  // `[scenario check]`, `[scenario coordinator copy]`, `[eval recovery]`, …
+  return /^\s*\[(scenario|eval)\b[^\]]*\]/i.test(scene.excerpt ?? '');
+}
+
+/**
+ * Whether the run needed outside help: a harness intervention, or a turn
+ * that was cut short. Such a run is a fair eval result, but a marketing
+ * cut of it would credit the crew with help it got from the test harness,
+ * so callers refuse to make one unless told otherwise.
+ */
+export function runNeededHelp(scenes: readonly RunRecordingScene[]): boolean {
+  return scenes.some((scene) => isHarnessNudge(scene) || scene.kind === 'turn-aborted');
 }
 
 /**

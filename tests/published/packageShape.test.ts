@@ -77,7 +77,13 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // and CraftbookContractSchema (7) took out ~7 KB packed, and naming
   // ChatEventSchema, which the envelope wrote out again, ~2 KB more. A repeat
   // within gzip's 32 KB window costs little packed: count unpacked bytes
-  // between copies before expecting a win.)
+  // between copies before expecting a win. It tripped at 2.108 MB from the
+  // craftbook-focus and eval-provenance modules; naming PoppetjeSchema (11
+  // copies across five chunks) and BoekwachterIssueSchema took out ~6 KB
+  // packed, naming ProjectSchema with its detail and list-entry extensions
+  // ~2 KB, and annotating PortableStore's question, project and gezel
+  // methods ~4 KB: a method that returns `this.run(helper)` infers its type
+  // and writes the whole shape out, where `Promise<Project>` prints a name.)
   '@bendyline/gezel': 2_100_000, //                    2.10 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB

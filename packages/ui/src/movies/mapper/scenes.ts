@@ -1,7 +1,7 @@
 import type { RunRecording, RunRecordingActor, RunRecordingScene } from '@bendyline/gezel';
 import type { Block, Layer, TextLayer } from '@bendyline/squisq/schemas';
 import { hasPoppetjeMedia, poppetjeMediaPath } from '../media.js';
-import { humanToolName } from './narration.js';
+import { humanToolName, toolVerb } from './narration.js';
 import type { RenditionProfile } from './profiles.js';
 
 /**
@@ -32,6 +32,20 @@ export const MOVIE_PALETTE = {
   failure: '#e2695f',
   chip: '#31405c',
 } as const;
+
+/**
+ * The marketing outro's facts. Every line is a claim a viewer can check
+ * against the scorecard, so the caller builds them from the trial's own
+ * records, never from copy.
+ */
+export interface EndCard {
+  /** The big line, e.g. "Done in 2 minutes". */
+  headline: string;
+  /** One fact per line: model and machine, pass count, where to read more. */
+  lines: string[];
+  /** Recording-relative screenshot of the finished work, when there is one. */
+  screenshotRef?: string;
+}
 
 /** CSS font stacks resolved from the squisq theme the doc plays under. */
 export interface MovieFonts {
@@ -176,10 +190,10 @@ export function sceneToBlock(
       layers.push(...delegationLayers(id, ctx, scene));
       break;
     case 'step-transition':
-      layers.push(...stepLayers(id, scene));
+      layers.push(...stepLayers(id, scene, ctx.profile));
       break;
     case 'gate-verdict':
-      layers.push(...gateLayers(id, scene));
+      layers.push(...gateLayers(id, scene, ctx.profile));
       break;
     case 'artifact-produced':
       layers.push(...artifactLayers(id, scene));
@@ -281,10 +295,13 @@ export function outroBlock(
   profile: RenditionProfile,
   timing: { startTime: number; duration: number },
   fonts: MovieFonts,
+  endCard?: EndCard,
 ): Block {
   const id = 'scene-outro';
   const layers: Layer[] = [backgroundLayers(id)];
-  if (profile === 'marketing') {
+  if (profile === 'marketing' && endCard) {
+    layers.push(...endCardLayers(id, endCard));
+  } else if (profile === 'marketing') {
     layers.push(
       text(`${id}-brand`, 'Made with Gezel', {
         x: '50%',
@@ -341,6 +358,64 @@ export function outroBlock(
     layers: applyThemeFonts(layers, fonts),
     transition: { type: 'fade', duration: 0.7 },
   };
+}
+
+/**
+ * The result and its numbers: the finished work on the left when there is
+ * a screenshot of it, the facts beside it, the brand last and smallest.
+ */
+function endCardLayers(id: string, card: EndCard): Layer[] {
+  const withShot = Boolean(card.screenshotRef);
+  const textX = withShot ? '56%' : '50%';
+  const anchor = withShot ? ('top-left' as const) : ('center' as const);
+  const align = withShot ? ('left' as const) : ('center' as const);
+  const layers: Layer[] = [];
+  if (card.screenshotRef) {
+    layers.push({
+      type: 'image',
+      id: `${id}-shot`,
+      content: { src: card.screenshotRef, alt: 'The finished work', fit: 'contain' },
+      position: { x: '28%', y: '48%', width: '46%', height: '66%', anchor: 'center' },
+      animation: { type: 'zoomIn', duration: 0.8 },
+    });
+  }
+  layers.push(
+    text(`${id}-title`, card.headline, {
+      x: textX,
+      y: withShot ? '30%' : '36%',
+      width: withShot ? '38%' : '80%',
+      anchor,
+      fontSize: 64,
+      color: MOVIE_PALETTE.text,
+      bold: true,
+      align,
+    }),
+    text(`${id}-facts`, card.lines.join('\n'), {
+      x: textX,
+      y: withShot ? '44%' : '52%',
+      width: withShot ? '38%' : '76%',
+      anchor,
+      fontSize: 32,
+      color: MOVIE_PALETTE.textMuted,
+      align,
+      animation: { type: 'fadeIn', duration: 0.6, delay: 0.5 },
+    }),
+    text(`${id}-brand`, 'Made with Gezel  ·  gezel.com', {
+      x: textX,
+      y: withShot ? '76%' : '78%',
+      width: withShot ? '38%' : '80%',
+      anchor,
+      fontSize: 30,
+      color: MOVIE_PALETTE.accent,
+      bold: true,
+      align,
+    }),
+  );
+  return layers;
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 // ── Layer helpers ────────────────────────────────────────────────────
@@ -400,8 +475,10 @@ function toolLayers(
 ): Layer[] {
   const actor = ctx.actors.get(scene.actorId ?? '');
   const name = actor?.name ?? 'Gezel';
+  const toolLabel =
+    ctx.profile === 'marketing' ? capitalize(toolVerb(scene.name)) : humanToolName(scene.name);
   const chipText =
-    humanToolName(scene.name) +
+    toolLabel +
     (scene.count && scene.count > 1 ? `  ×${scene.count}` : '') +
     (scene.success ? '' : '  ✕');
   const detailParts = [
@@ -585,19 +662,24 @@ function sizedBubble(
 function stepLayers(
   blockId: string,
   scene: RunRecordingScene & { kind: 'step-transition' },
+  profile: RenditionProfile,
 ): Layer[] {
   const title = scene.stepName ?? scene.stepId;
   const phaseLabel =
     scene.phase === 'activated' ? 'begins' : scene.phase === 'completed' ? 'complete' : scene.phase;
   return [
-    text(`${blockId}-kicker`, scene.taskRef ? `task ${scene.taskRef}` : 'craftbook step', {
-      x: '50%',
-      y: '38%',
-      anchor: 'center',
-      fontSize: 26,
-      color: MOVIE_PALETTE.accent,
-      align: 'center',
-    }),
+    text(
+      `${blockId}-kicker`,
+      profile === 'debug' && scene.taskRef ? `task ${scene.taskRef}` : 'step',
+      {
+        x: '50%',
+        y: '38%',
+        anchor: 'center',
+        fontSize: 26,
+        color: MOVIE_PALETTE.accent,
+        align: 'center',
+      },
+    ),
     text(`${blockId}-title`, title, {
       x: '50%',
       y: '48%',
@@ -619,8 +701,40 @@ function stepLayers(
   ];
 }
 
-function gateLayers(blockId: string, scene: RunRecordingScene & { kind: 'gate-verdict' }): Layer[] {
+function gateLayers(
+  blockId: string,
+  scene: RunRecordingScene & { kind: 'gate-verdict' },
+  profile: RenditionProfile,
+): Layer[] {
   const pass = scene.verdict === 'pass';
+  if (profile === 'marketing') {
+    // The step it checked, without the task id: `step "Lock the outline"`.
+    const step = scene.excerpt?.match(/step "([^"]+)"/)?.[1];
+    return [
+      text(`${blockId}-verdict`, pass ? 'Quality check passed' : 'Sent back for another pass', {
+        x: '50%',
+        y: '46%',
+        anchor: 'center',
+        fontSize: 64,
+        color: pass ? MOVIE_PALETTE.success : MOVIE_PALETTE.failure,
+        bold: true,
+        align: 'center',
+      }),
+      ...(step
+        ? [
+            text(`${blockId}-why`, `“${step}”`, {
+              x: '50%',
+              y: '58%',
+              width: '70%',
+              anchor: 'center',
+              fontSize: 34,
+              color: MOVIE_PALETTE.textMuted,
+              align: 'center',
+            }),
+          ]
+        : []),
+    ];
+  }
   return [
     text(`${blockId}-verdict`, pass ? 'GATE: PASS' : 'GATE: PUSHED BACK', {
       x: '50%',

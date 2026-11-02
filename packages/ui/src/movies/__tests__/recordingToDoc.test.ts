@@ -1,7 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { cleanExcerpt, toolVerb } from '../mapper/narration.js';
 import { recordingToDoc } from '../mapper/recordingToDoc.js';
+import { runNeededHelp } from '../mapper/timing.js';
 import { poppetjeMediaPath } from '../media.js';
 import { loadRecording } from '../recording.js';
 
@@ -182,5 +184,69 @@ describe('recordingToDoc', () => {
     const a = JSON.stringify(recordingToDoc(recording, 'marketing').doc);
     const b = JSON.stringify(recordingToDoc(recording, 'marketing').doc);
     expect(a).toBe(b);
+  });
+});
+
+describe('the marketing cut for people, not triage', () => {
+  const { recording } = loadRecording(fixtureRaw);
+  const texts = (doc: ReturnType<typeof recordingToDoc>['doc']) =>
+    doc.blocks.flatMap((block) =>
+      (block.layers ?? []).map((layer) =>
+        layer.type === 'text' ? (layer as { content: { text: string } }).content.text : '',
+      ),
+    );
+
+  it('flags a run that needed the harness or lost a turn', () => {
+    expect(runNeededHelp(recording.scenes)).toBe(false);
+    const nudged = structuredClone(recording);
+    nudged.scenes.push({
+      kind: 'user-prompt',
+      at: '2026-09-01T10:09:50.000Z',
+      actorId: 'user',
+      excerpt: '[eval recovery] Your previous turn aborted.',
+    });
+    expect(runNeededHelp(nudged.scenes)).toBe(true);
+  });
+
+  it('cleans excerpts for viewers: no markdown, no hand-off plumbing', () => {
+    expect(
+      cleanExcerpt(
+        'Build the **logo** in `assets/logo.png`.\n\n[Deliverable expected as an IMAGE FILE at `x`]',
+      ),
+    ).toBe('Build the logo in assets/logo.png.');
+    expect(toolVerb('suggest_work')).toBe('finds the right plan');
+    expect(toolVerb('some_new_tool')).toBe('uses some new tool');
+  });
+
+  it('uses the plain title and model name, and ends on the facts it is given', () => {
+    const { doc } = recordingToDoc(recording, 'marketing', {
+      title: 'Build a pet shop website',
+      modelLabel: 'Gemma 4 (12B, Q4)',
+      endCard: {
+        headline: 'Done in 2 minutes',
+        lines: ['Gemma 4 (12B, Q4) on AMD Radeon AI PRO R9700', 'Passed 2 of 3 attempts'],
+        screenshotRef: 'screenshots/00-index.png',
+      },
+    });
+    const all = texts(doc);
+    expect(all.filter(Boolean)[0]).toBe('Build a pet shop website');
+    expect(all.some((text) => text.includes('on Gemma 4 (12B, Q4)'))).toBe(true);
+    const outro = doc.blocks[doc.blocks.length - 1]!;
+    const outroTexts = (outro.layers ?? []).map((layer) =>
+      layer.type === 'text' ? (layer as { content: { text: string } }).content.text : '',
+    );
+    expect(outroTexts).toContain('Done in 2 minutes');
+    expect(outroTexts.join('\n')).toContain('Passed 2 of 3 attempts');
+    expect(outro.layers?.some((layer) => layer.type === 'image')).toBe(true);
+    // No eval plumbing on screen in the marketing cut.
+    expect(all.some((text) => /GATE: |task [\w-]+\/\d/.test(text))).toBe(false);
+  });
+
+  it('keeps the debug cut a faithful record', () => {
+    const { doc } = recordingToDoc(recording, 'debug', {
+      title: 'Build a pet shop website',
+      endCard: { headline: 'ignored', lines: [] },
+    });
+    expect(texts(doc)).not.toContain('ignored');
   });
 });

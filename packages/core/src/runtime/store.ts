@@ -12,12 +12,13 @@ import type {
 import type { GezelDetail, GezelFrontmatter, GezelSummary } from '../schemas/gezel.js';
 import type { GezelGrowthState } from '../schemas/growth.js';
 import type { ProjectReminder } from '../schemas/notifications.js';
-import { type ProjectDetail, ProjectSchema } from '../schemas/project.js';
+import { type Project, type ProjectDetail, ProjectSchema } from '../schemas/project.js';
 import type {
   CreatePromptDraftRequest,
   DuplicatePromptDraftRequest,
   PatchPromptDraftRequest,
 } from '../schemas/prompt-draft.js';
+import type { Question } from '../schemas/question.js';
 import type { ScriptRun } from '../schemas/script.js';
 import type { ChatSession } from '../schemas/session.js';
 import type { RestoreConfirm } from '../schemas/storage.js';
@@ -64,16 +65,20 @@ export class PortableStore {
   readConfig(): Promise<GezelConfig> {
     return this.run(projects.readConfig);
   }
-  listQuestions(filter: questions.PortableQuestionFilter = {}) {
+  listQuestions(filter: questions.PortableQuestionFilter = {}): Promise<Question[]> {
     return this.run((repo) => questions.listQuestions(repo, filter));
   }
-  getQuestion(id: string) {
+  getQuestion(id: string): Promise<Question | null> {
     return this.run((repo) => questions.getQuestion(repo, id));
   }
-  askQuestion(input: AskQuestionRequest) {
+  askQuestion(input: AskQuestionRequest): Promise<{ question: Question; deduped: boolean }> {
     return this.run((repo) => questions.askQuestion(repo, input));
   }
-  answerQuestion(id: string, input: AnswerQuestionRequest, continuation?: ChatSession) {
+  answerQuestion(
+    id: string,
+    input: AnswerQuestionRequest,
+    continuation?: ChatSession,
+  ): Promise<Question> {
     return this.run((repo) => questions.answerQuestion(repo, id, input, continuation));
   }
   readDocumentReference(path: string) {
@@ -171,13 +176,13 @@ export class PortableStore {
   sharedProjectId() {
     return this.run(projects.sharedProjectId);
   }
-  listProjects() {
+  listProjects(): Promise<Project[]> {
     return this.run(projects.listProjects);
   }
-  getProject(id: string) {
+  getProject(id: string): Promise<ProjectDetail | null> {
     return this.run((repo) => projects.getProject(repo, id));
   }
-  createProject(input: CreateProjectRequest) {
+  createProject(input: CreateProjectRequest): Promise<ProjectDetail> {
     return this.run((repo) => projects.createProject(repo, input));
   }
   /** A planned typed project, written in one transaction with its crew, scripts and seeds. */
@@ -187,13 +192,13 @@ export class PortableStore {
   ) {
     return this.run((repo) => projectTypes.commitPortableTypedProject(repo, plan, applied));
   }
-  updateProject(id: string, patch: UpdateProjectRequest) {
+  updateProject(id: string, patch: UpdateProjectRequest): Promise<ProjectDetail> {
     return this.run((repo) => projects.updateProject(repo, id, patch));
   }
-  addGezelToProject(id: string, gezelId: string) {
+  addGezelToProject(id: string, gezelId: string): Promise<ProjectDetail> {
     return this.run((repo) => projects.setRoster(repo, id, gezelId, true));
   }
-  removeGezelFromProject(id: string, gezelId: string) {
+  removeGezelFromProject(id: string, gezelId: string): Promise<ProjectDetail> {
     return this.run((repo) => projects.setRoster(repo, id, gezelId, false));
   }
   deleteProject(id: string, options: { removeWorkspace?: boolean } = {}) {
@@ -233,7 +238,7 @@ export class PortableStore {
       };
     });
   }
-  listGezels() {
+  listGezels(): Promise<GezelSummary[]> {
     return this.run(gezels.listGezels);
   }
   getGezel(id: string): Promise<GezelDetail | null> {
@@ -290,7 +295,7 @@ export class PortableStore {
       return { id, name: gezel.name };
     });
   }
-  getProjectGezels(projectId: string) {
+  getProjectGezels(projectId: string): Promise<GezelSummary[]> {
     return this.run(async (repo) => {
       const project = await projects.requireProject(repo, projectId);
       return (await gezels.listGezels(repo)).filter(
