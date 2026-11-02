@@ -13,7 +13,9 @@ describe('measuredResultFor', () => {
     expect(mac?.result.suiteId).toBe('core');
     expect(mac?.run.provenance.device.platform).toBe('darwin');
     expect(mac?.run.scope).not.toBe('subset');
-    expect(measuredClaim(mac)).toBe('100% general (M5 Max)');
+    expect(mac?.run.id).toBe('2026-10-27-m5max-native-0-1-54');
+    expect(mac?.result.engine).toBe('mlx');
+    expect(measuredClaim(mac)).toBe('94% general (M5 Max)');
 
     const linux = measuredResultFor(SCORECARD, 'qwen3.8-27b-q4', {
       platform: 'linux',

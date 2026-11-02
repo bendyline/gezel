@@ -1,0 +1,123 @@
+{
+  "nativeRelease": "0.1.54",
+  "verification": "Both darwin-arm64 archives fetched by scripts/fetch-native-binaries.mjs --version 0.1.54 and SHA256SUMS-verified before execution.",
+  "capturedAt": "2026-10-28T00:12:12.226689+00:00",
+  "llamaVersion": "0.7.0 (build 11669, commit 620d2225)",
+  "llamaBuild": {
+    "schemaVersion": 1,
+    "engine": "llama-cpp",
+    "revision": "620d2225cc436ab0b001e3200e590e3b286ef9ab",
+    "platform": "darwin-arm64",
+    "backend": "metal"
+  },
+  "mlxPackages": {
+    "mlx": "0.32.2",
+    "mlx-lm": "0.31.3",
+    "mlx-vlm": "0.7.1",
+    "transformers": "5.14.1",
+    "torch": "2.13.0"
+  },
+  "files": {
+    "packages/app/native-bin/darwin-arm64/libggml-base.0.15.1.dylib": {
+      "bytes": 724176,
+      "sha256": "c9b4c2fb5f5176541a0f1bfe82cbf54d2929be6a7fe335760d7f37f5666e71b0"
+    },
+    "packages/app/native-bin/darwin-arm64/libwhisper.1.9.1.dylib": {
+      "bytes": 439520,
+      "sha256": "a00e907277b5b6d4413f102d0edc75727c7b4b0e10e90d247725ed9e2674dcae"
+    },
+    "packages/app/native-bin/darwin-arm64/uv": {
+      "bytes": 51993360,
+      "sha256": "d5a559ac37edfca1c3b8ec2d304f5206a888bda4517f29fff73cb8abeff54d50"
+    },
+    "packages/app/native-bin/darwin-arm64/gezel-ds4-server": {
+      "bytes": 2967680,
+      "sha256": "6a840e73eaeb221b871babad6fdd66bf3d60dbfe4eec90c0ae6a9d20c38c7992"
+    },
+    "packages/app/native-bin/darwin-arm64/libggml-cpu.0.15.1.dylib": {
+      "bytes": 842736,
+      "sha256": "ef92f0bf91250dd2f1b04567df835be03f7fac8e975e0eb843dfb6ab71ed16e3"
+    },
+    "packages/app/native-bin/darwin-arm64/gezel-whisper-server": {
+      "bytes": 1241648,
+      "sha256": "376d745a6591c27e7a05677d27e12926896e6c2966164a85feb8df38f77fa9cb"
+    },
+    "packages/app/native-bin/darwin-arm64/libggml.0.15.1.dylib": {
+      "bytes": 77728,
+      "sha256": "66c5cf979ee4b28f5600e11cf1bb0bcc6687cd7ddc01c6abef7a77bac7ea95e8"
+    },
+    "packages/app/native-bin/darwin-arm64/libggml-metal.0.15.1.dylib": {
+      "bytes": 847200,
+      "sha256": "a25074d949ea2274c2574967be638cb09fdc0d4ea3e272f58919b174696b66fe"
+    },
+    "packages/app/native-bin/darwin-arm64/gezel-sd-server": {
+      "bytes": 46014128,
+      "sha256": "ed2e0b11557903a88c8a3499c9384cb9b1db1b9889a06991075fbea94381e94f"
+    },
+    "packages/app/native-bin/darwin-arm64/gezel-apple-fm": {
+      "bytes": 266592,
+      "sha256": "4b5d5d846a317ff1291e9f6ca41f4d9f0a10a617bbf9d24bdcd782a756475b8c"
+    },
+    "packages/app/native-bin/darwin-arm64/libggml-blas.0.15.1.dylib": {
+      "bytes": 76688,
+      "sha256": "c240a3dd6f0f88cdd22c39ab25ece0f4a47ab46c5facb3bcfd2ecea48c726bad"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libllama.0.7.0.dylib": {
+      "bytes": 3487616,
+      "sha256": "69f31724b41d92d4fc881db8e4f5038200cd09f34b4c5fcfe778509c4490affd"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libmtmd.0.7.0.dylib": {
+      "bytes": 1429856,
+      "sha256": "3e07e4b34113eaef8c6771dde27fa249eae5f775d59fdbae53fc34788bba832f"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libllama-common.0.7.0.dylib": {
+      "bytes": 5102992,
+      "sha256": "d41a17a6fc98ddc681f8c8d7b61104ed9bf5970a6274870dda0b3b795a2ee58a"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml.0.27.0.dylib": {
+      "bytes": 78112,
+      "sha256": "3ef17d4d4294024f0fdc096d91d38de227f099e548f0c146b3ece3bf4ec9c3d1"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libllama-server-impl.dylib": {
+      "bytes": 3343520,
+      "sha256": "c0ea1505a3d36ea2286e0d15556d316708bbddfab48f9a0503c6ae2048d24bda"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-blas.so": {
+      "bytes": 76752,
+      "sha256": "812b9b17e84868e8fd459aad0e34197a16fb8e48b0a948ae0e51d43c75d6cf0b"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-cpu-apple_m4.so": {
+      "bytes": 1019488,
+      "sha256": "37a6032e0a34acae18f5e505444020d939155e41f2160f337899857f3f4e9d57"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-cpu-apple_m2_m3.so": {
+      "bytes": 1003072,
+      "sha256": "e5432250a752cfee0bf58712062aef4b459848e972470bba43c588c9cb1f51c8"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-base.0.27.0.dylib": {
+      "bytes": 765152,
+      "sha256": "c186b329017240314e0af5561f2b9ebb874a70a5b3027a89040317bbca7b7da3"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-cpu-apple_m1.so": {
+      "bytes": 1003056,
+      "sha256": "03adae3e3f7b871cbedb2bf32e21c3e51b02490c324705c29a022a5c2a3d527b"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/gezel-llama-server": {
+      "bytes": 51568,
+      "sha256": "6fe07c888a160ff12c1ee6a9a3f7070144548d1e1df0bd94e82372b533d8ab10"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-metal.so": {
+      "bytes": 5573536,
+      "sha256": "a0423b66cbd3a4f343092af1fe1931713035e2b406f67e69282b9616b301e89f"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/gezel-llama-build.json": {
+      "bytes": 160,
+      "sha256": "d79f137dfa1bf050002d4d4863d05c445b1afe93ff5c0001a3fb663b6860084b"
+    }
+  },
+  "notes": [
+    "Engine-specific Q4 formats are the existing catalog installs, not byte-identical quantizations.",
+    "Qwen MLX uses its installed MTP drafter; other speculation follows current catalog/runtime defaults.",
+    "No GPU utilization sampler is available on this macOS host; unavailable GPU measurements must remain unknown."
+  ]
+}
