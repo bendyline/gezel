@@ -1436,6 +1436,20 @@ export function tokensFile(root: string): string {
 }
 
 /**
+ * Accounts that sign in on network-facing surfaces (ADR 0029): names, roles
+ * and scrypt password hashes. Kept apart from `tokens.json`, whose loader
+ * refuses durable first-party authority. POSIX 0600. Always local.
+ */
+export function accountsFile(root: string): string {
+  return join(root, 'accounts.json');
+}
+
+/** Signed-in account sessions, stored as token hashes. POSIX 0600. Always local. */
+export function accountSessionsFile(root: string): string {
+  return join(root, 'account-sessions.json');
+}
+
+/**
  * Persisted `/v1/apps/register` consent requests — both pending grants
  * (waiting for the user to approve/deny in the Integrations UI) and
  * decided grants (kept so a polling app can still observe the verdict

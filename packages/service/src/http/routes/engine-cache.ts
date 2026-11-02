@@ -1,6 +1,6 @@
-import { totalmem } from 'node:os';
 import { defaultCacheBudgetMb } from '@bendyline/gezel-inference/internal/cache/budget';
 import { usesMachineEngine } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
+import { totalMemoryBytes } from '@bendyline/gezel-inference/internal/system/host-memory';
 import { Hono } from 'hono';
 import type { EngineContext } from '../engine-context.js';
 import { sanitizeBrokerCacheStats } from './engine-queues.js';
@@ -29,7 +29,7 @@ export function engineCacheRoutes(ctx: EngineContext): Hono {
     // engine's live stats so the Settings slider can mark the auto
     // default and bound its track to physical RAM. Computed here at the
     // HTTP boundary (where we have `os`) to keep the controller pure.
-    const systemRamBytes = totalmem();
+    const systemRamBytes = totalMemoryBytes();
     const defaultBudgetBytes = defaultCacheBudgetMb(systemRamBytes) * 1024 * 1024;
     const providers = ctx.chat
       .getCacheStats()

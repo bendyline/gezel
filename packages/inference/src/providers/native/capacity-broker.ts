@@ -19,7 +19,6 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { freemem, totalmem } from 'node:os';
 import {
   CONSTRAINED_LOCAL_CONTEXT_FLOOR_TOKENS,
   LLAMA_CPP_COMPUTE_HEADROOM,
@@ -31,6 +30,7 @@ import {
   estimateMlxResidentBytes,
   localContextFloorTokens,
 } from '@bendyline/gezel';
+import { capToContainer, freeMemoryBytes, totalMemoryBytes } from '../../system/host-memory.js';
 import {
   type CapacityBudget,
   autoAllowRamSpillover,
@@ -65,7 +65,7 @@ export interface CapacityBrokerOptions {
    * tests and for users who want to opt out of the budget entirely.
    */
   budgetBytes?: number;
-  /** Test seam — defaults to {@link totalmem}. */
+  /** Test seam — defaults to {@link totalMemoryBytes}. */
   systemRamBytes?: () => number;
   /**
    * Whether this host shares one memory pool between CPU and GPU, which
@@ -314,7 +314,7 @@ export class CapacityBroker {
   private readonly reservations = new Map<EngineKey, number>();
 
   constructor(opts: CapacityBrokerOptions = {}) {
-    this.systemRamBytes = (opts.systemRamBytes ?? totalmem)();
+    this.systemRamBytes = (opts.systemRamBytes ?? totalMemoryBytes)();
     this.unifiedMemory = opts.unifiedMemory;
     this.gpuVramBytes = opts.gpuVramBytes;
     this.reservedGpuBytes = opts.reservedGpuBytes;
@@ -647,20 +647,22 @@ export function availableSystemRamBytes(): number {
   // vm_stat categories overlap (file-backed pages span active+inactive),
   // so the raw sum can exceed physical RAM; cap at 90% of totalmem — the
   // consumers already hold back their own OS reserves on top.
-  const cap = totalmem() * 0.9;
+  const cap = totalMemoryBytes() * 0.9;
   try {
     if (process.platform === 'darwin') {
       const out = execFileSync('/usr/bin/vm_stat', { encoding: 'utf8', timeout: 3_000 });
       const parsed = parseVmStatAvailableBytes(out);
-      if (parsed !== null) return Math.max(Math.min(parsed, cap), freemem());
+      if (parsed !== null)
+        return capToContainer(Math.max(Math.min(parsed, cap), freeMemoryBytes()));
     } else if (process.platform === 'linux') {
       const parsed = parseMeminfoAvailableBytes(readFileSync('/proc/meminfo', 'utf8'));
-      if (parsed !== null) return Math.max(Math.min(parsed, cap), freemem());
+      if (parsed !== null)
+        return capToContainer(Math.max(Math.min(parsed, cap), freeMemoryBytes()));
     }
   } catch {
     // Probe failure falls through to the conservative number.
   }
-  return freemem();
+  return freeMemoryBytes();
 }
 
 /** Pure vm_stat parser (exported for tests). Returns null when the output
@@ -897,7 +899,7 @@ export function llamaCppSlotCeiling(opts: {
  * going to free 5 GiB, because nothing was holding it but the estimate.
  * Planning and admission must read one number.
  */
-export function liveRamOsReserveBytes(totalRamBytes: number = totalmem()): number {
+export function liveRamOsReserveBytes(totalRamBytes: number = totalMemoryBytes()): number {
   return Math.min(4 * GIB, Math.max(2 * GIB, totalRamBytes * 0.1));
 }
 
@@ -1016,7 +1018,7 @@ export function minViableLocalContextTokens(opts?: {
 }): number {
   const override = envMinContextTokens();
   if (override !== null) return override;
-  const systemRamBytes = opts?.systemRamBytes ?? totalmem();
+  const systemRamBytes = opts?.systemRamBytes ?? totalMemoryBytes();
   const budget = opts?.budget ?? computeCapacityBudget({ systemRamBytes });
   return localContextFloorTokens({
     totalRamBytes: systemRamBytes,

@@ -53,6 +53,7 @@ export const PROJECT_CATEGORY_ICONS = {
   data: 'chart',
   home: 'house',
   money: 'coin',
+  business: 'briefcase',
   events: 'banner',
   other: 'dots',
 } as const satisfies Readonly<Record<string, ProjectIconId>>;

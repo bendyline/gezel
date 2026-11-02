@@ -98,12 +98,20 @@ export interface DistillOptions {
   maxScenes?: number;
   /** Excerpt cap in characters. Default 400. */
   maxExcerptChars?: number;
+  /**
+   * Separate cap for reasoning excerpts. Default 1600. A reasoning trace
+   * opens by restating its instructions; what the gezel actually decides
+   * comes later, so a 400-character cut keeps only the boilerplate.
+   * Reasoning is still the first tier dropped when over the byte budget.
+   */
+  maxReasoningChars?: number;
   /** Serialized-size budget in bytes. Default 1 MiB. */
   maxBytes?: number;
 }
 
 const DEFAULT_MAX_SCENES = 2000;
 const DEFAULT_MAX_EXCERPT_CHARS = 400;
+const DEFAULT_MAX_REASONING_CHARS = 1600;
 const DEFAULT_MAX_BYTES = 1024 * 1024;
 export const USER_ACTOR_ID = 'user';
 
@@ -144,13 +152,14 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
     key ? actorIdByKey.get(key.toLowerCase()) : undefined;
   const scenes: RunRecordingScene[] = [];
   let truncatedExcerpts = 0;
-  const excerpt = (text: string | undefined): string | undefined => {
+  const maxReasoningChars = opts?.maxReasoningChars ?? DEFAULT_MAX_REASONING_CHARS;
+  const excerpt = (text: string | undefined, cap = maxExcerptChars): string | undefined => {
     if (!text) return undefined;
     const trimmed = text.trim();
     if (trimmed.length === 0) return undefined;
-    if (trimmed.length <= maxExcerptChars) return trimmed;
+    if (trimmed.length <= cap) return trimmed;
     truncatedExcerpts += 1;
-    return `${trimmed.slice(0, maxExcerptChars - 1)}…`;
+    return `${trimmed.slice(0, cap - 1)}…`;
   };
 
   for (const session of inputs.sessions) {
@@ -215,7 +224,7 @@ export function distillRunRecording(inputs: DistillInputs, opts?: DistillOptions
       }
       // Assistant message: reasoning → tool calls → reply, in that order.
       if (message.reasoning && message.reasoning.trim().length > 0) {
-        const body = excerpt(message.reasoning);
+        const body = excerpt(message.reasoning, maxReasoningChars);
         scenes.push({
           kind: 'reasoning',
           at: message.at,

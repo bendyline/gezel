@@ -15,11 +15,11 @@ summary: A crew of AI companions that works for you, from your own computer.
 
 ## A crew, not a chat
 
-Most AI tools hand you a blank text field. Gezel hands you a crew — a small workshop of *gezellen* you assemble yourself: a researcher who digs into questions, a copywriter who drafts, a reviewer who checks, a developer who builds. Hand them work and they collaborate — passing tasks between each other, keeping notes on what they've done, and picking up where the last one left off.
+Most AI tools hand you a blank text field. Gezel hands you a crew — a small workshop you assemble yourself: a researcher who digs into questions, a copywriter who drafts, a reviewer who checks, a developer who builds. Hand them work and they collaborate — passing tasks between each other, keeping notes on what they've done, and picking up where the last one left off.
 
 ## Start with your Meester
 
-Your first conversations are with a **Meester** gezel: the guildmaster who acts as your concierge. Ask for what you need and they'll create projects and bring on specialized gezellen to fill the roles. You can also just chat with them :)
+Your first conversations are with a **Meester** gezel: the guildmaster who acts as your concierge. Ask for what you need and they'll create projects and bring on specialized crew members to fill the roles. You can also just chat with them :)
 
 ## Your data stays yours {[pullQuote]}
 
@@ -29,4 +29,4 @@ When you use local downloaded models, everything gezel does is powered by your d
 
 - Meet the crew model in [Your crew](the-crew.md).
 - See how work is organized in [Projects and threads](projects-and-threads.md).
-- Browse what your gezellen can do by role in the Gezel Roles section of this Handboek.
+- Browse what your crew can do by role in the Gezel Roles section of this Handboek.

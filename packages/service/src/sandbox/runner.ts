@@ -158,6 +158,12 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
   const macSandboxAvailable = process.platform === 'darwin' && (await canApplyMacSandbox());
   const linuxSystemdSandboxAvailable =
     process.platform === 'linux' && (await canApplyLinuxSystemdSandbox());
+  // Where systemd-run is not there to ask (a container, WSL, a server with no
+  // user session), the netjail helper gives the same AF_UNIX-only property.
+  const netjailBin =
+    process.platform === 'linux' && !linuxSystemdSandboxAvailable && opts.denyNet
+      ? await linuxNetjailForRun()
+      : null;
   const mxcLauncher = process.platform === 'win32' ? await windowsMxcLauncherForRun(nodeBin) : null;
   const windowsMxcSandboxAvailable = mxcLauncher !== null;
   if (
@@ -167,6 +173,7 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
       platform: process.platform,
       macSandboxAvailable,
       linuxSystemdSandboxAvailable,
+      linuxNetjailAvailable: netjailBin !== null,
       windowsMxcSandboxAvailable,
     }) === 'unavailable'
   ) {
@@ -251,6 +258,7 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
         denyNet: opts.denyNet,
         macSandboxAvailable,
         linuxSystemdSandboxAvailable,
+        netjailBin,
         mxcLauncher,
         timeoutMs: opts.timeoutMs,
         childEnv,
@@ -733,15 +741,25 @@ export function browserScriptEnv(src: NodeJS.ProcessEnv): Record<string, string>
   return out;
 }
 
-export type DenyNetBoundary = 'macos-seatbelt' | 'linux-systemd' | 'windows-mxc' | 'unavailable';
+export type DenyNetBoundary =
+  | 'macos-seatbelt'
+  | 'linux-systemd'
+  | 'linux-netjail'
+  | 'windows-mxc'
+  | 'unavailable';
 
 /** Whether this host can enforce `denyNet` for script work, RPC-driven runs included. */
 export async function denyNetBoundaryAvailable(): Promise<boolean> {
+  const linuxSystemdSandboxAvailable = await canApplyLinuxSystemdSandbox();
   return (
     selectDenyNetBoundary({
       platform: process.platform,
       macSandboxAvailable: process.platform === 'darwin' && (await canApplyMacSandbox()),
-      linuxSystemdSandboxAvailable: await canApplyLinuxSystemdSandbox(),
+      linuxSystemdSandboxAvailable,
+      linuxNetjailAvailable:
+        process.platform === 'linux' &&
+        !linuxSystemdSandboxAvailable &&
+        (await linuxNetjailForRun()) !== null,
       windowsMxcSandboxAvailable: await canApplyWindowsMxcSandbox(
         process.env.GEZEL_NODE_PATH || process.execPath,
       ),
@@ -754,12 +772,14 @@ export function selectDenyNetBoundary(input: {
   platform: NodeJS.Platform;
   macSandboxAvailable: boolean;
   linuxSystemdSandboxAvailable?: boolean;
+  linuxNetjailAvailable?: boolean;
   windowsMxcSandboxAvailable?: boolean;
 }): DenyNetBoundary {
   if (input.platform === 'darwin' && input.macSandboxAvailable) return 'macos-seatbelt';
   if (input.platform === 'linux' && input.linuxSystemdSandboxAvailable) {
     return 'linux-systemd';
   }
+  if (input.platform === 'linux' && input.linuxNetjailAvailable) return 'linux-netjail';
   if (input.platform === 'win32' && input.windowsMxcSandboxAvailable) return 'windows-mxc';
   return 'unavailable';
 }
@@ -791,6 +811,7 @@ async function wrapForPlatform(
     denyNet?: boolean;
     macSandboxAvailable: boolean;
     linuxSystemdSandboxAvailable: boolean;
+    netjailBin?: string | null;
     mxcLauncher: string | null;
     timeoutMs?: number;
     childEnv: Record<string, string>;
@@ -842,6 +863,11 @@ async function wrapForPlatform(
       ],
     };
   }
+  if (process.platform === 'linux' && ctx.denyNet && ctx.netjailBin) {
+    // The helper installs its seccomp filter and execs: the script keeps
+    // the runner's pipes (its RPC channel on fd 3 included) and its env.
+    return { command: ctx.netjailBin, args: ['--', command, ...args] };
+  }
   // Reached by non-denyNet work, and by provenance-trusted denyNet work
   // on platforms with no OS boundary (`allowMissingNetBoundary`) — the
   // permission model + JS neutralizer layers still apply to the bare run.
@@ -874,6 +900,54 @@ export function canApplyMacSandbox(): Promise<boolean> {
     });
   });
   return macSandboxProbe;
+}
+
+let linuxNetjailProbe: { bin: string; result: Promise<boolean> } | undefined;
+
+/**
+ * The netjail helper's path when it is installed and actually refuses an
+ * AF_INET socket on this kernel, else null. Proven the same way as the
+ * systemd boundary: a real Node child tries to connect and must be told no.
+ * A kernel without seccomp, or a seccomp profile that forbids nesting,
+ * fails here, and denyNet scripts stay refused rather than unconfined.
+ */
+export async function linuxNetjailForRun(): Promise<string | null> {
+  const bin = process.env.GEZEL_NETJAIL_BIN;
+  if (process.platform !== 'linux' || !bin) return null;
+  if (linuxNetjailProbe?.bin !== bin) {
+    linuxNetjailProbe = {
+      bin,
+      result: new Promise((resolve) => {
+        let settled = false;
+        const finish = (ok: boolean) => {
+          if (settled) return;
+          settled = true;
+          resolve(ok);
+        };
+        const probe =
+          "const net=require('node:net');" +
+          "const s=net.connect({host:'127.0.0.1',port:9});" +
+          "s.once('connect',()=>process.exit(9));" +
+          "s.once('error',e=>process.exit(['EAFNOSUPPORT','EPERM','EACCES'].includes(e.code)?0:2));" +
+          'setTimeout(()=>process.exit(3),1000);';
+        const child = spawn(bin, ['--', process.execPath, '-e', probe], {
+          stdio: ['ignore', 'ignore', 'ignore'],
+          env: sandboxEnv(process.env),
+        });
+        const timer = setTimeout(() => {
+          child.kill('SIGKILL');
+          finish(false);
+        }, 3_000);
+        timer.unref?.();
+        child.on('error', () => finish(false));
+        child.on('close', (code) => {
+          clearTimeout(timer);
+          finish(code === 0);
+        });
+      }),
+    };
+  }
+  return (await linuxNetjailProbe.result) ? bin : null;
 }
 
 let linuxSystemdSandboxProbe: Promise<boolean> | undefined;

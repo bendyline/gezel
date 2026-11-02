@@ -1,5 +1,6 @@
 import '@bendyline/gezel-inference/internal/http/auth-context';
 import type { Context, MiddlewareHandler } from 'hono';
+import { runAsAccount } from '../accounts/request-account.js';
 import type { TokenStore } from './token-store.js';
 
 /**
@@ -36,7 +37,13 @@ export function bearerAuth(
       ...(record.projectId !== undefined ? { projectId: record.projectId } : {}),
       ...(record.gezelId !== undefined ? { gezelId: record.gezelId } : {}),
       ...(record.team !== undefined ? { team: record.team } : {}),
+      ...(record.account ? { account: record.account } : {}),
+      ...(record.accountSessionId ? { accountSessionId: record.accountSessionId } : {}),
     });
+    if (record.account) {
+      const account = { accountId: record.account.id, name: record.account.label };
+      return runAsAccount(account, () => next());
+    }
     return next();
   };
 }

@@ -11,8 +11,10 @@ export {
   coverSubtitle,
   marketingCaption,
   cleanExcerpt,
+  thoughtExcerpt,
   toolVerb,
 } from './mapper/narration.js';
+export { crewModel, type CrewModel, type CrewMember, type PlanStep } from './mapper/crew.js';
 export { runNeededHelp, isHarnessNudge } from './mapper/timing.js';
 export type { EndCard } from './mapper/scenes.js';
 export { MOVIE_PALETTE } from './mapper/scenes.js';

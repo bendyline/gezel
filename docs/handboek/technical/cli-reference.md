@@ -55,6 +55,9 @@ gezel start --port 8080 --foreground
 gezel start --web --open    serve the web interface on this computer and open
                             it in your browser; the printed link signs you in
                             until the service restarts
+gezel start --web --accounts
+                            the same, but people sign in with a name and
+                            password; the first run prints a link to create one
 gezel status                is it up, and where (exits 1 if not running or unhealthy)
 gezel stop                  cancel any AI work and shut the service down
 gezel stop --keep-running   emergency brake: cancel AI work, unload engines,
@@ -91,10 +94,33 @@ gezel craftbook list [words]
                             (words filter by command, title, and tags;
                             --no-start answers from a running service only)
 gezel do <craftbook>        start a craftbook as a task in this folder's project
-                            (--wait to stay until it finishes)
+                            (--wait to stay until it finishes; --out <dir> to
+                            wait and copy what it made into that folder)
 gezel skills list           SKILL.md skills found in this project's workspace
 gezel skills import <path>  turn one of those skills into a craftbook
 ```
+
+## Who can reach this Gezel
+
+These matter where people sign in from a browser: a [Gezel container](gezel-in-docker.md), or `gezel start --web --accounts`.
+
+```
+gezel account list          the accounts that can sign in
+gezel account create <name> add one (asks for a password; --password-stdin to pipe it)
+gezel account reset-password <name>
+                            set a new password and sign them out everywhere
+gezel account disable <name> / enable <name>
+gezel account remove <name> --yes
+gezel account sessions <name>
+                            where an account is signed in
+gezel account setup-link    a new link to create the first account
+gezel integrations token create <app>
+                            a key for another program to use Gezel's models
+                            (--scope to give it more than chat; shown once)
+gezel integrations token revoke <app>
+```
+
+Everyone with an account can do everything, including open a terminal. Add only people you trust with the computer Gezel runs on.
 
 ## AI Apps
 

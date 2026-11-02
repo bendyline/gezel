@@ -36,7 +36,19 @@ powers can generally read files your account can read, including Gezel's
 user-scoped connection details. The separately installed machine engine has a
 credential that local user daemons can discover by design, but that credential
 is limited to inference and model management — it cannot read projects,
-gezellen, chats, tools, or credentials.
+the crew, chats, tools, or credentials.
+
+### In a container, people sign in
+
+[Gezel in Docker](gezel-in-docker.md) is the one way Gezel answers on a
+network. Its listener is separate from the service's own: it accepts only
+people signed in with an account and programs holding a key you made, and it
+leaves out every route that trusts a caller on the same computer. By default
+it answers only on the computer running Docker; reaching it from other devices
+goes through HTTPS you put in front of it. Passwords are stored as scrypt
+hashes, sign-ins slow down after repeated mistakes, and History records who
+did what. Every account can do everything for now, terminals included, so add
+only people you trust with that computer.
 
 ### Workspaces have walls
 
@@ -99,7 +111,7 @@ tools — project-file writes, git operations, and outward-facing actions — go
 through the policy and per-project consent you control in Settings. Approving a
 full-trust package command authorizes that command as a whole; Gezel cannot
 separately mediate every side effect produced inside it. Git itself stays
-yours in the default managed workflow: gezellen work in your working copy while
+yours in the default managed workflow: your crew works in your working copy while
 you control commits, branches, and pushes. A full-trust command can perform any
 of those operations if the command you approve includes them.
 

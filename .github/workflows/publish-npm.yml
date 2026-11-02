@@ -234,6 +234,9 @@ jobs:
       # Load-bearing for npm publishing, not just provenance: this repo has no
       # NPM_TOKEN. See the header.
       id-token: write
+    outputs:
+      cli_version: ${{ steps.cli.outputs.version }}
+      cli_ref: ${{ steps.cli.outputs.ref }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -270,6 +273,10 @@ jobs:
       # and cut git tags named literally `sharp@x.y.z` / `phonemizer@x.y.z` —
       # they occupy those dependency slots for Transformers.js and kokoro-js
       # and are not gezel release lines.
+      - name: Note where the release starts
+        id: start
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Release
         id: release
         env:
@@ -299,3 +306,37 @@ jobs:
       - name: Verify published npm artifacts
         if: ${{ steps.release.outcome == 'success' && !inputs.dry_run }}
         run: node scripts/verify-published-npm-release.mjs
+
+      # The container image follows the CLI's version line (release-docker.yml).
+      # Find the CLI tag this run created, if it released the CLI at all.
+      - name: Find the CLI release
+        id: cli
+        if: ${{ steps.release.outcome == 'success' && !inputs.dry_run }}
+        env:
+          START: ${{ steps.start.outputs.sha }}
+        run: |
+          set -euo pipefail
+          tag="$(git tag --list '@bendyline/gezel-cli@*' --contains "$START" --sort=-v:refname | head -n 1)"
+          if [[ -z "$tag" ]]; then
+            echo "The CLI was not released in this run; no container image."
+            exit 0
+          fi
+          echo "version=${tag##*@}" >> "$GITHUB_OUTPUT"
+          echo "ref=$(git rev-list -n 1 "$tag")" >> "$GITHUB_OUTPUT"
+
+  docker:
+    name: Container images
+    needs: [release]
+    if: ${{ needs.release.outputs.cli_version != '' }}
+    uses: ./.github/workflows/release-docker.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    with:
+      ref: ${{ needs.release.outputs.cli_ref }}
+      version: ${{ needs.release.outputs.cli_version }}
+      push: true
+    secrets:
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

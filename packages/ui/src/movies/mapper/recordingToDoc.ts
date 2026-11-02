@@ -16,15 +16,24 @@ import {
   hasPoppetjeMedia,
   poppetjeMediaPath,
 } from '../media.js';
+import { crewModel } from './crew.js';
 import {
   cleanExcerpt,
   coverSubtitle,
   coverTitle,
   marketingCaption,
   narrationLine,
+  thoughtExcerpt,
 } from './narration.js';
 import { RENDITION_KNOBS, type RenditionProfile } from './profiles.js';
-import { type EndCard, type MovieFonts, coverBlock, outroBlock, sceneToBlock } from './scenes.js';
+import {
+  type EndCard,
+  type MovieFonts,
+  castBlock,
+  coverBlock,
+  outroBlock,
+  sceneToBlock,
+} from './scenes.js';
 import { buildTimeline, selectMarketingScenes } from './timing.js';
 
 /**
@@ -65,14 +74,23 @@ export interface RecordingToDocOptions {
 
 /**
  * The marketing cut shows what a viewer can follow: the job, the hand-offs,
- * the work and the result. Private reasoning stays in the debug cut, and a
- * task's kickoff message (the system restating the job it just started)
- * would only repeat the opening ask. Excerpts lose markdown and the
- * structured hand-off instructions.
+ * the gezels thinking it through, the work and the result. A reasoning
+ * trace is kept only as the stretch where the gezel speaks for itself
+ * (`thoughtExcerpt`); one that is all instructions and tool names is
+ * dropped. A task's kickoff message (the system restating the job it just
+ * started) would only repeat the opening ask. Excerpts lose markdown and
+ * the structured hand-off instructions.
  */
 function marketingScenes(scenes: readonly RunRecordingScene[]): RunRecordingScene[] {
+  const thoughts = new Map<RunRecordingScene, string>();
+  for (const scene of scenes) {
+    if (scene.kind === 'reasoning' && scene.excerpt) {
+      const thought = thoughtExcerpt(scene.excerpt);
+      if (thought) thoughts.set(scene, thought);
+    }
+  }
   const kept = scenes.filter((scene, index) => {
-    if (scene.kind === 'reasoning') return false;
+    if (scene.kind === 'reasoning') return thoughts.has(scene);
     if (scene.kind === 'user-prompt' && index > 0 && scene.taskRef) return false;
     // Status pings between steps say nothing a viewer can use.
     if (scene.kind === 'reply' && isStatusPing(scene.excerpt ?? '')) return false;
@@ -86,6 +104,8 @@ function marketingScenes(scenes: readonly RunRecordingScene[]): RunRecordingScen
     .filter((scene) => scene.kind !== 'gate-verdict' || keepGates.has(scene))
     .map((scene, index) => {
       if (!scene.excerpt) return scene;
+      const thought = thoughts.get(scene);
+      if (thought) return { ...scene, excerpt: thought } as RunRecordingScene;
       const cleaned = cleanExcerpt(scene.excerpt);
       const excerpt =
         scene.kind === 'user-prompt' && index === 0 ? firstSentence(cleaned) : cleaned;
@@ -109,6 +129,10 @@ export interface RecordingDocResult {
 }
 
 const COVER_SECONDS = { debug: 3.5, marketing: 4 } as const;
+/** The cast card: long enough for each member to arrive and be read. */
+function castSeconds(members: number): number {
+  return Math.min(8, 3.5 + members * 0.6);
+}
 const OUTRO_SECONDS = { debug: 4, marketing: 3.5 } as const;
 
 /**
@@ -134,7 +158,10 @@ export function recordingToDoc(
 
   let scenes = recording.scenes;
   if (profile === 'marketing') {
-    scenes = selectMarketingScenes(marketingScenes(scenes), knobs.maxBlocks - 2);
+    // A few tool beats show the crew working; more is a list of file reads.
+    scenes = selectMarketingScenes(marketingScenes(scenes), knobs.maxBlocks - 2, {
+      maxToolCalls: 4,
+    });
   } else if (scenes.length > knobs.maxBlocks - 2) {
     // Debug keeps chronology; overflow thins the chattiest kinds first,
     // exactly like the distiller's tiers (which usually already ran).
@@ -152,6 +179,13 @@ export function recordingToDoc(
   const outroDuration = endCard ? (endCard.screenshotRef ? 7 : 5.5) : OUTRO_SECONDS[profile];
   const themeId = opts?.themeId ?? DEFAULT_THEME_ID;
   const fonts = themeFonts(themeId);
+  // The marketing cut draws the whole crew on every block and opens with
+  // them; a run of one gezel has no crew to show.
+  const crew = profile === 'marketing' ? crewModel(recording) : undefined;
+  const showCrew =
+    crew !== undefined && crew.members.filter((member) => member.id !== 'user').length >= 2;
+  const castDuration = showCrew ? castSeconds(crew.members.length) : 0;
+  const lead = coverDuration + castDuration;
   const blocks: Block[] = [];
   const captions: CaptionPhrase[] = [];
   const title = coverTitle(recording, opts?.title);
@@ -168,9 +202,13 @@ export function recordingToDoc(
     showTimestamps: knobs.showTimestamps,
     runStartedAtMs,
     fonts,
+    crew: showCrew ? crew : undefined,
   };
+  if (showCrew) {
+    blocks.push(castBlock(crew, ctx, { startTime: coverDuration, duration: castDuration }));
+  }
   for (const [index, entry] of timeline.timed.entries()) {
-    const startTime = entry.startTime + coverDuration;
+    const startTime = entry.startTime + lead;
     blocks.push(
       sceneToBlock(
         entry.scene,
@@ -193,7 +231,7 @@ export function recordingToDoc(
     });
   }
 
-  const outroStart = coverDuration + timeline.totalDuration;
+  const outroStart = lead + timeline.totalDuration;
   blocks.push(
     outroBlock(
       recording,

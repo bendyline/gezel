@@ -32,6 +32,7 @@ const ENGINE_ENV_VARS = [
   'GEZEL_SD_SERVER_BIN',
   'GEZEL_WHISPER_SERVER_BIN',
   'GEZEL_DEVICE_HEALTH_BIN',
+  'GEZEL_NETJAIL_BIN',
   'GEZEL_UV_BIN',
   'GEZEL_DUCKDB_BIN',
   'GEZEL_SQLITE_VEC_PATH',
@@ -152,6 +153,7 @@ describe('discoverNativeBinaries — short-circuits', () => {
     process.env.GEZEL_SD_SERVER_BIN = '/already/set/sd-server';
     process.env.GEZEL_WHISPER_SERVER_BIN = '/already/set/whisper-server';
     process.env.GEZEL_DEVICE_HEALTH_BIN = '/already/set/gezel-device-health';
+    process.env.GEZEL_NETJAIL_BIN = '/already/set/gezel-netjail';
     process.env.GEZEL_UV_BIN = '/already/set/uv';
     process.env.GEZEL_DUCKDB_BIN = '/already/set/duckdb';
     process.env.GEZEL_SQLITE_VEC_PATH = '/already/set/vec0.so';

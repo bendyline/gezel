@@ -1,9 +1,10 @@
 /** Shared by the live shim and the generated offline demo bootstrap. */
 export function pageLayoutSource(): string {
-  return String.raw`function installPageLayout(api,hosted){
+  // A standalone demo is the whole window, so it may present as expanded without the Fullscreen API.
+  return String.raw`function installPageLayout(api,hosted,whole){
   var subs=[],full=false,current;
   function refresh(){
-    var next=Object.freeze({fullscreen:hosted?full:!!document.fullscreenElement,width:window.innerWidth,height:window.innerHeight});
+    var next=Object.freeze({fullscreen:hosted?full:!!whole||!!document.fullscreenElement,width:window.innerWidth,height:window.innerHeight});
     if(current&&current.fullscreen===next.fullscreen&&current.width===next.width&&current.height===next.height)return;
     current=next;
     document.documentElement.setAttribute('data-gezel-fullscreen',String(next.fullscreen));

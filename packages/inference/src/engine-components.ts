@@ -103,8 +103,8 @@ export async function createEngineComponents(opts: {
   // controller via `setBudget`. (Wired in the config route as part of
   // the operator-controls UI work below.)
   {
-    const { totalmem } = await import('node:os');
-    const ramAware = defaultCacheBudgetMb(totalmem());
+    const { totalMemoryBytes } = await import('./system/host-memory.js');
+    const ramAware = defaultCacheBudgetMb(totalMemoryBytes());
     const mlxBudgetMb = bootConfig.cacheBudgetMb?.mlx ?? ramAware;
     const llamaCppBudgetMb = bootConfig.cacheBudgetMb?.['llama-cpp'] ?? ramAware;
     // setBudget is a no-op for providers without registered adapters

@@ -1,10 +1,18 @@
 import type { PageImportTarget } from '../schemas/page-imports.js';
 import { pageComponentsSource } from './page-components.js';
+import { pageDemoChatSource } from './page-demo-chat.js';
 import { PAGE_DEMO_STUB } from './page-demo-stub.js';
 import { pageLayoutSource } from './page-layout.js';
 
 export interface PageDemoConfig {
   imports?: PageImportTarget[];
+  /** Who the sample conversation speaks as when the page's script does not say. */
+  companion?: { name?: string; role?: string; avatar?: string };
+  /**
+   * `app` (default) presents the demo as the whole window, companion beside
+   * the page; `pane` keeps the narrow Output-pane presentation.
+   */
+  layout?: 'app' | 'pane';
 }
 
 /** Shared by website publishing, local previews, and offline exports. */
@@ -15,14 +23,16 @@ window.__gezelDemoBootstrap=1;
 ${PAGE_DEMO_STUB}
 ${pageComponentsSource()}
 ${pageLayoutSource()}
+${pageDemoChatSource()}
 var make=window.makeDemoGezel;
 window.makeDemoGezel=function(opts){
   if(window.gezel)return window.gezel;
   var node=document.getElementById('gezel-demo-config');
   var config=node?JSON.parse(node.textContent):{};
   var api=make(opts);
-  installPageLayout(api,false);
-  window.installGezelComponents(api,{demoTargets:config.imports||[],existingPaths:opts&&opts.existingPaths||[]});
+  installPageLayout(api,false,config.layout!=='pane');
+  var conversation=installDemoConversation(api,opts&&opts.chat,config);
+  window.installGezelComponents(api,{demoTargets:config.imports||[],existingPaths:opts&&opts.existingPaths||[],chat:conversation.mount});
   return api;
 };
 })();`;

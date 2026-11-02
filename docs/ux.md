@@ -803,6 +803,27 @@ whether the copy is current. Pending drafts from older startup versions still
 transfer before the local copy is released. Honor reduced motion and keyboard
 tabs.
 
+### Signing in
+
+Only a daemon that requires accounts (a Gezel container, or `gezel start
+--web --accounts`; ADR 0029) shows a sign-in. The desktop app and embedded
+surfaces bring their own credential and open on the first frame
+(`sign-in/SignInGate.tsx`). The screen is one small card on the paper
+background: the muted "Gezel" wordmark, a serif heading ("Create your
+account" or "Sign in"), fields laid out label, input, hint, and one filled
+key. Rules:
+
+- **Say the next step, never the mechanism.** "The setup link is in the
+  log" and "Someone who can sign in can set a new password in Settings,
+  then Accounts", not token, session or 401.
+- **One wrong answer for both mistakes.** A wrong name and a wrong password
+  read the same: "That name or password is not right."
+- **A session that ends mid-use returns here** with one line, "You were
+  signed out. Sign in again.", never a wall of failed requests.
+- **Where people are added, say what they get.** Settings → Accounts says
+  "Everyone here can do everything you can, including open a terminal."
+  until roles exist.
+
 ### The welcome
 
 The first thing a new person meets is the meester, not a setup page. Home
@@ -3055,6 +3076,26 @@ the cancel key keep the row. The role moves to the name's hover text. The
 rule keys on the timeline's own width (the `chat-timeline` container on
 `.chat-timeline-viewport`), never the window's, so a cramped panel in a wide
 window narrows too.
+
+### App demos: the companion works the page
+
+A Gezel app's website demo shows the page and its companion side by side, as
+the app looks in fullscreen. The conversation is scripted by the app
+([sample conversation](handboek/technical/gezel-page-apis.md#the-sample-conversation))
+and follows the chat's own look: serif replies, the visitor's turns in the
+terracotta bubble, a quiet step row with a check for each tool the companion
+uses. Three rules keep it honest and legible:
+
+- **Say it is scripted, once, quietly.** One muted line under the composer
+  ("Sample conversation. In Gezel, replies come from the model you choose.")
+  and a companion that answers anything off-script by saying the preview
+  follows a few sample requests. Never imitate a model's free answer.
+- **Show cause and effect.** Every suggestion does real work through the
+  app's tools; the page text that changed glows briefly in the accent, and a
+  change below the fold scrolls into view beside the conversation. A long
+  reply anchors at its start, so the name row stays on screen.
+- **Phones stack, they do not shrink.** Below 900px the conversation sits
+  under the page and its suggestions become one scrolling row of keys.
 
 ## Poppetjes: painted wooden crew
 

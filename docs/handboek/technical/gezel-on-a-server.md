@@ -15,6 +15,8 @@ The Gezel service runs without a screen. The desktop app is one way to drive it;
 
 This page covers a single-user server: one account that owns the service and its files. For the full list of commands, see [The gezel command line](cli-reference.md).
 
+If the server runs Docker, [Gezel in Docker](gezel-in-docker.md) is the shorter road: one command, every engine already inside, and a sign-in for each person who uses it.
+
 ## What the machine needs
 
 - **Node.js 24 or newer.** The command line checks this and says so if it is missing. On Ubuntu or Debian, `curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs` installs it; on any system, `nvm install 24` does too.
@@ -95,7 +97,7 @@ gezel mode reactive+tasks
 ## Using it
 
 - `gezel run "..."` sends one prompt and prints the reply; it reads a prompt from standard input with `-`.
-- `gezel start --web` serves the web interface on this machine only and prints a sign-in link. From your own computer, reach it through an SSH tunnel to that port rather than opening it to the network.
+- `gezel start --web` serves the web interface on this machine only and prints a sign-in link. From your own computer, reach it through an SSH tunnel to that port rather than opening it to the network. Add `--accounts` to sign in with a name and password instead of a link that lasts until the service restarts; `gezel account` manages who can sign in.
 - `gezel doctor` checks the installation and ends with what to do next.
 - `gezel bench` measures the chosen model on this machine with the same tasks as the published [model scorecard](model-scorecard.md).
 

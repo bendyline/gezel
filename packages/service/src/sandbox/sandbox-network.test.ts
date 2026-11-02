@@ -70,6 +70,33 @@ describe('denyNet boundary selection', () => {
     ).toBe('linux-systemd');
   });
 
+  it('falls back to the probed netjail helper where systemd cannot help (a container)', () => {
+    expect(
+      selectDenyNetBoundary({
+        platform: 'linux',
+        macSandboxAvailable: false,
+        linuxSystemdSandboxAvailable: false,
+        linuxNetjailAvailable: true,
+      }),
+    ).toBe('linux-netjail');
+    // systemd stays first where it works; netjail is never asked to stand in for it.
+    expect(
+      selectDenyNetBoundary({
+        platform: 'linux',
+        macSandboxAvailable: false,
+        linuxSystemdSandboxAvailable: true,
+        linuxNetjailAvailable: true,
+      }),
+    ).toBe('linux-systemd');
+    expect(
+      selectDenyNetBoundary({
+        platform: 'win32',
+        macSandboxAvailable: false,
+        linuxNetjailAvailable: true,
+      }),
+    ).toBe('unavailable');
+  });
+
   it('does not start user code when this runtime has no strong boundary', async () => {
     if (process.platform === 'darwin') return;
     if (process.platform === 'linux' && (await canApplyLinuxSystemdSandbox())) return;

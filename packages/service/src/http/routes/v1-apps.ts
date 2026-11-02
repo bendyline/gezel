@@ -253,6 +253,7 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
           ...(body.kind ? { kind: body.kind } : {}),
           ...(body.deviceIdentityPubKey ? { deviceIdentityPubKey: body.deviceIdentityPubKey } : {}),
           ...(upgradeFrom ? { upgradeFrom } : {}),
+          ...(c.get('listener') === 'container' ? { fromNetwork: true } : {}),
         });
         grant = created.grant;
         verificationCode = created.verificationCode;
@@ -504,6 +505,7 @@ export function v1AppsRoutes(ctx: EngineContext): Hono {
         ...(g.kind ? { kind: g.kind } : {}),
         ...(g.verificationRequired ? { verificationRequired: true } : {}),
         ...(g.upgradeFrom ? { upgradeFrom: g.upgradeFrom } : {}),
+        ...(g.fromNetwork ? { fromNetwork: true } : {}),
       })),
     });
   });

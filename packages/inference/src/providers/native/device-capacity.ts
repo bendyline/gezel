@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readdir, stat } from 'node:fs/promises';
-import { homedir, totalmem } from 'node:os';
+import { homedir } from 'node:os';
+import { totalMemoryBytes } from '../../system/host-memory.js';
 import { join } from 'node:path';
 import {
   DS4_FULL_RESIDENCY_HEADROOM_BYTES,
@@ -239,7 +240,7 @@ export function staticCapacityCeilings(
 
 export async function sampleDeviceCapacity(home?: string): Promise<DeviceCapacitySample> {
   const budget = await measuredCapacityBudget();
-  const ram = totalmem();
+  const ram = totalMemoryBytes();
   const config = home ? await new ConfigStore(home).readConfig() : {};
   const ceilings = staticCapacityCeilings(budget, ram, configuredEngineMemoryBytes(config));
   // The ledger's RAM ceiling and the OS's currently reclaimable RAM answer

@@ -235,6 +235,50 @@ describe('GrantManager — request / approve / deny lifecycle', () => {
     }
   });
 
+  it('verifies every request from the network by code and never auto-approves it', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const grants = await createGrantManager({
+      home,
+      tokenStore,
+      autoApproveAppIds: ['chat-app'],
+    });
+    const { grant, verificationCode } = await grants.request({
+      appId: 'chat-app',
+      appName: 'Chat App',
+      scopes: ['openai'],
+      fromNetwork: true,
+    });
+    expect(grant.status).toBe('pending');
+    expect(grant.fromNetwork).toBe(true);
+    expect(grant.verificationRequired).toBe(true);
+    expect(verificationCode).toBeTruthy();
+    await expect(grants.approve(grant.id)).rejects.toThrow();
+    // Persisted with its label, for Integrations.
+    expect(await readFile(join(home, 'pending-grants.json'), 'utf8')).toContain(
+      '"fromNetwork": true',
+    );
+  });
+
+  it('gives network requests their own pending budget', async () => {
+    const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
+    const grants = await createGrantManager({ home, tokenStore });
+    for (let i = 0; i < 8; i++) {
+      await grants.request({
+        appId: `net-${i}`,
+        appName: 'x',
+        scopes: ['openai'],
+        fromNetwork: true,
+      });
+    }
+    await expect(
+      grants.request({ appId: 'net-9', appName: 'x', scopes: ['openai'], fromNetwork: true }),
+    ).rejects.toThrow(/too many pending grants/);
+    // A local app still gets its turn.
+    await expect(
+      grants.request({ appId: 'local-app', appName: 'x', scopes: ['openai'] }),
+    ).resolves.toBeTruthy();
+  });
+
   it('lets an inference-only client opt into requester-code verification', async () => {
     const tokenStore = await createTokenStore({ home, rootToken: 'ROOT' });
     const grants = await createGrantManager({ home, tokenStore });

@@ -15,7 +15,7 @@ Asking one gezel to "write me a market report" leaves everything to improvisatio
 
 ## Using craftbooks
 
-Most craftbooks can be started straight from chat — each one declares trigger phrases, and your gezellen know when a request matches one. You can also browse and launch them from the Craftbooks tab, or ask the Meester what's available for the job at hand.
+Most craftbooks can be started straight from chat — each one declares trigger phrases, and gezel offers the craftbook when a request matches one. You can also browse and launch them from the Craftbooks tab, or ask the Meester what's available for the job at hand.
 
 ## What's on the shelf
 

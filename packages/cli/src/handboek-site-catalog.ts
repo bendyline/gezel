@@ -7,6 +7,7 @@ import {
   measuredClaim,
   measuredResultFor,
   measuredRowsFor,
+  plainRoleTitle,
   resolveCraftbookCategory,
   scorecardSpeeds,
 } from '@bendyline/gezel';
@@ -76,6 +77,8 @@ export interface SiteDemo {
   entry: string;
   files: Array<{ path: string; bytes: Buffer }>;
   imports?: PageImportTarget[];
+  /** The crew lead the demo's sample conversation speaks as, unless the page names one. */
+  companion?: { role: string };
 }
 
 /**
@@ -288,8 +291,9 @@ export async function buildSiteCatalog(
   ];
 
   const demos: SiteDemo[] = [];
+  const roleById = new Map(roles.map((r) => [r.id, r.role]));
   for (const pt of projectTypes) {
-    const demo = await projectTypeDemo(catalog, pt);
+    const demo = await projectTypeDemo(catalog, pt, roleById);
     if (demo) demos.push(demo);
   }
   const counts: SiteCatalogCounts = {
@@ -656,6 +660,7 @@ function escHtml(s: string): string {
 async function projectTypeDemo(
   catalog: SiteCatalogSource,
   pt: ProjectTypeManifest,
+  roleById: ReadonlyMap<string, string>,
 ): Promise<SiteDemo | null> {
   const entry = safeRelativePath(pt.pages?.entry);
   if (!entry) return null;
@@ -671,7 +676,15 @@ async function projectTypeDemo(
     const bytes = await catalog.readItemFile('project-type', pt.id, `${prefix}${path}`);
     if (bytes) files.push({ path, bytes });
   }
-  return { projectTypeId: pt.id, entry, files, imports: pt.pages?.imports };
+  const lead = pt.gezels?.find((g) => g.voorman) ?? pt.gezels?.[0];
+  const role = lead && roleById.get(lead.templateId);
+  return {
+    projectTypeId: pt.id,
+    entry,
+    files,
+    imports: pt.pages?.imports,
+    ...(role ? { companion: { role: plainRoleTitle(role) } } : {}),
+  };
 }
 
 /**
@@ -679,14 +692,18 @@ async function projectTypeDemo(
  * standalone demo. The frame is sandboxed without same-origin: the demo runs
  * on its own sample data and never needs the surrounding site.
  */
-export function demoSectionHtml(demo: SiteDemo, title: string): string {
+export function demoSectionHtml(demo: SiteDemo, title: string, appsPage?: string): string {
   const src = `demo/${demo.entry.split('/').map(encodeURIComponent).join('/')}`;
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  // The article column is narrow; the apps library shows the page and its companion side by side.
+  const library = appsPage
+    ? `<a href="${esc(appsPage)}">See it full size, with its companion, in the apps library</a> · `
+    : '';
   return `<section class="hb-demo">
 <h2>Try it</h2>
 <p>This is the project’s page running on sample data in your browser. It doesn’t connect to Gezel or to your files.</p>
 <div class="hb-demo-frame"><iframe src="${src}" title="${esc(title)} demo" loading="lazy" sandbox="allow-forms allow-modals allow-scripts" referrerpolicy="no-referrer"></iframe></div>
-<p class="hb-demo-open"><a href="${src}" target="_blank" rel="noreferrer">Open the demo in a new tab</a></p>
+<p class="hb-demo-open">${library}<a href="${src}" target="_blank" rel="noreferrer">Open the demo in a new tab</a></p>
 </section>`;
 }
 

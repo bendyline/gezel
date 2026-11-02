@@ -221,6 +221,7 @@ export const ProjectTypeCategorySchema = z.enum([
   'data',
   'home',
   'money',
+  'business',
   'events',
   'other',
 ]);

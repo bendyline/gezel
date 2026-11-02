@@ -1,5 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import { applyFirstBootSeeds } from './first-run/boot-seeds.js';
 import { findBundledHandboekArchive } from './handboek/bundled-archive.js';
 import {
   migrateInstalledModelIds,
@@ -86,6 +88,8 @@ import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/ho
 import { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/manager';
 import { createWorkerCatalogHost } from '@bendyline/gezel-inference/internal/knowledge/worker-host';
 import { warmEmbeddings } from '@bendyline/gezel-inference/internal/memory/embeddings';
+import { AccountManager } from './accounts/manager.js';
+import { seedOwnerFromEnvironment } from './accounts/seed.js';
 import { deferBootWork } from './boot-work.js';
 import { FirstUseIndexingHold, defaultProviderCanAnswer } from './first-run/indexing-hold.js';
 import { OptionalDownloads } from './first-run/optional-downloads.js';
@@ -108,6 +112,11 @@ import { createDaemonDeviceInfo } from './handboek/daemon-device.js';
 import { createHandboekEngine } from './handboek/engine.js';
 import { HarnessToolsManager } from './harness-tools/manager.js';
 import { generateLoopbackCert } from './http/cert.js';
+import {
+  bindContainerListener,
+  containerHostPolicy,
+  resolveContainerListener,
+} from './http/container-listener.js';
 import type { ServiceContext } from './http/context.js';
 import { bindMainListener } from './http/main-listener.js';
 import {
@@ -415,7 +424,15 @@ export async function startProductService(
     bundledToolsets: [bundledDocblocksToolset()],
   });
   await recoverTypedProjectCreations(store);
+  // A home this boot creates may take the deployer's first settings (a
+  // container's environment); an existing one keeps the person's own.
+  const freshHome = !existsSync(gezelPaths(home).config);
   await store.ensureLayout();
+  const seeds = await applyFirstBootSeeds(store, process.env, freshHome);
+  if (seeds.securityLevel) log.info(`[first-run] security level set to ${seeds.securityLevel}`);
+  if (seeds.mode) log.info(`[first-run] AI activity set to ${seeds.mode}`);
+  for (const ignored of seeds.ignored)
+    log.warn(`[first-run] ignored ${ignored}: not a value Gezel knows`);
   // Settle the runs a dead daemon left `running`, found by in-flight marker
   // alone (never a history scan), before any new run can start; never replay.
   await recoverInterruptedScriptRuns(
@@ -482,6 +499,56 @@ export async function startProductService(
     rootToken: token,
     ephemeralTokens,
   });
+  // Accounts sign people in on network-facing surfaces (ADR 0029): the
+  // container listener, and `gezel start --web --accounts`. Sessions live in
+  // their own store; the token store consults it for tokens it does not hold,
+  // so every bearer-gated mount accepts a signed-in account.
+  const containerListener = resolveContainerListener();
+  if (containerListener.refusedBecause) log.warn(`[service] ${containerListener.refusedBecause}`);
+  const accountsRequired =
+    containerListener.enabled ||
+    (webUiEnabled && (opts.webAccounts ?? process.env.GEZEL_WEB_ACCOUNTS === '1'));
+  const accounts = await AccountManager.open({ home, history, warn: (m) => log.warn(m) });
+  tokenStore.setAccountResolver((supplied) => {
+    const resolved = accounts.resolve(supplied);
+    if (!resolved) return null;
+    return {
+      appId: `account:${resolved.account.id}`,
+      appName: resolved.account.name,
+      // What the desktop's own credential carries: the UI reaches knowledge
+      // and images through /v1 too.
+      scopes: ['ui', 'openai', 'knowledge', 'images'],
+      token: supplied,
+      createdAt: Date.parse(resolved.account.createdAt),
+      lastUsedAt: Date.now(),
+      kind: 'account',
+      account: resolved.principal,
+      accountSessionId: resolved.sessionId,
+    };
+  });
+  try {
+    if ((await seedOwnerFromEnvironment(accounts)) === 'created') {
+      log.info('[accounts] created the owner account from GEZEL_OWNER_PASSWORD_FILE');
+    }
+  } catch (err) {
+    log.error(
+      `[accounts] could not create the owner from GEZEL_OWNER_PASSWORD_FILE: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const setupLinkBase = (): string =>
+    process.env.GEZEL_PUBLIC_URL?.replace(/\/+$/, '') ??
+    (containerListener.enabled
+      ? `http://localhost:${containerBoundPort ?? containerListener.port}`
+      : `http://127.0.0.1:${boundPort}`);
+  const announceSetupLink = (): { code: string; url: string } | null => {
+    const code = accounts.mintSetupCode();
+    if (!code) return null;
+    const url = `${setupLinkBase()}/?setup=${code}`;
+    log.info('[accounts] No account exists yet. Open this link to create the first one.');
+    log.info('[accounts] It works once, for an hour:');
+    log.info(`[accounts]   ${url}`);
+    return { code, url };
+  };
   // GrantManager owns the `/v1/apps/register` consent state machine.
   // GEZEL_AUTOAPPROVE_APPS=appId1,appId2 is a CI/scripting bypass —
   // listed appIds get an immediate `approved` grant + token without
@@ -2364,6 +2431,9 @@ export async function startProductService(
     gpuArbiter,
     token,
     tokenStore,
+    accounts,
+    accountsRequired,
+    announceSetupLink,
     grants,
     firstPartyApps,
     deviceIdentity,
@@ -2472,6 +2542,30 @@ export async function startProductService(
   }
 
   boundPort = port;
+
+  // The container listener: the UI and API on the container's interface,
+  // signed-in accounts only. A container that cannot serve its published
+  // port has nothing to offer, so a failed bind stops the boot.
+  let containerServer: ServerType | null = null;
+  let containerBoundPort: number | null = null;
+  if (containerListener.enabled) {
+    const containerApp = buildApp(context, {
+      listener: 'container',
+      containerHosts: containerHostPolicy(),
+      onUnexpectedHttpError: opts.onUnexpectedHttpError,
+      previewCapabilities,
+      previewBrowserOrigin: () => null,
+    });
+    const bound = await bindContainerListener(containerApp.fetch, containerListener.port);
+    containerServer = bound.server;
+    containerBoundPort = bound.port;
+    log.info(
+      `[service] serving the container listener on 0.0.0.0:${bound.port} (accounts required)`,
+    );
+  }
+  if (accountsRequired && !accounts.hasAccounts() && process.env.GEZEL_SETUP_LINK !== '0') {
+    announceSetupLink();
+  }
   await writeRuntime({
     paths,
     port,
@@ -2800,6 +2894,7 @@ export async function startProductService(
     clientToken,
     cert,
     webUiToken,
+    containerPort: containerBoundPort,
     profile: 'full',
     async stop() {
       stopping = true;
@@ -2887,6 +2982,26 @@ export async function startProductService(
       await shutdownStep('Office host', () => officeIntegrations.stop());
       await shutdownStep('machine engine', async () => machineEngine?.stop());
       await shutdownStep('paired remote fetches', () => closePairedRemoteFetches(remotes));
+      if (containerServer) {
+        const listening = containerServer;
+        await shutdownStep(
+          'container listener',
+          () =>
+            new Promise<void>((resolve) => {
+              let settled = false;
+              const finish = () => {
+                if (settled) return;
+                settled = true;
+                resolve();
+              };
+              listening.close(() => finish());
+              const s = listening as unknown as { closeAllConnections?: () => void };
+              s.closeAllConnections?.();
+              setTimeout(finish, 2_000).unref();
+            }),
+        );
+      }
+      await shutdownStep('account sessions', () => accounts.flush().catch(() => {}));
       if (previewServer) {
         await shutdownStep(
           'preview server',

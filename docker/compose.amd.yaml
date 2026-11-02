@@ -1,0 +1,14 @@
+# AMD or Intel GPU through Vulkan (x64 hosts). Passes the host's GPU device
+# nodes in, and joins the groups allowed to use them. Set GEZEL_RENDER_GID to
+# the host's render group: `getent group render | cut -d: -f3`.
+#
+#   GEZEL_RENDER_GID=$(getent group render | cut -d: -f3) \
+#     docker compose -f compose.yaml -f compose.amd.yaml up -d
+services:
+  gezel:
+    image: ${GEZEL_IMAGE:-ghcr.io/bendyline/gezel}:${GEZEL_VULKAN_TAG:-vulkan}
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - ${GEZEL_RENDER_GID:-video}

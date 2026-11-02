@@ -38,6 +38,7 @@ import {
 } from '@bendyline/gezel-client/node';
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Command, Option } from 'commander';
+import { registerAccountCommands, registerIntegrationCommands } from '../account-command.js';
 import { registerBenchCommands } from '../bench-command.js';
 import { formatCliFailure, isNotFound } from '../cli-errors.js';
 import {
@@ -126,6 +127,7 @@ import {
   resolveCleanupSelection,
   resolveRestoreSelection,
 } from '../storage-format.js';
+import { copyTaskOutput } from '../task-output.js';
 import { craftbookStartRequest, normalizeCraftbooks } from '../tui/craftbook-start.js';
 import { unknownCommandMessage } from '../unknown-command.js';
 import { runWorkflow } from '../workflow-command.js';
@@ -164,6 +166,8 @@ const connectForInspection = (opts: { start?: boolean }) =>
   opts.start === false ? connectRunning(cliGlobals()) : connectOwned(cliGlobals());
 
 registerSecretCommands(program, () => connectOwned(cliGlobals()));
+registerAccountCommands(program, () => connectOwned(cliGlobals()));
+registerIntegrationCommands(program, () => connectOwned(cliGlobals()));
 registerMcpCommands(program, () => connectOwned(cliGlobals()));
 registerBenchCommands(program, () => connectOwned(cliGlobals()));
 registerSecurityCommands(program, () => connectOwned(cliGlobals()));
@@ -282,6 +286,10 @@ program
   )
   .option('--open', 'With --web, open the printed URL in your default browser.')
   .option(
+    '--accounts',
+    'With --web, sign in with an account instead of a one-time URL; the first run prints a link to create one.',
+  )
+  .option(
     '--restart',
     'With --web or --port, stop a running daemon started without them and start a new one.',
   )
@@ -291,6 +299,7 @@ program
       foreground?: boolean;
       web?: boolean;
       open?: boolean;
+      accounts?: boolean;
       restart?: boolean;
     }) => {
       const port = opts.port ? Number.parseInt(opts.port, 10) : undefined;
@@ -321,6 +330,7 @@ program
       if (opts.web) {
         spawnEnv.GEZEL_WEB = '1';
         spawnEnv.GEZEL_INSECURE_TRANSPORT = '1';
+        if (opts.accounts) spawnEnv.GEZEL_WEB_ACCOUNTS = '1';
       }
 
       if (opts.foreground) {
@@ -372,7 +382,11 @@ program
         console.log(
           `gezeld running (version ${health.version}) on port ${new URL(result.baseUrl).port}`,
         );
-        if (opts.web) await printWebUrl(result.baseUrl, opts.open === true);
+        if (opts.web && opts.accounts) {
+          await printAccountsWebUrl(result.client, result.baseUrl, opts.open === true);
+        } else if (opts.web) {
+          await printWebUrl(result.baseUrl, opts.open === true);
+        }
         return;
       }
 
@@ -394,6 +408,33 @@ async function runtimeServes(
   const { gezelPaths } = await import('@bendyline/gezel/paths');
   const token = await readFile(gezelPaths().runtime.webUiToken, 'utf8').catch(() => '');
   return token.trim().length > 0;
+}
+
+/**
+ * With `--accounts` the browser signs in with an account (ADR 0029), so the
+ * URL carries no token: just the address, or the one-time setup link while
+ * no account exists.
+ */
+async function printAccountsWebUrl(
+  client: Pick<GezelClient, 'getSignInState' | 'createSetupLink'>,
+  baseUrl: string,
+  open: boolean,
+): Promise<void> {
+  const origin = new URL(baseUrl).origin;
+  const state = await client.getSignInState();
+  let url = `${origin}/`;
+  if (state.setupRequired) {
+    const link = await client.createSetupLink();
+    if (link.code) url = `${origin}/?setup=${encodeURIComponent(link.code)}`;
+  }
+  console.log('');
+  console.log(
+    state.setupRequired
+      ? `  Create your account →  ${url}`
+      : `  Gezel web UI →  ${url}  (sign in with your account)`,
+  );
+  console.log('');
+  if (open) await openInBrowser(url);
 }
 
 /**
@@ -883,6 +924,7 @@ Examples:
   )
   .option('--wait', 'wait for completion; exit nonzero when blocked, canceled, or timed out')
   .option('--timeout <seconds>', 'wait budget in seconds; timeout leaves the task running', '7200')
+  .option('--out <dir>', 'wait, then copy what the task made into this folder')
   .option('--json', 'emit one JSON result on stdout')
   .option(
     '--strict-sandbox',
@@ -896,6 +938,7 @@ Examples:
         param: string[];
         wait?: boolean;
         timeout: string;
+        out?: string;
         json?: boolean;
         strictSandbox?: boolean;
         viaCraftbookShorthand?: boolean;
@@ -987,9 +1030,17 @@ Examples:
         trustScripts: !opts.strictSandbox,
         roleBasedNameOnlyMode: true,
       });
-      if (opts.wait) {
+      if (opts.wait || opts.out) {
         console.error(`started ${created.ref} — ${created.title}`);
-        await printTaskWait(client, created.ref, { ...opts, timeoutMs });
+        const waited = await printTaskWait(client, created.ref, { ...opts, timeoutMs });
+        if (opts.out && waited.outcome === 'complete') {
+          const dir = waited.task.artifactDir;
+          if (!dir) throw new CliError(`${created.ref} finished without a task folder to copy.`);
+          const copied = await copyTaskOutput(client, projectId, dir, opts.out);
+          console.error(
+            `copied ${copied.length} file${copied.length === 1 ? '' : 's'} to ${opts.out}`,
+          );
+        }
       } else
         console.log(
           opts.json ? JSON.stringify(created) : `started ${created.ref} — ${created.title}`,
@@ -1051,6 +1102,7 @@ async function printTaskWait(
     console.error(`See its notes with \`gezel task notes ${result.task.ref}\`.`);
   }
   process.exitCode = result.exitCode;
+  return result;
 }
 
 const craftbook = program
@@ -1352,6 +1404,10 @@ handboek
     '--og-base <url>',
     'absolute URL the card directory is served from (e.g. https://gezel.com/og/); required with --og-out',
   )
+  .option(
+    '--apps-out <dir>',
+    'also write the apps library (gezel.com/apps) into this directory, outside --out',
+  )
   .action(
     async (opts: {
       out: string;
@@ -1360,6 +1416,7 @@ handboek
       canonicalBase?: string;
       ogOut?: string;
       ogBase?: string;
+      appsOut?: string;
     }) => {
       if (Boolean(opts.ogOut) !== Boolean(opts.ogBase)) {
         console.error('--og-out and --og-base go together: cards need a directory and a URL.');
@@ -1376,8 +1433,12 @@ handboek
         canonicalBase: opts.canonicalBase,
         ogOut: opts.ogOut,
         ogBase: opts.ogBase,
+        appsOut: opts.appsOut,
       });
       console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
+      if (result.apps) {
+        console.log(`Apps library: ${result.apps.apps} apps, ${result.apps.demos} with demos`);
+      }
       for (const id of result.skipped) console.error(`  skipped (no body): ${id}`);
       for (const note of result.warnings) console.error(`  data table: ${note}`);
       const cards = result.cards;

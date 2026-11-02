@@ -89,6 +89,24 @@ The `requires` list is both documentation and an enforced permission boundary. A
 
 A reminder is for a time the script worked out from the project's own state, such as when the next flashcard comes due. It is never a time picked for its own sake. `at` must be in the future and at most 30 days ahead, the title is up to 80 characters, and the body up to 160. Setting a reminder replaces the project's earlier one. The app turns it into a notification, within the person's daily allowance.
 
+A register of due dates (permits, contract notice dates, certificates that expire) keeps its one reminder on the soonest open item. End every action that changes the register with the same step: find the earliest open item, take its due date minus the app's lead time, and set the reminder for that moment when it falls within the next 30 days; otherwise clear it. An item further out arms nothing yet. The next run of any of the register's tools re-arms it, so a status tool the page or crew calls routinely should run the step too. Wrap the call in `try`: a host without reminders still keeps the register.
+
+```ts
+async function remindNextDue(items: Array<{ title: string; dueAt: string; open: boolean }>, leadDays: number) {
+  const now = Date.now();
+  const next = items
+    .filter((i) => i.open && Date.parse(i.dueAt) - leadDays * 86_400_000 > now)
+    .sort((a, b) => Date.parse(a.dueAt) - Date.parse(b.dueAt))[0];
+  const at = next ? Date.parse(next.dueAt) - leadDays * 86_400_000 : NaN;
+  try {
+    if (!next || at - now > 30 * 86_400_000) await gezel.reminder.clear();
+    else await gezel.reminder.set({ at: new Date(at).toISOString(), title: `${next.title} is due soon`, body: `Due ${next.dueAt.slice(0, 10)}.` });
+  } catch {
+    // Reminders are a convenience; the register is the record.
+  }
+}
+```
+
 `gezel.input`, `gezel.output()`, `gezel.log()`, and `gezel.script.run()` need no capability. A nested script runs under its own metadata and permission set, and nesting is limited to four levels.
 
 Ask only for what the script needs. In particular, use `gezel.fs` for workspace I/O rather than importing Node's `fs`: raw filesystem code runs in an isolated scratch directory and cannot see the project workspace. For authenticated HTTP, the service attaches the named credential and scrubs it from the response; the secret value never enters the script.

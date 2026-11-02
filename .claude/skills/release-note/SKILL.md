@@ -63,7 +63,7 @@ summary: One line naming the two or three things that matter most.
 
 # 1.26224 — 12 August 2026
 
-Opening paragraph: the span covered, and the single sentence a reader could stop after.
+Opening paragraph: what this release changes, and the single sentence a reader could stop after.
 ```
 
 `order` is the **negated** calendar-line digits (`1.26224` → `-26224`) so newest sorts first. The section index (`whats-new-index.md`, `order: -999999`) always stays on top. **Do not edit the index** — it lists releases through `::handboek-whats-new-list`, which reads the article frontmatter, so a new article appears there the moment it lands.
@@ -84,7 +84,9 @@ The Handboek exists to make gezel approachable for people who are not engineers.
 - **Say what it means before you say what it is.** "Choosing a local model used to mean guessing. Now there is a scoreboard" earns the paragraph that follows.
 - **Second person, active voice, ordinary words.** Not "the approval subsystem now performs content-bound validation" but "approving a command now approves that exact command".
 - **Name the annoyance the change removes.** A change is only interesting relative to the thing that was worse.
-- **Explain a Dutch or gezel-specific term the first time it appears** in the article — *gezel*, *gilde*, *craftbook*, *meester*, *voorman*.
+- **Open with the change, not the calendar.** No "Six days after 1.26300": the title already carries the date, and the list of releases shows the order.
+- **Don't re-explain gezel.** Someone reading release notes already uses it, so don't define *gezel*, *gezellen*, *craftbook*, the *Meester* or the crew's roles, and don't add glosses such as "(the crew member who reads your files)". A term that is genuinely new in this release gets one plain clause, or a link to the Handboek article that explains it.
+- **Keep personification light.** Gezels are characters in the app; in release notes, describe what the software does. Write "a gezel that edits pictures", not "a gezel who". Give gezels, models, tasks and features plain actions (draws, edits, pauses, shows), not an inner life: they don't know, try, care, explain themselves or tell when something worked. "Gezel now keeps track of which models can edit", not "Gezel now knows". Headings name the change ("Clearer pause messages"), not a character trait ("Paused tasks explain themselves"). Quoting the app's own words, such as a card that reads "Soren is drafting the invoices", is fine.
 - **Say when something is opt-in, and why.** Users trust software that tells them what it will not do without being asked.
 - **No marketing.** No "delighted to announce", no "powerful", no "seamless". State the change; let it be good on its own.
 - **No emojis** (repo-wide rule).

@@ -85,6 +85,13 @@ export interface StartServiceOptions {
    */
   webUi?: boolean;
   /**
+   * With {@link webUi}: the browser signs in with an account (ADR 0029)
+   * instead of the one-time `?token=` URL. Defaults to
+   * `process.env.GEZEL_WEB_ACCOUNTS === '1'` (`gezel start --web --accounts`).
+   * A container listener always requires accounts.
+   */
+  webAccounts?: boolean;
+  /**
    * Optional callback the service can invoke to ask the supervisor to
    * restart it (with `reason` for diagnostics). Wired by the Electron
    * supervisor for embedded + spawned modes; absent for standalone
@@ -161,6 +168,11 @@ export interface RunningService<C extends EngineContext = ServiceContext> {
    * CLI to compose the printed browser URL.
    */
   webUiToken: string | null;
+  /**
+   * The port the container listener bound (ADR 0029), or null when this
+   * daemon is not serving one. Usually the published 6228.
+   */
+  containerPort?: number | null;
   /** The product surface that was started; the inference-only profile has its own type. */
   profile?: 'full';
   stop: () => Promise<void>;

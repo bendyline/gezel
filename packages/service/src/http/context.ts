@@ -67,6 +67,7 @@ import type { VSCodeSetupManager } from '../vscode-setup/manager.js';
 import type { WorkspaceIndexManager } from '../workspace/index-manager.js';
 import type { OllamaEmulationController } from './ollama-emulation.js';
 
+import type { AccountManager } from '../accounts/manager.js';
 import type { EvalService } from '../eval/service.js';
 import type { LibreOfficeSetupManager } from '../libreoffice-setup/manager.js';
 import type { OfficeSetupManager } from '../office-setup/manager.js';
@@ -87,6 +88,22 @@ export interface ServiceContext extends EngineContext {
   channels: ChannelManager;
   memory: MemoryManager;
   history: HistoryManager;
+  /**
+   * Accounts that sign in on network-facing surfaces (ADR 0029). Absent on
+   * the machine-engine role.
+   */
+  accounts?: AccountManager;
+  /**
+   * Whether a network listener here admits only signed-in accounts: the
+   * container listener, or `gezel start --web --accounts`. Drives the
+   * sign-in screen; the listeners enforce it themselves.
+   */
+  accountsRequired?: boolean;
+  /**
+   * Mint a fresh setup code and print the setup link, while no account
+   * exists. Returns the code and the link, or null once an account exists.
+   */
+  announceSetupLink?: () => { code: string; url: string } | null;
   growth: GrowthEngine;
   tasks: TaskManager;
   /** Create-and-dispatch with invocation-key dedupe; every HTTP launch goes through it. */

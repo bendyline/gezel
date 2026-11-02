@@ -18,6 +18,14 @@ declare module 'hono' {
       projectId?: string;
       gezelId?: string;
       team?: boolean;
+      /**
+       * The signed-in account behind an account session (ADR 0029, the
+       * principal from ADR 0004). Absent for app, device and owner
+       * credentials.
+       */
+      account?: { id: string; source: 'password' | 'device' | 'os'; label: string };
+      /** The account session this request came in on, for "sign out this browser". */
+      accountSessionId?: string;
     };
   }
 }

@@ -1,6 +1,5 @@
 import { systemMemoryRoutes } from './system-memory.js';
 export { systemMemoryRoutes } from './system-memory.js';
-import { freemem, totalmem } from 'node:os';
 import { delimiter, dirname } from 'node:path';
 import {
   ClientPerfReportSchema,
@@ -30,6 +29,10 @@ import {
   recordClientPerfReport,
 } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import { isLocalProvider } from '@bendyline/gezel-inference/internal/providers/native/engine-key';
+import {
+  freeMemoryBytes,
+  totalMemoryBytes,
+} from '@bendyline/gezel-inference/internal/system/host-memory';
 import { Octokit } from '@octokit/rest';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
@@ -240,7 +243,7 @@ export function systemRoutes(ctx: ServiceContext): Hono {
         },
         ...(provider ? { provider } : {}),
         ...(defaultModel ? { defaultModel } : {}),
-        memory: { totalBytes: totalmem(), freeBytes: freemem() },
+        memory: { totalBytes: totalMemoryBytes(), freeBytes: freeMemoryBytes() },
         engines: (engineSnapshot?.entries ?? []).map((entry) => ({
           key: entry.key,
           residentBytes: entry.residentBytes,

@@ -132,6 +132,11 @@ export interface EngineFlagInput {
   backend?: string | undefined;
   /** Logical CPUs available to the daemon; caps the GPU-resident thread default. */
   hostCpuCount?: number | undefined;
+  /**
+   * CPUs a container leaves the daemon, when fewer than the host has (see
+   * `containerCpuLimit`). Without it llama.cpp sizes its pool from the host.
+   */
+  containerCpuLimit?: number | undefined;
 }
 
 /** Default `--cache-reuse` chunk when neither config nor manifest set it. */
@@ -236,6 +241,7 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     reasoningPreserve,
     backend,
     hostCpuCount,
+    containerCpuLimit,
   } = input;
   const args: string[] = [];
 
@@ -343,10 +349,13 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     !(typeof nCpuMoe === 'number' && nCpuMoe > 0) &&
     !(typeof nCpuFfn === 'number' && nCpuFfn > 0) &&
     !extraArgsOwnThreads(config.llamaCppExtraArgs);
+  // In a container that allows fewer CPUs than the host has, the all-cores
+  // default oversubscribes the quota and spends each period throttled.
   const threads =
     config.llamaCppThreads ??
     perModel?.threads ??
-    (gpuResident ? gpuResidentThreads(hostCpuCount) : undefined);
+    (gpuResident ? gpuResidentThreads(hostCpuCount) : undefined) ??
+    (extraArgsOwnThreads(config.llamaCppExtraArgs) ? undefined : containerCpuLimit);
   if (typeof threads === 'number') args.push('--threads', String(threads));
   const batchSize = config.llamaCppBatchSize ?? perModel?.batchSize;
   if (typeof batchSize === 'number') args.push('--batch-size', String(batchSize));

@@ -20,6 +20,8 @@
     "build:bundle:unleased": "pnpm --filter @bendyline/gezel-app run build:bundle",
     "build:node-bundle": "node scripts/run-with-dependency-lease.mjs build:node-bundle:unleased",
     "build:node-bundle:unleased": "pnpm build && node scripts/build-node-bundle.mjs",
+    "docker:stage": "node scripts/stage-docker-context.mjs",
+    "docker:smoke": "node docker/smoke.mjs",
     "build:packaged": "node scripts/run-with-dependency-lease.mjs build:packaged:unleased",
     "build:packaged:unleased": "pnpm build && pnpm stage:licenses && pnpm build:bundle",
     "package": "node scripts/run-with-dependency-lease.mjs package:unleased",

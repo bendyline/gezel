@@ -103,6 +103,11 @@ const AmbientDashboardCard = lazy(() =>
 const ConnectedAppsPanel = lazy(() =>
   loadConnectedAppsModule().then(({ ConnectedAppsPanel }) => ({ default: ConnectedAppsPanel })),
 );
+const AccountsPanel = lazy(() =>
+  import('../components/AccountsPanel.js').then(({ AccountsPanel }) => ({
+    default: AccountsPanel,
+  })),
+);
 const MediaSearchCard = lazy(() =>
   loadMediaSearchModule().then(({ MediaSearchCard }) => ({ default: MediaSearchCard })),
 );
@@ -225,6 +230,7 @@ type SectionId =
   | 'toolsets'
   | 'knowledge'
   | 'securityCompliance'
+  | 'accounts'
   | 'about'
   | 'benchmarks';
 
@@ -343,6 +349,7 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'aboutYou', label: 'About You' },
     { id: 'folders', label: 'Folders' },
     { id: 'securityCompliance', label: 'Security & Compliance' },
+    { id: 'accounts', label: 'Accounts' },
     { id: 'defaults', label: 'Artificial Intelligence', groupHeader: 'ai' },
     { id: 'mlx', label: localEngineSettingsLabel('mlx', platform), group: 'ai' },
     {
@@ -1642,11 +1649,28 @@ function DaemonSettingsView() {
       cancelled = true;
     };
   }, []);
+  // Accounts sign people in from a browser (ADR 0029). The tab shows where
+  // they are in use: a daemon that requires them (a container), or one that
+  // has some. The desktop app on its own never needs it.
+  const [accountsInUse, setAccountsInUse] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSignInState()
+      .then((state) => {
+        if (!cancelled) setAccountsInUse(state.accountsRequired || !state.setupRequired);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const usesProvider = (name: ProviderName) =>
     provider === name ||
     nightShiftProvider === name ||
     Boolean(config?.defaultModel?.[name as keyof NonNullable<typeof config.defaultModel>]);
   const developerAreaShown: Partial<Record<string, boolean>> = {
+    accounts: accountsInUse,
     ollama: usesProvider('ollama') || Boolean(config?.ollamaBaseUrl),
     codexCli: usesProvider('codex-cli') || Boolean(config?.codexCli),
     anthropicCli: usesProvider('anthropic-cli') || Boolean(config?.anthropicCli),
@@ -4362,6 +4386,7 @@ function DaemonSettingsView() {
           )}
 
           {section === 'connectedApps' && <ConnectedAppsPanel />}
+          {section === 'accounts' && <AccountsPanel />}
           {section === 'remoteServers' && <RemoteServersPanel />}
 
           {section === 'knowledge' && <KnowledgeCatalogsCard />}

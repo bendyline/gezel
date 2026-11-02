@@ -132,6 +132,21 @@ const HistoryEventKinds = [
    * even if hook B would have allowed).
    */
   'tool.gated',
+  /**
+   * Accounts that sign in on network-facing surfaces (ADR 0029). `details`
+   * carries `{ accountId, name }`; never a password or a session token.
+   * `account.sign-in.failed` is rate-limited and carries the attempted name
+   * and the address it came from.
+   */
+  'account.created',
+  'account.updated',
+  'account.disabled',
+  'account.enabled',
+  'account.removed',
+  'account.password.changed',
+  'account.signed-in',
+  'account.signed-out',
+  'account.sign-in.failed',
   'meester.changed',
   'klerk.changed',
   'boekwachter.changed',
@@ -363,6 +378,11 @@ export const HistoryEventSchema = z.object({
   gezelId: z.string().optional(),
   summary: z.string(),
   details: z.record(z.string(), z.unknown()).optional(),
+  /**
+   * The signed-in account whose request caused this event (ADR 0029). Absent
+   * for the owner's own app, the CLI, gezels and background work.
+   */
+  by: z.object({ accountId: z.string(), name: z.string() }).optional(),
 });
 export type HistoryEvent = z.infer<typeof HistoryEventSchema>;
 
@@ -439,6 +459,11 @@ export const PERSON_FACING_HISTORY_KINDS: ReadonlySet<HistoryEventKind> = new Se
     'document.updated',
     'document.renamed',
     'document.deleted',
+    'account.created',
+    'account.disabled',
+    'account.enabled',
+    'account.removed',
+    'account.password.changed',
     'meester.changed',
     'ai-app.installed',
     'ai-app.removed',

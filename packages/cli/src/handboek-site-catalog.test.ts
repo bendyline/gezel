@@ -309,6 +309,10 @@ describe('page insertions', () => {
     );
     expect(demo).toContain('src="demo/dash%20board/index.html"');
     expect(demo).toContain('title="X &quot;room&quot; demo"');
+    expect(demo).not.toContain('apps library');
+    expect(
+      demoSectionHtml({ projectTypeId: 'x', entry: 'index.html', files: [] }, 'X', '/apps/x/'),
+    ).toContain('<a href="/apps/x/">See it full size, with its companion, in the apps library</a>');
     expect(insertDemoSection(body, '<section/>')).toBe(
       '<h1>T</h1>\n<p>Lead.</p>\n<section/>\n<h2>More</h2>',
     );

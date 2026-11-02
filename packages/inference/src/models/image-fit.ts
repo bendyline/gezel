@@ -12,7 +12,7 @@
  * the helpers here.
  */
 
-import { totalmem } from 'node:os';
+import { totalMemoryBytes } from '../system/host-memory.js';
 import {
   type GezelConfig,
   type ImageModelManifest,
@@ -104,7 +104,7 @@ export async function mediaCapacity(
   readConfig: MediaFitContext['readConfig'],
 ): Promise<MediaCapacity> {
   const budget = await measuredCapacityBudget();
-  const ram = totalmem();
+  const ram = totalMemoryBytes();
   const auto = staticCapacityCeilings(budget, ram);
   const configured = configuredEngineMemoryBytes(await readConfig().catch(() => ({})));
   const limited =

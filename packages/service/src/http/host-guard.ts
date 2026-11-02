@@ -44,7 +44,17 @@ function hostnameOf(host: string): string {
  * an absolute URL is rejected; in-process `app.request('/')` remains usable
  * because Hono resolves it against `http://localhost`.
  */
-export function hostGuard(opts: { allowLanIpHosts?: () => boolean } = {}): MiddlewareHandler {
+export function hostGuard(
+  opts: {
+    allowLanIpHosts?: () => boolean;
+    /**
+     * Exact hostnames an operator configured (the container listener's
+     * `GEZEL_ALLOWED_HOSTS`, for a TLS reverse proxy in front). Named, never
+     * matched by pattern, so a rebinding attacker cannot pick one.
+     */
+    allowedHostnames?: () => readonly string[];
+  } = {},
+): MiddlewareHandler {
   return async (c, next) => {
     const host = requestHost(c);
     if (!host) return c.json({ error: 'forbidden_host' }, 403);
@@ -52,6 +62,7 @@ export function hostGuard(opts: { allowLanIpHosts?: () => boolean } = {}): Middl
     if (LOOPBACK_HOSTS.has(lower) || LOOPBACK_HOSTS.has(hostnameOf(lower))) {
       return next();
     }
+    if (opts.allowedHostnames?.().includes(hostnameOf(lower))) return next();
     const hostname = hostnameOf(lower).replace(/^\[/, '').replace(/\]$/, '');
     // Remote serving deliberately accepts requests addressed to a LAN IP.
     // Keep domain names forbidden so DNS rebinding cannot turn an attacker

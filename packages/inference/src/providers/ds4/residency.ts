@@ -1,4 +1,4 @@
-import { totalmem } from 'node:os';
+import { totalMemoryBytes } from '../../system/host-memory.js';
 import {
   DS4_FULL_RESIDENCY_HEADROOM_BYTES,
   LLAMA_CPP_VISION_COMPUTE_BYTES,
@@ -75,7 +75,7 @@ export interface Ds4ResidencyOptions {
 export function canUseDs4FullResidency(opts: Ds4ResidencyOptions = {}): boolean {
   return ds4FitsFullResidency({
     modelSizeBytes: opts.modelSizeBytes,
-    totalRamBytes: opts.totalRamBytes ?? totalmem(),
+    totalRamBytes: opts.totalRamBytes ?? totalMemoryBytes(),
     companionBytes: opts.companionBytes,
     platform: opts.platform ?? process.platform,
     arch: opts.arch ?? process.arch,
@@ -128,7 +128,7 @@ export interface Ds4ExpertCachePlan {
  * state + the cache cannot consume the runtime/OS reserve.
  */
 export function planDs4ExpertCache(opts: Ds4ExpertCachePlanOptions): Ds4ExpertCachePlan {
-  const totalRamBytes = opts.totalRamBytes ?? totalmem();
+  const totalRamBytes = opts.totalRamBytes ?? totalMemoryBytes();
   const catalogCacheBytes = opts.catalogCacheBytes ?? 0;
   const fixedResidentBytes = Math.max(0, (opts.catalogResidentBytes ?? 0) - catalogCacheBytes);
   const fallbackGb = totalRamBytes >= 120 * GB ? 64 : totalRamBytes >= 88 * GB ? 48 : 32;

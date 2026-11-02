@@ -21,6 +21,7 @@ import {
   globalHistoryFile,
   projectHistoryFile,
 } from '@bendyline/gezel/paths';
+import { currentRequestAccount } from '../accounts/request-account.js';
 import { readLinesBackward } from './read-backward.js';
 
 const log = createLogger('history');
@@ -217,6 +218,9 @@ export class HistoryManager {
    * only after the durable append has succeeded.
    */
   async log(event: Omit<HistoryEvent, 'id' | 'at'> & { at?: string; id?: string }): Promise<void> {
+    // Read before queueing: the signed-in account belongs to the caller's
+    // request, not to whatever runs the mutation chain.
+    const by = event.by ?? currentRequestAccount();
     return this.mutate(async () => {
       const full: HistoryEvent = {
         id: event.id ?? randomUUID(),
@@ -226,6 +230,7 @@ export class HistoryManager {
         ...(event.projectId ? { projectId: event.projectId } : {}),
         ...(event.gezelId ? { gezelId: event.gezelId } : {}),
         ...(event.details ? { details: event.details } : {}),
+        ...(by ? { by: { accountId: by.accountId, name: by.name } } : {}),
       };
       const file = event.projectId
         ? projectHistoryFile(this.home, event.projectId)

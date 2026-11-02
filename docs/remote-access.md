@@ -103,6 +103,17 @@ Tunnel limits, stated honestly: manual setup, a rotating token with no
 per-client revocation (revoking = restarting the remote daemon), and no
 remote-user identity — every tunnel holder is the same first-party client.
 
+## Containers: the first slice, shipped
+
+A Gezel container ([container.md](container.md), [ADR 0029](decisions/0029-container-hosting-and-accounts.md))
+is the first place the design below is real. Its container listener is
+step 1 (a separate app that mounts the product surface deliberately, with its
+own host policy and route denylist), and accounts ([accounts.md](accounts.md))
+are step 3's principals, signed in with a password and listed and revocable
+in Settings → Accounts. Transport trust is a TLS reverse proxy in front for
+now (`docker/compose.lan.yaml`); step 2's pinned or enrolled certificates are
+still to come. Outside a container, everything below is still design.
+
 ## First-class remote access (design)
 
 Target: a device or browser connects to `https://<machine>:<port>` directly,

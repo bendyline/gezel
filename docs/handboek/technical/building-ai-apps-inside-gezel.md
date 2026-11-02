@@ -220,7 +220,7 @@ Before handing over the app:
 1. Validate the source or Gilde payload, including every referenced role, craftbook, script, page, and seed. Keep generated and authored files distinct.
 2. Create or apply the app in an isolated test project. Verify the actual folder binding, permission denials, and every state-changing action. A folder explorer must leave originals unchanged.
 3. Exercise the main craftbook with representative inputs and confirm its outputs and gates. Check disabled/consent-required schedules without silently arming them.
-4. Test the page's live and standalone flows, light/dark themes, keyboard navigation, narrow layout, empty content, unavailable capabilities, and failed actions. Dispose watches and media players.
+4. Test the page's live and standalone flows, light/dark themes, keyboard navigation, narrow layout, empty content, unavailable capabilities, and failed actions. Dispose watches and media players. A page with a conversation gets a [sample conversation](gezel-page-apis.md#the-sample-conversation) for its demo; then ask the real crew lead the same suggestions on a small local model, so the demo never promises what the app cannot do.
 5. If upgrading, check user-modified content and seed drift. Document any unsupported migration or reconciliation rather than overwriting it as a convenience.
 6. Report what shipped, what was tested, which host modes are supported, and whether the normal app consumes the new catalog version yet.
 

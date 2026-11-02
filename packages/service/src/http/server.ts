@@ -33,6 +33,11 @@ import {
   requireInternalApiAccess,
   requireScope,
 } from './auth.js';
+import {
+  type ContainerHostPolicy,
+  containerRouteDenylist,
+  containerTokenStore,
+} from './container-listener.js';
 import type { ServiceContext } from './context.js';
 import { v1Cors } from './cors.js';
 import { harnessRouteGuard } from './harness-route-guard.js';
@@ -130,6 +135,8 @@ import { taskInputRoutes } from './routes/task-inputs.js';
 
 import { v1ChatRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-chat';
 import { v1EmbeddingsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-embeddings';
+import { accountRoutes } from './routes/accounts.js';
+import { appTokenRoutes } from './routes/app-tokens.js';
 import { pairingCodeRoutes } from './routes/pairing-code.js';
 import { remotesRoutes } from './routes/remotes.js';
 import { renderRoutes } from './routes/render.js';
@@ -151,6 +158,7 @@ import { usageRoutes } from './routes/usage.js';
 import { v1AppsRoutes } from './routes/v1-apps.js';
 import { v1GezelsRoutes } from './routes/v1-gezels.js';
 import { v1IdentityRoutes } from './routes/v1-identity.js';
+import { v1SignInRoutes } from './routes/v1-signin.js';
 import { workOptionRoutes } from './routes/work-options.js';
 
 import { v1ModelsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
@@ -195,9 +203,27 @@ interface BuildAppOptions {
    * Read lazily — the preview listener binds after this app is built.
    */
   previewBrowserOrigin?: () => string | null;
+  /**
+   * `container` builds the network-facing container listener's app (ADR
+   * 0029): its own host policy, a route denylist, and only account sessions
+   * and approved app grants as credentials. See container-listener.ts.
+   */
+  listener?: 'loopback' | 'container';
+  containerHosts?: ContainerHostPolicy;
 }
 
-export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Hono {
+export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {}): Hono {
+  const container = options.listener === 'container';
+  // Every bearerAuth mount below, and every router that checks a token
+  // itself, reads ctx.tokenStore: narrowing it here covers them all.
+  const ctx: ServiceContext = container
+    ? new Proxy(baseCtx, {
+        get(target, key, receiver) {
+          if (key === 'tokenStore') return containerTokenStore(target.tokenStore);
+          return Reflect.get(target, key, receiver);
+        },
+      })
+    : baseCtx;
   const app = new Hono();
   const previewCapabilities = options.previewCapabilities ?? new PreviewCapabilityStore();
   const httpLog = createLogger('http');
@@ -297,7 +323,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // an attacker-controlled hostname rebound to 127.0.0.1 can't reach any
   // surface. Loopback Host literals only; see host-guard.ts for why this
   // doesn't break legitimate cross-origin /v1 apps.
-  app.use('*', hostGuard());
+  app.use('*', hostGuard(container ? (options.containerHosts ?? {}) : {}));
+  if (container) app.use('*', containerRouteDenylist());
   app.use('*', classifyMalformedJsonBody());
 
   // Gate only the API and event stream. The static UI bundle is public —
@@ -458,6 +485,18 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
     return c.json(reply.body, reply.status as 422);
   });
 
+  // The container listener faces a network: answer liveness and the
+  // compatibility handshake, never the pid, host or engine details.
+  if (container) {
+    app.get('/api/health', (c) =>
+      c.json({
+        ok: true as const,
+        version: GEZEL_VERSION,
+        apiCompat: { floor: GEZEL_API_GENERATION_FLOOR, current: GEZEL_API_GENERATION },
+        serviceRole: ctx.serviceRole,
+      }),
+    );
+  }
   app.get('/api/health', (c) => {
     // The supervisor sets three env vars about the llama-server backend:
     //   GEZEL_LLAMA_SERVER_BACKEND   — what's actually configured this
@@ -540,6 +579,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // Growth (XP / level-ups / traits) at /api/gezels/:id/growth/*
   app.route('/api/gezels', growthRoutes(ctx));
   app.route('/api/config', configRoutes(ctx));
+  app.route('/api/accounts', accountRoutes(ctx));
+  app.route('/api/app-tokens', appTokenRoutes(ctx));
   app.route('/api/credentials', credentialRoutes(ctx));
   // Bring-your-own OAuth apps (per-provider client id + keychain secret).
   app.route('/api/oauth-clients', oauthClientRoutes(ctx));
@@ -695,6 +736,8 @@ export function buildApp(ctx: ServiceContext, options: BuildAppOptions = {}): Ho
   // account's `runtime/`, is traded for a project-bound `harness` token.
   // Registered before the consent router, which owns the rest of `/v1/apps`.
   app.route('/v1/apps/harness-connect', harnessConnectRoutes(ctx));
+  // Account sign-in (ADR 0029), ahead of the consent router like the above.
+  app.route('/v1/apps/signin', v1SignInRoutes(ctx));
   app.route('/v1/apps', v1AppsRoutes(ctx));
   app.use('/v1/knowledge/*', openaiEndpointsGate);
   app.use('/v1/knowledge/*', bearerAuth(ctx.tokenStore));

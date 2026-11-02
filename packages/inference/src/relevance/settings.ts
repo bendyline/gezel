@@ -1,4 +1,4 @@
-import { availableParallelism } from 'node:os';
+import { availableCpuCount } from '../system/host-memory.js';
 import {
   type GezelConfig,
   KNOWLEDGE_FILTER_MIN_RELEVANCE,
@@ -116,6 +116,6 @@ export function toResolvedModel(home: string, spec: RelevanceModelSpec): Resolve
     maxTokens: spec.maxTokens,
     queryMaxTokens: spec.queryMaxTokens,
     scoreActivation: spec.scoreActivation,
-    intraOpNumThreads: Math.max(1, Math.min(4, Math.floor(availableParallelism() / 2))),
+    intraOpNumThreads: Math.max(1, Math.min(4, Math.floor(availableCpuCount() / 2))),
   };
 }

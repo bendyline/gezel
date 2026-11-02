@@ -35,14 +35,26 @@ for (const app of catalogPages()) {
         assets: await writePageDemoAssets(shared),
       },
     );
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto(pathToFileURL(join(output, app.entry)).href);
     await expect(page.locator('gezel-app-layout')).toHaveCount(1);
     await expect(page.locator('[data-gezel-demo-banner]')).toBeVisible();
-    await page.evaluate(() => document.documentElement.requestFullscreen());
+    // A demo is the whole window: it opens in the app layout without the Fullscreen API.
     await expect(page.locator('html')).toHaveAttribute('data-gezel-fullscreen', 'true');
     if (app.id !== 'media-library') {
       await expect(page.getByRole('button', { name: 'Hide conversation' })).toBeVisible();
-      await expect(page.locator('gezel-app-layout .unavailable')).toBeVisible();
+      const chat = page.locator('gezel-chat');
+      await expect(chat.locator('.msg.gezel').first()).toBeVisible();
+      const idea = chat.getByRole('group', { name: 'Try asking' }).getByRole('button').first();
+      if (await idea.isVisible()) {
+        await idea.click();
+        await expect(chat.locator('.msg.you')).toHaveCount(1);
+        await expect(chat.getByRole('button', { name: 'Send', exact: true })).toBeEnabled({
+          timeout: 15_000,
+        });
+        await expect(chat.locator('.msg.gezel')).not.toHaveCount(1);
+        await expect(chat.locator('.step.failed')).toHaveCount(0);
+      }
       await page.getByRole('button', { name: 'Hide conversation' }).click();
       await expect(page.getByRole('button', { name: 'Show conversation' })).toBeVisible();
       await page.getByRole('button', { name: 'Show conversation' }).click();

@@ -1,0 +1,7 @@
+# HTTPS in front of Gezel for compose.lan.yaml. `tls internal` signs with
+# Caddy's own local authority; replace it with a real certificate when the
+# hostname has one.
+{$GEZEL_HOSTNAME} {
+	tls internal
+	reverse_proxy gezel:6228
+}

@@ -1,13 +1,13 @@
 ---
 id: the-crew
-title: "Your crew: gezellen, the Meester, and the crew lead"
+title: "Your crew: the Meester, the crew lead, and everyone else"
 order: 2
 summary: Who's who in your workshop, and how the roles fit together.
 ---
 
 # Your crew
 
-A **gezel** is a named AI companion with a role. Each one carries their own character description, their own memory, and their own small carved-wood figure — their *poppetje* — so you always know who you're talking to.
+A **gezel** is a named AI companion with a role. Each one carries their own character description, their own memory, and their own small carved-wood figure, so you always know who you're talking to.
 
 ## The Meester
 
@@ -15,7 +15,7 @@ A **gezel** is a named AI companion with a role. Each one carries their own char
 
 When you're not sure who should do a job, ask the Meester. They know every role in the guild, can create a new gezel on the spot, and can set up whole projects for you.
 
-## Your gezellen
+## Crew members
 
 ::handboek-gezel-roster
 
@@ -28,7 +28,7 @@ Every gezel has:
 
 ## The crew lead
 
-A **crew lead** is a gezel you put in charge of one project. They triage what comes in, route work to the right specialist, and keep an eye on progress. You don't need one for small projects — but when a project involves several gezellen, a crew lead keeps the crew coordinated.
+A **crew lead** is a gezel you put in charge of one project. They triage what comes in, route work to the right specialist, and keep an eye on progress. You don't need one for small projects — but when a project involves several crew members, a crew lead keeps them coordinated.
 
 ## The Librarian and the Scribe
 

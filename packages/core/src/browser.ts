@@ -85,6 +85,7 @@ export * from './project-types/page-api-shim.js';
 export * from './project-types/page-components.js';
 export * from './json-schema/validate.js';
 export * from './roles/index.js';
+export * from './accounts/index.js';
 export * from './deliverable.js';
 export * from './task-owned-paths.js';
 export * from './task-deliverable.js';

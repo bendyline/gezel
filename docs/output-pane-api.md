@@ -133,11 +133,19 @@ Typed definitions ship as `@bendyline/gezel-sdk/page`. Feature-detect with
 
 `demo` comes from the shared demo bootstrap, injected by the website publisher,
 Gilde preview server, or `gezel app demo` offline exporter. App scripts use
-`window.gezel || window.makeDemoGezel({ page, tools, data, existingPaths })`.
+`window.gezel || window.makeDemoGezel({ page, tools, data, existingPaths, chat })`.
 The bootstrap supplies the canonical components, font stylesheet and sample
 transport; import destinations come from `pages.imports`. App source contains
 its own sample handlers and Reset control, with no platform asset copies.
 Existing hosts are preserved, including when a live call fails.
+
+A demo is the whole window, so `ui.layout.fullscreen` is `true` unless the
+demo config asks for `layout: 'pane'`. In place of the host's chat, the
+`chat` component draws a scripted sample conversation from the page's `chat`
+option (`GezelDemoConversation` in `@bendyline/gezel-sdk/page`): replies,
+the tools they invoke through the page's own handlers, and reactions keyed by
+page tool. A demo watch fires when that conversation changes data. See
+[the sample conversation](handboek/technical/gezel-page-apis.md#the-sample-conversation).
 
 ## Reading data
 

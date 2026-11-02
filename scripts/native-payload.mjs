@@ -114,11 +114,23 @@ export const NATIVE_PAYLOAD = Object.freeze({
     'uv',
   ],
   'darwin-arm64-metal': ['gezel-llama-server'],
-  'linux-x64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
+  'linux-x64': [
+    'gezel-device-health',
+    'gezel-netjail',
+    'gezel-sd-server',
+    'gezel-whisper-server',
+    'uv',
+  ],
   'linux-x64-cpu': ['gezel-llama-server'],
   'linux-x64-vulkan': ['gezel-llama-server'],
   'linux-x64-cuda': ['gezel-llama-server', 'gezel-ds4-server', 'gezel-sd-server'],
-  'linux-arm64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
+  'linux-arm64': [
+    'gezel-device-health',
+    'gezel-netjail',
+    'gezel-sd-server',
+    'gezel-whisper-server',
+    'uv',
+  ],
   'linux-arm64-cpu': ['gezel-llama-server'],
   'linux-arm64-cuda': ['gezel-llama-server', 'gezel-ds4-server', 'gezel-sd-server'],
 });
@@ -145,6 +157,7 @@ export const ENGINE_FOR_BINARY = Object.freeze({
   uv: 'uv',
   'vec0.dll': 'sqlite-vec',
   'gezel-device-health': null,
+  'gezel-netjail': null,
   'gezel-service-host': null,
   'gezel-apple-fm': null,
 });
@@ -182,6 +195,8 @@ export const FIRST_NATIVE_RELEASE = Object.freeze({
 export const FIRST_NATIVE_RELEASE_BINARY = Object.freeze({
   'win32-arm64/vec0.dll': '0.1.53',
   'win32-arm64-cuda/gezel-whisper-server': '0.1.53',
+  'linux-x64/gezel-netjail': '0.1.56',
+  'linux-arm64/gezel-netjail': '0.1.56',
 });
 
 function parseNativeVersion(version) {

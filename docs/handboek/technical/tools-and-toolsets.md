@@ -15,7 +15,7 @@ Tools are a gezel's hands: without them, an AI model can only talk. Gezel's
 tools are bundled into named **groups**, and each role carries the groups that
 fit its trade — a reviewer gets file reading, a developer gets file writing and
 code execution, a coordinator gets team management. You can add or remove groups
-per gezel, and third-party toolsets from the gilde catalog extend the set
+per gezel, and third-party toolsets from the catalog extend the set
 further.
 
 [Add-on toolsets and connectors](https://gezel.com/docs/toolset-catalog/) on gezel.com lists what you can add beyond the built-in groups, and [every project type](https://gezel.com/docs/project-types-index/) shows the ready-made project setups.

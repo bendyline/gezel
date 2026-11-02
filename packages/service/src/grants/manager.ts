@@ -15,6 +15,12 @@ import {
 export const PENDING_GRANT_TTL_MS = 10 * 60_000;
 export const APPROVED_GRANT_DELIVERY_TTL_MS = 5 * 60_000;
 export const MAX_PENDING_GRANTS = 32;
+/**
+ * Requests that arrived through the container listener (ADR 0029) get their
+ * own, smaller budget, so register spam from the network cannot crowd out a
+ * local app or the CLI asking to connect.
+ */
+export const MAX_PENDING_NETWORK_GRANTS = 8;
 export const MAX_VERIFICATION_ATTEMPTS = 5;
 
 const VERIFICATION_CODE_ALPHABET = '23456789ABCDEFGHJKMNPQRSTVWXYZ';
@@ -76,6 +82,12 @@ export interface GrantRequest {
    * until then, and after a denial, the current token keeps working.
    */
   upgradeFrom?: string[];
+  /**
+   * The request came through the container listener rather than this
+   * machine's loopback. Always verified by code, never auto-approved, and
+   * labeled in Integrations.
+   */
+  fromNetwork?: boolean;
 }
 
 export type GrantEvent =
@@ -93,6 +105,8 @@ export interface GrantRequestInput {
   deviceIdentityPubKey?: string;
   /** The scopes the app holds now, when this request adds to an existing grant. */
   upgradeFrom?: string[];
+  /** Arrived through the container listener; see {@link GrantRequest.fromNetwork}. */
+  fromNetwork?: boolean;
 }
 
 export interface GrantRequestCreated {
@@ -397,15 +411,21 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
         ) {
           throw new PendingGrantExistsError(input.appId);
         }
+        const fromNetwork = input.fromNetwork === true;
         if (
-          Array.from(byId.values()).filter((grant) => grant.status === 'pending').length >=
-          MAX_PENDING_GRANTS
+          Array.from(byId.values()).filter(
+            (grant) => grant.status === 'pending' && (grant.fromNetwork === true) === fromNetwork,
+          ).length >= (fromNetwork ? MAX_PENDING_NETWORK_GRANTS : MAX_PENDING_GRANTS)
         ) {
           throw new TooManyPendingGrantsError();
         }
         const createdAt = Date.now();
+        // From the network even an inference-only grant shows a code: the
+        // person approving must be able to tell their own app from a stranger's.
         const verificationRequired =
-          input.requireVerificationCode === true || requiresGrantVerification(input.scopes);
+          fromNetwork ||
+          input.requireVerificationCode === true ||
+          requiresGrantVerification(input.scopes);
         const verificationCode = verificationRequired ? generateVerificationCode() : undefined;
         const normalizedCode = verificationCode
           ? normalizeVerificationCode(verificationCode)
@@ -424,6 +444,7 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
             ? { deviceIdentityPubKey: input.deviceIdentityPubKey }
             : {}),
           ...(input.upgradeFrom ? { upgradeFrom: [...input.upgradeFrom] } : {}),
+          ...(fromNetwork ? { fromNetwork: true } : {}),
           status: 'pending',
           createdAt,
           expiresAt: createdAt + PENDING_GRANT_TTL_MS,
@@ -447,7 +468,7 @@ export async function createGrantManager(opts: CreateGrantManagerOptions): Promi
           throw err;
         }
         emit({ type: 'grant_requested', grant });
-        if (autoApprove.has(input.appId)) {
+        if (autoApprove.has(input.appId) && !fromNetwork) {
           try {
             await approveGrant(grant);
           } catch (err) {
@@ -795,6 +816,7 @@ function decodePersisted(raw: string): GrantRequest[] {
       e.upgradeFrom.every((scope): scope is string => typeof scope === 'string')
         ? { upgradeFrom: e.upgradeFrom }
         : {}),
+      ...(e.fromNetwork === true ? { fromNetwork: true } : {}),
     });
   }
   return grants;

@@ -1,6 +1,7 @@
 # 0004 — Accounts and per-project ACLs for shared machines
 
-Status: Proposed (design only; no implementation is scheduled by this record)
+Status: Proposed (design only; no implementation is scheduled by this record).
+Option (c) is adopted for network sign-in by [0029](0029-container-hosting-and-accounts.md).
 
 ## Context
 
