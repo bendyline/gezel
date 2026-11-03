@@ -362,11 +362,9 @@ for (const [source, published] of Object.entries({
   publicTargets.set(`${campaignRoot}/${source}`, published);
 const publicMarkdown = (text) =>
   sanitize(
-    text.replace(/\]\(<?([^)>]+)>?\)/g, (match, target) => {
-      if (/^(?:https?:|#)/.test(target)) return match;
-      const path = target.startsWith('/')
-        ? portable(target)
-        : portable(`${campaignRoot}/${target}`);
+    text.replace(/\]\(<?([^)>]+)>?\)/g, (match, href) => {
+      if (/^(?:https?:|#)/.test(href)) return match;
+      const path = href.startsWith('/') ? portable(href) : portable(`${campaignRoot}/${href}`);
       return `](${publicTargets.get(path) ?? 'scorecard-details.json'})`;
     }),
   );
