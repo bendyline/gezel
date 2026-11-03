@@ -8,6 +8,7 @@ import {
   DuckRunner,
   DuckUnavailableError,
   buildDuckPrelude,
+  duckBinaryMatchesPin,
   sqlLiteral,
 } from './duck.js';
 import {
@@ -295,6 +296,13 @@ describe('DuckRunner — binary discovery ladder', () => {
       source: 'env',
       pinned: true,
     });
+  });
+
+  it('counts an env copy outside the home as pinned only by its bytes', async () => {
+    const copy = join(dir, duckdbBinaryName());
+    await writeFile(copy, 'not the pinned build');
+    expect(await duckBinaryMatchesPin(copy)).toBe(false);
+    expect(await duckBinaryMatchesPin(join(dir, 'missing'))).toBe(false);
   });
 
   it('ignores empty PATH segments so a stray ./duckdb cannot win', () => {

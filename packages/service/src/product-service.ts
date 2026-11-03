@@ -169,7 +169,11 @@ import {
 } from './models/install-jobs.js';
 
 import { migrateLegacySystemModels } from '@bendyline/gezel-inference/internal/models/storage-roots';
-import { DuckRunner } from './observations/duck.js';
+import {
+  type DuckBinaryResolution,
+  DuckRunner,
+  duckBinaryMatchesPin,
+} from './observations/duck.js';
 import { runProjectObservationNightly } from './observations/nightly.js';
 import {
   discoverManagedScriptRuntimes,
@@ -1866,15 +1870,23 @@ export async function startProductService(
     // starts "the query returned the wrong thing" needs to know whether this
     // is the pinned build the sandbox matrix was measured against or a system
     // DuckDB of unknown vintage; without this the answer takes a repro.
+    const report = (resolved: DuckBinaryResolution | null) => {
+      if (!resolved) {
+        log.info('[duckdb] no query engine resolved — data features will report it as unavailable');
+      } else if (resolved.pinned) {
+        log.info(`[duckdb] using pinned build (${resolved.source}): ${resolved.path}`);
+      } else {
+        log.warn(
+          `[duckdb] using an unverified DuckDB (${resolved.source}): ${resolved.path} — sandbox behaviour is only measured against the pinned build`,
+        );
+      }
+    };
     const resolved = duck.resolvedBinaryProvenance();
-    if (!resolved) {
-      log.info('[duckdb] no query engine resolved — data features will report it as unavailable');
-    } else if (resolved.pinned) {
-      log.info(`[duckdb] using pinned build (${resolved.source}): ${resolved.path}`);
+    if (resolved?.source === 'env' && !resolved.pinned) {
+      // Hashed off the boot path; only an env path outside the home pays it.
+      void duckBinaryMatchesPin(resolved.path).then((pinned) => report({ ...resolved, pinned }));
     } else {
-      log.warn(
-        `[duckdb] using an unverified DuckDB (${resolved.source}): ${resolved.path} — sandbox behaviour is only measured against the pinned build`,
-      );
+      report(resolved);
     }
   }
   // The index's derived-table drain needs the engine, but the index is

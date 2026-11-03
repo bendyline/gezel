@@ -45,7 +45,13 @@ import {
   pathsEqual,
   toInferencePlatform,
 } from '@bendyline/gezel';
-import { duckdbBinaryName, duckdbInstalledBinary } from '@bendyline/gezel/native';
+import {
+  DUCKDB_BINARY_SHA256,
+  duckdbBinaryName,
+  duckdbInstalledBinary,
+  duckdbPlatformKey,
+} from '@bendyline/gezel/native';
+import { sha256File } from '../index-store/hash.js';
 import { sandboxEnv } from '../sandbox/runner.js';
 
 const log = createLogger('duckdb');
@@ -152,6 +158,22 @@ export interface DuckBinaryResolution {
   source: DuckBinarySource;
   /** True only when the bytes were verified against the pinned digest. */
   pinned: boolean;
+}
+
+/**
+ * Whether the binary at `path` is byte for byte the pinned build. For a copy
+ * the ladder cannot recognize by its path: the container image stages its
+ * verified DuckDB under /opt, outside any home, and names it in
+ * GEZEL_DUCKDB_BIN.
+ */
+export async function duckBinaryMatchesPin(path: string): Promise<boolean> {
+  const key = duckdbPlatformKey(process.platform, process.arch);
+  if (!key) return false;
+  try {
+    return (await sha256File(path)) === DUCKDB_BINARY_SHA256[key];
+  } catch {
+    return false;
+  }
 }
 
 /**

@@ -257,7 +257,11 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "$HUB_USER" || -z "$HUB_TOKEN" ]]; then
-            echo "::notice::Docker Hub mirror skipped: set the DOCKERHUB_USERNAME variable and DOCKERHUB_TOKEN secret."
+            if [[ -n "$HUB_TOKEN" ]]; then
+              echo "::warning::Docker Hub mirror skipped: DOCKERHUB_TOKEN is set but the DOCKERHUB_USERNAME variable is not. It must be a repository variable, not a secret."
+            else
+              echo "::notice::Docker Hub mirror skipped: set the DOCKERHUB_USERNAME variable and DOCKERHUB_TOKEN secret."
+            fi
             exit 0
           fi
           echo "$HUB_TOKEN" | docker login docker.io -u "$HUB_USER" --password-stdin
