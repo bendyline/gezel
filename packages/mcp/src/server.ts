@@ -4271,12 +4271,9 @@ async function writeArtifactToolCall({
       };
     }
   }
-  // normalizeMarkdown collapses single newlines inside non-fenced paragraphs into
-  // spaces — correct for prose .md, catastrophic for source code. An end-of-line
-  // `// comment` would eat the next statement when collapsed onto one line
-  // (observed corrupting inline JS in the tictactoe eval).
-  const stored = clean.endsWith('.md') ? normalizeMarkdown(content) : content;
-  await api.writeProjectArtifact(projectId, clean, stored, {
+  // Artifacts may carry line-based data or gate verdicts even in Markdown.
+  // Preserve the submitted bytes; prose normalization can change their meaning.
+  await api.writeProjectArtifact(projectId, clean, content, {
     ...(gezelId ? { gezelId } : {}),
     ...(sessionId ? { sessionId } : {}),
   });

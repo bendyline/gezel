@@ -4,9 +4,11 @@ import {
   FILE_REPAIR_MUTATION_TOOLS,
   FILE_REPAIR_TOOLS,
   type LocalChatCompletionTool,
+  chatCompletionToolName,
   isFileRepairTurn,
   isImmediateFileWriteTurn,
 } from './constrained-turn.js';
+import type { ToolFailureResult } from './tool-failure-tracker.js';
 
 export const LOCAL_TURN_LIMITS = {
   iterations: 96,
@@ -65,6 +67,34 @@ export class LocalTurnPolicy {
     if (this.compactionAttempted) return false;
     this.compactionAttempted = true;
     return true;
+  }
+}
+
+/** A rejected premature or fragmentary write must reopen recovery tools for this send. */
+export class ConstrainedWriteRecovery {
+  active = false;
+  lookupPending: string | null = null;
+
+  recordResult(
+    toolName: string,
+    output: string,
+    result: ToolFailureResult,
+    tools: LocalChatCompletionTool[] | undefined,
+  ): void {
+    if (result.sourceFailureKind === 'fragment') {
+      this.active = true;
+      this.lookupPending = null;
+    } else if (result.sourceFailureKind === 'grounding-required') {
+      this.active = true;
+      const requested = output.match(/next tool call must be\s+`([^`]+)`/i)?.[1];
+      // A tool result can select from the authorized roster, never expand it.
+      this.lookupPending =
+        requested && tools?.some((tool) => chatCompletionToolName(tool) === requested)
+          ? requested
+          : null;
+    } else if (toolName === this.lookupPending && result.count === 0) {
+      this.lookupPending = null;
+    }
   }
 }
 

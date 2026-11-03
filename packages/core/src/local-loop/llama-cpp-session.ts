@@ -105,6 +105,7 @@ import {
   stripXmlTagToolCallsFromText,
 } from './local-tool-call-salvage.js';
 import {
+  ConstrainedWriteRecovery,
   LOCAL_TURN_LIMITS,
   LocalTurnPolicy,
   compactLocalTurn,
@@ -2303,8 +2304,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
     let requiredInputHoldLogged = false;
     // A grounding refusal takes precedence over file-only recovery. Otherwise
     // the next request cannot call the research tool the write guard requires.
-    let groundingRecoveryActive = false;
-    let groundingLookupPending: string | null = null;
+    const writeRecovery = new ConstrainedWriteRecovery();
     const prerequisiteRepairReadPaths =
       opts?.fileTurnIntent?.kind === 'repair-file' && opts.fileTurnIntent.readPaths
         ? opts.fileTurnIntent.readPaths.map(normalizeWorkspacePathForCompare)
@@ -2493,7 +2493,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             typeof body.max_tokens === 'number' ? body.max_tokens : Number.POSITIVE_INFINITY;
           body.max_tokens = Math.min(current, opts.continuationMaxTokens);
         }
-        const fileTurnPlan = groundingRecoveryActive
+        const fileTurnPlan = writeRecovery.active
           ? { kind: 'ordinary' as const }
           : planFileTurn(prompt, tools, opts?.fileTurnIntent);
         const unreadInputs = unreadRequiredInputs(requiredInputs, requiredInputReads);
@@ -2520,7 +2520,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         // helper script mutation, before that helper is executed. Prefer the
         // scripted direct-file state machine whenever its tools are present.
         const scriptedDataFileWorkTurn =
-          !groundingRecoveryActive &&
+          !writeRecovery.active &&
           !immediateFileWriteTurn &&
           shouldPreferScriptedDataFileWork(prompt, inferredDirectFileWorkTarget) &&
           hasWriteFileTool(tools) &&
@@ -2528,7 +2528,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         const scenarioFileRepairTurn =
           !scriptedDataFileWorkTurn && fileTurnPlan.kind === 'repair-file';
         const existingSourceEditTurn =
-          !groundingRecoveryActive &&
+          !writeRecovery.active &&
           !scriptedDataFileWorkTurn &&
           fileTurnPlan.kind === 'ordinary' &&
           isExistingSourceEditTurn(prompt, tools);
@@ -2537,13 +2537,13 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         // explicit guards document the intended precedence — every existing
         // mode wins; this mode fills the previously-inert gap.
         const gateSurgicalEditTurn =
-          !groundingRecoveryActive &&
+          !writeRecovery.active &&
           !immediateFileWriteTurn &&
           !scenarioFileRepairTurn &&
           !existingSourceEditTurn &&
           isGateSurgicalEditTurn(prompt, tools);
         const directFileWorkTurn =
-          !groundingRecoveryActive &&
+          !writeRecovery.active &&
           !immediateFileWriteTurn &&
           !scenarioFileRepairTurn &&
           !existingSourceEditTurn &&
@@ -3155,9 +3155,9 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             }, max_tokens=${body.max_tokens}`,
           );
         }
-        if (groundingLookupPending) {
+        if (writeRecovery.lookupPending) {
           requestTools = tools?.filter(
-            (tool) => chatCompletionToolName(tool) === groundingLookupPending,
+            (tool) => chatCompletionToolName(tool) === writeRecovery.lookupPending,
           );
           this.forceToolChoice(body);
           disableThinkingForConstrainedTurn(
@@ -3166,10 +3166,10 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             this.deps.model,
           );
           log.debug(
-            `[llama-cpp] grounding recovery: research-only surface=${groundingLookupPending}`,
+            `[llama-cpp] grounding recovery: research-only surface=${writeRecovery.lookupPending}`,
           );
         }
-        if (missingFileCreatePath && !groundingRecoveryActive) {
+        if (missingFileCreatePath && !writeRecovery.active) {
           if (
             typeof userMsg.content === 'string' &&
             !userMsg.content.includes('[Local-model missing-file recovery:')
@@ -5833,20 +5833,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           }
           requiredInputReads.push(...requiredInputsRead(call.function.name, args, output));
           const tracked = failureTracker.recordResult(call.function.name, output);
-          if (tracked.sourceFailureKind === 'grounding-required') {
-            groundingRecoveryActive = true;
-            const requestedLookup = output.match(/next tool call must be\s+`([^`]+)`/i)?.[1];
-            groundingLookupPending =
-              requestedLookup &&
-              tools?.some((tool) => chatCompletionToolName(tool) === requestedLookup)
-                ? requestedLookup
-                : null;
-          } else if (
-            call.function.name === groundingLookupPending &&
-            mutationToolOutputSucceeded(output)
-          ) {
-            groundingLookupPending = null;
-          }
+          writeRecovery.recordResult(call.function.name, output, tracked, tools);
           terminalActionClosing ??= terminalToolClosingText(
             this.deps.terminalToolPolicy,
             call.function.name,
@@ -6034,7 +6021,8 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         }
         if (
           (immediateFileWriteTurn || writeContinuationActive) &&
-          immediateFileWritePaths.length > 0
+          immediateFileWritePaths.length > 0 &&
+          !writeRecovery.active
         ) {
           const closingText = immediateFileWriteClosing(immediateFileWritePaths);
           this.messages.push({ role: 'assistant', content: closingText });
@@ -6059,7 +6047,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           }
           return fullText;
         }
-        if (scenarioFileRepairTurn && scenarioRepairMutationSucceeded) {
+        if (scenarioFileRepairTurn && scenarioRepairMutationSucceeded && !writeRecovery.active) {
           log.info(
             '[llama-cpp] scenario-repair mutation landed; ending turn so validation feedback can run',
           );
@@ -6082,7 +6070,11 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           }
           return fullText;
         }
-        if (existingSourceEditTurn && existingSourceEditMutationSucceeded) {
+        if (
+          existingSourceEditTurn &&
+          existingSourceEditMutationSucceeded &&
+          !writeRecovery.active
+        ) {
           log.info(
             '[llama-cpp] existing-source-edit mutation landed; ending turn so validation feedback can run',
           );
@@ -6105,7 +6097,7 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           }
           return fullText;
         }
-        if (directFileWorkTurn && directFileWorkMutationSucceeded) {
+        if (directFileWorkTurn && directFileWorkMutationSucceeded && !writeRecovery.active) {
           log.info(
             '[llama-cpp] direct-file-work mutation landed; ending turn so validation feedback can run',
           );

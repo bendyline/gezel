@@ -149,7 +149,41 @@ def test_cache_matches_tower():
             raise RuntimeError("boom")
 
     assert not spec_decode.cache_matches_tower([Arrays()], Broken())
+
+    class RotatingKVCache:
+        pass
+
+    class BufferedRotatingKVCache(RotatingKVCache):
+        pass
+
+    class BatchRotatingKVCache(RotatingKVCache):
+        pass
+
+    rotating = types.SimpleNamespace(make_cache=lambda: [RotatingKVCache(), KV()])
+    assert spec_decode.cache_matches_tower([BufferedRotatingKVCache(), KV()], rotating)
+    assert not spec_decode.cache_matches_tower([BatchRotatingKVCache(), KV()], rotating)
+    # A matching class name without the upstream inheritance contract is unsafe.
+    impostor = type("BufferedRotatingKVCache", (), {})
+    assert not spec_decode.cache_matches_tower([impostor(), KV()], rotating)
     print("PASS cache_matches_tower")
+
+
+def test_cached_token_prefix():
+    tokens = [10, 20, 30, 40]
+    def cache(*offsets):
+        return [types.SimpleNamespace(offset=n) for n in offsets]
+
+    assert spec_decode.cached_token_prefix(cache(4, 4), tokens) == tokens
+    # The final bonus token is visible but has not yet entered the target KV.
+    assert spec_decode.cached_token_prefix(cache(3, 3), tokens) == tokens[:3]
+    assert spec_decode.cached_token_prefix(cache(3, 4), tokens) is None
+    assert spec_decode.cached_token_prefix(cache(5, 5), tokens) is None
+    assert spec_decode.cached_token_prefix(cache(0, 0), tokens) is None
+    assert spec_decode.cached_token_prefix([], tokens) is None
+    assert spec_decode.cached_token_prefix([object()], tokens) is None
+    assert spec_decode.cached_token_prefix(cache("bad"), tokens) is None
+    assert tokens == [10, 20, 30, 40]
+    print("PASS cached_token_prefix")
 
 
 def test_clone_layers_roundtrip_and_isolation():
@@ -262,6 +296,15 @@ def test_draft_prefill_gate():
     admit, why = spec_decode.draft_prefill_gate(state(raw), limit + 1)
     assert not admit and "quadratic" in why, (admit, why)
 
+    # Gemma-style shared-KV drafting has no separate prompt-prefill step.
+    # Its prompt length must not be mistaken for an unchunked Qwen prefill.
+    shared = _Drafter(full=False)
+    del shared.prefill_from_target_hidden
+    admit, why = spec_decode.draft_prefill_gate(state(shared), limit * 100)
+    assert admit and why == "", (admit, why)
+    shared.prefill_from_target_hidden = None
+    assert spec_decode.draft_prefill_gate(state(shared), limit * 100) == (True, "")
+
     # No drafter at all is not this gate's business.
     admit, why = spec_decode.draft_prefill_gate(None, 10**9)
     assert admit and why == ""
@@ -313,6 +356,7 @@ def main():
     test_resolve_missing_drafter_dir()
     test_resolve_version_gate()
     test_cache_matches_tower()
+    test_cached_token_prefix()
     test_clone_layers_roundtrip_and_isolation()
     print("all spec_decode tests passed")
 

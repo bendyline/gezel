@@ -205,6 +205,7 @@ import {
   remainingPrerequisiteRepairReadPaths,
 } from '../file-repair-policy.js';
 import {
+  ConstrainedWriteRecovery,
   LOCAL_TURN_LIMITS,
   LocalTurnPolicy,
   compactLocalTurn,
@@ -1308,6 +1309,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
     // validation error every iteration, "diagnosing" the schema in
     // chat, and re-trying the same wrong shape forever. See the
     // tracker's docstring for the threshold rationale.
+    const writeRecovery = new ConstrainedWriteRecovery();
     const failureTracker = new ToolFailureTracker({
       surgicalEditsAvailable,
       delegationAvailable,
@@ -1500,7 +1502,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             log.debug(`turn#${seq}.${turn} required-call turn: ${opts.requiredTool} only`);
           }
         }
-        const fileTurnPlan = planFileTurn(prompt, tools, opts?.fileTurnIntent);
+        const fileTurnPlan = writeRecovery.active
+          ? { kind: 'ordinary' as const }
+          : planFileTurn(prompt, tools, opts?.fileTurnIntent);
         const unreadInputs = unreadRequiredInputs(requiredInputs, requiredInputReads);
         const immediateFileWriteTurn =
           fileTurnPlan.kind === 'create-file' && unreadInputs.length === 0;
@@ -1570,6 +1574,15 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           (typeof body.max_tokens !== 'number' || body.max_tokens < FILE_WRITE_MIN_TOKENS)
         ) {
           body.max_tokens = FILE_WRITE_MIN_TOKENS;
+        }
+        if (writeRecovery.lookupPending) {
+          requestTools = tools?.filter(
+            (tool) => chatCompletionToolName(tool) === writeRecovery.lookupPending,
+          );
+          applyConstrainedTurnShape(body);
+          log.debug(
+            `turn#${seq}.${turn} grounding recovery: research-only surface=${writeRecovery.lookupPending}`,
+          );
         }
         if (requestTools && requestTools.length > 0) body.tools = requestTools;
         // Tool-schema size breakdown (opt-in: GEZEL_PROMPT_BREAKDOWN=1). The
@@ -3358,6 +3371,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             }
           }
           const tracked = failureTracker.recordResult(call.function.name, output);
+          writeRecovery.recordResult(call.function.name, output, tracked, tools);
           terminalActionClosing ??= terminalToolClosingText(
             this.deps.terminalToolPolicy,
             call.function.name,
@@ -3448,7 +3462,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           });
         }
         this.turnPolicy.checkpoint();
-        if (fileRepairTurn && repairMutationSucceeded) {
+        if (fileRepairTurn && repairMutationSucceeded && !writeRecovery.active) {
           const closing = 'Updated the requested file.';
           this.messages.push({ role: 'assistant', content: closing });
           return closing;
@@ -3473,7 +3487,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           );
           return fullText;
         }
-        if (immediateFileWritePaths.length > 0) {
+        if (immediateFileWritePaths.length > 0 && !writeRecovery.active) {
           // File was truncated mid-content and we still have continuation
           // budget — keep the turn alive instead of bailing on a partial.
           // The tool result already carries the "append the rest" hint;

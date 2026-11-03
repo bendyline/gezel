@@ -10,6 +10,15 @@ describe('gate script helpers', () => {
     });
   });
 
+  it.each(
+    [[], [{ ok: false }], { ok: false }, 'false', 1, 0, null, undefined].map((value) => [value]),
+  )('rejects a non-boolean runtime argument: %j', (value) => {
+    expect(gateResult(value as never, 'looks good')).toMatchObject({
+      decision: 'reject',
+      message: expect.stringContaining('expects a boolean'),
+    });
+  });
+
   it('adapts gezel filesystem reads and listings', async () => {
     const read = vi.fn(async (path: string) => `content:${path}`);
     const listAll = vi.fn(async () => ['a.md', 'nested/b.md']);
