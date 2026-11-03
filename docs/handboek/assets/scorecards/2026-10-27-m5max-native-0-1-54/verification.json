@@ -1,0 +1,22 @@
+{
+  "counts": {
+    "trials": 516,
+    "treatments": 172,
+    "passes": 349,
+    "eligible": 514,
+    "exclusions": 2,
+    "numericReviews": 215,
+    "judgeSpecMismatch": 12,
+    "noArtifact": 1,
+    "notApplicable": 288,
+    "judgedFailedTrials": 80,
+    "pendingReviews": 0
+  },
+  "repetitionsAllThree": true,
+  "originalEvidenceModified": false,
+  "frozenIdentityVerifiedAtCompletion": true,
+  "sourceFilesVerified": 3798,
+  "newInferenceCalls": 0,
+  "newJudgeCalls": 0,
+  "schema": "ScorecardDatasetSchema v1"
+}

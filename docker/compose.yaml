@@ -1,0 +1,49 @@
+# Gezel in Docker (docs/container.md). On this computer only:
+#
+#   docker compose up -d
+#   docker compose logs gezel          # the link to create your account
+#
+# Add a GPU or your network with the files beside this one:
+#
+#   docker compose -f compose.yaml -f compose.nvidia.yaml up -d   # NVIDIA
+#   docker compose -f compose.yaml -f compose.amd.yaml up -d      # AMD or Intel (Vulkan)
+#   docker compose -f compose.yaml -f compose.lan.yaml up -d      # HTTPS on your network
+name: gezel
+
+services:
+  gezel:
+    image: ${GEZEL_IMAGE:-ghcr.io/bendyline/gezel}:${GEZEL_TAG:-latest}
+    container_name: gezel
+    hostname: gezel
+    restart: unless-stopped
+    stop_grace_period: 30s
+    # 127.0.0.1 keeps Gezel on this computer. Publishing on all addresses
+    # is the LAN file's job, behind HTTPS.
+    ports:
+      - "127.0.0.1:6228:6228"
+    volumes:
+      # Everything Gezel keeps: crews, projects, chats, memories, models.
+      - gezel:/gezel
+      # Folders you want Gezel to work on. Add them as projects from the
+      # web UI under /projects. Gezel reads them; it changes nothing there
+      # until you allow it per project.
+      - ${GEZEL_PROJECTS:-./projects}:/projects
+    environment:
+      # Applied only to the first boot of an empty volume.
+      GEZEL_INITIAL_SECURITY_LEVEL: ${GEZEL_INITIAL_SECURITY_LEVEL:-lockdown}
+      GEZEL_INITIAL_MODE: ${GEZEL_INITIAL_MODE:-reactive+tasks}
+      # Download a model as soon as the service is up (an id from
+      # `docker compose exec gezel gezel model list --available`).
+      GEZEL_PULL_MODEL: ${GEZEL_PULL_MODEL:-}
+    #   To skip the setup link, name the owner and keep the password in a
+    #   secret file (never in an environment variable):
+    #   GEZEL_OWNER_NAME: you
+    #   GEZEL_OWNER_PASSWORD_FILE: /run/secrets/gezel_owner
+    # secrets: [gezel_owner]
+
+volumes:
+  gezel:
+
+# secrets:
+#   gezel_owner:
+#     file: ./owner-password.txt

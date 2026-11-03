@@ -67,6 +67,7 @@ export const PROJECT_TYPE_CATEGORY_GROUND: Readonly<
   data: 'slate',
   home: 'sage',
   money: 'ochre',
+  business: 'ochre',
   events: 'rose',
   other: 'slate',
 };

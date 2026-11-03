@@ -56,7 +56,9 @@ const suppliedTarballDir =
 if (tarballDirFlag !== -1 && !process.argv[tarballDirFlag + 1]) {
   throw new Error('--tarball-dir requires a directory path');
 }
-const MAX_NODE_MODULES_BYTES = 900 * 1024 * 1024;
+// Gilde content rides in the service's install: 0.3.5's new project types
+// (+5.8 MiB) took the 1.2.11 rehearsal to 900.4 MiB.
+const MAX_NODE_MODULES_BYTES = 950 * 1024 * 1024;
 
 function validateArgs(args) {
   for (let index = 0; index < args.length; index += 1) {
@@ -501,7 +503,9 @@ try {
       `node_modules is ${installedMiB.toFixed(1)} MiB; budget is ${MAX_NODE_MODULES_BYTES / 1024 / 1024} MiB`,
     );
   } else {
-    ok(`node_modules is ${installedMiB.toFixed(1)} MiB (budget 900 MiB)`);
+    ok(
+      `node_modules is ${installedMiB.toFixed(1)} MiB (budget ${MAX_NODE_MODULES_BYTES / 1024 / 1024} MiB)`,
+    );
   }
 
   step('auditing the npm consumer graph');

@@ -361,7 +361,7 @@ describe('memory-authority version skew', () => {
     // An outage is not permission to double-book, and the diversion must not
     // become a way to reach the local ledger by breaking identity discovery.
     mocks.inspect.mockRejectedValue(new Error('identity returned HTTP 503'));
-    await expect(acquire()).rejects.toThrow(/HTTP 503/);
+    await expect(acquire()).rejects.toThrow("Local models can't start: identity returned HTTP 503");
     // The broker then goes away entirely. Claiming the authority before
     // rethrowing above is what keeps this from quietly becoming a second
     // ledger beside whatever the installed engine had already admitted — the

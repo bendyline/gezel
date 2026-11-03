@@ -1,0 +1,31 @@
+# Gezel on your network over HTTPS: Caddy answers at GEZEL_HOSTNAME with
+# its own local certificate authority and forwards to Gezel. Browsers on
+# other devices warn until they trust Caddy's root certificate (see
+# docs/container.md), or point GEZEL_HOSTNAME at a name with a real
+# certificate.
+#
+#   GEZEL_HOSTNAME=gezel.home docker compose -f compose.yaml -f compose.lan.yaml up -d
+services:
+  gezel:
+    environment:
+      # The one hostname Gezel answers besides this computer's own.
+      GEZEL_ALLOWED_HOSTS: ${GEZEL_HOSTNAME:-gezel.local}
+      GEZEL_PUBLIC_URL: https://${GEZEL_HOSTNAME:-gezel.local}
+      # Sign-in throttling counts each browser's address, not Caddy's.
+      GEZEL_TRUST_PROXY: "1"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [gezel]
+    ports:
+      - "443:443"
+      - "80:80"
+    environment:
+      GEZEL_HOSTNAME: ${GEZEL_HOSTNAME:-gezel.local}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+
+volumes:
+  caddy-data:

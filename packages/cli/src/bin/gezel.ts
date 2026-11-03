@@ -11,6 +11,7 @@ import {
   IMAGE_QUALITIES,
   ImageAspectRatioSchema,
   ImageQualitySchema,
+  SCORECARD,
   type StorageJob,
   evaluateApiCompat,
   getLogLevel,
@@ -18,7 +19,11 @@ import {
   setLogLevel,
   setLogOutput,
 } from '@bendyline/gezel';
-import { type KnowledgeInstallEvent, streamChatEvents } from '@bendyline/gezel-client';
+import {
+  type KnowledgeInstallEvent,
+  type ModelFitnessEntry,
+  streamChatEvents,
+} from '@bendyline/gezel-client';
 import {
   GezelClient,
   createTrustingFetch,
@@ -33,6 +38,8 @@ import {
 } from '@bendyline/gezel-client/node';
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Command, Option } from 'commander';
+import { registerAccountCommands, registerIntegrationCommands } from '../account-command.js';
+import { registerBenchCommands } from '../bench-command.js';
 import { formatCliFailure, isNotFound } from '../cli-errors.js';
 import {
   CLI_CLIENT_LABEL,
@@ -42,6 +49,7 @@ import {
   connectForRun,
   connectForTui,
   connectOwned,
+  connectRunning,
   describeMachineEngineBroker,
   ensureCliProjectLead,
   findHealthySystemService,
@@ -71,6 +79,7 @@ import {
   workspaceCraftbookId,
 } from '../craftbook-shorthand.js';
 import { type DaemonStopHealth, planDaemonStop } from '../daemon-stop.js';
+import { doctorVerdict, renderDoctorModel } from '../doctor-report.js';
 import {
   CLI_ENGAGEMENT_MODE_USAGE,
   cliEngagementModeOption,
@@ -82,6 +91,7 @@ import { registerMcpCommands } from '../mcp-command.js';
 import {
   availableChatModels,
   formatAvailableChatModels,
+  measuredClaimsFor,
   pinPulledModel,
   useChatModel,
 } from '../model-choice.js';
@@ -117,9 +127,11 @@ import {
   resolveCleanupSelection,
   resolveRestoreSelection,
 } from '../storage-format.js';
+import { copyTaskOutput } from '../task-output.js';
 import { craftbookStartRequest, normalizeCraftbooks } from '../tui/craftbook-start.js';
 import { unknownCommandMessage } from '../unknown-command.js';
 import { runWorkflow } from '../workflow-command.js';
+import { unsupportedNodeMessage } from './node-version.js';
 
 const program = new Command();
 program
@@ -149,8 +161,15 @@ program
 /** Global flags, read off the root program. */
 const cliGlobals = (): CliGlobals => program.opts() as CliGlobals;
 
+/** Read-only commands honour `--no-start`: a running service, or a clear error. */
+const connectForInspection = (opts: { start?: boolean }) =>
+  opts.start === false ? connectRunning(cliGlobals()) : connectOwned(cliGlobals());
+
 registerSecretCommands(program, () => connectOwned(cliGlobals()));
+registerAccountCommands(program, async () => (await connectOwned(cliGlobals())).accounts);
+registerIntegrationCommands(program, () => connectOwned(cliGlobals()));
 registerMcpCommands(program, () => connectOwned(cliGlobals()));
+registerBenchCommands(program, () => connectOwned(cliGlobals()));
 registerSecurityCommands(program, () => connectOwned(cliGlobals()));
 registerGrowthCommand(program, () => connectOwned(cliGlobals()));
 
@@ -267,6 +286,10 @@ program
   )
   .option('--open', 'With --web, open the printed URL in your default browser.')
   .option(
+    '--accounts',
+    'With --web, sign in with an account instead of a one-time URL; the first run prints a link to create one.',
+  )
+  .option(
     '--restart',
     'With --web or --port, stop a running daemon started without them and start a new one.',
   )
@@ -276,6 +299,7 @@ program
       foreground?: boolean;
       web?: boolean;
       open?: boolean;
+      accounts?: boolean;
       restart?: boolean;
     }) => {
       const port = opts.port ? Number.parseInt(opts.port, 10) : undefined;
@@ -306,6 +330,7 @@ program
       if (opts.web) {
         spawnEnv.GEZEL_WEB = '1';
         spawnEnv.GEZEL_INSECURE_TRANSPORT = '1';
+        if (opts.accounts) spawnEnv.GEZEL_WEB_ACCOUNTS = '1';
       }
 
       if (opts.foreground) {
@@ -357,7 +382,11 @@ program
         console.log(
           `gezeld running (version ${health.version}) on port ${new URL(result.baseUrl).port}`,
         );
-        if (opts.web) await printWebUrl(result.baseUrl, opts.open === true);
+        if (opts.web && opts.accounts) {
+          await printAccountsWebUrl(result.client.accounts, result.baseUrl, opts.open === true);
+        } else if (opts.web) {
+          await printWebUrl(result.baseUrl, opts.open === true);
+        }
         return;
       }
 
@@ -379,6 +408,33 @@ async function runtimeServes(
   const { gezelPaths } = await import('@bendyline/gezel/paths');
   const token = await readFile(gezelPaths().runtime.webUiToken, 'utf8').catch(() => '');
   return token.trim().length > 0;
+}
+
+/**
+ * With `--accounts` the browser signs in with an account (ADR 0029), so the
+ * URL carries no token: just the address, or the one-time setup link while
+ * no account exists.
+ */
+async function printAccountsWebUrl(
+  client: Pick<GezelClient['accounts'], 'getSignInState' | 'createSetupLink'>,
+  baseUrl: string,
+  open: boolean,
+): Promise<void> {
+  const origin = new URL(baseUrl).origin;
+  const state = await client.getSignInState();
+  let url = `${origin}/`;
+  if (state.setupRequired) {
+    const link = await client.createSetupLink();
+    if (link.code) url = `${origin}/?setup=${encodeURIComponent(link.code)}`;
+  }
+  console.log('');
+  console.log(
+    state.setupRequired
+      ? `  Create your account →  ${url}`
+      : `  Gezel web UI →  ${url}  (sign in with your account)`,
+  );
+  console.log('');
+  if (open) await openInBrowser(url);
 }
 
 /**
@@ -868,6 +924,7 @@ Examples:
   )
   .option('--wait', 'wait for completion; exit nonzero when blocked, canceled, or timed out')
   .option('--timeout <seconds>', 'wait budget in seconds; timeout leaves the task running', '7200')
+  .option('--out <dir>', 'wait, then copy what the task made into this folder')
   .option('--json', 'emit one JSON result on stdout')
   .option(
     '--strict-sandbox',
@@ -881,6 +938,7 @@ Examples:
         param: string[];
         wait?: boolean;
         timeout: string;
+        out?: string;
         json?: boolean;
         strictSandbox?: boolean;
         viaCraftbookShorthand?: boolean;
@@ -972,9 +1030,17 @@ Examples:
         trustScripts: !opts.strictSandbox,
         roleBasedNameOnlyMode: true,
       });
-      if (opts.wait) {
+      if (opts.wait || opts.out) {
         console.error(`started ${created.ref} — ${created.title}`);
-        await printTaskWait(client, created.ref, { ...opts, timeoutMs });
+        const waited = await printTaskWait(client, created.ref, { ...opts, timeoutMs });
+        if (opts.out && waited.outcome === 'complete') {
+          const dir = waited.task.artifactDir;
+          if (!dir) throw new CliError(`${created.ref} finished without a task folder to copy.`);
+          const copied = await copyTaskOutput(client, projectId, dir, opts.out);
+          console.error(
+            `copied ${copied.length} file${copied.length === 1 ? '' : 's'} to ${opts.out}`,
+          );
+        }
       } else
         console.log(
           opts.json ? JSON.stringify(created) : `started ${created.ref} — ${created.title}`,
@@ -1036,6 +1102,7 @@ async function printTaskWait(
     console.error(`See its notes with \`gezel task notes ${result.task.ref}\`.`);
   }
   process.exitCode = result.exitCode;
+  return result;
 }
 
 const craftbook = program
@@ -1048,8 +1115,9 @@ craftbook
     "List the craftbooks `gezel do` can start in this folder's project; words filter by command, title and tags",
   )
   .option('--json', 'emit the list as JSON')
-  .action(async (words: string[], opts: { json?: boolean }) => {
-    const client = await connectOwned(cliGlobals());
+  .option('--no-start', 'Use a running service only; never start one')
+  .action(async (words: string[], opts: { json?: boolean; start?: boolean }) => {
+    const client = await connectForInspection(opts);
     // Listing must not create a project: a folder that has none yet sees what
     // `gezel do` would offer there, the Default project's craftbooks.
     const preview = await previewRunProject(client, cliGlobals());
@@ -1336,6 +1404,10 @@ handboek
     '--og-base <url>',
     'absolute URL the card directory is served from (e.g. https://gezel.com/og/); required with --og-out',
   )
+  .option(
+    '--apps-out <dir>',
+    'also write the apps library (gezel.com/apps) into this directory, outside --out',
+  )
   .action(
     async (opts: {
       out: string;
@@ -1344,6 +1416,7 @@ handboek
       canonicalBase?: string;
       ogOut?: string;
       ogBase?: string;
+      appsOut?: string;
     }) => {
       if (Boolean(opts.ogOut) !== Boolean(opts.ogBase)) {
         console.error('--og-out and --og-base go together: cards need a directory and a URL.');
@@ -1360,8 +1433,12 @@ handboek
         canonicalBase: opts.canonicalBase,
         ogOut: opts.ogOut,
         ogBase: opts.ogBase,
+        appsOut: opts.appsOut,
       });
       console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
+      if (result.apps) {
+        console.log(`Apps library: ${result.apps.apps} apps, ${result.apps.demos} with demos`);
+      }
       for (const id of result.skipped) console.error(`  skipped (no body): ${id}`);
       for (const note of result.warnings) console.error(`  data table: ${note}`);
       const cards = result.cards;
@@ -2404,16 +2481,30 @@ model
   .description('List downloaded chat models, or with --available the catalog models that fit')
   .option('-p, --provider <engine>', 'mlx | llama-cpp | ds4 (default: platform default)')
   .option('-a, --available', 'List catalog models for this machine, with download sizes')
-  .action(async (opts: { provider?: string; available?: boolean }) => {
-    const client = await connectOwned(cliGlobals());
+  .option('--no-start', 'Use a running service only; never start one')
+  .action(async (opts: { provider?: string; available?: boolean; start?: boolean }) => {
+    const client = await connectForInspection(opts);
     const provider = resolveModelProvider(opts.provider);
     if (opts.available) {
       const available = await availableChatModels(client, provider);
+      // What the published scorecard says, preferring rounds on this platform.
+      // The daemon may be remote (--connect); its platform is the one that counts.
+      const health = await client.health().catch(() => null);
+      const device = {
+        platform: health?.platform ?? process.platform,
+        arch: process.arch,
+        label: health?.platform ?? process.platform,
+      };
       console.log(
         formatAvailableChatModels({
           engine: provider,
           platformDefault: resolveOnDeviceProvider(process.platform, process.arch),
           ...available,
+          measured: measuredClaimsFor(
+            SCORECARD,
+            available.ranked.map((m) => m.id),
+            device,
+          ),
         }),
       );
       return;
@@ -2505,6 +2596,10 @@ program
       console.log(
         `machine engine: healthy (${broker.baseUrl}) version=${broker.version} — compute broker; the product API is the per-user daemon`,
       );
+    } else if (broker?.present && broker.healthy === false && broker.staleRuntimeDir) {
+      console.log(
+        `machine service: not running; its runtime files were left behind in ${broker.staleRuntimeDir} (remove them if you uninstalled the Gezel app)`,
+      );
     } else if (broker?.present && broker.healthy === false) {
       console.log(`machine service: runtime files present but unreachable (port ${broker.port})`);
     } else if (broker?.present) {
@@ -2515,6 +2610,7 @@ program
       console.log('machine service: not installed');
     }
     console.log(`runtime file: ${runtime ? 'present' : 'missing'}`);
+    let serviceReachable = Boolean(system);
     if (runtime) {
       const alive = isProcessAlive(runtime.pid);
       console.log(`  port=${runtime.port} pid=${runtime.pid} alive=${alive}`);
@@ -2526,6 +2622,7 @@ program
             ...(runtime.cert ? { fetch: createTrustingFetch({ cert: runtime.cert }) } : {}),
           });
           const health = await client.health();
+          serviceReachable = true;
           const engineNote =
             health.machineEngineConnected !== undefined
               ? ` machine engine connected: ${health.machineEngineConnected ? 'yes' : 'no'}`
@@ -2536,6 +2633,58 @@ program
         }
       }
     }
+    // The model half: can the model chats will use actually do the work?
+    // Read through the running service, or an in-process one that stops
+    // with this command — doctor never leaves a daemon behind.
+    let modelId: string | undefined;
+    let fitnessAdmitted: boolean | null = null;
+    if (serviceReachable || globals.connect) {
+      try {
+        await withTransientConnection(globals, async (client) => {
+          const [config, fitness, health] = await Promise.all([
+            client.getConfig(),
+            client
+              .listModelFitness()
+              .catch((): { records: ModelFitnessEntry[]; probing: string[] } => ({
+                records: [],
+                probing: [],
+              })),
+            client.health().catch(() => null),
+          ]);
+          const provider = config.provider ?? 'llama-cpp';
+          modelId = config.defaultModel?.[provider as keyof typeof config.defaultModel];
+          const key = modelId ? `${provider}:${modelId}` : '';
+          const entry = fitness.records.find((r) => r.key === key);
+          if (entry?.record.status === 'probed' && !entry.stale)
+            fitnessAdmitted = entry.record.admitted;
+          const device = {
+            platform: health?.platform ?? process.platform,
+            arch: process.arch,
+            label: health?.platform ?? process.platform,
+          };
+          for (const line of renderDoctorModel({
+            provider,
+            modelId,
+            fitness: entry,
+            probing: fitness.probing.includes(key),
+            dataset: SCORECARD,
+            device,
+          })) {
+            console.log(line);
+          }
+        });
+      } catch {
+        /* the model section is best-effort too */
+      }
+    }
+    console.log(
+      doctorVerdict({
+        nodeOk: unsupportedNodeMessage(process.versions.node) === undefined,
+        serviceReachable,
+        modelId,
+        fitnessAdmitted,
+      }),
+    );
   });
 
 // ── Storage: see what Gezel is keeping, and reclaim it before uninstalling ──

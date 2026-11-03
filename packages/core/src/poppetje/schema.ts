@@ -40,53 +40,64 @@ function migrateLegacyAccessory(raw: unknown): unknown {
   return r;
 }
 
+const PoppetjeObject = z.object({
+  /** Stable id; locks the wood-grain noise seed. Pin to the gezel id at creation. */
+  key: z.string().min(1),
+  name: z.string(),
+
+  bodyShape: z.enum(BODY_SHAPE_KEYS as [string, ...string[]]),
+  figureScale: z.enum(FIGURE_SCALE_KEYS as [string, ...string[]]),
+
+  /** Mid-tone of the head. Paired with skin2 for the lateral gradient. */
+  skin: z.string(),
+  /** Darker edge tone. */
+  skin2: z.string(),
+
+  hair: z.string(),
+  hairShape: z.enum(HAIR_SHAPES),
+  /** Optional styling choices; older files retain an open, unparted hairline. */
+  bangs: z.enum(BANGS_OPTIONS).nullable().optional().default(null),
+  hairPart: z.enum(HAIR_PART_OPTIONS).optional().default('none'),
+
+  /** Replaces hair when set; 'hood' renders at body level. */
+  hat: z.enum(HAT_OPTIONS).nullable().optional().default(null),
+  /** Body overlay; null for an unadorned shirt. */
+  dress: z.enum(DRESS_OPTIONS).nullable().optional().default(null),
+  /** Wearable face accessory (glasses, earring, monocle). User-toggleable. */
+  accessory: z.enum(ACCESSORY_OPTIONS).nullable().optional().default(null),
+  /** Facial hair (beard, mustache). Physical — reroll-only. */
+  facialHair: z.enum(FACIAL_HAIR_OPTIONS).nullable().optional().default(null),
+  /** Small facial detail (freckles, mole). Physical — reroll-only. */
+  mark: z.enum(MARK_OPTIONS).nullable().optional().default(null),
+  expression: z.enum(EXPRESSION_OPTIONS).optional().default('smile'),
+
+  shirt: z.string(),
+  shirtAccent: z.string(),
+  /**
+   * Painted garment pattern over the shirt (buttons, stripes, sash, …).
+   * Files written before patterns existed parse as `plain` — the bare
+   * shirt those characters always had.
+   */
+  shirtPattern: z.enum(SHIRT_PATTERN_OPTIONS).optional().default('plain'),
+});
+/**
+ * Named so the declarations that embed a poppetje (gezel summaries, run
+ * recordings, Handboek figures, the startup snapshot) print this name rather
+ * than the whole figure again, about 3.4 KB each and mostly too far apart for
+ * gzip to fold. Named through the object for the reason
+ * `GezelConfigZodSchema` (../schemas/api.ts) is.
+ */
+export interface PoppetjeZodSchema
+  extends z.ZodPreprocess<z.ZodObject<(typeof PoppetjeObject)['shape']>> {}
+
 /**
  * A resolved poppetje — the carved-figure character data for a gezel.
  * Stored explicitly on disk so adding new catalog entries or tuning slot
  * odds later never drifts existing characters. The renderer reads from
  * this struct; the seed generator produces it.
  */
-export const PoppetjeSchema = z.preprocess(
+export const PoppetjeSchema: PoppetjeZodSchema = z.preprocess(
   migrateLegacyAccessory,
-  z.object({
-    /** Stable id; locks the wood-grain noise seed. Pin to the gezel id at creation. */
-    key: z.string().min(1),
-    name: z.string(),
-
-    bodyShape: z.enum(BODY_SHAPE_KEYS as [string, ...string[]]),
-    figureScale: z.enum(FIGURE_SCALE_KEYS as [string, ...string[]]),
-
-    /** Mid-tone of the head. Paired with skin2 for the lateral gradient. */
-    skin: z.string(),
-    /** Darker edge tone. */
-    skin2: z.string(),
-
-    hair: z.string(),
-    hairShape: z.enum(HAIR_SHAPES),
-    /** Optional styling choices; older files retain an open, unparted hairline. */
-    bangs: z.enum(BANGS_OPTIONS).nullable().optional().default(null),
-    hairPart: z.enum(HAIR_PART_OPTIONS).optional().default('none'),
-
-    /** Replaces hair when set; 'hood' renders at body level. */
-    hat: z.enum(HAT_OPTIONS).nullable().optional().default(null),
-    /** Body overlay; null for an unadorned shirt. */
-    dress: z.enum(DRESS_OPTIONS).nullable().optional().default(null),
-    /** Wearable face accessory (glasses, earring, monocle). User-toggleable. */
-    accessory: z.enum(ACCESSORY_OPTIONS).nullable().optional().default(null),
-    /** Facial hair (beard, mustache). Physical — reroll-only. */
-    facialHair: z.enum(FACIAL_HAIR_OPTIONS).nullable().optional().default(null),
-    /** Small facial detail (freckles, mole). Physical — reroll-only. */
-    mark: z.enum(MARK_OPTIONS).nullable().optional().default(null),
-    expression: z.enum(EXPRESSION_OPTIONS).optional().default('smile'),
-
-    shirt: z.string(),
-    shirtAccent: z.string(),
-    /**
-     * Painted garment pattern over the shirt (buttons, stripes, sash, …).
-     * Files written before patterns existed parse as `plain` — the bare
-     * shirt those characters always had.
-     */
-    shirtPattern: z.enum(SHIRT_PATTERN_OPTIONS).optional().default('plain'),
-  }),
+  PoppetjeObject,
 );
 export type Poppetje = z.infer<typeof PoppetjeSchema>;

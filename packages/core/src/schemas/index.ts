@@ -37,6 +37,7 @@ export * from './session-telemetry.js';
 export * from './session-wire-transcript.js';
 export * from './terminal.js';
 export * from './history.js';
+export * from './accounts.js';
 export * from './index-readiness.js';
 export * from './gilde-updates.js';
 export * from './knowledge.js';

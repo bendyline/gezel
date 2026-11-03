@@ -754,13 +754,13 @@ export class LocalEngineRuntime {
                 residentCtxTokens: ds4Block?.residentCtxTokens,
               });
               if (line) {
-                const { totalmem } = await import('node:os');
+                const { totalMemoryBytes } = await import('../../system/host-memory.js');
                 bytes = ds4ProjectedResidentBytes(
                   line,
                   resolveDs4LaunchCtx({
                     configured:
                       config.modelContextOverrides?.[`ds4:${modelId}`] ?? config.ds4NumCtx,
-                    ramTieredCtx: totalmem() / 1024 ** 3 >= 192 ? 262_144 : 131_072,
+                    ramTieredCtx: totalMemoryBytes() / 1024 ** 3 >= 192 ? 262_144 : 131_072,
                     catalogMaxCtx: ds4Block?.maxLaunchCtx,
                     minViableContextTokens: minViableLocalContextTokens(),
                   }),
@@ -1341,8 +1341,8 @@ export class LocalEngineRuntime {
       if (!installed && !hasExplicitSource && !(opts.allowUninstalled && ds4Source)) {
         throw new ModelNotInstalledError(name, modelId);
       }
-      const { totalmem } = await import('node:os');
-      const ramTieredCtx = totalmem() / 1024 ** 3 >= 192 ? 262_144 : 131_072;
+      const { totalMemoryBytes } = await import('../../system/host-memory.js');
+      const ramTieredCtx = totalMemoryBytes() / 1024 ** 3 >= 192 ? 262_144 : 131_072;
       const ds4Override = config.modelContextOverrides?.[`ds4:${modelId}`];
       const ds4Floor =
         ds4Override !== undefined ? Math.min(contextFloor, ds4Override) : contextFloor;

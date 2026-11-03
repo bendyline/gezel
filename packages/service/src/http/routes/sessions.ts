@@ -12,6 +12,7 @@ import {
   UpdateQueuedMessageRequestSchema,
   composeCraftbookLaunch,
   createLogger,
+  errorMessageWithCause,
   getEngagementMode,
   isEngagementAllowed,
   isSafeEntityId,
@@ -54,12 +55,15 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
     // `subject` (repeatable): only threads about these app items — the
     // Office pane asks for its document's path key and its own surface key.
     const subjectKeys = new Set(c.req.queries('subject') ?? []);
+    // `craftbook`: only the threads editing this craftbook (its AI assist).
+    const craftbookRef = c.req.query('craftbook') || undefined;
     const sessions = await ctx.chat.listSessions({ gezelId, projectId });
     return c.json({
-      sessions:
-        subjectKeys.size > 0
-          ? sessions.filter((s) => s.subject && subjectKeys.has(s.subject.key))
-          : sessions,
+      sessions: sessions.filter(
+        (s) =>
+          (subjectKeys.size === 0 || (s.subject && subjectKeys.has(s.subject.key))) &&
+          (!craftbookRef || s.craftbookRef === craftbookRef),
+      ),
     });
   });
 
@@ -308,8 +312,7 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
             ...(body.imageCues ? { imageCues: body.imageCues } : {}),
           })
           .catch((err) => {
-            const message = err instanceof Error ? err.message : String(err);
-            log.warn(`[sessions] send failed for ${id}: ${message}`);
+            log.warn(`[sessions] send failed for ${id}: ${errorMessageWithCause(err)}`);
           }),
       );
     }

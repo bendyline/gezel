@@ -1,4 +1,4 @@
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, isTaskOrCraftbookSession } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { ServiceContext } from '../context.js';
@@ -54,7 +54,7 @@ export function chatEventsRoutes(ctx: ServiceContext): Hono {
       const sessions = await ctx.chat.listSessions({ gezelId, projectId });
       // The gezel/project fallback is an ordinary-chat compatibility route.
       // Task and night-shift streams must be selected explicitly by session.
-      const active = sessions.find((s) => !s.archived && !s.taskRef);
+      const active = sessions.find((s) => !s.archived && !isTaskOrCraftbookSession(s));
       if (!active) return c.json({ error: 'no active session' }, 404);
       sessionId = active.id;
     }

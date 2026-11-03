@@ -3499,6 +3499,13 @@ button.machine-memory-unload-button {
   padding-inline-start: 0.75rem;
 }
 
+/* Reserve the scrollbar gutter whether or not the list overflows, so Home
+   keeps its width as the rail grows past the fold and across the startup
+   handoff, whose rail holds only Home. */
+.app-sidebar:not(.collapsed) .app-sidebar-scroll {
+  scrollbar-gutter: stable;
+}
+
 .app-sidebar:not(.collapsed) .app-sidebar-home {
   width: calc(100% - 0.35rem);
   margin-left: 0.35rem;

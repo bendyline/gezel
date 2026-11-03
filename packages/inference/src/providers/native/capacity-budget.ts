@@ -1,4 +1,5 @@
-import { arch, platform, totalmem } from 'node:os';
+import { arch, platform } from 'node:os';
+import { totalMemoryBytes } from '../../system/host-memory.js';
 
 const GIB = 1024 ** 3;
 
@@ -249,7 +250,7 @@ export interface CapacityBudgetInput {
  * `GEZEL_CAPACITY_BUDGET_GB` overrides the total, including the setting.
  */
 export function computeCapacityBudget(input: CapacityBudgetInput = {}): CapacityBudget {
-  const systemRamBytes = input.systemRamBytes ?? totalmem();
+  const systemRamBytes = input.systemRamBytes ?? totalMemoryBytes();
   // Reading the ambient probe is for callers that know nothing about the
   // host. One that passes `unifiedMemory` has already described it.
   const measuredVram =
@@ -388,7 +389,7 @@ function envOverrideBytes(): number | null {
  * either way.
  */
 export function autoDetectBudgetBytes(
-  systemRamBytes: number = totalmem(),
+  systemRamBytes: number = totalMemoryBytes(),
   opts: { unifiedMemory?: boolean; gpuVramBytes?: number | null } = {},
 ): number {
   return computeCapacityBudget({ systemRamBytes, ...opts }).budgetBytes;
@@ -400,7 +401,7 @@ export function autoDetectBudgetBytes(
  * that must live where the compute happens size against this.
  */
 export function fastMemoryBudgetBytes(
-  systemRamBytes: number = totalmem(),
+  systemRamBytes: number = totalMemoryBytes(),
   opts: { unifiedMemory?: boolean; gpuVramBytes?: number | null } = {},
 ): number {
   return computeCapacityBudget({ systemRamBytes, ...opts }).fastBytes;

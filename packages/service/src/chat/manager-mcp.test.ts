@@ -298,6 +298,49 @@ describe('ChatManager turn intent routing', () => {
     expect(sends[1]?.prompt).toContain('invoke_craftbook');
   }, 30_000);
 
+  // Linux CLI, 2026-11-02: a gemma4-e2b Builder asked for DOCX files had no
+  // DocBlocks, said it had no conversion tool, and ended on a prose menu.
+  it('gives a worker DocBlocks for an Office format and retries its denial once', async () => {
+    const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+    mock.script(
+      "I can't directly convert JSON files to DOCX format, as I don't have a conversion tool.",
+      'Converting them now.',
+    );
+
+    await manager.send(session.id, 'can you convert the JSON files here to DOCX files?');
+
+    const sends = mock.calls.filter((call) => call.kind === 'send');
+    expect(sends).toHaveLength(2);
+    expect(sends[1]?.prompt).toContain('Correction: you can make that file');
+    expect(sends[1]?.prompt).toContain('convert_document');
+  }, 60_000);
+
+  it('posts the options a reply wrote out as a question card', async () => {
+    const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+    mock.script(
+      [
+        'Two ways work.',
+        '',
+        'Which of these would you prefer?',
+        '',
+        '1. **A shell script:** quick to write.',
+        '2. **A Node script:** runs anywhere.',
+      ].join('\n'),
+    );
+
+    await manager.send(session.id, 'Write me a script that renames the photos.');
+
+    const question = (await store.listProjectQuestions('default')).find(
+      (q) => q.sessionId === session.id,
+    );
+    expect(question).toMatchObject({
+      prompt: 'Which of these would you prefer?',
+      choices: ['A shell script', 'A Node script'],
+    });
+    expect((await manager.history(session.id)).at(-1)?.pendingQuestionId).toBe(question?.id);
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
+  }, 30_000);
+
   it('skips the route and the denial retry when the send opted out', async () => {
     const meester = await store.createGezel({ name: 'Nils', role: 'Meester' });
     await store.writeConfig({

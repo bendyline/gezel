@@ -231,7 +231,7 @@ export type ProjectTypeOverlay = z.infer<typeof ProjectTypeOverlaySchema>;
 export const ProjectModeSchema = z.enum(['crew', 'solo']);
 export type ProjectMode = z.infer<typeof ProjectModeSchema>;
 
-export const ProjectSchema = z.object({
+const ProjectObject = z.object({
   id: EntityIdSchema,
   name: z.string(),
   description: z.string().optional(),
@@ -525,6 +525,14 @@ export const ProjectSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
 });
+/**
+ * Named so the project responses print this name rather than the whole
+ * project again, about 7 KB each and mostly too far apart for gzip to fold.
+ * Named through the object for the reason `GezelConfigZodSchema` (./api.ts)
+ * is.
+ */
+export interface ProjectZodSchema extends z.ZodObject<(typeof ProjectObject)['shape']> {}
+export const ProjectSchema: ProjectZodSchema = ProjectObject;
 export type Project = z.infer<typeof ProjectSchema>;
 
 /**
@@ -621,13 +629,20 @@ export const InstalledPackageSchema = z.object({
 });
 export type InstalledPackage = z.infer<typeof InstalledPackageSchema>;
 
-export const ProjectDetailSchema = ProjectSchema.extend({
+const ProjectDetailShape = {
   packages: z.array(InstalledPackageSchema),
   /** Contents of `documents/about.md` inside the project, if present. */
   about: z.string().optional(),
   /** Contents of `documents/missionObjectives.md`, if present. */
   missionObjectives: z.string().optional(),
-});
+};
+/**
+ * Named for the reason {@link ProjectZodSchema} is, through the extension so
+ * its own declaration does not write the project out again either.
+ */
+export interface ProjectDetailZodSchema
+  extends z.ZodObject<z.core.util.Extend<ProjectZodSchema['shape'], typeof ProjectDetailShape>> {}
+export const ProjectDetailSchema: ProjectDetailZodSchema = ProjectSchema.extend(ProjectDetailShape);
 export type ProjectDetail = z.infer<typeof ProjectDetailSchema>;
 
 export const ProjectFileEntrySchema = z.object({

@@ -2,7 +2,7 @@
 id: memory-and-documents
 title: Memory, documents, and the shared library
 order: 4
-summary: What your gezellen remember, and where shared knowledge lives.
+summary: What your crew remembers, and where shared knowledge lives.
 ---
 
 # Memory, documents, and the shared library
@@ -38,7 +38,7 @@ For the technical details, see [How knowledge works in Gezel](../technical/how-k
 
 ## The history log
 
-Gezel keeps an **audit log** of meaningful events: who created which gezel, when a project's mission changed, which tools ran. The History tab lets you filter and search it — and your gezellen can search it too, which means "did anyone change the mission this week?" is a question they can answer truthfully rather than guess at.
+Gezel keeps an **audit log** of meaningful events: who created which gezel, when a project's mission changed, which tools ran. The History tab lets you filter and search it — and your crew can search it too, which means "did anyone change the mission this week?" is a question they can answer truthfully rather than guess at.
 
 ## Everything is a file
 

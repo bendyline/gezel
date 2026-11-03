@@ -1,4 +1,3 @@
-import { availableParallelism } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import {
   DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
@@ -20,6 +19,7 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 import { mmprojBudgetBytes, nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
 import { engineInstallPhase } from '../../engines/registry.js';
+import { availableCpuCount, containerCpuLimit } from '../../system/host-memory.js';
 import {
   localDeviceSettingsLabel,
   noModelYetMessage,
@@ -1586,7 +1586,8 @@ export async function buildLlamaCppProvider(opts: {
         reasoningFormat: process.env.GEZEL_LLAMA_REASONING_FORMAT?.trim() || undefined,
         reasoningPreserve,
         backend: llamaBuildMetadata?.backend ?? process.env.GEZEL_LLAMA_SERVER_BACKEND,
-        hostCpuCount: availableParallelism(),
+        hostCpuCount: availableCpuCount(),
+        containerCpuLimit: containerCpuLimit() ?? undefined,
       });
       return {
         command: binary,

@@ -128,6 +128,47 @@ export function flattenErrorMessage(err: unknown): string {
   return parts.join(' | ');
 }
 
+/**
+ * The most specific reason an error's cause chain gives: the innermost
+ * message. A dual-stack connect fails with an `AggregateError` whose own
+ * message is blank, so its first inner error, then its errno code, stand in.
+ */
+export function innermostErrorReason(err: unknown): string {
+  const seen = new Set<unknown>();
+  let reason = '';
+  let current: unknown = err;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    if (!(current instanceof Error)) {
+      reason = String(current);
+      break;
+    }
+    const inner = (current as { errors?: unknown }).errors;
+    const firstInner = Array.isArray(inner) && inner[0] instanceof Error ? inner[0].message : '';
+    const code = (current as { code?: unknown }).code;
+    reason = current.message || firstInner || (typeof code === 'string' ? code : '') || reason;
+    current = (current as { cause?: unknown }).cause;
+  }
+  return reason;
+}
+
+/** Undici's wrappers, which name neither the host nor the fault. */
+const BARE_FETCH_MESSAGES = new Set(['fetch failed', 'terminated']);
+
+/**
+ * An error's message, with its innermost reason appended when the message is
+ * one of undici's bare wrappers. A chat turn once showed the person, and
+ * logged, nothing but `fetch failed` while `connect ECONNREFUSED
+ * 127.0.0.1:6228` sat on `.cause`. Any other message is returned as is: one
+ * that already says what went wrong does not need its cause repeated.
+ */
+export function errorMessageWithCause(err: unknown): string {
+  if (!(err instanceof Error)) return String(err);
+  if (!BARE_FETCH_MESSAGES.has(err.message)) return err.message;
+  const reason = innermostErrorReason(err);
+  return reason && reason !== err.message ? `${err.message} (${reason})` : err.message;
+}
+
 export interface RetryAttemptInfo {
   /** Which attempt is about to start (1-based). */
   attempt: number;

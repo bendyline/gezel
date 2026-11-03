@@ -122,14 +122,20 @@ function judgeColumns(result: ScorecardModelResult): JudgeColumns {
   };
 }
 
-interface PerformanceColumns {
+/** A result's speeds, chosen by the one rule every published surface uses. */
+export interface ScorecardSpeeds {
   decode?: number;
   prefill?: number;
   samples?: number;
+  /** Which measurement the speeds are; empty when none was recorded. */
   source: string;
 }
 
-function performanceColumns(result: ScorecardModelResult): PerformanceColumns {
+/**
+ * Engine-log medians when the round recorded them, else the older admission
+ * probe; nothing for a result measured across several hardware periods.
+ */
+export function scorecardSpeeds(result: ScorecardModelResult): ScorecardSpeeds {
   const periods = (result.taskMeasurements ?? []).filter(
     (group) => group.outputTokensPerSec || group.prefillTokensPerSec,
   );
@@ -181,7 +187,7 @@ function scorecardCsvFields(run: ScorecardRun, result: ScorecardModelResult): Sc
   const p = run.provenance;
   const score = scoreModel(result, p.count);
   const judge = judgeColumns(result);
-  const perf = performanceColumns(result);
+  const perf = scorecardSpeeds(result);
   return {
     run_id: run.id,
     started_at: p.startedAt,

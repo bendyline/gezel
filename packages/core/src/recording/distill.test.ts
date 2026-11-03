@@ -389,4 +389,43 @@ describe('distillRunRecording', () => {
     expect(recording.scenes.length).toBeGreaterThan(0);
     expect(recording.actors.find((actor) => actor.id === 'user')).toBeDefined();
   });
+
+  it('keeps more of a reasoning trace than of a reply, since the decisions come late', () => {
+    const preamble = 'The user wants me to run the step. '.repeat(20);
+    const decision = "So I'll pick seven slides and close on the next actions.";
+    const recording = distillRunRecording({
+      sessions: [
+        session({
+          id: 's',
+          gezelId: 'ada',
+          messages: [
+            {
+              role: 'assistant',
+              content: `${preamble}${decision}`,
+              at: T(1),
+              reasoning: `${preamble}${decision}`,
+            },
+          ],
+        }),
+      ],
+    });
+    const reasoning = recording.scenes.find((scene) => scene.kind === 'reasoning');
+    const reply = recording.scenes.find((scene) => scene.kind === 'reply');
+    expect(reasoning?.excerpt).toContain(decision);
+    expect(reply?.excerpt?.length).toBe(400);
+    expect(
+      distillRunRecording(
+        {
+          sessions: [
+            session({
+              id: 's',
+              gezelId: 'ada',
+              messages: [{ role: 'assistant', content: 'ok', at: T(1), reasoning: preamble }],
+            }),
+          ],
+        },
+        { maxReasoningChars: 100 },
+      ).scenes.find((scene) => scene.kind === 'reasoning')?.excerpt?.length,
+    ).toBe(100);
+  });
 });

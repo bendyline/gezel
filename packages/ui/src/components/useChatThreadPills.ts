@@ -1,4 +1,5 @@
 import type { ChatEventEnvelope, ChatMessage, ChatSessionSummary } from '@bendyline/gezel';
+import { isTaskOrCraftbookSession } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
@@ -143,7 +144,7 @@ export function selectThreadPills(input: {
   const candidates: ThreadPill[] = [];
   const taskPills = new Map<string, ThreadPill>();
   const latestIndependentSessionId = sessions
-    .filter((session) => !session.archived && !session.taskRef)
+    .filter((session) => !session.archived && !isTaskOrCraftbookSession(session))
     .reduce<ChatSessionSummary | null>((latest, session) => {
       if (!latest || activityMs(session.lastActivityAt) > activityMs(latest.lastActivityAt)) {
         return session;
@@ -183,6 +184,8 @@ export function selectThreadPills(input: {
     }
 
     const pinned = pinnedSessionId !== undefined && s.id === pinnedSessionId;
+    // A craftbook's threads live in its editor's AI assist.
+    if (s.craftbookRef && !pinned) continue;
     // A settled task's chat is a record of finished work, not a live thread.
     if (state === 'idle' && !pinned && s.taskRef && finishedTaskRefs?.has(s.taskRef)) continue;
 

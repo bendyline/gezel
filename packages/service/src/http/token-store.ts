@@ -206,7 +206,14 @@ export interface TokenRecord {
    * in the Integrations UI. Purely a UI/label hint — scope checks don't
    * read it.
    */
-  kind?: 'app' | 'device' | 'harness';
+  kind?: 'app' | 'device' | 'harness' | 'account';
+  /**
+   * For `kind:'account'` records: the signed-in account (ADR 0029) and the
+   * session the token belongs to. Built per lookup by the account resolver;
+   * never stored here or in `tokens.json`.
+   */
+  account?: { id: string; source: 'password' | 'device' | 'os'; label: string };
+  accountSessionId?: string;
   /**
    * For `kind:'harness'` records, the folder the outside app is working in,
    * when it named one. Shown in Settings → Integrations; never persisted.
@@ -302,6 +309,12 @@ export interface TokenStore {
    * don't touch disk on every request). Silent no-op for unknown tokens.
    */
   touch(token: string): void;
+  /**
+   * Consult `resolve` for a token this store does not hold: account
+   * sessions (ADR 0029) live in their own store and are checked here so
+   * every `bearerAuth` mount accepts them without a second middleware.
+   */
+  setAccountResolver(resolve: ((token: string) => TokenRecord | null) | null): void;
 }
 
 export interface CreateTokenStoreOptions {
@@ -416,6 +429,8 @@ export async function createTokenStore(opts: CreateTokenStoreOptions): Promise<T
     await chmod(filePath, 0o600).catch(() => {});
   };
 
+  let accountResolver: ((token: string) => TokenRecord | null) | null = null;
+
   // Serialize the mutation itself, not just its later disk write. Otherwise
   // issue(A) followed immediately by revoke(A) can make issue's queued flush
   // observe the revoked map and return a token that was never durable.
@@ -431,7 +446,11 @@ export async function createTokenStore(opts: CreateTokenStoreOptions): Promise<T
 
   return {
     lookup(token: string): TokenRecord | null {
-      return byToken.get(token) ?? null;
+      return byToken.get(token) ?? accountResolver?.(token) ?? null;
+    },
+
+    setAccountResolver(resolve: ((token: string) => TokenRecord | null) | null): void {
+      accountResolver = resolve;
     },
 
     async issue(input: IssueTokenInput): Promise<TokenRecord> {

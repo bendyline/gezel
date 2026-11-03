@@ -152,6 +152,7 @@ import {
   ProjectSchema,
   ProjectTabVisibilitySchema,
   ProjectTypeProvenanceSchema,
+  type ProjectZodSchema,
 } from './project.js';
 import { PromptDraftConfigSchema } from './prompt-draft.js';
 import {
@@ -4332,14 +4333,21 @@ export const CopilotAvailabilitySchema = z.object({
 });
 export type CopilotAvailability = z.infer<typeof CopilotAvailabilitySchema>;
 
+const ProjectListEntryShape = {
+  /** Deep-pass architecture note, present only on `?rollup=1` requests
+   *  for projects whose index has been enriched. Truncated ~400 chars. */
+  architecture: z.string().optional(),
+};
+/** Named for the reason `ProjectDetailZodSchema` (./project.ts) is. */
+export interface ProjectListEntryZodSchema
+  extends z.ZodObject<
+    z.core.util.Extend<ProjectZodSchema['shape'], typeof ProjectListEntryShape>
+  > {}
+const ProjectListEntrySchema: ProjectListEntryZodSchema =
+  ProjectSchema.extend(ProjectListEntryShape);
+
 export const ListProjectsResponseSchema = z.object({
-  projects: z.array(
-    ProjectSchema.extend({
-      /** Deep-pass architecture note, present only on `?rollup=1` requests
-       *  for projects whose index has been enriched. Truncated ~400 chars. */
-      architecture: z.string().optional(),
-    }),
-  ),
+  projects: z.array(ProjectListEntrySchema),
 });
 
 /**

@@ -1,0 +1,29 @@
+name: Bench result
+description: Share a model scorecard run from `gezel bench --json` so it can join the community rounds.
+title: "Bench result: <model> on <hardware>"
+labels: ["bench-result"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you. Community rounds are shown separately from Bendyline's own rounds, with your hardware named beside every number.
+        `gezel bench submit <file>` fills this in for you when the GitHub CLI is installed.
+  - type: textarea
+    id: shard
+    attributes:
+      label: Results file
+      description: Paste the JSON that `gezel bench --json <file>` wrote, or attach the file by dragging it here.
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: hardware
+    attributes:
+      label: Hardware
+      description: Chip, graphics card and memory, if the file's device line is incomplete.
+      placeholder: "Mac Studio M4 Max 64 GB · or · Ryzen 9 7950X3D, Radeon AI PRO R9700 32 GB"
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything unusual
+      description: Thermal limits, a model that would not load, a run you stopped, or anything else a reader should know.

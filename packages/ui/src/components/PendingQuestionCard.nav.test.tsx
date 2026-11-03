@@ -100,8 +100,7 @@ describe('PendingQuestionCard navigation', () => {
   });
 
   // An attached document is lifted out of the card's context strip into
-  // its own column — once, never twice — and reads as a full portrait
-  // page, so the ten-line teaser's expand toggle has nothing to do.
+  // its own column — once, never twice — and reads as a full portrait page.
   it('lifts an attached document into its own panel', async () => {
     const { container } = render(
       <PendingQuestionCard

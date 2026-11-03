@@ -26,11 +26,19 @@ interface NativePlatformPin {
   symlinks: Record<string, string>;
 }
 
+/**
+ * Schema 3 also pins runtime source files (ds4's `metal/*.metal`), which an
+ * engine compiles at startup and no code signature covers. Schema 2, from
+ * native releases up to 0.1.55, is verified without them, as it was generated.
+ * Same rule as scripts/native-file-manifest-lib.mjs.
+ */
 interface NativeFileManifest {
-  schemaVersion: 2;
+  schemaVersion: 2 | 3;
   release: string;
   platforms: Record<string, NativePlatformPin>;
 }
+
+const NATIVE_RUNTIME_SOURCE_EXTENSIONS = ['.metal'];
 
 const pinnedManifest = pinnedManifestJson as NativeFileManifest;
 
@@ -96,7 +104,10 @@ export async function verifyNativeBinaries(
   const arch = opts.arch ?? process.arch;
   const release = opts.release ?? effectiveEngineRelease();
   const manifest = opts.manifest ?? pinnedManifest;
-  if (manifest.schemaVersion !== 2 || manifest.release !== release) {
+  if (
+    (manifest.schemaVersion !== 2 && manifest.schemaVersion !== 3) ||
+    manifest.release !== release
+  ) {
     return {
       reused: false,
       reason: `no per-file native pins for release ${release}`,
@@ -129,6 +140,7 @@ export async function verifyNativeBinaries(
           root: candidate,
           platform,
           entries: platformEntries,
+          pinRuntimeSources: manifest.schemaVersion >= 3,
           verifySignature: opts.verifySignature ?? verifyCodeSignature,
           allowStandaloneMacPayload: opts.allowStandaloneMacPayload === true,
           cache,
@@ -224,6 +236,7 @@ async function verifyCandidate(opts: {
   root: string;
   platform: NodeJS.Platform;
   entries: Array<[string, NativePlatformPin]>;
+  pinRuntimeSources: boolean;
   verifySignature: typeof verifyCodeSignature;
   allowStandaloneMacPayload: boolean;
   cache: HashCache | null;
@@ -243,7 +256,7 @@ async function verifyCandidate(opts: {
     if (!isRecord(platformPin.files) || !isRecord(platformPin.symlinks)) {
       throw new Error(`invalid native manifest entry: ${platformKey}`);
     }
-    const actual = await listNativeEntries(platformDir, opts.platform);
+    const actual = await listNativeEntries(platformDir, opts.platform, opts.pinRuntimeSources);
     assertSamePaths(
       `${platformKey} executable/loadable file`,
       Object.keys(platformPin.files),
@@ -340,6 +353,7 @@ async function verifyCandidate(opts: {
 async function listNativeEntries(
   root: string,
   platform: NodeJS.Platform,
+  pinRuntimeSources: boolean,
 ): Promise<{ files: string[]; symlinks: Map<string, string> }> {
   const files: string[] = [];
   const symlinks = new Map<string, string>();
@@ -362,7 +376,10 @@ async function listNativeEntries(
         await visit(absolute);
       } else if (entry.isFile()) {
         const info = await lstat(absolute);
-        if (isLoadableNativeFile(platform, entry.name, info.mode)) {
+        if (
+          isLoadableNativeFile(platform, entry.name, info.mode) ||
+          (pinRuntimeSources && isNativeRuntimeSource(entry.name))
+        ) {
           files.push(path);
         }
       } else {
@@ -414,6 +431,11 @@ function isLoadableNativeFile(platform: NodeJS.Platform, name: string, mode: num
   if (platform === 'win32') return lower.endsWith('.exe') || lower.endsWith('.dll');
   if (platform === 'darwin') return lower.endsWith('.dylib') || (mode & 0o111) !== 0;
   return lower.includes('.so') || (mode & 0o111) !== 0;
+}
+
+function isNativeRuntimeSource(name: string): boolean {
+  const lower = name.toLowerCase();
+  return NATIVE_RUNTIME_SOURCE_EXTENSIONS.some((extension) => lower.endsWith(extension));
 }
 
 function isSafeRelativePath(path: string): boolean {

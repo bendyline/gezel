@@ -53,7 +53,9 @@ export type NativeBinaryName =
   | 'uv'
   | 'duckdb'
   /** macOS 26+ bridge to Apple's on-device model (native/helpers/apple-fm). */
-  | 'apple-fm';
+  | 'apple-fm'
+  /** Linux launcher that starts a script under rules it cannot lift, such as no network where systemd-run is unavailable (native/helpers/sandbox). */
+  | 'sandbox';
 
 export interface DiscoverInput {
   /** GEZEL_HOME — backend cache file lives at `<home>/engines/llama-cpp/`. */
@@ -432,6 +434,7 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
     { name: 'device-health' as const, envVar: 'GEZEL_DEVICE_HEALTH_BIN' },
     { name: 'uv' as const, envVar: 'GEZEL_UV_BIN' },
     ...(platform === 'darwin' ? [{ name: 'apple-fm' as const, envVar: 'GEZEL_APPLE_FM_BIN' }] : []),
+    ...(platform === 'linux' ? [{ name: 'sandbox' as const, envVar: 'GEZEL_SANDBOX_BIN' }] : []),
   ]) {
     if (process.env[envVar]) {
       binaries.push({ name, source: 'pre-set', path: process.env[envVar] });

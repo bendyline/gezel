@@ -104,7 +104,8 @@ for (const app of catalogPages()) {
           );
         }
       }
-      await form.getByRole('button', { name: 'Save', exact: true }).click();
+      // An action form's one button submits it, whatever the app labels it.
+      await form.getByRole('button').click();
       await expect(form.getByRole('status')).toHaveText('Saved.', { timeout: 20_000 });
       await form.locator('summary').click();
     }
@@ -162,7 +163,8 @@ test('page edits respect a denied workspace policy and retain the entered draft'
   const form = frame.locator('gezel-action-form').filter({ hasText: 'Plan a meal' });
   await form.locator('summary').click();
   await form.getByLabel('Meal', { exact: true }).fill('A meal to keep in the draft');
-  await form.getByRole('button', { name: 'Save', exact: true }).click();
+  // An action form's one button submits it, whatever the app labels it.
+  await form.getByRole('button').click();
   await expect(form.getByRole('status')).toContainText('Could not save.');
   await expect(form.getByLabel('Meal', { exact: true })).toHaveValue('A meal to keep in the draft');
   expect((await api.readProjectWorkspaceFile(project.id, 'menu.json')).content).toBe(

@@ -18,11 +18,11 @@
 
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { totalmem } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { gezelHome } from '@bendyline/gezel/paths';
+import { totalMemoryBytes } from '../../system/host-memory.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -215,7 +215,7 @@ export async function probeLlamaDevices(opts: {
 }): Promise<LlamaDeviceProbe> {
   const { binaryPath, home, force } = opts;
   const now = opts.nowIso ?? (() => new Date().toISOString());
-  const systemRamBytes = opts.systemRamBytes ?? totalmem();
+  const systemRamBytes = opts.systemRamBytes ?? totalMemoryBytes();
   const path = cachePath(home);
   const binary = llamaBinaryFingerprint(binaryPath);
 

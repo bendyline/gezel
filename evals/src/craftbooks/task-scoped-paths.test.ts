@@ -24,9 +24,19 @@ import { loadCraftbookTestSpecsSync } from './test-spec-loader.ts';
  * match is version-exact, so the fixed version is checked like any other.
  * changelog-writeup 1.0.3 (gilde 0.3.2) is the first version of that book the
  * harness loaded; earlier ones never reached Gilde's legacy index, so the
- * sweep that unpinned the rest never saw it.
+ * sweep that unpinned the rest never saw it. The 1.0.0 books below arrived in
+ * gilde 0.3.5 pinning `tasks/eval` while seeding their fixtures at the
+ * workspace root.
  */
-const PINNED_UNTIL_NEXT_VERSION = new Map([['changelog-writeup', '1.0.3']]);
+const PINNED_UNTIL_NEXT_VERSION = new Map([
+  ['changelog-writeup', '1.0.3'],
+  ['audit-evidence-pack', '1.0.0'],
+  ['reorder-run', '1.0.0'],
+  ['review-reply-batch', '1.0.0'],
+  ['run-of-show', '1.0.0'],
+  ['structured-interview-kit', '1.0.0'],
+  ['weekly-schedule-draft', '1.0.0'],
+]);
 
 describe('craftbook eval sidecars keep working files task-scoped', () => {
   const specs = loadCraftbookTestSpecsSync();

@@ -80,11 +80,14 @@ A macro is a leaf directive on its own line. The engine expands it into plain ma
 | `::handboek-installed-models` | Models installed on this device with engine and tier. |
 | `::handboek-project-type-composition{id=…}` | What a project type sets up: crew, craftbooks, toolsets, schedules. |
 | `::handboek-model-scorecard{suites=core,productivity}` | Measured model results from the checked-in scorecard, grouped by test round (`suite=core` renders a single set). The site gets a filterable HTML version. |
+| `::handboek-community-scorecard{suites=core,productivity}` | Community rounds submitted with `gezel bench submit`, from `packages/core/src/scorecard/data/community/`, rendered apart from Bendyline's rounds in every mode. |
 | `::handboek-whats-new-list{limit=12}` | Every release in `whats-new/`, newest first, each with its one-line summary. Identical in all three modes. |
 
 ## Conventions
 
-- Second person, warm, plain language — the Handboek exists to make gezel approachable for non-technical people. Explain a Dutch term the first time an article uses it.
+- Second person, warm, plain language — the Handboek exists to make gezel approachable for non-technical people.
+- Don't re-explain gezel in every article. [What is gezel?](conceptual/welcome.md) says what a gezel is and introduces the Meester, so other articles use those words without defining them and link to the article that covers a concept rather than restating it.
+- The only Dutch words left are *gezel*, *Handboek* and *Meester*. Everything else has a plain English name (the Crew Lead, the Librarian, the Scribe; see [plain-names.ts](../../packages/core/src/roles/plain-names.ts)), so use that name and don't bring the Dutch one back.
 - No emojis (repo-wide rule).
 - Don't hard-wrap prose — one paragraph is one line. The squisq renderer keeps a single newline inside a paragraph as a real line break, so 80-column wrapping shows up as ragged breaks in the app. The engine folds soft breaks defensively (`packages/service/src/handboek/unwrap.ts`, for prose that comes from gilde), but sources here stay unwrapped so diffs stay readable.
 - Relative links between articles and to `assets/…` only; the link checker (`scripts/check-markdown-links.mjs`) runs over this tree.

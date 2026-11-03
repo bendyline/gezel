@@ -175,7 +175,7 @@ export async function buildDs4Provider(opts: {
   // This tier assumes DeepSeek-V4's small resident footprint. A model whose
   // non-routed weights are much larger caps it further via the catalog's
   // `ds4.maxLaunchCtx`; see `resolveDs4LaunchCtx` below.
-  const totalRamBytes = (await import('node:os')).totalmem();
+  const totalRamBytes = (await import('../../system/host-memory.js')).totalMemoryBytes();
   const totalRamGb = totalRamBytes / 1024 ** 3;
   const ramTieredCtx = ds4RamTieredContext(totalRamBytes);
   const ds4ConstrainedToolNoSignalMs = (() => {

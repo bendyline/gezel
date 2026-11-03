@@ -8,8 +8,8 @@ import type { LanguageProfile } from './detect.js';
  * project's files.
  *
  * Exists because {@link detectProjectType} was gated on the content index
- * having already run: a folder opened for the first time (the CLI's `npx gezel`
- * path) had no profile until the index tick fired, so `detectedProjectType`
+ * having already run: a folder opened for the first time (the CLI's
+ * `npx -p @bendyline/gezel-cli gezel` path) had no profile until the index tick fired, so `detectedProjectType`
  * stayed unset for the whole first session and every consumer — the craftbook
  * rail, the gezel-role affinity lists — behaved as if the folder had no shape.
  * This runs off nothing but a directory walk, so a type is available the moment

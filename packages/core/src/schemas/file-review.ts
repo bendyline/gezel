@@ -144,7 +144,7 @@ export type IssueVerdictEntry = z.infer<typeof IssueVerdictEntrySchema>;
  * hash whose review last reported the issue; the old line is retained as
  * evidence, but consumers must label it as a previous anchor.
  */
-export const BoekwachterIssueSchema = FileReviewIssueSchema.extend({
+const BoekwachterIssueObject = FileReviewIssueSchema.extend({
   /** Small project-scoped reference intended for people and prompts. */
   ref: z.string().regex(/^BW-[1-9]\d*$/),
   /** Collision-resistant internal identity; never use the display ref as a map key. */
@@ -179,6 +179,14 @@ export const BoekwachterIssueSchema = FileReviewIssueSchema.extend({
    */
   lowConfidence: z.boolean().optional(),
 });
+/**
+ * Named so the issue routes' responses and the verdict results print this
+ * name rather than the whole issue, verdict and all, again. Named through
+ * the object for the reason `GezelConfigZodSchema` (./api.ts) is.
+ */
+export interface BoekwachterIssueZodSchema
+  extends z.ZodObject<(typeof BoekwachterIssueObject)['shape']> {}
+export const BoekwachterIssueSchema: BoekwachterIssueZodSchema = BoekwachterIssueObject;
 export type BoekwachterIssue = z.infer<typeof BoekwachterIssueSchema>;
 
 /**

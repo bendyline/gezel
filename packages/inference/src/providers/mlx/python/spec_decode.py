@@ -117,8 +117,11 @@ def resolve_spec(args, model, text_tower: Optional[str], log=print) -> Optional[
     except Exception as exc:  # noqa: BLE001
         _off(log, f"drafter incompatible with target: {exc}")
         return None
-    if not install_chunked_draft_prefill(
-        drafter, int(getattr(args, "prefill_step_size", 0) or 0), log=log
+    if (
+        callable(getattr(drafter, "prefill_from_target_hidden", None))
+        and not install_chunked_draft_prefill(
+            drafter, int(getattr(args, "prefill_step_size", 0) or 0), log=log
+        )
     ):
         log(
             "[spec] drafter has no incremental prefill surface — long prompts "
@@ -240,6 +243,11 @@ def draft_prefill_gate(spec: Optional[SpecState], prompt_len: int) -> Tuple[bool
     throw that work away."""
     if spec is None:
         return True, ""
+    # Shared-KV drafters (e.g. Gemma's assistant) have no separate prompt
+    # prefill. Both round loops skip this optional hook, so there is no
+    # quadratic drafter prefill to limit for that capability shape.
+    if not callable(getattr(spec.drafter, "prefill_from_target_hidden", None)):
+        return True, ""
     if getattr(spec.drafter, "_gezel_chunked_prefill", False):
         return True, ""
     if int(prompt_len) > UNCHUNKED_DRAFT_PREFILL_LIMIT:
@@ -278,9 +286,21 @@ def cache_matches_tower(layers, tower) -> bool:
         return False
     if layers is None or len(layers) != len(expect):
         return False
-    return all(
-        type(a).__name__ == type(b).__name__ for a, b in zip(layers, expect)
-    )
+
+    def matches(actual, expected):
+        if type(actual).__name__ == type(expected).__name__:
+            return True
+        # Upstream MTP deliberately wraps a rotating cache in this subclass
+        # to roll back rejected drafts. It is still the same target layout;
+        # rejecting our own saved cache here forces every follow-up cold.
+        # Do not admit arbitrary subclasses (e.g. batch-shaped cache adapters).
+        return (
+            type(expected).__name__ == "RotatingKVCache"
+            and type(actual).__name__ == "BufferedRotatingKVCache"
+            and isinstance(actual, type(expected))
+        )
+
+    return all(matches(a, b) for a, b in zip(layers, expect))
 
 
 def clone_layers(layers) -> List[Any]:
@@ -292,6 +312,25 @@ def clone_layers(layers) -> List[Any]:
     for c in layers:
         out.append(type(c).from_state(c.state, c.meta_state))
     return out
+
+
+def cached_token_prefix(layers, tokens: Sequence[int]) -> Optional[List[int]]:
+    """Describe only tokens actually fed into a trimmable target cache.
+
+    A final bonus token can be emitted before it is fed back to the target.
+    Saving it as cached makes the next seed fail its offset consistency guard.
+    Unknown or disagreeing offsets must remain a miss, never guessed state.
+    """
+    try:
+        offsets = [int(c.offset) for c in layers]
+    except (AttributeError, TypeError, ValueError):
+        return None
+    if not offsets or len(set(offsets)) != 1:
+        return None
+    count = offsets[0]
+    if count <= 0 or count > len(tokens):
+        return None
+    return list(tokens[:count])
 
 
 def chunked_prefill_steps(

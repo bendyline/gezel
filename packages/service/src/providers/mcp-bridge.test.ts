@@ -16,6 +16,7 @@ import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type RunningService, startService } from '../service.js';
+import { evaluateStepGate } from '../tasks/step-gate.js';
 import { McpBridge } from './mcp-bridge.js';
 import { UnresolvedToolFailureLedger } from './unresolved-tool-failure-ledger.js';
 
@@ -728,6 +729,33 @@ describe('McpBridge', () => {
       path: 'tasks/1/report.html',
     });
     expect(readBack).toContain('<h1>Task report</h1>');
+  });
+
+  it.each([
+    ['approve', 'Amounts reconcile PASS\nNumbers continue PASS\nDue dates match terms PASS\n'],
+    ['reject', 'Amounts reconcile PASS\nNumbers continue PASS\nDue dates match terms FAIL\n'],
+  ])('preserves Markdown verdict lines so the gate can %s them', async (decision, content) => {
+    const path = 'tasks/1/criteria.md';
+    const scoped = await boundBridge();
+    const written = await scoped.callTool('write_artifact', { path, content });
+    expect(written).not.toMatch(/ERROR:/);
+    const stored = await svc.context.store.readProjectArtifact('default', path);
+    expect(stored).toBe(content);
+    const outcome = await evaluateStepGate({
+      gate: {
+        at: 'completion',
+        checks: [
+          { kind: 'contains', file: path, pattern: '\\bPASS\\s*$', flags: 'm', artifact: true },
+          { kind: 'notContains', file: path, pattern: '\\bFAIL\\s*$', flags: 'm', artifact: true },
+        ],
+        scripts: [],
+        maxAttempts: 4,
+        legacy: false,
+      },
+      ws: { read: async () => null, list: async () => [], readArtifact: async () => stored },
+      runScript: vi.fn(),
+    });
+    expect(outcome.decision).toBe(decision);
   });
 
   it('preserves the previous JSON artifact when a replacement is truncated or malformed', async () => {

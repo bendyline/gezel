@@ -1,5 +1,6 @@
 import {
   APP_ITEM_FOCUS_BUILTIN_TOOLS,
+  CRAFTBOOK_FOCUS_BUILTIN_TOOLS,
   type ChatSession,
   type GezelConfig,
   LEAN_PROFILE_BUILTIN_TOOLS,
@@ -35,7 +36,6 @@ import {
 import { promptConditionallyReferencedTools, promptMandatedTools } from './prompt-tool-contract.js';
 import {
   EXTERNAL_SERVICE_TOOLS,
-  MEESTER_STRIPPED_CRAFTBOOK_TOOLS,
   WORK_ROUTING_TOOLS,
   type WebSearchBackendName,
   computeToolAllowlist,
@@ -112,6 +112,7 @@ export function taskStepContextualBuiltinTools(
 export type SessionToolSurface = 'prompt' | 'bridge';
 export type SessionToolClampKind =
   | 'app-item-focus'
+  | 'craftbook-focus'
   | 'project-orchestration'
   | 'exact-craftbook-invocation'
   | 'project-retrieval-first'
@@ -493,19 +494,42 @@ export async function resolveSessionToolSurface(
       if (entry?.registration === 'conditional' && entry.modelFacing) rawAllowlist.add(name);
     }
   }
-  // The full surgical step-patch schema is intentionally absent from every
-  // ordinary role kit. It is worth its ~18K compact schema characters only
-  // in the explicit Craftbook editor, where the session is pinned to one
-  // template and the editing prompt names it. Null already means unrestricted;
-  // a concrete role/security allowlist needs this contextual grant.
-  if (rawAllowlist && opts.session.craftbookRef) {
-    rawAllowlist = new Set(rawAllowlist);
-    rawAllowlist.add('craftbook_update_step');
-    // The default Meester roster drops step surgery in favor of the
-    // whole-document `craftbook_read` + `craftbook_write` path
-    // (MEESTER_STRIPPED_CRAFTBOOK_TOOLS). A session pinned to one template
-    // IS the editor, and its prompt names these — same grant, same reason.
-    for (const name of MEESTER_STRIPPED_CRAFTBOOK_TOOLS) rawAllowlist.add(name);
+  // A thread pinned to one craftbook: improving that book is the whole job,
+  // whatever the role. The editing family is granted outright: the session
+  // pin is what admits it (the surgical step-patch schema is in no ordinary
+  // role kit, and the Meester's roster strips step surgery). The reference
+  // tools still pass the hard ceiling and, for a worker, the coordinator-only
+  // subtraction, so nothing offered here is a guaranteed 403. It returns
+  // before the message-shaped clamps, which would read "add a step that
+  // writes a deck" as a deck to make.
+  if (opts.session.craftbookRef) {
+    const ceiling = computeToolAllowlist({
+      role: opts.role,
+      mode: 'never',
+      provider: opts.provider,
+      ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
+      ...(opts.parameterSize !== undefined ? { parameterSize: opts.parameterSize } : {}),
+      githubLinked: opts.githubLinked,
+      isGitRepo: opts.isGitRepo,
+      ...(opts.securityPolicy ? { securityPolicy: opts.securityPolicy } : {}),
+      ...(opts.workspaceWritable !== undefined
+        ? { workspaceWritable: opts.workspaceWritable }
+        : {}),
+    });
+    const editing = (name: string) =>
+      name.startsWith('craftbook_') || name === 'set_step_deliverable';
+    let allowlist = new Set(
+      CRAFTBOOK_FOCUS_BUILTIN_TOOLS.filter(
+        (name) => editing(name) || ceiling === null || ceiling.has(name),
+      ),
+    );
+    if (!coordinatorScope) allowlist = withoutCoordinatorOnlyTools(allowlist, () => allowlist);
+    opts.onClamp?.('craftbook-focus');
+    return {
+      allowlist,
+      projectOrchestrationConstrained: false,
+      exactCraftbookConstrained: false,
+    };
   }
   // Lean-profile hard override: collapse the builtin surface to the minimal
   // essential set. Applied right after the role compute — a game session has

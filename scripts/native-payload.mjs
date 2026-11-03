@@ -48,6 +48,8 @@
  *     first ships in the release named in FIRST_NATIVE_RELEASE below.
  *   - `gezel-device-health` is Windows + Linux only (macOS uses IOKit in-process)
  *   - `gezel-service-host` is Windows only (macOS/Linux use launchd/systemd)
+ *   - `gezel-sandbox` is Linux only (macOS has Seatbelt, Windows the MXC
+ *     container); it ships from the release named in FIRST_NATIVE_RELEASE_BINARY
  *   - no `duckdb` — the DuckDB CLI is vendored unmodified from the DuckDB
  *     Foundation's own signed + notarized release, so it is a bundled runtime
  *     beside node and pnpm (`packages/app/scripts/fetch-duckdb.mjs`, pinned in
@@ -114,11 +116,23 @@ export const NATIVE_PAYLOAD = Object.freeze({
     'uv',
   ],
   'darwin-arm64-metal': ['gezel-llama-server'],
-  'linux-x64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
+  'linux-x64': [
+    'gezel-device-health',
+    'gezel-sandbox',
+    'gezel-sd-server',
+    'gezel-whisper-server',
+    'uv',
+  ],
   'linux-x64-cpu': ['gezel-llama-server'],
   'linux-x64-vulkan': ['gezel-llama-server'],
   'linux-x64-cuda': ['gezel-llama-server', 'gezel-ds4-server', 'gezel-sd-server'],
-  'linux-arm64': ['gezel-device-health', 'gezel-sd-server', 'gezel-whisper-server', 'uv'],
+  'linux-arm64': [
+    'gezel-device-health',
+    'gezel-sandbox',
+    'gezel-sd-server',
+    'gezel-whisper-server',
+    'uv',
+  ],
   'linux-arm64-cpu': ['gezel-llama-server'],
   'linux-arm64-cuda': ['gezel-llama-server', 'gezel-ds4-server', 'gezel-sd-server'],
 });
@@ -145,6 +159,7 @@ export const ENGINE_FOR_BINARY = Object.freeze({
   uv: 'uv',
   'vec0.dll': 'sqlite-vec',
   'gezel-device-health': null,
+  'gezel-sandbox': null,
   'gezel-service-host': null,
   'gezel-apple-fm': null,
 });
@@ -182,6 +197,8 @@ export const FIRST_NATIVE_RELEASE = Object.freeze({
 export const FIRST_NATIVE_RELEASE_BINARY = Object.freeze({
   'win32-arm64/vec0.dll': '0.1.53',
   'win32-arm64-cuda/gezel-whisper-server': '0.1.53',
+  'linux-x64/gezel-sandbox': '0.1.56',
+  'linux-arm64/gezel-sandbox': '0.1.56',
 });
 
 function parseNativeVersion(version) {

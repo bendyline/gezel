@@ -788,7 +788,7 @@ privileged service identity or putting the daemon root token on disk.
 | Package-script edits by sandboxed scripts | PARTIAL | `run_nodejs_script` / `derive_file` write through Node's permission model, not the Store, so only the workspace's root manifests are snapshotted and put back. A nested workspace package's `scripts` can still change that way while `allowPackageScriptEdits` is off. |
 | URL, Git, local-file, workspace, and alias NPM sources | NOT SUPPORTED | The generic install surfaces intentionally accept registry packages only. If alternate sources become necessary, add a separate explicit consent-gated API with source-specific validation and SSRF controls; do not widen the registry-package parser. |
 | Package-command input closure | PARTIAL | Persistent approvals bind identifiable project-local files, but outside-project paths, directory/glob contents, dynamically selected files, implicit config conventions, PATH-resolved programs, bare package imports, oversized files, input graphs beyond the bounded scan, and network responses cannot always be inferred safely before execution. Treat an approved package command as trusted code, not a sandbox. |
-| Default security level = `free` | BY DESIGN | Confirm against product risk appetite. |
+| Default security level | ENFORCE | New installs get explicit `lockdown`; an absent policy resolves to `lockdown` (`DEFAULT_SECURITY_LEVEL`). Only a configured legacy install is migrated to explicit `free`, to preserve the behavior it already had (§5). |
 
 ---
 

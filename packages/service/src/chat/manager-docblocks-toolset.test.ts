@@ -336,6 +336,33 @@ describe('ChatManager — the bundled DocBlocks joins only document work', () =>
     expect(rebuilds()).toBe(1);
   });
 
+  // Linux CLI, 2026-11-02: a gemma4-e2b Builder asked for this had no
+  // `convert_document` and said it could not make the file.
+  it('joins a plain chat whose person asks for an Office format by name', async () => {
+    const { extras } = await createOpts(
+      await manager.createSession({ gezelId: 'ada' }),
+      'can you convert the JSON files here to DOCX files?',
+    );
+    expect(extras).toContain('docblocks');
+  });
+
+  it('leaves a crew lead asked for a format to its craftbook route', async () => {
+    await store.createGezel({ name: 'Vera', role: 'Crew Lead' });
+    const { extras } = await createOpts(
+      await manager.createSession({ gezelId: 'vera' }),
+      'Please make a PowerPoint about Mongolia',
+    );
+    expect(extras).not.toContain('docblocks');
+  });
+
+  it('stays out of a chat that only asks about a format', async () => {
+    const { extras } = await createOpts(
+      await manager.createSession({ gezelId: 'ada' }),
+      'What is a DOCX file?',
+    );
+    expect(extras).not.toContain('docblocks');
+  });
+
   it('stays out of a chat that names only a PDF', async () => {
     const { extras } = await createOpts(
       await manager.createSession({ gezelId: 'ada' }),

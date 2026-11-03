@@ -40,6 +40,7 @@ const unixWrapperPaths = [
   '../native/engines/whisper-cpp/build.sh',
   '../native/engines/ds4/build.sh',
   '../native/helpers/device-health/build.sh',
+  '../native/helpers/sandbox/build.sh',
 ].map((path) => [path, readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8')]);
 const windowsWrapperPaths = [
   '../native/engines/llama-cpp/build.ps1',

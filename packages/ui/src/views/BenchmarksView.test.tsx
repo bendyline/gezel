@@ -154,6 +154,15 @@ describe('BenchmarksView', () => {
     expect(await screen.findByRole('button', { name: 'Start evaluation' })).toBeEnabled();
   });
 
+  it('stamps the page with the hardware, engine build and version a result belongs to', async () => {
+    render(<BenchmarksView />);
+    const host = await screen.findByTestId('bench-host');
+    // The same line `gezel bench` prints before it starts.
+    expect(host).toHaveTextContent(
+      'Measuring on: Linux · AMD Radeon RX 7900 XTX · 60 GB · native native-v0.0.0 (vulkan) · gezel 1.0.0-test',
+    );
+  });
+
   it('plans the default suite with the default model and names what cannot be graded', async () => {
     render(<BenchmarksView />);
     const suite = await screen.findByRole('combobox', { name: 'Suite' });

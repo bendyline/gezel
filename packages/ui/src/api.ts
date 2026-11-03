@@ -17,6 +17,7 @@ import {
   invalidateApiReads,
   withReadInvalidation,
 } from './shared-api-reads.js';
+import { SIGNED_OUT_EVENT, TOKEN_STORAGE_KEY, isSignedOutResponse } from './sign-in/gate.js';
 
 /**
  * Where an app update has got to. Mirrors the union the Electron main process
@@ -467,11 +468,36 @@ const injectedFetch = window.__GEZEL__?.fetch;
 const baseFetch: typeof fetch = injectedFetch ?? ((input, init) => globalThis.fetch(input, init));
 const appSurface = readAppSurface(window.location.search);
 
+/**
+ * An account session (ADR 0029) can end while the page is open: signed out
+ * from another browser, its password changed, or simply expired. Tell the
+ * sign-in gate so the person sees "Sign in again" instead of a wall of
+ * failed requests.
+ */
+function watchSignedOut(inner: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    const res = await inner(input, init);
+    if (res.status === 401) {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      let token: string | null = null;
+      try {
+        token = window.localStorage.getItem(TOKEN_STORAGE_KEY);
+      } catch {
+        token = null;
+      }
+      if (isSignedOutResponse(res.status, url, token)) {
+        window.dispatchEvent(new Event(SIGNED_OUT_EVENT));
+      }
+    }
+    return res;
+  };
+}
+
 export const api = new GezelClient({
   baseUrl: resolveBaseUrl(),
   token: resolveToken(),
   fetch: withReadInvalidation(
-    instrumentFetch(appSurface ? withAppSurface(baseFetch, appSurface) : baseFetch),
+    instrumentFetch(watchSignedOut(appSurface ? withAppSurface(baseFetch, appSurface) : baseFetch)),
   ),
 });
 installSharedApiReads(api);

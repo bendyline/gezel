@@ -1,3 +1,4 @@
+import { innermostErrorReason } from '@bendyline/gezel';
 import type { SystemServiceRuntime } from '@bendyline/gezel-client/node';
 import {
   IdentityResponseSchema,
@@ -11,9 +12,19 @@ const MACHINE_REMOTE_ID = 'this-machine';
 export async function inspectMachineRuntime(runtime: SystemServiceRuntime): Promise<PairedRemote> {
   const fetchImpl = runtime.cert ? createPinnedFetch(runtime.cert) : fetch;
   try {
-    const response = await fetchImpl(`${runtime.baseUrl}/v1/identity`, {
-      signal: AbortSignal.timeout(5_000),
-    });
+    let response: Response;
+    try {
+      response = await fetchImpl(`${runtime.baseUrl}/v1/identity`, {
+        signal: AbortSignal.timeout(5_000),
+      });
+    } catch (error) {
+      // Bare, this surfaced as `fetch failed` in chat bubbles that never
+      // mentioned a machine engine at all.
+      throw new Error(
+        `Gezel's machine engine at ${runtime.baseUrl} isn't answering (${innermostErrorReason(error)})`,
+        { cause: error },
+      );
+    }
     if (!response.ok) throw new Error(`identity returned HTTP ${response.status}`);
     const identity = IdentityResponseSchema.parse(await response.json());
     if (identity.serviceRole !== 'machine-engine') {

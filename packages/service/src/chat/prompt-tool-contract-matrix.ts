@@ -25,6 +25,7 @@ import {
   type ProviderName,
   type ResolvedSecurityPolicy,
   type Task,
+  renderCraftbookFocusBlock,
   resolveGeneralistKickoff,
   resolveRoleId,
   resolveSecurityPolicy,
@@ -667,17 +668,33 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
                 ? { workspaceWritable: scenario.workspaceWritable }
                 : {}),
               layeredPrefixCache: provider === 'llama-cpp',
+              ...(scenario.craftbookRef ? { craftbookFocus: true } : {}),
             });
-            const userPrelude = resolveMatrixUserPrelude({
-              profile,
-              providerName: provider,
-              modelId: manifest.id,
-              sessionId: session.id,
-              userText: scenario.latestUserMessage,
-              isMeester: roleManifest.id === 'meester',
-              availableToolNames: availableTools.map((tool) => tool.name),
-            });
-            const renderedPrompt = [instructions.full, instructions.volatileContext, userPrelude]
+            // A craftbook thread renders the book's section and runs no
+            // per-turn preludes, as in ChatManager.
+            const craftbookBlock = scenario.craftbookRef
+              ? renderCraftbookFocusBlock({
+                  id: scenario.craftbookRef,
+                  toolNames: availableTools.map((tool) => tool.name),
+                })
+              : null;
+            const userPrelude = scenario.craftbookRef
+              ? null
+              : resolveMatrixUserPrelude({
+                  profile,
+                  providerName: provider,
+                  modelId: manifest.id,
+                  sessionId: session.id,
+                  userText: scenario.latestUserMessage,
+                  isMeester: roleManifest.id === 'meester',
+                  availableToolNames: availableTools.map((tool) => tool.name),
+                });
+            const renderedPrompt = [
+              instructions.full,
+              instructions.volatileContext,
+              craftbookBlock,
+              userPrelude,
+            ]
               .filter((part): part is string => Boolean(part))
               .join('\n\n');
             const toolNames = availableTools.map((tool) => tool.name);

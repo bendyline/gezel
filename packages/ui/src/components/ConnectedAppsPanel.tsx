@@ -66,6 +66,8 @@ interface PendingGrant {
   verificationRequired?: boolean;
   /** Scopes the app already holds, when this request adds to its grant. */
   upgradeFrom?: string[];
+  /** Arrived over a container's network listener rather than this machine. */
+  fromNetwork?: boolean;
 }
 
 interface ConnectedAppsResponse {
@@ -361,6 +363,7 @@ export function ConnectedAppsPanel() {
                   <div className="connected-app-name">
                     {g.appName}
                     {g.kind === 'device' && <span className="badge"> device</span>}
+                    {g.fromNetwork && <span className="badge"> from the network</span>}
                   </div>
                   <div className="muted small">
                     {g.kind === 'device'

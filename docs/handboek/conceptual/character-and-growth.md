@@ -7,7 +7,7 @@ summary: How a gezel's character shapes their chat, how they grow with you, and 
 
 # Social mode
 
-**Social mode** is one switch in **Settings → General**. With it on, your gezellen chat in their own character, you can watch them grow, and opening a chat shows you what they have waiting. With it off, they work in a plain, even voice and none of this is on screen.
+**Social mode** is one switch in **Settings → General**. With it on, your crew chats in character, you can watch each gezel grow, and opening a chat shows you what is waiting. With it off, they work in a plain, even voice and none of this is on screen.
 
 It starts on for phones and off for the desktop. Your choice wins on either one.
 
@@ -28,7 +28,7 @@ Some choices also have a practical effect. A quiet, calm, or frugal gezel keeps 
 
 ## Growth
 
-Gezellen get better at helping you over time, and growth makes that visible. A gezel earns experience from what they **learn**: preferences and decisions they write down, corrections they take on board, lessons they distill, and work they finish. Chatting more does not earn anything. Neither does sending lots of messages.
+Your crew gets better at helping you over time, and growth makes that visible. A gezel earns experience from what they **learn**: preferences and decisions they write down, corrections they take on board, lessons they distill, and work they finish. Chatting more does not earn anything. Neither does sending lots of messages.
 
 When a gezel reaches a new level, they offer you a short menu of changes, each grounded in what they've actually learned:
 
@@ -51,4 +51,4 @@ With social mode on, opening a gezel's chat shows **at most one** thing they hav
 - a question they asked that you haven't answered yet, or
 - work they finished in the last few days, with a button to open it.
 
-If there's nothing waiting, there's no card. Gezellen don't invent a greeting to fill the space. Dismiss a card and it stays gone.
+If there's nothing waiting, there's no card. Gezel doesn't invent a greeting to fill the space. Dismiss a card and it stays gone.

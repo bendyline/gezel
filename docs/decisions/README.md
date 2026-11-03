@@ -35,3 +35,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0026](0026-lookouts.md) | Accepted | Lookouts: a person's standing instruction to a project, acted on structured answers only |
 | [0027](0027-issue-triage.md) | Accepted | Issue triage: outside coding apps judge the night shift's leads, and the verdicts teach the reviewer |
 | [0028](0028-package-scripts-and-egress-tripwire.md) | Accepted | Package scripts get their own switches, and tool calls pass an egress tripwire |
+| [0029](0029-container-hosting-and-accounts.md) | Accepted | Container hosting: a container listener, and accounts for network sign-in |

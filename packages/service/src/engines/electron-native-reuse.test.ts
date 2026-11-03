@@ -391,6 +391,70 @@ describe('Electron native reuse', () => {
     expect(verifySignature).not.toHaveBeenCalled();
   });
 
+  describe('runtime shader sources', () => {
+    const binary = Buffer.from('signed standalone fixture');
+    const shader = Buffer.from('kernel void moe() {}\n');
+    const pin = (bytes: Buffer, signature: 'bendyline' | 'hash-only') => ({
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      sizeBytes: bytes.length,
+      signature,
+    });
+
+    // ds4-server compiles metal/*.metal at startup; they ship 0644.
+    async function ds4Payload(schemaVersion: 2 | 3) {
+      const root = await mkdtemp(join(tmpdir(), 'gezel-native-shaders-'));
+      roots.push(root);
+      const dir = join(root, 'darwin-arm64');
+      await mkdir(join(dir, 'metal'), { recursive: true });
+      await writeFile(join(dir, 'libggml.dylib'), binary);
+      await writeFile(join(dir, 'metal', 'moe.metal'), shader);
+      const options: ElectronNativeReuseOptions = {
+        candidates: [root],
+        platform: 'darwin',
+        arch: 'arm64',
+        release: '9.9.9',
+        allowStandaloneMacPayload: true,
+        manifest: {
+          schemaVersion,
+          release: '9.9.9',
+          platforms: {
+            'darwin-arm64': {
+              files: {
+                'libggml.dylib': pin(binary, 'bendyline'),
+                ...(schemaVersion === 3 ? { 'metal/moe.metal': pin(shader, 'hash-only') } : {}),
+              },
+              symlinks: {},
+            },
+          },
+        },
+      };
+      return { dir, options };
+    }
+
+    it('verifies pinned shaders under schema 3', async () => {
+      const { options } = await ds4Payload(3);
+      expect((await verifyNativeBinaries(options)).reused).toBe(true);
+    });
+
+    it('rejects a changed or missing shader under schema 3', async () => {
+      const { dir, options } = await ds4Payload(3);
+      await writeFile(join(dir, 'metal', 'moe.metal'), 'kernel void moe() { /* edited */ }\n');
+      const changed = await verifyNativeBinaries(options);
+      expect(changed.reused).toBe(false);
+      expect(changed.reason).toContain('mismatch: darwin-arm64/metal/moe.metal');
+
+      await rm(join(dir, 'metal', 'moe.metal'));
+      const missing = await verifyNativeBinaries(options);
+      expect(missing.reused).toBe(false);
+      expect(missing.reason).toContain('missing: metal/moe.metal');
+    });
+
+    it('verifies a schema 2 pin without its shaders, as releases up to 0.1.55 ship', async () => {
+      const { options } = await ds4Payload(2);
+      expect((await verifyNativeBinaries(options)).reused).toBe(true);
+    });
+  });
+
   it.runIf(process.platform !== 'win32')(
     'accepts an exactly pinned internal SONAME symlink chain',
     async () => {

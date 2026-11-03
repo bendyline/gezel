@@ -5,11 +5,17 @@ them to work from your terminal.
 
 ## Quick start
 
-Install the CLI globally. It needs Node.js 24 or newer:
+Install the CLI globally. It needs Node.js 24 or newer; check with
+`node --version`, and if it is older, `brew install node` (macOS),
+`winget install OpenJS.NodeJS.LTS` (Windows) or `nvm install 24` (anywhere)
+installs a current one.
 
 ```bash
 npm install -g @bendyline/gezel-cli
 ```
+
+To try it without installing, name the package: `npx -p @bendyline/gezel-cli gezel`.
+A bare `npx gezel` fetches an unrelated package from npm.
 
 Then choose where the AI runs.
 

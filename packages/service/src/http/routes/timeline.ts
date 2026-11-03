@@ -38,6 +38,8 @@ export async function buildTimeline(
     taskRef?: string;
     /** Only threads about these app items (`ChatSession.subject.key`). */
     subjectKeys?: readonly string[] | undefined;
+    /** Only the threads editing this craftbook (`ChatSession.craftbookRef`). */
+    craftbookRef?: string | undefined;
     rawLimit?: string;
     before?: string;
     excludeScheduledRuns?: boolean;
@@ -51,6 +53,7 @@ export async function buildTimeline(
     ...(opts.gezelId ? { gezelId: opts.gezelId } : {}),
     ...(opts.taskRef ? { taskRef: opts.taskRef } : {}),
     ...(opts.subjectKeys?.length ? { subjectKeys: opts.subjectKeys } : {}),
+    ...(opts.craftbookRef ? { craftbookRef: opts.craftbookRef } : {}),
     ...(opts.excludeScheduledRuns ? { excludeScheduledRuns: true } : {}),
     limit,
     ...(opts.before ? { before: opts.before } : {}),

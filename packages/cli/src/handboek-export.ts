@@ -21,6 +21,7 @@ import { generateExternalHtml, markdownDocToPlainHtml } from '@bendyline/squisq-
 import { PLAYER_BUNDLE } from '@bendyline/squisq-react/standalone-source';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
+import { type AppsSiteResult, writeAppsSite } from './apps-site.js';
 import {
   DATA_TABLE_ATTR,
   DATA_TABLE_JS,
@@ -77,6 +78,8 @@ export interface HandboekExportResult {
   warnings: string[];
   /** Card-generation tally, absent when no `ogOut` was configured. */
   cards?: OgCardsResult;
+  /** The apps library tally, absent when no `appsOut` was configured. */
+  apps?: AppsSiteResult;
 }
 
 export interface HandboekExportOptions {
@@ -117,6 +120,12 @@ export interface HandboekExportOptions {
    * the usual resolution; a card pass is skipped when no browser is there.
    */
   home?: string;
+  /**
+   * Directory to write the apps library into (gezel.com/apps). Must be outside
+   * `out`; the caller owns wiping it. Links into the docs assume they are
+   * published at `/docs/` beside it.
+   */
+  appsOut?: string;
 }
 
 /**
@@ -262,7 +271,10 @@ export async function runHandboekExport(
       await dataTableMounts(doc, contentDir, (note) => warnings.push(`${entry.id}: ${note}`)),
     );
     if (sitePage?.html) rendered = `${rendered}\n${sitePage.html}`;
-    if (demo) rendered = insertDemoSection(rendered, demoSectionHtml(demo, entry.title));
+    if (demo) {
+      const appsPage = opts.appsOut ? `/apps/${demo.projectTypeId}/` : undefined;
+      rendered = insertDemoSection(rendered, demoSectionHtml(demo, entry.title, appsPage));
+    }
     if (art) rendered = insertAfterTitle(rendered, craftbookArtHtml(entry.title, art.ground));
     const { html: body, headings } = withHeadingIds(rendered);
     const dir = join(out, ...entry.id.split('/'));
@@ -272,7 +284,7 @@ export async function runHandboekExport(
       await writePageDemo(
         join(dir, 'demo'),
         demo.files,
-        { imports: demo.imports },
+        { imports: demo.imports, ...(demo.companion ? { companion: demo.companion } : {}) },
         {
           directory: demoAssetsDirectory,
           assets: demoAssets,
@@ -363,7 +375,15 @@ export async function runHandboekExport(
         })
       : undefined;
 
-  return { out, pages, skipped, warnings, cards };
+  const apps = opts.appsOut
+    ? await writeAppsSite(catalog, site, {
+        out: resolve(opts.appsOut),
+        docsBase: '/docs/',
+        ...(canonicalBase ? { siteOrigin: new URL(canonicalBase).origin } : {}),
+      })
+    : undefined;
+
+  return { out, pages, skipped, warnings, cards, apps };
 }
 
 /** The Handboek landing page's own card, written beside the article cards. */

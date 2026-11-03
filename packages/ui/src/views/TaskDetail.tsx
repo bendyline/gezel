@@ -546,7 +546,7 @@ export function TaskDetail({
                 }
                 onClick={() => void activate(planGuards.length > 0)}
               >
-                {busy ? 'Firing…' : planGuards.length > 0 ? 'Fire anyway' : 'Fire task'}
+                {busy ? 'Starting…' : 'Start task'}
               </button>
               <button
                 type="button"

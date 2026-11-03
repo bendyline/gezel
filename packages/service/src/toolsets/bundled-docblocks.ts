@@ -10,6 +10,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { type InstalledToolset, isExpectedBinaryDocumentDeliverablePath } from '@bendyline/gezel';
+import { asksForOfficeFormat, isCoordinatorRole } from '../chat/turn-intent-plan.js';
 
 const require = createRequire(import.meta.url);
 export const BUNDLED_DOCBLOCKS_TOOLSET_ID = 'docblocks';
@@ -52,15 +53,34 @@ export function bundledDocblocksToolset(): InstalledToolset {
  */
 const OFFICE_DOCUMENT_NAME_RE = /[\w-]\.(?:pptx|docx|xlsx)\b/i;
 
-/** Whether the person's side of a thread, the message being sent included, names an Office file. */
-export function threadNamesOfficeDocument(
+function personSaid(
   messages: ReadonlyArray<{ role: string; content: string }>,
-  pendingUserText?: string,
+  pendingUserText: string | undefined,
+  test: (text: string) => boolean,
 ): boolean {
-  if (pendingUserText && OFFICE_DOCUMENT_NAME_RE.test(pendingUserText)) return true;
-  return messages.some(
-    (message) => message.role === 'user' && OFFICE_DOCUMENT_NAME_RE.test(message.content),
-  );
+  if (pendingUserText && test(pendingUserText)) return true;
+  return messages.some((message) => message.role === 'user' && test(message.content));
+}
+
+/**
+ * Whether the person's side of a thread, the message being sent included,
+ * asks for Office document work: it names an Office file, or it asks for an
+ * Office format by name ("convert the JSON files here to DOCX files"). A
+ * gemma4-e2b Builder given that request had no `convert_document` and said
+ * it could not make the file (2026-11-02). The format reading is skipped for
+ * a Meester or crew lead: their exact-format route hands a new document to a
+ * craftbook, which brings DocBlocks to the steps that make it.
+ */
+export function threadWantsOfficeDocument(
+  messages: ReadonlyArray<{ role: string; content: string }>,
+  pendingUserText: string | undefined,
+  gezelRole: string | undefined,
+): boolean {
+  if (personSaid(messages, pendingUserText, (text) => OFFICE_DOCUMENT_NAME_RE.test(text))) {
+    return true;
+  }
+  if (isCoordinatorRole({ isMeester: false, role: gezelRole })) return false;
+  return personSaid(messages, pendingUserText, asksForOfficeFormat);
 }
 
 /**
@@ -71,7 +91,7 @@ export function threadNamesOfficeDocument(
  * document needs it: a craftbook that declares DocBlocks (its steps that do
  * not make the file still drop it through `disallowToolsets`), a delegation
  * whose expected deliverable is a binary document, and a thread whose person
- * named an Office file. A copy
+ * asked for Office document work (`threadWantsOfficeDocument`). A copy
  * installed at gezel, shared or project scope joins every session there,
  * unless this one supersedes it (`Store.bundledToolsetSupersedes`), which
  * makes it this one.
@@ -79,10 +99,10 @@ export function threadNamesOfficeDocument(
 export function bundledDocblocksJoinsSession(session: {
   craftbookToolsetIds?: readonly string[];
   expectedDeliverablePath?: string;
-  namesOfficeDocument?: boolean;
+  wantsOfficeDocument?: boolean;
 }): boolean {
   if (session.craftbookToolsetIds?.includes(BUNDLED_DOCBLOCKS_TOOLSET_ID)) return true;
-  if (session.namesOfficeDocument) return true;
+  if (session.wantsOfficeDocument) return true;
   const path = session.expectedDeliverablePath?.trim();
   return !!path && isExpectedBinaryDocumentDeliverablePath(path);
 }

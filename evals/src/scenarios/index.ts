@@ -7,6 +7,7 @@ import {
   annotatedChatPolicyScenario,
   annotatedDeckScenarios,
 } from './annotated-work.ts';
+import { appParityScenarios } from './app-parity.ts';
 import { arcadeDeluxeScenario } from './arcade-deluxe.ts';
 import { bookstoreOpenapiScenario } from './bookstore-openapi.ts';
 import { codebaseEvolutionScenario } from './codebase-evolution.ts';
@@ -87,6 +88,8 @@ export const SCENARIOS: Record<string, EvalScenario> = {
   ...Object.fromEntries(toolRoutingFormatScenarios().map((s) => [s.id, s])),
   ...Object.fromEntries(meesterEndToEndScenarios().map((s) => [s.id, s])),
   ...Object.fromEntries(firstProjectScenarios().map((s) => [s.id, s])),
+  // Website demo parity: a real crew lead does what the app demo shows (suite app-parity).
+  ...Object.fromEntries(appParityScenarios.map((s) => [s.id, s])),
   // Route probes for the suggest_work / start_work A/B (suite work-routing).
   ...Object.fromEntries(workRoutingScenarios().map((s) => [s.id, s])),
   // Browser primitive probe: no craftbook or real Chromium. A small worker

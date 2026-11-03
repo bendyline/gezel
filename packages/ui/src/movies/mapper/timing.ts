@@ -66,8 +66,8 @@ export function buildTimeline(
       const onScreen =
         scene.excerpt && scene.excerpt.length > 0 ? scene.excerpt : narrationOf(scene);
       const reading = estimateReadingTime(onScreen);
-      // +1.5s settle: the bubble typewrites in over up to 2.5s, and a card
-      // needs a breath after its last word before the cut.
+      // +1.5s settle: the bubble's lines flow in over the first part of
+      // the block, and a card needs a breath after its last word.
       duration = clamp(knobs.minSceneSeconds, knobs.maxSceneSeconds, reading.seconds + 1.5);
     }
     timed.push({
@@ -102,7 +102,18 @@ export function buildTimeline(
  * marketing cut must not headline the harness poking the model.
  */
 export function isHarnessNudge(scene: RunRecordingScene): boolean {
-  return /^\s*\[scenario check\]/i.test(scene.excerpt ?? '');
+  // `[scenario check]`, `[scenario coordinator copy]`, `[eval recovery]`, …
+  return /^\s*\[(scenario|eval)\b[^\]]*\]/i.test(scene.excerpt ?? '');
+}
+
+/**
+ * Whether the run needed outside help: a harness intervention, or a turn
+ * that was cut short. Such a run is a fair eval result, but a marketing
+ * cut of it would credit the crew with help it got from the test harness,
+ * so callers refuse to make one unless told otherwise.
+ */
+export function runNeededHelp(scenes: readonly RunRecordingScene[]): boolean {
+  return scenes.some((scene) => isHarnessNudge(scene) || scene.kind === 'turn-aborted');
 }
 
 /**
@@ -114,7 +125,10 @@ export function isHarnessNudge(scene: RunRecordingScene): boolean {
 export function selectMarketingScenes(
   scenes: RunRecordingScene[],
   budget: number,
+  opts: { maxToolCalls?: number } = {},
 ): RunRecordingScene[] {
+  const maxToolCalls = opts.maxToolCalls ?? Number.POSITIVE_INFINITY;
+  let toolKept = 0;
   const lastReplyIndex = scenes.reduce(
     (last, scene, index) => (scene.kind === 'reply' ? index : last),
     -1,
@@ -149,13 +163,21 @@ export function selectMarketingScenes(
         score = 45;
         break;
       case 'reasoning':
-        score = 40;
+        // The cut keeps only readable thoughts; the ones where the gezel
+        // weighs a choice rank first.
+        score = 40 + Math.min(20, 5 * (scene.excerpt?.match(DECISION_WORDS)?.length ?? 0));
         break;
       case 'tool-call':
-        score = 30 + (scene.diffStats ? 15 : 0) + (scene.path?.endsWith('.html') ? 10 : 0);
+        // Reading is the least watchable thing a gezel does.
+        score =
+          (/^(read|list|inspect|preview)_/.test(scene.name) ? 22 : 30) +
+          (scene.diffStats ? 15 : 0) +
+          (scene.path?.endsWith('.html') ? 10 : 0);
         break;
       case 'note':
-        score = 20;
+        // A note that says what was done ("Wrote the deck: 7 slides…") is
+        // worth a beat; "Bibliography complete." is not.
+        score = (scene.excerpt?.length ?? 0) >= 80 ? 42 : 20;
         break;
     }
     return { scene, index, score };
@@ -166,12 +188,17 @@ export function selectMarketingScenes(
     if (isHarnessNudge(entry.scene)) continue;
     if (entry.scene.kind === 'reasoning' && reasoningKept >= 2) continue;
     if (entry.scene.kind === 'step-transition' && stepKept >= 3) continue;
+    if (entry.scene.kind === 'tool-call' && toolKept >= maxToolCalls) continue;
+    if (entry.scene.kind === 'tool-call') toolKept += 1;
     if (entry.scene.kind === 'reasoning') reasoningKept += 1;
     if (entry.scene.kind === 'step-transition') stepKept += 1;
     picked.add(entry.index);
   }
   return scenes.filter((_, index) => picked.has(index));
 }
+
+const DECISION_WORDS =
+  /\b(I'll|so I|next|should I|decide|pick|plan|instead|rather|but|hmm|actually)\b|\?/gi;
 
 function clamp(min: number, max: number, value: number): number {
   return Math.min(max, Math.max(min, value));

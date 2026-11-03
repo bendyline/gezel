@@ -13,7 +13,7 @@ A **project** is a scoped workspace: one goal, one set of files, one crew. "Plan
 
 Every project can carry:
 
-- **About** — a plain-language description of what the project is. Your gezellen read it before every conversation, so they always have context.
+- **About** — a plain-language description of what the project is. Your crew reads it before every conversation, so the context is always there.
 - **Mission objectives** — the success criteria. Write these like you'd brief a team.
 - **A crew lead** — the gezel in charge, if you name one.
 

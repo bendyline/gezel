@@ -1,10 +1,12 @@
 import { TurnIntentPlanSchema } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
+  asksForOfficeFormat,
   deckTopicFromRequest,
   detectExactArtifactRoute,
   falseCapabilityDenialCorrection,
   looksLikeImplementationRequest,
+  officeDocumentDenialCorrection,
   renderTurnIntentPrelude,
   resolveTurnIntentPlan,
   shouldConstrainToExactCraftbookInvocation,
@@ -132,6 +134,58 @@ describe('turn intent planning', () => {
         assistantContent: 'I can’t create it.',
         toolCalls: [{ name: 'mcp__gezel__invoke_craftbook', durationMs: 1, success: false }],
       }),
+    ).toBeNull();
+  });
+});
+
+describe('Office document requests', () => {
+  it.each([
+    'can you convert the JSON files here to DOCX files?',
+    'Please turn my notes into a Word document',
+    'Convert budget.csv to Excel',
+    'Make a PowerPoint from the outline',
+    'Export the tables as an Excel spreadsheet',
+  ])('reads a format named as the thing to make: %s', (text) => {
+    expect(asksForOfficeFormat(text)).toBe(true);
+  });
+
+  it.each([
+    'What is a DOCX file?',
+    'How do Word documents store comments?',
+    'Help me word this email better',
+    'Write a cover letter that shows I excel at sales',
+    'Can you cancel the PowerPoint task?',
+  ])('leaves questions and lookalikes alone: %s', (text) => {
+    expect(asksForOfficeFormat(text)).toBe(false);
+  });
+
+  const denial = {
+    userText: 'can you convert the JSON files here to DOCX files?',
+    assistantContent:
+      "I can't directly convert JSON files to DOCX format, as I don't have a file conversion utility.",
+    toolCalls: [],
+    availableTools: ['read_file', 'convert_document', 'save_artifact'],
+  };
+
+  it('corrects a gezel that holds DocBlocks and says it cannot make the file', () => {
+    const correction = officeDocumentDenialCorrection(denial);
+    expect(correction).toContain('convert_document');
+    expect(correction).toContain('save_artifact');
+  });
+
+  it('stays quiet without DocBlocks, after a conversion, or when nothing was denied', () => {
+    expect(officeDocumentDenialCorrection({ ...denial, availableTools: ['read_file'] })).toBeNull();
+    expect(
+      officeDocumentDenialCorrection({
+        ...denial,
+        toolCalls: [{ name: 'mcp__docblocks__convert_document', durationMs: 1, success: false }],
+      }),
+    ).toBeNull();
+    expect(
+      officeDocumentDenialCorrection({ ...denial, assistantContent: 'Converting them now.' }),
+    ).toBeNull();
+    expect(
+      officeDocumentDenialCorrection({ ...denial, userText: 'What is a DOCX file?' }),
     ).toBeNull();
   });
 });

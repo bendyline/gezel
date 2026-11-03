@@ -3,6 +3,7 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 import type { ServerType } from '@hono/node-server';
 import { Hono } from 'hono';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
+import { closeListener } from './http/close-listener.js';
 import { hostGuard } from './http/host-guard.js';
 import { bindMainListener } from './http/main-listener.js';
 import { writeRuntime } from './runtime-discovery.js';
@@ -79,16 +80,4 @@ export async function startInferenceOnlyService(
     await inference.stop().catch(() => {});
     throw err;
   }
-}
-
-function closeListener(server: ServerType): Promise<void> {
-  return new Promise<void>((resolve) => {
-    const finish = () => resolve();
-    server.close(finish);
-    const http1 = server as unknown as { closeAllConnections?: () => void };
-    http1.closeAllConnections?.();
-    const http2 = server as unknown as { _sessions?: Set<{ destroy?: () => void }> };
-    for (const session of http2._sessions ?? []) session.destroy?.();
-    setTimeout(finish, 2_000).unref();
-  });
 }

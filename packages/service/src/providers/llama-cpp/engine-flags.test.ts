@@ -528,6 +528,26 @@ describe('buildLlamaCppEngineArgs — GPU-resident thread default', () => {
     }
   });
 
+  it("sizes a CPU build's pool to a container's CPU limit", () => {
+    // llama.cpp's default counts the host's cores; under `--cpus 4` on a
+    // 32-core host that pool spent each period throttled (3.7 t/s on 0.8B).
+    const args = buildLlamaCppEngineArgs({ config: {}, backend: 'cpu', containerCpuLimit: 4 });
+    expect(argValue(args, '--threads')).toBe('4');
+    // An explicit choice still wins, in config or in extra args.
+    expect(
+      argValue(
+        buildLlamaCppEngineArgs({ config: { llamaCppThreads: 2 }, containerCpuLimit: 4 }),
+        '--threads',
+      ),
+    ).toBe('2');
+    const extra = buildLlamaCppEngineArgs({
+      config: { llamaCppExtraArgs: { threads: 6 } },
+      containerCpuLimit: 4,
+    });
+    expect(extra.filter((arg) => arg === '--threads')).toHaveLength(1);
+    expect(argValue(extra, '--threads')).toBe('6');
+  });
+
   it('needs the planner to have measured a full fit', () => {
     // No planner, or a decision that leaves placement to the engine's own
     // fit, may put layers on the CPU where every thread counts.

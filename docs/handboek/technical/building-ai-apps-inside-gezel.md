@@ -174,6 +174,16 @@ Each script declares its capabilities, inputs, outputs, and whether it is an act
 
 A `tools` entry gives a script a stable name, a JSON Schema `inputs` object validated before every run, and static `bind` values so several narrow tools can share one script without letting the caller replace the bound operation. A tool listed in `pages.tools` is page-only — kept off the model's roster — and can carry a `reaction` that summons a named gezel when the page invokes it, with the tool output interpolated into the reaction prompt.
 
+Design tools a small local model can use. These rules come from running app requests on Gemma 4 E4B and 12B, where each one fixed a request that otherwise failed:
+
+- **Give the status tool the whole picture a request needs.** A meal planner whose status listed only the grocery gap could not plan "around what we have", because nothing said what was in stock. Include ids, owners, dates and totals, and lead with what changed. A `state: true` tool runs before each chat turn and the model often answers from its output without calling anything, literally: asked what was due in 60 days, it skipped a separate "Overdue" list. Put what a question selects in one list, most urgent first.
+- **Name people in an output field, don't just count them.** Asked who still owed a dietary answer, a model read `missingDietary: 2` beside a list that also held a guest who had not replied, decided he was one of the two, and could not name the other. A `noDietaryAnswer` field listing the names leaves nothing to infer.
+- **Say when to call a write tool.** "Call it as soon as the person mentions one, before you describe it" stops a model that would otherwise describe a plan it never saved.
+- **Make adds idempotent on name.** "We ran out of olive oil" often arrives as an add; update the existing record instead of creating a twin.
+- **Give relative changes their own input.** Told that someone joined a party of four, a model replaced the party with one name. A `joining` input the script adds to the count removes the arithmetic from the model.
+- **Keep money in integer cents and dates as local `YYYY-MM-DD`**, and roll a monthly date forward to the last day of a shorter month rather than into the next.
+- **Speak to the model in the units its inputs take.** Store cents, but report dollars in tool outputs. After reading `openValueCents` in one result, a model passed `valueChange: 340000` for "another $3,400" to an input that takes dollars, and a $22,500 deal became $362,500.
+
 The Output page runs in a sandbox and codes against the injected `window.gezel` API (typed definitions in `@bendyline/gezel-sdk/page`; set `pages.api` to `1`). Every readable file must appear in `pages.reads` and every callable tool in `pages.tools` — there is deliberately no raw page write API, so state changes flow through declared tools and stay auditable:
 
 ```js
@@ -220,7 +230,7 @@ Before handing over the app:
 1. Validate the source or Gilde payload, including every referenced role, craftbook, script, page, and seed. Keep generated and authored files distinct.
 2. Create or apply the app in an isolated test project. Verify the actual folder binding, permission denials, and every state-changing action. A folder explorer must leave originals unchanged.
 3. Exercise the main craftbook with representative inputs and confirm its outputs and gates. Check disabled/consent-required schedules without silently arming them.
-4. Test the page's live and standalone flows, light/dark themes, keyboard navigation, narrow layout, empty content, unavailable capabilities, and failed actions. Dispose watches and media players.
+4. Test the page's live and standalone flows, light/dark themes, keyboard navigation, narrow layout, empty content, unavailable capabilities, and failed actions. Dispose watches and media players. A page with a conversation gets a [sample conversation](gezel-page-apis.md#the-sample-conversation) for its demo; then ask the real crew lead the same suggestions on a small local model, so the demo never promises what the app cannot do.
 5. If upgrading, check user-modified content and seed drift. Document any unsupported migration or reconciliation rather than overwriting it as a convenience.
 6. Report what shipped, what was tested, which host modes are supported, and whether the normal app consumes the new catalog version yet.
 

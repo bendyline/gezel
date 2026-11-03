@@ -44,7 +44,7 @@ test(
       ]);
 
       const manifest = JSON.parse(await readFile(output, 'utf8'));
-      assert.equal(manifest.schemaVersion, 2);
+      assert.equal(manifest.schemaVersion, 3);
       assert.equal(manifest.release, '9.9.9');
       assert.deepEqual(Object.keys(manifest.platforms['darwin-arm64'].files), [
         'gezel-fixture-server',
@@ -171,6 +171,116 @@ test(
     }
   },
 );
+
+// ds4-server compiles these at startup; 0644 and outside any code signature.
+async function ds4ShaderTree(temp) {
+  const root = join(temp, 'native');
+  const dir = join(root, 'darwin-arm64');
+  await mkdir(join(dir, 'metal'), { recursive: true });
+  await writeFile(join(dir, 'libggml.dylib'), 'shared library fixture');
+  await writeFile(join(dir, 'metal', 'moe.metal'), 'kernel void moe() {}\n');
+  await writeFile(join(dir, 'metal', 'norm.metal'), 'kernel void norm() {}\n');
+  return { root, dir };
+}
+
+async function generate(root, output) {
+  await execFileP(process.execPath, [
+    generator,
+    '--root',
+    root,
+    '--version',
+    '9.9.9',
+    '--out',
+    output,
+  ]);
+  return JSON.parse(await readFile(output, 'utf8'));
+}
+
+test('generator pins runtime shader sources as hash-only', async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'gezel-native-manifest-'));
+  try {
+    const { root } = await ds4ShaderTree(temp);
+    const manifest = await generate(root, join(temp, 'manifest.json'));
+    const files = manifest.platforms['darwin-arm64'].files;
+    assert.deepEqual(Object.keys(files), ['libggml.dylib', 'metal/moe.metal', 'metal/norm.metal']);
+    assert.equal(files['libggml.dylib'].signature, 'bendyline');
+    assert.equal(files['metal/moe.metal'].signature, 'hash-only');
+    assert.equal(files['metal/norm.metal'].signature, 'hash-only');
+    assert.deepEqual(await verifyNativeFileTree({ root, manifest }), {
+      platformCount: 1,
+      fileCount: 3,
+      symlinkCount: 0,
+    });
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test('a changed, missing, or unpinned shader fails verification', async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'gezel-native-manifest-'));
+  try {
+    const { root, dir } = await ds4ShaderTree(temp);
+    const manifest = await generate(root, join(temp, 'manifest.json'));
+
+    await writeFile(join(dir, 'metal', 'moe.metal'), 'kernel void moe() { /* edited */ }\n');
+    await assert.rejects(
+      verifyNativeFileTree({ root, manifest }),
+      /mismatch: darwin-arm64\/metal\/moe\.metal/,
+    );
+
+    await rm(join(dir, 'metal', 'moe.metal'));
+    await assert.rejects(verifyNativeFileTree({ root, manifest }), /missing: metal\/moe\.metal/);
+
+    await writeFile(join(dir, 'metal', 'moe.metal'), 'kernel void moe() {}\n');
+    await writeFile(join(dir, 'metal', 'extra.metal'), 'kernel void extra() {}\n');
+    await assert.rejects(
+      verifyNativeFileTree({ root, manifest }),
+      /unexpected: metal\/extra\.metal/,
+    );
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test('a schema 2 manifest still verifies a tree that carries shaders', async () => {
+  // Native releases up to 0.1.55 published schema 2 without shader pins, and
+  // the current pin is one of them.
+  const temp = await mkdtemp(join(tmpdir(), 'gezel-native-manifest-'));
+  try {
+    const { root } = await ds4ShaderTree(temp);
+    const manifest = await generate(root, join(temp, 'manifest.json'));
+    const files = manifest.platforms['darwin-arm64'].files;
+    const legacy = {
+      ...manifest,
+      schemaVersion: 2,
+      platforms: {
+        'darwin-arm64': { files: { 'libggml.dylib': files['libggml.dylib'] }, symlinks: {} },
+      },
+    };
+    assert.deepEqual(await verifyNativeFileTree({ root, manifest: legacy }), {
+      platformCount: 1,
+      fileCount: 1,
+      symlinkCount: 0,
+    });
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
+
+test('a shader pin that claims a signature is rejected', async () => {
+  const temp = await mkdtemp(join(tmpdir(), 'gezel-native-manifest-'));
+  try {
+    const { root } = await ds4ShaderTree(temp);
+    const manifest = await generate(root, join(temp, 'manifest.json'));
+    manifest.platforms['darwin-arm64'].files['metal/moe.metal'].signature = 'bendyline';
+    await assert.rejects(
+      verifyNativeFileTree({ root, manifest }),
+      /runtime source must be hash-only: darwin-arm64\/metal\/moe\.metal/,
+    );
+  } finally {
+    await rm(temp, { recursive: true, force: true });
+  }
+});
 
 test('staging does not mark native sidecar data executable', async () => {
   const source = await readFile(fetchNativeBinaries, 'utf8');

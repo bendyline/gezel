@@ -1,6 +1,7 @@
 import { type SpawnSyncReturns, execFileSync, spawn, spawnSync } from 'node:child_process';
 import {
   chmodSync,
+  existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
@@ -40,6 +41,49 @@ function shellFunction(
   const end = source.indexOf(`\n${closing}\n`, start);
   expect(end, `unterminated installer function: ${name}`).toBeGreaterThan(start);
   return source.slice(start, end + 2);
+}
+
+const RUNTIME_DISCOVERY_FILES = [
+  'auth-token',
+  'web-ui-token',
+  'port',
+  'pid',
+  'cert.pem',
+  'cert-fingerprint',
+  'service-role',
+  'lock',
+];
+
+/**
+ * Run an uninstaller's runtime cleanup against a scratch data dir: every
+ * discovery file goes, the directory and the kept data stay, and a symlinked
+ * runtime directory is never followed.
+ */
+function expectRuntimeDiscoveryCleared(run: (dataDir: string) => unknown): void {
+  const root = mkdtempSync(join(tmpdir(), 'gezel-runtime-clear-'));
+  try {
+    const dataDir = join(root, 'data');
+    mkdirSync(join(dataDir, 'runtime'), { recursive: true });
+    mkdirSync(join(dataDir, 'assets', 'models'), { recursive: true });
+    for (const name of RUNTIME_DISCOVERY_FILES) {
+      writeFileSync(join(dataDir, 'runtime', name), 'stale\n');
+    }
+    writeFileSync(join(dataDir, 'assets', 'models', 'model.gguf'), 'weights');
+    run(dataDir);
+    expect(readdirSync(join(dataDir, 'runtime'))).toEqual([]);
+    expect(existsSync(join(dataDir, 'assets', 'models', 'model.gguf'))).toBe(true);
+
+    const linkedData = join(root, 'linked');
+    const outside = join(root, 'outside');
+    mkdirSync(linkedData);
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'port'), '6228\n');
+    symlinkSync(outside, join(linkedData, 'runtime'));
+    run(linkedData);
+    expect(existsSync(join(outside, 'port'))).toBe(true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 }
 
 const macPostinstall = installerFile('macos-pkg-scripts/postinstall');
@@ -220,6 +264,33 @@ describe('macOS machine-service filesystem security', () => {
     expect(macUninstall).toContain('/bin/rm -rf -- "$MACHINE_SHARED_DIR"');
     expect(macUninstall).toContain('/usr/bin/sudo -H -u "$target_username" /bin/rm -rf --');
   });
+
+  it('clears runtime discovery from kept machine data once the service is verified stopped', () => {
+    expect(macUninstall).toContain(
+      'else\n  clear_machine_runtime\n  echo "[gezel uninstall] preserved machine broker/engine data at ${DATA_DIR}"',
+    );
+    expect(position(macUninstall, '\nstop_machine_service\n')).toBeLessThan(
+      position(macUninstall, '\n  clear_machine_runtime\n'),
+    );
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'removes only discovery files and never follows a symlinked runtime directory',
+    () => {
+      const run = (dataDir: string) =>
+        execFileSync(
+          '/bin/bash',
+          [
+            '-c',
+            `DATA_DIR="$1"\n${shellFunction(macUninstall, 'clear_machine_runtime', 'brace')}\nclear_machine_runtime`,
+            'gezel-uninstall-test',
+            dataDir,
+          ],
+          { encoding: 'utf8' },
+        );
+      expectRuntimeDiscoveryCleared(run);
+    },
+  );
 
   it('removes Office add-in registrations for every account, as that account', () => {
     expect(macUninstall).toContain(
@@ -693,6 +764,46 @@ refresh_desktop_caches
     expect(guard).toBeLessThan(position(linuxPostremove, 'rm -f "$UNIT_DST"'));
     expect(guard).toBeLessThan(position(linuxPostremove, 'update-alternatives --remove'));
   });
+
+  it('clears runtime discovery after stopping the service on final removal', () => {
+    const stop = position(linuxPostremove, 'systemctl disable --now gezeld.service');
+    const clear = position(linuxPostremove, '\nclear_runtime_discovery\n');
+    expect(position(linuxPostremove, 'if ! is_final_removal "${1:-}"; then')).toBeLessThan(clear);
+    expect(stop).toBeLessThan(clear);
+    expect(clear).toBeLessThan(position(linuxPostremove, 'rm -f "$UNIT_DST"'));
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'removes only discovery files, and leaves them while the service still runs',
+    () => {
+      const run = (dataDir: string, serviceActive = false) =>
+        execFileSync(
+          '/bin/sh',
+          [
+            '-c',
+            `systemctl() { return ${serviceActive ? 0 : 3}; }
+DATA_DIR="$1"
+RUNTIME_DIR="$1/runtime"
+${shellFunction(linuxPostremove, 'clear_runtime_discovery', 'brace')}
+clear_runtime_discovery`,
+            'gezel-remove-test',
+            dataDir,
+          ],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
+        );
+      expectRuntimeDiscoveryCleared(run);
+
+      const root = mkdtempSync(join(tmpdir(), 'gezel-runtime-active-'));
+      try {
+        mkdirSync(join(root, 'runtime'));
+        writeFileSync(join(root, 'runtime', 'service-role'), 'machine-engine\n');
+        run(root, true);
+        expect(existsSync(join(root, 'runtime', 'service-role'))).toBe(true);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   it.skipIf(process.platform === 'win32')(
     'classifies real dpkg and RPM removal actions conservatively',

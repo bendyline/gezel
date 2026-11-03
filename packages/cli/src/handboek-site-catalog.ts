@@ -1,8 +1,15 @@
 import {
   CRAFTBOOK_CATEGORY_FAMILY_META,
   CRAFTBOOK_CATEGORY_META,
+  SCORECARD,
+  type ScorecardDataset,
   catalogGroundFor,
+  measuredClaim,
+  measuredResultFor,
+  measuredRowsFor,
+  plainRoleTitle,
   resolveCraftbookCategory,
+  scorecardSpeeds,
 } from '@bendyline/gezel';
 import type {
   CatalogGroundTone,
@@ -20,6 +27,8 @@ import type {
   ToolsetManifest,
   VideoModelManifest,
 } from '@bendyline/gezel';
+import { scorecardRoundPageId, scorecardRoundTitles } from '@bendyline/gezel-service/handboek';
+import { SCORECARD_SUITE_IDS, SCORECARD_SUITE_LABELS } from '@bendyline/gezel/eval';
 
 /**
  * The public catalog pages that gezelgilde.com used to serve, rendered into
@@ -68,6 +77,8 @@ export interface SiteDemo {
   entry: string;
   files: Array<{ path: string; bytes: Buffer }>;
   imports?: PageImportTarget[];
+  /** The crew lead the demo's sample conversation speaks as, unless the page names one. */
+  companion?: { role: string };
 }
 
 /**
@@ -137,7 +148,14 @@ const CATEGORY_LABELS: Record<string, string> = {
   coding: 'Coding',
 };
 
-export async function buildSiteCatalog(catalog: SiteCatalogSource): Promise<SiteCatalog> {
+/**
+ * Build every catalog page. `scorecard` is the published results dataset the
+ * model pages and the model table quote; tests pass their own.
+ */
+export async function buildSiteCatalog(
+  catalog: SiteCatalogSource,
+  scorecard: ScorecardDataset = SCORECARD,
+): Promise<SiteCatalog> {
   const manifests = async <T>(kind: CatalogKind): Promise<T[]> =>
     (await catalog.list(kind)).map((s) => s.manifest as T);
 
@@ -199,7 +217,7 @@ export async function buildSiteCatalog(catalog: SiteCatalogSource): Promise<Site
         generated: true,
         subcategory: MODELS_AND_TESTING,
       },
-      markdown: modelCatalogMarkdown(chat, images, videos),
+      markdown: modelCatalogMarkdown(chat, images, videos, scorecard),
       listed: true,
     },
     ...chat.map((m) => ({
@@ -212,7 +230,7 @@ export async function buildSiteCatalog(catalog: SiteCatalogSource): Promise<Site
         generated: true,
         subcategory: MODELS_AND_TESTING,
       },
-      markdown: chatModelMarkdown(m),
+      markdown: chatModelMarkdown(m, scorecard),
       listed: false,
     })),
     {
@@ -273,8 +291,9 @@ export async function buildSiteCatalog(catalog: SiteCatalogSource): Promise<Site
   ];
 
   const demos: SiteDemo[] = [];
+  const roleById = new Map(roles.map((r) => [r.id, r.role]));
   for (const pt of projectTypes) {
-    const demo = await projectTypeDemo(catalog, pt);
+    const demo = await projectTypeDemo(catalog, pt, roleById);
     if (demo) demos.push(demo);
   }
   const counts: SiteCatalogCounts = {
@@ -292,6 +311,7 @@ function modelCatalogMarkdown(
   chat: ChatModelManifest[],
   images: ImageModelManifest[],
   videos: VideoModelManifest[],
+  scorecard: ScorecardDataset,
 ): string {
   const lines = [
     '# Every model',
@@ -300,13 +320,14 @@ function modelCatalogMarkdown(
     '',
     `## Chat models (${chat.length})`,
     '',
-    'The models your gezels think and write with, recommended first.',
+    'The models your gezels think and write with, recommended first. **Measured** is the share of tasks the model (or another build of it) passed in its most recent full [scorecard](model-scorecard) round, preferring the general set, with the machine that round ran on. Follow it to every round on the model’s page. Rounds are not comparable with each other, and a number from a workstation is not a promise about a laptop.',
     '',
-    '| Model | Size | Context | Tools | Best for | Runs on | License |',
-    '| --- | --- | --- | --- | --- | --- | --- |',
+    '| Model | Measured | Size | Context | Tools | Best for | Runs on | License |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- |',
     ...chat.map((m) =>
       row([
         `[${cell(m.name)}](model/${m.id})`,
+        measuredCell(scorecard, m.id),
         formatGB(m.approxSizeBytes),
         formatContext(m.contextWindow),
         m.supportsTools === false ? 'No' : 'Yes',
@@ -358,7 +379,86 @@ function modelCatalogMarkdown(
   return lines.join('\n');
 }
 
-function chatModelMarkdown(m: ChatModelManifest): string {
+/** The catalog table's Measured cell: the headline claim, linked to the model's rounds. */
+function measuredCell(scorecard: ScorecardDataset, modelId: string): string {
+  const measured = measuredResultFor(scorecard, modelId);
+  if (!measured) return 'Not yet';
+  return `[${cell(measuredClaim(measured))}](model/${modelId}#measured-results)`;
+}
+
+/** Engine ids as the scorecard records them, in reader terms. */
+const SCORECARD_ENGINE_LABELS: Record<string, string> = {
+  'llama-cpp': 'llama.cpp',
+  mlx: 'MLX',
+  ollama: 'Ollama',
+  ds4: 'DwarfStar',
+};
+
+const speed = (value: number | undefined): string =>
+  value === undefined ? '—' : `${value.toFixed(1)} tok/s`;
+
+/**
+ * A model page's "Measured results": one row per published round, set and
+ * build of this model, newest first, linked to each round's own page. The
+ * same rows, scored by the same rules, as the scorecard tables.
+ */
+export function measuredResultsMarkdown(scorecard: ScorecardDataset, modelId: string): string[] {
+  // Newest round first; within a round, the scorecard's own set order.
+  const suiteOrder = (id: string): number => {
+    const index = (SCORECARD_SUITE_IDS as readonly string[]).indexOf(id);
+    return index === -1 ? SCORECARD_SUITE_IDS.length : index;
+  };
+  const rows = measuredRowsFor(scorecard, modelId).sort(
+    (a, b) =>
+      b.run.provenance.startedAt.localeCompare(a.run.provenance.startedAt) ||
+      a.run.id.localeCompare(b.run.id) ||
+      suiteOrder(a.result.suiteId) - suiteOrder(b.result.suiteId) ||
+      a.result.modelId.localeCompare(b.result.modelId),
+  );
+  const lines = ['## Measured results', ''];
+  if (rows.length === 0) {
+    lines.push(
+      'Not measured yet. No [scorecard](model-scorecard) round has run this model or another build of it, which is not a verdict either way. [How we test models](how-we-test-models) explains what a round measures, and you can run the same tests on your own machine:',
+      '',
+      '```sh',
+      `gezel bench --model ${modelId}`,
+      '```',
+    );
+    return lines;
+  }
+  const titles = scorecardRoundTitles(scorecard.runs);
+  lines.push(
+    'Every [scorecard](model-scorecard) round that ran this model or another build of it, newest first. Each round is one machine, one day, one version of Gezel and one version of the tests, so **rounds are not comparable with each other**: a change to any of those can move a score without the model changing. Where a task ran fewer than three times, the result is a count rather than a percentage. [How we test models](how-we-test-models) explains what each set contains.',
+    '',
+    '| Round | Build | Task set | Passed | Output speed | Prefill speed |',
+    '| --- | --- | --- | --- | --- | --- |',
+    ...rows.map(({ run, result, score }) => {
+      const title = titles.get(run.id) ?? run.id;
+      const partial = run.scope === 'subset' ? ' (partial)' : '';
+      const speeds = scorecardSpeeds(result);
+      const suite =
+        SCORECARD_SUITE_LABELS[result.suiteId as keyof typeof SCORECARD_SUITE_LABELS] ??
+        result.suiteId;
+      return row([
+        `[${cell(title)}](${scorecardRoundPageId(run.id)})${partial}`,
+        cell(`${result.modelId} · ${SCORECARD_ENGINE_LABELS[result.engine] ?? result.engine}`),
+        cell(suite),
+        cell(score.claim),
+        speed(speeds.decode),
+        speed(speeds.prefill),
+      ]);
+    }),
+  );
+  if (rows.some(({ run }) => run.scope === 'subset')) {
+    lines.push(
+      '',
+      'A partial round reran only some of a set’s tasks, usually to check a fix. It is not a score for the whole set.',
+    );
+  }
+  return lines;
+}
+
+function chatModelMarkdown(m: ChatModelManifest, scorecard: ScorecardDataset): string {
   // `maker` names who trained the model; `maintainer` who published this build.
   const maker = (m as { maker?: { name?: string } }).maker?.name ?? m.maintainer?.name;
   const facts: Array<[string, string]> = [
@@ -383,6 +483,8 @@ function chatModelMarkdown(m: ChatModelManifest): string {
     ...facts.filter(([, v]) => v).map(([k, v]) => row([k, cell(v)])),
     '',
     'Gezel downloads this model the first time a gezel needs it, checks the file against its published hash, and applies tuned settings for it.',
+    '',
+    ...measuredResultsMarkdown(scorecard, m.id),
   ];
   const more = [
     m.upstream ? `[The model’s own page](${m.upstream})` : '',
@@ -558,6 +660,7 @@ function escHtml(s: string): string {
 async function projectTypeDemo(
   catalog: SiteCatalogSource,
   pt: ProjectTypeManifest,
+  roleById: ReadonlyMap<string, string>,
 ): Promise<SiteDemo | null> {
   const entry = safeRelativePath(pt.pages?.entry);
   if (!entry) return null;
@@ -573,7 +676,15 @@ async function projectTypeDemo(
     const bytes = await catalog.readItemFile('project-type', pt.id, `${prefix}${path}`);
     if (bytes) files.push({ path, bytes });
   }
-  return { projectTypeId: pt.id, entry, files, imports: pt.pages?.imports };
+  const lead = pt.gezels?.find((g) => g.voorman) ?? pt.gezels?.[0];
+  const role = lead && roleById.get(lead.templateId);
+  return {
+    projectTypeId: pt.id,
+    entry,
+    files,
+    imports: pt.pages?.imports,
+    ...(role ? { companion: { role: plainRoleTitle(role) } } : {}),
+  };
 }
 
 /**
@@ -581,14 +692,18 @@ async function projectTypeDemo(
  * standalone demo. The frame is sandboxed without same-origin: the demo runs
  * on its own sample data and never needs the surrounding site.
  */
-export function demoSectionHtml(demo: SiteDemo, title: string): string {
+export function demoSectionHtml(demo: SiteDemo, title: string, appsPage?: string): string {
   const src = `demo/${demo.entry.split('/').map(encodeURIComponent).join('/')}`;
   const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  // The article column is narrow; the apps library shows the page and its companion side by side.
+  const library = appsPage
+    ? `<a href="${esc(appsPage)}">See it full size, with its companion, in the apps library</a> · `
+    : '';
   return `<section class="hb-demo">
 <h2>Try it</h2>
 <p>This is the project’s page running on sample data in your browser. It doesn’t connect to Gezel or to your files.</p>
 <div class="hb-demo-frame"><iframe src="${src}" title="${esc(title)} demo" loading="lazy" sandbox="allow-forms allow-modals allow-scripts" referrerpolicy="no-referrer"></iframe></div>
-<p class="hb-demo-open"><a href="${src}" target="_blank" rel="noreferrer">Open the demo in a new tab</a></p>
+<p class="hb-demo-open">${library}<a href="${src}" target="_blank" rel="noreferrer">Open the demo in a new tab</a></p>
 </section>`;
 }
 

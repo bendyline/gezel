@@ -24,7 +24,8 @@ export function pageAppComponentsSource(): string {
     toolbar.className='toolbar';toggle.type='button';layout.className='layout';work.className='content';slot.name='content';aside.className='companion';intro.className='intro';chatRegion.className='chat';chatSlot.name='conversation';unavailable.className='unavailable';unavailable.setAttribute('role','status');
     var mount=el('div');mount.slot='conversation';mount.style.cssText='display:block;height:100%;min-height:0;min-width:0';s.host.append(mount);
     intro.append(heading,description);chatRegion.append(chatSlot);aside.append(intro,unavailable,chatRegion);work.append(slot);layout.append(work,aside);toolbar.append(toggle);wrapper.append(toolbar,layout);s.root.append(style,wrapper);
-    function hasDialog(){return Array.from(document.querySelectorAll('dialog[open],[aria-modal="true"]')).some(function(dialog){return dialog.getClientRects().length>0;});}
+    // Host-drawn chat floats above the iframe and must step aside for a page dialog; an in-page demo conversation sits beneath it anyway.
+    function hasDialog(){if(demo&&transport.chat)return false;return Array.from(document.querySelectorAll('dialog[open],[aria-modal="true"]')).some(function(dialog){return dialog.getClientRects().length>0;});}
     function render(){
       if(stopped)return;
       var full=!!(api.ui.layout&&api.ui.layout.fullscreen),enabled=opts.chat!==false,visible=full&&enabled&&!collapsed;
@@ -32,7 +33,7 @@ export function pageAppComponentsSource(): string {
       wrapper.className=(full?'expanded':'')+(visible?' with-chat':'');toolbar.hidden=!enabled;aside.hidden=!visible;
       heading.textContent=opts.title||'Your companion';description.textContent=opts.description||'';description.hidden=!opts.description;
       toggle.textContent=collapsed?'Show conversation':'Hide conversation';toggle.setAttribute('aria-expanded',String(!collapsed));
-      var supported=api.page.mode==='embedded'&&typeof chat==='function';
+      var supported=(api.page.mode==='embedded'||demo&&!!transport.chat)&&typeof chat==='function';
       unavailable.hidden=supported;unavailable.textContent='Open this app in Gezel to talk with your companion.'+(api.page.mode==='demo'?' This preview keeps your sample work in this page.':' Your project work stays in its existing files.');
       var visibility=hasDialog()?'hidden':'visible';if(mount.style.visibility!==visibility)mount.style.visibility=visibility;
       if(visible&&supported&&!conversation){

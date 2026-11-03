@@ -245,8 +245,30 @@ describe('machine-engine broker reporting', () => {
         probeHealth: async () => {
           throw new Error('connection refused');
         },
+        isRuntimeStale: async () => false,
       }),
-    ).resolves.toMatchObject({ present: true, healthy: false, port: 6228 });
+    ).resolves.toEqual({
+      present: true,
+      healthy: false,
+      baseUrl: 'https://127.0.0.1:6228',
+      port: 6228,
+    });
+  });
+
+  it('names the runtime files an uninstalled or dead service left behind', async () => {
+    await expect(
+      describeMachineEngineBroker({
+        readEndpoint: async () => endpoint,
+        probeHealth: async () => {
+          throw new TypeError('fetch failed');
+        },
+        isRuntimeStale: async (home) => home === '/machine/gezel',
+      }),
+    ).resolves.toMatchObject({
+      present: true,
+      healthy: false,
+      staleRuntimeDir: join('/machine/gezel', 'runtime'),
+    });
   });
 });
 

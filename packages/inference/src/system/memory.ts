@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { freemem, platform as osPlatform, totalmem } from 'node:os';
+import { platform as osPlatform } from 'node:os';
 import { promisify } from 'node:util';
 import type {
   GpuProcessMemory,
@@ -34,6 +34,7 @@ import {
   linuxGpuCarveOutBytes,
   matchGpuAdapter,
 } from './gpu-carve-out.js';
+import { freeMemoryBytes, totalMemoryBytes } from './host-memory.js';
 
 const exec = promisify(execFile);
 
@@ -123,7 +124,7 @@ let pendingMemoryProfile: Promise<MemoryProfile> | null = null;
  */
 export async function detectMemoryProfile(): Promise<MemoryProfile> {
   const plat = osPlatform();
-  const totalRam = totalmem();
+  const totalRam = totalMemoryBytes();
 
   if (plat === 'darwin') {
     setDetectedGpuVramBytes(null);
@@ -509,7 +510,9 @@ export function sampleMachineMemoryUsage(
 
   if (mainMemory) {
     const freeRamBytes = clamp(
-      finiteNonNegative(opts.darwinSystemMemory?.freeBytes ?? opts.freeRamBytes ?? freemem()),
+      finiteNonNegative(
+        opts.darwinSystemMemory?.freeBytes ?? opts.freeRamBytes ?? freeMemoryBytes(),
+      ),
       0,
       totalRamBytes,
     );
@@ -784,7 +787,7 @@ export interface NvidiaMemoryProbe {
  */
 export function parseNvidiaMemoryProbe(
   stdout: string,
-  systemRamBytes: number = totalmem(),
+  systemRamBytes: number = totalMemoryBytes(),
 ): NvidiaMemoryProbe | null {
   const devices: Array<{ name: string; bytes: number }> = [];
   for (const rawLine of stdout.split(/\r?\n/)) {

@@ -2584,3 +2584,40 @@ legend.gz-setting-label {
   margin-top: 0.5rem;
   font-size: 0.85rem;
 }
+
+/* Settings → Accounts (ADR 0029): the add-person and password forms keep the
+   settings rhythm; the rows reuse the Integrations row recipe. */
+.accounts-add,
+.accounts-password {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1rem;
+  max-width: 28rem;
+}
+
+.accounts-form-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Text inputs as in the other Settings forms (.new-row); a key keeps its own
+   width instead of stretching across the form grid. */
+.accounts-add input,
+.accounts-password input {
+  padding: 0.4rem 0.5rem;
+  background: var(--panel);
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.accounts-add > button {
+  justify-self: start;
+}
+
+.accounts-status {
+  margin-left: 0.4rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}

@@ -4,7 +4,7 @@ export function pageChatComponentSource(): string {
     var s=setup(target,'gezel-chat'),opts=Object.assign({},options),stopped=false,frame=0,last='',remote=null;
     s.host.style.height='100%';s.host.style.minHeight='0';
     var status=el('p','Opening chat…');status.setAttribute('role','status');s.root.append(status);
-    var ready=transport.chat?transport.chat(opts):Promise.reject(new Error(demo?'Chat is available in Gezel. This demo does not send messages.':'Chat is unavailable in this host. Open this app in Gezel.'));
+    var ready=transport.chat?transport.chat(opts,s.root):Promise.reject(new Error(demo?'Chat is available in Gezel. This demo does not send messages.':'Chat is unavailable in this host. Open this app in Gezel.'));
     function position(){
       frame=0;
       if(stopped||!s.host.isConnected)return;

@@ -8,6 +8,7 @@ import type { MessageGezelRequest } from '../schemas/api.js';
 import type { FileTurnIntent } from '../schemas/file-turn-intent.js';
 import type { ChatMessage } from '../schemas/gezel.js';
 import type { ChatSession, ExpectedDeliverable } from '../schemas/session.js';
+import { isTaskOrCraftbookSession } from '../session-scope.js';
 import { renamedRoleBasedName } from '../tools/assignee-arg.js';
 import { validatePortablePath } from './files.js';
 import { portableToolSurface } from './product-tools.js';
@@ -84,7 +85,7 @@ export async function preparePortableMessage(
   if (!(await store.getProject(projectId))) throw new Error('Project not found');
   const config = await store.readConfig();
   const latest = sessions
-    .filter((s) => s.projectId === projectId && !s.archived && !s.taskRef)
+    .filter((s) => s.projectId === projectId && !s.archived && !isTaskOrCraftbookSession(s))
     .sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt))[0];
   const session = latest ? await store.getSession(target.id, latest.id) : null;
   // Validate a file request against the current role and project before allocating a session.

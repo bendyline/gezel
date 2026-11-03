@@ -1,5 +1,10 @@
 import type { GezelSummary, ProjectDetail, Task } from '@bendyline/gezel';
-import { displayName, isCodingProject, pronounFormsForGender } from '@bendyline/gezel';
+import {
+  displayName,
+  isCodingProject,
+  isTaskOrCraftbookSession,
+  pronounFormsForGender,
+} from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
@@ -131,7 +136,7 @@ export function ProjectChat({
         // Task/craftbook runs have their own task surfaces. They must not
         // steer the ordinary project composer toward whichever gezel most
         // recently worked a night-shift step.
-        const live = r.sessions.filter((s) => !s.archived && !s.taskRef);
+        const live = r.sessions.filter((s) => !s.archived && !isTaskOrCraftbookSession(s));
         const newest = live[0];
         setLastThread(
           newest

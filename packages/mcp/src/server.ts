@@ -126,6 +126,7 @@ import {
   binaryDocumentWriteRefusalText,
   coerceDeliverableKind,
   composeCraftbookLaunch,
+  craftbookCheckup,
   craftbookDocFormatFromEnv,
   createTaskText,
   crewMemberNamedIn,
@@ -4270,12 +4271,9 @@ async function writeArtifactToolCall({
       };
     }
   }
-  // normalizeMarkdown collapses single newlines inside non-fenced paragraphs into
-  // spaces — correct for prose .md, catastrophic for source code. An end-of-line
-  // `// comment` would eat the next statement when collapsed onto one line
-  // (observed corrupting inline JS in the tictactoe eval).
-  const stored = clean.endsWith('.md') ? normalizeMarkdown(content) : content;
-  await api.writeProjectArtifact(projectId, clean, stored, {
+  // Artifacts may carry line-based data or gate verdicts even in Markdown.
+  // Preserve the submitted bytes; prose normalization can change their meaning.
+  await api.writeProjectArtifact(projectId, clean, content, {
     ...(gezelId ? { gezelId } : {}),
     ...(sessionId ? { sessionId } : {}),
   });
@@ -5785,10 +5783,18 @@ server.tool(
       return cbResult(doc.content);
     }
     const book = await loadTargetCraftbook(t);
+    const template =
+      t.kind === 'craftbook' ? (await api.getCraftbook(t.id).catch(() => null))?.craftbook : null;
     const scripts =
       t.kind === 'task'
         ? (await api.getTask(t.projectId, t.num)).craftbook.scripts
-        : (await api.getCraftbook(t.id).catch(() => null))?.craftbook.scripts;
+        : template?.scripts;
+    // The editor's AI assist reads its own book to see what is left to
+    // improve, and to confirm a change cleared what it was meant to.
+    const checkup =
+      template && template.id === sessionCraftbookId
+        ? craftbookCheckup(template).map((finding) => finding.message)
+        : null;
     return cbResult(
       JSON.stringify(
         {
@@ -5796,6 +5802,7 @@ server.tool(
           entryStepId: book.entryStepId,
           steps: book.steps,
           ...(scripts ? { scripts: Object.keys(scripts) } : {}),
+          ...(checkup ? { checkup } : {}),
         },
         null,
         2,
@@ -7884,10 +7891,14 @@ async function listRoutableProjectTypes(): Promise<RoutableProjectType[]> {
  * The project type this goal belongs to, when its words name one clearly
  * (see matchProjectTypeForBrief). Null for everything else, and on any
  * failure: the ordinary kickoff is always there to fall back to.
+ *
+ * Pass the caller's own fields, never `resolveMacroBrief`'s output: its
+ * padding ("…a real workspace deliverable, not a plan") named gilde 0.3.5's
+ * Client Delivery through its `deliverables` tag, tying every short trip brief.
  */
 async function routeBriefToProjectType(brief: {
   name: string;
-  about: string;
+  about?: string;
   taskDescription?: string;
 }): Promise<{ match: BriefTypeMatch; type: RoutableProjectType } | null> {
   if (process.env.GEZEL_DISABLE_TYPE_ROUTING === '1') return null;
@@ -8149,7 +8160,7 @@ async function runStartProject(
   if (binaryRequest) {
     return runBinaryDocumentProject({ ...brief, taskTitle, kickoffMessage }, binaryRequest, tool);
   }
-  const routed = await routeBriefToProjectType(brief);
+  const routed = await routeBriefToProjectType({ name, about, taskDescription });
   if (routed) {
     const typed = await runTypedKickoff(brief, routed, {
       cacheTool: tool,
@@ -8651,7 +8662,7 @@ async function runFlatProject(
       cacheTool,
     );
   }
-  const routed = await routeBriefToProjectType(brief);
+  const routed = await routeBriefToProjectType({ name, about, taskDescription });
   if (routed) {
     const typed = await runTypedKickoff(brief, routed, {
       cacheTool,

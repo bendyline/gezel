@@ -39,6 +39,8 @@ chat slot while a page dialog is open. Use a specific companion title and a shor
 description of useful work the person can do together. A file-only app can pass
 `chat: false`. Keep the content usable in the ordinary pane as well.
 
+In a standalone demo the same slot holds the [sample conversation](gezel-page-apis.md#the-sample-conversation), drawn to match Gezel's chat: replies in the heading serif, the visitor's messages in an accent-tinted bubble, each tool the companion uses as a quiet step row with a check, and suggestions as bare keys under the conversation (one scrolling row on narrow screens). It lives in the component's shadow root, so restyle it only through the `--gezel-component-*` properties below. Keep its copy in the role's voice: short, specific, American English, no emojis.
+
 Use `actionForm` for small, declared edits and `collectionFilter` for search over
 rendered records. These components supply controls and state handling, while the
 app owns field labels, domain data, allowed actions, and refresh behavior. Avoid

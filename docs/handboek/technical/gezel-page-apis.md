@@ -291,3 +291,31 @@ components.demo?.reset();
 Demo imports exercise the same picker, drop, validation, progress and cards. They retain browser Files/object URLs in this tab, use deterministic metadata, and never write to disk or invoke a model. `data.url` resolves imported demo media. Reset the page's own sample state and remount the adder to clear its result list. Do not claim imported demo data was indexed: Data Analysis keeps its charts on labeled sample tables.
 
 React apps can mount either component in a ref inside an effect and call `destroy()` in cleanup. There is no separate React component implementation to keep in sync.
+
+### The sample conversation
+
+In a standalone demo, `appLayout` (or a bare `chat` slot) draws a sample conversation where Gezel's chat would be. A demo opens as the whole window: the layout reports `fullscreen: true` without the Fullscreen API, so the companion sits beside the page, or beneath it below 900 CSS pixels. Script the conversation and pass it as `chat`:
+
+```js
+const api = window.gezel || window.makeDemoGezel({
+  page: { typeName: 'Meal Planner' },
+  tools: { page_set_menu: input => setDemoMenu(input), grocery_list: () => demoGroceries() },
+  data: { 'menu.json': () => demoMenu },
+  chat: {
+    name: 'Mila',
+    role: 'Meal Planner',
+    greeting: 'Hello, I’m Mila. Sunday is still open.',
+    suggestions: ['Plan Sunday around what we have'],
+    respond: async (text, ctx) => {
+      if (!/sunday|plan/i.test(text)) return null;
+      await ctx.invoke('set_menu', { day: 'sunday', meal: 'Shakshuka' }, 'Sunday: Shakshuka');
+      return 'Sunday is shakshuka. Everything it needs is stocked.';
+    },
+    reactions: { page_set_menu: input => `${input.day} is set.` },
+  },
+});
+```
+
+`ctx.read(path)` returns a snapshot of the sample data. `ctx.invoke(tool, input, summary)` runs the page's demo handler for the model's tool name, falling back to its `page_` alias, shows the step in the conversation, fires the page's watches and `gezel-app-data-changed`, and briefly highlights page text that changed. `ctx.say(text)` adds a line mid-turn, and `ctx.suggest(list)` swaps the suggestions without a reply. A read-only tool that changes nothing repaints nothing. A reply is a string, an array of strings, or `{ reply, suggestions }`; `null` gives the shared answer that the preview follows a few sample requests. `reactions`, keyed by page tool, are the demo form of a manifest `reaction`: the person's page action summons a reply, and a game answers with the companion's move through its turn tool.
+
+The composer labels the replies as scripted, nothing leaves the page, and a live host never runs this code. Without a script the conversation greets the visitor and gives the shared answer, naming the crew lead's role when the exporter supplies it. A demo configured with `layout: 'pane'` keeps the narrow Output-pane presentation.

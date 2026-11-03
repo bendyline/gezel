@@ -135,14 +135,106 @@ test('fullscreen notifications resize a live chat slot without remounting it', a
     .toBe(1);
 });
 
-test('standalone chat explains its unavailable state without sending to a parent or model', async ({
+test('standalone chat runs the page’s sample conversation without sending to a parent or model', async ({
   page,
 }) => {
-  await page.setContent('<div id="chat" style="height:400px"></div>');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setContent('<div id="chat" style="height:520px"></div>');
+  await page.addScriptTag({ content: pageDemoBootstrapSource() });
+  await page.evaluate(() => {
+    const posted: unknown[] = [];
+    Reflect.set(window, 'posted', posted);
+    window.postMessage = (message: unknown) => posted.push(message);
+    const items = { list: ['Bread'] };
+    const seen: string[] = [];
+    Reflect.set(window, 'seen', seen);
+    window.addEventListener('gezel-app-data-changed', () => seen.push('event'));
+    const api = Reflect.get(
+      window,
+      'makeDemoGezel',
+    )({
+      tools: {
+        page_add: (input: { item: string }) => {
+          items.list.push(input.item);
+          return { count: items.list.length };
+        },
+        page_clear: () => {
+          items.list = [];
+          return { count: 0 };
+        },
+      },
+      data: { 'items.json': () => items },
+      chat: {
+        name: 'Mila',
+        role: 'Meal Planner',
+        greeting: 'Hello, I’m Mila.',
+        suggestions: ['Add milk'],
+        respond: (text: string, ctx: Record<string, (...args: unknown[]) => Promise<unknown>>) => {
+          if (!/milk/i.test(text)) return null;
+          return ctx.read('items.json').then((before) => {
+            (before as { list: string[] }).list.push('Not saved');
+            return ctx
+              .invoke('add', { item: 'Milk' }, 'Milk')
+              .then((out) => `Added milk. **${(out as { count: number }).count}** items now.`);
+          });
+        },
+        reactions: { page_clear: () => 'Cleared. Usually next:\n- Milk\n- Bread' },
+      },
+    });
+    api.data.watch('items.json', (event: { path: string }) => seen.push(`watch:${event.path}`));
+    api.ui.components.chat('#chat');
+    Reflect.set(window, 'demoApi', api);
+    Reflect.set(window, 'items', () => items.list.slice());
+  });
+  const chat = page.locator('gezel-chat');
+  await expect(chat.locator('.msg.gezel .body')).toHaveText(['Hello, I’m Mila.']);
+  await expect(chat.locator('.who')).toContainText('Meal Planner');
+  await chat.getByRole('button', { name: 'Add milk' }).click();
+  await expect(chat.locator('.msg.you .body')).toHaveText(['Add milk']);
+  await expect(chat.locator('.step.done')).toContainText('Add · Milk');
+  await expect(chat.locator('.msg.gezel .body').last()).toHaveText('Added milk. 2 items now.');
+  await expect(chat.locator('.msg.gezel strong')).toHaveText('2');
+  await expect(chat.getByRole('group', { name: 'Try asking' })).toBeHidden();
+  expect(await page.evaluate(() => Reflect.get(window, 'items')())).toEqual(['Bread', 'Milk']);
+  expect(await page.evaluate(() => Reflect.get(window, 'seen'))).toEqual([
+    'watch:items.json',
+    'event',
+  ]);
+
+  await chat.getByRole('textbox', { name: 'Message Mila' }).fill('Tell me a joke');
+  await chat.getByRole('textbox', { name: 'Message Mila' }).press('Enter');
+  await expect(chat.locator('.msg.gezel .body').last()).toContainText(
+    'I can only follow a few sample requests in this preview',
+  );
+
+  await page.evaluate(() => Reflect.get(window, 'demoApi').tools.invoke('page_clear', {}));
+  const reply = chat.locator('.msg.gezel .body').last();
+  await expect(reply.locator('p')).toHaveText('Cleared. Usually next:');
+  await expect(reply.locator('ul li')).toHaveText(['Milk', 'Bread']);
+  await expect(chat.getByRole('button', { name: 'Send', exact: true })).toBeEnabled();
+  expect(await page.evaluate(() => Reflect.get(window, 'posted'))).toEqual([]);
+  await expect(page.locator('html')).toHaveAttribute('data-gezel-fullscreen', 'true');
+});
+
+test('a demo configured for the pane keeps the compact layout, and an unscripted conversation still answers', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setContent(
+    '<script type="application/json" id="gezel-demo-config">{"layout":"pane","companion":{"role":"Trip Planner"}}</script><div id="chat" style="height:400px"></div>',
+  );
   await page.addScriptTag({ content: pageDemoBootstrapSource() });
   await page.evaluate(() => Reflect.get(window, 'makeDemoGezel')({}).ui.components.chat('#chat'));
-  await expect(page.getByRole('status')).toContainText('This demo does not send messages.');
   await expect(page.locator('html')).toHaveAttribute('data-gezel-fullscreen', 'false');
+  const chat = page.locator('gezel-chat');
+  await expect(chat.locator('.msg.gezel .body')).toHaveText(
+    'Hello. I’m your trip planner. Ask me about this sample project.',
+  );
+  await chat.getByRole('textbox', { name: 'Message Trip Planner' }).fill('Plan Lisbon');
+  await chat.getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(chat.locator('.msg.gezel .body').last()).toContainText(
+    'I can only follow a few sample requests in this preview.',
+  );
 });
 
 test('demo bootstrap is idempotent and never replaces a live host', async ({ page }) => {

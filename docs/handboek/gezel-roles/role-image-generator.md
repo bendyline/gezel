@@ -9,13 +9,13 @@ summary: A fixed-function specialist — prompts in, pictures out.
 
 The **Image Generator** does one thing on purpose: turn descriptions into images. Illustrations, hero images, textures, mockup art — ask, refine, ask again. Results land in the project's artifacts, ready for a Designer or you to place.
 
-This is a deliberately narrow, fixed-function role. It doesn't edit your files or wander the workspace; keeping it single-purpose makes it safe to hand loose creative prompts without side effects. Gezel's install dialog likes to give these gezellen painterly names — Picasso, Vermeer — because a character beats a button.
+This is a deliberately narrow, fixed-function role. It doesn't edit your files or wander the workspace; keeping it single-purpose makes it safe to hand loose creative prompts without side effects. Gezel's install dialog gives these gezels painterly names — Picasso, Vermeer — because a character beats a button.
 
 ::handboek-gezel-roster{role=image-generator}
 
 ## Editing a picture
 
-To change a picture rather than make a new one, add an **Image editor** gezel from the gilde. Attach a picture to your message and say what to change ("remove the people in the background," "turn it into a watercolor"). It changes that and keeps the rest. Send the next change without a picture and it keeps editing the last result, or attach up to three pictures to combine them. A message with no picture to change is turned away, so it never draws something new from words alone.
+To change a picture rather than make a new one, add an **Image editor** gezel from the catalog. Attach a picture to your message and say what to change ("remove the people in the background," "turn it into a watercolor"). It changes that and keeps the rest. Send the next change without a picture and it keeps editing the last result, or attach up to three pictures to combine them. A message with no picture to change is turned away, so it never draws something new from words alone.
 
 On this computer, editing needs a model that can do it. **Qwen Image Edit 2511** is made for editing and does nothing else. **FLUX.2 Klein** draws new pictures and edits too. Whenever a picture comes with the request, from the Image editor or from any gezel, Gezel picks an installed model that can edit it, and the result keeps the picture's shape unless you choose another. Download them in **Settings → Image generation**.
 

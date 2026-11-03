@@ -103,6 +103,11 @@ const AmbientDashboardCard = lazy(() =>
 const ConnectedAppsPanel = lazy(() =>
   loadConnectedAppsModule().then(({ ConnectedAppsPanel }) => ({ default: ConnectedAppsPanel })),
 );
+const AccountsPanel = lazy(() =>
+  import('../components/AccountsPanel.js').then(({ AccountsPanel }) => ({
+    default: AccountsPanel,
+  })),
+);
 const MediaSearchCard = lazy(() =>
   loadMediaSearchModule().then(({ MediaSearchCard }) => ({ default: MediaSearchCard })),
 );
@@ -225,6 +230,7 @@ type SectionId =
   | 'toolsets'
   | 'knowledge'
   | 'securityCompliance'
+  | 'accounts'
   | 'about'
   | 'benchmarks';
 
@@ -343,6 +349,7 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'aboutYou', label: 'About You' },
     { id: 'folders', label: 'Folders' },
     { id: 'securityCompliance', label: 'Security & Compliance' },
+    { id: 'accounts', label: 'Accounts' },
     { id: 'defaults', label: 'Artificial Intelligence', groupHeader: 'ai' },
     { id: 'mlx', label: localEngineSettingsLabel('mlx', platform), group: 'ai' },
     {
@@ -364,12 +371,12 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'audio', label: 'Audio', group: 'workloads' },
     { id: 'webSearch', label: 'Web search', group: 'workloads' },
     { id: 'knowledge', label: 'Knowledge', group: 'workloads' },
+    { id: 'benchmarks', label: 'Benchmarks' },
     { id: 'channels', label: 'Channels' },
     { id: 'connectedApps', label: 'Integrations' },
     { id: 'remoteServers', label: 'Remote Servers' },
     { id: 'toolsets', label: 'Shared Toolsets' },
     { id: 'about', label: 'About' },
-    { id: 'benchmarks', label: 'Benchmarks' },
   ];
 }
 
@@ -783,11 +790,7 @@ function DaemonSettingsView() {
         const res = await api.updateConfig({ showWorkInProgressFeatures });
         setConfig(res);
         window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-        setStatus(
-          showWorkInProgressFeatures
-            ? 'very early work-in-progress features ON'
-            : 'very early work-in-progress features OFF',
-        );
+        setStatus(showWorkInProgressFeatures ? 'preview features ON' : 'preview features OFF');
       } catch (err) {
         setStatus(`save failed: ${(err as Error).message}`);
       }
@@ -1646,11 +1649,28 @@ function DaemonSettingsView() {
       cancelled = true;
     };
   }, []);
+  // Accounts sign people in from a browser (ADR 0029). The tab shows where
+  // they are in use: a daemon that requires them (a container), or one that
+  // has some. The desktop app on its own never needs it.
+  const [accountsInUse, setAccountsInUse] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    api.accounts
+      .getSignInState()
+      .then((state) => {
+        if (!cancelled) setAccountsInUse(state.accountsRequired || !state.setupRequired);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const usesProvider = (name: ProviderName) =>
     provider === name ||
     nightShiftProvider === name ||
     Boolean(config?.defaultModel?.[name as keyof NonNullable<typeof config.defaultModel>]);
   const developerAreaShown: Partial<Record<string, boolean>> = {
+    accounts: accountsInUse,
     ollama: usesProvider('ollama') || Boolean(config?.ollamaBaseUrl),
     codexCli: usesProvider('codex-cli') || Boolean(config?.codexCli),
     anthropicCli: usesProvider('anthropic-cli') || Boolean(config?.anthropicCli),
@@ -1676,9 +1696,6 @@ function DaemonSettingsView() {
       // a provider the daemon refuses to construct. The greyed pill on the
       // Artificial Intelligence tab carries the explanation.
       if (EXTERNAL_CHAT_SECTIONS.has(s.id) && externalChatBlocked) return false;
-      // Benchmarks is a debug-only surface — hidden until the user turns on
-      // Debug mode under the About tab.
-      if (s.id === 'benchmarks' && config?.debugMode !== true) return false;
       // Channels is in the work-in-progress bucket alongside connectors —
       // hidden until the user opts in under About.
       if (s.id === 'channels' && config?.showWorkInProgressFeatures !== true) return false;
@@ -4369,6 +4386,7 @@ function DaemonSettingsView() {
           )}
 
           {section === 'connectedApps' && <ConnectedAppsPanel />}
+          {section === 'accounts' && <AccountsPanel />}
           {section === 'remoteServers' && <RemoteServersPanel />}
 
           {section === 'knowledge' && <KnowledgeCatalogsCard />}
@@ -4451,10 +4469,10 @@ function DaemonSettingsView() {
                     checked={config?.showWorkInProgressFeatures === true}
                     onChange={(e) => void saveShowWorkInProgressFeatures(e.target.checked)}
                   />
-                  <span>Show very early work-in-progress features</span>
+                  <span>Show preview features</span>
                 </label>
                 <p className="muted small">
-                  Very early features may be incomplete or change shape. The current preview is
+                  Preview features are usable but still changing shape. The current preview is
                   Connectors and the project types and craftbooks that use them.
                 </p>
               </section>
@@ -4505,7 +4523,7 @@ function DaemonSettingsView() {
             </>
           )}
 
-          {section === 'benchmarks' && config?.debugMode === true && <BenchmarksView />}
+          {section === 'benchmarks' && <BenchmarksView />}
         </Suspense>
 
         {error && <p className="error">{error}</p>}

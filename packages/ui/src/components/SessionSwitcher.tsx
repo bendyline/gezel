@@ -1,5 +1,5 @@
 import type { ChatSessionSummary, PromptDraftSummary } from '@bendyline/gezel';
-import { derivePromptDraftTitle, parseTaskRef } from '@bendyline/gezel';
+import { derivePromptDraftTitle, isTaskOrCraftbookSession, parseTaskRef } from '@bendyline/gezel';
 import {
   Fragment,
   type ReactNode,
@@ -237,15 +237,15 @@ export function SessionSwitcher({
   const refreshDraftsRef = useRef<() => Promise<void>>(async () => {});
   const refreshedUnknownSession = useRef<string | null>(null);
 
-  // The (gezel, project, task) triple the list is scoped to. Stamped onto
-  // the loaded list so the auto-pick below can tell "this list is for the
-  // scope I'm looking at" from "this list is the previous scope's, still
-  // on screen while the refetch flies".
-  const scopeKey = `${gezelId}:${projectId}:${taskRef ?? ''}:${subjectScope}`;
+  // The scope the list is loaded for. Stamped onto the loaded list so the
+  // auto-pick below can tell "this list is for the scope I'm looking at"
+  // from "this list is the previous scope's, still on screen while the
+  // refetch flies".
+  const scopeKey = `${gezelId}:${projectId}:${taskRef ?? ''}:${subjectScope}:${craftbookRef ?? ''}`;
   const [sessionsScope, setSessionsScope] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const key = `${gezelId}:${projectId}:${taskRef ?? ''}:${subjectScope}`;
+    const key = `${gezelId}:${projectId}:${taskRef ?? ''}:${subjectScope}:${craftbookRef ?? ''}`;
     try {
       let all: ChatSessionSummary[];
       if (taskRef) {
@@ -258,12 +258,17 @@ export function SessionSwitcher({
           gezelId,
           projectId,
           ...(subjectScope ? { subjectKeys: subjectScope.split('\n') } : {}),
+          ...(craftbookRef ? { craftbookRef } : {}),
         });
         // The ordinary chat surface is the gezel's lobby conversation.
         // Task-scoped sessions (including night-shift handoffs) have their
-        // own task UI and procedure prompt; letting one win this newest-first
-        // list silently drops an ordinary user message into that procedure.
-        all = res.sessions.filter((s) => !s.taskRef);
+        // own task UI and procedure prompt, and a craftbook's threads edit
+        // that book; letting one win this newest-first list silently drops an
+        // ordinary user message into that procedure or that book. The
+        // craftbook editor's own list is the reverse: only its book's threads.
+        all = craftbookRef
+          ? res.sessions.filter((s) => s.craftbookRef === craftbookRef)
+          : res.sessions.filter((s) => !isTaskOrCraftbookSession(s));
       }
       const visible = all.filter((s) => !s.archived);
       setSessions(visible);
@@ -278,7 +283,7 @@ export function SessionSwitcher({
       });
       return [] as ChatSessionSummary[];
     }
-  }, [gezelId, projectId, taskRef, subjectScope]);
+  }, [gezelId, projectId, taskRef, subjectScope, craftbookRef]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey is a bump counter — incrementing it is the re-fetch trigger.
   useEffect(() => {

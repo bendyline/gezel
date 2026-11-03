@@ -459,23 +459,50 @@ const DEFAULT_RESPONSES: Record<string, unknown> = {
     activeTraits: [],
     driftedTraitIds: [],
   },
+  // The desktop app on its own: no account exists and none is required.
+  'accounts.getSignInState': {
+    accountsRequired: false,
+    setupRequired: true,
+    setupCodeAvailable: false,
+  },
 };
 
-export function createMockApi(overrides: MockApi = {}): MockApi {
-  const handler: ProxyHandler<MockApi> = {
-    get(target, prop: string) {
-      if (prop in target) return target[prop as keyof MockApi];
+/**
+ * The client's sub-clients (`api.accounts.signOut()`), mocked one level down
+ * the same way. Their defaults are keyed `subClient.method` above. Without
+ * this a sub-client read as a bare vi.fn(), and its methods as undefined.
+ */
+const SUB_CLIENTS = new Set<string>([
+  'taskInputs',
+  'officeIntegrations',
+  'retrieval',
+  'issueTriage',
+  'accounts',
+] satisfies (keyof GezelClient)[]);
+
+function lazyMocks(initial: Record<PropertyKey, unknown>, subClient?: string) {
+  return new Proxy(initial, {
+    get(target, prop) {
+      if (prop in target) return target[prop];
+      if (subClient === undefined && typeof prop === 'string' && SUB_CLIENTS.has(prop)) {
+        target[prop] = lazyMocks({}, prop);
+        return target[prop];
+      }
       // Lazily create a vi.fn() that resolves with the default response
       // for this method (or an empty object for unknown methods; a listed
       // `null` stays null, for "nothing yet" answers). The
       // first read installs it so subsequent reads return the same fn,
       // letting tests configure it after the fact via vi.mocked(api.x).
+      const key = subClient === undefined ? prop : `${subClient}.${String(prop)}`;
       const fn = vi
         .fn()
-        .mockResolvedValue(prop in DEFAULT_RESPONSES ? DEFAULT_RESPONSES[prop] : {});
-      (target as Record<string, unknown>)[prop] = fn;
+        .mockResolvedValue(key in DEFAULT_RESPONSES ? DEFAULT_RESPONSES[key as string] : {});
+      target[prop] = fn;
       return fn;
     },
-  };
-  return new Proxy({ ...overrides } as MockApi, handler);
+  });
+}
+
+export function createMockApi(overrides: MockApi = {}): MockApi {
+  return lazyMocks({ ...overrides }) as MockApi;
 }

@@ -40,6 +40,7 @@ const PROJECT_TYPE_CATEGORY_AREAS: Record<ProjectTypeCategory, readonly Interest
   data: ['data'],
   home: ['home'],
   money: ['business', 'home'],
+  business: ['business', 'work'],
   events: ['home'],
   other: [],
 };

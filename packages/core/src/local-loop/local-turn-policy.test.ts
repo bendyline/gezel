@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import { salvageImmediateFileWriteArgs } from './immediate-write-salvage.js';
 import {
+  ConstrainedWriteRecovery,
   LocalTurnPolicy,
   compactLocalTurn,
   isMissingRepairTargetOutput,
   planFileTurn,
   turnCheckpoint,
 } from './local-turn-policy.js';
+import { ToolFailureTracker } from './tool-failure-tracker.js';
 
 const tools = ['read_file', 'write_file', 'replace_in_file'].map((name) => ({
   type: 'function' as const,
@@ -188,5 +190,54 @@ describe('missing repair target detection', () => {
   it('does not fire on ordinary tool failures', () => {
     expect(isMissingRepairTargetOutput('validate', 'tsc: 3 errors')).toBe(false);
     expect(isMissingRepairTargetOutput('read_file', 'ok: 42 lines')).toBe(false);
+  });
+});
+
+describe('grounding recovery', () => {
+  const roster = [
+    ...tools,
+    { type: 'function' as const, function: { name: 'search', description: '', parameters: {} } },
+  ];
+  const refusal =
+    'Not saved: no source evidence has been collected. Your next tool call must be `search`.';
+
+  it('holds the requested lookup until success, then keeps research open', () => {
+    const recovery = new ConstrainedWriteRecovery();
+    const tracker = new ToolFailureTracker();
+    const record = (name: string, output: string) =>
+      recovery.recordResult(name, output, tracker.recordResult(name, output), roster);
+    record('read_file', 'Read notes');
+    expect(recovery.active).toBe(false);
+    record('write_file', refusal);
+    expect(recovery).toMatchObject({ active: true, lookupPending: 'search' });
+    record('read_file', 'Read notes');
+    record('search', 'ERROR: temporarily unavailable');
+    expect(recovery.lookupPending).toBe('search');
+    record('search', 'Found three sources');
+    expect(recovery).toMatchObject({ active: true, lookupPending: null });
+    expect(new ConstrainedWriteRecovery().active).toBe(false);
+  });
+
+  it('reopens the existing tool roster after a fragmentary rewrite is refused', () => {
+    const recovery = new ConstrainedWriteRecovery();
+    const output = 'ERROR: Refusing to replace src/widget.js with a much shorter source file.';
+    recovery.recordResult(
+      'write_file',
+      output,
+      new ToolFailureTracker().recordResult('write_file', output),
+      tools,
+    );
+    expect(recovery).toMatchObject({ active: true, lookupPending: null });
+  });
+
+  it('never introduces a tool absent from the authorized roster', () => {
+    const recovery = new ConstrainedWriteRecovery();
+    recovery.recordResult(
+      'write_file',
+      refusal,
+      new ToolFailureTracker().recordResult('write_file', refusal),
+      tools,
+    );
+    expect(recovery).toMatchObject({ active: true, lookupPending: null });
   });
 });

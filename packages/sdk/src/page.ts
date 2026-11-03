@@ -436,6 +436,68 @@ export interface GezelChatOptions {
   expand?: boolean;
 }
 
+/** What a sample conversation's handlers may do in a standalone demo. */
+export interface GezelDemoConversationContext {
+  page: GezelPageInfo;
+  /** A snapshot of the page's sample data, as a live read returns fresh JSON. */
+  read(path: string, opts?: GezelPageReadOptions): Promise<unknown>;
+  /**
+   * Runs the page's demo handler for `tool` (or its `page_` alias), shows the
+   * step with `summary`, repaints watches, and highlights what changed.
+   */
+  invoke(tool: string, input?: Record<string, unknown>, summary?: string): Promise<unknown>;
+  /** Adds a companion line mid-turn. */
+  say(text: string): Promise<void>;
+  /** Replaces the suggestions without a reply; earlier wording may be offered again. */
+  suggest(next: string[]): void;
+}
+
+/** A reply: one message, several, or a message with fresh suggestions. */
+export type GezelDemoReply =
+  | string
+  | string[]
+  | { reply: string | string[]; suggestions?: string[] }
+  | null
+  | undefined;
+
+/**
+ * The scripted companion a standalone demo shows where Gezel's chat would be.
+ * Replies never reach a model; the composer says they are scripted.
+ */
+export interface GezelDemoConversation {
+  /** A sample first name; live crew members are named when they are hired. */
+  name?: string;
+  /** The crew template's plain-English role. */
+  role?: string;
+  /** Image URL for the companion's avatar; an initial otherwise. */
+  avatar?: string;
+  greeting?: string;
+  suggestions?: string[];
+  /** Answer the person. Return null for the shared "sample requests only" reply. */
+  respond?(
+    text: string,
+    ctx: GezelDemoConversationContext,
+  ): GezelDemoReply | Promise<GezelDemoReply>;
+  /** Keyed by page tool: the demo form of a manifest `reaction`. Return null to stay quiet. */
+  reactions?: Record<
+    string,
+    (
+      input: Record<string, unknown>,
+      output: unknown,
+      ctx: GezelDemoConversationContext,
+    ) => GezelDemoReply | Promise<GezelDemoReply>
+  >;
+}
+
+/** Sample handlers the page passes to `makeDemoGezel` when no host injected `window.gezel`. */
+export interface GezelDemoOptions {
+  page?: Partial<Pick<GezelPageInfo, 'entry' | 'typeName' | 'params'>>;
+  tools?: Record<string, (input: Record<string, unknown>) => unknown>;
+  data?: Record<string, (opts: Record<string, unknown>) => unknown>;
+  existingPaths?: string[];
+  chat?: GezelDemoConversation;
+}
+
 /**
  * The `window.gezel` object a served project-type page codes against.
  * Installed non-writable before any page script runs; absent entirely in
@@ -459,5 +521,7 @@ declare global {
   interface Window {
     /** Present when the page is served (or stubbed) with the gezel page API. */
     gezel?: GezelPageApi;
+    /** Present only where the shared demo bootstrap was injected. */
+    makeDemoGezel?: (options: GezelDemoOptions) => GezelPageApi;
   }
 }

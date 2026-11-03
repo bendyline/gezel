@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { Store } from '../fs/store.js';
 
 /**
  * Does this inbound message ask the recipient to MODIFY / change existing
@@ -66,4 +67,63 @@ export function isSubstantiveExistingWorkspaceFile(filePath: string, content: st
     return trimmed.length >= 500 && /<script\b/i.test(trimmed) && /<(?:html|body)\b/i.test(trimmed);
   }
   return true;
+}
+
+/**
+ * The workspace file a handoff asks to create although it already exists
+ * with real content, so the request can be answered as delivered instead of
+ * re-run; null when the request is real work.
+ */
+export async function staleWorkspaceFileRequest(
+  store: Pick<Store, 'readProjectWorkspaceFile'>,
+  projectId: string,
+  userText: string,
+): Promise<string | null> {
+  const explicitMissingFileMatch = userText.match(
+    /there is still\s+\*?\*?no\s+`([^`]+)`\*?\*?\s+in the workspace/i,
+  );
+  const explicitMissingFilePath = explicitMissingFileMatch?.[1]?.trim();
+  if (explicitMissingFilePath) {
+    try {
+      const content = await store.readProjectWorkspaceFile(projectId, explicitMissingFilePath);
+      return content !== null &&
+        isSubstantiveExistingWorkspaceFile(explicitMissingFilePath, content)
+        ? explicitMissingFilePath
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // A request to MODIFY an existing file ("update index.html so an alien
+  // reaching the bottom subtracts 50 points") names the same path a
+  // redundant "create it" request would — but it is real work, not a
+  // no-op. Never short-circuit it. Without this guard the change is
+  // silently dropped: the recipient's turn is skipped entirely and the
+  // synthetic "treat as delivered" reply tells the voorman to close the
+  // task. Wild-caught (qwen3.6 voorman "Space Shooter Arcade"): a
+  // "subtract 50 points" change handoff was eaten here because it
+  // mentioned `workspace/index.html` and the file already existed.
+  if (messageExpressesModifyIntent(userText)) return null;
+
+  const text = userText.trim();
+  const isQueuedGezelMessage = /^\[Message from [^\]]+\]:/i.test(text);
+  const isRepairMessage =
+    /\bworking-image\b/i.test(text) ||
+    /\bsuccess criteria\b/i.test(text) ||
+    /\breplace_in_file\b/i.test(text) ||
+    /\bpatch\b[\s\S]{0,160}\b(?:img|image|src)\b/i.test(text);
+  if (!isQueuedGezelMessage || isRepairMessage) return null;
+  const filePath =
+    text.match(/\[Deliverable expected as a FILE at `([^`]+)`/i)?.[1]?.trim() ??
+    text.match(/\bworkspace\/(index\.html)\b/i)?.[1]?.trim();
+  if (!filePath) return null;
+  try {
+    const content = await store.readProjectWorkspaceFile(projectId, filePath);
+    return content !== null && isSubstantiveExistingWorkspaceFile(filePath, content)
+      ? filePath
+      : null;
+  } catch {
+    return null;
+  }
 }

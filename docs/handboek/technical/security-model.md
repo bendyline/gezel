@@ -12,7 +12,7 @@ subcategory:
 
 Giving AI hands means deciding, carefully, what those hands may touch.
 
-**It is important to note: gezel is still in early beta.** Like any young project, it will have security bugs we haven't found yet, and we fix them as they are reported. If you find one, please report it privately as described in the project's [security policy](https://github.com/bendyline/gezel/blob/main/SECURITY.md) rather than in a public issue.
+**How this code is written and checked.** Gezel is open source under the MIT license: anyone can read it, audit it, build it and fork it, and anyone can propose a change. The code itself is written by one team, so every control described here has a single accountable author and one set of conventions. The full threat model, every enforced control and its current status, and the known limitations are in the [security architecture](https://github.com/bendyline/gezel/blob/main/docs/security-architecture.md). Like any software, Gezel will have security bugs we have not found yet, and we fix them as they are reported. If you find one, please report it privately as described in the project's [security policy](https://github.com/bendyline/gezel/blob/main/SECURITY.md) rather than in a public issue. [Governance](governance.md) says more about who writes Gezel and how a change is checked, and [What leaves this computer](what-leaves-this-computer.md) lists every kind of network traffic and the security level that allows it.
 
 **Our security model is not designed to be perfect.** In many places, the security design focuses on keeping honest models honest via layers of "defense in depth". This lets gezel still be useful without requiring you to make every fiddly technical security decision, and without requiring exotic and complicated isolation mechanisms (e.g., containers). Think of the security design like multiple 5-foot-tall chain-link fences: it keeps things corralled, but a determined attacker (a purpose-built malicious program already on your machine) could hop over them.
 
@@ -36,7 +36,19 @@ powers can generally read files your account can read, including Gezel's
 user-scoped connection details. The separately installed machine engine has a
 credential that local user daemons can discover by design, but that credential
 is limited to inference and model management — it cannot read projects,
-gezellen, chats, tools, or credentials.
+the crew, chats, tools, or credentials.
+
+### In a container, people sign in
+
+[Gezel in Docker](gezel-in-docker.md) is the one way Gezel answers on a
+network. Its listener is separate from the service's own: it accepts only
+people signed in with an account and programs holding a key you made, and it
+leaves out every route that trusts a caller on the same computer. By default
+it answers only on the computer running Docker; reaching it from other devices
+goes through HTTPS you put in front of it. Passwords are stored as scrypt
+hashes, sign-ins slow down after repeated mistakes, and History records who
+did what. Every account can do everything for now, terminals included, so add
+only people you trust with that computer.
 
 ### Workspaces have walls
 
@@ -99,7 +111,7 @@ tools — project-file writes, git operations, and outward-facing actions — go
 through the policy and per-project consent you control in Settings. Approving a
 full-trust package command authorizes that command as a whole; Gezel cannot
 separately mediate every side effect produced inside it. Git itself stays
-yours in the default managed workflow: gezellen work in your working copy while
+yours in the default managed workflow: your crew works in your working copy while
 you control commits, branches, and pushes. A full-trust command can perform any
 of those operations if the command you approve includes them.
 

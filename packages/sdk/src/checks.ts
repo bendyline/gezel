@@ -23,6 +23,13 @@ export type { GateScriptResult };
  *   gezel.output(gateResult(r.ok, r.detail));
  */
 export function gateResult(ok: boolean, detail: string): GateScriptResult {
+  if (typeof ok !== 'boolean') {
+    return {
+      decision: 'reject',
+      message:
+        'gateResult expects a boolean first argument. Pass the check result’s .ok value, or explicitly combine multiple checks into a boolean.',
+    };
+  }
   return ok ? { decision: 'approve', message: detail } : { decision: 'reject', message: detail };
 }
 

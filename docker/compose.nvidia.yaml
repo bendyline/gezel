@@ -1,0 +1,14 @@
+# NVIDIA GPU: the CUDA image, with every GPU passed through. Needs the
+# NVIDIA driver and the NVIDIA Container Toolkit on the host.
+#
+#   docker compose -f compose.yaml -f compose.nvidia.yaml up -d
+services:
+  gezel:
+    image: ${GEZEL_IMAGE:-ghcr.io/bendyline/gezel}:${GEZEL_CUDA_TAG:-cuda}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

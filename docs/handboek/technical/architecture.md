@@ -19,7 +19,7 @@ The app finds or starts the service automatically. On a standard install the ser
 
 ## How a gezel acts
 
-A language model on its own can only produce text. A gezel gets **tools** — reading and writing workspace files, saving memories, running scripts, creating tasks, messaging other gezellen. Tools are how a gezel's words become work, and every tool call is subject to the same consent and audit rules regardless of which AI provider is behind the gezel.
+A language model on its own can only produce text. A gezel gets **tools** — reading and writing workspace files, saving memories, running scripts, creating tasks, messaging the rest of the crew. Tools are how a gezel's words become work, and every tool call is subject to the same consent and audit rules regardless of which AI provider is behind the gezel.
 
 The [Tools and toolsets](tools-and-toolsets.md) article lists every group; each role article shows exactly which groups that role carries.
 

@@ -312,6 +312,12 @@ export const PROJECT_CATEGORIES: ProjectCategoryMeta[] = [
     glyph: PROJECT_CATEGORY_ICONS.money,
   },
   {
+    id: 'business',
+    label: 'Business & Teams',
+    tagline: 'Hire, train, sell, and keep the business in good standing.',
+    glyph: PROJECT_CATEGORY_ICONS.business,
+  },
+  {
     id: 'events',
     label: 'Events & Journeys',
     tagline: 'Plan the day, make the trip, rally the crowd.',

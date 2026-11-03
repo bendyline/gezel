@@ -1,6 +1,8 @@
 import type { GetScriptSourceResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import type { RecentTabInput } from '../components/recent-tabs.js';
 import type { EditorProblem } from '../components/script-editor/ScriptCodeEditor.js';
 import {
   ScriptEditorTabs,
@@ -29,6 +31,16 @@ export function CraftbookScriptEditorView({
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+
+  const returnToCraftbook = () => {
+    setConfirmLeave(false);
+    window.dispatchEvent(
+      new CustomEvent<RecentTabInput>('gezel:open-tab', {
+        detail: { kind: 'craftbook', id: craftbookId },
+      }),
+    );
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -66,7 +78,7 @@ export function CraftbookScriptEditorView({
         return;
       }
       setData({ ...data, source, hash: res.hash });
-      setDirty(false);
+      setDirty(editorRef.current?.getValue() !== source);
       editorRef.current?.setServerDiagnostics(res.diagnostics);
     } catch (err) {
       setError((err as Error).message);
@@ -75,14 +87,22 @@ export function CraftbookScriptEditorView({
     }
   }, [craftbookId, scriptName, data]);
 
-  if (error && !data) return <p className="error">{error}</p>;
-  if (!data) return null;
-
   const errorCount = problems.filter((p) => p.severity === 'error').length;
 
   return (
     <div className="script-editor-view">
       <header className="script-editor-header">
+        <button
+          type="button"
+          className="secondary"
+          disabled={saving}
+          onClick={() => {
+            if (dirty) setConfirmLeave(true);
+            else returnToCraftbook();
+          }}
+        >
+          Back to craftbook
+        </button>
         <div className="script-editor-title">
           <span className="task-ref">{craftbookId}</span>
           <h3>{scriptName}</h3>
@@ -93,30 +113,42 @@ export function CraftbookScriptEditorView({
             type="button"
             className="primary"
             onClick={() => void save()}
-            disabled={saving || !dirty}
+            disabled={saving || !data || !dirty}
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </header>
       {error && <p className="error small">{error}</p>}
-      <div className="script-editor-body">
-        <ScriptEditorTabs
-          ref={editorRef}
-          projectId={`craftbook:${craftbookId}`}
-          scriptName={scriptName}
-          initialSource={data.source}
-          initialMeta={data.meta}
-          onChangeContent={() => setDirty(true)}
-          onSave={() => void save()}
-          onProblems={setProblems}
-        />
-      </div>
+      {data && (
+        <div className="script-editor-body">
+          <ScriptEditorTabs
+            ref={editorRef}
+            projectId={`craftbook:${craftbookId}`}
+            scriptName={scriptName}
+            initialSource={data.source}
+            initialMeta={data.meta}
+            onChangeContent={(source) => setDirty(source !== data.source)}
+            onSave={() => void save()}
+            onProblems={setProblems}
+          />
+        </div>
+      )}
       {errorCount > 0 && (
         <div className="script-editor-problems small">
           {errorCount} problem{errorCount === 1 ? '' : 's'} — hover the red marks in the editor.
         </div>
       )}
+      <ConfirmDialog
+        open={confirmLeave}
+        title="Discard unsaved changes?"
+        message="Your script has unsaved changes. Keep editing to save them, or discard them and return to the craftbook."
+        confirmLabel="Discard changes and return"
+        cancelLabel="Keep editing"
+        danger
+        onConfirm={returnToCraftbook}
+        onCancel={() => setConfirmLeave(false)}
+      />
     </div>
   );
 }

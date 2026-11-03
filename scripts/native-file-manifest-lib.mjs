@@ -3,9 +3,23 @@ import { createReadStream } from 'node:fs';
 import { lstat, readdir, readlink } from 'node:fs/promises';
 import { basename, dirname, join, posix, relative, resolve } from 'node:path';
 
-export const NATIVE_FILE_MANIFEST_SCHEMA_VERSION = 2;
+/**
+ * Schema 3 also pins runtime source files (see NATIVE_RUNTIME_SOURCE_EXTENSIONS).
+ * Schema 2 manifests, from native releases up to 0.1.55, still verify: their
+ * trees are inventoried without those files, as they were generated.
+ */
+export const NATIVE_FILE_MANIFEST_SCHEMA_VERSION = 3;
+const SUPPORTED_SCHEMA_VERSIONS = new Set([2, 3]);
 
 const SIGNATURE_EXPECTATIONS = new Set(['bendyline', 'vendor-hash-only', 'hash-only']);
+
+/**
+ * Source an engine compiles and runs at startup, which no code signature
+ * covers: ds4-server builds its Metal kernels from `metal/*.metal` beside the
+ * binary. Pinned by extension (the files ship 0644) and always `hash-only`.
+ * Keep this tight for the same reason as the data list below.
+ */
+const NATIVE_RUNTIME_SOURCE_EXTENSIONS = ['.metal'];
 
 /**
  * Sidecar data that travels with the binaries — engine build metadata and
@@ -31,23 +45,30 @@ export function isNativeDataFile(name) {
   return NATIVE_DATA_EXTENSIONS.some((extension) => lower.endsWith(extension));
 }
 
+export function isNativeRuntimeSource(name) {
+  const lower = name.toLowerCase();
+  return NATIVE_RUNTIME_SOURCE_EXTENSIONS.some((extension) => lower.endsWith(extension));
+}
+
 /**
  * Build the source-pinnable manifest entry for one native platform directory.
  *
- * Every executable/loadable regular file is hashed. Every symlink is recorded
- * separately with its exact relative target, and must terminate at one of
- * those pinned regular files. This preserves ordinary SONAME chains without
+ * Every executable/loadable regular file and runtime source file is hashed.
+ * Every symlink is recorded separately with its exact relative target, and
+ * must terminate at one of those pinned regular files. This preserves ordinary SONAME chains without
  * allowing a link to escape the platform directory or hide an unpinned file.
  */
 export async function buildNativePlatformManifest({ dir, platformKey, signatureFor }) {
-  const inventory = await inventoryNativePlatform(dir, platformKey);
+  const inventory = await inventoryNativePlatform(dir, platformKey, {
+    pinRuntimeSources: true,
+  });
   const files = {};
   for (const [path, absolute] of inventory.files) {
     const info = await lstat(absolute);
     files[path] = {
       sha256: await sha256File(absolute),
       sizeBytes: info.size,
-      signature: signatureFor(basename(path), path),
+      signature: isNativeRuntimeSource(path) ? 'hash-only' : signatureFor(basename(path), path),
     };
   }
   const symlinks = Object.fromEntries(inventory.symlinks);
@@ -94,7 +115,9 @@ export async function verifyNativeFileTree({ root, manifest, expectedRelease, pl
       throw new Error(`${platformKey} is not a real directory`);
     }
 
-    const actual = await inventoryNativePlatform(dir, platformKey);
+    const actual = await inventoryNativePlatform(dir, platformKey, {
+      pinRuntimeSources: manifest.schemaVersion >= 3,
+    });
     const expectedFiles = Object.keys(expected.files).sort();
     const expectedSymlinks = Object.keys(expected.symlinks).sort();
     assertSamePaths(`${platformKey} executable/loadable file`, expectedFiles, [
@@ -142,8 +165,10 @@ export function assertNativeFileManifest(
   { expectedRelease, allowEmptyPlatforms = false } = {},
 ) {
   if (!isRecord(manifest)) throw new Error('native file manifest is not an object');
-  if (manifest.schemaVersion !== NATIVE_FILE_MANIFEST_SCHEMA_VERSION) {
-    throw new Error(`native file manifest schema must be ${NATIVE_FILE_MANIFEST_SCHEMA_VERSION}`);
+  if (!SUPPORTED_SCHEMA_VERSIONS.has(manifest.schemaVersion)) {
+    throw new Error(
+      `native file manifest schema must be one of ${[...SUPPORTED_SCHEMA_VERSIONS].join(', ')}`,
+    );
   }
   if (typeof manifest.release !== 'string' || manifest.release.length === 0) {
     throw new Error('native file manifest release is missing');
@@ -192,6 +217,9 @@ export function assertNativePlatformManifest(platformKey, platform) {
     }
     if (!SIGNATURE_EXPECTATIONS.has(pin.signature)) {
       throw new Error(`invalid signature expectation: ${platformKey}/${path}`);
+    }
+    if (isNativeRuntimeSource(path) && pin.signature !== 'hash-only') {
+      throw new Error(`runtime source must be hash-only: ${platformKey}/${path}`);
     }
   }
 
@@ -272,7 +300,7 @@ function resolveManifestSymlink(platformKey, start, platform) {
   return current;
 }
 
-async function inventoryNativePlatform(dir, platformKey) {
+async function inventoryNativePlatform(dir, platformKey, { pinRuntimeSources }) {
   const files = new Map();
   const symlinks = new Map();
 
@@ -297,7 +325,10 @@ async function inventoryNativePlatform(dir, platformKey) {
         await visit(absolute);
       } else if (entry.isFile()) {
         const info = await lstat(absolute);
-        if (isLoadableNativeFile(platformKey, path, info.mode)) {
+        if (
+          isLoadableNativeFile(platformKey, path, info.mode) ||
+          (pinRuntimeSources && isNativeRuntimeSource(path))
+        ) {
           files.set(path, absolute);
         }
       } else {

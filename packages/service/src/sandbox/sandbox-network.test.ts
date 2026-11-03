@@ -9,6 +9,7 @@ import {
   type SandboxRunResult,
   canApplyLinuxSystemdSandbox,
   isSilentMacSandboxStartupFailure,
+  linuxSandboxHelperForRun,
   runInSandbox,
   selectDenyNetBoundary,
 } from './runner.js';
@@ -70,9 +71,37 @@ describe('denyNet boundary selection', () => {
     ).toBe('linux-systemd');
   });
 
+  it('falls back to the probed gezel-sandbox helper where systemd cannot help (a container)', () => {
+    expect(
+      selectDenyNetBoundary({
+        platform: 'linux',
+        macSandboxAvailable: false,
+        linuxSystemdSandboxAvailable: false,
+        linuxSandboxHelperAvailable: true,
+      }),
+    ).toBe('linux-gezel-sandbox');
+    // systemd stays first where it works; the helper never stands in for it.
+    expect(
+      selectDenyNetBoundary({
+        platform: 'linux',
+        macSandboxAvailable: false,
+        linuxSystemdSandboxAvailable: true,
+        linuxSandboxHelperAvailable: true,
+      }),
+    ).toBe('linux-systemd');
+    expect(
+      selectDenyNetBoundary({
+        platform: 'win32',
+        macSandboxAvailable: false,
+        linuxSandboxHelperAvailable: true,
+      }),
+    ).toBe('unavailable');
+  });
+
   it('does not start user code when this runtime has no strong boundary', async () => {
     if (process.platform === 'darwin') return;
     if (process.platform === 'linux' && (await canApplyLinuxSystemdSandbox())) return;
+    if (await linuxSandboxHelperForRun()) return;
     if (await canApplyWindowsMxcSandbox(process.execPath)) return;
 
     const marker = join(scratch, 'should-not-exist.txt');
@@ -245,6 +274,60 @@ process.exit(0);
     expect(result.stdout).toContain('plain output');
     expect(result.stdout).toContain('reply=pong');
     expect(result.stdout).not.toContain('gezel-rpc');
+  });
+
+  it('runs denyNet work under the gezel-sandbox filter where systemd cannot help', async () => {
+    if (process.platform !== 'linux' || (await canApplyLinuxSystemdSandbox())) return;
+    if (!(await linuxSandboxHelperForRun())) return;
+
+    // The script reports how many seccomp filters it runs under, then talks
+    // back over fd 3, which the helper must leave open across its exec.
+    const entry = join(scratch, 'sandbox-helper.mjs');
+    await writeFile(
+      entry,
+      String.raw`import { readFileSync, writeSync } from 'node:fs';
+import net from 'node:net';
+const status = readFileSync('/proc/self/status', 'utf8');
+const filters = /^Seccomp_filters:\s*(\d+)/m.exec(status)?.[1] ?? null;
+writeSync(3, Buffer.from(JSON.stringify({ filters }) + '\n'));
+const rpc = new net.Socket({ fd: 3, readable: true, writable: true });
+rpc.setEncoding('utf8');
+rpc.once('data', (data) => {
+  console.log('reply=' + data.trim());
+  rpc.end();
+});
+`,
+      'utf8',
+    );
+
+    const frames: string[] = [];
+    const result = await runInSandbox({
+      entry,
+      cwd: scratch,
+      input: '',
+      denyNet: true,
+      timeoutMs: 20_000,
+      extraReadPaths: ['/proc'],
+      rpcChannel: {
+        onLine: (line) => frames.push(line),
+        onOpen: (send) => {
+          const poll = setInterval(() => {
+            if (frames.length === 0) return;
+            clearInterval(poll);
+            send('pong\n');
+          }, 20);
+        },
+      },
+    });
+
+    expect(result).toMatchObject({ exitCode: 0, timedOut: false });
+    expect(frames).toHaveLength(1);
+    const { filters } = JSON.parse(frames[0]!) as { filters: string | null };
+    const own = /^Seccomp_filters:\s*(\d+)/m.exec(await readFile('/proc/self/status', 'utf8'))?.[1];
+    // One filter more than this process has: the helper's, on top of any
+    // the container runtime applies to everything.
+    if (own !== undefined) expect(Number(filters)).toBeGreaterThan(Number(own));
+    expect(result.stdout).toContain('reply=pong');
   });
 });
 

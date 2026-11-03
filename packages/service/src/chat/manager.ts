@@ -110,6 +110,7 @@ import {
   deriveThreadTitleFromMessages,
   displayName,
   effectiveGeneralistModeSetting,
+  errorMessageWithCause,
   isEngagementAllowed,
   isItemFocus,
   isLocalProvider,
@@ -117,6 +118,7 @@ import {
   isProactiveAllowed,
   isScheduledRunSession,
   isScheduledTaskRun,
+  isTaskOrCraftbookSession,
   isTaskWorkAllowed,
   leaksUntaggedReasoning,
   normalizeCodexPermissionMode,
@@ -131,6 +133,7 @@ import {
   projectManagedWorkspaceWritable,
   pronounFormsForGender,
   redactCredentials,
+  resolveAsk,
   resolveGeneralistKickoff,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
@@ -213,7 +216,6 @@ import {
 import {
   AnthropicCliProvider,
   CLAUDE_CLI_EXCLUDED_MCP_TOOLS,
-  DEFAULT_CLAUDE_POOL_SIZE,
   isClaudeReasoningEffort,
 } from '../providers/anthropic-cli/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
@@ -232,12 +234,14 @@ import {
   NON_SANDBOX_EXCLUDED_MCP_TOOLS,
 } from '../providers/copilot.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
+import { type AnthropicCliPoolView, describeAnthropicCliPool } from './anthropic-cli-pool-view.js';
 import {
   promptAppSubjectFor,
   readAppSubjectStateLine,
   retrievalExclusionsFor,
   subjectBinding,
 } from './app-subject-session.js';
+import { craftbookFocusPromptBlock, readCraftbookStateLine } from './craftbook-focus-session.js';
 
 import {
   extractReasoning,
@@ -332,7 +336,7 @@ import { taskReferencesAsRetrieval } from '../tasks/references.js';
 import {
   BUNDLED_DOCBLOCKS_TOOLSET_ID,
   bundledDocblocksJoinsSession,
-  threadNamesOfficeDocument,
+  threadWantsOfficeDocument,
 } from '../toolsets/bundled-docblocks.js';
 import {
   discoverProjectMcpToolsets,
@@ -447,11 +451,7 @@ import {
   formatExpectedDeliverableAnnotation,
   normalizeExpectedDeliverablePath,
 } from './expected-deliverable.js';
-import {
-  fileHandoffIntentKey,
-  isSubstantiveExistingWorkspaceFile,
-  messageExpressesModifyIntent,
-} from './file-handoff-intent.js';
+import { fileHandoffIntentKey, staleWorkspaceFileRequest } from './file-handoff-intent.js';
 import {
   IMAGE_EDITOR_NEEDS_INSTRUCTION,
   IMAGE_EDITOR_NEEDS_PICTURE,
@@ -514,6 +514,7 @@ import {
   formatPromptToolContractFinding,
   lintPromptToolContract,
 } from './prompt-tool-contract.js';
+import { proseChoiceQuestion } from './prose-choice-question.js';
 import { providerUsesManagedMcpBridge } from './provider-capabilities.js';
 import { spliceIntoText } from './recognition-splice.js';
 import {
@@ -579,6 +580,7 @@ import { describeTurnError } from './turn-error.js';
 import {
   falseCapabilityDenialCorrection,
   isCoordinatorRole,
+  officeDocumentDenialCorrection,
   renderTurnIntentPrelude,
   resolveTurnIntentPlan,
 } from './turn-intent-plan.js';
@@ -976,9 +978,9 @@ interface LiveSessionState {
    */
   exactCraftbookConstrained: boolean;
   /**
-   * The person named an Office file in this thread, which brings the bundled
-   * DocBlocks into the session. It only ever turns on, so a thread rebuilds
-   * once, on the message that first names one.
+   * The person asked for Office document work in this thread, which brings
+   * the bundled DocBlocks into the session. It only ever turns on, so a
+   * thread rebuilds once, on the message that first asks.
    */
   officeDocumentThread: boolean;
   /**
@@ -3695,7 +3697,7 @@ export class ChatManager extends LocalEngineRuntime {
     // night-shift sessions are created explicitly with taskRef/stepId and
     // must never become the implicit destination for lobby chat, mentions,
     // reactions, or legacy chat clients merely because they are newest.
-    const active = existing.find((s) => !s.archived && !s.taskRef);
+    const active = existing.find((s) => !s.archived && !isTaskOrCraftbookSession(s));
     if (active) {
       const full = await this.store.getSession(args.gezelId, active.id);
       if (full) {
@@ -5909,6 +5911,48 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * Post the card a reply asked for in prose (`proseChoiceQuestion`). Only a
+   * person's own chat gets one: a task step or a gezel asking another gezel
+   * has nobody at the card, and the question route's unattended rules are
+   * not repeated here. A thread that already holds an unanswered card keeps
+   * that one.
+   */
+  private async postProseChoiceCard(
+    record: ChatSession,
+    assistantMessage: ChatMessage,
+    scope: PublishScope,
+  ): Promise<boolean> {
+    if (record.taskRef || record.consultationMode || record.parentSession) return false;
+    const asked = proseChoiceQuestion(assistantMessage.content);
+    if (!asked) return false;
+    const { question, deduped } = resolveAsk(
+      await this.store.listProjectQuestions(record.projectId),
+      {
+        projectId: record.projectId,
+        gezelId: record.gezelId,
+        sessionId: record.id,
+        prompt: asked.prompt,
+        choices: asked.choices,
+      },
+      { id: randomUUID(), at: nowIso() },
+    );
+    if (deduped) return false;
+    await this.store.writeQuestion(question);
+    assistantMessage.pendingQuestionId = question.id;
+    this.events.publish(scope, { type: 'question_asked', question });
+    await this.historyManager
+      ?.log({
+        kind: 'user.question.asked',
+        projectId: question.projectId,
+        gezelId: question.gezelId,
+        summary: `Question posted from the reply's own options: ${truncate(question.prompt, 80)}`,
+        details: { questionId: question.id, sessionId: question.sessionId },
+      })
+      .catch((err) => log.warn('[questions] history log failed:', err));
+    return true;
+  }
+
+  /**
    * Inject the user's structured answer into the gezel's session as a
    * synthetic user message. Rides on `sendWithBusyRetry` so a target
    * mid-turn doesn't drop the delivery, and so cross-gezel reply
@@ -7281,7 +7325,11 @@ export class ChatManager extends LocalEngineRuntime {
     };
 
     if (ffRecord) {
-      const staleMissingPath = await this.staleWorkspaceFileRequest(ffRecord, userText);
+      const staleMissingPath = await staleWorkspaceFileRequest(
+        this.store,
+        ffRecord.projectId,
+        userText,
+      );
       if (staleMissingPath) {
         const message: ChatMessage = {
           role: 'assistant',
@@ -7836,6 +7884,14 @@ export class ChatManager extends LocalEngineRuntime {
       if (subjectStateLine) {
         promptForTurn = `${subjectStateLine}\n\n${promptForTurn}`;
       }
+      const craftbookStateLine = await readCraftbookStateLine({
+        store: this.store,
+        session: state.record,
+        origin: resolveTurnMessageOrigin(opts),
+      });
+      if (craftbookStateLine) {
+        promptForTurn = `${craftbookStateLine}\n\n${promptForTurn}`;
+      }
       const freshGameState = await this.refreshLeanGameState(
         state.record,
         userText,
@@ -7868,7 +7924,15 @@ export class ChatManager extends LocalEngineRuntime {
       );
       // A person's nudge steers the work already running, and the composer
       // never sends the route opt-out with one, so it gets no route of its own.
-      if (messageOrigin === 'direct-user' && opts?.nudge !== true && opts?.turnIntent !== 'off') {
+      // A craftbook-editing thread routes nowhere: "add a step that makes a
+      // deck" is an edit to the book, never a deck to make.
+      const craftbookFocus = Boolean(state.record.craftbookRef);
+      if (
+        messageOrigin === 'direct-user' &&
+        opts?.nudge !== true &&
+        opts?.turnIntent !== 'off' &&
+        !craftbookFocus
+      ) {
         try {
           turnIntentPlan = await this.previewTurnIntent({
             message: userText,
@@ -7909,17 +7973,18 @@ export class ChatManager extends LocalEngineRuntime {
           }),
         );
       }
-      const projectRetrieval = await this.resolveTurnProjectRetrieval(
-        state,
-        userText,
-        messageOrigin,
-      );
+      // The book is the craftbook thread's whole context; the Default
+      // project's files and library hits would only pull it elsewhere.
+      const projectRetrieval = craftbookFocus
+        ? null
+        : await this.resolveTurnProjectRetrieval(state, userText, messageOrigin);
       // The unified retrieval includes the shared library. Keep the older
       // library-only behavior as a graceful fallback for tests/embedders that
       // have not wired SearchService yet.
-      const libraryRecall = projectRetrieval
-        ? []
-        : await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
+      const libraryRecall =
+        projectRetrieval || craftbookFocus
+          ? []
+          : await this.resolveTurnLibraryRecall(state, userText, messageOrigin);
       const plannedPrelude = turnIntentPlan
         ? renderTurnIntentPrelude(turnIntentPlan, { workRouting: workRoutingOn })
         : null;
@@ -7928,14 +7993,16 @@ export class ChatManager extends LocalEngineRuntime {
         : await this.resolveTurnWorkOptions(state, userText, messageOrigin, workRoutingOn);
       const preludeForTurn = plannedPrelude
         ? { behaviorId: 'turn-intent-plan', text: plannedPrelude }
-        : await resolveUserPromptPrelude(
-            this.store,
-            state,
-            userText,
-            messageOrigin,
-            libraryRecall,
-            workOptions,
-          );
+        : craftbookFocus
+          ? null
+          : await resolveUserPromptPrelude(
+              this.store,
+              state,
+              userText,
+              messageOrigin,
+              libraryRecall,
+              workOptions,
+            );
       if (preludeForTurn) {
         // Prepend onto `promptForTurn`, NOT `userText` — the latter silently
         // discarded anything already spliced in above (image digests today,
@@ -8720,6 +8787,28 @@ export class ChatManager extends LocalEngineRuntime {
             );
           }
         }
+        if (
+          !detectorReprompt &&
+          !falseCapabilityDenialCorrected &&
+          messageOrigin === 'direct-user'
+        ) {
+          const correction = officeDocumentDenialCorrection({
+            userText,
+            assistantContent: assistantMessage.content,
+            toolCalls: toolsAcrossContinuations,
+            availableTools: liveTurnToolNames(liveSession),
+          });
+          if (correction) {
+            falseCapabilityDenialCorrected = true;
+            detectorReprompt = correctivePromptForLiveRoster(
+              correction,
+              'office document capability denial',
+            );
+            log.info(
+              `session ${sessionId}: denied an Office document while holding DocBlocks — re-prompting once`,
+            );
+          }
+        }
         // Observable-progress auto-advance: if this gezel just produced the
         // deliverable a craftbook step is waiting on, advance the workflow
         // without requiring the `advance_task_step` call the model omits.
@@ -8854,6 +8943,29 @@ export class ChatManager extends LocalEngineRuntime {
             }
           }
         }
+        // A reply that ends on options it wrote out as a list asked for the
+        // card it never posted. Post that card and end the turn, as a real
+        // `ask_user_question` would, so the pick comes back as the option's
+        // words rather than a bare number.
+        let proseChoiceCardPosted = false;
+        if (
+          !detectorReprompt &&
+          messageOrigin === 'direct-user' &&
+          liveTurnToolNames(liveSession).includes('ask_user_question') &&
+          !drained.some((call) => call.name === 'ask_user_question')
+        ) {
+          proseChoiceCardPosted = await this.postProseChoiceCard(
+            state.record,
+            assistantMessage,
+            scope,
+          ).catch((err) => {
+            log.warn(`session ${sessionId}: posting the reply's options as a card failed:`, err);
+            return false;
+          });
+          if (proseChoiceCardPosted) {
+            log.info(`session ${sessionId}: the reply asked for a choice in prose — posted a card`);
+          }
+        }
         // The turn succeeded — any prior "the server-side context was lost"
         // banner is now stale. Clear it. (Mid-conversation recovery above may
         // have set resumeFailed=true, but a successful send means the rebuilt
@@ -8951,6 +9063,7 @@ export class ChatManager extends LocalEngineRuntime {
         // an exhausted continuation budget.
         if (
           commandApprovalRaisedThisTurn ||
+          proseChoiceCardPosted ||
           drained.some((call) => call.name === 'ask_user_question' && call.success)
         ) {
           log.info(
@@ -9629,7 +9742,7 @@ export class ChatManager extends LocalEngineRuntime {
       }
       return lastAssistantMessage!;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessageWithCause(err);
       const intentionallyCancelled = inflightTurn.cancelled === true;
       // The tool-loop guards (failure / repeat / deliverable-pacing) throw a
       // `TurnAbortError` whose `message` is a model-facing corrective and
@@ -12301,41 +12414,7 @@ export class ChatManager extends LocalEngineRuntime {
     };
     const pool = cliProvider.pool;
     if (!pool) return null;
-    const snap = pool.snapshot();
-    const config = await this.store.readConfig();
-    const boringMode = config.roleBasedNameOnlyMode ?? false;
-    const workers: AnthropicCliPoolView['workers'] = [];
-    for (const w of snap.workers) {
-      // Resolve display names by reading the persisted ChatSession +
-      // gezel + project. Each lookup is a couple of small file reads;
-      // we tolerate misses (a session in flight whose record we can't
-      // find right now) by falling back to the id.
-      const record = await this.getSessionRecord(w.sessionId).catch(() => null);
-      const gezel = record ? await this.store.getGezel(record.gezelId).catch(() => null) : null;
-      const project = record
-        ? await this.store.getProject(record.projectId).catch(() => null)
-        : null;
-      workers.push({
-        sessionId: w.sessionId,
-        gezelId: record?.gezelId ?? '',
-        gezelName: gezel
-          ? displayName({ name: gezel.name, roleBasedName: gezel.roleBasedName }, boringMode)
-          : (record?.gezelId ?? 'unknown'),
-        projectId: record?.projectId ?? '',
-        projectName: project?.name ?? record?.projectId ?? 'unknown',
-        idle: w.idle,
-        alive: w.alive,
-        lastUsedAt: w.lastUsedAt,
-        claudeSessionId: w.claudeSessionId,
-      });
-    }
-    // Read the configured cap so the pill can show "2 / 10 warm".
-    const poolSize = config.anthropicCli?.poolSize ?? DEFAULT_CLAUDE_POOL_SIZE;
-    return {
-      size: snap.size,
-      poolSize,
-      workers,
-    };
+    return describeAnthropicCliPool(pool, this.store, (id) => this.getSessionRecord(id));
   }
 
   /**
@@ -13801,9 +13880,10 @@ export class ChatManager extends LocalEngineRuntime {
         ? exactCraftbookConstraintActive(existing.record, gezel, pendingUserText)
         : false;
       const gateRepairConstrained = await gateRepairConstraintActive(this.store, existing.record);
-      const officeDocumentThread = threadNamesOfficeDocument(
+      const officeDocumentThread = threadWantsOfficeDocument(
         existing.record.messages,
         pendingUserText,
+        gezel?.role,
       );
       // Its paired server went away (or came back): rebuild so the turn goes
       // where it can be answered. Probed first when a turn is about to run.
@@ -13883,7 +13963,7 @@ export class ChatManager extends LocalEngineRuntime {
         }
         if (officeDocumentThread !== existing.officeDocumentThread) {
           log.info(
-            `session ${existing.record.id.slice(0, 8)}: an Office file was named; rebuilding with DocBlocks`,
+            `session ${existing.record.id.slice(0, 8)}: Office document work was asked for; rebuilding with DocBlocks`,
           );
         }
         if (codexPermissionMode !== existing.codexPermissionModeSnapshot) {
@@ -14148,7 +14228,7 @@ export class ChatManager extends LocalEngineRuntime {
       projectOrchestrationConstrained,
       exactCraftbookConstrained,
       gateRepairConstrained,
-      officeDocumentThread: threadNamesOfficeDocument(record.messages, pendingUserText),
+      officeDocumentThread: threadWantsOfficeDocument(record.messages, pendingUserText, gezel.role),
       ...(sessionOpts.modelTier ? { modelTier: sessionOpts.modelTier } : {}),
       ...(sessionOpts.profile ? { profile: sessionOpts.profile } : {}),
       ...(sessionOpts.toolCapWarnings && sessionOpts.toolCapWarnings.length > 0
@@ -14196,66 +14276,6 @@ export class ChatManager extends LocalEngineRuntime {
       config.anthropicCli?.defaultPermissionMode ??
       'acceptEdits'
     );
-  }
-
-  private async staleWorkspaceFileRequest(
-    record: ChatSession,
-    userText: string,
-  ): Promise<string | null> {
-    const explicitMissingFileMatch = userText.match(
-      /there is still\s+\*?\*?no\s+`([^`]+)`\*?\*?\s+in the workspace/i,
-    );
-    const explicitMissingFilePath = explicitMissingFileMatch?.[1]?.trim();
-    if (explicitMissingFilePath) {
-      try {
-        const content = await this.store.readProjectWorkspaceFile(
-          record.projectId,
-          explicitMissingFilePath,
-        );
-        return content !== null &&
-          isSubstantiveExistingWorkspaceFile(explicitMissingFilePath, content)
-          ? explicitMissingFilePath
-          : null;
-      } catch {
-        return null;
-      }
-    }
-
-    // A request to MODIFY an existing file ("update index.html so an alien
-    // reaching the bottom subtracts 50 points") names the same path a
-    // redundant "create it" request would — but it is real work, not a
-    // no-op. Never short-circuit it. Without this guard the change is
-    // silently dropped: the recipient's turn is skipped entirely and the
-    // synthetic "treat as delivered" reply below tells the voorman to close
-    // the task. Wild-caught (qwen3.6 voorman "Space Shooter
-    // Arcade"): a "subtract 50 points" change handoff was eaten here because
-    // it mentioned `workspace/index.html` and the file already existed.
-    if (messageExpressesModifyIntent(userText)) return null;
-
-    let filePath: string | undefined;
-    if (!filePath) {
-      const text = userText.trim();
-      const isQueuedGezelMessage = /^\[Message from [^\]]+\]:/i.test(text);
-      const isRepairMessage =
-        /\bworking-image\b/i.test(text) ||
-        /\bsuccess criteria\b/i.test(text) ||
-        /\breplace_in_file\b/i.test(text) ||
-        /\bpatch\b[\s\S]{0,160}\b(?:img|image|src)\b/i.test(text);
-      if (isQueuedGezelMessage && !isRepairMessage) {
-        filePath =
-          text.match(/\[Deliverable expected as a FILE at `([^`]+)`/i)?.[1]?.trim() ??
-          text.match(/\bworkspace\/(index\.html)\b/i)?.[1]?.trim();
-      }
-    }
-    if (!filePath) return null;
-    try {
-      const content = await this.store.readProjectWorkspaceFile(record.projectId, filePath);
-      return content !== null && isSubstantiveExistingWorkspaceFile(filePath, content)
-        ? filePath
-        : null;
-    } catch {
-      return null;
-    }
   }
 
   /**
@@ -15045,14 +15065,18 @@ export class ChatManager extends LocalEngineRuntime {
     // chat is about. A thread about one document keeps the document's tools
     // and a small core; installed toolsets (the document converters among
     // them) drop out of both the prompt and the bridge, the way a
-    // built-in-only step drops them.
-    const appToolBindings = builtinOnlyStep ? [] : this.appToolBindingsFor(record);
+    // built-in-only step drops them. A thread pinned to a craftbook keeps
+    // only its editing kit, so neither apps' tools nor toolsets join it.
+    const craftbookFocus = Boolean(record.craftbookRef);
+    const appToolBindings =
+      builtinOnlyStep || craftbookFocus ? [] : this.appToolBindingsFor(record);
     const appSubject = promptAppSubjectFor(record, appToolBindings);
     const appItemFocus = isItemFocus(appSubject);
     const activeToolsets = (entries: readonly InstalledToolset[]): InstalledToolset[] =>
       entries.filter(
         (entry) =>
-          (!(builtinOnlyStep || appItemFocus) || entry.runtime.kind === 'builtin') &&
+          (!(builtinOnlyStep || appItemFocus || craftbookFocus) ||
+            entry.runtime.kind === 'builtin') &&
           !stepDisabledToolsetIds.has(entry.toolsetId),
       );
     // A copy installed elsewhere that the shipped one replaces is the shipped
@@ -15070,7 +15094,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(record.expectedDeliverable?.kind === 'file' && record.expectedDeliverable.filePath
         ? { expectedDeliverablePath: record.expectedDeliverable.filePath }
         : {}),
-      namesOfficeDocument: threadNamesOfficeDocument(record.messages, pendingUserText),
+      wantsOfficeDocument: threadWantsOfficeDocument(record.messages, pendingUserText, gezel?.role),
     });
     const activeSystem = activeToolsets(system).filter(
       (entry) =>
@@ -15220,7 +15244,6 @@ export class ChatManager extends LocalEngineRuntime {
     };
     const contextualBuiltinTools = [
       ...taskStepContextualBuiltinTools(record, taskContext?.step),
-      ...(record.craftbookRef ? ['craftbook_update_step'] : []),
       ...(project?.connectors?.some((binding) => binding.type.startsWith('mail-')) &&
       securityPolicy.allowMail
         ? ['draft_email', 'queue_email', 'send_email', 'save_email_draft']
@@ -15476,6 +15499,7 @@ export class ChatManager extends LocalEngineRuntime {
       // model treats it as data, not commands.
       ...(project?.connectors?.length ? { untrustedContentPresent: true } : {}),
       ...(appSubject ? { appSubject } : {}),
+      ...(craftbookFocus ? { craftbookFocus: true } : {}),
       ...(factualWriting.on
         ? {
             factualWriting: {
@@ -15506,24 +15530,17 @@ export class ChatManager extends LocalEngineRuntime {
       }
     }
 
-    // When this session is scoped to a craftbook template (the explicit
-    // editor's AI assist), append the book's current structure + how to
-    // edit it so the voorman acts on it in place via the craftbook_* tools.
+    // A session pinned to a craftbook (the editor's AI assist) gets the
+    // book's section; its current state rides each turn instead.
     let systemMessage = systemInstructions.full;
     let volatileContext = systemInstructions.volatileContext;
     const extraSections: PromptSectionSize[] = [];
     if (record.craftbookRef) {
-      const book = await this.store
-        .getLocalCraftbookTemplate(record.craftbookRef)
-        .catch(() => null);
-      const summary = book
-        ? JSON.stringify(
-            { id: book.id, name: book.name, entryStepId: book.entryStepId, steps: book.steps },
-            null,
-            2,
-          )
-        : `(craftbook "${record.craftbookRef}" not found — call craftbook_read to inspect it.)`;
-      const craftbookBlock = `\n\n## Craftbook you are editing\n\nYou are editing the local craftbook template **${record.craftbookRef}**. The unified \`craftbook_*\` tools default to it (no need to pass a target). For broad changes, read the full document with \`craftbook_read\`, edit it, and save it atomically with \`craftbook_write\`. For surgical changes use \`craftbook_add_step\` / \`craftbook_update_step\` / \`craftbook_remove_step\` / \`craftbook_reorder_steps\` / \`craftbook_set_entry\`; use \`set_step_deliverable\` for a focused deliverable gate. Give each step a role and concrete exit criteria. After each change, tell the user in one line what you changed. Current structure:\n\n\`\`\`json\n${summary}\n\`\`\``;
+      const craftbookBlock = `\n\n${await craftbookFocusPromptBlock({
+        store: this.store,
+        craftbookRef: record.craftbookRef,
+        toolNames: availableBuiltinTools.map((tool) => tool.name),
+      })}`;
       extraSections.push({
         name: 'craftbookEditing',
         tokens: estimateTokens(craftbookBlock),
@@ -17133,31 +17150,6 @@ export class ChatManager extends LocalEngineRuntime {
     }
     return env;
   }
-}
-
-/**
- * Wire shape for the Claude CLI worker pool snapshot exposed via
- * `/api/queues`. Drives the header `ClaudeCliPoolPill` — the
- * always-visible status indicator that lists warm workers per (gezel,
- * project) and lights up when one of them is mid-turn.
- */
-export interface AnthropicCliPoolView {
-  size: number;
-  /** Configured cap from `config.anthropicCli.poolSize` (default 4). */
-  poolSize: number;
-  workers: Array<{
-    sessionId: string;
-    gezelId: string;
-    gezelName: string;
-    projectId: string;
-    projectName: string;
-    idle: boolean;
-    alive: boolean;
-    /** ms-epoch of the worker's last turn entry/exit, used for LRU. */
-    lastUsedAt: number;
-    /** Captured Claude-side session id; null until system.init arrives. */
-    claudeSessionId: string | null;
-  }>;
 }
 
 /**

@@ -41,12 +41,16 @@ export const RENDITION_KNOBS: Record<RenditionProfile, RenditionKnobs> = {
     showTimestamps: true,
   },
   marketing: {
-    targetDurationSeconds: 150,
+    // A landing-page cut: long enough to see the crew hand the job around
+    // and the result arrive, short enough to watch before scrolling on.
+    // With the crew card and the gezels' own thinking, a cut runs 1.5 to 2
+    // minutes; the ceiling only compresses a run that would go longer.
+    targetDurationSeconds: 100,
     minSceneSeconds: 4.5,
-    maxSceneSeconds: 14,
+    maxSceneSeconds: 11,
     gapBeatThresholdSeconds: Number.POSITIVE_INFINITY,
     gapBeatSeconds: 0,
-    maxBlocks: 20,
+    maxBlocks: 18,
     showTimestamps: false,
   },
 };

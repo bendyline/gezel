@@ -1,0 +1,267 @@
+# Container images — builds, smoke-tests and publishes the Gezel image
+# (ADR 0029, docs/container.md) for every flavor and architecture:
+#
+#   ghcr.io/bendyline/gezel:X.Y.Z  X.Y  latest           CPU, amd64 + arm64
+#   ghcr.io/bendyline/gezel:X.Y.Z-vulkan  vulkan          AMD/Intel GPUs, amd64
+#   ghcr.io/bendyline/gezel:X.Y.Z-cuda    cuda            NVIDIA GPUs, amd64 + arm64 (GB10)
+#
+# X.Y.Z is the @bendyline/gezel-cli version, so `docker run …:1.2.11` and
+# `npm i -g @bendyline/gezel-cli@1.2.11` are the same Gezel.
+#
+# Called by publish-npm.yml after a release that included the CLI, or
+# dispatched by hand (push off by default: build and smoke only).
+#
+# Order matters: versioned tags are pushed first, every architecture is
+# smoke-tested by digest, and only then do the floating tags move and the
+# Docker Hub mirror update. Provenance and SBOM attestations ride on the
+# image; `gh attestation verify oci://ghcr.io/bendyline/gezel:X.Y.Z --owner
+# bendyline` checks the signed GitHub attestation.
+#
+# Docker Hub: set the DOCKERHUB_USERNAME variable and DOCKERHUB_TOKEN secret
+# for the mirror. Without them the mirror step leaves a notice and skips.
+
+name: Release container images
+run-name: Container images ${{ inputs.version }}${{ inputs.push && '' || ' (no push)' }}
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Commit or tag to build.'
+        type: string
+        required: true
+      version:
+        description: 'The @bendyline/gezel-cli version at that ref.'
+        type: string
+        required: true
+      push:
+        type: boolean
+        default: true
+    secrets:
+      DOCKERHUB_TOKEN:
+        required: false
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Commit or tag to build (empty: the selected branch).'
+        type: string
+        default: ''
+      version:
+        description: 'Image version, normally the @bendyline/gezel-cli version at that ref.'
+        type: string
+        required: true
+      push:
+        description: 'Push to the registries. Off: build and smoke-test only.'
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.15.1'
+  NODE_OPTIONS: '--max-old-space-size=4096'
+  IMAGE: ghcr.io/bendyline/gezel
+  MIRROR: docker.io/bendyline/gezel
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-docker-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.flavor }} (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, platform: linux/amd64, runner: ubuntu-24.04, flavor: cpu }
+          - { arch: x64, platform: linux/amd64, runner: ubuntu-24.04, flavor: vulkan }
+          - { arch: x64, platform: linux/amd64, runner: ubuntu-24.04, flavor: cuda }
+          - { arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm, flavor: cpu }
+          - { arch: arm64, platform: linux/arm64, runner: ubuntu-24.04-arm, flavor: cuda }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      # The bundle, its staged copy and the image layers together pass what a
+      # hosted runner keeps free; the CUDA engines alone are a gigabyte.
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+
+      # The same stamp the npm release puts into core, so /api/health and
+      # `gezel --version` inside the image report the released version.
+      - name: Build
+        run: |
+          set -euo pipefail
+          export GEZEL_RELEASE_VERSION="$(node -p "require('./packages/core/package.json').version")"
+          export GEZEL_RELEASE_CONTENT_COMPAT="$(node --input-type=module -e "import { calVerPrefix } from './scripts/calver.mjs'; console.log(calVerPrefix())")"
+          pnpm build
+
+      - name: Stage the image context
+        run: node scripts/stage-docker-context.mjs --flavor ${{ matrix.flavor }}
+
+      - name: Set up the builder
+        id: base
+        run: |
+          set -euo pipefail
+          docker buildx create --name gezel --driver docker-container --use
+          digest="$(docker buildx imagetools inspect ubuntu:24.04 --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          echo "image=ubuntu:24.04@${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        if: ${{ inputs.push }}
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build the image
+        id: build
+        env:
+          PUSH: ${{ inputs.push && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          ctx="release/docker-context/linux-${{ matrix.arch }}-${{ matrix.flavor }}"
+          native="$(node -p "require('./${ctx}/image.json').nativeRelease")"
+          args=(
+            --platform "${{ matrix.platform }}"
+            --build-arg "FLAVOR=${{ matrix.flavor }}"
+            --build-arg "GEZEL_VERSION=${{ inputs.version }}"
+            --build-arg "NATIVE_RELEASE=${native}"
+            --build-arg "VCS_REF=$(git rev-parse HEAD)"
+            --build-arg "BASE_IMAGE=${{ steps.base.outputs.image }}"
+            --metadata-file metadata.json
+          )
+          if [[ "$PUSH" == "1" ]]; then
+            args+=(--provenance=mode=max --sbom=true)
+            args+=(--output "type=image,name=${IMAGE},push-by-digest=true,name-canonical=true,push=true")
+          else
+            args+=(--load --tag "gezel-local:${{ matrix.flavor }}")
+          fi
+          docker buildx build "${args[@]}" "$ctx"
+          if [[ "$PUSH" == "1" ]]; then
+            digest="$(node -p "require('./metadata.json')['containerimage.digest']")"
+            echo "ref=${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+            mkdir -p digests
+            touch "digests/${digest#sha256:}"
+          else
+            echo "ref=gezel-local:${{ matrix.flavor }}" >> "$GITHUB_OUTPUT"
+          fi
+          docker image ls
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.push }}" == "true" ]]; then docker pull "${{ steps.build.outputs.ref }}"; fi
+          node docker/smoke.mjs "${{ steps.build.outputs.ref }}"
+
+      - name: Keep the digest
+        if: ${{ inputs.push }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digests-${{ matrix.flavor }}-${{ matrix.arch }}
+          path: digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish ${{ matrix.flavor }}
+    needs: [build]
+    if: ${{ inputs.push }}
+    strategy:
+      matrix:
+        flavor: [cpu, vulkan, cuda]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: digests-${{ matrix.flavor }}-*
+          path: digests
+          merge-multiple: true
+
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Create the versioned tags
+        id: tags
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version }}"
+          if [[ "${{ matrix.flavor }}" == "cpu" ]]; then
+            tags=("${version}" "${version%.*}")
+          else
+            tags=("${version}-${{ matrix.flavor }}")
+          fi
+          sources=()
+          for file in digests/*; do sources+=("${IMAGE}@sha256:$(basename "$file")"); done
+          tag_args=()
+          for tag in "${tags[@]}"; do tag_args+=(--tag "${IMAGE}:${tag}"); done
+          docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+          digest="$(docker buildx imagetools inspect "${IMAGE}:${tags[0]}" --format '{{json .Manifest.Digest}}' | tr -d '"')"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.tags.outputs.digest }}
+          push-to-registry: true
+
+  promote:
+    name: Move the floating tags
+    needs: [publish]
+    if: ${{ inputs.push }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: latest, vulkan and cuda
+        run: |
+          set -euo pipefail
+          v="${{ inputs.version }}"
+          docker buildx imagetools create --tag "${IMAGE}:latest" "${IMAGE}:${v}"
+          docker buildx imagetools create --tag "${IMAGE}:vulkan" "${IMAGE}:${v}-vulkan"
+          docker buildx imagetools create --tag "${IMAGE}:cuda" "${IMAGE}:${v}-cuda"
+
+      - name: Mirror to Docker Hub
+        env:
+          HUB_USER: ${{ vars.DOCKERHUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$HUB_USER" || -z "$HUB_TOKEN" ]]; then
+            echo "::notice::Docker Hub mirror skipped: set the DOCKERHUB_USERNAME variable and DOCKERHUB_TOKEN secret."
+            exit 0
+          fi
+          echo "$HUB_TOKEN" | docker login docker.io -u "$HUB_USER" --password-stdin
+          v="${{ inputs.version }}"
+          for tag in "$v" "${v%.*}" latest "$v-vulkan" vulkan "$v-cuda" cuda; do
+            docker buildx imagetools create --tag "${MIRROR}:${tag}" "${IMAGE}:${tag}"
+          done

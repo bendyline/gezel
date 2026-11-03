@@ -613,6 +613,7 @@
 }
 .craftbook-editor {
   padding: 12px 4px 4rem;
+  container: craftbook-editor / inline-size;
 }
 .craftbook-editor-header {
   display: flex;
@@ -630,14 +631,6 @@
   font-weight: 600;
   min-width: 220px;
 }
-.craftbook-bench-row {
-  gap: 0;
-  border-bottom: 0;
-}
-.craftbook-bench-row > .bench-scroll {
-  flex: 1 1 auto;
-  min-width: 0;
-}
 /* The selected step's caption is the tab for the settings page below, just
    like it is in Task detail. Pull the page through the bench's bottom padding
    + margin and this editor's 12px flex gap, so the two borders meet instead
@@ -645,13 +638,29 @@
 .craftbook-editor > .task-step-panel:not(.empty) {
   margin-top: calc(-1.65rem - 1px);
 }
-.craftbook-editor-tabs {
-  border-bottom: 1px solid var(--border, #333);
+/* The Overview page docks under its tab the same way, through this editor's
+   12px gap rather than Task detail's 1rem. */
+.craftbook-editor > .task-view-panel {
+  margin-top: calc(-0.75rem - 1px);
 }
-.craftbook-overview {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+/* Task detail's narrow layout: stack the view keys above a full-width bench. */
+@container craftbook-editor (max-width: 480px) {
+  .craftbook-bench-row {
+    flex-direction: column;
+  }
+  .craftbook-bench-row .task-bench-sidebar {
+    flex-basis: auto;
+  }
+  .craftbook-bench-row .task-tab-rail {
+    align-self: flex-start;
+  }
+  .craftbook-bench-row .task-tab-btn {
+    min-height: 44px;
+    padding-block: 0.5rem;
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    margin-bottom: 0;
+  }
 }
 .craftbook-chat-pane {
   min-height: 240px;

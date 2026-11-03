@@ -1,3 +1,4 @@
+import { ALL_PARITY_CASES } from './scenarios/app-parity.ts';
 import { ANCHORED_SCENARIOS, getScenario } from './scenarios/index.ts';
 import { WORK_ROUTING_SCENARIO_IDS } from './scenarios/work-routing.ts';
 import type { EvalScenario } from './types.ts';
@@ -73,6 +74,16 @@ export const SUITES: Record<string, EvalSuite> = {
   // One message per trial to the Meester, scored on the route it takes and
   // ended once that route is known. The instrument of the suggest_work /
   // start_work A/B (`pnpm eval:ab-work-routing`); every arm runs the same probes.
+  // What a Gezel app's website demo shows its companion doing, a real crew lead
+  // must do in Gezel: one demo suggestion (or a game move) per trial, graded on
+  // the app's own data files. Under a minute per passing trial on Gemma 4 E4B.
+  'app-parity': {
+    id: 'app-parity',
+    description:
+      'Website demo parity: each case sends an app demo suggestion to the real crew lead, or ' +
+      'makes the page move a reaction answers, and checks the app data changed as the demo shows.',
+    scenarios: ALL_PARITY_CASES.map((c) => `app-parity-${c.id}`),
+  },
   'work-routing': {
     id: 'work-routing',
     description:
@@ -364,7 +375,7 @@ export const SUITES: Record<string, EvalSuite> = {
   // NOT duplicated from `core`. A scorecard that charges the same trial to
   // two suites reads as a bigger sample than it is.
   //
-  // Budget 5h40m at --count 1, ordered cheapest-first.
+  // Budget 10h at --count 1, ordered cheapest-first.
   developer: {
     id: 'developer',
     description:
@@ -428,7 +439,7 @@ export const SUITES: Record<string, EvalSuite> = {
   // other member can claim, and because the 45m it costs bought no axis the
   // nine below do not already cover.
   //
-  // Budget 5h40m at --count 1, ordered cheapest-first.
+  // Budget 11h25m at --count 1, ordered cheapest-first.
   'complex-work': {
     id: 'complex-work',
     description:

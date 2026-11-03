@@ -62,6 +62,19 @@ describe('formatAvailableChatModels', () => {
     expect(text).toContain('`gezel model pull <id>`');
   });
 
+  it('adds the published measurement beside memory fit when asked', () => {
+    const text = formatAvailableChatModels({
+      engine: 'llama-cpp',
+      platformDefault: 'llama-cpp',
+      ranked: [model('qwen3.8-27b-q4', 16.1), model('brand-new-q4', 2)],
+      installed: new Set(),
+      measured: new Map([['qwen3.8-27b-q4', '100% general (M5 Max)']]),
+    });
+    expect(text).toMatch(/qwen3.8-27b-q4.*fits.*100% general \(M5 Max\)\s+QWEN3.8-27B-Q4/);
+    expect(text).toMatch(/brand-new-q4.*not measured\s+BRAND-NEW-Q4/);
+    expect(text).toContain('"Fits" is about memory.');
+  });
+
   it('carries --provider when the engine is not the platform default', () => {
     const text = formatAvailableChatModels({
       engine: 'llama-cpp',

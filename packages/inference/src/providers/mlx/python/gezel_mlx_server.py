@@ -2759,10 +2759,17 @@ class BatchEngine:
                     cache_seed.trim_layers(cache_layers, excess)
             except Exception:  # noqa: BLE001 — snapshot path covers hybrids
                 pass
+            cache_tokens = full_prompt + [int(t) for t in sub.token_ids]
+            if cache_seed.all_trimmable(cache_layers):
+                cache_tokens = spec_decode.cached_token_prefix(cache_layers, cache_tokens)
+                if cache_tokens is None:
+                    # Leave any prior valid entry intact rather than persisting
+                    # cache layers whose token boundary cannot be established.
+                    cache_layers = None
             r = types.SimpleNamespace(
                 finish_reason=finish_reason,
-                prompt_cache=list(cache_layers),
-                all_tokens=full_prompt + [int(t) for t in sub.token_ids],
+                prompt_cache=list(cache_layers) if cache_layers is not None else None,
+                all_tokens=cache_tokens,
                 token=sub.token_ids[-1] if sub.token_ids else 0,
             )
             self._finish(sub, r)

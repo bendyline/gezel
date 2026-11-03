@@ -59,6 +59,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 16 | `## Tools available this turn` ([chat/tools-block.ts](../packages/service/src/chat/tools-block.ts)) | tiers tiny/small/medium only; skipped for providers without an MCP bridge (copilot, the CLI providers); per-gezel `tools.md` overrides; bridge-failure notice overrides all | tiny: full descriptions; small/medium: names-only |
 | 17 | File-edits-off notice / consultation-mode addendum / fresh-project addendum | lockdown / spawned consultation / ≤5 workspace files | ~1–2K ch each |
 | 17b | `## The document open beside this chat` — the item an app's chat is about (`renderAppSubjectBlock` in [core app-subject.ts](../packages/core/src/app-subject.ts)), naming only the app's tools. With `focus: 'item'` and the app connected it also stands down rows 2, 6's "Where work belongs", 6b, 7, 10, 13 and the fresh-project addendum, condenses the project about, and lists the app's tools first in row 16. An out-of-reach variant says the document cannot be reached | the session's surface registered a `subject` (the Office pane), or the thread carries a `subject` stamp | ~110 tok |
+| 17c | `## The craftbook open beside this chat` — the craftbook editor's AI assist (`renderCraftbookFocusBlock` in [core craftbook-focus.ts](../packages/core/src/craftbook-focus.ts)): the thread is about improving that one book, change it only with the `craftbook_*` editors it holds, do not run it or start work. Stands down the same rows as 17b (`craftbookFocus`). The roster is `CRAFTBOOK_FOCUS_BUILTIN_TOOLS` whatever the role, with no installed toolsets or app tools. Session-stable; the book itself rides each turn (below) | the thread carries `craftbookRef` | ~250 tok |
 | 18 | Active-task anchor (recency anchor, deliberately **last**) | task-scoped | 1 paragraph |
 
 ### The two bands (KV-prefix caching)
@@ -264,7 +265,12 @@ while they stream.
   Voorman exact-format turn is further clamped to `invoke_craftbook` alone — the model gets
   one required action, not a suggest/invoke menu. If it nevertheless denies the capability
   without attempting that invocation, the post-turn loop supplies one corrective
-  continuation and then stops retrying this detector.
+  continuation and then stops retrying this detector. Any other gezel holding DocBlocks
+  gets the same one-shot corrective (`officeDocumentDenialCorrection`) when it says it
+  cannot make the Office file the person asked for; DocBlocks joins such a session when
+  the message names an Office file or, outside a Meester or crew lead, asks for an Office
+  format by name (`threadWantsOfficeDocument` in
+  [bundled-docblocks.ts](../packages/service/src/toolsets/bundled-docblocks.ts)).
   A second, lower tier runs when no exact format matched: a craftbook's declared
   `triggers` found in the text on word boundaries ([`craftbook-trigger-route.ts`](../packages/service/src/chat/craftbook-trigger-route.ts)).
   It is advisory only — `reason: 'trigger-phrase'`, medium confidence, no `output`, so
@@ -287,6 +293,17 @@ while they stream.
   other prelude above it. The selected text joins the turn's evidence the way
   the person's own message does, so rewriting it is not refused as invention.
   The same turn's indexed context leaves out project files (below).
+- **The craftbook as it stands** (`renderCraftbookTurnLine` in
+  [core craftbook-focus.ts](../packages/core/src/craftbook-focus.ts)): on a
+  person's turn in a craftbook-editing thread, the daemon reads the book fresh
+  (the person edits it by hand between messages) and opens the message with a
+  bracketed outline (each step's name, id, role and output) and its checkup
+  (`craftbookCheckup` in [core craftbook-checkup.ts](../packages/core/src/craftbook-checkup.ts):
+  no description or triggers, no request input, a path the person must type,
+  a step with no role, prompt or completion check, contract problems). Such a
+  thread runs no turn-intent plan, no behavior prelude, no library recall and
+  no indexed context: the book is its whole context. `craftbook_read` returns
+  the same checkup, so the model can see a change clear a finding.
 - **Indexed context** (`resolveTurnProjectRetrieval`): a scoped, diversified
   evidence block from the active project, current gezel memory, the person's
   own memory ("About you"), and shared library. Off/Lean/Balanced/Deep plus a
@@ -334,6 +351,11 @@ while they stream.
   deliverable-edit re-prompts from the task system.
 - **Post-turn detectors** (fabrication detectors, tool-error auto-acknowledge, inline-JS
   validation) also re-prompt on this channel.
+- **Prose choice questions** take no model turn at all. A person's own chat whose reply
+  ends on a question about options it listed ("Which of these would you prefer?" over a
+  numbered list) gets that question posted as an `ask_user_question` card, and the turn
+  ends there ([prose-choice-question.ts](../packages/service/src/chat/prose-choice-question.ts)).
+  Task steps, consultations and delegated sessions are left alone.
 
 Rule of thumb: if the guidance depends on *this turn's* content or state, it goes on the
 user channel. The system prompt is for standing facts and standing conduct.

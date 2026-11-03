@@ -23,7 +23,9 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_REPO, writeReleaseListing } from './latest-app-release.mjs';
 
 const MARKER = '.handboek-export.json';
+const APPS_MARKER = '.apps-export.json';
 const RELEASES_FILE = 'releases.json';
+const APPS_DIR = 'apps';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptsDir, '..');
@@ -64,6 +66,7 @@ if (flag('--help') || flag('-h')) {
   --site-origin <u>  origin for canonical + Open Graph URLs (default:
                  ${DEFAULT_SITE_ORIGIN}); --no-site-origin omits both
   --no-og        skip rendering Open Graph cards into ../gezel-site/${OG_DIR}/
+  --no-apps      skip the apps library at ../gezel-site/${APPS_DIR}/ (gezel.com/apps)
   --skip-build   reuse the current packages/cli/dist instead of rebuilding
   --force        wipe the output directory even without an export marker
 `);
@@ -86,6 +89,9 @@ const siteOrigin = flag('--no-site-origin')
 // the directory this script wipes — because the card set is its own cache and
 // re-rendering all of them costs minutes of headless Chromium.
 const ogOut = siteOrigin && !flag('--no-og') ? resolve(out, '..', OG_DIR) : null;
+// The apps library sits beside the docs at the site root (gezel.com/apps) and
+// links into them at /docs/. Generated from the same catalog, wiped the same way.
+const appsOut = flag('--no-apps') ? null : resolve(out, '..', APPS_DIR);
 
 const run = (label, cmd, args) => {
   console.log(`[handboek-site] ${label}`);
@@ -122,19 +128,23 @@ if (!existsSync(cliEntry)) {
   process.exit(1);
 }
 
-if (existsSync(out)) {
-  const entries = readdirSync(out);
-  const ours = entries.includes(MARKER);
-  if (entries.length > 0 && !ours && !flag('--force')) {
-    console.error(`[handboek-site] ${out} has contents but no ${MARKER} marker.`);
-    console.error(
-      '[handboek-site] refusing to wipe it — pass --force if it is the right directory.',
-    );
-    process.exit(1);
+async function clearGenerated(dir, marker) {
+  if (existsSync(dir)) {
+    const entries = readdirSync(dir);
+    const ours = entries.includes(marker);
+    if (entries.length > 0 && !ours && !flag('--force')) {
+      console.error(`[handboek-site] ${dir} has contents but no ${marker} marker.`);
+      console.error(
+        '[handboek-site] refusing to wipe it — pass --force if it is the right directory.',
+      );
+      process.exit(1);
+    }
+    await rm(dir, { recursive: true, force: true });
   }
-  await rm(out, { recursive: true, force: true });
+  await mkdir(dir, { recursive: true });
 }
-await mkdir(out, { recursive: true });
+await clearGenerated(out, MARKER);
+if (appsOut) await clearGenerated(appsOut, APPS_MARKER);
 
 // Render from the docs tree, not the CLI's packaged copy: the published service
 // package leaves out assets/scorecards/, and the site is where those downloads live.
@@ -149,13 +159,16 @@ run('rendering handboek', process.execPath, [
   ...(siteUrl ? ['--site-url', siteUrl] : []),
   ...(siteOrigin ? ['--canonical-base', `${siteOrigin}/docs/`] : []),
   ...(ogOut ? ['--og-out', ogOut, '--og-base', `${siteOrigin}/${OG_DIR}/`] : []),
+  ...(appsOut ? ['--apps-out', appsOut] : []),
 ]);
 
-await writeFile(
-  join(out, MARKER),
-  `${JSON.stringify({ generator: 'scripts/export-handboek-site.mjs', source: repoRoot }, null, 2)}\n`,
-  'utf8',
-);
+for (const [dir, marker] of [[out, MARKER], ...(appsOut ? [[appsOut, APPS_MARKER]] : [])]) {
+  await writeFile(
+    join(dir, marker),
+    `${JSON.stringify({ generator: 'scripts/export-handboek-site.mjs', source: repoRoot }, null, 2)}\n`,
+    'utf8',
+  );
+}
 
 let releasesFailure = null;
 if (releasesOut) {

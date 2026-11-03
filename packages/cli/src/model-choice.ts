@@ -1,3 +1,9 @@
+import {
+  type ScorecardDataset,
+  type ScorecardDevice,
+  measuredClaim,
+  measuredResultFor,
+} from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { CliError } from './connection.js';
 import {
@@ -82,10 +88,20 @@ export function formatAvailableChatModels(input: {
   ranked: readonly BootstrapChatModel[];
   installed: ReadonlySet<string>;
   pinned?: string;
+  /**
+   * What the published scorecard says about each model (`measuredClaim`),
+   * keyed by id. "Fits" is about memory; this column is about whether the
+   * model finishes work, measured on real jobs. Absent entries print as
+   * not measured.
+   */
+  measured?: ReadonlyMap<string, string>;
 }): string {
-  const { engine, ranked, installed, pinned } = input;
+  const { engine, ranked, installed, pinned, measured } = input;
   if (ranked.length === 0) return `(no ${engine} chat models in the catalog for this machine)`;
   const width = Math.max(...ranked.map((model) => model.id.length));
+  const measuredWidth = measured
+    ? Math.max('not measured'.length, ...ranked.map((m) => (measured.get(m.id) ?? '').length))
+    : 0;
   const lines = [`${engine} chat models for this machine, best first:`];
   ranked.forEach((model, index) => {
     const notes = [
@@ -93,8 +109,11 @@ export function formatAvailableChatModels(input: {
       installed.has(model.id) ? 'installed' : '',
       model.id === pinned ? 'in use' : '',
     ].filter(Boolean);
+    const claim = measured
+      ? `  ${(measured.get(model.id) ?? 'not measured').padEnd(measuredWidth)}`
+      : '';
     lines.push(
-      `  ${model.id.padEnd(width)}  ${formatDownloadSize(model.approxSizeBytes).padStart(7)}  ${FIT_LABEL[model.fit].padEnd(22)}  ${model.name}${notes.length > 0 ? `  (${notes.join(', ')})` : ''}`,
+      `  ${model.id.padEnd(width)}  ${formatDownloadSize(model.approxSizeBytes).padStart(7)}  ${FIT_LABEL[model.fit].padEnd(22)}${claim}  ${model.name}${notes.length > 0 ? `  (${notes.join(', ')})` : ''}`,
     );
   });
   const flag = providerFlag(engine, input.platformDefault);
@@ -104,7 +123,27 @@ export function formatAvailableChatModels(input: {
     `Download one with \`gezel model pull <id>${flag}\`. The smallest is ${smallest.id} (${formatDownloadSize(smallest.approxSizeBytes)}).`,
     `\`gezel model use <id>${flag}\` picks the installed model chats use.`,
   );
+  if (measured) {
+    lines.push(
+      '"Fits" is about memory. The measured column is the published scorecard\'s pass rate on real jobs, on the hardware named; `gezel bench` measures a model on this machine.',
+    );
+  }
   return lines.join('\n');
+}
+
+/**
+ * The measured column for `formatAvailableChatModels`: one scorecard claim
+ * per catalog model, from the published dataset, preferring rounds run on
+ * the same platform as this machine.
+ */
+export function measuredClaimsFor(
+  dataset: ScorecardDataset,
+  ids: readonly string[],
+  device: Pick<ScorecardDevice, 'platform' | 'arch' | 'label'>,
+): Map<string, string> {
+  const claims = new Map<string, string>();
+  for (const id of ids) claims.set(id, measuredClaim(measuredResultFor(dataset, id, device)));
+  return claims;
 }
 
 /**

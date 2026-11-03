@@ -39,6 +39,13 @@ work**, which is developer work such as reviewing a change and proving a fix
 with tests, and **Complex workflows**, which asks a model to write and repair
 reusable recipes of its own.
 
+What is in each set, test by test:
+
+- [General capability](how-we-test-models.md#core-11-tests) — 11 tests
+- [Office and knowledge work](how-we-test-models.md#productivity-13-tests) — 13 tests
+- [Engineering work](how-we-test-models.md#engineering-10-tests) — 10 tests
+- [Complex workflows](how-we-test-models.md#complex-workflows-9-tests) — 9 tests
+
 ### Every result in one table {[dataTable src=../assets/scorecards/all-results.csv previewRows=5000 follow=scorecard group=run_id columns=model,suite,pass_rate_pct,judge_score,decode_tok_s,prefill_tok_s,device,started_at,run_id,successes,attributable_trials,rate_quotable,engine,perf_source,scope]}
 
 Every round laid end to end, one row per round, task set, and model, grouped
@@ -48,6 +55,12 @@ the file adds per-rubric judge scores, memory, context, and build details.
 ::handboek-model-scorecard{suites=core,productivity,developer,complex-work}
 
 ::handboek-scorecard-notes
+
+## Community rounds
+
+Anyone can run the same tests on their own machine with `gezel bench`, and send the result in with `gezel bench submit`. Rounds we accept appear here, apart from ours: they are measured on hardware we do not control, so they never enter the tables above, the model pages, or the model catalog. Read each one against its own stamp, the same as any round.
+
+::handboek-community-scorecard{suites=core,productivity,developer,complex-work}
 
 ## Reading the table
 

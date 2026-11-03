@@ -243,10 +243,20 @@ describe('McpValidateIdsStrict', () => {
     const w1 = dyn(McpValidateIdsStrict);
     const w2 = dyn(McpValidateIdsStrict);
     await w1.postProcess!('x', {}, { text: '{"id":"only-in-bridge-1"}', images: [] }, STOCK_CTX);
-    const v1 = await w1.preProcess!('y', { id: 'only-in-bridge-1' }, STOCK_CTX);
-    const v2 = await w2.preProcess!('y', { id: 'only-in-bridge-1' }, STOCK_CTX);
+    const v1 = await w1.preProcess!('update_project', { id: 'only-in-bridge-1' }, STOCK_CTX);
+    const v2 = await w2.preProcess!('update_project', { id: 'only-in-bridge-1' }, STOCK_CTX);
     expect(v1.kind).toBe('allow');
     expect(v2.kind).toBe('reject');
+  });
+
+  it("leaves a project type's script tools to check their own ids", async () => {
+    // Gemma 4 12B could not record a permit renewal: the script printed
+    // `(ob-1, permit, owner Dana)` in prose and the guard rejected ob-1.
+    const w = dyn(McpValidateIdsStrict);
+    const script = await w.preProcess!('complete_obligation', { id: 'ob-1' }, STOCK_CTX);
+    expect(script.kind).toBe('allow');
+    const builtin = await w.preProcess!('updateProject', { id: 'ob-1' }, STOCK_CTX);
+    expect(builtin.kind).toBe('reject');
   });
 });
 

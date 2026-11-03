@@ -1,0 +1,109 @@
+/* The sign-in and first-account screens (ADR 0029). One small card on the
+   paper background: serif heading, sans everything else, sizes from the
+   shared scale, controls from the shared tokens. */
+
+.gz-sign-in {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem 1rem;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.gz-sign-in-card {
+  width: min(24rem, 100%);
+  padding: 1.75rem 1.75rem 1.5rem;
+  background: var(--surface, var(--panel));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  /* The dialog cadence, without gz-dialog-in's centering translate: this
+     card is centered by the grid, not by a transform. */
+  animation: gz-sign-in-in 160ms ease-out;
+}
+
+@keyframes gz-sign-in-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gz-sign-in-card {
+    animation: none;
+  }
+}
+
+.gz-sign-in-brand {
+  margin: 0 0 1rem;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--text-muted);
+}
+
+.gz-sign-in-form {
+  display: grid;
+  gap: 1rem;
+  font-size: var(--text-md);
+}
+
+.gz-sign-in-form h1 {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.gz-sign-in-lede,
+.gz-sign-in-notice {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.gz-sign-in-notice {
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.gz-sign-in-field {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.gz-sign-in-field label {
+  font-weight: 600;
+}
+
+.gz-sign-in-field input {
+  padding: 0.5rem 0.6rem;
+  font-size: var(--text-md);
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.gz-sign-in-hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.gz-sign-in-error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--danger-text, var(--danger));
+}
+
+.gz-sign-in-form button[type="submit"] {
+  justify-self: start;
+  padding: 0.5rem 1rem;
+  font-size: var(--text-md);
+  border-radius: var(--radius-md);
+}

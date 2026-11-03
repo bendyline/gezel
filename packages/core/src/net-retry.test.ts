@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   HttpStatusError,
   backoffDelayMs,
+  errorMessageWithCause,
   fetchWithRetry,
   flattenErrorMessage,
+  innermostErrorReason,
   isTransientHttpStatus,
   isTransientNetworkError,
   retryTransient,
@@ -80,6 +82,43 @@ describe('flattenErrorMessage', () => {
     const err = new Error('loop') as Error & { cause?: unknown };
     err.cause = err;
     expect(flattenErrorMessage(err)).toBe('Error: loop');
+  });
+});
+
+describe('errorMessageWithCause', () => {
+  it("names the fault undici's bare wrapper hides on `.cause`", () => {
+    const refused = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:6228'), {
+      code: 'ECONNREFUSED',
+    });
+    expect(errorMessageWithCause(new TypeError('fetch failed', { cause: refused }))).toBe(
+      'fetch failed (connect ECONNREFUSED 127.0.0.1:6228)',
+    );
+    expect(
+      errorMessageWithCause(new TypeError('terminated', { cause: new Error('other side closed') })),
+    ).toBe('terminated (other side closed)');
+  });
+
+  it('reads a dual-stack AggregateError through its inner errors, then its code', () => {
+    const both = Object.assign(
+      new AggregateError([new Error('connect ECONNREFUSED ::1:6228')], ''),
+      { code: 'ECONNREFUSED' },
+    );
+    expect(errorMessageWithCause(new TypeError('fetch failed', { cause: both }))).toBe(
+      'fetch failed (connect ECONNREFUSED ::1:6228)',
+    );
+    const codeOnly = Object.assign(new AggregateError([], ''), { code: 'ECONNREFUSED' });
+    expect(innermostErrorReason(new TypeError('fetch failed', { cause: codeOnly }))).toBe(
+      'ECONNREFUSED',
+    );
+  });
+
+  it('leaves a message that already says what went wrong alone', () => {
+    const wrapped = new Error('[llama-cpp] engine exited before it was ready', {
+      cause: new TypeError('fetch failed'),
+    });
+    expect(errorMessageWithCause(wrapped)).toBe('[llama-cpp] engine exited before it was ready');
+    expect(errorMessageWithCause(new TypeError('fetch failed'))).toBe('fetch failed');
+    expect(errorMessageWithCause('plain string')).toBe('plain string');
   });
 });
 
