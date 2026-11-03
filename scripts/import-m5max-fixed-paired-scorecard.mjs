@@ -383,9 +383,11 @@ for (const [published, original] of Object.entries(markdownFiles)) {
     )}\n\nPublication note: portable copy of the completed, user-curtailed report. Archive-only links open scorecard-details.json, which embeds trial facts, postmortems and review specifications. Publication-status statements describe the original closeout.\n`,
   );
 }
+// The campaign writes CRLF rows, but .gitattributes stores text as LF, so a
+// hash of the CRLF bytes would never match a checkout.
 files.set(
   `${destination}/performance.csv`,
-  sanitize(bytes(`${campaignRoot}/performance.csv`).toString()),
+  sanitize(bytes(`${campaignRoot}/performance.csv`).toString()).replaceAll('\r\n', '\n'),
 );
 addJson(`${destination}/scorecard-details.json`, {
   schemaVersion: 1,

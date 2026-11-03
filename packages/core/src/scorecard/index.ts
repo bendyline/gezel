@@ -22,10 +22,16 @@ export * from './lookup.js';
  * them knows or cares how many files it came from. Each shard is validated
  * on its own first, so a malformed sweep names itself instead of failing
  * somewhere inside a merged blob.
+ *
+ * Marked pure so a bundle that never reads it (the UI) drops every shard:
+ * they were over half a megabyte of the browser entry, and each new sweep
+ * pushed Home's JavaScript budget closer to its limit.
  */
-export const SCORECARD: ScorecardDataset = mergeShards(
-  RUN_SHARDS.map((shard) => ScorecardDatasetSchema.parse(shard)),
-);
+export const SCORECARD: ScorecardDataset = /* @__PURE__ */ publishedDataset();
+
+function publishedDataset(): ScorecardDataset {
+  return mergeShards(RUN_SHARDS.map((shard) => ScorecardDatasetSchema.parse(shard)));
+}
 
 /**
  * Rounds submitted by people outside Bendyline (`gezel bench --json`, then
@@ -37,7 +43,10 @@ export const SCORECARD: ScorecardDataset = mergeShards(
  * may not reuse a Bendyline run id, so a submission can never shadow or be
  * mistaken for a published round.
  */
-export const COMMUNITY_SCORECARD: ScorecardDataset = communityDataset(COMMUNITY_SHARDS, SCORECARD);
+export const COMMUNITY_SCORECARD: ScorecardDataset = /* @__PURE__ */ communityDataset(
+  COMMUNITY_SHARDS,
+  SCORECARD,
+);
 
 /** Parse the community shards and refuse any run id the published scorecard already uses. */
 export function communityDataset(

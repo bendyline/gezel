@@ -91,8 +91,8 @@
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/performance.csv",
-      "bytes": 36527,
-      "sha256": "0a53ec15516343818ada7582495a3515b317a159366e39cb2a7cf378857934b9"
+      "bytes": 36453,
+      "sha256": "d34a1ef1c04092ae8bac7dd66cd4845b6880be0a8b8493a294a87cca652b10cc"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/scorecard-details.json",
