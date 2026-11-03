@@ -17,8 +17,9 @@ Handboek's [Gezel in Docker](handboek/technical/gezel-in-docker.md).
 `X.Y.Z` is the `@bendyline/gezel-cli` version at the commit built, so an
 image and an npm install of the same version are the same Gezel. The arm64
 CUDA build targets GB10 (DGX Spark) only, like the native release it comes
-from. `libvulkan1` stays out of the CPU image: its presence alone makes the
-backend probe report Vulkan with no device behind it.
+from. The CPU image has no Vulkan engines and no Vulkan drivers. ffmpeg's
+dependencies still bring in the Vulkan loader (`libvulkan1`), and the backend
+probe settles on the CPU build there (`no bundled vulkan binary, using cpu`).
 
 Registries: `ghcr.io/bendyline/gezel` (primary), mirrored digest for digest
 to `docker.io/bendyline/gezel`.

@@ -165,6 +165,36 @@ async function main() {
   ]);
   assert(engines.includes('ok'), 'a bundled llama-server runs (the C library floor holds)');
 
+  step('scripts kept off the network run sealed');
+  // A container has no systemd user manager, so denyNet scripts depend on
+  // the gezel-sandbox helper: discovery must find it, and its filter must
+  // hold under this container's own seccomp profile. The probe is the
+  // runner's: exit 0 only when the connect is refused for the family.
+  const booted = spawnSync('docker', ['logs', name], { encoding: 'utf8' });
+  // The logger wraps long lines, so the path may start on the next one.
+  const helper = /\[native\] discovered sandbox:\s+(\S+)/.exec(
+    `${booted.stdout}${booted.stderr}`,
+  )?.[1];
+  assert(Boolean(helper), 'the service found the sandbox helper');
+  const probe =
+    "const s=require('node:net').connect({host:'127.0.0.1',port:9});" +
+    "s.once('connect',()=>process.exit(9));" +
+    "s.once('error',e=>process.exit(e.code==='EAFNOSUPPORT'?0:2));" +
+    'setTimeout(()=>process.exit(3),3000);';
+  const open = spawnSync('docker', ['exec', name, 'node', '-e', probe]);
+  assert(open.status === 2, 'outside the helper, a script can open a connection');
+  const sealed = spawnSync('docker', [
+    'exec',
+    name,
+    helper,
+    '--deny-net',
+    '--',
+    'node',
+    '-e',
+    probe,
+  ]);
+  assert(sealed.status === 0, 'under the helper, the same script cannot');
+
   step('a second container on the same volume refuses to start');
   const second = spawnSync(
     'docker',
