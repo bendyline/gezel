@@ -180,16 +180,29 @@ export function scoreCandidate(query: string, candidate: MatchCandidate): MatchS
 }
 
 /**
- * Rank candidates, returning the best-scoring first. Ties broken by the
+ * Rank candidates, returning the best-scoring first. A tie goes to the
+ * candidate whose role adds the fewest words beyond the query, then to the
  * candidate's own ID (stable ordering).
+ *
+ * The score only measures how much of the query a candidate covers, so a role
+ * that contains the query ties with one that is exactly it. Gilde 0.3.5 added
+ * Account Manager, whose `manager` folds into `voorman`: it tied Crew Lead for
+ * "voorman", won on its id, and projects stopped getting a crew lead.
  */
 export function rankCandidates(query: string, candidates: MatchCandidate[]): MatchScore[] {
-  const scored = candidates.map((c) => scoreCandidate(query, c));
+  const queryTokens = roleTokens(query);
+  const extraRoleWords = (c: MatchCandidate) =>
+    [...roleTokens(c.role ?? '')].filter((t) => !queryTokens.has(t)).length;
+  const scored = candidates.map((c) => ({
+    match: scoreCandidate(query, c),
+    extra: extraRoleWords(c),
+  }));
   scored.sort((a, b) => {
-    if (b.score !== a.score) return b.score - a.score;
-    return a.id.localeCompare(b.id);
+    if (b.match.score !== a.match.score) return b.match.score - a.match.score;
+    if (a.extra !== b.extra) return a.extra - b.extra;
+    return a.match.id.localeCompare(b.match.id);
   });
-  return scored;
+  return scored.map((s) => s.match);
 }
 
 /**

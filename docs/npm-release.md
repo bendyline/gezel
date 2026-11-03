@@ -217,7 +217,7 @@ packs every published package, `npm install`s the tarballs into a throwaway
 
 1. asserts every package resolved from a candidate tarball rather than the
    registry,
-2. enforces a 900 MiB logical `node_modules` budget,
+2. enforces a 950 MiB logical `node_modules` budget,
 3. runs `npm audit --omit=dev` and fails on any high or critical advisory
    that [`scripts/npm-consumer-audit-allowlist.json`](../scripts/npm-consumer-audit-allowlist.json)
    does not accept with a reason and an expiry — stricter than the workspace

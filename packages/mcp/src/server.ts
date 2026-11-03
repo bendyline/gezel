@@ -7891,10 +7891,14 @@ async function listRoutableProjectTypes(): Promise<RoutableProjectType[]> {
  * The project type this goal belongs to, when its words name one clearly
  * (see matchProjectTypeForBrief). Null for everything else, and on any
  * failure: the ordinary kickoff is always there to fall back to.
+ *
+ * Pass the caller's own fields, never `resolveMacroBrief`'s output: its
+ * padding ("…a real workspace deliverable, not a plan") named gilde 0.3.5's
+ * Client Delivery through its `deliverables` tag, tying every short trip brief.
  */
 async function routeBriefToProjectType(brief: {
   name: string;
-  about: string;
+  about?: string;
   taskDescription?: string;
 }): Promise<{ match: BriefTypeMatch; type: RoutableProjectType } | null> {
   if (process.env.GEZEL_DISABLE_TYPE_ROUTING === '1') return null;
@@ -8156,7 +8160,7 @@ async function runStartProject(
   if (binaryRequest) {
     return runBinaryDocumentProject({ ...brief, taskTitle, kickoffMessage }, binaryRequest, tool);
   }
-  const routed = await routeBriefToProjectType(brief);
+  const routed = await routeBriefToProjectType({ name, about, taskDescription });
   if (routed) {
     const typed = await runTypedKickoff(brief, routed, {
       cacheTool: tool,
@@ -8658,7 +8662,7 @@ async function runFlatProject(
       cacheTool,
     );
   }
-  const routed = await routeBriefToProjectType(brief);
+  const routed = await routeBriefToProjectType({ name, about, taskDescription });
   if (routed) {
     const typed = await runTypedKickoff(brief, routed, {
       cacheTool,

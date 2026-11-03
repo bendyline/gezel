@@ -4,11 +4,24 @@ import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
 
+/**
+ * One PID the probe refuses blanks every row in its batch: macOS ps prints
+ * "process id too large" past XNU's PID_MAX, and Get-Process -Id binds Int32.
+ * A PID past the limit cannot be live, so it is left out like an absent one.
+ */
+const PROBE_PID_LIMIT: Partial<Record<NodeJS.Platform, number>> = {
+  darwin: 99_999,
+  win32: 2_147_483_647,
+};
+
 /** Birth stamps survive coordinator restarts and distinguish a reused PID. */
 export async function readProcessIdentities(
   pids: readonly number[],
 ): Promise<ReadonlyMap<number, string>> {
-  const ids = [...new Set(pids)].filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+  const limit = PROBE_PID_LIMIT[process.platform] ?? Number.MAX_SAFE_INTEGER;
+  const ids = [...new Set(pids)].filter(
+    (pid) => Number.isSafeInteger(pid) && pid > 0 && pid <= limit,
+  );
   const identities = new Map<number, string>();
   if (!ids.length) return identities;
   try {
