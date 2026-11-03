@@ -151,7 +151,9 @@ async function main(): Promise<void> {
   // comparison, outcome-bare for the contract ablation.
   const control = args.flags.control ? String(args.flags.control) : CONTROL_ARM;
   if (!arms.some((a) => a.arm === control)) {
-    throw new Error(`--control ${control} is not among the arms (${arms.map((a) => a.arm).join(', ')})`);
+    throw new Error(
+      `--control ${control} is not among the arms (${arms.map((a) => a.arm).join(', ')})`,
+    );
   }
 
   const missing: string[] = [];

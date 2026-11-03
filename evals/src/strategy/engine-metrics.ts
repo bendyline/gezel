@@ -24,7 +24,8 @@ export interface TrialEngineMetrics {
 
 const STOP_PROCESSING = /stop processing: n_tokens = (\d+)/g;
 const DECODE = /\btg =\s*([\d.]+) t\/s/g;
-const PREFILL = /prompt processing, n_tokens =\s*\d+, progress = [\d.]+, t =\s*[\d.]+ s \/\s*([\d.]+) tokens per second/g;
+const PREFILL =
+  /prompt processing, n_tokens =\s*\d+, progress = [\d.]+, t =\s*[\d.]+ s \/\s*([\d.]+) tokens per second/g;
 const FIRST_REQUEST_FLOOR = 8_000;
 
 function median(values: number[]): number | null {
@@ -41,9 +42,7 @@ function numbers(log: string, pattern: RegExp): number[] {
 export function parseEngineMetrics(log: string, taskRef?: string): TrialEngineMetrics {
   const prompts = numbers(log, STOP_PROCESSING);
   const marker = taskRef
-    ? log
-        .split('\n')
-        .find((line) => line.includes(`${taskRef} generalist-mode resolved=`))
+    ? log.split('\n').find((line) => line.includes(`${taskRef} generalist-mode resolved=`))
     : undefined;
   return {
     peakPromptTokens: prompts.length ? Math.max(...prompts) : null,

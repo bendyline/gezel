@@ -183,7 +183,8 @@ function renderOutcomeStepPrompt(
       : 'When the work is done, call advance_task_step once.',
   );
   if (options.procedure === 'none') return parts.join('\n\n');
-  const listedBy = contractMode === 'hidden' ? 'the request asks for them' : 'the contract lists them';
+  const listedBy =
+    contractMode === 'hidden' ? 'the request asks for them' : 'the contract lists them';
   const recipe: string[] = [
     '#### Recommended approach (advisory)',
     `The recipe this outcome usually follows. Use what helps; reorder, merge or skip parts when you can reach the outcome more directly. Files it writes along the way are optional unless ${listedBy}. Where it says to advance a step, move on to the next part; advance the task only once, at the end.`,

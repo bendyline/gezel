@@ -383,7 +383,10 @@ describe('the task contract block', () => {
       activeStepId: 'outcome',
       strategyOptions: { procedure: 'none', contract: 'hidden' },
     } as unknown as Task;
-    const block = renderTaskContextBlock({ task: hiddenTask, step: hiddenTask.craftbook.steps[0]! });
+    const block = renderTaskContextBlock({
+      task: hiddenTask,
+      step: hiddenTask.craftbook.steps[0]!,
+    });
     expect(block).not.toContain('### Task contract');
     expect(block).not.toContain('A deck whose figures are cited');
   });

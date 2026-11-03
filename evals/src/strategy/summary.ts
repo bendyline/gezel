@@ -315,7 +315,13 @@ export function renderStrategyMarkdown(
       lines.push(`| ${book} | ${cells.join(' | ')} |`);
     }
     lines.push('', 'Cells: P1 passes / trials · mean P2 · median wall time.', '');
-    lines.push(...renderCostTable(rows.filter((r) => r.modelId === modelId), arms), '');
+    lines.push(
+      ...renderCostTable(
+        rows.filter((r) => r.modelId === modelId),
+        arms,
+      ),
+      '',
+    );
     for (const c of comparisons.filter((x) => x.modelId === modelId)) {
       const interval = (d: Interval | null) =>
         d ? `${signed(d.estimate)} [${signed(d.low)}, ${signed(d.high)}]` : '—';

@@ -62,7 +62,10 @@ describe('applyExecutionMode', () => {
     expect(applied.strategyOptions).toEqual({ procedure: 'none' });
     expect(applied.craftbook.renderedAs).toBe('outcome');
     expect(applied.craftbook.steps[0]!.prompt).not.toContain('Recommended approach');
-    expect(applied.craftbook.steps[0]!.assignee).toEqual({ kind: 'gezel', gezelId: 'g-generalist' });
+    expect(applied.craftbook.steps[0]!.assignee).toEqual({
+      kind: 'gezel',
+      gezelId: 'g-generalist',
+    });
   });
 
   it("lays the request's options over the pick's", async () => {

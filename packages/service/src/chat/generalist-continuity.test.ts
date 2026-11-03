@@ -10,8 +10,7 @@ function stubs(opts: {
 }) {
   const store = {
     readConfig: async () => ({ defaultModel: opts.defaultModel ?? {} }),
-    getGezel: async () =>
-      opts.gezel ? { parsed: { frontmatter: { ...opts.gezel } } } : null,
+    getGezel: async () => (opts.gezel ? { parsed: { frontmatter: { ...opts.gezel } } } : null),
   } as unknown as Store;
   const catalog = {
     get: async (_kind: string, id: string) => {

@@ -150,7 +150,11 @@ export async function applyExecutionMode(
     if (spawnsCraftbook) spawnsCraftbook = withTerminalContractGate(spawnsCraftbook);
   }
   const strategyOptions =
-    strategy === 'outcome' ? options : options?.contract ? { contract: options.contract } : undefined;
+    strategy === 'outcome'
+      ? options
+      : options?.contract
+        ? { contract: options.contract }
+        : undefined;
   const mode = executionModeForStrategy(strategy);
   const owner =
     mode === 'generalist' ? (args.assigneeGezelId ?? resolution.ownerGezelId) : undefined;
