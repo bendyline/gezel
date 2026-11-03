@@ -41,10 +41,11 @@ function tables(scores: ModelScore[]) {
     ...new Set(groups.flatMap(({ group }) => group.judgments.map((judge) => judge.judgeModel))),
   ];
   const hasNotApplicable = groups.some(({ group }) => (group.notApplicableReviews ?? 0) > 0);
+  const hasObservedPrefill = groups.some(({ group }) => group.observedPrefillTokensPerSec);
   return [
     {
       title: 'Task performance',
-      note: 'Task measurements across all attempted trials, including failures. Measurement methods and limits are stated in period labels and round notes. Values are per-trial medians (minimum–maximum; sample count), not admission probes. Wall time includes tools. System RSS and GPU memory are separate peak measurements; do not add their medians. Periods remain separate because hardware performance can change.',
+      note: `Task measurements include failures within each stated period or comparison subset. Measurement methods and exclusions are stated in period labels and round notes. Values are per-trial medians (minimum–maximum; sample count), not admission probes. Wall time includes tools. System RSS and GPU memory are separate peak measurements; do not add their medians. Periods remain separate because hardware performance can change.${hasObservedPrefill ? ' Observed prefill uses partial chat-event rates summarized within each trial. It is not a duration-weighted aggregate of every request, and does not recover pure prefill time.' : ''}`,
       headers: [
         'Model',
         'Period',
@@ -62,7 +63,11 @@ function tables(scores: ModelScore[]) {
           group.label,
           String(group.trials),
           observation(group.outputTokensPerSec),
-          observation(group.prefillTokensPerSec),
+          group.prefillTokensPerSec
+            ? observation(group.prefillTokensPerSec)
+            : group.observedPrefillTokensPerSec
+              ? `${observation(group.observedPrefillTokensPerSec)} observed`
+              : '—',
           observation(group.durationMs, 60000, 1),
           observation(group.peakRssMb, 1024),
           observation(group.peakGpuMemMb, 1024),

@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "publicationId": "2026-11-03-m5max-fixed-paired",
+  "regenerate": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-m5max-fixed-paired-scorecard.mjs",
+  "check": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-m5max-fixed-paired-scorecard.mjs --check",
+  "files": [
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-11-03-m5max-fixed-paired.json",
+      "bytes": 29873,
+      "sha256": "e8253649e7f0c815ccc27f4352fb22b73075feb6f26455cad37974e1117e4b98"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/scorecard.json",
+      "bytes": 29873,
+      "sha256": "e8253649e7f0c815ccc27f4352fb22b73075feb6f26455cad37974e1117e4b98"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/analysis.json",
+      "bytes": 73458,
+      "sha256": "996c71fd94682bea6db8540e0d5455891db3d20c757228c5f81f8c7cf77f8894"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/paired-analysis.json",
+      "bytes": 132843,
+      "sha256": "9a7fcf926c59ad01ba7e5b4837dc1d32887546ae66c0d411069afba0731717e7"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/performance.json",
+      "bytes": 133093,
+      "sha256": "d9b9c29f20dbc864b58d0b4d3df14affab8b95a3068ee87738fa4cc0d4309805"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/mlx-prefill-recovery.json",
+      "bytes": 79386,
+      "sha256": "d45aa3ec4a660d037703f1eec922f4593fc3e33ee4c4fa9553ac559d53994ead"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/native-provenance.json",
+      "bytes": 14429,
+      "sha256": "b991e5b9464f03c0e8dafbd9fb9824e663e6528b578e096fcdc0b28c405c853a"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/completion-audit.json",
+      "bytes": 1940,
+      "sha256": "c13f9ab9eaa6a84a778da0ff9b834abf335789a38cfb176908f5f2a957f3ce3e"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/scope-amendment.json",
+      "bytes": 1426,
+      "sha256": "c4f56ca375d1942fdc0ad3701d59989d1d1b8125b988a66b7a961aab4b7cb7fe"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/analysis-plan.json",
+      "bytes": 331,
+      "sha256": "0068269500fe3aef089d390a4dc34ef005db9d710763ce2ea95f16ca9a0bdc99"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/judging.json",
+      "bytes": 151104,
+      "sha256": "20c1003561d6446f3f8bc03c6d5165b5812da9bd82460f8a46cce769ce3117db"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/report.md",
+      "bytes": 17684,
+      "sha256": "0ccdb6917e6fc25bced5a00844383e37e9f9789d0814cff26a045c939a1f7849"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/paired-analysis.md",
+      "bytes": 3633,
+      "sha256": "d540acc15d1a2f919ce96ebb80a937e137161d0449a8c690700e9f0fb56a958c"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/judging.md",
+      "bytes": 11824,
+      "sha256": "455914f79387b49f2eff04c5aea53360e9c4a3a1a22fad9b640c433f4bd2b172"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/mlx-prefill-recovery.md",
+      "bytes": 4790,
+      "sha256": "5c36fd4e2bd9fbf27ef10cb7f9f992b18bc2d0c5e15bf6598b2013bc749e5527"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/scope-amendment.md",
+      "bytes": 1441,
+      "sha256": "3e861db7c40d36f0eafb0dec5c4c56c8378ec3068f920483e9ba5545c3823b04"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/analysis-plan.md",
+      "bytes": 5560,
+      "sha256": "eea615a3ccd1362df86ca36d352a330457fd016df93e0d4ed1ad95bdaeccb17c"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/performance.csv",
+      "bytes": 36453,
+      "sha256": "d34a1ef1c04092ae8bac7dd66cd4845b6880be0a8b8493a294a87cca652b10cc"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/scorecard-details.json",
+      "bytes": 3323720,
+      "sha256": "908273e80676c7c0c75568013a05c07ade7edd49e4cd64fa3ffd9150fee89b43"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/verification.json",
+      "bytes": 606,
+      "sha256": "e33e7fceda42e6e5d9abc7ed37c8350a18eb694c0887f664e417f5d314b8a3ad"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/README.md",
+      "bytes": 1268,
+      "sha256": "4882e42e0bf75679458db23c68214dbb39a98ecec7ced6fcf05a1144072c4672"
+    }
+  ]
+}

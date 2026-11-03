@@ -1,0 +1,25 @@
+{
+  "counts": {
+    "recordedTrials": 73,
+    "matchedTrials": 72,
+    "pairs": 36,
+    "passes": 68,
+    "excludedUnpairedTrials": 1,
+    "numericReviews": 25,
+    "includedNumericReviews": 24,
+    "notApplicable": 48,
+    "recoveredMlxTrials": 37,
+    "includedMlxPrefillObservations": 121
+  },
+  "originalEvidenceModified": false,
+  "matchedPairsVerified": true,
+  "originalDesignComplete": false,
+  "allIncludedRepetitions": [
+    1
+  ],
+  "mlxPrefillReparsedFromRecordings": true,
+  "newInferenceCalls": 0,
+  "newJudgeCalls": 0,
+  "sourceFilesVerified": 576,
+  "schema": "ScorecardDatasetSchema v1"
+}

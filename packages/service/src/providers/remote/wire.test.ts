@@ -142,6 +142,9 @@ describe('remote wire contract', () => {
         promptTokens: 100,
         completionTokens: 20,
         durationMs: 5000,
+        ttftMs: 100,
+        promptTokensPerSec: 900.5,
+        cachedPromptTokens: 0,
         tokensPerSec: 4,
       },
       { type: 'engine_stats', provider: 'llama-cpp', ramAllocBytes: 4_000_000_000 },
@@ -149,7 +152,7 @@ describe('remote wire contract', () => {
       { type: 'error', code: 'model_not_loaded', message: 'nope' },
     ];
     for (const f of frames) {
-      expect(RemoteInferFrameSchema.parse(f).type).toBe(f.type);
+      expect(RemoteInferFrameSchema.parse(f)).toMatchObject(f);
     }
   });
 

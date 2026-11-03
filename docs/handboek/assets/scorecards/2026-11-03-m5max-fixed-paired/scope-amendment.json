@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "recordedAt": "2026-11-03T13:00:04.017450+00:00",
+  "authorization": "User: no, not 516 trials - that will take many days. Please condense it considerably and wrap it up in the next few hours.",
+  "originalPlanTrials": 516,
+  "originalPlanPreserved": true,
+  "scope": "Close at the existing 73 recorded trials, no further inference. Analyze the 72 paired core/productivity trials; retain the unpaired identity-flagged PowerPoint result separately.",
+  "matchedTrials": 72,
+  "matchedPairsPerModel": 18,
+  "repetitions": 1,
+  "untestedSuites": [
+    "developer",
+    "complex-work"
+  ],
+  "notRunTrials": 443,
+  "selection": "Chronological completed prefix when the user curtailed the run for time. Not randomly sampled; outcomes were already visible. No selection by pass/fail and no adaptive expansion.",
+  "margin": 0.05,
+  "inferentialStatus": "Exploratory, user-curtailed after partial results; original 516-trial preregistered design incomplete. Non-significance is not equivalence.",
+  "reportDeadlineUtc": "2026-11-03T16:00:00Z",
+  "driverStoppedAt": "2026-11-03T12:57:21.071Z",
+  "driverStopPreserved": "Frozen comparison changed: fixtures: \"bin/ab-strategy.ts\", \"strategy/books.ts\", \"strategy/engine-metrics.ts\", \"strategy/summary.ts\", \"types.ts\" (see identity-drift-after-trial.json)",
+  "campaignSha256AtAmendment": "4c95a41e150003491d9802bcdefc948c7bf27ef007770541753f5c905d7f1a79"
+}

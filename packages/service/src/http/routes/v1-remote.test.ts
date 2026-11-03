@@ -121,6 +121,16 @@ describe('remote model execution — B-side surface (e2e)', () => {
       'mock-fast',
     )) as MockProvider;
     provider.scriptReasoning('checking the plan');
+    const stats = {
+      provider: 'mlx' as const,
+      promptTokens: 100,
+      completionTokens: 4,
+      durationMs: 250,
+      ttftMs: 42,
+      promptTokensPerSec: 1234.5,
+      cachedPromptTokens: 0,
+    };
+    provider.scriptEngineTelemetry({ turnStats: stats });
     const res = await httpFetch(`${baseUrl}/v1/remote/infer`, {
       method: 'POST',
       headers: {
@@ -142,6 +152,11 @@ describe('remote model execution — B-side surface (e2e)', () => {
     const text = await res.text();
     // SSE frames, terminating in a `done` frame (mock emits text, no tool call).
     expect(text).toContain('data:');
+    const frames = text
+      .split('\n')
+      .filter((line) => line.startsWith('data: '))
+      .map((line) => JSON.parse(line.slice(6)));
+    expect(frames.find((frame) => frame.type === 'turn_stats')).toMatchObject(stats);
     expect(text).toContain('"type":"reasoning_delta"');
     expect(text).toContain('"type":"done"');
     expect(text).not.toContain('"type":"error"');

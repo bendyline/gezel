@@ -1155,6 +1155,7 @@ export async function runTrial(
     client,
     enableLocalSampling: isLocalEngine(engine),
     daemonLogPath: join(runDir, 'daemon.log'),
+    chatEventsPath: join(runDir, 'recording', 'chat-events.jsonl'),
   });
   perf.start(spawned.pid);
   let metrics: TrialMetrics | null = null;
@@ -1549,6 +1550,8 @@ export async function runTrial(
   } finally {
     // Phase 8: stop perf collector (one usage probe before the daemon
     // goes away), capture forensic state, then shut down.
+    // Flush terminal telemetry before the collector reads the recording.
+    await stopRecorderSegment('tap stopped');
     try {
       metrics = await perf.stop();
       await writeMetrics(runDir, metrics);
@@ -1570,7 +1573,6 @@ export async function runTrial(
         `[perf] collector teardown failed (non-fatal): ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    await stopRecorderSegment('tap stopped');
     if (recordingSegments.length > 0) {
       recordingStats = {
         lines: recordingSegments.reduce((sum, segment) => sum + segment.lines, 0),

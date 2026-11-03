@@ -4306,6 +4306,9 @@ describe('ChatManager — one-shot attribution', () => {
         promptTokens: 100,
         completionTokens: 4,
         durationMs: 250,
+        ttftMs: 42,
+        promptTokensPerSec: 1234.5,
+        cachedPromptTokens: 0,
         tokensPerSec: 20,
       },
     });
@@ -4319,6 +4322,11 @@ describe('ChatManager — one-shot attribution', () => {
     expect(received[0]?.sessionId).toMatch(/^one-shot:/);
     expect(received[0]?.projectId).toBe('project-7');
     expect(received[0]?.event).toMatchObject({ activity: 'Indexing src/app.ts' });
+    expect(received[1]?.event).toMatchObject({
+      ttftMs: 42,
+      promptTokensPerSec: 1234.5,
+      cachedPromptTokens: 0,
+    });
     expect(received[1]?.sessionId).toBe(received[0]?.sessionId);
     unsubscribe();
   });

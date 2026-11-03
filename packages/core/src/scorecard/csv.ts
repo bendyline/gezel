@@ -22,6 +22,8 @@ import type { ScorecardDataset, ScorecardModelResult, ScorecardRun } from './sch
  * - `decode_tok_s` / `prefill_tok_s` prefer the per-trial engine-log medians
  *   of newer rounds over the averaged admission probe of older ones, and
  *   `perf_source` says which a row carries — the two are never interchangeable.
+ *   Recovered partial chat-event prefill rates are marked explicitly in that
+ *   source column; they do not supply an all-request aggregate or pure duration.
  *   A result measured across several hardware periods has no single speed
  *   (the periods exist because the speed changed), so those cells stay empty
  *   rather than average a throttled period into a normal one.
@@ -126,6 +128,8 @@ function judgeColumns(result: ScorecardModelResult): JudgeColumns {
 export interface ScorecardSpeeds {
   decode?: number;
   prefill?: number;
+  /** Prefill is a partial chat-event observation, not aggregate request throughput. */
+  prefillObserved?: boolean;
   samples?: number;
   /** Which measurement the speeds are; empty when none was recorded. */
   source: string;
@@ -137,7 +141,8 @@ export interface ScorecardSpeeds {
  */
 export function scorecardSpeeds(result: ScorecardModelResult): ScorecardSpeeds {
   const periods = (result.taskMeasurements ?? []).filter(
-    (group) => group.outputTokensPerSec || group.prefillTokensPerSec,
+    (group) =>
+      group.outputTokensPerSec || group.prefillTokensPerSec || group.observedPrefillTokensPerSec,
   );
   if (periods.length > 1) {
     return { source: `engine-log, ${periods.length} periods (not combined)` };
@@ -146,9 +151,18 @@ export function scorecardSpeeds(result: ScorecardModelResult): ScorecardSpeeds {
   if (period) {
     return {
       decode: period.outputTokensPerSec?.median,
-      prefill: period.prefillTokensPerSec?.median,
-      samples: period.outputTokensPerSec?.samples ?? period.prefillTokensPerSec?.samples,
-      source: 'engine-log median',
+      prefill: period.prefillTokensPerSec?.median ?? period.observedPrefillTokensPerSec?.median,
+      ...(period.prefillTokensPerSec === undefined && period.observedPrefillTokensPerSec
+        ? { prefillObserved: true }
+        : {}),
+      samples:
+        period.outputTokensPerSec?.samples ??
+        period.prefillTokensPerSec?.samples ??
+        period.observedPrefillTokensPerSec?.samples,
+      source:
+        period.prefillTokensPerSec === undefined && period.observedPrefillTokensPerSec
+          ? 'engine-log decode; observed chat-event prefill (partial, per-trial medians)'
+          : 'engine-log median',
     };
   }
   if (result.performance) {

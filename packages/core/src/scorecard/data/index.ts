@@ -98,6 +98,9 @@ import run_2026_10_30_r9700_docblocks_activation from './runs/2026-10-30-r9700-d
 import run_2026_10_30_spark_native_0_1_54_final_six from './runs/2026-10-30-spark-native-0-1-54-final-six.json' with {
   type: 'json',
 };
+import run_2026_11_03_m5max_fixed_paired from './runs/2026-11-03-m5max-fixed-paired.json' with {
+  type: 'json',
+};
 
 /** Every recorded sweep. Merged (and ordered by recency) by ../index.ts. */
 export const RUN_SHARDS: ScorecardDataset[] = [
@@ -134,6 +137,7 @@ export const RUN_SHARDS: ScorecardDataset[] = [
   run_2026_10_29_spark_native_0_1_54_continuation as unknown as ScorecardDataset,
   run_2026_10_30_r9700_docblocks_activation as unknown as ScorecardDataset,
   run_2026_10_30_spark_native_0_1_54_final_six as unknown as ScorecardDataset,
+  run_2026_11_03_m5max_fixed_paired as unknown as ScorecardDataset,
 ];
 
 /**

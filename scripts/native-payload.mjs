@@ -197,8 +197,8 @@ export const FIRST_NATIVE_RELEASE = Object.freeze({
 export const FIRST_NATIVE_RELEASE_BINARY = Object.freeze({
   'win32-arm64/vec0.dll': '0.1.53',
   'win32-arm64-cuda/gezel-whisper-server': '0.1.53',
-  'linux-x64/gezel-sandbox': '0.1.56',
-  'linux-arm64/gezel-sandbox': '0.1.56',
+  'linux-x64/gezel-sandbox': '0.1.57',
+  'linux-arm64/gezel-sandbox': '0.1.57',
 });
 
 function parseNativeVersion(version) {

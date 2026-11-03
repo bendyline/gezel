@@ -8,6 +8,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
  */
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { type ChatEvent, ChatEventSchema } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
@@ -64,6 +65,29 @@ afterEach(async () => {
 });
 
 describe('ChatManager session telemetry', () => {
+  it('preserves prefill, cache hits and TTFT through the public chat event schema', async () => {
+    const session = await manager.createSession({ gezelId: 'ada' });
+    const received: ChatEvent[] = [];
+    const unsubscribe = events.subscribeAll(({ sessionId, event }) => {
+      if (sessionId === session.id) received.push(ChatEventSchema.parse(event));
+    });
+    mock.script('Ready.');
+    const stats = {
+      provider: 'mlx' as const,
+      promptTokens: 100,
+      completionTokens: 4,
+      durationMs: 250,
+      ttftMs: 42,
+      promptTokensPerSec: 1234.5,
+      cachedPromptTokens: 0,
+      tokensPerSec: 20,
+    };
+    mock.scriptEngineTelemetry({ turnStats: stats });
+    await manager.send(session.id, 'hi');
+    expect(received.find((event) => event.type === 'turn_stats')).toMatchObject(stats);
+    unsubscribe();
+  });
+
   it('counts deltas, tool calls, and file mutations across a real send', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });
 

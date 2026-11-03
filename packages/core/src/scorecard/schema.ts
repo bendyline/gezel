@@ -258,6 +258,8 @@ export const ScorecardTaskMeasurementSchema = z
     source: z.literal('engine-log'),
     outputTokensPerSec: ScorecardObservationSchema.optional(),
     prefillTokensPerSec: ScorecardObservationSchema.optional(),
+    /** Partial chat-event prefill rates, summarized per trial; never an all-request aggregate. */
+    observedPrefillTokensPerSec: ScorecardObservationSchema.optional(),
     durationMs: ScorecardObservationSchema.optional(),
     peakRssMb: ScorecardObservationSchema.optional(),
     peakGpuMemMb: ScorecardObservationSchema.optional(),
@@ -284,6 +286,7 @@ export const ScorecardTaskMeasurementSchema = z
     for (const key of [
       'outputTokensPerSec',
       'prefillTokensPerSec',
+      'observedPrefillTokensPerSec',
       'durationMs',
       'peakRssMb',
       'peakGpuMemMb',

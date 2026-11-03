@@ -92,6 +92,20 @@ describe('postmortem report filesystem workflow', () => {
     expect(await writeTrialReport(active)).toMatchObject({ status: 'skipped-active' });
   });
 
+  it('surfaces observed MLX rates and their partial coverage in ordinary postmortems', async () => {
+    const dir = join(tempRoot, 'mlx-trial');
+    await writeCompleteTrial(dir, 'mlx-trial');
+    const facts = completeFacts('mlx-trial');
+    facts.perf = {
+      mlxPrefill: { tokensPerSec: 1234.5, sampleCount: 2, source: 'turn_stats' },
+    };
+    await writeFile(join(dir, 'facts.json'), JSON.stringify(facts));
+    await writeTrialReport(dir);
+    const report = await readFile(join(dir, 'postmortem.md'), 'utf8');
+    expect(report).toContain('Observed MLX prefill tok/s | 1234.5 median, 2 observations');
+    expect(report).toContain('partial turn coverage, not aggregate prompt timing');
+  });
+
   it('writes score and deterministic postmortem files, preserves them by default, and forces replacement', async () => {
     const dir = join(tempRoot, 'trial');
     await writeCompleteTrial(dir, 'trial');

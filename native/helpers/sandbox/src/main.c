@@ -26,8 +26,9 @@
  *   - lets socket() and socketpair() create AF_UNIX sockets only, and answers
  *     every other family with EAFNOSUPPORT, as RestrictAddressFamilies does;
  *   - refuses io_uring, whose socket operations bypass the socket() check,
- *     and ptrace / process_vm_*, which would let the script reach into a
- *     process outside the filter.
+ *     and ptrace / process_vm_* / pidfd_getfd, which would let the script
+ *     reach into a process outside the filter. pidfd_getfd would copy an
+ *     open socket out of the parent, which is the Gezel daemon.
  *
  * Inherited file descriptors are left alone: the sandbox runner passes the
  * script exactly the pipes it needs, its RPC channel among them.
@@ -61,6 +62,11 @@
 #endif
 
 #define X32_SYSCALL_BIT 0x40000000u
+
+/* Linux 5.6; syscalls since 5.1 share one number on every architecture. */
+#ifndef __NR_pidfd_getfd
+#define __NR_pidfd_getfd 438
+#endif
 
 /* The rules this build has, as --features prints them. */
 static const char *const FEATURES[] = {"deny-net"};
@@ -96,7 +102,28 @@ static struct sock_filter deny_net_filter[] = {
     REFUSE(__NR_ptrace),
     REFUSE(__NR_process_vm_readv),
     REFUSE(__NR_process_vm_writev),
+    REFUSE(__NR_pidfd_getfd),
     RET(SECCOMP_RET_ALLOW),
+};
+
+/*
+ * The syscalls REFUSE answers, for the self-test. Each is called with
+ * arguments that would fail some other way, or do nothing, if it got
+ * through, so EPERM means a filter refused it. Under Docker's default
+ * profile that can be Docker's rather than this one; the build's self-test
+ * runs on a bare runner, where it can only be this one.
+ */
+static const struct {
+  long nr;
+  const char *name;
+} REFUSED[] = {
+    {__NR_io_uring_setup, "io_uring_setup"},
+    {__NR_io_uring_enter, "io_uring_enter"},
+    {__NR_io_uring_register, "io_uring_register"},
+    {__NR_ptrace, "ptrace"},
+    {__NR_process_vm_readv, "process_vm_readv"},
+    {__NR_process_vm_writev, "process_vm_writev"},
+    {__NR_pidfd_getfd, "pidfd_getfd"},
 };
 
 static void print_usage(FILE *stream) {
@@ -166,6 +193,13 @@ static int self_test(void) {
   }
   close(pair[0]);
   close(pair[1]);
+  for (size_t i = 0; i < sizeof(REFUSED) / sizeof(REFUSED[0]); i++) {
+    errno = 0;
+    if (syscall(REFUSED[i].nr, -1L, 0L, 0L, 0L, 0L, 0L) != -1 || errno != EPERM) {
+      fprintf(stderr, "gezel-sandbox: --deny-net: %s was not refused\n", REFUSED[i].name);
+      return 1;
+    }
+  }
   puts("gezel-sandbox: ok");
   return 0;
 }

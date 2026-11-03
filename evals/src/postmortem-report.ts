@@ -123,6 +123,9 @@ function performanceRows(facts: TrialFacts): string[] {
   const peakSysMem = recordAt(facts, 'perf.systemMemory.peakUsedMb');
   const totalSysMem = recordAt(facts, 'perf.systemMemory.totalMb');
   const meanTps = recordAt(facts, 'perf.derived.meanTokensPerSec');
+  const mlxPrefill = recordAt(facts, 'perf.mlxPrefill.tokensPerSec');
+  const mlxPrefillSource = recordAt(facts, 'perf.mlxPrefill.source');
+  const mlxPrefillCount = recordAt(facts, 'perf.mlxPrefill.sampleCount');
   const inputTokens = recordAt(facts, 'perf.usage.totalInputTokens');
   const outputTokens = recordAt(facts, 'perf.usage.totalOutputTokens');
   const cpu = recordAt(facts, 'host.cpuModel');
@@ -169,6 +172,11 @@ function performanceRows(facts: TrialFacts): string[] {
     } | \`facts.perf.gpu.peakMemUsedMb\`, \`facts.perf.gpu.memoryModel\` |`,
     `| Peak system memory | ${metric(peakSysMem, ' MB')} / ${metric(totalSysMem, ' MB')} | \`facts.perf.systemMemory.peakUsedMb\`, \`facts.perf.systemMemory.totalMb\` |`,
     `| Mean tokens/sec | ${metric(meanTps)} | \`facts.perf.derived.meanTokensPerSec\` |`,
+    ...(typeof mlxPrefill === 'number'
+      ? [
+          `| Observed MLX prefill tok/s | ${metric(mlxPrefill)} median, ${metric(mlxPrefillCount)} observations | \`facts.perf.mlxPrefill\` (${escapeTable(String(mlxPrefillSource))}; partial turn coverage, not aggregate prompt timing) |`,
+        ]
+      : []),
     `| Total tokens | ${tokenText} | \`facts.perf.usage.totalInputTokens\`, \`facts.perf.usage.totalOutputTokens\` |`,
     `| Host | ${escapeTable(hostText || 'n/a')} | \`facts.host.cpuModel\`, \`facts.host.totalRamGb\`, \`facts.host.gpuModel\` |`,
     `| Framework | ${escapeTable(frameworkText || 'n/a')} | \`facts.host.framework\`, \`facts.host.frameworkBinary\` |`,
