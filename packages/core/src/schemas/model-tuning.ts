@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import { TASK_STRATEGIES } from '../task-strategy.js';
 import { LlamaCppLazyModeSchema, LlamaCppLoadModeSchema } from './llama-cpp-config.js';
 import { TuningProfileIdSchema } from './tuning-profile-registry.js';
 
@@ -348,6 +349,31 @@ export const EngineConfigSchema = z
 export type EngineConfig = z.infer<typeof EngineConfigSchema>;
 
 /**
+ * The task strategy this model does its best work under, as measured by the
+ * strategy benchmark (docs/task-strategies.md). `auto` reads it for the model
+ * that will run a task; a model without one falls back to the tier rule.
+ */
+export const ModelTaskStrategySchema = z
+  .object({
+    strategy: z
+      .enum(TASK_STRATEGIES)
+      .describe('`stepwise`, `generalist`, or `outcome` (the contract as the only gate).'),
+    procedure: z
+      .enum(['advisory', 'none'])
+      .optional()
+      .describe(
+        'Outcome only: show the recipe as advice (`advisory`, the default) or leave it out (`none`).',
+      ),
+    basis: z
+      .string()
+      .max(400)
+      .optional()
+      .describe('The measurement the pick rests on, for whoever revisits it.'),
+  })
+  .describe('The task strategy `auto` picks for this model.');
+export type ModelTaskStrategy = z.infer<typeof ModelTaskStrategySchema>;
+
+/**
  * Per-model tuning, minus the `profiles` map. Split out from
  * {@link ChatModelTuningSchema} so each value inside `profiles` can carry
  * a sparse partial of the same shape without the recursion exploding the
@@ -393,6 +419,9 @@ export type ChatModelTuningBase = z.infer<typeof ChatModelTuningBaseSchema>;
 const ChatModelTuningProfilesShape = {
   engine: EngineConfigSchema.optional().describe(
     'Per-model ENGINE launch-flag defaults (llama.cpp `--n-gpu-layers`, `--cpu-moe`, `--spec-type`, …). Applied once at model load, not per request — so it lives on the top-level tuning object, not inside per-request `profiles`.',
+  ),
+  taskStrategy: ModelTaskStrategySchema.optional().describe(
+    'The task strategy `auto` picks when this model runs a craftbook task. Decided per task, not per request, so it lives on the top-level tuning object.',
   ),
   profiles: z
     .record(TuningProfileIdSchema, ChatModelTuningBaseSchema.partial())

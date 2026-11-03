@@ -17,8 +17,9 @@
  * an outcome render of the book (`TaskCraftbook.renderedAs`). That keeps
  * `Task.executionMode` two-valued for older readers and the eval harness.
  *
- * `auto` reproduces `generalistMode`'s task rule exactly and never picks
- * outcome: outcome is unmeasured, and `auto` follows evidence. See
+ * `auto` follows evidence: the strategy the benchmark measured for the model
+ * that will run the task (its catalog `tuning.taskStrategy`), else
+ * `generalistMode`'s task rule, which never picks outcome. See
  * docs/task-strategies.md.
  */
 import {
@@ -37,6 +38,71 @@ export interface TaskStrategyOptions {
   procedure?: 'advisory' | 'none';
   /** Let the owner hand self-contained pieces to teammates. Default true. */
   subagents?: boolean;
+  /**
+   * Eval only, to measure what the contract buys: `enforced` (the default)
+   * shows and checks it; `shown` shows it and checks nothing; `hidden` keeps
+   * it for grading but leaves the request as the only instruction.
+   */
+  contract?: TaskContractMode;
+}
+
+export type TaskContractMode = 'enforced' | 'shown' | 'hidden';
+
+/** How a task's contract reaches its owner. See {@link TaskStrategyOptions.contract}. */
+export function taskContractMode(task: {
+  strategyOptions?: TaskStrategyOptions | undefined;
+}): TaskContractMode {
+  return task.strategyOptions?.contract ?? 'enforced';
+}
+
+/**
+ * A model's measured strategy (catalog `tuning.taskStrategy`). Structural so
+ * this module stays free of the schemas that import it.
+ */
+export interface ModelStrategyAffinity {
+  strategy: TaskStrategy;
+  procedure?: 'advisory' | 'none' | undefined;
+}
+
+export interface AutoTaskStrategy {
+  strategy: TaskStrategy;
+  /** Options the model's pick carries (outcome without a recipe). */
+  options?: TaskStrategyOptions;
+  /** Where the pick came from: the model's measurement, or the tier rule. */
+  source: 'model' | 'tier';
+  /**
+   * What to run when the pick cannot render for this book (outcome needs a
+   * contract): the tier rule, the choice `auto` made before models had one.
+   */
+  fallback: TaskStrategy;
+}
+
+/**
+ * `auto` for one model. An explicit `generalistMode` (`on` / `off`) is the
+ * person's choice about task execution and wins over the model's
+ * measurement; under `auto` the measurement wins, and a model without one
+ * gets the tier rule.
+ */
+export function resolveAutoTaskStrategy(args: {
+  generalistMode?: GeneralistModeSetting | undefined;
+  providerName: string | undefined;
+  tier?: string | undefined;
+  affinity?: ModelStrategyAffinity | undefined;
+}): AutoTaskStrategy {
+  const fallback = resolveTaskExecutionMode(args.generalistMode, args.providerName, args.tier);
+  const measured =
+    args.affinity && isTaskStrategy(args.affinity.strategy) ? args.affinity : undefined;
+  if (!measured || args.generalistMode === 'on' || args.generalistMode === 'off') {
+    return { strategy: fallback, source: 'tier', fallback };
+  }
+  return {
+    strategy: measured.strategy,
+    ...(measured.strategy === 'outcome' && measured.procedure
+      ? { options: { procedure: measured.procedure } }
+      : {}),
+    source: 'model',
+    fallback,
+  };
 }
 
 export function isTaskStrategy(value: unknown): value is TaskStrategy {

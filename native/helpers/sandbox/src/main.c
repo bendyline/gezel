@@ -4,6 +4,7 @@
  *   gezel-sandbox --deny-net -- <command> [args...]
  *   gezel-sandbox --features
  *   gezel-sandbox --self-test
+ *   gezel-sandbox --help
  *
  * Each rule is a flag, and a run must name at least one: the runner says
  * what it wants, so a rule added later never changes what an existing caller
@@ -98,11 +99,16 @@ static struct sock_filter deny_net_filter[] = {
     RET(SECCOMP_RET_ALLOW),
 };
 
-static int usage(void) {
-  fprintf(stderr,
+static void print_usage(FILE *stream) {
+  fprintf(stream,
           "usage: gezel-sandbox --deny-net -- <command> [args...]\n"
           "       gezel-sandbox --features\n"
-          "       gezel-sandbox --self-test\n");
+          "       gezel-sandbox --self-test\n"
+          "       gezel-sandbox --help\n");
+}
+
+static int usage(void) {
+  print_usage(stderr);
   return 64;
 }
 
@@ -167,6 +173,10 @@ static int self_test(void) {
 int main(int argc, char **argv) {
   if (argc == 2 && strcmp(argv[1], "--features") == 0) return print_features();
   if (argc == 2 && strcmp(argv[1], "--self-test") == 0) return self_test();
+  if (argc == 2 && strcmp(argv[1], "--help") == 0) {
+    print_usage(stdout);
+    return 0;
+  }
 
   int rules = 0;
   int deny_net = 0;

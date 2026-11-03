@@ -116,15 +116,21 @@ export function renderCraftbookAsOutcome(
   // The same number of tries at the contract a stepwise run gets on its
   // terminal step: there, the plateau pause ends the loop on the fourth
   // identical rejection however many loop-backs reset the attempt count.
-  const gate: StepGate = {
-    at: 'completion',
-    checks: contractChecksForTask(contract),
-    maxAttempts: GATE_DEFAULT_MAX_ATTEMPTS,
-  };
+  // An eval arm that shows or hides the contract checks nothing: the turn
+  // that ends with the primary deliverable written finishes the task.
+  const contractMode = opts.options?.contract ?? 'enforced';
+  const gate: StepGate | undefined =
+    contractMode === 'enforced'
+      ? {
+          at: 'completion',
+          checks: contractChecksForTask(contract),
+          maxAttempts: GATE_DEFAULT_MAX_ATTEMPTS,
+        }
+      : undefined;
   const step: TaskCraftbookStep = {
     id: OUTCOME_STEP_ID,
     name: 'Deliver the outcome',
-    description: contract.goal,
+    description: contractMode === 'hidden' ? 'Deliver what the request asks for' : contract.goal,
     prompt: renderOutcomeStepPrompt(craftbook, opts.spawnsCraftbook, opts.options ?? {}),
     ...(entry?.suggestedRole ? { suggestedRole: entry.suggestedRole } : {}),
     ...(entry?.assignee ? { assignee: entry.assignee } : {}),
@@ -134,7 +140,7 @@ export function renderCraftbookAsOutcome(
     ...(entry?.onEnter ? { onEnter: entry.onEnter } : {}),
     ...(authoring ? { authoring } : {}),
     ...(producerAdvance ? { advanceWhen: producerAdvance } : {}),
-    gate,
+    ...(gate ? { gate } : {}),
     terminal: true,
     createdAt: opts.now,
   };
@@ -158,8 +164,13 @@ function renderOutcomeStepPrompt(
   spawnsCraftbook: TaskCraftbook | undefined,
   options: TaskStrategyOptions,
 ): string {
+  const contractMode = options.contract ?? 'enforced';
   const parts = [
-    'Deliver the outcome the **Task contract** describes. You own all of it, in this one conversation, and you choose how to get there: work directly toward deliverables that meet the bar.',
+    contractMode === 'enforced'
+      ? 'Deliver the outcome the **Task contract** describes. You own all of it, in this one conversation, and you choose how to get there: work directly toward deliverables that meet the bar.'
+      : contractMode === 'shown'
+        ? 'Deliver the outcome the **Task contract** describes. You own all of it, in this one conversation, and you choose how to get there.'
+        : 'Deliver what the request asks for. You own all of it, in this one conversation, and you choose how to get there.',
   ];
   if (options.subagents !== false) {
     parts.push(
@@ -167,12 +178,16 @@ function renderOutcomeStepPrompt(
     );
   }
   parts.push(
-    'When every deliverable is in place, call advance_task_step once. The runtime checks the contract and names anything unmet; fix exactly that and call it again.',
+    contractMode === 'enforced'
+      ? 'When every deliverable is in place, call advance_task_step once. The runtime checks the contract and names anything unmet; fix exactly that and call it again.'
+      : 'When the work is done, call advance_task_step once.',
   );
   if (options.procedure === 'none') return parts.join('\n\n');
+  const listedBy =
+    contractMode === 'hidden' ? 'the request asks for them' : 'the contract lists them';
   const recipe: string[] = [
     '#### Recommended approach (advisory)',
-    'The recipe this outcome usually follows. Use what helps; reorder, merge or skip parts when you can reach the outcome more directly. Files it writes along the way are optional unless the contract lists them. Where it says to advance a step, move on to the next part; advance the task only once, at the end.',
+    `The recipe this outcome usually follows. Use what helps; reorder, merge or skip parts when you can reach the outcome more directly. Files it writes along the way are optional unless ${listedBy}. Where it says to advance a step, move on to the next part; advance the task only once, at the end.`,
   ];
   craftbook.steps.forEach((step, i) => {
     recipe.push(

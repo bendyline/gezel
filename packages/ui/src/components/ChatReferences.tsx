@@ -272,7 +272,7 @@ export function ChatReferences({
   /**
    * Narrow-form-factor mode (VS Code chat panel, mobile, or an explicitly
    * compact host). The side-by-side rail and resize grip are suppressed;
-   * Chat, Task, Skills, and References become full-width tabs instead.
+   * Chat, Task, Skills, and Files become full-width tabs instead.
    */
   compact?: boolean;
   /**
@@ -717,7 +717,7 @@ export function ChatReferences({
       ...(hasTasks ? [{ value: 'tasks', label: 'Task', icon: 'tasks' as const }] : []),
       ...(hasSkills ? [{ value: 'skills', label: 'Skills', icon: 'skills' as const }] : []),
       ...(hasReferences
-        ? [{ value: 'references', label: 'References', icon: 'references' as const }]
+        ? [{ value: 'references', label: 'Files', icon: 'references' as const }]
         : []),
     ];
     const onlyChat = compactPanes.length === 1;
@@ -851,7 +851,8 @@ export function ChatReferences({
             {([hasTasks, hasReferences, hasSkills].filter(Boolean).length > 1 ||
               orderedTasks.length > 1 ||
               references.length > 1) && (
-              <div className="chat-rail-section-tabs" role="tablist">
+              <div className="chat-rail-section-tabs" role="tablist" aria-label="Chat panels">
+                <span className="chat-rail-section-label">Chat</span>
                 {hasTasks &&
                   (orderedTasks.length > 1 ? (
                     <TaskTabMenu
@@ -908,7 +909,7 @@ export function ChatReferences({
                       aria-selected={activeTab === 'references'}
                       onClick={() => setActiveTab('references')}
                     >
-                      References
+                      Files
                     </button>
                   ))}
               </div>
@@ -1322,7 +1323,7 @@ function TaskTabMenu({
           }
           aria-selected={variant === 'tab' ? selected : undefined}
         >
-          <span>{variant === 'tab' ? 'Tasks' : (activeRef ?? 'Choose task')}</span>
+          <span>{variant === 'tab' ? 'Task' : (activeRef ?? 'Choose task')}</span>
           <DropdownChevron className="chat-rail-section-tab-chevron" />
         </button>
       </DropdownMenu.Trigger>
@@ -1403,7 +1404,7 @@ function ReferenceTabMenu({
           }
           aria-selected={variant === 'tab' ? selected : undefined}
         >
-          <span>{variant === 'tab' ? 'References' : (activeName ?? 'Choose reference')}</span>
+          <span>{variant === 'tab' ? 'Files' : (activeName ?? 'Choose file')}</span>
           <DropdownChevron className="chat-rail-section-tab-chevron" />
         </button>
       </DropdownMenu.Trigger>
@@ -1412,7 +1413,7 @@ function ReferenceTabMenu({
           className="app-nav-menu chat-rail-reference-menu"
           sideOffset={4}
           align="start"
-          aria-label="Choose reference"
+          aria-label="Choose file"
         >
           {refs.map((reference) => {
             const active = reference.key === activeKey;

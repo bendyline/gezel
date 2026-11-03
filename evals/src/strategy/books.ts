@@ -49,6 +49,22 @@ export const STRATEGY_ARMS: Readonly<Record<string, TrialTaskStrategy>> = {
   outcome: { arm: 'outcome', strategy: 'outcome' },
   'outcome-solo': { arm: 'outcome-solo', strategy: 'outcome', options: { subagents: false } },
   'outcome-bare': { arm: 'outcome-bare', strategy: 'outcome', options: { procedure: 'none' } },
+  // The daemon picks: the model's catalog `tuning.taskStrategy`, else the tier rule.
+  auto: { arm: 'auto', strategy: 'auto' },
+  // The contract ablation (round 2, test 1): outcome-bare with the contract
+  // shown but never checked, and with it hidden so the request is the only
+  // brief, as a general-purpose agent harness would run it. Both are graded
+  // against the same contract afterward.
+  'contract-shown': {
+    arm: 'contract-shown',
+    strategy: 'outcome',
+    options: { procedure: 'none', contract: 'shown' },
+  },
+  harness: {
+    arm: 'harness',
+    strategy: 'outcome',
+    options: { procedure: 'none', contract: 'hidden' },
+  },
 };
 
 export const DEFAULT_STRATEGY_ARMS: readonly string[] = ['stepwise', 'generalist', 'outcome'];

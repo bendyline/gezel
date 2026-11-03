@@ -370,4 +370,24 @@ describe('the task contract block', () => {
     expect(block).toContain('#### Contract check');
     expect(block).not.toContain('#### Phase gate');
   });
+
+  it('leaves a hidden contract out of the prompt', () => {
+    const hiddenTask = {
+      ...task,
+      craftbook: {
+        ...task.craftbook,
+        contract,
+        renderedAs: 'outcome',
+        steps: [{ ...step, id: 'outcome', name: 'Deliver the outcome', next: undefined }],
+      },
+      activeStepId: 'outcome',
+      strategyOptions: { procedure: 'none', contract: 'hidden' },
+    } as unknown as Task;
+    const block = renderTaskContextBlock({
+      task: hiddenTask,
+      step: hiddenTask.craftbook.steps[0]!,
+    });
+    expect(block).not.toContain('### Task contract');
+    expect(block).not.toContain('A deck whose figures are cited');
+  });
 });

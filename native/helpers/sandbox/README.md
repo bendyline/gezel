@@ -8,6 +8,7 @@ the command.
 gezel-sandbox --deny-net -- node script.js
 gezel-sandbox --features
 gezel-sandbox --self-test
+gezel-sandbox --help
 ```
 
 ## The flag contract

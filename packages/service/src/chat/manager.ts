@@ -140,6 +140,7 @@ import {
   roleDeliverableScripts,
   sameSessionSubject,
   stepTurnSteering,
+  taskContractMode,
   taskEffectiveStatus,
   tierAtLeast,
   tuningForStepAction,
@@ -464,10 +465,12 @@ import {
 } from './fixed-function-adapters.js';
 import { resolveFixedFunctionTaskImageArgs } from './fixed-function-task-image.js';
 import {
+  type ExecutionModelProfile,
   checkpointGapForStep,
   classifyExecutionTierFor,
   isContextOverflowError,
   renderWriteBailContinuation,
+  resolveExecutionModelFor,
   sessionContextPoisoned,
 } from './generalist-continuity.js';
 import {
@@ -12331,6 +12334,22 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * {@link classifyExecutionTier} plus the model id and its measured task
+   * strategy, so `auto` picks the strategy for the model that will run.
+   */
+  async executionModelProfile(
+    providerName: ProviderName,
+    gezelId?: string,
+  ): Promise<ExecutionModelProfile> {
+    return resolveExecutionModelFor({
+      store: this.store,
+      catalog: this.catalog,
+      providerName,
+      ...(gezelId ? { gezelId } : {}),
+    });
+  }
+
+  /**
    * Cheap, side-effect-free route preview for the composer. The send path
    * recomputes the same plan authoritatively; this endpoint exists so users
    * can see and tune the heuristic before committing the turn.
@@ -15268,9 +15287,16 @@ export class ChatManager extends LocalEngineRuntime {
           ...(gezel?.role ? { role: gezel.role } : {}),
           ...(gezel?.roleBasedName ? { roleBasedName: gezel.roleBasedName } : {}),
           toolNames: appToolNames,
-          taskGrounded: contractAsksForGrounding(
-            (taskContext?.task ?? (await this.subagentTask(record)))?.craftbook.contract,
-          ),
+          taskGrounded: await (async () => {
+            const groundingTask = taskContext?.task ?? (await this.subagentTask(record));
+            // The write-time check enforces the contract, so an eval arm that
+            // shows or hides the contract runs without it.
+            return (
+              !!groundingTask &&
+              taskContractMode(groundingTask) === 'enforced' &&
+              contractAsksForGrounding(groundingTask.craftbook.contract)
+            );
+          })(),
         });
     const factualLookupPreference: FactualLookupPreference =
       project?.knowledgeCatalogs?.mode === 'off'

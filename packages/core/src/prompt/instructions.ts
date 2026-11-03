@@ -26,7 +26,7 @@ import { normalizeScriptRefs } from '../schemas/script.js';
 import type { ExpectedDeliverable } from '../schemas/session.js';
 import type { Task, TaskCraftbookStep } from '../schemas/task.js';
 import { MANAGED_WORKSPACE_WRITE_SETTING_LABEL } from '../security/policy.js';
-import { isOutcomeTask } from '../task-strategy.js';
+import { isOutcomeTask, taskContractMode } from '../task-strategy.js';
 import {
   type PromptTaskContext,
   isGatedStep,
@@ -1464,7 +1464,18 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
         task.task.executionMode === 'generalist'
           ? " You own every step of this task in this conversation; the Task outline above shows where this step sits, and only this step's procedure is in force."
           : '';
-      if (outcomeTask) {
+      if (outcomeTask && taskContractMode(task.task) !== 'enforced') {
+        // Eval arms that measure the contract itself: nothing checks the
+        // work, and a hidden contract leaves the request as the brief.
+        const brief =
+          taskContractMode(task.task) === 'hidden'
+            ? 'The request above is your brief'
+            : 'The **Task contract** above describes the outcome wanted';
+        const finish = availableToolNameSet.has('advance_task_step')
+          ? ' When the work is done, call `advance_task_step`.'
+          : '';
+        activeTaskAnchor = `\n\n---\n\n**You are delivering task \`${task.task.ref}\` — "${task.task.title}".** ${brief}, and it takes precedence over your default \`about.md\` persona. Take the most direct route. If this turn's transcript already shows work done, continue from there instead of starting over.${finish}`;
+      } else if (outcomeTask) {
         const finish = availableToolNameSet.has('advance_task_step')
           ? ' When every deliverable is in place, call `advance_task_step`; the runtime checks the contract and names anything unmet.'
           : '';

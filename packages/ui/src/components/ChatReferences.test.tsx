@@ -319,10 +319,7 @@ describe('ChatReferences responsive split', () => {
     // switches to References and the task effect holds back.
     await user.click(screen.getByRole('button', { name: 'Add artifact' }));
     await waitFor(() => {
-      expect(screen.getByRole('tab', { name: 'References' })).toHaveAttribute(
-        'aria-selected',
-        'true',
-      );
+      expect(screen.getByRole('tab', { name: 'Files' })).toHaveAttribute('aria-selected', 'true');
     });
 
     await user.click(screen.getByRole('button', { name: 'Focus task' }));
@@ -444,7 +441,7 @@ describe('ChatReferences task picker', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add task references' }));
 
-    const taskTab = await screen.findByRole('tab', { name: 'Tasks' });
+    const taskTab = await screen.findByRole('tab', { name: 'Task' });
     expect(taskTab).toHaveAttribute('aria-haspopup', 'menu');
     expect(container.querySelector('nav[aria-label="Tasks"]')).toBeNull();
     expect(await screen.findByText('First task')).toBeInTheDocument();
@@ -886,7 +883,7 @@ describe('ChatReferences reference picker', () => {
     );
   });
 
-  it('selects files from a dropdown under the References tab', async () => {
+  it('selects files from a dropdown under the Files tab', async () => {
     activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
     const user = userEvent.setup();
     // Keep the viewer on its lightweight error path. This test exercises the
@@ -922,7 +919,7 @@ describe('ChatReferences reference picker', () => {
 
     await user.click(screen.getByRole('button', { name: 'Add references' }));
 
-    const referencesTab = await screen.findByRole('tab', { name: 'References' });
+    const referencesTab = await screen.findByRole('tab', { name: 'Files' });
     expect(referencesTab).toHaveAttribute('aria-haspopup', 'menu');
     expect(container.querySelector('nav[aria-label="References"]')).toBeNull();
 
@@ -971,7 +968,7 @@ describe('ChatReferences reference picker', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Read batch' }));
-    const referencesTab = await screen.findByRole('tab', { name: 'References' });
+    const referencesTab = await screen.findByRole('tab', { name: 'Files' });
     await user.click(referencesTab);
     expect(await screen.findByRole('menuitem', { name: 'alpha.ts' })).toBeVisible();
     expect(screen.getByRole('menuitem', { name: 'beta.ts' })).toBeVisible();

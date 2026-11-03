@@ -38,15 +38,34 @@ Precedence, highest first:
 2. `config.taskStrategy` (`auto | stepwise | generalist | outcome`). Under it,
    a book that cannot be rendered as an outcome runs generalist with a
    warning in the log.
-3. The task half of `config.generalistMode`, whose `auto` is generalist for
-   hosted frontier providers and stepwise for on-device models.
+3. An explicit `config.generalistMode` (`on` / `off`): the person's choice
+   about task execution, so it outranks any model's measurement.
+4. The model's measured strategy: `tuning.taskStrategy` on the chat-model
+   catalog entry (`{ strategy, procedure?, basis? }`), or a gezel's own
+   `tuning.taskStrategy` override. It is read for the model the owner will
+   actually run: the assignee's model, or for an auto-assigned single-owner
+   task the Generalist gezel's model. An outcome pick that cannot render for
+   this book (no contract, owner steps, branches) falls back to the tier rule
+   below, with a warning naming the reason.
+5. The tier rule, `generalistMode`'s `auto`: generalist for hosted frontier
+   providers and stepwise for on-device models. It never picks outcome.
 
-`auto` never picks outcome. `generalistMode` still decides the Meester's
-kickoff shape. A system job is always stepwise. Fanout children inherit the
-parent's strategy.
+So `auto` picks outcome only where the benchmark measured it for that model.
+The pick ships as a gilde patch (the catalog read is tolerant, so older builds
+ignore the field), and live gilde updates carry a new measurement to users
+without an app release. Picks as of round 1 (2026-10-28): Gemma 4 E4B outcome
+without the recipe, Qwen 3.8 27B outcome, Qwen 3.5 9B stepwise.
+
+`generalistMode` still decides the Meester's kickoff shape. A system job is
+always stepwise. Fanout children inherit the parent's strategy.
 
 The log marker the eval harness reads keeps its shape and gains a suffix:
-`[tasks] <ref> generalist-mode resolved=<mode> setting=<s> provider=<p> tier=<t> requested=<r>[ owner=<id>] strategy=<s>`.
+`[tasks] <ref> generalist-mode resolved=<mode> setting=<s> provider=<p> tier=<t> requested=<r>[ owner=<id>] strategy=<s>[ source=model|tier][ procedure=none][ contract=shown|hidden]`.
+
+`strategyOptions.contract` is an eval-only lever for measuring the contract
+itself: `shown` shows the contract and checks nothing, `hidden` keeps it on the
+task for grading but leaves the request as the only brief (the "harness" arm).
+Neither turns on fact-checked writing, which enforces the contract.
 
 The phone runs stepwise and generalist. It refuses an outcome request and
 stands generalist in for an `outcome` install setting.

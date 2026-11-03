@@ -7,6 +7,7 @@ import { contractScopedSpec } from '../craftbooks/scenario.ts';
 import type { CraftbookEvalSpec } from '../craftbooks/types.ts';
 import { armOrder, parseStrategyArms } from './books.ts';
 import { gradeContract } from './contract-grade.ts';
+import { parseEngineMetrics } from './engine-metrics.ts';
 import { clusterBootstrap, compareArms } from './summary.ts';
 
 const contract = {
@@ -329,5 +330,42 @@ describe('judge', () => {
     ]);
     expect(summary.axes.craft).toBe(8);
     expect(summary.mean).toBeCloseTo(7.75);
+  });
+});
+
+describe('round-2 arms and engine metrics', () => {
+  it('parses the auto and contract-ablation arms', () => {
+    expect(parseStrategyArms('auto,harness,contract-shown,outcome-bare')).toEqual([
+      { arm: 'auto', strategy: 'auto' },
+      { arm: 'harness', strategy: 'outcome', options: { procedure: 'none', contract: 'hidden' } },
+      {
+        arm: 'contract-shown',
+        strategy: 'outcome',
+        options: { procedure: 'none', contract: 'shown' },
+      },
+      { arm: 'outcome-bare', strategy: 'outcome', options: { procedure: 'none' } },
+    ]);
+  });
+
+  it('reads context size, engine speed and the resolved strategy from the daemon log', () => {
+    const log = [
+      'INFO  [tasks] [tasks] default/1 generalist-mode resolved=stepwise setting=auto provider=llama-cpp tier=tiny requested=auto strategy=stepwise',
+      'INFO  [tasks] [tasks] eval-proj/1 generalist-mode resolved=generalist setting=auto provider=llama-cpp tier=medium requested=auto owner=g1 strategy=outcome source=model procedure=none',
+      '[llama-server] slot print_timing: id  0 | task 0 | prompt processing, n_tokens =   4002, progress = 0.85, t =   4.57 s / 876.00 tokens per second',
+      '[llama-server] slot print_timing: id  0 | task 0 | n_gen =    100, tg =  32.38 t/s, tg_3s =  32.70 t/s',
+      '[llama-server] slot print_timing: id  0 | task 0 | n_gen =    176, tg =  28.43 t/s, tg_3s =  24.53 t/s',
+      '[llama-server] slot      release: id  0 | task 0 | stop processing: n_tokens = 5120, truncated = 0',
+      '[llama-server] slot      release: id  0 | task 1 | stop processing: n_tokens = 31200, truncated = 0',
+      '[llama-server] slot      release: id  0 | task 2 | stop processing: n_tokens = 38900, truncated = 0',
+    ].join('\n');
+    expect(parseEngineMetrics(log, 'eval-proj/1')).toEqual({
+      peakPromptTokens: 38900,
+      firstPromptTokens: 31200,
+      decodeTps: 30.405,
+      prefillTps: 876,
+      resolvedStrategy: 'outcome',
+      resolvedSource: 'model',
+    });
+    expect(parseEngineMetrics('', 'eval-proj/1').resolvedStrategy).toBeNull();
   });
 });

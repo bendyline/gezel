@@ -23,7 +23,7 @@ import { normalizeStepGate } from '../schemas/gate.js';
 import { normalizeScriptRefs } from '../schemas/script.js';
 import type { TaskInputRecord } from '../schemas/task-inputs.js';
 import type { Task, TaskCraftbookStep, TaskReferences } from '../schemas/task.js';
-import { isOutcomeTask } from '../task-strategy.js';
+import { isOutcomeTask, taskContractMode } from '../task-strategy.js';
 import { stepCheckedArtifactPaths } from '../tools/results.js';
 import { squisqAuthoringNote } from '../transform/squisq-dialect.js';
 import { renderGateHandoffBlock } from './gate-handoff.js';
@@ -274,7 +274,7 @@ export function renderTaskContextBlock(
       }),
     );
   }
-  if (t.craftbook.contract) {
+  if (t.craftbook.contract && taskContractMode(t) !== 'hidden') {
     lines.push(
       renderTaskContractBlock(t.craftbook.contract, {
         stepwise: t.executionMode !== 'generalist',

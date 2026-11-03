@@ -1,6 +1,12 @@
-import { type ProviderName, type Task, isLocalProvider, parseTaskRef } from '@bendyline/gezel';
+import {
+  type ChatModelTuning,
+  type ModelTaskStrategy,
+  type ProviderName,
+  type Task,
+  isLocalProvider,
+  parseTaskRef,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import { resolveCatalogParameterSize } from '@bendyline/gezel-inference/internal/chat/catalog-model-lookup';
 import {
   type LocalModelTier,
   classifyLocalModelTier,
@@ -49,20 +55,65 @@ export async function classifyExecutionTierFor(args: {
   providerName: ProviderName;
   gezelId?: string;
 }): Promise<LocalModelTier> {
-  if (!isLocalProvider(args.providerName)) return 'cloud';
+  return (await resolveExecutionModelFor(args)).tier;
+}
+
+/** The model a gezel's task turns would run on, as `auto` judges it. */
+export interface ExecutionModelProfile {
+  tier: LocalModelTier;
+  /** The model id the dispatch will use, when one is pinned or defaulted. */
+  modelId?: string;
+  /** The model's measured task strategy: the gezel's override, else the catalog's. */
+  affinity?: ModelTaskStrategy;
+}
+
+/**
+ * {@link classifyExecutionTierFor} plus the model's measured strategy
+ * (`tuning.taskStrategy`), read for the same model the dispatch will use. A
+ * gezel's own `tuning.taskStrategy` wins over the catalog's.
+ */
+export async function resolveExecutionModelFor(args: {
+  store: Store;
+  catalog: CatalogService;
+  providerName: ProviderName;
+  gezelId?: string;
+}): Promise<ExecutionModelProfile> {
   const [config, gezel] = await Promise.all([
     args.store.readConfig(),
     args.gezelId ? args.store.getGezel(args.gezelId).catch(() => null) : Promise.resolve(null),
   ]);
   const effectiveModel =
     gezel?.parsed.frontmatter.model ?? config.defaultModel?.[args.providerName] ?? undefined;
-  const catalogId =
-    (await resolveCatalogIdFromModelId(args.catalog, effectiveModel)) ?? effectiveModel;
-  return classifyLocalModelTier({
-    providerName: args.providerName,
-    modelId: effectiveModel,
-    parameterSize: await resolveCatalogParameterSize(args.catalog, catalogId),
-  });
+  const local = isLocalProvider(args.providerName);
+  const catalogId = local
+    ? ((await resolveCatalogIdFromModelId(args.catalog, effectiveModel)) ?? effectiveModel)
+    : effectiveModel;
+  const manifest = catalogId ? await chatModelManifest(args.catalog, catalogId) : undefined;
+  const affinity = gezel?.parsed.frontmatter.tuning?.taskStrategy ?? manifest?.tuning?.taskStrategy;
+  const tier: LocalModelTier = local
+    ? classifyLocalModelTier({
+        providerName: args.providerName,
+        modelId: effectiveModel,
+        parameterSize: manifest?.parameterSize,
+      })
+    : 'cloud';
+  return {
+    tier,
+    ...(effectiveModel ? { modelId: effectiveModel } : {}),
+    ...(affinity ? { affinity } : {}),
+  };
+}
+
+async function chatModelManifest(
+  catalog: CatalogService,
+  catalogId: string,
+): Promise<{ parameterSize?: string; tuning?: ChatModelTuning } | undefined> {
+  try {
+    const detail = await catalog.get('chat-model', catalogId);
+    return detail?.manifest.kind === 'chat-model' ? detail.manifest : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
