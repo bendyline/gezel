@@ -1,0 +1,57 @@
+{
+  "at": "2026-11-03T13:07:35.378496+00:00",
+  "checks": {
+    "all_model_all_groups_18": true,
+    "paired_36": true,
+    "included_72": true,
+    "passed_68": true,
+    "judge_counts": true,
+    "speculation_seen_all_trials": true,
+    "original_journal_unchanged": true,
+    "old_journal_unchanged": true,
+    "report_links_exist": true
+  },
+  "externalRuntimeVerified": true,
+  "processCheck": "No campaign supervisor, runner, llama server or MLX server observed at closeout.",
+  "reportStatus": "complete-user-curtailed",
+  "unchangedCampaignSha256": "4c95a41e150003491d9802bcdefc948c7bf27ef007770541753f5c905d7f1a79",
+  "heartbeatStatus": "PAUSED",
+  "heartbeatPausedAt": "2026-11-03T13:07:55.226830+00:00",
+  "mlxPrefillRecoveryRevision": {
+    "at": "2026-11-03T18:32:20.756086+00:00",
+    "checks": {
+      "campaignUnchanged": true,
+      "olderCampaignUnchanged": true,
+      "originalMetricsAndRecordingsUnchanged": true,
+      "oldScorecardValuesUnchanged": true,
+      "oldGroupMetricsUnchanged": true,
+      "pairedAnalysisUnchanged": true,
+      "coverageReconciles": true,
+      "csvContains37RecoveredTrials": true,
+      "reportLinksExist": true
+    },
+    "coverage": {
+      "recordedMlxTrials": 37,
+      "recoveredMlxTrials": 37,
+      "includedMlxTrials": 36,
+      "observations": 126,
+      "structuredObservations": 0
+    },
+    "parserSha256": "0e141545ec2555c7f927da1498cffe8423ae0970a3533bf5ac17b65436d1b4f3",
+    "evidence": "mlx-prefill-recovery.json",
+    "priorReports": "report-revisions/pre-mlx-prefill",
+    "noAdditionalInference": true,
+    "verification": {
+      "evalTestsPassed": 78,
+      "serviceTestsPassed": 13,
+      "serviceTestsSelected": true,
+      "typechecks": [
+        "evals",
+        "service"
+      ],
+      "coreSchemaBuild": "passed",
+      "lint": "changed files passed"
+    },
+    "remainingUnknown": "Exact MLX prefill durations and complete internal-request coverage"
+  }
+}

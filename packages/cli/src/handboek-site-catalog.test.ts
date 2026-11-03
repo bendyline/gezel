@@ -266,6 +266,25 @@ const scorecard = {
 } as unknown as ScorecardDataset;
 
 describe('measured results', () => {
+  it('labels partial prefill observations on model pages', () => {
+    const data = structuredClone(scorecard);
+    data.results[0]!.taskMeasurements = [
+      {
+        id: 'matched',
+        label: 'Matched subset',
+        trials: 1,
+        source: 'engine-log',
+        observedPrefillTokensPerSec: { samples: 1, min: 604.75, median: 604.75, max: 604.75 },
+        judgments: [],
+        noArtifact: 0,
+        excludedReviews: 0,
+        notApplicableReviews: 1,
+      },
+    ];
+    const md = measuredResultsMarkdown(data, 'big-q4').join('\n');
+    expect(md).toContain('604.8 tok/s (observed)');
+    expect(md).toContain('not the aggregate throughput of every request');
+  });
   it('links the catalog table to each model page and quotes only full rounds', async () => {
     const { pages } = await buildSiteCatalog(catalog, scorecard);
     const index = pages.find((p) => p.entry.id === MODEL_CATALOG_ID)!;

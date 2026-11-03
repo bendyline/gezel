@@ -250,6 +250,11 @@ export const TurnStatsFrameSchema = z.object({
   promptTokens: z.number().int().nonnegative(),
   completionTokens: z.number().int().nonnegative(),
   durationMs: z.number().int().nonnegative(),
+  /** Time to first token; includes more than prompt processing. */
+  ttftMs: z.number().nonnegative().optional(),
+  /** Engine-reported prefill rate, excluding cache hits when available. */
+  promptTokensPerSec: z.number().nonnegative().optional(),
+  cachedPromptTokens: z.number().int().nonnegative().optional(),
   tokensPerSec: z.number().nonnegative().optional(),
 });
 /** Native engine's static memory allocation, when available. */

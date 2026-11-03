@@ -1,4 +1,5 @@
 import {
+  SCORECARD,
   SCORECARD_DATA_ATTRS,
   type ScorecardDataset,
   ScorecardDatasetSchema,
@@ -59,6 +60,17 @@ function dataset(
 }
 
 describe('::handboek-model-scorecard', () => {
+  it('renders the published condensed round with recovered rates and its scope limits', () => {
+    const page = renderScorecardRoundPages(SCORECARD).find(
+      (page) => page.runId === '2026-11-03-m5max-fixed-paired',
+    )!;
+    expect(page.html).toContain('574.00');
+    expect(page.html).toContain('1,341.50');
+    expect(page.html).toContain('observed');
+    expect(page.html).toContain('equivalence within ±5 percentage points is not established');
+    expect(page.html).toContain('count not rate');
+    expect(page.html).toContain('Artifact reviews');
+  });
   it('publishes task observations and separate rubric means even when capability is withheld', () => {
     const data = dataset();
     const result = data.results[0]!;
@@ -74,6 +86,7 @@ describe('::handboek-model-scorecard', () => {
         trials: 3,
         source: 'engine-log',
         outputTokensPerSec: { samples: 2, min: 3, median: 3.5, max: 4 },
+        observedPrefillTokensPerSec: { samples: 3, min: 400, median: 604.75, max: 800 },
         judgments: [],
         noArtifact: 1,
         excludedReviews: 1,
@@ -100,6 +113,8 @@ describe('::handboek-model-scorecard', () => {
     ]) {
       expect(output).toContain('Task performance');
       expect(output).toContain('3.50 (3.00–4.00; n=2)');
+      expect(output).toContain('604.75 (400.00–800.00; n=3) observed');
+      expect(output).toContain('not a duration-weighted aggregate of every request');
       expect(output).toContain('45.00 (40.00–50.00; n=2)');
       expect(output).toContain('Code quality');
       expect(output).toContain('Document quality');

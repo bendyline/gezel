@@ -19,12 +19,10 @@
  *      shutdown. Best-effort; missing on providers that don't surface
  *      usage (Copilot CLI under some configurations).
  *
+ * MLX prefill observations come from the trial's recorded chat-events SSE
+ * stream. They remain separate from aggregate engine timings: per-turn rates
+ * and TTFT do not establish total prompt-processing duration.
  * What this is NOT yet:
- *   - Per-turn TTFT / prefill time. Those live in the chat-events SSE
- *     stream and need a separate subscriber that reads through the
- *     daemon's bearer-token-auth HTTP API. Tier 5a v1 leaves this for
- *     a follow-up; the wall-clock + RSS + GPU axes already deliver the
- *     hardware-comparison story.
  *   - Cross-framework normalization. The shape here matches llama-cpp /
  *     gezel-service today; an MLX-only or Ollama-only trial will see
  *     reduced fields and the score-trial output marks them `n/a`.
@@ -36,6 +34,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { cpus, freemem, hostname, platform, release, totalmem } from 'node:os';
 import { setTimeout as wait } from 'node:timers/promises';
 import type { GezelClient } from '@bendyline/gezel-client/node';
+import { type MlxPrefillTelemetry, readMlxPrefillTelemetry } from './mlx-prefill-telemetry.ts';
 import type { EngineBuild } from './native-bin.ts';
 
 export interface HostInfo {
@@ -97,6 +96,12 @@ export interface SystemMemorySample {
 }
 
 export interface TrialMetrics {
+  /**
+   * MLX observed prefill rates from chat events; partial provider-turn coverage.
+   * Structured terminal rates take precedence over rounded historical first-token
+   * descriptions. Neither is a duration-weighted aggregate across all requests.
+   */
+  mlxPrefill?: MlxPrefillTelemetry;
   /** Wall-clock samples taken during the trial. */
   process: {
     sampleCount: number;
@@ -366,6 +371,7 @@ export class PerfCollector {
   private readonly client: GezelClient;
   private readonly enableLocalSampling: boolean;
   private readonly daemonLogPath?: string;
+  private readonly chatEventsPath?: string;
   private stopped = false;
   private loop?: Promise<void>;
   /**
@@ -393,6 +399,8 @@ export class PerfCollector {
      * on the local llama-cpp path, which doesn't feed the usage tracker.
      */
     daemonLogPath?: string;
+    /** Flushed recording/chat-events.jsonl; includes native-engine telemetry. */
+    chatEventsPath?: string;
     /**
      * When false, skip the `ps` + `nvidia-smi` samplers and just track
      * duration + usage. Right for CLI-wrapper and cloud providers:
@@ -409,6 +417,7 @@ export class PerfCollector {
     this.client = opts.client;
     this.enableLocalSampling = opts.enableLocalSampling ?? true;
     this.daemonLogPath = opts.daemonLogPath;
+    this.chatEventsPath = opts.chatEventsPath;
   }
 
   start(daemonPid: number): void {
@@ -556,6 +565,16 @@ export class PerfCollector {
       usage = { ...usage, source: 'http' };
     }
 
+    let mlxPrefill: MlxPrefillTelemetry | undefined;
+    if (this.chatEventsPath) {
+      try {
+        const observed = await readMlxPrefillTelemetry(this.chatEventsPath);
+        if (observed.sampleCount > 0) mlxPrefill = observed;
+      } catch (err) {
+        this.log(`[perf] chat-event prefill unavailable (non-fatal): ${String(err)}`);
+      }
+    }
+
     const peakRssKb = this.processSamples.reduce((m, s) => Math.max(m, s.rssKb), 0);
     const peakCpu = this.processSamples.reduce((m, s) => Math.max(m, s.cpuPercent), 0);
     const peakGpu = this.gpuSamples.reduce((m, s) => Math.max(m, s.utilPercent), 0);
@@ -584,6 +603,7 @@ export class PerfCollector {
         : null);
 
     return {
+      ...(mlxPrefill ? { mlxPrefill } : {}),
       process: {
         sampleCount: this.processSamples.length,
         peakRssMb: Math.round(peakRssKb / 1024),
@@ -1035,7 +1055,8 @@ const MLX_CACHE_RE = /\[mlx\] \[cache\].*?\bcached_tokens=(\d+)\s+prefilled_toke
  *    resists the low first-pulse reading on each turn.
  *  - `promptTokensPerSec` stays null — MLX logs prefill token COUNTS but no
  *    prefill duration, and inventing a rate from turn wall-clock would be
- *    worse than an honest "n/a".
+ *    worse than an honest "n/a". Observed rates from recorded chat events are
+ *    collected separately in `TrialMetrics.mlxPrefill`.
  */
 export function parseMlxTimings(logText: string): LlamaCppTimings | null {
   const rates: number[] = [];

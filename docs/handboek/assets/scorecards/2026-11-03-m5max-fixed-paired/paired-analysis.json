@@ -1,0 +1,4116 @@
+{
+  "generatedAt": "2026-11-03T18:29:17.088779+00:00",
+  "recordedTrials": 73,
+  "plannedTrials": 516,
+  "margin": 0.05,
+  "models": [
+    {
+      "model": "gemma4-12b-q4",
+      "plannedPairs": 129,
+      "evaluablePairs": 18,
+      "bothPass": 16,
+      "bothFail": 0,
+      "mlxOnlyPass": 0,
+      "llamaOnlyPass": 2,
+      "mlxPassRate": 0.8888888888888888,
+      "llamaPassRate": 1,
+      "difference": -0.1111111111111111,
+      "pairedConservative95CI": [
+        -0.3808803717442083,
+        0.20657060240561254
+      ],
+      "scenarioCluster95CI": [
+        -0.2631578947368421,
+        0
+      ],
+      "distinctScenarios": 16,
+      "clusterDegenerate": false,
+      "mcnemarNominalP": 0.5,
+      "verdict": "inconclusive-exploratory-curtailed-run",
+      "allPlannedWorstCaseDifference": [
+        -0.875968992248062,
+        0.8449612403100775
+      ],
+      "unavailablePairs": [
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-powerpoint-deck",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "excluded",
+              "cellId": "r1-gemma-mlx-productivity-craftbook-powerpoint-deck",
+              "reason": "Frozen comparison changed: fixtures: \"bin/ab-strategy.ts\", \"strategy/books.ts\", \"strategy/engine-metrics.ts\", \"strategy/summary.ts\", \"types.ts\" (see identity-drift-after-trial.json)",
+              "resultReason": "craftbook-powerpoint-deck passed 21 deterministic craftbook checks",
+              "runDir": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-mlx-gemma4-12b-q4-2026-11-03T12-49-23-654Z-l0ag"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-productivity-craftbook-powerpoint-deck"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "wikipedia-research-brief",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-productivity-wikipedia-research-brief"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-productivity-wikipedia-research-brief"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-week-plan",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-productivity-craftbook-week-plan"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-productivity-craftbook-week-plan"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-ab-test-readout",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-productivity-craftbook-ab-test-readout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-productivity-craftbook-ab-test-readout"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-annotated-bibliography",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-productivity-craftbook-annotated-bibliography"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-productivity-craftbook-annotated-bibliography"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-research-to-document",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-productivity-craftbook-research-to-document"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-productivity-craftbook-research-to-document"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "fix-squisq-bugs",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-developer-fix-squisq-bugs"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-developer-fix-squisq-bugs"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "dev-craftbook-routing",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-developer-dev-craftbook-routing"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-developer-dev-craftbook-routing"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "interface-contract",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-developer-interface-contract"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-developer-interface-contract"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-code-review",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-developer-craftbook-code-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-developer-craftbook-code-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-api-contract-review",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-developer-craftbook-api-contract-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-developer-craftbook-api-contract-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-deep-security-review",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-developer-craftbook-deep-security-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-developer-craftbook-deep-security-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "large-pr-review",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-developer-large-pr-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-developer-large-pr-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-codemod-sweep",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-developer-craftbook-codemod-sweep"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-developer-craftbook-codemod-sweep"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-refactor-module",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-developer-craftbook-refactor-module"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-developer-craftbook-refactor-module"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-bug-fix-tdd",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-developer-craftbook-bug-fix-tdd"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-developer-craftbook-bug-fix-tdd"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-find-vs-create",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-complex-work-craftbook-find-vs-create"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-complex-work-craftbook-find-vs-create"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-edit-midtask",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-complex-work-craftbook-edit-midtask"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-complex-work-craftbook-edit-midtask"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-invoice-run",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-complex-work-craftbook-invoice-run"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-complex-work-craftbook-invoice-run"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-linear",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-complex-work-craftbook-author-linear"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-complex-work-craftbook-author-linear"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-route-multi",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-complex-work-craftbook-route-multi"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-complex-work-craftbook-route-multi"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-export-generalize",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-complex-work-craftbook-export-generalize"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-complex-work-craftbook-export-generalize"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-params",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-complex-work-craftbook-author-params"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-complex-work-craftbook-author-params"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-gate-script",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-complex-work-craftbook-author-gate-script"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-complex-work-craftbook-author-gate-script"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-fanout",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-mlx-complex-work-craftbook-author-fanout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-gemma-llamacpp-complex-work-craftbook-author-fanout"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "tictactoe",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-tictactoe"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-tictactoe"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "petshop",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-petshop"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-petshop"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "tankcombat",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-tankcombat"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-tankcombat"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "schema-migration",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-schema-migration"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-schema-migration"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "failing-tests-spec",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-failing-tests-spec"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-failing-tests-spec"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "symptom-debug",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-symptom-debug"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-symptom-debug"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "data-wrangle",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-data-wrangle"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-data-wrangle"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "incident-postmortem",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-incident-postmortem"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-incident-postmortem"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "ops-runbook-anomaly",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-ops-runbook-anomaly"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-ops-runbook-anomaly"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "plan-and-estimate",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-plan-and-estimate"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-plan-and-estimate"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "conflict-synthesis",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-core-conflict-synthesis"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-core-conflict-synthesis"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "constrained-comms",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-constrained-comms"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-constrained-comms"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "records-intake",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-records-intake"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-records-intake"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "plan-and-estimate",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-plan-and-estimate"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-plan-and-estimate"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "meeting-followup",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-meeting-followup"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-meeting-followup"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-spreadsheet-model",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-craftbook-spreadsheet-model"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-craftbook-spreadsheet-model"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "conflict-synthesis",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-conflict-synthesis"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-conflict-synthesis"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "docblocks-theme-roundtrip",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-docblocks-theme-roundtrip"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-docblocks-theme-roundtrip"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-powerpoint-deck",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-craftbook-powerpoint-deck"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-craftbook-powerpoint-deck"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "wikipedia-research-brief",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-wikipedia-research-brief"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-wikipedia-research-brief"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-week-plan",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-craftbook-week-plan"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-craftbook-week-plan"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-ab-test-readout",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-craftbook-ab-test-readout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-craftbook-ab-test-readout"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-annotated-bibliography",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-craftbook-annotated-bibliography"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-craftbook-annotated-bibliography"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-research-to-document",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-productivity-craftbook-research-to-document"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-productivity-craftbook-research-to-document"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "fix-squisq-bugs",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-developer-fix-squisq-bugs"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-developer-fix-squisq-bugs"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "dev-craftbook-routing",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-developer-dev-craftbook-routing"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-developer-dev-craftbook-routing"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "interface-contract",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-developer-interface-contract"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-developer-interface-contract"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-code-review",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-developer-craftbook-code-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-developer-craftbook-code-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-api-contract-review",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-developer-craftbook-api-contract-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-developer-craftbook-api-contract-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-deep-security-review",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-developer-craftbook-deep-security-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-developer-craftbook-deep-security-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "large-pr-review",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-developer-large-pr-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-developer-large-pr-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-codemod-sweep",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-developer-craftbook-codemod-sweep"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-developer-craftbook-codemod-sweep"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-refactor-module",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-developer-craftbook-refactor-module"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-developer-craftbook-refactor-module"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-bug-fix-tdd",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-developer-craftbook-bug-fix-tdd"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-developer-craftbook-bug-fix-tdd"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-find-vs-create",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-complex-work-craftbook-find-vs-create"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-complex-work-craftbook-find-vs-create"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-edit-midtask",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-complex-work-craftbook-edit-midtask"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-complex-work-craftbook-edit-midtask"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-invoice-run",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-complex-work-craftbook-invoice-run"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-complex-work-craftbook-invoice-run"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-linear",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-complex-work-craftbook-author-linear"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-complex-work-craftbook-author-linear"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-route-multi",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-complex-work-craftbook-route-multi"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-complex-work-craftbook-route-multi"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-export-generalize",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-complex-work-craftbook-export-generalize"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-complex-work-craftbook-export-generalize"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-params",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-complex-work-craftbook-author-params"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-complex-work-craftbook-author-params"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-gate-script",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-complex-work-craftbook-author-gate-script"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-complex-work-craftbook-author-gate-script"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-fanout",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-mlx-complex-work-craftbook-author-fanout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-gemma-llamacpp-complex-work-craftbook-author-fanout"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "tictactoe",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-tictactoe"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-tictactoe"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "petshop",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-petshop"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-petshop"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "tankcombat",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-tankcombat"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-tankcombat"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "schema-migration",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-schema-migration"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-schema-migration"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "failing-tests-spec",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-failing-tests-spec"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-failing-tests-spec"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "symptom-debug",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-symptom-debug"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-symptom-debug"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "data-wrangle",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-data-wrangle"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-data-wrangle"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "incident-postmortem",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-incident-postmortem"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-incident-postmortem"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "ops-runbook-anomaly",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-ops-runbook-anomaly"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-ops-runbook-anomaly"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "plan-and-estimate",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-plan-and-estimate"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-plan-and-estimate"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "conflict-synthesis",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-core-conflict-synthesis"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-core-conflict-synthesis"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "constrained-comms",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-constrained-comms"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-constrained-comms"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "records-intake",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-records-intake"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-records-intake"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "plan-and-estimate",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-plan-and-estimate"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-plan-and-estimate"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "meeting-followup",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-meeting-followup"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-meeting-followup"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-spreadsheet-model",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-craftbook-spreadsheet-model"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-craftbook-spreadsheet-model"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "conflict-synthesis",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-conflict-synthesis"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-conflict-synthesis"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "docblocks-theme-roundtrip",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-docblocks-theme-roundtrip"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-docblocks-theme-roundtrip"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-powerpoint-deck",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-craftbook-powerpoint-deck"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-craftbook-powerpoint-deck"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "wikipedia-research-brief",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-wikipedia-research-brief"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-wikipedia-research-brief"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-week-plan",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-craftbook-week-plan"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-craftbook-week-plan"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-ab-test-readout",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-craftbook-ab-test-readout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-craftbook-ab-test-readout"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-annotated-bibliography",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-craftbook-annotated-bibliography"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-craftbook-annotated-bibliography"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-research-to-document",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-productivity-craftbook-research-to-document"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-productivity-craftbook-research-to-document"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "fix-squisq-bugs",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-developer-fix-squisq-bugs"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-developer-fix-squisq-bugs"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "dev-craftbook-routing",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-developer-dev-craftbook-routing"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-developer-dev-craftbook-routing"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "interface-contract",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-developer-interface-contract"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-developer-interface-contract"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-code-review",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-developer-craftbook-code-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-developer-craftbook-code-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-api-contract-review",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-developer-craftbook-api-contract-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-developer-craftbook-api-contract-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-deep-security-review",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-developer-craftbook-deep-security-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-developer-craftbook-deep-security-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "large-pr-review",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-developer-large-pr-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-developer-large-pr-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-codemod-sweep",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-developer-craftbook-codemod-sweep"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-developer-craftbook-codemod-sweep"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-refactor-module",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-developer-craftbook-refactor-module"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-developer-craftbook-refactor-module"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-bug-fix-tdd",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-developer-craftbook-bug-fix-tdd"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-developer-craftbook-bug-fix-tdd"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-find-vs-create",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-complex-work-craftbook-find-vs-create"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-complex-work-craftbook-find-vs-create"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-edit-midtask",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-complex-work-craftbook-edit-midtask"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-complex-work-craftbook-edit-midtask"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-invoice-run",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-complex-work-craftbook-invoice-run"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-complex-work-craftbook-invoice-run"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-linear",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-complex-work-craftbook-author-linear"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-complex-work-craftbook-author-linear"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-route-multi",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-complex-work-craftbook-route-multi"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-complex-work-craftbook-route-multi"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-export-generalize",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-complex-work-craftbook-export-generalize"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-complex-work-craftbook-export-generalize"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-params",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-complex-work-craftbook-author-params"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-complex-work-craftbook-author-params"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-gate-script",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-complex-work-craftbook-author-gate-script"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-complex-work-craftbook-author-gate-script"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-fanout",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-mlx-complex-work-craftbook-author-fanout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-gemma-llamacpp-complex-work-craftbook-author-fanout"
+            }
+          ]
+        }
+      ],
+      "pairs": [
+        {
+          "suite": "core",
+          "scenario": "tictactoe",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "petshop",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "tankcombat",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "schema-migration",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "failing-tests-spec",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "symptom-debug",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "data-wrangle",
+          "repetition": 1,
+          "mlx": 0,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "incident-postmortem",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "ops-runbook-anomaly",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "plan-and-estimate",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "conflict-synthesis",
+          "repetition": 1,
+          "mlx": 0,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "constrained-comms",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "records-intake",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "plan-and-estimate",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "meeting-followup",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-spreadsheet-model",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "conflict-synthesis",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "docblocks-theme-roundtrip",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        }
+      ],
+      "mcnemarHolmP": 1
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "plannedPairs": 129,
+      "evaluablePairs": 18,
+      "bothPass": 16,
+      "bothFail": 0,
+      "mlxOnlyPass": 0,
+      "llamaOnlyPass": 2,
+      "mlxPassRate": 0.8888888888888888,
+      "llamaPassRate": 1,
+      "difference": -0.1111111111111111,
+      "pairedConservative95CI": [
+        -0.3808803717442083,
+        0.20657060240561254
+      ],
+      "scenarioCluster95CI": [
+        -0.2631578947368421,
+        0
+      ],
+      "distinctScenarios": 16,
+      "clusterDegenerate": false,
+      "mcnemarNominalP": 0.5,
+      "verdict": "inconclusive-exploratory-curtailed-run",
+      "allPlannedWorstCaseDifference": [
+        -0.875968992248062,
+        0.8449612403100775
+      ],
+      "unavailablePairs": [
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-powerpoint-deck",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-productivity-craftbook-powerpoint-deck"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-productivity-craftbook-powerpoint-deck"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "wikipedia-research-brief",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-productivity-wikipedia-research-brief"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-productivity-wikipedia-research-brief"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-week-plan",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-productivity-craftbook-week-plan"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-productivity-craftbook-week-plan"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-ab-test-readout",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-productivity-craftbook-ab-test-readout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-productivity-craftbook-ab-test-readout"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-annotated-bibliography",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-productivity-craftbook-annotated-bibliography"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-productivity-craftbook-annotated-bibliography"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-research-to-document",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-productivity-craftbook-research-to-document"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-productivity-craftbook-research-to-document"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "fix-squisq-bugs",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-developer-fix-squisq-bugs"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-developer-fix-squisq-bugs"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "dev-craftbook-routing",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-developer-dev-craftbook-routing"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-developer-dev-craftbook-routing"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "interface-contract",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-developer-interface-contract"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-developer-interface-contract"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-code-review",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-developer-craftbook-code-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-developer-craftbook-code-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-api-contract-review",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-developer-craftbook-api-contract-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-developer-craftbook-api-contract-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-deep-security-review",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-developer-craftbook-deep-security-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-developer-craftbook-deep-security-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "large-pr-review",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-developer-large-pr-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-developer-large-pr-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-codemod-sweep",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-developer-craftbook-codemod-sweep"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-developer-craftbook-codemod-sweep"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-refactor-module",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-developer-craftbook-refactor-module"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-developer-craftbook-refactor-module"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-bug-fix-tdd",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-developer-craftbook-bug-fix-tdd"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-developer-craftbook-bug-fix-tdd"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-find-vs-create",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-complex-work-craftbook-find-vs-create"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-complex-work-craftbook-find-vs-create"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-edit-midtask",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-complex-work-craftbook-edit-midtask"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-complex-work-craftbook-edit-midtask"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-invoice-run",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-complex-work-craftbook-invoice-run"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-complex-work-craftbook-invoice-run"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-linear",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-complex-work-craftbook-author-linear"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-complex-work-craftbook-author-linear"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-route-multi",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-complex-work-craftbook-route-multi"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-complex-work-craftbook-route-multi"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-export-generalize",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-complex-work-craftbook-export-generalize"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-complex-work-craftbook-export-generalize"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-params",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-complex-work-craftbook-author-params"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-complex-work-craftbook-author-params"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-gate-script",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-complex-work-craftbook-author-gate-script"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-complex-work-craftbook-author-gate-script"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-fanout",
+          "repetition": 1,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-mlx-complex-work-craftbook-author-fanout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r1-qwen-llamacpp-complex-work-craftbook-author-fanout"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "tictactoe",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-tictactoe"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-tictactoe"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "petshop",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-petshop"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-petshop"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "tankcombat",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-tankcombat"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-tankcombat"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "schema-migration",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-schema-migration"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-schema-migration"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "failing-tests-spec",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-failing-tests-spec"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-failing-tests-spec"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "symptom-debug",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-symptom-debug"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-symptom-debug"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "data-wrangle",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-data-wrangle"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-data-wrangle"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "incident-postmortem",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-incident-postmortem"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-incident-postmortem"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "ops-runbook-anomaly",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-ops-runbook-anomaly"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-ops-runbook-anomaly"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "plan-and-estimate",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-plan-and-estimate"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-plan-and-estimate"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "conflict-synthesis",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-core-conflict-synthesis"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-core-conflict-synthesis"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "constrained-comms",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-constrained-comms"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-constrained-comms"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "records-intake",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-records-intake"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-records-intake"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "plan-and-estimate",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-plan-and-estimate"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-plan-and-estimate"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "meeting-followup",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-meeting-followup"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-meeting-followup"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-spreadsheet-model",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-craftbook-spreadsheet-model"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-craftbook-spreadsheet-model"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "conflict-synthesis",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-conflict-synthesis"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-conflict-synthesis"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "docblocks-theme-roundtrip",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-docblocks-theme-roundtrip"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-docblocks-theme-roundtrip"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-powerpoint-deck",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-craftbook-powerpoint-deck"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-craftbook-powerpoint-deck"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "wikipedia-research-brief",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-wikipedia-research-brief"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-wikipedia-research-brief"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-week-plan",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-craftbook-week-plan"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-craftbook-week-plan"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-ab-test-readout",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-craftbook-ab-test-readout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-craftbook-ab-test-readout"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-annotated-bibliography",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-craftbook-annotated-bibliography"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-craftbook-annotated-bibliography"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-research-to-document",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-productivity-craftbook-research-to-document"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-productivity-craftbook-research-to-document"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "fix-squisq-bugs",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-developer-fix-squisq-bugs"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-developer-fix-squisq-bugs"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "dev-craftbook-routing",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-developer-dev-craftbook-routing"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-developer-dev-craftbook-routing"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "interface-contract",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-developer-interface-contract"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-developer-interface-contract"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-code-review",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-developer-craftbook-code-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-developer-craftbook-code-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-api-contract-review",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-developer-craftbook-api-contract-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-developer-craftbook-api-contract-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-deep-security-review",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-developer-craftbook-deep-security-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-developer-craftbook-deep-security-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "large-pr-review",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-developer-large-pr-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-developer-large-pr-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-codemod-sweep",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-developer-craftbook-codemod-sweep"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-developer-craftbook-codemod-sweep"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-refactor-module",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-developer-craftbook-refactor-module"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-developer-craftbook-refactor-module"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-bug-fix-tdd",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-developer-craftbook-bug-fix-tdd"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-developer-craftbook-bug-fix-tdd"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-find-vs-create",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-complex-work-craftbook-find-vs-create"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-complex-work-craftbook-find-vs-create"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-edit-midtask",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-complex-work-craftbook-edit-midtask"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-complex-work-craftbook-edit-midtask"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-invoice-run",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-complex-work-craftbook-invoice-run"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-complex-work-craftbook-invoice-run"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-linear",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-complex-work-craftbook-author-linear"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-complex-work-craftbook-author-linear"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-route-multi",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-complex-work-craftbook-route-multi"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-complex-work-craftbook-route-multi"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-export-generalize",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-complex-work-craftbook-export-generalize"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-complex-work-craftbook-export-generalize"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-params",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-complex-work-craftbook-author-params"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-complex-work-craftbook-author-params"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-gate-script",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-complex-work-craftbook-author-gate-script"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-complex-work-craftbook-author-gate-script"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-fanout",
+          "repetition": 2,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-mlx-complex-work-craftbook-author-fanout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r2-qwen-llamacpp-complex-work-craftbook-author-fanout"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "tictactoe",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-tictactoe"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-tictactoe"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "petshop",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-petshop"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-petshop"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "tankcombat",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-tankcombat"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-tankcombat"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "schema-migration",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-schema-migration"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-schema-migration"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "failing-tests-spec",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-failing-tests-spec"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-failing-tests-spec"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "symptom-debug",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-symptom-debug"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-symptom-debug"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "data-wrangle",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-data-wrangle"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-data-wrangle"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "incident-postmortem",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-incident-postmortem"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-incident-postmortem"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "ops-runbook-anomaly",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-ops-runbook-anomaly"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-ops-runbook-anomaly"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "plan-and-estimate",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-plan-and-estimate"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-plan-and-estimate"
+            }
+          ]
+        },
+        {
+          "suite": "core",
+          "scenario": "conflict-synthesis",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-core-conflict-synthesis"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-core-conflict-synthesis"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "constrained-comms",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-constrained-comms"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-constrained-comms"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "records-intake",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-records-intake"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-records-intake"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "plan-and-estimate",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-plan-and-estimate"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-plan-and-estimate"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "meeting-followup",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-meeting-followup"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-meeting-followup"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-spreadsheet-model",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-craftbook-spreadsheet-model"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-craftbook-spreadsheet-model"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "conflict-synthesis",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-conflict-synthesis"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-conflict-synthesis"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "docblocks-theme-roundtrip",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-docblocks-theme-roundtrip"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-docblocks-theme-roundtrip"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-powerpoint-deck",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-craftbook-powerpoint-deck"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-craftbook-powerpoint-deck"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "wikipedia-research-brief",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-wikipedia-research-brief"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-wikipedia-research-brief"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-week-plan",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-craftbook-week-plan"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-craftbook-week-plan"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-ab-test-readout",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-craftbook-ab-test-readout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-craftbook-ab-test-readout"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-annotated-bibliography",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-craftbook-annotated-bibliography"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-craftbook-annotated-bibliography"
+            }
+          ]
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-research-to-document",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-productivity-craftbook-research-to-document"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-productivity-craftbook-research-to-document"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "fix-squisq-bugs",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-developer-fix-squisq-bugs"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-developer-fix-squisq-bugs"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "dev-craftbook-routing",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-developer-dev-craftbook-routing"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-developer-dev-craftbook-routing"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "interface-contract",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-developer-interface-contract"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-developer-interface-contract"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-code-review",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-developer-craftbook-code-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-developer-craftbook-code-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-api-contract-review",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-developer-craftbook-api-contract-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-developer-craftbook-api-contract-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-deep-security-review",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-developer-craftbook-deep-security-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-developer-craftbook-deep-security-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "large-pr-review",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-developer-large-pr-review"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-developer-large-pr-review"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-codemod-sweep",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-developer-craftbook-codemod-sweep"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-developer-craftbook-codemod-sweep"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-refactor-module",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-developer-craftbook-refactor-module"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-developer-craftbook-refactor-module"
+            }
+          ]
+        },
+        {
+          "suite": "developer",
+          "scenario": "craftbook-bug-fix-tdd",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-developer-craftbook-bug-fix-tdd"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-developer-craftbook-bug-fix-tdd"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-find-vs-create",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-complex-work-craftbook-find-vs-create"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-complex-work-craftbook-find-vs-create"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-edit-midtask",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-complex-work-craftbook-edit-midtask"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-complex-work-craftbook-edit-midtask"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-invoice-run",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-complex-work-craftbook-invoice-run"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-complex-work-craftbook-invoice-run"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-linear",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-complex-work-craftbook-author-linear"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-complex-work-craftbook-author-linear"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-route-multi",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-complex-work-craftbook-route-multi"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-complex-work-craftbook-route-multi"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-export-generalize",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-complex-work-craftbook-export-generalize"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-complex-work-craftbook-export-generalize"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-params",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-complex-work-craftbook-author-params"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-complex-work-craftbook-author-params"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-gate-script",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-complex-work-craftbook-author-gate-script"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-complex-work-craftbook-author-gate-script"
+            }
+          ]
+        },
+        {
+          "suite": "complex-work",
+          "scenario": "craftbook-author-fanout",
+          "repetition": 3,
+          "reasons": [
+            {
+              "provider": "mlx",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-mlx-complex-work-craftbook-author-fanout"
+            },
+            {
+              "provider": "llama-cpp",
+              "status": "not-run-after-user-curtailment",
+              "cellId": "r3-qwen-llamacpp-complex-work-craftbook-author-fanout"
+            }
+          ]
+        }
+      ],
+      "pairs": [
+        {
+          "suite": "core",
+          "scenario": "tictactoe",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "petshop",
+          "repetition": 1,
+          "mlx": 0,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "tankcombat",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "schema-migration",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "failing-tests-spec",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "symptom-debug",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "data-wrangle",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "incident-postmortem",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "ops-runbook-anomaly",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "plan-and-estimate",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "core",
+          "scenario": "conflict-synthesis",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "constrained-comms",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "records-intake",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "plan-and-estimate",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "meeting-followup",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "craftbook-spreadsheet-model",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "conflict-synthesis",
+          "repetition": 1,
+          "mlx": 0,
+          "llama-cpp": 1
+        },
+        {
+          "suite": "productivity",
+          "scenario": "docblocks-theme-roundtrip",
+          "repetition": 1,
+          "mlx": 1,
+          "llama-cpp": 1
+        }
+      ],
+      "mcnemarHolmP": 1
+    }
+  ],
+  "originalDesignComplete": false,
+  "reportComplete": true,
+  "status": "Final descriptive analysis of user-curtailed run; original design incomplete",
+  "scopeAmendment": "scope-amendment.json",
+  "assumptions": [
+    "Outcome-visible chronological prefix; no random scenario sampling and no completed preregistered design.",
+    "Difference is MLX minus llama.cpp; original user-selected margin remains +/-0.05.",
+    "Conservative paired interval uses Bonferroni-combined 97.5% Clopper-Pearson intervals for each discordance direction. Its nominal coverage assumes independent paired observations; suite overlap violates strict independence.",
+    "50,000-replicate percentile bootstrap resamples distinct scenario IDs, retaining suite overlap; seed 20261103. Only 16 observed scenario clusters per model, so uncertainty about unseen tasks remains substantial.",
+    "Exact nominal McNemar assumes exchangeable discordance directions under the null and independent discordant pairs. Holm corrects the two model p-values; neither p-value establishes equivalence.",
+    "Both intervals would have to lie strictly within +/-5 pp; neither does. No claim that engines are equivalent or that the true gap exceeds 5 pp.",
+    "Worst-case sensitivity assigns every unavailable original pair a difference of either -1 or +1. It is not a confidence interval."
+  ]
+}

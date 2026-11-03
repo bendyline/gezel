@@ -845,6 +845,13 @@ export class RemoteSession extends StreamingSessionBase implements LLMSession {
                 promptTokens: frame.promptTokens,
                 completionTokens: frame.completionTokens,
                 durationMs: frame.durationMs,
+                ...(typeof frame.ttftMs === 'number' ? { ttftMs: frame.ttftMs } : {}),
+                ...(typeof frame.promptTokensPerSec === 'number'
+                  ? { promptTokensPerSec: frame.promptTokensPerSec }
+                  : {}),
+                ...(typeof frame.cachedPromptTokens === 'number'
+                  ? { cachedPromptTokens: frame.cachedPromptTokens }
+                  : {}),
                 ...(typeof frame.tokensPerSec === 'number'
                   ? { tokensPerSec: frame.tokensPerSec }
                   : {}),

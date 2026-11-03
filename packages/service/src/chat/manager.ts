@@ -7730,6 +7730,13 @@ export class ChatManager extends LocalEngineRuntime {
           promptTokens: ev.promptTokens,
           completionTokens: ev.completionTokens,
           durationMs: ev.durationMs,
+          ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
+          ...(typeof ev.promptTokensPerSec === 'number'
+            ? { promptTokensPerSec: ev.promptTokensPerSec }
+            : {}),
+          ...(typeof ev.cachedPromptTokens === 'number'
+            ? { cachedPromptTokens: ev.cachedPromptTokens }
+            : {}),
           ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
         });
       });
@@ -11930,6 +11937,13 @@ export class ChatManager extends LocalEngineRuntime {
         promptTokens: ev.promptTokens,
         completionTokens: ev.completionTokens,
         durationMs: ev.durationMs,
+        ...(typeof ev.ttftMs === 'number' ? { ttftMs: ev.ttftMs } : {}),
+        ...(typeof ev.promptTokensPerSec === 'number'
+          ? { promptTokensPerSec: ev.promptTokensPerSec }
+          : {}),
+        ...(typeof ev.cachedPromptTokens === 'number'
+          ? { cachedPromptTokens: ev.cachedPromptTokens }
+          : {}),
         ...(typeof ev.tokensPerSec === 'number' ? { tokensPerSec: ev.tokensPerSec } : {}),
       });
     });

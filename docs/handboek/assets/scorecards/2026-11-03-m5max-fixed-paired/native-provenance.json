@@ -1,0 +1,314 @@
+{
+  "capturedAt": "2026-11-03T07:02:32.863766+00:00",
+  "nativeRelease": "0.1.55",
+  "verification": "scripts/verify-native-file-manifest.mjs verified 23 files and 22 symlinks against the current source-bundled manifest; no native upgrade performed by this campaign.",
+  "manifestSha256": "d5afbca810e4a554e3d243ade3f0141044216d0f163762fae632d93ce93fab5a",
+  "llamaVersion": "0.8.0 (build 11960, commit 8642541b)",
+  "llamaBuild": {
+    "schemaVersion": 1,
+    "engine": "llama-cpp",
+    "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+    "platform": "darwin-arm64",
+    "backend": "metal"
+  },
+  "mlxPackages": {
+    "mlx": "0.32.2",
+    "mlx-lm": "0.31.3",
+    "mlx-vlm": "0.7.1",
+    "transformers": "5.14.1",
+    "torch": "2.13.0"
+  },
+  "files": {
+    "packages/app/native-bin/darwin-arm64/libggml-base.0.15.1.dylib": {
+      "bytes": 724176,
+      "sha256": "db2fa59e54e96575c9847b3c4fa0af4ecd11c59fbfe97f9a69b6b0cea95eb270"
+    },
+    "packages/app/native-bin/darwin-arm64/libwhisper.1.9.1.dylib": {
+      "bytes": 439520,
+      "sha256": "ff0cb822ce51aa20a3d7e69880f8e8f56f52137d0ed1185cbbf9b17b4744d8eb"
+    },
+    "packages/app/native-bin/darwin-arm64/uv": {
+      "bytes": 51993360,
+      "sha256": "6c43b70e2b613a741de15044c952b16829170334a87ab088985b3d6c4c3d5eb4"
+    },
+    "packages/app/native-bin/darwin-arm64/gezel-ds4-server": {
+      "bytes": 2967680,
+      "sha256": "1cec3aef18099f19db5b3a70081154cf5743a5b6f007f29e0e2ae451af6abd61"
+    },
+    "packages/app/native-bin/darwin-arm64/libggml-cpu.0.15.1.dylib": {
+      "bytes": 842736,
+      "sha256": "c0e2949c319fc9d6caf9ec06649370c60a96b689d471136205ff57970e287744"
+    },
+    "packages/app/native-bin/darwin-arm64/gezel-whisper-server": {
+      "bytes": 1241648,
+      "sha256": "fdc245c26056fef4b94dbecc68f27eb8ada8efa214bb1cae788fb5f64fe6f938"
+    },
+    "packages/app/native-bin/darwin-arm64/libggml.0.15.1.dylib": {
+      "bytes": 77728,
+      "sha256": "058e65c0e4550d467f2255e754becd523385c388c4e669118605551a290470f8"
+    },
+    "packages/app/native-bin/darwin-arm64/libggml-metal.0.15.1.dylib": {
+      "bytes": 847200,
+      "sha256": "0b032b3c0a2e69e3c407360641a26b0e4528a6c69c61796fb798519fd70cbc60"
+    },
+    "packages/app/native-bin/darwin-arm64/gezel-sd-server": {
+      "bytes": 46014128,
+      "sha256": "8da9176129c3edf23188538746214a02da1bbba149dbdb7c7b590b70ce619d81"
+    },
+    "packages/app/native-bin/darwin-arm64/gezel-apple-fm": {
+      "bytes": 266592,
+      "sha256": "42c0edb0ea270b331de149722a38df1f5fd8f47dba1ef288cdb77c7613f88514"
+    },
+    "packages/app/native-bin/darwin-arm64/libggml-blas.0.15.1.dylib": {
+      "bytes": 76688,
+      "sha256": "1b2fdebce18fcdc9c16a9ce3a69690d2605a469402112506c831b64e630610f6"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/dsv4_kv.metal": {
+      "bytes": 22218,
+      "sha256": "65e6e12ac3266fdf72b1e9c69bfbd07ea7324e930a8117b63b651b5016b1b5f6"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/repeat.metal": {
+      "bytes": 1640,
+      "sha256": "2c6142b47a2007d246f5eb6e7395047627bb6dfa02c649311d16620da35007cd"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/unary.metal": {
+      "bytes": 10104,
+      "sha256": "4607dbea21501230a193f8a333b1bd543d566f405568a094d6faf2c17cb0c5cf"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/deepseek4_vision.metal": {
+      "bytes": 7815,
+      "sha256": "e0908e53ab5b33903408e5723434a59b28fb90a998123a32a794570fdf5a27ea"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/qwen4_vision.metal": {
+      "bytes": 7402,
+      "sha256": "b37c7fc2c66131bf5817621920a6b5b30271af21160e7da33edc71e2d5c7fb4b"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/get_rows.metal": {
+      "bytes": 6976,
+      "sha256": "bd3b352a6ffb138ae5e391db97b211f8386d417365eac2caa3730f55a075aa3a"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/sum_rows.metal": {
+      "bytes": 2737,
+      "sha256": "7e1f3ad3f945b1f6f59aa2d8ee5bf464052d989a632c33ea95ce50d3c4fbf0fc"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/glm53_bf16.metal": {
+      "bytes": 5466,
+      "sha256": "27d93dcfe81b09f93ed65cd986aaa0b9c1ca1df7fc43e58c15da533284d50db5"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/flash_attn.metal": {
+      "bytes": 61784,
+      "sha256": "c9ec79daf2063cd9e8c4e8874c123fbf2642c3fb6247b16aa21e1e0e6db92fcc"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/glm53_kda.metal": {
+      "bytes": 13116,
+      "sha256": "a695c313e36b76fa260164c6f5a2f3203748cbcff9becc6707e71aa703ed0818"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/dsv4_hc.metal": {
+      "bytes": 63069,
+      "sha256": "5d1988269671c9cfa9ad09024dd1c04b77559ea3894628e9bfddab44005b80d3"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/set_rows.metal": {
+      "bytes": 1909,
+      "sha256": "25f597bf5f5fb5a3791efc68e3182539727609f09c45750ef9376ed430d7a029"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/moe.metal": {
+      "bytes": 423032,
+      "sha256": "b3ae62713a47e54c47959023a0d15c8589198ec6092307dfcf4014f180bc7f42"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/norm.metal": {
+      "bytes": 14229,
+      "sha256": "700bf92792e70a969c1f564c3c0ea7c8c9fe707d51a3537b766a9d336acfddd6"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/concat.metal": {
+      "bytes": 1932,
+      "sha256": "04fb0fc2a3b51015444e330290b979a56e4cac82aee523afa2b42e361ab23da7"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/dsv4_rope.metal": {
+      "bytes": 35980,
+      "sha256": "f56cb24a381c27435953d120448bc22c1b2314b151280445246bd28920b4d518"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/dsv41.metal": {
+      "bytes": 12508,
+      "sha256": "2000ee67dc2983f931103659ee7596e3619b34db5d7d971db42616a2bcee847c"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/dsv4_misc.metal": {
+      "bytes": 282925,
+      "sha256": "8705189726c71b468bb80e0b356ab09d07d5a7c646964a0f51afe2be0c8804d3"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/cpy.metal": {
+      "bytes": 10154,
+      "sha256": "df8cabe88c33076c16a54cfb88a00133b68ea5cbfc1742ac79608c84d4456cd4"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/qwen4.metal": {
+      "bytes": 232464,
+      "sha256": "13224aeae23802defef678877146ae8047a45c2d1be824361efa2f4f5aa25b28"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/softmax.metal": {
+      "bytes": 7679,
+      "sha256": "6eaa6ce78c4b221b3c7fe45647d6eb42f165201992a243d77d04cf2668fb7664"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/argsort.metal": {
+      "bytes": 11174,
+      "sha256": "a36f9e1ca3a2d8272cb52cece7d3d0624cd45de4b2887446f525e9ec64abd5de"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/glu.metal": {
+      "bytes": 2129,
+      "sha256": "59281e30a27cc2eb618800b6e53a57e234f65f1a1e680d6267d9139e1a06b627"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/bin.metal": {
+      "bytes": 6580,
+      "sha256": "4b537679fe874fa4dea079bbb10634b3feeb2cce9b737bdb602fe6926fbb175a"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/glm53_vision.metal": {
+      "bytes": 11295,
+      "sha256": "d20bdf039f9bd9d7b0cab8c6a4fc10bcb3097571a81246dbde1c278e0e9bec7b"
+    },
+    "packages/app/native-bin/darwin-arm64/metal/dense.metal": {
+      "bytes": 111137,
+      "sha256": "4f536cb6e2b7ac6c4faa45d708ad78b2298877d31bb0ce66d13e5f5b3b787bf5"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-base.0.28.0.dylib": {
+      "bytes": 765776,
+      "sha256": "597ea3b8f210ab1dbaab9f7493c3b3aad866d7985e05e49dad71f0dea55fd6f5"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libllama-server-impl.dylib": {
+      "bytes": 3759664,
+      "sha256": "cc3d911c72d2b7da2663b41ff7b8d4535df77d8084d0b61ab2ebd977d0737008"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-blas.so": {
+      "bytes": 76752,
+      "sha256": "a8d51b329d01bb5aee0000204ef5ce798d7aa4bbb4c56b62f25ebf272279ebb0"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-cpu-apple_m4.so": {
+      "bytes": 986960,
+      "sha256": "8507bfa4a1e5bae9d037dd306d47dc88812b3d87876fd69855cd3202b416afd6"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-cpu-apple_m2_m3.so": {
+      "bytes": 986960,
+      "sha256": "79dfd074ac979f3da3f7b75386ea0113e2320800a91aca5c118dceabc6a622cc"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libllama-common.0.8.0.dylib": {
+      "bytes": 5304000,
+      "sha256": "9b24dd6c924423a13ad55a8588d4d0cd9e539aaeeeaf3e85d30f208b5dea124b"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libllama.0.8.0.dylib": {
+      "bytes": 3634624,
+      "sha256": "79a5ac030379d912e3983b902b7cad0e289af12e6893feb3f71385de8dd0f2fd"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libmtmd.0.8.0.dylib": {
+      "bytes": 1629360,
+      "sha256": "5ac327a60cf935131fdba1635d7d980043fa4004ea11209535f9c54b0d8bab76"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-cpu-apple_m1.so": {
+      "bytes": 970544,
+      "sha256": "9926ae06fe33a13235f3388faf2b8a3251fb3c763feb2cd3d4109cfb680ebe35"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/gezel-llama-server": {
+      "bytes": 51568,
+      "sha256": "ff92cc20768c088c09096ac9774c7e5ce6e404623b4601828ef4330bf4901b18"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml-metal.so": {
+      "bytes": 5606576,
+      "sha256": "7741094dccffc37b141c5063e3c7c38e485e0fa79f30130204c5fb2742b0e76e"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/gezel-llama-build.json": {
+      "bytes": 160,
+      "sha256": "dc01e80eba96194c1075e6893196dadc39b0dc75faefb652a79c203015153731"
+    },
+    "packages/app/native-bin/darwin-arm64-metal/libggml.0.28.0.dylib": {
+      "bytes": 78112,
+      "sha256": "c738a3c7df5791a749d841b48ad622d13e037c40f916a1e11169bc382c65bb57"
+    }
+  },
+  "symlinks": {
+    "packages/app/native-bin/darwin-arm64/libggml.dylib": "libggml.0.dylib",
+    "packages/app/native-bin/darwin-arm64/libggml.0.dylib": "libggml.0.15.1.dylib",
+    "packages/app/native-bin/darwin-arm64/libggml-base.dylib": "libggml-base.0.dylib",
+    "packages/app/native-bin/darwin-arm64/libggml-blas.dylib": "libggml-blas.0.dylib",
+    "packages/app/native-bin/darwin-arm64/libggml-metal.0.dylib": "libggml-metal.0.15.1.dylib",
+    "packages/app/native-bin/darwin-arm64/libggml-cpu.dylib": "libggml-cpu.0.dylib",
+    "packages/app/native-bin/darwin-arm64/libggml-metal.dylib": "libggml-metal.0.dylib",
+    "packages/app/native-bin/darwin-arm64/libwhisper.dylib": "libwhisper.1.dylib",
+    "packages/app/native-bin/darwin-arm64/libwhisper.1.dylib": "libwhisper.1.9.1.dylib",
+    "packages/app/native-bin/darwin-arm64/libggml-base.0.dylib": "libggml-base.0.15.1.dylib",
+    "packages/app/native-bin/darwin-arm64/libggml-blas.0.dylib": "libggml-blas.0.15.1.dylib",
+    "packages/app/native-bin/darwin-arm64/libggml-cpu.0.dylib": "libggml-cpu.0.15.1.dylib",
+    "packages/app/native-bin/darwin-arm64-metal/libllama.0.dylib": "libllama.0.8.0.dylib",
+    "packages/app/native-bin/darwin-arm64-metal/libmtmd.0.dylib": "libmtmd.0.8.0.dylib",
+    "packages/app/native-bin/darwin-arm64-metal/libggml.dylib": "libggml.0.dylib",
+    "packages/app/native-bin/darwin-arm64-metal/libggml.0.dylib": "libggml.0.28.0.dylib",
+    "packages/app/native-bin/darwin-arm64-metal/libmtmd.dylib": "libmtmd.0.dylib",
+    "packages/app/native-bin/darwin-arm64-metal/libggml-base.dylib": "libggml-base.0.dylib",
+    "packages/app/native-bin/darwin-arm64-metal/libllama-common.0.dylib": "libllama-common.0.8.0.dylib",
+    "packages/app/native-bin/darwin-arm64-metal/libllama.dylib": "libllama.0.dylib",
+    "packages/app/native-bin/darwin-arm64-metal/libllama-common.dylib": "libllama-common.0.dylib",
+    "packages/app/native-bin/darwin-arm64-metal/libggml-base.0.dylib": "libggml-base.0.28.0.dylib"
+  },
+  "drafters": {
+    "qwen3.8-27b-q4": {
+      "path": "<home>/.gezel-dev/engines/mlx/drafters/qwen3.8-27b-q4-mtp",
+      "files": {
+        "config.json": {
+          "bytes": 3804,
+          "sha256": "16094efa6177985ab3725a9d6d61d6ab248b71e4b42a114efddcdb2aaddc0a55"
+        },
+        "model.safetensors": {
+          "bytes": 238934137,
+          "sha256": "76663c101e7e8ea9c0ae17bcb95183cd7f733ce424c912b8b264a7b1c48e4cc6"
+        },
+        "tokenizer_config.json": {
+          "bytes": 1124,
+          "sha256": "66e427c470fe580fe8c7b5725d857af23d8417e37fae62667ec698306a19987b"
+        }
+      }
+    },
+    "gemma4-12b-q4": {
+      "path": "evals/runs/recovery-fixes-2026-11-02/gemma-mlx-drafter",
+      "files": {
+        ".gitattributes": {
+          "bytes": 1570,
+          "sha256": "34448b82c17d60fec9b65b1f093c115ddbaadc04beb1b0140b6bfed2e012a930"
+        },
+        "README.md": {
+          "bytes": 1934,
+          "sha256": "fa71288ae55146ac39acd94b481410b585961e9a397f8c7e8a2aa154be6455a0"
+        },
+        "chat_template.jinja": {
+          "bytes": 17466,
+          "sha256": "36e3a42e5cf14cd0020e72d92e1fdd9970f59b82170e421f0cbe1bb42bead3f0"
+        },
+        "config.json": {
+          "bytes": 2989,
+          "sha256": "78aff43d66b50df64fb2d337ab8fb094d852f3a8c45b4e41ffbf3004162fcc72"
+        },
+        "generation_config.json": {
+          "bytes": 260,
+          "sha256": "a8349d9bd64cc5841297fcb5002f0fdc4749c473c8f1b10ea337f9ce4ee7014e"
+        },
+        "model.safetensors": {
+          "bytes": 224677940,
+          "sha256": "cac04d05cc286936f9280e48b8cf7d01dc896d4a83a913acd3e6be263e7b6259"
+        },
+        "model.safetensors.index.json": {
+          "bytes": 4985,
+          "sha256": "3d6485519c520315c9b9135e4b272f80f7b1bfcc272df2427ec4cd6d965a7ff7"
+        },
+        "tokenizer.json": {
+          "bytes": 32169440,
+          "sha256": "75a6583c1a418e2bbd79c60d95d28e0f5bf549ad3f2990b5bdb5238c6c2bf70c"
+        },
+        "tokenizer_config.json": {
+          "bytes": 2682,
+          "sha256": "2084566efe9ae430fa5fa7f901373d9c2e027865a417e119c3598fdcc69a35f8"
+        }
+      }
+    }
+  },
+  "head": "d0750db1712b45c304d3ba772e996f01a1da1b30",
+  "notes": [
+    "Gemma MLX uses verified assistant drafter candidate; installed catalog remains Gilde 0.3.5.",
+    "Quantization is engine-specific, not byte-identical. MLX and llama.cpp speculation follow their separate paths.",
+    "macOS GPU utilization unavailable; actual in-trial rates required.",
+    "Historical campaign used native 0.1.54; this new campaign uses the already-installed current source-pinned native release."
+  ]
+}

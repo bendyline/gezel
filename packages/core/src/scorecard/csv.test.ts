@@ -172,6 +172,20 @@ describe('scorecard results CSV', () => {
     });
   });
 
+  it('identifies recovered prefill as partial observations in the shared CSV', () => {
+    const recovered = result('r1', {
+      taskMeasurements: [
+        period('matched', {
+          prefillTokensPerSec: undefined,
+          observedPrefillTokensPerSec: { samples: 6, median: 604.75, min: 400, max: 800 },
+        }),
+      ],
+    });
+    const [row] = scorecardCsvRows(dataset([run('r1', '2026-11-03')], [recovered]));
+    expect(row?.prefill_tok_s).toBe('604.8');
+    expect(row?.perf_source).toContain('observed chat-event prefill (partial');
+  });
+
   it('lists newest sweeps first and quotes only fields that need it', () => {
     const csv = scorecardResultsCsv(
       dataset(

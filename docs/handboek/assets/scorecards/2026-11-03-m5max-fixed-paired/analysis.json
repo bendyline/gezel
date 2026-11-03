@@ -1,0 +1,2743 @@
+{
+  "generatedAt": "2026-11-03T18:29:17.347653+00:00",
+  "status": "complete-user-curtailed",
+  "scopeAmendment": {
+    "version": 1,
+    "recordedAt": "2026-11-03T13:00:04.017450+00:00",
+    "authorization": "User: no, not 516 trials - that will take many days. Please condense it considerably and wrap it up in the next few hours.",
+    "originalPlanTrials": 516,
+    "originalPlanPreserved": true,
+    "scope": "Close at the existing 73 recorded trials, no further inference. Analyze the 72 paired core/productivity trials; retain the unpaired identity-flagged PowerPoint result separately.",
+    "matchedTrials": 72,
+    "matchedPairsPerModel": 18,
+    "repetitions": 1,
+    "untestedSuites": [
+      "developer",
+      "complex-work"
+    ],
+    "notRunTrials": 443,
+    "selection": "Chronological completed prefix when the user curtailed the run for time. Not randomly sampled; outcomes were already visible. No selection by pass/fail and no adaptive expansion.",
+    "margin": 0.05,
+    "inferentialStatus": "Exploratory, user-curtailed after partial results; original 516-trial preregistered design incomplete. Non-significance is not equivalence.",
+    "reportDeadlineUtc": "2026-11-03T16:00:00Z",
+    "driverStoppedAt": "2026-11-03T12:57:21.071Z",
+    "driverStopPreserved": "Frozen comparison changed: fixtures: \"bin/ab-strategy.ts\", \"strategy/books.ts\", \"strategy/engine-metrics.ts\", \"strategy/summary.ts\", \"types.ts\" (see identity-drift-after-trial.json)",
+    "campaignSha256AtAmendment": "4c95a41e150003491d9802bcdefc948c7bf27ef007770541753f5c905d7f1a79"
+  },
+  "originalTrials": 516,
+  "recordedTrials": 73,
+  "comparisonTrials": 72,
+  "excludedTrials": [
+    {
+      "cellId": "r1-gemma-mlx-productivity-craftbook-powerpoint-deck",
+      "comparisonIssue": "Frozen comparison changed: fixtures: \"bin/ab-strategy.ts\", \"strategy/books.ts\", \"strategy/engine-metrics.ts\", \"strategy/summary.ts\", \"types.ts\" (see identity-drift-after-trial.json)",
+      "recordedPass": true
+    }
+  ],
+  "notRunTrials": 443,
+  "matchedPairsPerModel": 18,
+  "distinctScenariosPerModel": 16,
+  "repetitions": 1,
+  "groups": [
+    {
+      "model": "gemma4-12b-q4",
+      "engine": "mlx",
+      "suite": "all",
+      "trials": 18,
+      "passes": 16,
+      "fixedComposite": {
+        "n": 18,
+        "median": 10,
+        "mean": 9.216666666666667,
+        "min": 3.9,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 18,
+          "median": 10,
+          "mean": 9.055555555555555,
+          "min": 0,
+          "max": 10
+        },
+        "quality": {
+          "n": 18,
+          "median": 10,
+          "mean": 9.6,
+          "min": 3.6,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 18,
+          "median": 10,
+          "mean": 8.88888888888889,
+          "min": 5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 18,
+          "median": 10,
+          "mean": 9.444444444444445,
+          "min": 0,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 18,
+          "median": 152.481,
+          "mean": 188.3467777777778,
+          "min": 32.652,
+          "max": 645.556
+        },
+        "firstTokenSeconds": {
+          "n": 18,
+          "median": 14.375499999999999,
+          "mean": 14.692166666666667,
+          "min": 10.632,
+          "max": 20.607
+        },
+        "firstToolSeconds": {
+          "n": 18,
+          "median": 22.432,
+          "mean": 23.61727777777778,
+          "min": 11.002,
+          "max": 37.633
+        },
+        "firstArtifactSeconds": {
+          "n": 18,
+          "median": 36.201,
+          "mean": 70.82205555555555,
+          "min": 23.529,
+          "max": 343.835
+        },
+        "decodeTokensPerSecond": {
+          "n": 18,
+          "median": 59,
+          "mean": 60.22222222222222,
+          "min": 47,
+          "max": 80
+        },
+        "prefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 18,
+          "median": 1332.25,
+          "mean": 1332.25,
+          "min": 1028,
+          "max": 1963
+        },
+        "peakSubtreeRssGiB": {
+          "n": 18,
+          "median": 10.01513671875,
+          "mean": 10.569227430555555,
+          "min": 9.8671875,
+          "max": 18.0615234375
+        },
+        "peakSystemUsedGiB": {
+          "n": 18,
+          "median": 91.69482421875,
+          "mean": 91.81163194444444,
+          "min": 90.5595703125,
+          "max": 95.46484375
+        },
+        "inputTokensReported": {
+          "n": 18,
+          "median": 36899,
+          "mean": 51611.38888888889,
+          "min": 5699,
+          "max": 149406
+        },
+        "outputTokensReported": {
+          "n": 18,
+          "median": 3402,
+          "mean": 5215.444444444444,
+          "min": 281,
+          "max": 24659
+        }
+      },
+      "reportedInputTokenSum": 929005,
+      "reportedOutputTokenSum": 93878,
+      "specRequestGeneratedTokenSum": 104299
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "engine": "mlx",
+      "suite": "core",
+      "trials": 11,
+      "passes": 9,
+      "fixedComposite": {
+        "n": 11,
+        "median": 10,
+        "mean": 8.763636363636364,
+        "min": 3.9,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 11,
+          "median": 10,
+          "mean": 8.454545454545455,
+          "min": 0,
+          "max": 10
+        },
+        "quality": {
+          "n": 11,
+          "median": 10,
+          "mean": 9.345454545454546,
+          "min": 3.6,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 11,
+          "median": 10,
+          "mean": 8.409090909090908,
+          "min": 5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 11,
+          "median": 10,
+          "mean": 9.090909090909092,
+          "min": 0,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 11,
+          "median": 153.511,
+          "mean": 197.78372727272728,
+          "min": 32.652,
+          "max": 645.556
+        },
+        "firstTokenSeconds": {
+          "n": 11,
+          "median": 13.971,
+          "mean": 14.232727272727272,
+          "min": 10.632,
+          "max": 17.602
+        },
+        "firstToolSeconds": {
+          "n": 11,
+          "median": 22.275,
+          "mean": 22.43136363636364,
+          "min": 11.002,
+          "max": 37.633
+        },
+        "firstArtifactSeconds": {
+          "n": 11,
+          "median": 42.553,
+          "mean": 65.03145454545455,
+          "min": 24.472,
+          "max": 178.274
+        },
+        "decodeTokensPerSecond": {
+          "n": 11,
+          "median": 63,
+          "mean": 61,
+          "min": 47,
+          "max": 80
+        },
+        "prefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 11,
+          "median": 1341.5,
+          "mean": 1358.590909090909,
+          "min": 1046,
+          "max": 1963
+        },
+        "peakSubtreeRssGiB": {
+          "n": 11,
+          "median": 10.0693359375,
+          "mean": 10.860706676136363,
+          "min": 9.8671875,
+          "max": 18.0615234375
+        },
+        "peakSystemUsedGiB": {
+          "n": 11,
+          "median": 91.68359375,
+          "mean": 91.75124289772727,
+          "min": 90.5595703125,
+          "max": 95.46484375
+        },
+        "inputTokensReported": {
+          "n": 11,
+          "median": 47031,
+          "mean": 62044.90909090909,
+          "min": 5699,
+          "max": 149406
+        },
+        "outputTokensReported": {
+          "n": 11,
+          "median": 2727,
+          "mean": 5410.636363636364,
+          "min": 281,
+          "max": 24659
+        }
+      },
+      "reportedInputTokenSum": 682494,
+      "reportedOutputTokenSum": 59517,
+      "specRequestGeneratedTokenSum": 64421
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "engine": "mlx",
+      "suite": "productivity",
+      "trials": 7,
+      "passes": 7,
+      "fixedComposite": {
+        "n": 7,
+        "median": 10,
+        "mean": 9.928571428571429,
+        "min": 9.5,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 7,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "quality": {
+          "n": 7,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 7,
+          "median": 10,
+          "mean": 9.642857142857142,
+          "min": 7.5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 7,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 7,
+          "median": 151.451,
+          "mean": 173.51728571428572,
+          "min": 37.761,
+          "max": 376.645
+        },
+        "firstTokenSeconds": {
+          "n": 7,
+          "median": 15.825,
+          "mean": 15.414142857142856,
+          "min": 11.794,
+          "max": 20.607
+        },
+        "firstToolSeconds": {
+          "n": 7,
+          "median": 23.108,
+          "mean": 25.480857142857143,
+          "min": 18.005,
+          "max": 37.21
+        },
+        "firstArtifactSeconds": {
+          "n": 7,
+          "median": 35.191,
+          "mean": 79.92157142857143,
+          "min": 23.529,
+          "max": 343.835
+        },
+        "decodeTokensPerSecond": {
+          "n": 7,
+          "median": 57,
+          "mean": 59,
+          "min": 51,
+          "max": 68
+        },
+        "prefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 7,
+          "median": 1222,
+          "mean": 1290.857142857143,
+          "min": 1028,
+          "max": 1615.5
+        },
+        "peakSubtreeRssGiB": {
+          "n": 7,
+          "median": 9.955078125,
+          "mean": 10.111188616071429,
+          "min": 9.8857421875,
+          "max": 10.814453125
+        },
+        "peakSystemUsedGiB": {
+          "n": 7,
+          "median": 91.8359375,
+          "mean": 91.90652901785714,
+          "min": 91.27734375,
+          "max": 92.921875
+        },
+        "inputTokensReported": {
+          "n": 7,
+          "median": 21368,
+          "mean": 35215.857142857145,
+          "min": 6183,
+          "max": 71458
+        },
+        "outputTokensReported": {
+          "n": 7,
+          "median": 4077,
+          "mean": 4908.714285714285,
+          "min": 330,
+          "max": 13110
+        }
+      },
+      "reportedInputTokenSum": 246511,
+      "reportedOutputTokenSum": 34361,
+      "specRequestGeneratedTokenSum": 39878
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "suite": "all",
+      "trials": 18,
+      "passes": 18,
+      "fixedComposite": {
+        "n": 18,
+        "median": 10,
+        "mean": 9.75,
+        "min": 8,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 18,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "quality": {
+          "n": 18,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 18,
+          "median": 10,
+          "mean": 9.166666666666666,
+          "min": 7.5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 18,
+          "median": 10,
+          "mean": 9.444444444444445,
+          "min": 0,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 18,
+          "median": 103.7555,
+          "mean": 110.53477777777778,
+          "min": 24.76,
+          "max": 277.289
+        },
+        "firstTokenSeconds": {
+          "n": 18,
+          "median": 10.5305,
+          "mean": 11.701222222222222,
+          "min": 8.602,
+          "max": 16.716
+        },
+        "firstToolSeconds": {
+          "n": 18,
+          "median": 16.0745,
+          "mean": 16.774833333333333,
+          "min": 8.715,
+          "max": 25.791
+        },
+        "firstArtifactSeconds": {
+          "n": 18,
+          "median": 30.378,
+          "mean": 44.68694444444444,
+          "min": 19.174,
+          "max": 159.309
+        },
+        "decodeTokensPerSecond": {
+          "n": 18,
+          "median": 84.12,
+          "mean": 87.41444444444444,
+          "min": 63.36,
+          "max": 123.39
+        },
+        "prefillTokensPerSecond": {
+          "n": 18,
+          "median": 1101.6799999999998,
+          "mean": 1128.2822222222221,
+          "min": 853.2,
+          "max": 1519.39
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "peakSubtreeRssGiB": {
+          "n": 18,
+          "median": 18.8115234375,
+          "mean": 19.447374131944443,
+          "min": 13.7041015625,
+          "max": 28.44140625
+        },
+        "peakSystemUsedGiB": {
+          "n": 18,
+          "median": 92.296875,
+          "mean": 92.95713975694444,
+          "min": 86.1484375,
+          "max": 107.5546875
+        },
+        "inputTokensReported": {
+          "n": 18,
+          "median": 21917,
+          "mean": 31972,
+          "min": 5653,
+          "max": 97867
+        },
+        "outputTokensReported": {
+          "n": 18,
+          "median": 2539.5,
+          "mean": 4041.777777777778,
+          "min": 600,
+          "max": 11011
+        }
+      },
+      "reportedInputTokenSum": 575496,
+      "reportedOutputTokenSum": 72752,
+      "specRequestGeneratedTokenSum": null
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "suite": "core",
+      "trials": 11,
+      "passes": 11,
+      "fixedComposite": {
+        "n": 11,
+        "median": 10,
+        "mean": 9.636363636363637,
+        "min": 8,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 11,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "quality": {
+          "n": 11,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 11,
+          "median": 10,
+          "mean": 8.863636363636363,
+          "min": 7.5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 11,
+          "median": 10,
+          "mean": 9.090909090909092,
+          "min": 0,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 11,
+          "median": 85.336,
+          "mean": 115.30927272727273,
+          "min": 24.76,
+          "max": 277.289
+        },
+        "firstTokenSeconds": {
+          "n": 11,
+          "median": 10.161,
+          "mean": 10.982181818181818,
+          "min": 8.602,
+          "max": 15.358
+        },
+        "firstToolSeconds": {
+          "n": 11,
+          "median": 15.764,
+          "mean": 16.22881818181818,
+          "min": 8.715,
+          "max": 25.336
+        },
+        "firstArtifactSeconds": {
+          "n": 11,
+          "median": 35.247,
+          "mean": 48.53,
+          "min": 19.174,
+          "max": 159.309
+        },
+        "decodeTokensPerSecond": {
+          "n": 11,
+          "median": 81.72,
+          "mean": 87.55636363636364,
+          "min": 63.36,
+          "max": 123.39
+        },
+        "prefillTokensPerSecond": {
+          "n": 11,
+          "median": 1101.53,
+          "mean": 1142.0118181818182,
+          "min": 853.2,
+          "max": 1519.39
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "peakSubtreeRssGiB": {
+          "n": 11,
+          "median": 18.83984375,
+          "mean": 20.083274147727273,
+          "min": 13.7041015625,
+          "max": 28.44140625
+        },
+        "peakSystemUsedGiB": {
+          "n": 11,
+          "median": 93.7431640625,
+          "mean": 93.48579545454545,
+          "min": 86.1484375,
+          "max": 107.5546875
+        },
+        "inputTokensReported": {
+          "n": 11,
+          "median": 21412,
+          "mean": 38237.27272727273,
+          "min": 5653,
+          "max": 97867
+        },
+        "outputTokensReported": {
+          "n": 11,
+          "median": 2945,
+          "mean": 4268.545454545455,
+          "min": 703,
+          "max": 11011
+        }
+      },
+      "reportedInputTokenSum": 420610,
+      "reportedOutputTokenSum": 46954,
+      "specRequestGeneratedTokenSum": null
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "suite": "productivity",
+      "trials": 7,
+      "passes": 7,
+      "fixedComposite": {
+        "n": 7,
+        "median": 10,
+        "mean": 9.928571428571429,
+        "min": 9.5,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 7,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "quality": {
+          "n": 7,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 7,
+          "median": 10,
+          "mean": 9.642857142857142,
+          "min": 7.5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 7,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 7,
+          "median": 122.175,
+          "mean": 103.032,
+          "min": 32.184,
+          "max": 175.344
+        },
+        "firstTokenSeconds": {
+          "n": 7,
+          "median": 13.327,
+          "mean": 12.831142857142858,
+          "min": 9.335,
+          "max": 16.716
+        },
+        "firstToolSeconds": {
+          "n": 7,
+          "median": 16.799,
+          "mean": 17.632857142857144,
+          "min": 13.327,
+          "max": 25.791
+        },
+        "firstArtifactSeconds": {
+          "n": 7,
+          "median": 25.792,
+          "mean": 38.64785714285714,
+          "min": 21.518,
+          "max": 106.823
+        },
+        "decodeTokensPerSecond": {
+          "n": 7,
+          "median": 85.05,
+          "mean": 87.19142857142857,
+          "min": 75.04,
+          "max": 105.02
+        },
+        "prefillTokensPerSecond": {
+          "n": 7,
+          "median": 1101.83,
+          "mean": 1106.7071428571428,
+          "min": 931.24,
+          "max": 1277.21
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "peakSubtreeRssGiB": {
+          "n": 7,
+          "median": 18.783203125,
+          "mean": 18.448102678571427,
+          "min": 14.1396484375,
+          "max": 24.556640625
+        },
+        "peakSystemUsedGiB": {
+          "n": 7,
+          "median": 90.658203125,
+          "mean": 92.12639508928571,
+          "min": 86.431640625,
+          "max": 103.6494140625
+        },
+        "inputTokensReported": {
+          "n": 7,
+          "median": 22422,
+          "mean": 22126.571428571428,
+          "min": 6169,
+          "max": 50713
+        },
+        "outputTokensReported": {
+          "n": 7,
+          "median": 1692,
+          "mean": 3685.4285714285716,
+          "min": 600,
+          "max": 10930
+        }
+      },
+      "reportedInputTokenSum": 154886,
+      "reportedOutputTokenSum": 25798,
+      "specRequestGeneratedTokenSum": null
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "engine": "mlx",
+      "suite": "all",
+      "trials": 18,
+      "passes": 16,
+      "fixedComposite": {
+        "n": 18,
+        "median": 10,
+        "mean": 9.122222222222222,
+        "min": 1.7,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 18,
+          "median": 10,
+          "mean": 9.222222222222221,
+          "min": 3,
+          "max": 10
+        },
+        "quality": {
+          "n": 18,
+          "median": 10,
+          "mean": 9.4,
+          "min": 0,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 18,
+          "median": 10,
+          "mean": 8.333333333333334,
+          "min": 2.5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 18,
+          "median": 10,
+          "mean": 9.444444444444445,
+          "min": 0,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 18,
+          "median": 126.04149999999998,
+          "mean": 441.08261111111113,
+          "min": 57.565,
+          "max": 2866.983
+        },
+        "firstTokenSeconds": {
+          "n": 18,
+          "median": 21.259999999999998,
+          "mean": 21.371222222222222,
+          "min": 12.236,
+          "max": 37.698
+        },
+        "firstToolSeconds": {
+          "n": 18,
+          "median": 25.557499999999997,
+          "mean": 25.49072222222222,
+          "min": 13.062,
+          "max": 41.961
+        },
+        "firstArtifactSeconds": {
+          "n": 18,
+          "median": 77.048,
+          "mean": 169.48566666666667,
+          "min": 30.774,
+          "max": 673.015
+        },
+        "decodeTokensPerSecond": {
+          "n": 17,
+          "median": 34,
+          "mean": 34.88235294117647,
+          "min": 25,
+          "max": 49
+        },
+        "prefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 18,
+          "median": 604.75,
+          "mean": 662.6944444444445,
+          "min": 493,
+          "max": 943
+        },
+        "peakSubtreeRssGiB": {
+          "n": 18,
+          "median": 17.263671875,
+          "mean": 17.43701171875,
+          "min": 17.126953125,
+          "max": 20.015625
+        },
+        "peakSystemUsedGiB": {
+          "n": 18,
+          "median": 107.29541015625,
+          "mean": 107.44514973958333,
+          "min": 104.19921875,
+          "max": 109.451171875
+        },
+        "inputTokensReported": {
+          "n": 18,
+          "median": 18504,
+          "mean": 36075.27777777778,
+          "min": 4817,
+          "max": 166105
+        },
+        "outputTokensReported": {
+          "n": 18,
+          "median": 2109.5,
+          "mean": 8888.222222222223,
+          "min": 6,
+          "max": 60189
+        }
+      },
+      "reportedInputTokenSum": 649355,
+      "reportedOutputTokenSum": 159988,
+      "specRequestGeneratedTokenSum": 167322
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "engine": "mlx",
+      "suite": "core",
+      "trials": 11,
+      "passes": 10,
+      "fixedComposite": {
+        "n": 11,
+        "median": 10,
+        "mean": 9.10909090909091,
+        "min": 1.7,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 11,
+          "median": 10,
+          "mean": 9.363636363636363,
+          "min": 3,
+          "max": 10
+        },
+        "quality": {
+          "n": 11,
+          "median": 10,
+          "mean": 9.090909090909092,
+          "min": 0,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 11,
+          "median": 10,
+          "mean": 8.636363636363637,
+          "min": 2.5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 11,
+          "median": 10,
+          "mean": 9.090909090909092,
+          "min": 0,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 11,
+          "median": 118.413,
+          "mean": 460.1298181818182,
+          "min": 57.654,
+          "max": 2866.983
+        },
+        "firstTokenSeconds": {
+          "n": 11,
+          "median": 21.027,
+          "mean": 20.83709090909091,
+          "min": 13.117,
+          "max": 29.027
+        },
+        "firstToolSeconds": {
+          "n": 11,
+          "median": 28.7,
+          "mean": 26.186272727272726,
+          "min": 14.088,
+          "max": 41.961
+        },
+        "firstArtifactSeconds": {
+          "n": 11,
+          "median": 100.999,
+          "mean": 208.01572727272728,
+          "min": 30.774,
+          "max": 673.015
+        },
+        "decodeTokensPerSecond": {
+          "n": 11,
+          "median": 34,
+          "mean": 34.09090909090909,
+          "min": 26,
+          "max": 45
+        },
+        "prefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 11,
+          "median": 574,
+          "mean": 616.5909090909091,
+          "min": 493,
+          "max": 801
+        },
+        "peakSubtreeRssGiB": {
+          "n": 11,
+          "median": 17.208984375,
+          "mean": 17.51083096590909,
+          "min": 17.126953125,
+          "max": 20.015625
+        },
+        "peakSystemUsedGiB": {
+          "n": 11,
+          "median": 107.048828125,
+          "mean": 107.01704545454545,
+          "min": 104.19921875,
+          "max": 109.0244140625
+        },
+        "inputTokensReported": {
+          "n": 11,
+          "median": 16743,
+          "mean": 33225.181818181816,
+          "min": 4817,
+          "max": 166105
+        },
+        "outputTokensReported": {
+          "n": 11,
+          "median": 2518,
+          "mean": 9665.181818181818,
+          "min": 391,
+          "max": 60189
+        }
+      },
+      "reportedInputTokenSum": 365477,
+      "reportedOutputTokenSum": 106317,
+      "specRequestGeneratedTokenSum": 107892
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "engine": "mlx",
+      "suite": "productivity",
+      "trials": 7,
+      "passes": 6,
+      "fixedComposite": {
+        "n": 7,
+        "median": 10,
+        "mean": 9.142857142857142,
+        "min": 5.5,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 7,
+          "median": 10,
+          "mean": 9,
+          "min": 3,
+          "max": 10
+        },
+        "quality": {
+          "n": 7,
+          "median": 10,
+          "mean": 9.885714285714286,
+          "min": 9.2,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 7,
+          "median": 10,
+          "mean": 7.857142857142857,
+          "min": 2.5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 7,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 7,
+          "median": 133.67,
+          "mean": 411.15128571428573,
+          "min": 57.565,
+          "max": 1263.132
+        },
+        "firstTokenSeconds": {
+          "n": 7,
+          "median": 21.493,
+          "mean": 22.210571428571427,
+          "min": 12.236,
+          "max": 37.698
+        },
+        "firstToolSeconds": {
+          "n": 7,
+          "median": 22.641,
+          "mean": 24.397714285714287,
+          "min": 13.062,
+          "max": 39.997
+        },
+        "firstArtifactSeconds": {
+          "n": 7,
+          "median": 55.647,
+          "mean": 108.93842857142857,
+          "min": 31.788,
+          "max": 351.972
+        },
+        "decodeTokensPerSecond": {
+          "n": 6,
+          "median": 34,
+          "mean": 36.333333333333336,
+          "min": 25,
+          "max": 49
+        },
+        "prefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 7,
+          "median": 743,
+          "mean": 735.1428571428571,
+          "min": 522,
+          "max": 943
+        },
+        "peakSubtreeRssGiB": {
+          "n": 7,
+          "median": 17.2919921875,
+          "mean": 17.321010044642858,
+          "min": 17.1474609375,
+          "max": 17.583984375
+        },
+        "peakSystemUsedGiB": {
+          "n": 7,
+          "median": 108.1201171875,
+          "mean": 108.11788504464286,
+          "min": 106.8701171875,
+          "max": 109.451171875
+        },
+        "inputTokensReported": {
+          "n": 7,
+          "median": 28882,
+          "mean": 40554,
+          "min": 4817,
+          "max": 141201
+        },
+        "outputTokensReported": {
+          "n": 7,
+          "median": 1466,
+          "mean": 7667.285714285715,
+          "min": 6,
+          "max": 27954
+        }
+      },
+      "reportedInputTokenSum": 283878,
+      "reportedOutputTokenSum": 53671,
+      "specRequestGeneratedTokenSum": 59430
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "suite": "all",
+      "trials": 18,
+      "passes": 18,
+      "fixedComposite": {
+        "n": 18,
+        "median": 10,
+        "mean": 9.71111111111111,
+        "min": 8.8,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 18,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "quality": {
+          "n": 18,
+          "median": 10,
+          "mean": 9.722222222222221,
+          "min": 5,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 18,
+          "median": 10,
+          "mean": 8.88888888888889,
+          "min": 5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 18,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 18,
+          "median": 156.80700000000002,
+          "mean": 249.37883333333335,
+          "min": 34.069,
+          "max": 1183.198
+        },
+        "firstTokenSeconds": {
+          "n": 18,
+          "median": 19.118000000000002,
+          "mean": 24.073944444444447,
+          "min": 14.42,
+          "max": 47.83
+        },
+        "firstToolSeconds": {
+          "n": 18,
+          "median": 27.328,
+          "mean": 27.816833333333335,
+          "min": 15.485,
+          "max": 48.715
+        },
+        "firstArtifactSeconds": {
+          "n": 18,
+          "median": 71.02199999999999,
+          "mean": 109.74744444444444,
+          "min": 29.544,
+          "max": 394.156
+        },
+        "decodeTokensPerSecond": {
+          "n": 18,
+          "median": 35.655,
+          "mean": 36.98222222222222,
+          "min": 23.55,
+          "max": 53.75
+        },
+        "prefillTokensPerSecond": {
+          "n": 18,
+          "median": 448.985,
+          "mean": 477.01666666666665,
+          "min": 395.51,
+          "max": 630.37
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "peakSubtreeRssGiB": {
+          "n": 18,
+          "median": 38.7548828125,
+          "mean": 39.983561197916664,
+          "min": 35.7880859375,
+          "max": 51.01171875
+        },
+        "peakSystemUsedGiB": {
+          "n": 18,
+          "median": 112.29150390625,
+          "mean": 114.51247829861111,
+          "min": 109.8623046875,
+          "max": 127.94140625
+        },
+        "inputTokensReported": {
+          "n": 18,
+          "median": 18032,
+          "mean": 26610.555555555555,
+          "min": 4749,
+          "max": 82423
+        },
+        "outputTokensReported": {
+          "n": 18,
+          "median": 2205,
+          "mean": 5270.333333333333,
+          "min": 510,
+          "max": 32422
+        }
+      },
+      "reportedInputTokenSum": 478990,
+      "reportedOutputTokenSum": 94866,
+      "specRequestGeneratedTokenSum": null
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "suite": "core",
+      "trials": 11,
+      "passes": 11,
+      "fixedComposite": {
+        "n": 11,
+        "median": 10,
+        "mean": 9.754545454545454,
+        "min": 8.8,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 11,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "quality": {
+          "n": 11,
+          "median": 10,
+          "mean": 9.545454545454545,
+          "min": 5,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 11,
+          "median": 10,
+          "mean": 9.318181818181818,
+          "min": 7.5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 11,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 11,
+          "median": 114.087,
+          "mean": 261.71727272727276,
+          "min": 34.069,
+          "max": 1183.198
+        },
+        "firstTokenSeconds": {
+          "n": 11,
+          "median": 18.646,
+          "mean": 22.00209090909091,
+          "min": 14.42,
+          "max": 34.014
+        },
+        "firstToolSeconds": {
+          "n": 11,
+          "median": 26.712,
+          "mean": 26.842,
+          "min": 15.485,
+          "max": 38.757
+        },
+        "firstArtifactSeconds": {
+          "n": 11,
+          "median": 68.115,
+          "mean": 125.23372727272728,
+          "min": 29.544,
+          "max": 394.156
+        },
+        "decodeTokensPerSecond": {
+          "n": 11,
+          "median": 35.85,
+          "mean": 36.68,
+          "min": 27.64,
+          "max": 50.85
+        },
+        "prefillTokensPerSecond": {
+          "n": 11,
+          "median": 449.19,
+          "mean": 474.6890909090909,
+          "min": 395.51,
+          "max": 630.37
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "peakSubtreeRssGiB": {
+          "n": 11,
+          "median": 38.9541015625,
+          "mean": 40.02423650568182,
+          "min": 35.7880859375,
+          "max": 51.01171875
+        },
+        "peakSystemUsedGiB": {
+          "n": 11,
+          "median": 112.5595703125,
+          "mean": 114.44380326704545,
+          "min": 109.8623046875,
+          "max": 127.94140625
+        },
+        "inputTokensReported": {
+          "n": 11,
+          "median": 14607,
+          "mean": 27253.363636363636,
+          "min": 4749,
+          "max": 82423
+        },
+        "outputTokensReported": {
+          "n": 11,
+          "median": 1736,
+          "mean": 5738.090909090909,
+          "min": 510,
+          "max": 32422
+        }
+      },
+      "reportedInputTokenSum": 299787,
+      "reportedOutputTokenSum": 63119,
+      "specRequestGeneratedTokenSum": null
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "suite": "productivity",
+      "trials": 7,
+      "passes": 7,
+      "fixedComposite": {
+        "n": 7,
+        "median": 9.5,
+        "mean": 9.642857142857142,
+        "min": 9,
+        "max": 10
+      },
+      "fixedAxes": {
+        "completion": {
+          "n": 7,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "quality": {
+          "n": 7,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        },
+        "efficiency": {
+          "n": 7,
+          "median": 7.5,
+          "mean": 8.214285714285714,
+          "min": 5,
+          "max": 10
+        },
+        "behavior": {
+          "n": 7,
+          "median": 10,
+          "mean": 10,
+          "min": 10,
+          "max": 10
+        }
+      },
+      "metrics": {
+        "durationSeconds": {
+          "n": 7,
+          "median": 172.209,
+          "mean": 229.98985714285715,
+          "min": 69.985,
+          "max": 565.188
+        },
+        "firstTokenSeconds": {
+          "n": 7,
+          "median": 27.213,
+          "mean": 27.329714285714285,
+          "min": 15.918,
+          "max": 47.83
+        },
+        "firstToolSeconds": {
+          "n": 7,
+          "median": 27.944,
+          "mean": 29.348714285714287,
+          "min": 17.5,
+          "max": 48.715
+        },
+        "firstArtifactSeconds": {
+          "n": 7,
+          "median": 84.947,
+          "mean": 85.41185714285714,
+          "min": 36.395,
+          "max": 150.78
+        },
+        "decodeTokensPerSecond": {
+          "n": 7,
+          "median": 33.73,
+          "mean": 37.457142857142856,
+          "min": 23.55,
+          "max": 53.75
+        },
+        "prefillTokensPerSecond": {
+          "n": 7,
+          "median": 440.62,
+          "mean": 480.6742857142857,
+          "min": 401.65,
+          "max": 612.3
+        },
+        "observedMlxPrefillTokensPerSecond": {
+          "n": 0,
+          "median": null,
+          "mean": null,
+          "min": null,
+          "max": null
+        },
+        "peakSubtreeRssGiB": {
+          "n": 7,
+          "median": 38.5556640625,
+          "mean": 39.919642857142854,
+          "min": 35.8271484375,
+          "max": 44.8349609375
+        },
+        "peakSystemUsedGiB": {
+          "n": 7,
+          "median": 112.0234375,
+          "mean": 114.62039620535714,
+          "min": 110.7734375,
+          "max": 122.3037109375
+        },
+        "inputTokensReported": {
+          "n": 7,
+          "median": 21457,
+          "mean": 25600.428571428572,
+          "min": 4749,
+          "max": 50047
+        },
+        "outputTokensReported": {
+          "n": 7,
+          "median": 2674,
+          "mean": 4535.285714285715,
+          "min": 680,
+          "max": 11777
+        }
+      },
+      "reportedInputTokenSum": 179203,
+      "reportedOutputTokenSum": 31747,
+      "specRequestGeneratedTokenSum": null
+    }
+  ],
+  "pairedRatios": [
+    {
+      "model": "gemma4-12b-q4",
+      "metric": "decodeTokensPerSecond",
+      "mlxOverLlamaCpp": {
+        "n": 18,
+        "median": 0.683848837299645,
+        "mean": 0.7051700575453622,
+        "min": 0.5592025285679553,
+        "max": 1.0244648318042813
+      }
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "metric": "durationSeconds",
+      "mlxOverLlamaCpp": {
+        "n": 18,
+        "median": 1.2658077518683726,
+        "mean": 1.8224390059766455,
+        "min": 0.8814463889745724,
+        "max": 7.564872972719603
+      }
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "metric": "decodeTokensPerSecond",
+      "mlxOverLlamaCpp": {
+        "n": 17,
+        "median": 0.9003001000333445,
+        "mean": 0.9876044475672823,
+        "min": 0.7648655317049099,
+        "max": 1.6985138004246283
+      }
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "metric": "durationSeconds",
+      "mlxOverLlamaCpp": {
+        "n": 18,
+        "median": 1.0714877535224185,
+        "mean": 1.3862031877700263,
+        "min": 0.24562860379351167,
+        "max": 3.324702166762822
+      }
+    }
+  ],
+  "advisoryByRubric": [
+    {
+      "scenario": "craftbook-spreadsheet-model",
+      "model": "gemma4-12b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "workflow fidelity": 5,
+        "usefulness": 4
+      },
+      "meanWithinRubric": 4.5
+    },
+    {
+      "scenario": "craftbook-spreadsheet-model",
+      "model": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "workflow fidelity": 5,
+        "usefulness": 4
+      },
+      "meanWithinRubric": 4.5
+    },
+    {
+      "scenario": "craftbook-spreadsheet-model",
+      "model": "qwen3.8-27b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "workflow fidelity": 6,
+        "usefulness": 3
+      },
+      "meanWithinRubric": 4.5
+    },
+    {
+      "scenario": "craftbook-spreadsheet-model",
+      "model": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "workflow fidelity": 6,
+        "usefulness": 5
+      },
+      "meanWithinRubric": 5.5
+    },
+    {
+      "scenario": "docblocks-theme-roundtrip",
+      "model": "gemma4-12b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "grounding": 6,
+        "candor": 6,
+        "usefulness": 5
+      },
+      "meanWithinRubric": 5.666666666666667
+    },
+    {
+      "scenario": "docblocks-theme-roundtrip",
+      "model": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "grounding": 5,
+        "candor": 5,
+        "usefulness": 2
+      },
+      "meanWithinRubric": 4
+    },
+    {
+      "scenario": "docblocks-theme-roundtrip",
+      "model": "qwen3.8-27b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "grounding": 2,
+        "candor": 6,
+        "usefulness": 6
+      },
+      "meanWithinRubric": 4.666666666666667
+    },
+    {
+      "scenario": "docblocks-theme-roundtrip",
+      "model": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "grounding": 4,
+        "candor": 4,
+        "usefulness": 4
+      },
+      "meanWithinRubric": 4
+    },
+    {
+      "scenario": "meeting-followup",
+      "model": "gemma4-12b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "decisionClarity": 5,
+        "grounding": 6,
+        "actionability": 4,
+        "brevity": 6
+      },
+      "meanWithinRubric": 5.25
+    },
+    {
+      "scenario": "meeting-followup",
+      "model": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "decisionClarity": 6,
+        "grounding": 7,
+        "actionability": 6,
+        "brevity": 7
+      },
+      "meanWithinRubric": 6.5
+    },
+    {
+      "scenario": "meeting-followup",
+      "model": "qwen3.8-27b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "decisionClarity": 7,
+        "grounding": 6,
+        "actionability": 7,
+        "brevity": 7
+      },
+      "meanWithinRubric": 6.75
+    },
+    {
+      "scenario": "meeting-followup",
+      "model": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "decisionClarity": 7,
+        "grounding": 6,
+        "actionability": 7,
+        "brevity": 7
+      },
+      "meanWithinRubric": 6.75
+    },
+    {
+      "scenario": "petshop",
+      "model": "gemma4-12b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 4,
+        "codeQuality": 4,
+        "polish": 3
+      },
+      "meanWithinRubric": 4
+    },
+    {
+      "scenario": "petshop",
+      "model": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 4,
+        "codeQuality": 5,
+        "polish": 4
+      },
+      "meanWithinRubric": 4.75
+    },
+    {
+      "scenario": "petshop",
+      "model": "qwen3.8-27b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 5,
+        "codeQuality": 6,
+        "polish": 5
+      },
+      "meanWithinRubric": 5.5
+    },
+    {
+      "scenario": "petshop",
+      "model": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 5,
+        "codeQuality": 5,
+        "polish": 4
+      },
+      "meanWithinRubric": 5
+    },
+    {
+      "scenario": "tankcombat",
+      "model": "gemma4-12b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 4,
+        "functionalCompleteness": 4,
+        "codeQuality": 3,
+        "polish": 2
+      },
+      "meanWithinRubric": 3.25
+    },
+    {
+      "scenario": "tankcombat",
+      "model": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 5,
+        "codeQuality": 4,
+        "polish": 3
+      },
+      "meanWithinRubric": 4.25
+    },
+    {
+      "scenario": "tankcombat",
+      "model": "qwen3.8-27b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 6,
+        "codeQuality": 5,
+        "polish": 7
+      },
+      "meanWithinRubric": 6.25
+    },
+    {
+      "scenario": "tankcombat",
+      "model": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 4,
+        "codeQuality": 4,
+        "polish": 3
+      },
+      "meanWithinRubric": 4
+    },
+    {
+      "scenario": "tictactoe",
+      "model": "gemma4-12b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 5,
+        "codeQuality": 5,
+        "polish": 3
+      },
+      "meanWithinRubric": 4.5
+    },
+    {
+      "scenario": "tictactoe",
+      "model": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 5,
+        "codeQuality": 5,
+        "polish": 3
+      },
+      "meanWithinRubric": 4.5
+    },
+    {
+      "scenario": "tictactoe",
+      "model": "qwen3.8-27b-q4",
+      "engine": "mlx",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 7,
+        "codeQuality": 7,
+        "polish": 6
+      },
+      "meanWithinRubric": 6.5
+    },
+    {
+      "scenario": "tictactoe",
+      "model": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "reviews": 1,
+      "axes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 6,
+        "codeQuality": 6,
+        "polish": 4
+      },
+      "meanWithinRubric": 5.25
+    }
+  ],
+  "judgingCoverage": {
+    "judged": 25,
+    "notApplicable": 48
+  },
+  "telemetryCoverageAll73": {
+    "durationSeconds": 73,
+    "firstTokenSeconds": 73,
+    "firstToolSeconds": 73,
+    "firstArtifactSeconds": 73,
+    "decodeTokensPerSecond": 72,
+    "prefillTokensPerSecond": 36,
+    "observedMlxPrefillTokensPerSecond": 37,
+    "peakSubtreeRssGiB": 73,
+    "peakSystemUsedGiB": 73,
+    "inputTokensReported": 73,
+    "outputTokensReported": 73,
+    "gpuUtilization": 0,
+    "anyPrefillRate": 73
+  },
+  "frozenSetupChecks": {
+    "config.json": true,
+    "analysis-plan.md": true,
+    "analysis-plan.json": true,
+    "analyze-pairs.py": true,
+    "supervise.mjs": true,
+    "environment.mjs": true,
+    "verify-external.mjs": true,
+    "judge-packets.ts": true,
+    "native-provenance.json": true,
+    "source-overlay.json": true,
+    "external-runtime-guard.json": true
+  },
+  "hostChecks": [
+    {
+      "cellId": "r1-qwen-mlx-core-tictactoe",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-tictactoe",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-tictactoe",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-tictactoe",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-petshop",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-petshop",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-petshop",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-petshop",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-tankcombat",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-tankcombat",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-tankcombat",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-tankcombat",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-schema-migration",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-schema-migration",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-schema-migration",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-schema-migration",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-failing-tests-spec",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-failing-tests-spec",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-failing-tests-spec",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-failing-tests-spec",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-symptom-debug",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-symptom-debug",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-symptom-debug",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-symptom-debug",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-data-wrangle",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-data-wrangle",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-data-wrangle",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-data-wrangle",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-incident-postmortem",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-incident-postmortem",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-incident-postmortem",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-incident-postmortem",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-ops-runbook-anomaly",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-ops-runbook-anomaly",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-ops-runbook-anomaly",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-ops-runbook-anomaly",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-plan-and-estimate",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-plan-and-estimate",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-plan-and-estimate",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-plan-and-estimate",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-conflict-synthesis",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-core-conflict-synthesis",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-conflict-synthesis",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-core-conflict-synthesis",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-productivity-constrained-comms",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-constrained-comms",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-productivity-constrained-comms",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-constrained-comms",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-records-intake",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-productivity-records-intake",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-records-intake",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-productivity-records-intake",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-productivity-plan-and-estimate",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-plan-and-estimate",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-productivity-plan-and-estimate",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-plan-and-estimate",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-meeting-followup",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-productivity-meeting-followup",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-meeting-followup",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-productivity-meeting-followup",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-productivity-craftbook-spreadsheet-model",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-craftbook-spreadsheet-model",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-productivity-craftbook-spreadsheet-model",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-craftbook-spreadsheet-model",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-conflict-synthesis",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-productivity-conflict-synthesis",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-conflict-synthesis",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-productivity-conflict-synthesis",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-llamacpp-productivity-docblocks-theme-roundtrip",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-docblocks-theme-roundtrip",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-llamacpp-productivity-docblocks-theme-roundtrip",
+      "hostMatches": true,
+      "frameworkBuild": {
+        "buildNumber": "11960",
+        "revision": "8642541b255bfb5dc39cd351a178be09013a55d6",
+        "backend": "metal",
+        "cudaArchitectures": null,
+        "sidecarPresent": true
+      }
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-docblocks-theme-roundtrip",
+      "hostMatches": true,
+      "frameworkBuild": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-craftbook-powerpoint-deck",
+      "hostMatches": true,
+      "frameworkBuild": null
+    }
+  ],
+  "diagnoses": [
+    {
+      "checkedAt": "2026-11-03T11:14:35.821937+00:00",
+      "cellId": "r1-gemma-mlx-core-conflict-synthesis",
+      "runDir": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-mlx-gemma4-12b-q4-2026-11-03T10-23-48-739Z-edca",
+      "recordedFailureClass": "model",
+      "outcomeUnchanged": true,
+      "observations": [
+        "The output correctly names Marcus in Overview and explicitly reconciles Marcus versus Priya with org.md in Conflicts and Resolutions. It does not include Marcus inside Consolidated Plan.",
+        "The frozen gate checks each canonical value specifically in Consolidated plan (conflict-synthesis.ts:617). This is a section-placement failure, not choosing the wrong owner or failing to reconcile the source conflict.",
+        "The initial brief says to use winning values everywhere outside conflicts, without expressly requiring every winning value in the plan section; feedback then explicitly requests the authoritative owner in that section. Four completed attempts still leave that omission.",
+        "Gemma llama.cpp puts Launch DRI: Marcus with org.md in Consolidated plan and passes. The MLX output retains numeric citations without a bibliography; this is separate from its recorded DRI failure.",
+        "Final MLX gate is 12/13 after a temporary section-heading regression, with 26 tool calls including 19 single-file reads."
+      ],
+      "action": "Preserve the recorded model failure and all evidence; report the gate sensitivity explicitly. No rerun, reclassification or source edit."
+    },
+    {
+      "checkedAt": "2026-11-03T10:12:16.918782+00:00",
+      "cellId": "r1-gemma-mlx-core-data-wrangle",
+      "runDir": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-data-wrangle/data-wrangle/data-wrangle-mlx-gemma4-12b-q4-2026-11-03T09-26-43-638Z-lv3u",
+      "recordedFailureClass": "model",
+      "outcomeUnchanged": true,
+      "observations": [
+        "Saved out/customers.json contains 60 rows and four duplicated normalized emails: Alice Archer, Robert Smith, Zoe Quill and Omar Haddad. Alice has both A-001 dated 2024-03-14 and L-004 dated 2025-11-02; only the newer row should survive.",
+        "The session wrote scripts with malformed literal filenames containing closing quote/parenthesis characters. Its 12 tool calls contain no script execution or checker invocation. It wrote customers.json directly, made an invalid-JSON edit, then rewrote the original duplicate-containing array.",
+        "The bounded repair controller ended after four completed unsuccessful attempts. The final attempt wrote a script again without changing the checked output. Logs preserve both the invalid-JSON intermediate state and restored duplicate-containing final data.",
+        "Paired Gemma llama.cpp output has 56 rows, no duplicate emails and retains L-004 for Alice. All 11 deterministic property checks passed there.",
+        "Gemma MLX assisted decoding remained active: later requests show 3.40–3.80 accepted tokens/round. A missing drafter is not the cause of this failure; do not infer a unique engine cause from one stochastic outcome."
+      ],
+      "action": "Keep the model failure in paired analysis, preserve all intermediate evidence, and do not rerun or modify the frozen campaign."
+    },
+    {
+      "checkedAt": "2026-11-03T09:12:41.339175+00:00",
+      "cellId": "r1-qwen-mlx-core-petshop",
+      "runDir": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-petshop/petshop/petshop-mlx-qwen3-8-27b-q4-2026-11-03T07-48-27-109Z-vg4t",
+      "recordedFailureClass": "model",
+      "outcomeUnchanged": true,
+      "observations": [
+        "Declared petshop HTML was produced but assets/logo.png was absent; artifacts include a 1635-byte SVG instead. No image-generation call appears in the 68 recorded tool calls.",
+        "Four completed repair attempts exhausted the unchanged missing working-image/image-asset signals in the intended website workspace.",
+        "The trial also created a claude-code-1-0-63-to-1-0-65 project. Its alternate HTML reached 5/5 static signals, but the browser assertion failed: no local raster <img> is rendered in the browser DOM. Thus the static score alone does not establish successful delivery.",
+        "Generated fixed-score quality text says gate complete based on the latest static sniff, while runtime failed and raster realism cap is zero. Preserve fixed score; explain the static/runtime distinction in final diagnosis.",
+        "Terminal capture reports tamara has 0 persisted versus 4 recorded messages. Use session-telemetry.json, recording and daemon.log for this partial session.",
+        "This is the first paired pass discordance: Qwen MLX petshop failed, llama.cpp passed. The sample remains too small and incomplete for statistical conclusions."
+      ],
+      "action": "Preserve recorded model failure and all partial evidence; no retry, reclassification, source change or campaign interruption."
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-conflict-synthesis",
+      "runDir": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-mlx-qwen3-8-27b-q4-2026-11-03T12-05-50-901Z-b4hg",
+      "recordedFailureClass": "model",
+      "fixedScorePreserved": 5.5,
+      "observedAt": "2026-11-03T13:02:27.999787+00:00",
+      "facts": {
+        "durationMs": 1117971,
+        "totalToolCalls": 54,
+        "deliveredCompletedRepairs": 4,
+        "latestGate": "12/13; claims-source-supported missing"
+      },
+      "diagnosis": "Two overly broad source-support checks reject the final report: its Compiled: 2026-11-03 metadata is treated as an unsupported launch date; led by Iris describes the campaign lead, correctly supported by org.md, but unsupportedDriClaim accepts only Marcus/Priya for any led by phrase. The final launch date, budget and DRI are correct. This is a documented gate false-positive, not reclassified or removed from the frozen headline.",
+      "reproduction": {
+        "unsupportedIsoDate": "2026-11-03",
+        "dateContext": "Compiled metadata, not launch timing",
+        "ownershipMatch": "led by Iris",
+        "sourceSupport": "org.md: Campaign lead: Iris."
+      },
+      "nextExperiment": "In a separate change, scope source-support checks to semantic claim roles and distinguish document metadata dates from launch dates. Add positive controls for seeded campaign/engineering owners and negative controls for invented launch owners/dates; verify on unrelated grounded-document tasks before new evals. Do not rerun or repair this campaign."
+    }
+  ],
+  "historicalDiscordantScenariosSeparateBuild": [
+    {
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "scenario": "petshop",
+      "engine": "mlx",
+      "nativeRelease": "0.1.54",
+      "trials": 3,
+      "passes": 1,
+      "fixedScores": [
+        2.2,
+        7.5,
+        2.2
+      ]
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "scenario": "petshop",
+      "engine": "llama-cpp",
+      "nativeRelease": "0.1.54",
+      "trials": 3,
+      "passes": 3,
+      "fixedScores": [
+        9.5,
+        7,
+        9.5
+      ]
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "scenario": "data-wrangle",
+      "engine": "mlx",
+      "nativeRelease": "0.1.54",
+      "trials": 3,
+      "passes": 1,
+      "fixedScores": [
+        4.1,
+        3.7,
+        10
+      ]
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "scenario": "data-wrangle",
+      "engine": "llama-cpp",
+      "nativeRelease": "0.1.54",
+      "trials": 3,
+      "passes": 3,
+      "fixedScores": [
+        10,
+        10,
+        10
+      ]
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "scenario": "conflict-synthesis",
+      "engine": "mlx",
+      "nativeRelease": "0.1.54",
+      "trials": 3,
+      "passes": 2,
+      "fixedScores": [
+        10,
+        5.6,
+        9.5
+      ]
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "scenario": "conflict-synthesis",
+      "engine": "llama-cpp",
+      "nativeRelease": "0.1.54",
+      "trials": 3,
+      "passes": 3,
+      "fixedScores": [
+        9,
+        10,
+        10
+      ]
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "suite": "productivity",
+      "scenario": "conflict-synthesis",
+      "engine": "mlx",
+      "nativeRelease": "0.1.54",
+      "trials": 3,
+      "passes": 2,
+      "fixedScores": [
+        5.5,
+        9,
+        9.5
+      ]
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "suite": "productivity",
+      "scenario": "conflict-synthesis",
+      "engine": "llama-cpp",
+      "nativeRelease": "0.1.54",
+      "trials": 3,
+      "passes": 2,
+      "fixedScores": [
+        9.5,
+        9.5,
+        5.3
+      ]
+    }
+  ],
+  "unrelatedHistoricalCheck": [
+    {
+      "model": "gemma4-12b-q4",
+      "engine": "mlx",
+      "scenario": "meeting-followup",
+      "passes": 3,
+      "trials": 3
+    },
+    {
+      "model": "gemma4-12b-q4",
+      "engine": "llama-cpp",
+      "scenario": "meeting-followup",
+      "passes": 3,
+      "trials": 3
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "engine": "mlx",
+      "scenario": "meeting-followup",
+      "passes": 3,
+      "trials": 3
+    },
+    {
+      "model": "qwen3.8-27b-q4",
+      "engine": "llama-cpp",
+      "scenario": "meeting-followup",
+      "passes": 3,
+      "trials": 3
+    }
+  ],
+  "campaignSha256": "4c95a41e150003491d9802bcdefc948c7bf27ef007770541753f5c905d7f1a79",
+  "historicalCampaignSha256": "a64051dadd9e07e96cee37afd4314febcfc8f43c069701ab0e3fa5cb1cc98dc1",
+  "pairedAnalysis": "condensed-paired-analysis.json",
+  "performanceData": "performance-audit.json",
+  "mlxPrefillRecovery": "mlx-prefill-recovery.json",
+  "mlxPrefillRecoveryCoverage": {
+    "recordedMlxTrials": 37,
+    "recoveredMlxTrials": 37,
+    "includedMlxTrials": 36,
+    "observations": 126,
+    "structuredObservations": 0
+  }
+}

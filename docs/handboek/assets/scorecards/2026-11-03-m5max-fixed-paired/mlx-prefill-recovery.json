@@ -1,0 +1,1915 @@
+{
+  "generatedAt": "2026-11-03T18:28:34.530Z",
+  "campaignSha256": "4c95a41e150003491d9802bcdefc948c7bf27ef007770541753f5c905d7f1a79",
+  "method": "Median of observed rounded first-token prefill rates per trial; partial provider-turn coverage. Not request-duration-weighted and not pure prefill time. No inference or changes to raw trial records.",
+  "caveats": [
+    "First-token and terminal rates describe different request boundaries; structured rates would take precedence, but all historical samples here are first-token details.",
+    "Internal tool-loop requests, cancelled turns and event-stream gaps may be missing. Reconnect replays without stable event IDs cannot be identified beyond exact duplicate lines.",
+    "TTFT includes scheduling/first-token work; neither TTFT nor trial input tokens can reconstruct exact prompt duration from these rounded observations."
+  ],
+  "coverage": {
+    "recordedMlxTrials": 37,
+    "recoveredMlxTrials": 37,
+    "includedMlxTrials": 36,
+    "observations": 126,
+    "structuredObservations": 0
+  },
+  "trials": [
+    {
+      "cellId": "r1-qwen-mlx-core-tictactoe",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-tictactoe/tictactoe/tictactoe-mlx-qwen3-8-27b-q4-2026-11-03T07-06-18-943Z-cp0v/recording/chat-events.jsonl",
+      "recordingSha256": "2aff31db9569b169221c94a7118b55f6a712c1403b280c17bf6acddf9865711e",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-tictactoe/tictactoe/tictactoe-mlx-qwen3-8-27b-q4-2026-11-03T07-06-18-943Z-cp0v/metrics.json",
+      "metricsSha256": "411cc26a2b547591f58d9d373fe8a3c442bda9226f7e9e11bb9332607070798b",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 722,
+        "sampleCount": 2,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 2,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 25,
+            "rx": "2026-11-03T07:06:39.971Z",
+            "sessionId": "6f6f5d61-bbee-401c-a4f7-a563163e6e8f",
+            "source": "first-token-detail",
+            "tokensPerSec": 819,
+            "ttftMs": 19474
+          },
+          {
+            "line": 226,
+            "rx": "2026-11-03T07:07:17.596Z",
+            "sessionId": "4d47a5f8-382f-4024-8cc0-17ee5588b1f7",
+            "source": "first-token-detail",
+            "tokensPerSec": 625,
+            "ttftMs": 7866
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-tictactoe",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-tictactoe/tictactoe/tictactoe-mlx-gemma4-12b-q4-2026-11-03T07-12-05-257Z-ue03/recording/chat-events.jsonl",
+      "recordingSha256": "904e440cbb3dbff283239da558a9e5cff0bacc16893e7522ea7139c0f738e788",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-tictactoe/tictactoe/tictactoe-mlx-gemma4-12b-q4-2026-11-03T07-12-05-257Z-ue03/metrics.json",
+      "metricsSha256": "db40f528a4ebf4b4639bc135035bccaf17e30bce68984ddf2daa7c369ef586d7",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1669,
+        "sampleCount": 3,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 3,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 23,
+            "rx": "2026-11-03T07:12:19.229Z",
+            "sessionId": "23df7ac9-02ac-4894-b997-b40af6a83164",
+            "source": "first-token-detail",
+            "tokensPerSec": 1441,
+            "ttftMs": 12275
+          },
+          {
+            "line": 88,
+            "rx": "2026-11-03T07:12:35.251Z",
+            "sessionId": "d9040fed-68e3-4cdb-9f25-63af21a83a1f",
+            "source": "first-token-detail",
+            "tokensPerSec": 1893,
+            "ttftMs": 3524
+          },
+          {
+            "line": 109,
+            "rx": "2026-11-03T07:12:43.895Z",
+            "sessionId": "d9040fed-68e3-4cdb-9f25-63af21a83a1f",
+            "source": "first-token-detail",
+            "tokensPerSec": 1669,
+            "ttftMs": 5931
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-petshop",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-petshop/petshop/petshop-mlx-gemma4-12b-q4-2026-11-03T07-36-55-804Z-c7vf/recording/chat-events.jsonl",
+      "recordingSha256": "47083daa0698bca90a8796e68020c3f9de5f5b5769d61fb7954978ca6e3b6296",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-petshop/petshop/petshop-mlx-gemma4-12b-q4-2026-11-03T07-36-55-804Z-c7vf/metrics.json",
+      "metricsSha256": "273b1ccfa8d1e40dd5563d8c505f65ff3f4b93fa1586fe802dffec66ee5e9b35",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1108,
+        "sampleCount": 8,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 8,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 23,
+            "rx": "2026-11-03T07:37:12.942Z",
+            "sessionId": "0a32c043-bc06-46a3-ad51-f550a958e08f",
+            "source": "first-token-detail",
+            "tokensPerSec": 1146,
+            "ttftMs": 15432
+          },
+          {
+            "line": 103,
+            "rx": "2026-11-03T07:37:36.565Z",
+            "sessionId": "692341a6-19b6-4121-91f7-c039f3a6bbfd",
+            "source": "first-token-detail",
+            "tokensPerSec": 1646,
+            "ttftMs": 9253
+          },
+          {
+            "line": 159,
+            "rx": "2026-11-03T07:37:47.807Z",
+            "sessionId": "4cc1784a-e031-42b6-8b16-b75b12879b80",
+            "source": "first-token-detail",
+            "tokensPerSec": 1227,
+            "ttftMs": 3103
+          },
+          {
+            "line": 263,
+            "rx": "2026-11-03T07:38:19.500Z",
+            "sessionId": "ff37c7df-9e31-4b8e-bc7f-65f8acf5b292",
+            "source": "first-token-detail",
+            "tokensPerSec": 1200,
+            "ttftMs": 11492
+          },
+          {
+            "line": 493,
+            "rx": "2026-11-03T07:39:03.852Z",
+            "sessionId": "692341a6-19b6-4121-91f7-c039f3a6bbfd",
+            "source": "first-token-detail",
+            "tokensPerSec": 232,
+            "ttftMs": 56655
+          },
+          {
+            "line": 561,
+            "rx": "2026-11-03T07:39:18.354Z",
+            "sessionId": "4cc1784a-e031-42b6-8b16-b75b12879b80",
+            "source": "first-token-detail",
+            "tokensPerSec": 1070,
+            "ttftMs": 6116
+          },
+          {
+            "line": 679,
+            "rx": "2026-11-03T07:39:54.237Z",
+            "sessionId": "ff37c7df-9e31-4b8e-bc7f-65f8acf5b292",
+            "source": "first-token-detail",
+            "tokensPerSec": 863,
+            "ttftMs": 1427
+          },
+          {
+            "line": 840,
+            "rx": "2026-11-03T07:40:16.100Z",
+            "sessionId": "ae1d7df8-dc4b-4565-a1eb-71f5c5252bcc",
+            "source": "first-token-detail",
+            "tokensPerSec": 181,
+            "ttftMs": 27854
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-petshop",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-petshop/petshop/petshop-mlx-qwen3-8-27b-q4-2026-11-03T07-48-27-109Z-vg4t/recording/chat-events.jsonl",
+      "recordingSha256": "f5024f05a344c45f4ec3dd24f7b5381f692e605a2bb24d5477a97ed08776a060",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-petshop/petshop/petshop-mlx-qwen3-8-27b-q4-2026-11-03T07-48-27-109Z-vg4t/metrics.json",
+      "metricsSha256": "d29357bfe610a99fd2b2af8d5a8f8b460c7b69e8aa9eb934d9418a808c2bcc86",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 493,
+        "sampleCount": 17,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 17,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 27,
+            "rx": "2026-11-03T07:48:56.137Z",
+            "sessionId": "6ae1eba8-0fa5-4365-8dd6-6e8138bf916b",
+            "source": "first-token-detail",
+            "tokensPerSec": 553,
+            "ttftMs": 27467
+          },
+          {
+            "line": 158,
+            "rx": "2026-11-03T07:49:16.210Z",
+            "sessionId": "6ae1eba8-0fa5-4365-8dd6-6e8138bf916b",
+            "source": "first-token-detail",
+            "tokensPerSec": 272,
+            "ttftMs": 955
+          },
+          {
+            "line": 207,
+            "rx": "2026-11-03T07:49:23.352Z",
+            "sessionId": "6ae1eba8-0fa5-4365-8dd6-6e8138bf916b",
+            "source": "first-token-detail",
+            "tokensPerSec": 321,
+            "ttftMs": 890
+          },
+          {
+            "line": 350,
+            "rx": "2026-11-03T07:50:26.361Z",
+            "sessionId": "7d59e0db-e366-420b-b62f-f700d1f28649",
+            "source": "first-token-detail",
+            "tokensPerSec": 569,
+            "ttftMs": 32713
+          },
+          {
+            "line": 425,
+            "rx": "2026-11-03T07:50:44.157Z",
+            "sessionId": "95112898-d477-475d-8b19-a841131f22f5",
+            "source": "first-token-detail",
+            "tokensPerSec": 523,
+            "ttftMs": 9371
+          },
+          {
+            "line": 3837,
+            "rx": "2026-11-03T08:00:07.410Z",
+            "sessionId": "96cd6170-031a-4206-a7de-95a7cb31f0b4",
+            "source": "first-token-detail",
+            "tokensPerSec": 495,
+            "ttftMs": 24762
+          },
+          {
+            "line": 5041,
+            "rx": "2026-11-03T08:03:41.140Z",
+            "sessionId": "c4c25d29-2206-4bad-96b6-ef7ed296be42",
+            "source": "first-token-detail",
+            "tokensPerSec": 509,
+            "ttftMs": 32147
+          },
+          {
+            "line": 7243,
+            "rx": "2026-11-03T08:09:29.389Z",
+            "sessionId": "96cd6170-031a-4206-a7de-95a7cb31f0b4",
+            "source": "first-token-detail",
+            "tokensPerSec": 313,
+            "ttftMs": 3188
+          },
+          {
+            "line": 8924,
+            "rx": "2026-11-03T08:14:19.064Z",
+            "sessionId": "08593fde-5fbd-453c-8b6f-9c0817a460d5",
+            "source": "first-token-detail",
+            "tokensPerSec": 488,
+            "ttftMs": 34221
+          },
+          {
+            "line": 10286,
+            "rx": "2026-11-03T08:17:58.511Z",
+            "sessionId": "ecceb91e-0c0f-4c80-9188-5b7cd75ddd9f",
+            "source": "first-token-detail",
+            "tokensPerSec": 494,
+            "ttftMs": 29531
+          },
+          {
+            "line": 10571,
+            "rx": "2026-11-03T08:18:43.701Z",
+            "sessionId": "3a01832d-95da-40bf-95a4-e2c4313ced14",
+            "source": "first-token-detail",
+            "tokensPerSec": 115,
+            "ttftMs": 214532
+          },
+          {
+            "line": 14244,
+            "rx": "2026-11-03T08:28:09.317Z",
+            "sessionId": "c0f7c462-b81e-4523-b86a-8abe2e4463ce",
+            "source": "first-token-detail",
+            "tokensPerSec": 468,
+            "ttftMs": 81111
+          },
+          {
+            "line": 14949,
+            "rx": "2026-11-03T08:30:05.529Z",
+            "sessionId": "8889e63f-01f7-49a4-b897-1163d45fb83d",
+            "source": "first-token-detail",
+            "tokensPerSec": 484,
+            "ttftMs": 16762
+          },
+          {
+            "line": 15351,
+            "rx": "2026-11-03T08:31:33.482Z",
+            "sessionId": "7d59e0db-e366-420b-b62f-f700d1f28649",
+            "source": "first-token-detail",
+            "tokensPerSec": 426,
+            "ttftMs": 12758
+          },
+          {
+            "line": 15576,
+            "rx": "2026-11-03T08:32:17.467Z",
+            "sessionId": "95112898-d477-475d-8b19-a841131f22f5",
+            "source": "first-token-detail",
+            "tokensPerSec": 499,
+            "ttftMs": 18196
+          },
+          {
+            "line": 16778,
+            "rx": "2026-11-03T08:35:18.892Z",
+            "sessionId": "22e5d5d9-681a-4ded-b357-9f98f0a0ed05",
+            "source": "first-token-detail",
+            "tokensPerSec": 494,
+            "ttftMs": 169258
+          },
+          {
+            "line": 16971,
+            "rx": "2026-11-03T08:35:51.922Z",
+            "sessionId": "8789f74f-3348-487e-b6d7-b531201f080c",
+            "source": "first-token-detail",
+            "tokensPerSec": 493,
+            "ttftMs": 52102
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-tankcombat",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-tankcombat/tankcombat/tankcombat-mlx-gemma4-12b-q4-2026-11-03T08-36-58-686Z-po7v/recording/chat-events.jsonl",
+      "recordingSha256": "cb7fcc2cf9a8da420b134c54b2a2f1b392f39b56100be531bbc1afccae73633f",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-tankcombat/tankcombat/tankcombat-mlx-gemma4-12b-q4-2026-11-03T08-36-58-686Z-po7v/metrics.json",
+      "metricsSha256": "0e26ae5626949a31d874ad9c05a0d5e078e7155b9b7a1b82d9c46cddf06982c1",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1512,
+        "sampleCount": 2,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 2,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 23,
+            "rx": "2026-11-03T08:37:16.149Z",
+            "sessionId": "5272ee84-f228-41bf-84eb-c5cc479c800d",
+            "source": "first-token-detail",
+            "tokensPerSec": 1122,
+            "ttftMs": 15853
+          },
+          {
+            "line": 168,
+            "rx": "2026-11-03T08:37:53.475Z",
+            "sessionId": "159a6167-b4aa-4cb8-a3e0-626acd297599",
+            "source": "first-token-detail",
+            "tokensPerSec": 1902,
+            "ttftMs": 3275
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-tankcombat",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-tankcombat/tankcombat/tankcombat-mlx-qwen3-8-27b-q4-2026-11-03T08-41-33-861Z-4y65/recording/chat-events.jsonl",
+      "recordingSha256": "3d5b39c9afd6bbd0a644909fe19503f003103276bef7c467c709cebb2f512f85",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-tankcombat/tankcombat/tankcombat-mlx-qwen3-8-27b-q4-2026-11-03T08-41-33-861Z-4y65/metrics.json",
+      "metricsSha256": "20aca2199cb045438adcd2df9ff8dcd7f2e4da36890c2a88a4b0efe2d7ea2abc",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 752,
+        "sampleCount": 2,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 2,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 26,
+            "rx": "2026-11-03T08:41:56.198Z",
+            "sessionId": "ee72fbd5-fe76-4bcc-b3d8-be1fa5ea3ab4",
+            "source": "first-token-detail",
+            "tokensPerSec": 819,
+            "ttftMs": 20761
+          },
+          {
+            "line": 351,
+            "rx": "2026-11-03T08:42:49.213Z",
+            "sessionId": "16abca97-c768-4616-9e9c-b5b2824601bf",
+            "source": "first-token-detail",
+            "tokensPerSec": 685,
+            "ttftMs": 4219
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-schema-migration",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-schema-migration/schema-migration/schema-migration-mlx-qwen3-8-27b-q4-2026-11-03T08-57-15-039Z-3926/recording/chat-events.jsonl",
+      "recordingSha256": "d2e96f6d9f5d4e6bde6608b55fb62615fc8faf95c92494783a625c12a8c645b2",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-schema-migration/schema-migration/schema-migration-mlx-qwen3-8-27b-q4-2026-11-03T08-57-15-039Z-3926/metrics.json",
+      "metricsSha256": "25e2eecbba2e9adeef26f6518c99c78362652bb1a67aa0c8c2c2875d152f2ceb",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 574,
+        "sampleCount": 7,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 7,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 28,
+            "rx": "2026-11-03T08:57:30.447Z",
+            "sessionId": "0dd7d23b-9575-4de6-82cb-49c00a05011a",
+            "source": "first-token-detail",
+            "tokensPerSec": 544,
+            "ttftMs": 13914
+          },
+          {
+            "line": 97,
+            "rx": "2026-11-03T08:57:53.783Z",
+            "sessionId": "0dd7d23b-9575-4de6-82cb-49c00a05011a",
+            "source": "first-token-detail",
+            "tokensPerSec": 544,
+            "ttftMs": 7470
+          },
+          {
+            "line": 139,
+            "rx": "2026-11-03T08:58:10.096Z",
+            "sessionId": "0dd7d23b-9575-4de6-82cb-49c00a05011a",
+            "source": "first-token-detail",
+            "tokensPerSec": 636,
+            "ttftMs": 8314
+          },
+          {
+            "line": 185,
+            "rx": "2026-11-03T08:58:17.756Z",
+            "sessionId": "0dd7d23b-9575-4de6-82cb-49c00a05011a",
+            "source": "first-token-detail",
+            "tokensPerSec": 567,
+            "ttftMs": 1305
+          },
+          {
+            "line": 238,
+            "rx": "2026-11-03T08:58:27.260Z",
+            "sessionId": "0dd7d23b-9575-4de6-82cb-49c00a05011a",
+            "source": "first-token-detail",
+            "tokensPerSec": 589,
+            "ttftMs": 750
+          },
+          {
+            "line": 472,
+            "rx": "2026-11-03T08:59:19.677Z",
+            "sessionId": "0dd7d23b-9575-4de6-82cb-49c00a05011a",
+            "source": "first-token-detail",
+            "tokensPerSec": 594,
+            "ttftMs": 7810
+          },
+          {
+            "line": 586,
+            "rx": "2026-11-03T09:00:01.002Z",
+            "sessionId": "0dd7d23b-9575-4de6-82cb-49c00a05011a",
+            "source": "first-token-detail",
+            "tokensPerSec": 574,
+            "ttftMs": 13830
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-schema-migration",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-schema-migration/schema-migration/schema-migration-mlx-gemma4-12b-q4-2026-11-03T09-05-20-192Z-fn5m/recording/chat-events.jsonl",
+      "recordingSha256": "d30563f45b60fda3b055ee93f3c7c832bcce6365d3ea346a47e91fd1059ed3e7",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-schema-migration/schema-migration/schema-migration-mlx-gemma4-12b-q4-2026-11-03T09-05-20-192Z-fn5m/metrics.json",
+      "metricsSha256": "7e00b04f09de5f9561c5c840ad05b58a7279c65f467ab674c5e00a13ae97089a",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1073.5,
+        "sampleCount": 12,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 12,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 26,
+            "rx": "2026-11-03T09:05:33.030Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 1084,
+            "ttftMs": 11313
+          },
+          {
+            "line": 107,
+            "rx": "2026-11-03T09:05:54.764Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 1063,
+            "ttftMs": 5054
+          },
+          {
+            "line": 126,
+            "rx": "2026-11-03T09:06:06.272Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 1520,
+            "ttftMs": 4347
+          },
+          {
+            "line": 145,
+            "rx": "2026-11-03T09:06:12.395Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 1456,
+            "ttftMs": 835
+          },
+          {
+            "line": 171,
+            "rx": "2026-11-03T09:06:28.502Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 1133,
+            "ttftMs": 6892
+          },
+          {
+            "line": 194,
+            "rx": "2026-11-03T09:06:37.208Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 1361,
+            "ttftMs": 541
+          },
+          {
+            "line": 257,
+            "rx": "2026-11-03T09:07:16.883Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 1012,
+            "ttftMs": 11311
+          },
+          {
+            "line": 372,
+            "rx": "2026-11-03T09:07:34.802Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 550,
+            "ttftMs": 363
+          },
+          {
+            "line": 504,
+            "rx": "2026-11-03T09:08:01.224Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 577,
+            "ttftMs": 513
+          },
+          {
+            "line": 701,
+            "rx": "2026-11-03T09:08:42.889Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 576,
+            "ttftMs": 333
+          },
+          {
+            "line": 902,
+            "rx": "2026-11-03T09:09:28.226Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 1134,
+            "ttftMs": 10640
+          },
+          {
+            "line": 1006,
+            "rx": "2026-11-03T09:10:36.946Z",
+            "sessionId": "194fe734-43e2-4f1e-9ce4-7727d144abec",
+            "source": "first-token-detail",
+            "tokensPerSec": 1045,
+            "ttftMs": 13980
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-failing-tests-spec",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-failing-tests-spec/failing-tests-spec/failing-tests-spec-mlx-qwen3-8-27b-q4-2026-11-03T09-11-43-635Z-kqkp/recording/chat-events.jsonl",
+      "recordingSha256": "e52075a97b0f66b3df094acd3337fc9aee954eec6f9e47b384c636f1c89d395a",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-failing-tests-spec/failing-tests-spec/failing-tests-spec-mlx-qwen3-8-27b-q4-2026-11-03T09-11-43-635Z-kqkp/metrics.json",
+      "metricsSha256": "f1f5e0223a9a8d01d276950717bb0ae65625b0f58fa5d63d9b2944fc4d2fd7ce",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 596.5,
+        "sampleCount": 2,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 2,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 26,
+            "rx": "2026-11-03T09:11:58.214Z",
+            "sessionId": "9edc3692-98c2-4aca-95ea-bad5ae18809f",
+            "source": "first-token-detail",
+            "tokensPerSec": 515,
+            "ttftMs": 13072
+          },
+          {
+            "line": 130,
+            "rx": "2026-11-03T09:12:33.434Z",
+            "sessionId": "9edc3692-98c2-4aca-95ea-bad5ae18809f",
+            "source": "first-token-detail",
+            "tokensPerSec": 678,
+            "ttftMs": 7647
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-failing-tests-spec",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-failing-tests-spec/failing-tests-spec/failing-tests-spec-mlx-gemma4-12b-q4-2026-11-03T09-14-39-926Z-zx8u/recording/chat-events.jsonl",
+      "recordingSha256": "29fcd468bbd31a0955d2b0b9b2c6c5c033012cf62056d2a4b7a214a00290c06b",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-failing-tests-spec/failing-tests-spec/failing-tests-spec-mlx-gemma4-12b-q4-2026-11-03T09-14-39-926Z-zx8u/metrics.json",
+      "metricsSha256": "4132d7cacc7bae8676cff8bee4f13982d71810384dde9c584a6f3a718900d646",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1963,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 25,
+            "rx": "2026-11-03T09:14:50.559Z",
+            "sessionId": "99d6880a-d10c-4977-8016-af7c9b76f002",
+            "source": "first-token-detail",
+            "tokensPerSec": 1963,
+            "ttftMs": 8969
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-symptom-debug",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-symptom-debug/symptom-debug/symptom-debug-mlx-gemma4-12b-q4-2026-11-03T09-18-07-118Z-8fo4/recording/chat-events.jsonl",
+      "recordingSha256": "7282b230e3538466b6cd68b036df875b510c5153d6a60096f83385d8a5f31235",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-symptom-debug/symptom-debug/symptom-debug-mlx-gemma4-12b-q4-2026-11-03T09-18-07-118Z-8fo4/metrics.json",
+      "metricsSha256": "fdf6364cdf2198cb72e645557073b623eeb5294ac7949e1597a987e4c0d16117",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1373.5,
+        "sampleCount": 2,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 2,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 26,
+            "rx": "2026-11-03T09:18:18.288Z",
+            "sessionId": "a641f3e2-9183-45ba-9c12-9997e7dd1850",
+            "source": "first-token-detail",
+            "tokensPerSec": 1685,
+            "ttftMs": 9648
+          },
+          {
+            "line": 912,
+            "rx": "2026-11-03T09:20:45.938Z",
+            "sessionId": "a641f3e2-9183-45ba-9c12-9997e7dd1850",
+            "source": "first-token-detail",
+            "tokensPerSec": 1062,
+            "ttftMs": 12771
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-symptom-debug",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-symptom-debug/symptom-debug/symptom-debug-mlx-qwen3-8-27b-q4-2026-11-03T09-25-13-163Z-p8hj/recording/chat-events.jsonl",
+      "recordingSha256": "46100f854062ae95b31f305509197d5407d41def13b67c1568cc971376e47c87",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-symptom-debug/symptom-debug/symptom-debug-mlx-qwen3-8-27b-q4-2026-11-03T09-25-13-163Z-p8hj/metrics.json",
+      "metricsSha256": "f6f62bffc0279d9f52d969091f73d3db7ee2d0d75088627fb9d4690afebe4b59",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 544,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 27,
+            "rx": "2026-11-03T09:25:28.249Z",
+            "sessionId": "c253bc73-85d8-4f4e-b697-bb1c65381728",
+            "source": "first-token-detail",
+            "tokensPerSec": 544,
+            "ttftMs": 13591
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-data-wrangle",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-data-wrangle/data-wrangle/data-wrangle-mlx-gemma4-12b-q4-2026-11-03T09-26-43-638Z-lv3u/recording/chat-events.jsonl",
+      "recordingSha256": "2f694c132181b90e7f79a33aeba6d49411df5fa125209895a0be3ac1b74e0ec6",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-data-wrangle/data-wrangle/data-wrangle-mlx-gemma4-12b-q4-2026-11-03T09-26-43-638Z-lv3u/metrics.json",
+      "metricsSha256": "2ed11f5318963fbc10fc78f4d26fe42636bca88c3ece0864358cc34927dba941",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1046,
+        "sampleCount": 7,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 7,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 26,
+            "rx": "2026-11-03T09:26:56.179Z",
+            "sessionId": "c76232e0-c577-4b27-9fd1-dd89ff392650",
+            "source": "first-token-detail",
+            "tokensPerSec": 1205,
+            "ttftMs": 11029
+          },
+          {
+            "line": 1094,
+            "rx": "2026-11-03T09:30:18.590Z",
+            "sessionId": "c76232e0-c577-4b27-9fd1-dd89ff392650",
+            "source": "first-token-detail",
+            "tokensPerSec": 1229,
+            "ttftMs": 7582
+          },
+          {
+            "line": 1866,
+            "rx": "2026-11-03T09:32:34.215Z",
+            "sessionId": "c76232e0-c577-4b27-9fd1-dd89ff392650",
+            "source": "first-token-detail",
+            "tokensPerSec": 1133,
+            "ttftMs": 8160
+          },
+          {
+            "line": 2081,
+            "rx": "2026-11-03T09:33:58.244Z",
+            "sessionId": "c76232e0-c577-4b27-9fd1-dd89ff392650",
+            "source": "first-token-detail",
+            "tokensPerSec": 1046,
+            "ttftMs": 11853
+          },
+          {
+            "line": 2166,
+            "rx": "2026-11-03T09:34:36.406Z",
+            "sessionId": "c76232e0-c577-4b27-9fd1-dd89ff392650",
+            "source": "first-token-detail",
+            "tokensPerSec": 965,
+            "ttftMs": 14862
+          },
+          {
+            "line": 2202,
+            "rx": "2026-11-03T09:35:23.244Z",
+            "sessionId": "c76232e0-c577-4b27-9fd1-dd89ff392650",
+            "source": "first-token-detail",
+            "tokensPerSec": 946,
+            "ttftMs": 21531
+          },
+          {
+            "line": 2424,
+            "rx": "2026-11-03T09:37:04.307Z",
+            "sessionId": "c76232e0-c577-4b27-9fd1-dd89ff392650",
+            "source": "first-token-detail",
+            "tokensPerSec": 947,
+            "ttftMs": 26678
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-data-wrangle",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-data-wrangle/data-wrangle/data-wrangle-mlx-qwen3-8-27b-q4-2026-11-03T09-39-57-626Z-vm00/recording/chat-events.jsonl",
+      "recordingSha256": "d9f84d8117a69cbaf5bcd6d083ea72822268270cca6b1093d340ceafd0121e70",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-data-wrangle/data-wrangle/data-wrangle-mlx-qwen3-8-27b-q4-2026-11-03T09-39-57-626Z-vm00/metrics.json",
+      "metricsSha256": "8f6fa5b387f53effb86828dd20453c396a252a3d5efb5c1adb7393d78e5c3724",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 613,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 26,
+            "rx": "2026-11-03T09:40:12.370Z",
+            "sessionId": "b9a2c158-ddf7-4cd3-9482-88e4772988bc",
+            "source": "first-token-detail",
+            "tokensPerSec": 613,
+            "ttftMs": 13259
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-incident-postmortem",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-incident-postmortem/incident-postmortem/incident-postmortem-mlx-qwen3-8-27b-q4-2026-11-03T09-47-14-688Z-rx7i/recording/chat-events.jsonl",
+      "recordingSha256": "1e1c60ae0df0067167a5eea8e28b5287b2d161abaac33ef6db3cc09f62a4f36c",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-incident-postmortem/incident-postmortem/incident-postmortem-mlx-qwen3-8-27b-q4-2026-11-03T09-47-14-688Z-rx7i/metrics.json",
+      "metricsSha256": "0a44bf8bbb0a5b8299b4665befbcd35ab563d3b991b9aa7c72f4569d1b4a7170",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 562,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 31,
+            "rx": "2026-11-03T09:47:43.345Z",
+            "sessionId": "a46ad835-5d81-4df5-9885-aedc60eed69f",
+            "source": "first-token-detail",
+            "tokensPerSec": 562,
+            "ttftMs": 27165
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-incident-postmortem",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-incident-postmortem/incident-postmortem/incident-postmortem-mlx-gemma4-12b-q4-2026-11-03T10-05-46-552Z-r8hi/recording/chat-events.jsonl",
+      "recordingSha256": "99195eec1b583d37eb1568234c112daaf73db9d7ca260dff57e8d8a762a0fc31",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-incident-postmortem/incident-postmortem/incident-postmortem-mlx-gemma4-12b-q4-2026-11-03T10-05-46-552Z-r8hi/metrics.json",
+      "metricsSha256": "88b92c9d834e43ffba9cc29060c20295d7ca69356f47880ca34ddc56fe36ab89",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1169,
+        "sampleCount": 3,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 3,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 28,
+            "rx": "2026-11-03T10:06:04.156Z",
+            "sessionId": "b7bbc972-e9ee-4c2d-9604-e97fb9037668",
+            "source": "first-token-detail",
+            "tokensPerSec": 1086,
+            "ttftMs": 16081
+          },
+          {
+            "line": 388,
+            "rx": "2026-11-03T10:08:52.063Z",
+            "sessionId": "b7bbc972-e9ee-4c2d-9604-e97fb9037668",
+            "source": "first-token-detail",
+            "tokensPerSec": 1169,
+            "ttftMs": 13306
+          },
+          {
+            "line": 427,
+            "rx": "2026-11-03T10:09:04.250Z",
+            "sessionId": "b7bbc972-e9ee-4c2d-9604-e97fb9037668",
+            "source": "first-token-detail",
+            "tokensPerSec": 1225,
+            "ttftMs": 870
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-ops-runbook-anomaly",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-ops-runbook-anomaly/ops-runbook-anomaly/ops-runbook-anomaly-mlx-qwen3-8-27b-q4-2026-11-03T10-09-52-914Z-l99e/recording/chat-events.jsonl",
+      "recordingSha256": "782da3b27412d94305f015c4e6aa2aa7ac0be61bc3ecf4ddbb8980d65a94b65f",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-ops-runbook-anomaly/ops-runbook-anomaly/ops-runbook-anomaly-mlx-qwen3-8-27b-q4-2026-11-03T10-09-52-914Z-l99e/metrics.json",
+      "metricsSha256": "7a36db11c38272ca8c76ec22ae56f1f9deb2ba5f748987da8ca2c7c441093051",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 572,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 31,
+            "rx": "2026-11-03T10:10:20.262Z",
+            "sessionId": "a0ec27b6-141c-4500-83f5-45160d4899ed",
+            "source": "first-token-detail",
+            "tokensPerSec": 572,
+            "ttftMs": 25850
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-ops-runbook-anomaly",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-ops-runbook-anomaly/ops-runbook-anomaly/ops-runbook-anomaly-mlx-gemma4-12b-q4-2026-11-03T10-14-52-305Z-v5t8/recording/chat-events.jsonl",
+      "recordingSha256": "7137ab98e91b2878c817ba7b772b5cc111a1527b5fb875c850b830f660360e61",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-ops-runbook-anomaly/ops-runbook-anomaly/ops-runbook-anomaly-mlx-gemma4-12b-q4-2026-11-03T10-14-52-305Z-v5t8/metrics.json",
+      "metricsSha256": "ef816a61a17a524d56f319f2b58d760db915f77bcf03b217eebb80bcdafa845d",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1323,
+        "sampleCount": 3,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 3,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 27,
+            "rx": "2026-11-03T10:15:08.564Z",
+            "sessionId": "243c3595-6c35-41ee-b354-267b11f2f6f5",
+            "source": "first-token-detail",
+            "tokensPerSec": 1192,
+            "ttftMs": 14732
+          },
+          {
+            "line": 124,
+            "rx": "2026-11-03T10:15:32.574Z",
+            "sessionId": "243c3595-6c35-41ee-b354-267b11f2f6f5",
+            "source": "first-token-detail",
+            "tokensPerSec": 1766,
+            "ttftMs": 3549
+          },
+          {
+            "line": 158,
+            "rx": "2026-11-03T10:15:48.443Z",
+            "sessionId": "243c3595-6c35-41ee-b354-267b11f2f6f5",
+            "source": "first-token-detail",
+            "tokensPerSec": 1323,
+            "ttftMs": 4796
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-plan-and-estimate",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-plan-and-estimate/plan-and-estimate/plan-and-estimate-mlx-gemma4-12b-q4-2026-11-03T10-20-05-274Z-ljgz/recording/chat-events.jsonl",
+      "recordingSha256": "ffd56686f0a20ea2a68cfd51cefce7c9af79d686807b37cd1322185250dab334",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-plan-and-estimate/plan-and-estimate/plan-and-estimate-mlx-gemma4-12b-q4-2026-11-03T10-20-05-274Z-ljgz/metrics.json",
+      "metricsSha256": "4224a95516059c32ef1a5e442c92b79d4dfbc673106e8ff4c726a135deae1e32",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1366,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 25,
+            "rx": "2026-11-03T10:20:17.452Z",
+            "sessionId": "6b51ac79-5f5d-4da4-9dea-fb0f4a6516d5",
+            "source": "first-token-detail",
+            "tokensPerSec": 1366,
+            "ttftMs": 10526
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-plan-and-estimate",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-plan-and-estimate/plan-and-estimate/plan-and-estimate-mlx-qwen3-8-27b-q4-2026-11-03T10-22-12-154Z-fh19/recording/chat-events.jsonl",
+      "recordingSha256": "fc36cffa2dfe443a41c310b8a277d07bb44183844c3e5eade0d0402bea477631",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-plan-and-estimate/plan-and-estimate/plan-and-estimate-mlx-qwen3-8-27b-q4-2026-11-03T10-22-12-154Z-fh19/metrics.json",
+      "metricsSha256": "18bda6dcfbbeac39dcac399c85881e1dcbdb7ecb31e8990f9a27a8410e9d30c4",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 801,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 25,
+            "rx": "2026-11-03T10:22:25.272Z",
+            "sessionId": "7278576e-53a4-4b74-88b5-7d35925a2f83",
+            "source": "first-token-detail",
+            "tokensPerSec": 801,
+            "ttftMs": 11631
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-core-conflict-synthesis",
+      "model": "gemma4-12b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-mlx-gemma4-12b-q4-2026-11-03T10-23-48-739Z-edca/recording/chat-events.jsonl",
+      "recordingSha256": "b2b52b67f15e135989006ed4b3a962e679dcaf56bef09b63c435fd6212e491e9",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-mlx-gemma4-12b-q4-2026-11-03T10-23-48-739Z-edca/metrics.json",
+      "metricsSha256": "1f21b3f35da7ad1c1437bfa301ba17f0b28fa8c1f0effa8c992af4b275038ecf",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1341.5,
+        "sampleCount": 6,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 6,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 27,
+            "rx": "2026-11-03T10:24:03.521Z",
+            "sessionId": "5443b278-a655-4d9d-8e2e-6110cfb3189a",
+            "source": "first-token-detail",
+            "tokensPerSec": 1452,
+            "ttftMs": 13255
+          },
+          {
+            "line": 104,
+            "rx": "2026-11-03T10:24:23.659Z",
+            "sessionId": "5443b278-a655-4d9d-8e2e-6110cfb3189a",
+            "source": "first-token-detail",
+            "tokensPerSec": 1803,
+            "ttftMs": 3262
+          },
+          {
+            "line": 184,
+            "rx": "2026-11-03T10:24:50.257Z",
+            "sessionId": "5443b278-a655-4d9d-8e2e-6110cfb3189a",
+            "source": "first-token-detail",
+            "tokensPerSec": 1355,
+            "ttftMs": 5174
+          },
+          {
+            "line": 252,
+            "rx": "2026-11-03T10:25:07.776Z",
+            "sessionId": "5443b278-a655-4d9d-8e2e-6110cfb3189a",
+            "source": "first-token-detail",
+            "tokensPerSec": 1328,
+            "ttftMs": 7632
+          },
+          {
+            "line": 285,
+            "rx": "2026-11-03T10:25:22.269Z",
+            "sessionId": "5443b278-a655-4d9d-8e2e-6110cfb3189a",
+            "source": "first-token-detail",
+            "tokensPerSec": 1300,
+            "ttftMs": 7073
+          },
+          {
+            "line": 362,
+            "rx": "2026-11-03T10:25:54.031Z",
+            "sessionId": "5443b278-a655-4d9d-8e2e-6110cfb3189a",
+            "source": "first-token-detail",
+            "tokensPerSec": 1257,
+            "ttftMs": 8689
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-core-conflict-synthesis",
+      "model": "qwen3.8-27b-q4",
+      "suite": "core",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-mlx-qwen3-8-27b-q4-2026-11-03T10-29-53-990Z-2z0b/recording/chat-events.jsonl",
+      "recordingSha256": "c1a90fad2cd73c241059e75be304afdb893d87cd610caf179a0528cc8ea0f3c0",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-mlx-qwen3-8-27b-q4-2026-11-03T10-29-53-990Z-2z0b/metrics.json",
+      "metricsSha256": "71a06ee54716c0dbcca9e3a1be97b85b4cb5f8985a59d1f2324f85bbaf5656df",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 553,
+        "sampleCount": 2,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 2,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 31,
+            "rx": "2026-11-03T10:30:21.881Z",
+            "sessionId": "8efc4373-6fd6-455f-9039-4a0c87ab78ab",
+            "source": "first-token-detail",
+            "tokensPerSec": 556,
+            "ttftMs": 26402
+          },
+          {
+            "line": 860,
+            "rx": "2026-11-03T10:32:59.219Z",
+            "sessionId": "8efc4373-6fd6-455f-9039-4a0c87ab78ab",
+            "source": "first-token-detail",
+            "tokensPerSec": 550,
+            "ttftMs": 7936
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-constrained-comms",
+      "model": "qwen3.8-27b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-constrained-comms/constrained-comms/constrained-comms-mlx-qwen3-8-27b-q4-2026-11-03T10-47-48-925Z-a2bm/recording/chat-events.jsonl",
+      "recordingSha256": "13d1693013e6d58dd735f0c4212e9326d1441c46d28bcc43fe17e4eb41a2497f",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-constrained-comms/constrained-comms/constrained-comms-mlx-qwen3-8-27b-q4-2026-11-03T10-47-48-925Z-a2bm/metrics.json",
+      "metricsSha256": "137ed1d12993d79749be91c93739efc44d33ea3b0ff1510a7627da13ef514efe",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 823,
+        "sampleCount": 3,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 3,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 29,
+            "rx": "2026-11-03T10:48:10.420Z",
+            "sessionId": "51bdb659-1f90-4faf-89f0-0b656fd756a8",
+            "source": "first-token-detail",
+            "tokensPerSec": 823,
+            "ttftMs": 20004
+          },
+          {
+            "line": 82,
+            "rx": "2026-11-03T10:48:31.106Z",
+            "sessionId": "51bdb659-1f90-4faf-89f0-0b656fd756a8",
+            "source": "first-token-detail",
+            "tokensPerSec": 835,
+            "ttftMs": 5484
+          },
+          {
+            "line": 127,
+            "rx": "2026-11-03T10:48:44.474Z",
+            "sessionId": "51bdb659-1f90-4faf-89f0-0b656fd756a8",
+            "source": "first-token-detail",
+            "tokensPerSec": 697,
+            "ttftMs": 4262
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-constrained-comms",
+      "model": "gemma4-12b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-constrained-comms/constrained-comms/constrained-comms-mlx-gemma4-12b-q4-2026-11-03T10-51-16-423Z-i847/recording/chat-events.jsonl",
+      "recordingSha256": "7d058db2c708e58fa7a547f1c484ab1d97da423c13fc92736b0166397fc4a24e",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-constrained-comms/constrained-comms/constrained-comms-mlx-gemma4-12b-q4-2026-11-03T10-51-16-423Z-i847/metrics.json",
+      "metricsSha256": "4c4033003058923cc60c4a13ee821d39fe62d97693e909d659ae0f6448139c2c",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1409.5,
+        "sampleCount": 2,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 2,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 27,
+            "rx": "2026-11-03T10:51:32.249Z",
+            "sessionId": "d3cf6ff8-5101-4609-beb0-165129758dae",
+            "source": "first-token-detail",
+            "tokensPerSec": 1252,
+            "ttftMs": 14311
+          },
+          {
+            "line": 88,
+            "rx": "2026-11-03T10:51:51.899Z",
+            "sessionId": "d3cf6ff8-5101-4609-beb0-165129758dae",
+            "source": "first-token-detail",
+            "tokensPerSec": 1567,
+            "ttftMs": 3746
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-records-intake",
+      "model": "qwen3.8-27b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-records-intake/records-intake/records-intake-mlx-qwen3-8-27b-q4-2026-11-03T10-52-32-513Z-0ucf/recording/chat-events.jsonl",
+      "recordingSha256": "656e58dd7a6427cdc541ff5ca5a95386048b039f57fca5ccc74d7fb03111c557",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-records-intake/records-intake/records-intake-mlx-qwen3-8-27b-q4-2026-11-03T10-52-32-513Z-0ucf/metrics.json",
+      "metricsSha256": "326e4fe5cda53ec13f612bc9ebf8af085b650498dbdd4678e07756859ab5f85c",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 692,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 26,
+            "rx": "2026-11-03T10:52:46.692Z",
+            "sessionId": "789d2613-5965-4169-b8b6-2e4facaba9ad",
+            "source": "first-token-detail",
+            "tokensPerSec": 692,
+            "ttftMs": 12594
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-records-intake",
+      "model": "gemma4-12b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-records-intake/records-intake/records-intake-mlx-gemma4-12b-q4-2026-11-03T10-58-30-291Z-59ha/recording/chat-events.jsonl",
+      "recordingSha256": "f16c33062307e4e1f650f0656f75de52be31b7c24bbac51d80cf4d6dc8ca4f84",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-records-intake/records-intake/records-intake-mlx-gemma4-12b-q4-2026-11-03T10-58-30-291Z-59ha/metrics.json",
+      "metricsSha256": "eee6c31cb841730be4f8d5e04e88038e0e816aaa1036a5237b03036fb59fc81f",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1028,
+        "sampleCount": 2,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 2,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 26,
+            "rx": "2026-11-03T10:58:43.756Z",
+            "sessionId": "642f3af4-aa4c-42b1-a175-6004cde80922",
+            "source": "first-token-detail",
+            "tokensPerSec": 969,
+            "ttftMs": 11943
+          },
+          {
+            "line": 262,
+            "rx": "2026-11-03T11:00:04.875Z",
+            "sessionId": "642f3af4-aa4c-42b1-a175-6004cde80922",
+            "source": "first-token-detail",
+            "tokensPerSec": 1087,
+            "ttftMs": 7591
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-plan-and-estimate",
+      "model": "gemma4-12b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-plan-and-estimate/plan-and-estimate/plan-and-estimate-mlx-gemma4-12b-q4-2026-11-03T11-07-01-547Z-fdf1/recording/chat-events.jsonl",
+      "recordingSha256": "ce86d5a014873b83bf545ac37306328525ddffcc5153fab56e7def6979b84c1b",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-plan-and-estimate/plan-and-estimate/plan-and-estimate-mlx-gemma4-12b-q4-2026-11-03T11-07-01-547Z-fdf1/metrics.json",
+      "metricsSha256": "7e9b241ff17942a5ae8b021dd5aa0e288a2e1da1bbd43bba0469b9120d9af502",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1222,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 25,
+            "rx": "2026-11-03T11:07:13.691Z",
+            "sessionId": "664d21ed-c957-4f91-afc9-c5aa6e09b232",
+            "source": "first-token-detail",
+            "tokensPerSec": 1222,
+            "ttftMs": 10625
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-plan-and-estimate",
+      "model": "qwen3.8-27b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-plan-and-estimate/plan-and-estimate/plan-and-estimate-mlx-qwen3-8-27b-q4-2026-11-03T11-09-21-661Z-7ly7/recording/chat-events.jsonl",
+      "recordingSha256": "5297624d3f8e0c10b8585b5228979e436b813f59f29d0a58801630444bf9d79e",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-plan-and-estimate/plan-and-estimate/plan-and-estimate-mlx-qwen3-8-27b-q4-2026-11-03T11-09-21-661Z-7ly7/metrics.json",
+      "metricsSha256": "58a88bf8bc8ccb87a499361ec0308a98933b65deea6caed615e9f26263c65760",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 943,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 25,
+            "rx": "2026-11-03T11:09:33.899Z",
+            "sessionId": "bc9618f1-5885-4364-9fc0-5870e833938f",
+            "source": "first-token-detail",
+            "tokensPerSec": 943,
+            "ttftMs": 10757
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-meeting-followup",
+      "model": "gemma4-12b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-meeting-followup/meeting-followup/meeting-followup-mlx-gemma4-12b-q4-2026-11-03T11-10-56-975Z-gv9z/recording/chat-events.jsonl",
+      "recordingSha256": "8887dd78240d8b60c631edb13c2d4195477078bd9ba82a390615eaf272741692",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-meeting-followup/meeting-followup/meeting-followup-mlx-gemma4-12b-q4-2026-11-03T11-10-56-975Z-gv9z/metrics.json",
+      "metricsSha256": "53272d22bfc92bc4a18ce277c6ea26926c3d3b5f6bcfad5550d7d42caa39b247",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1615.5,
+        "sampleCount": 4,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 4,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 25,
+            "rx": "2026-11-03T11:11:08.770Z",
+            "sessionId": "59a2c343-d807-45f2-b722-8d6f82ae67bb",
+            "source": "first-token-detail",
+            "tokensPerSec": 1784,
+            "ttftMs": 10273
+          },
+          {
+            "line": 92,
+            "rx": "2026-11-03T11:12:52.823Z",
+            "sessionId": "59a2c343-d807-45f2-b722-8d6f82ae67bb",
+            "source": "first-token-detail",
+            "tokensPerSec": 1898,
+            "ttftMs": 4083
+          },
+          {
+            "line": 545,
+            "rx": "2026-11-03T11:14:18.946Z",
+            "sessionId": "59a2c343-d807-45f2-b722-8d6f82ae67bb",
+            "source": "first-token-detail",
+            "tokensPerSec": 1447,
+            "ttftMs": 4846
+          },
+          {
+            "line": 561,
+            "rx": "2026-11-03T11:14:24.760Z",
+            "sessionId": "59a2c343-d807-45f2-b722-8d6f82ae67bb",
+            "source": "first-token-detail",
+            "tokensPerSec": 1231,
+            "ttftMs": 601
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-meeting-followup",
+      "model": "qwen3.8-27b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-meeting-followup/meeting-followup/meeting-followup-mlx-qwen3-8-27b-q4-2026-11-03T11-18-38-160Z-0qki/recording/chat-events.jsonl",
+      "recordingSha256": "7f1c4d0975c61c9bbbac539d6aede1b22ea68a4d179a346c77b332ca73e509f2",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-meeting-followup/meeting-followup/meeting-followup-mlx-qwen3-8-27b-q4-2026-11-03T11-18-38-160Z-0qki/metrics.json",
+      "metricsSha256": "327e0f3f9bdad72deaa5badc3a4db473b08bd0a6bea35a7190a51ad83ec936c4",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 857,
+        "sampleCount": 2,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 2,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 27,
+            "rx": "2026-11-03T11:18:54.601Z",
+            "sessionId": "bc43d02b-6211-4f44-af1a-9eb4439e93d9",
+            "source": "first-token-detail",
+            "tokensPerSec": 861,
+            "ttftMs": 14962
+          },
+          {
+            "line": 124,
+            "rx": "2026-11-03T11:20:42.699Z",
+            "sessionId": "bc43d02b-6211-4f44-af1a-9eb4439e93d9",
+            "source": "first-token-detail",
+            "tokensPerSec": 853,
+            "ttftMs": 2751
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-craftbook-spreadsheet-model",
+      "model": "qwen3.8-27b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-mlx-qwen3-8-27b-q4-2026-11-03T11-27-24-639Z-38e1/recording/chat-events.jsonl",
+      "recordingSha256": "c23a5b6da9e89914d529d66103c7c2a4ef43863cbce81d57b71315bcac90f027",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-mlx-qwen3-8-27b-q4-2026-11-03T11-27-24-639Z-38e1/metrics.json",
+      "metricsSha256": "dcd90213484e33e8641b367a134294aee64820ad98f8ef1b4d05a7744a1dd4aa",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 566,
+        "sampleCount": 4,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 4,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 31,
+            "rx": "2026-11-03T11:27:50.237Z",
+            "sessionId": "583e6653-e8fd-4bdc-9d74-3b5a74fd5edc",
+            "source": "first-token-detail",
+            "tokensPerSec": 627,
+            "ttftMs": 19175
+          },
+          {
+            "line": 430,
+            "rx": "2026-11-03T11:29:11.261Z",
+            "sessionId": "ffcae1cc-4a44-4593-bf7c-1aae241481b4",
+            "source": "first-token-detail",
+            "tokensPerSec": 589,
+            "ttftMs": 15074
+          },
+          {
+            "line": 3554,
+            "rx": "2026-11-03T11:38:22.825Z",
+            "sessionId": "c399e0b9-6237-4871-a8f8-625d1ef0a9dc",
+            "source": "first-token-detail",
+            "tokensPerSec": 543,
+            "ttftMs": 16452
+          },
+          {
+            "line": 6466,
+            "rx": "2026-11-03T11:47:32.301Z",
+            "sessionId": "d9efef28-20ac-4529-88da-b48f41eff6b8",
+            "source": "first-token-detail",
+            "tokensPerSec": 518,
+            "ttftMs": 15701
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-craftbook-spreadsheet-model",
+      "model": "gemma4-12b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-mlx-gemma4-12b-q4-2026-11-03T11-59-00-041Z-xt4q/recording/chat-events.jsonl",
+      "recordingSha256": "451201c57e185a8af6ebe67721c2fd53860d81f39d5c22cb8a70bc7723da44e6",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-mlx-gemma4-12b-q4-2026-11-03T11-59-00-041Z-xt4q/metrics.json",
+      "metricsSha256": "35f45c555eb559b6b97d47b4562f186f120bc21f57283a53c2889a95d014afdc",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1487,
+        "sampleCount": 5,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 5,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 30,
+            "rx": "2026-11-03T11:59:20.649Z",
+            "sessionId": "0208e0da-95fe-4213-a8da-7db04e4fb803",
+            "source": "first-token-detail",
+            "tokensPerSec": 1140,
+            "ttftMs": 14115
+          },
+          {
+            "line": 123,
+            "rx": "2026-11-03T11:59:47.761Z",
+            "sessionId": "b569c412-22af-4e21-94ae-3ba6aeb00ac1",
+            "source": "first-token-detail",
+            "tokensPerSec": 1528,
+            "ttftMs": 6258
+          },
+          {
+            "line": 276,
+            "rx": "2026-11-03T12:00:42.616Z",
+            "sessionId": "9975514e-4dfc-4e8b-bc14-2804ef30f487",
+            "source": "first-token-detail",
+            "tokensPerSec": 1498,
+            "ttftMs": 6009
+          },
+          {
+            "line": 1591,
+            "rx": "2026-11-03T12:04:43.061Z",
+            "sessionId": "3f3604b6-7a7d-4457-84d6-c4b26cce2d18",
+            "source": "first-token-detail",
+            "tokensPerSec": 1252,
+            "ttftMs": 6369
+          },
+          {
+            "line": 1696,
+            "rx": "2026-11-03T12:05:06.404Z",
+            "sessionId": "df1903fc-6bbc-4858-8531-4dd6a6cd1521",
+            "source": "first-token-detail",
+            "tokensPerSec": 1487,
+            "ttftMs": 3459
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-conflict-synthesis",
+      "model": "qwen3.8-27b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-mlx-qwen3-8-27b-q4-2026-11-03T12-05-50-901Z-b4hg/recording/chat-events.jsonl",
+      "recordingSha256": "c1f538e356804e70e3edd66d0cdad2031de7a46fd7b7deebf639572b6b3b23e6",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-mlx-qwen3-8-27b-q4-2026-11-03T12-05-50-901Z-b4hg/metrics.json",
+      "metricsSha256": "3fcd8cdaad81ee3dcca7d06c73465b0415854723b7f8073978a4948831a7018f",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 522,
+        "sampleCount": 6,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 6,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 31,
+            "rx": "2026-11-03T12:06:18.736Z",
+            "sessionId": "37956cf5-f81b-4a42-9137-5f012412bacd",
+            "source": "first-token-detail",
+            "tokensPerSec": 558,
+            "ttftMs": 26336
+          },
+          {
+            "line": 1919,
+            "rx": "2026-11-03T12:12:02.022Z",
+            "sessionId": "37956cf5-f81b-4a42-9137-5f012412bacd",
+            "source": "first-token-detail",
+            "tokensPerSec": 481,
+            "ttftMs": 9292
+          },
+          {
+            "line": 2477,
+            "rx": "2026-11-03T12:14:00.983Z",
+            "sessionId": "37956cf5-f81b-4a42-9137-5f012412bacd",
+            "source": "first-token-detail",
+            "tokensPerSec": 541,
+            "ttftMs": 7205
+          },
+          {
+            "line": 4349,
+            "rx": "2026-11-03T12:20:34.980Z",
+            "sessionId": "37956cf5-f81b-4a42-9137-5f012412bacd",
+            "source": "first-token-detail",
+            "tokensPerSec": 502,
+            "ttftMs": 19875
+          },
+          {
+            "line": 4454,
+            "rx": "2026-11-03T12:21:31.829Z",
+            "sessionId": "37956cf5-f81b-4a42-9137-5f012412bacd",
+            "source": "first-token-detail",
+            "tokensPerSec": 519,
+            "ttftMs": 21279
+          },
+          {
+            "line": 4863,
+            "rx": "2026-11-03T12:23:49.325Z",
+            "sessionId": "37956cf5-f81b-4a42-9137-5f012412bacd",
+            "source": "first-token-detail",
+            "tokensPerSec": 525,
+            "ttftMs": 23247
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-conflict-synthesis",
+      "model": "gemma4-12b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-mlx-gemma4-12b-q4-2026-11-03T12-31-12-895Z-84z4/recording/chat-events.jsonl",
+      "recordingSha256": "4cd7e29d3df0f5598c2c3d4219af7507bd2c9b8fa41ff1f15ca3a517da6995cb",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-mlx-gemma4-12b-q4-2026-11-03T12-31-12-895Z-84z4/metrics.json",
+      "metricsSha256": "fd0605e4cf1bf7445096c3a6d0bfa3f98fde4cef6d1222570804d29bf163c622",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1083,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 27,
+            "rx": "2026-11-03T12:31:29.995Z",
+            "sessionId": "cbde0d17-b69a-434d-800f-f7ded88948ae",
+            "source": "first-token-detail",
+            "tokensPerSec": 1083,
+            "ttftMs": 15587
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-docblocks-theme-roundtrip",
+      "model": "gemma4-12b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-mlx-gemma4-12b-q4-2026-11-03T12-36-49-628Z-sdya/recording/chat-events.jsonl",
+      "recordingSha256": "e6edc792efe42d8c6c63684462638b24ca81c8adc767c43bd9cf74fd076672c0",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-mlx-gemma4-12b-q4-2026-11-03T12-36-49-628Z-sdya/metrics.json",
+      "metricsSha256": "f7c91d59253b373cf11fca5f22dc8e28759f82a7d5ba14a046d841520b0a13a7",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1191,
+        "sampleCount": 3,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 3,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 27,
+            "rx": "2026-11-03T12:37:06.597Z",
+            "sessionId": "2f9e899c-1507-4d0d-b1cc-8656390b96a3",
+            "source": "first-token-detail",
+            "tokensPerSec": 1191,
+            "ttftMs": 14985
+          },
+          {
+            "line": 116,
+            "rx": "2026-11-03T12:38:16.759Z",
+            "sessionId": "2f9e899c-1507-4d0d-b1cc-8656390b96a3",
+            "source": "first-token-detail",
+            "tokensPerSec": 1296,
+            "ttftMs": 577
+          },
+          {
+            "line": 1176,
+            "rx": "2026-11-03T12:41:31.572Z",
+            "sessionId": "2f9e899c-1507-4d0d-b1cc-8656390b96a3",
+            "source": "first-token-detail",
+            "tokensPerSec": 1007,
+            "ttftMs": 15409
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-qwen-mlx-productivity-docblocks-theme-roundtrip",
+      "model": "qwen3.8-27b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": true,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-mlx-qwen3-8-27b-q4-2026-11-03T12-45-48-219Z-1o2j/recording/chat-events.jsonl",
+      "recordingSha256": "bc5d045cfb233134801a22ccb12851481357840715cc68246f1f4e6a4bb34a78",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-qwen-mlx-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-mlx-qwen3-8-27b-q4-2026-11-03T12-45-48-219Z-1o2j/metrics.json",
+      "metricsSha256": "55f5bcbf58a52da195c0cf23ac9b3d05ea4c52fe589d09fe067ea659a4b12e67",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 743,
+        "sampleCount": 1,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 1,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 36,
+            "rx": "2026-11-03T12:46:25.918Z",
+            "sessionId": "fac015d1-8c54-43db-8dbf-d2656d0d3e78",
+            "source": "first-token-detail",
+            "tokensPerSec": 743,
+            "ttftMs": 35749
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    },
+    {
+      "cellId": "r1-gemma-mlx-productivity-craftbook-powerpoint-deck",
+      "model": "gemma4-12b-q4",
+      "suite": "productivity",
+      "comparisonIncluded": false,
+      "recording": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-mlx-gemma4-12b-q4-2026-11-03T12-49-23-654Z-l0ag/recording/chat-events.jsonl",
+      "recordingSha256": "083498875453f05f06fa62b6b1ae1b1a7f1e4a0381c38af837cfe8b2930d3597",
+      "metrics": "evals/runs/scorecard-2026-11-03-m5max-fixed-paired/r1-gemma-mlx-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-mlx-gemma4-12b-q4-2026-11-03T12-49-23-654Z-l0ag/metrics.json",
+      "metricsSha256": "f49d792ff5f775533e50ad1e000f3e89d58555ab452fa665fc3e837a26af90e8",
+      "originalAggregatePrefillTokensPerSec": null,
+      "recovered": {
+        "source": "first-token-detail",
+        "aggregation": "median-observed-events",
+        "tokensPerSec": 1124,
+        "sampleCount": 5,
+        "structuredSampleCount": 0,
+        "firstTokenSampleCount": 5,
+        "malformedLineCount": 0,
+        "duplicateLineCount": 0,
+        "observations": [
+          {
+            "line": 31,
+            "rx": "2026-11-03T12:49:46.353Z",
+            "sessionId": "db73f65e-6c88-4458-a081-6200d741d069",
+            "source": "first-token-detail",
+            "tokensPerSec": 1058,
+            "ttftMs": 16160
+          },
+          {
+            "line": 189,
+            "rx": "2026-11-03T12:50:27.048Z",
+            "sessionId": "17bc2b93-42fb-4d85-83a8-926299c511f9",
+            "source": "first-token-detail",
+            "tokensPerSec": 1258,
+            "ttftMs": 6823
+          },
+          {
+            "line": 329,
+            "rx": "2026-11-03T12:51:08.586Z",
+            "sessionId": "c6bc7554-de56-4163-b7c6-d9a68a446329",
+            "source": "first-token-detail",
+            "tokensPerSec": 1124,
+            "ttftMs": 8464
+          },
+          {
+            "line": 586,
+            "rx": "2026-11-03T12:52:32.387Z",
+            "sessionId": "283a265c-ccbd-4da4-9884-e65fe2280ae7",
+            "source": "first-token-detail",
+            "tokensPerSec": 1247,
+            "ttftMs": 7128
+          },
+          {
+            "line": 785,
+            "rx": "2026-11-03T12:53:41.197Z",
+            "sessionId": "815c9f78-93f6-4d42-8c2e-c561d5fe5380",
+            "source": "first-token-detail",
+            "tokensPerSec": 1013,
+            "ttftMs": 15406
+          }
+        ]
+      },
+      "purePrefillDurationMs": null
+    }
+  ]
+}

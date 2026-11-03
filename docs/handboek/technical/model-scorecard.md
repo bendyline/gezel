@@ -127,6 +127,12 @@ otherwise, as `perf_source` says, and a round measured across separate
 hardware periods has no single speed, so those cells stay empty. Focused
 reruns show `subset` under `scope`.
 
+Where `perf_source` says **observed chat-event prefill**, the prefill figure
+summarizes partial rate observations within each trial. These recovered
+figures are not duration-weighted throughput across every request or exact
+prefill times. The round's report gives coverage and keeps them separate
+from aggregate engine measurements.
+
 ## Choosing from this
 
 A high score on the office set is the better guide for everyday document,

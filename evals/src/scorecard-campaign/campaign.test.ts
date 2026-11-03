@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { comparisonOptions } from '../bin/scorecard-campaign.ts';
+import { parseMlxPrefillTelemetry } from '../mlx-prefill-telemetry.ts';
 import { repoRoot } from '../native-bin.ts';
 import {
   type Cell,
@@ -327,6 +328,26 @@ describe('evidence and reporting', () => {
     r.result.engine = 'openai';
     await write();
     await expect(readRow(root, cell, d)).rejects.toThrow('mismatch');
+  });
+  it('reports observed MLX prefill separately from aggregate timing and exports provenance', async () => {
+    const d = await fullDefinition();
+    const cells = comparisonCells(d);
+    const r = row(cells[0]!, '/result');
+    r.metrics.mlxPrefill = parseMlxPrefillTelemetry(
+      JSON.stringify({
+        rx: 'now',
+        sessionId: 's',
+        event: { type: 'turn_stats', provider: 'mlx', promptTokensPerSec: 1234.5 },
+      }),
+    );
+    const report = comparisonReport(d, cells, [r]);
+    expect(report).toContain('Observed MLX prefill tok/s');
+    expect(report).toContain('1234.5');
+    expect(report).toContain('partial provider-turn coverage');
+    const csv = comparisonCsv([r]);
+    expect(csv).toContain('mlxPrefillSource');
+    expect(csv).toContain('"1234.5","turn_stats","1"');
+    expect(r.metrics.derived.promptTokensPerSec).toBeNull();
   });
   it('preserves missing performance, excludes infrastructure and distinguishes suite repeats', async () => {
     const d = await fullDefinition();

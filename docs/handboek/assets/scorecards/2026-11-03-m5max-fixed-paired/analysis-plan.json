@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "margin": 0.05,
+  "marginSelectedBy": "user",
+  "alpha": 0.05,
+  "bootstrapReplicates": 50000,
+  "seed": 20261103,
+  "pairKey": [
+    "model",
+    "suite",
+    "scenario",
+    "repetition"
+  ],
+  "clusterKey": "scenario",
+  "expectedTrials": 516,
+  "expectedPairsPerModel": 129,
+  "noAdaptiveExpansion": true
+}

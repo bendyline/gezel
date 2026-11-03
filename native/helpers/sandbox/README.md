@@ -37,15 +37,20 @@ session. It gives the same guarantee as systemd's
   family gets `EAFNOSUPPORT`.
 - A syscall made under a foreign ABI (i386 or x32 on x86-64) kills the
   process, so `socketcall()` cannot route around the check.
-- `io_uring_*`, `ptrace` and `process_vm_*` are refused, because each could
-  reach the network or another process outside the filter.
+- `io_uring_*`, `ptrace`, `process_vm_*` and `pidfd_getfd` are refused,
+  because each could reach the network or another process outside the
+  filter. `pidfd_getfd` would copy an open socket out of the parent, which is
+  the Gezel daemon (native-v0.1.57 lacked this rule).
 
 The runner reads `--features` and then proves the rule with a real
 `AF_INET` connect before trusting the helper.
 
 The helper does not confine the file system yet; the runner's Node
 permission model does that, as it does under systemd. Landlock is the
-planned next rule. It links the system C library like the other engines,
+planned next rule. It also closes `/proc/<pid>/mem`, which seccomp cannot
+filter by path: where Yama's `ptrace_scope` is 0, a script that escaped the
+permission model could open the daemon's memory, and Landlock refuses
+ptrace-mode access outside its domain. It links the system C library like the other engines,
 and nothing it uses needs more than the release's glibc 2.38 floor. See
 ADR 0029.
 

@@ -97,8 +97,8 @@ export function comparisonReport(
   }
   lines.push(
     '',
-    '| Target | Input tokens (sum) | Output tokens (sum) | Reported USD (sum) | Decode tok/s (median) | Prefill tok/s (median) | Peak RSS MB (median) | Peak GPU % (median) |',
-    '|---|---:|---:|---:|---:|---:|---:|---:|',
+    '| Target | Input tokens (sum) | Output tokens (sum) | Reported USD (sum) | Decode tok/s (median) | Aggregate prefill tok/s (median) | Observed MLX prefill tok/s (median) | Peak RSS MB (median) | Peak GPU % (median) |',
+    '|---|---:|---:|---:|---:|---:|---:|---:|---:|',
   );
   for (const t of d.targets) {
     const rs = rows.filter((r) => r.cell.targetId === t.id && eligible(r));
@@ -113,12 +113,12 @@ export function comparisonReport(
         rs.map((r) => (r.metrics.usage.available ? r.metrics.usage.totalCostUsd : null)),
         true,
         4,
-      )} | ${measured(rs.map((r) => r.metrics.derived.genTokensPerSec))} | ${measured(rs.map((r) => r.metrics.derived.promptTokensPerSec))} | ${measured(rs.map((r) => r.metrics.derived.peakRssMb))} | ${measured(rs.map((r) => r.metrics.derived.peakGpuUtilPercent))} |`,
+      )} | ${measured(rs.map((r) => r.metrics.derived.genTokensPerSec))} | ${measured(rs.map((r) => r.metrics.derived.promptTokensPerSec))} | ${measured(rs.map((r) => r.metrics.mlxPrefill?.tokensPerSec))} | ${measured(rs.map((r) => r.metrics.derived.peakRssMb))} | ${measured(rs.map((r) => r.metrics.derived.peakGpuUtilPercent))} |`,
     );
   }
   lines.push(
     '',
-    'Actual decode/prefill timings are used above. Whole-trial tokens/second are deliberately omitted. Cloud hardware is not observable; local RSS/GPU and image generation share this device. Timing includes startup and tool work; local warmup/admission probes add elapsed campaign time outside the trial. Cache details and normalized billing remain in summary.json and metrics.json.',
+    'Aggregate prefill uses engine request timings. Observed MLX prefill is the median of per-trial medians from recorded turn_stats (or rounded first-token descriptions on older builds); it has partial provider-turn coverage and is not a request-duration-weighted aggregate. Source, sample counts and observations are in metrics.json. Whole-trial tokens/second are deliberately omitted. Cloud hardware is not observable; local RSS/GPU and image generation share this device. Timing includes startup and tool work; local warmup/admission probes add elapsed campaign time outside the trial. Cache details and normalized billing remain in summary.json and metrics.json.',
     '',
     '## Scenario results',
     '',
@@ -179,6 +179,9 @@ export function comparisonCsv(rows: Row[]) {
       'reportedCostUsd',
       'decodeTokensPerSec',
       'prefillTokensPerSec',
+      'mlxObservedPrefillTokensPerSec',
+      'mlxPrefillSource',
+      'mlxPrefillSampleCount',
       'peakRssMb',
       'peakGpuPercent',
       'repairPolicy',
@@ -207,6 +210,9 @@ export function comparisonCsv(rows: Row[]) {
       r.metrics.usage.totalCostUsd,
       r.metrics.derived.genTokensPerSec,
       r.metrics.derived.promptTokensPerSec,
+      r.metrics.mlxPrefill?.tokensPerSec,
+      r.metrics.mlxPrefill?.source,
+      r.metrics.mlxPrefill?.sampleCount,
       r.metrics.derived.peakRssMb,
       r.metrics.derived.peakGpuUtilPercent,
       r.result.repairPolicy ?? 'harness',

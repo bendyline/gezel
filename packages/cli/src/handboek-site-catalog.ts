@@ -445,7 +445,7 @@ export function measuredResultsMarkdown(scorecard: ScorecardDataset, modelId: st
         cell(suite),
         cell(score.claim),
         speed(speeds.decode),
-        speed(speeds.prefill),
+        `${speed(speeds.prefill)}${speeds.prefillObserved ? ' (observed)' : ''}`,
       ]);
     }),
   );
@@ -453,6 +453,12 @@ export function measuredResultsMarkdown(scorecard: ScorecardDataset, modelId: st
     lines.push(
       '',
       'A partial round reran only some of a set’s tasks, usually to check a fix. It is not a score for the whole set.',
+    );
+  }
+  if (rows.some(({ result }) => scorecardSpeeds(result).prefillObserved)) {
+    lines.push(
+      '',
+      'Observed prefill summarizes partial chat-event rates within each trial. It is not the aggregate throughput of every request or a measurement of pure prefill time; see the round for coverage and method.',
     );
   }
   return lines;
