@@ -47,6 +47,7 @@ export const TaskStrategyOptionsSchema = z
   .object({
     procedure: z.enum(['advisory', 'none']).optional(),
     subagents: z.boolean().optional(),
+    contract: z.enum(['enforced', 'shown', 'hidden']).optional(),
   })
   .strict();
 

@@ -53,10 +53,15 @@ export interface EvalRepairActionSnapshot {
  * craftbook task is created with, and the variant label it is reported under.
  */
 export interface TrialTaskStrategy {
-  /** `stepwise`, `generalist`, `outcome`, `outcome-solo`, `outcome-bare`. */
+  /** An arm id from `STRATEGY_ARMS` (strategy/books.ts). */
   arm: string;
-  strategy: 'stepwise' | 'generalist' | 'outcome';
-  options?: { procedure?: 'advisory' | 'none'; subagents?: boolean };
+  /** `auto` leaves the pick to the daemon: the model's measured strategy, else the tier rule. */
+  strategy: 'stepwise' | 'generalist' | 'outcome' | 'auto';
+  options?: {
+    procedure?: 'advisory' | 'none';
+    subagents?: boolean;
+    contract?: 'enforced' | 'shown' | 'hidden';
+  };
 }
 
 export interface EvalContext {

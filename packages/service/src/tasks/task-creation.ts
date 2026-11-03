@@ -10,8 +10,7 @@ import {
   effectiveGeneralistModeSetting,
   executionModeForStrategy,
   parseTaskRef,
-  resolveTaskExecutionMode,
-  resolveTaskStrategy,
+  resolveAutoTaskStrategy,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { ChatEventBus } from '../chat/events.js';
@@ -125,19 +124,37 @@ export async function wireTaskCreation({
     }),
   );
 
-  // Execution mode (generalist v2): decided once per task from the install
-  // setting and the provider that will actually run it, then stamped on
-  // the task. An auto-assigned generalist task gets the Generalist gezel
-  // (one per install, reused by template id) pulled onto the project;
-  // a task whose caller pinned an owner keeps that owner. Errors fall back
-  // to stepwise inside TaskManager, the behavior every task had before.
+  // Strategy: decided once per task from the install settings and the model
+  // that will actually run it, then stamped on the task. Under `auto` the
+  // model's measured strategy (catalog `tuning.taskStrategy`) wins, else the
+  // tier rule. An auto-assigned single-owner task gets the Generalist gezel
+  // (one per install, reused by template id) pulled onto the project, and the
+  // pick is re-read for the Generalist's own model; a task whose caller
+  // pinned an owner keeps that owner. Errors fall back to stepwise inside
+  // TaskManager, the behavior every task had before.
+  const autoFor = async (
+    providerName: ProviderName,
+    gezelId: string | undefined,
+    generalistMode: ReturnType<typeof effectiveGeneralistModeSetting>,
+  ) => {
+    const model = await chat.executionModelProfile(providerName, gezelId);
+    return {
+      ...model,
+      ...resolveAutoTaskStrategy({
+        generalistMode,
+        providerName,
+        tier: model.tier,
+        affinity: model.affinity,
+      }),
+    };
+  };
   tasks.setExecutionModeResolver(async ({ projectId, assigneeGezelId, nightShift, requested }) => {
     const config = await store.readConfig();
     const setting = effectiveGeneralistModeSetting(config);
     const strategySetting =
       config.taskStrategy && config.taskStrategy !== 'auto' ? config.taskStrategy : undefined;
     let providerName: ProviderName | undefined;
-    let tier: string | undefined;
+    let auto: Awaited<ReturnType<typeof autoFor>> | undefined;
     let strategy: TaskStrategy;
     if (requested !== 'auto') {
       strategy = requested;
@@ -147,10 +164,17 @@ export async function wireTaskCreation({
       providerName = assigneeGezelId
         ? await chat.providerForGezel(assigneeGezelId, { nightShift: Boolean(nightShift) })
         : resolveDefaultProviderName(config);
-      tier = await chat.classifyExecutionTier(providerName, assigneeGezelId);
-      strategy = resolveTaskStrategy({ generalistMode: setting }, providerName, tier);
+      auto = await autoFor(providerName, assigneeGezelId, setting);
+      strategy = auto.strategy;
     }
-    const mode = executionModeForStrategy(strategy);
+    const pick = (a: Awaited<ReturnType<typeof autoFor>>, provider: ProviderName) => ({
+      strategy: a.strategy,
+      ...(a.options ? { options: a.options } : {}),
+      fallback: a.fallback,
+      source: a.source,
+      providerName: provider,
+      tier: a.tier,
+    });
     const base = {
       strategy,
       ...(strategySetting
@@ -158,9 +182,9 @@ export async function wireTaskCreation({
         : setting
           ? { setting }
           : {}),
-      ...(providerName ? { providerName } : {}),
-      ...(tier ? { tier } : {}),
+      ...(auto && providerName ? pick(auto, providerName) : {}),
     };
+    const mode = executionModeForStrategy(strategy);
     if (mode !== 'generalist' || assigneeGezelId) return { mode, ...base };
     const generalist = await ensureGezel({
       opts: { jobTitle: 'Generalist', templateId: GENERALIST_TEMPLATE_ID },
@@ -172,28 +196,28 @@ export async function wireTaskCreation({
     await store.addGezelToProject(projectId, generalist.gezelId, { source: 'task' }).catch(() => {
       /* roster add is best-effort */
     });
-    // The Generalist may carry its own provider pin (a user parked it on a
-    // local model). Under `auto` that pin decides, not the install default:
-    // a single-session run on a model the rule says is not ready for it is
-    // exactly what `auto` exists to avoid.
-    if (requested === 'auto' && !strategySetting) {
+    // The Generalist may carry its own provider or model pin (a user parked
+    // it on a local model). Under `auto` its model decides, not the install
+    // default: running one owner on a model whose measurement says otherwise
+    // is exactly what `auto` exists to avoid.
+    if (auto && providerName) {
       const ownerProvider = await chat.providerForGezel(generalist.gezelId, {
         nightShift: Boolean(nightShift),
       });
-      if (ownerProvider !== providerName) {
-        const ownerTier = await chat.classifyExecutionTier(ownerProvider, generalist.gezelId);
-        if (resolveTaskExecutionMode(setting, ownerProvider, ownerTier) !== 'generalist') {
+      const owner = await autoFor(ownerProvider, generalist.gezelId, setting);
+      if (ownerProvider !== providerName || owner.modelId !== auto.modelId) {
+        if (executionModeForStrategy(owner.strategy) !== 'generalist') {
           log.info(
-            `[tasks] generalist ${generalist.gezelId} is pinned to ${ownerProvider} (${ownerTier}); running stepwise under auto`,
+            `[tasks] generalist ${generalist.gezelId} runs ${ownerProvider}${owner.modelId ? `:${owner.modelId}` : ''} (${owner.tier}); running ${owner.strategy} under auto`,
           );
-          return {
-            mode: 'stepwise',
-            ...base,
-            strategy: 'stepwise',
-            providerName: ownerProvider,
-            tier: ownerTier,
-          };
+          return { mode: 'stepwise', ...base, ...pick(owner, ownerProvider) };
         }
+        return {
+          mode: 'generalist',
+          ownerGezelId: generalist.gezelId,
+          ...base,
+          ...pick(owner, ownerProvider),
+        };
       }
     }
     return { mode: 'generalist', ownerGezelId: generalist.gezelId, ...base };

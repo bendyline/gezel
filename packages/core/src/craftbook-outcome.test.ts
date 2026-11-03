@@ -11,8 +11,10 @@ import { normalizeStepGate } from './schemas/gate.js';
 import type { TaskCraftbook } from './schemas/task.js';
 import {
   requestedTaskStrategy,
+  resolveAutoTaskStrategy,
   resolveTaskStrategy,
   strategyProfile,
+  taskContractMode,
   taskSurfaceSteps,
 } from './task-strategy.js';
 
@@ -138,7 +140,96 @@ describe('resolveTaskStrategy', () => {
   });
 });
 
+describe('resolveAutoTaskStrategy', () => {
+  it("picks the model's measured strategy and carries its options", () => {
+    expect(
+      resolveAutoTaskStrategy({
+        providerName: 'llama-cpp',
+        tier: 'tiny',
+        affinity: { strategy: 'outcome', procedure: 'none' },
+      }),
+    ).toEqual({
+      strategy: 'outcome',
+      options: { procedure: 'none' },
+      source: 'model',
+      fallback: 'stepwise',
+    });
+    expect(
+      resolveAutoTaskStrategy({
+        generalistMode: 'auto',
+        providerName: 'llama-cpp',
+        tier: 'medium',
+        affinity: { strategy: 'outcome' },
+      }),
+    ).toEqual({ strategy: 'outcome', source: 'model', fallback: 'stepwise' });
+  });
+
+  it('falls back to the tier rule for a model with no measurement', () => {
+    expect(resolveAutoTaskStrategy({ providerName: 'llama-cpp', tier: 'small' })).toEqual({
+      strategy: 'stepwise',
+      source: 'tier',
+      fallback: 'stepwise',
+    });
+    expect(resolveAutoTaskStrategy({ providerName: 'anthropic', tier: 'cloud' }).strategy).toBe(
+      'generalist',
+    );
+  });
+
+  it("lets an explicit generalistMode win over the model's measurement", () => {
+    const affinity = { strategy: 'outcome' as const, procedure: 'none' as const };
+    expect(
+      resolveAutoTaskStrategy({ generalistMode: 'off', providerName: 'llama-cpp', affinity }),
+    ).toEqual({ strategy: 'stepwise', source: 'tier', fallback: 'stepwise' });
+    expect(
+      resolveAutoTaskStrategy({ generalistMode: 'on', providerName: 'llama-cpp', affinity })
+        .strategy,
+    ).toBe('generalist');
+  });
+
+  it('drops a recipe option on a pick that is not outcome', () => {
+    expect(
+      resolveAutoTaskStrategy({
+        providerName: 'llama-cpp',
+        affinity: { strategy: 'stepwise', procedure: 'none' },
+      }),
+    ).toEqual({ strategy: 'stepwise', source: 'model', fallback: 'stepwise' });
+  });
+});
+
 describe('renderCraftbookAsOutcome', () => {
+  it('checks nothing when the contract is only shown, and keeps the finish on the deliverable', () => {
+    const rendered = renderCraftbookAsOutcome(book(), {
+      now: NOW,
+      options: { procedure: 'none', contract: 'shown' },
+    });
+    expect(rendered.ok).toBe(true);
+    if (!rendered.ok) return;
+    const step = rendered.craftbook.steps[0]!;
+    expect(step.gate).toBeUndefined();
+    expect(step.advanceWhen).toEqual({ file: 'out/report.md', minBytes: 400 });
+    expect(step.description).toBe(CONTRACT.goal);
+    expect(step.prompt).toContain('**Task contract**');
+    expect(step.prompt).not.toContain('checks the contract');
+    expect(rendered.craftbook.contract).toEqual(CONTRACT);
+  });
+
+  it('leaves the request as the only brief when the contract is hidden, keeping it for grading', () => {
+    const rendered = renderCraftbookAsOutcome(book(), {
+      now: NOW,
+      options: { procedure: 'none', contract: 'hidden' },
+    });
+    expect(rendered.ok).toBe(true);
+    if (!rendered.ok) return;
+    const step = rendered.craftbook.steps[0]!;
+    expect(step.gate).toBeUndefined();
+    expect(step.description).not.toContain(CONTRACT.goal);
+    expect(step.prompt).not.toContain('Task contract');
+    expect(step.prompt).toContain('Deliver what the request asks for');
+    expect(rendered.craftbook.contract).toEqual(CONTRACT);
+    expect(taskContractMode({ strategyOptions: { contract: 'hidden' } })).toBe('hidden');
+    expect(taskContractMode({})).toBe('enforced');
+  });
+
   it('folds the recipe into one terminal step gated by the contract', () => {
     const rendered = renderCraftbookAsOutcome(book(), { now: NOW });
     expect(rendered.ok).toBe(true);

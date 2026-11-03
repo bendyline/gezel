@@ -25,6 +25,15 @@ const log = createLogger('tasks');
 export interface ExecutionModeResolution {
   mode: TaskExecutionMode;
   strategy?: TaskStrategy;
+  /** Options the strategy pick carries (a model measured on outcome without a recipe). */
+  options?: TaskStrategyOptions;
+  /**
+   * What `auto` runs when an outcome pick cannot render for this book.
+   * Absent: generalist, the fallback an install-wide outcome setting gets.
+   */
+  fallback?: TaskStrategy;
+  /** `auto`'s source: the model's measured strategy, or the tier rule. */
+  source?: 'model' | 'tier';
   ownerGezelId?: string;
   setting?: string;
   providerName?: string;
@@ -67,6 +76,8 @@ export interface ApplyExecutionModeArgs {
 export interface AppliedExecutionMode {
   mode: TaskExecutionMode;
   strategy: TaskStrategy;
+  /** The options to stamp on the task: the request's over the pick's. */
+  strategyOptions?: TaskStrategyOptions;
   craftbook: TaskCraftbook;
   spawnsCraftbook?: TaskCraftbook | undefined;
 }
@@ -112,12 +123,16 @@ export async function applyExecutionMode(
     resolution = { mode: 'stepwise' };
   }
   let strategy: TaskStrategy = resolution.strategy ?? resolution.mode;
+  const options: TaskStrategyOptions | undefined =
+    resolution.options || args.strategyOptions
+      ? { ...resolution.options, ...args.strategyOptions }
+      : undefined;
   let craftbook = args.craftbook;
   let spawnsCraftbook = args.spawnsCraftbook;
   if (strategy === 'outcome') {
     const rendered = renderCraftbookAsOutcome(craftbook, {
       spawnsCraftbook,
-      options: args.strategyOptions,
+      options,
       now: args.now,
     });
     if (rendered.ok) {
@@ -126,14 +141,16 @@ export async function applyExecutionMode(
     } else if (args.explicit) {
       throw new Error(`task ${args.ref} cannot run as an outcome: ${rendered.reason}`);
     } else {
-      log.warn(`[tasks] ${args.ref} runs generalist: ${rendered.reason}`);
-      strategy = 'generalist';
+      strategy = resolution.fallback ?? 'generalist';
+      log.warn(`[tasks] ${args.ref} runs ${strategy}: ${rendered.reason}`);
     }
   }
-  if (strategy !== 'outcome') {
+  if (strategy !== 'outcome' && (options?.contract ?? 'enforced') === 'enforced') {
     craftbook = withTerminalContractGate(craftbook);
     if (spawnsCraftbook) spawnsCraftbook = withTerminalContractGate(spawnsCraftbook);
   }
+  const strategyOptions =
+    strategy === 'outcome' ? options : options?.contract ? { contract: options.contract } : undefined;
   const mode = executionModeForStrategy(strategy);
   const owner =
     mode === 'generalist' ? (args.assigneeGezelId ?? resolution.ownerGezelId) : undefined;
@@ -144,7 +161,13 @@ export async function applyExecutionMode(
   // Stable marker: the eval harness reads `resolved=`/`setting=`/`strategy=`
   // into its continuity facts. Keep the shape if you reword the rest.
   log.info(
-    `[tasks] ${args.ref} generalist-mode resolved=${mode} setting=${resolution.setting ?? 'auto'} provider=${resolution.providerName ?? 'unknown'} tier=${resolution.tier ?? 'unknown'} requested=${args.requested}${owner ? ` owner=${owner}` : ''} strategy=${strategy}`,
+    `[tasks] ${args.ref} generalist-mode resolved=${mode} setting=${resolution.setting ?? 'auto'} provider=${resolution.providerName ?? 'unknown'} tier=${resolution.tier ?? 'unknown'} requested=${args.requested}${owner ? ` owner=${owner}` : ''} strategy=${strategy}${resolution.source ? ` source=${resolution.source}` : ''}${strategyOptions?.procedure ? ` procedure=${strategyOptions.procedure}` : ''}${strategyOptions?.contract ? ` contract=${strategyOptions.contract}` : ''}`,
   );
-  return { mode, strategy, craftbook, ...(spawnsCraftbook ? { spawnsCraftbook } : {}) };
+  return {
+    mode,
+    strategy,
+    ...(strategyOptions ? { strategyOptions } : {}),
+    craftbook,
+    ...(spawnsCraftbook ? { spawnsCraftbook } : {}),
+  };
 }

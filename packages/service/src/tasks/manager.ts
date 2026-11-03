@@ -1138,6 +1138,8 @@ export class TaskManager {
     let executionMode: TaskExecutionMode | undefined = strategy
       ? executionModeForStrategy(strategy)
       : undefined;
+    let strategyOptions =
+      strategy === 'outcome' || input.strategyOptions?.contract ? input.strategyOptions : undefined;
     if (!isDraft) {
       const applied = await applyExecutionMode(this.executionModeResolver, {
         projectId,
@@ -1153,6 +1155,7 @@ export class TaskManager {
       });
       executionMode = applied.mode;
       strategy = applied.strategy;
+      strategyOptions = applied.strategyOptions;
       craftbook = applied.craftbook;
       spawnsCraftbook = applied.spawnsCraftbook;
     }
@@ -1201,9 +1204,7 @@ export class TaskManager {
       ...(assigneeAuto ? { assigneeAuto: true } : {}),
       ...(executionMode ? { executionMode } : {}),
       ...(strategy ? { strategy } : {}),
-      ...(input.strategyOptions && strategy === 'outcome'
-        ? { strategyOptions: input.strategyOptions }
-        : {}),
+      ...(strategyOptions ? { strategyOptions } : {}),
       craftbook,
       ...(input.trustScripts
         ? {
@@ -1670,13 +1671,18 @@ export class TaskManager {
       steps: bumpStepActivation(applied.craftbook.steps, entry, now),
       updatedAt: now,
     };
-    const { spawnsCraftbook: _priorSpawn, ...withoutSpawn } = task;
+    const {
+      spawnsCraftbook: _priorSpawn,
+      strategyOptions: _requestedOptions,
+      ...withoutSpawn
+    } = task;
     const next: Task = {
       ...withoutSpawn,
       ...(applied.spawnsCraftbook ? { spawnsCraftbook: applied.spawnsCraftbook } : {}),
       status: 'active',
       executionMode: applied.mode,
       strategy: applied.strategy,
+      ...(applied.strategyOptions ? { strategyOptions: applied.strategyOptions } : {}),
       craftbook,
       activeStepId: entry,
       updatedAt: now,

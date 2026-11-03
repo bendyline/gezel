@@ -1,8 +1,9 @@
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { holm, mcnemarExact, meanOf, quantile, seededRandom } from '../ab-stats.ts';
-import { CONTROL_ARM, STRATEGY_BOOK_CLASSES } from './books.ts';
+import { CONTROL_ARM, STRATEGY_ARMS, STRATEGY_BOOK_CLASSES } from './books.ts';
 import { type ContractGrade, gradeContract } from './contract-grade.ts';
+import { type TrialEngineMetrics, readEngineMetrics } from './engine-metrics.ts';
 import { type JudgeReport, isCurrentJudgeReport } from './judge.ts';
 
 /**
@@ -37,6 +38,10 @@ export interface StrategyTrialRow {
   failureClass?: string;
   inputTokens?: number;
   outputTokens?: number;
+  /** Context size, engine speed and the resolved strategy, from the daemon log. */
+  engine?: TrialEngineMetrics;
+  /** Compactions the daemon ran (between turns and mid-loop). */
+  compactions?: number;
 }
 
 async function readJson<T>(path: string): Promise<T | null> {
@@ -53,6 +58,7 @@ interface FactsShape {
     progression?: Array<{ score?: number; scoreMax?: number }>;
   };
   perf?: { usage?: { totalInputTokens?: number; totalOutputTokens?: number } };
+  continuity?: { compaction?: { betweenTurn?: number; midTurn?: number } };
 }
 
 /** Grade one trial directory, writing `contract-grade.json` beside it. */
@@ -75,6 +81,8 @@ export async function gradeTrial(
   const passed = (contract?.passed ?? 0) + (testScore ?? 0);
   const usage = facts?.perf?.usage;
   const judge = await readJson<Partial<JudgeReport>>(join(trialDir, 'judge.json'));
+  const engine = await readEngineMetrics(trialDir, contract?.taskRef);
+  const compaction = facts?.continuity?.compaction;
   return {
     ...meta,
     bookClass: STRATEGY_BOOK_CLASSES[meta.craftbookId] ?? 'other',
@@ -93,6 +101,10 @@ export async function gradeTrial(
     ...(typeof usage?.totalInputTokens === 'number' ? { inputTokens: usage.totalInputTokens } : {}),
     ...(typeof usage?.totalOutputTokens === 'number'
       ? { outputTokens: usage.totalOutputTokens }
+      : {}),
+    ...(engine ? { engine } : {}),
+    ...(compaction
+      ? { compactions: (compaction.betweenTurn ?? 0) + (compaction.midTurn ?? 0) }
       : {}),
   };
 }
@@ -182,18 +194,22 @@ function median(values: number[]): number | null {
  * Pair each arm's trials with the control's on the same model and book, by
  * replicate order, and compare.
  */
-export function compareArms(rows: readonly StrategyTrialRow[], arms: readonly string[]) {
+export function compareArms(
+  rows: readonly StrategyTrialRow[],
+  arms: readonly string[],
+  control: string = CONTROL_ARM,
+) {
   const out: ArmComparison[] = [];
   const models = [...new Set(rows.map((r) => r.modelId))];
   for (const modelId of models) {
     const forModel = rows.filter((r) => r.modelId === modelId);
     const comparisons: ArmComparison[] = [];
     for (const arm of arms) {
-      if (arm === CONTROL_ARM) continue;
+      if (arm === control) continue;
       const pairs: Array<{ book: string; x: StrategyTrialRow; c: StrategyTrialRow }> = [];
       for (const book of new Set(forModel.map((r) => r.craftbookId))) {
         const xs = forModel.filter((r) => r.craftbookId === book && r.arm === arm);
-        const cs = forModel.filter((r) => r.craftbookId === book && r.arm === CONTROL_ARM);
+        const cs = forModel.filter((r) => r.craftbookId === book && r.arm === control);
         for (let i = 0; i < Math.min(xs.length, cs.length); i++) {
           pairs.push({ book, x: xs[i]!, c: cs[i]! });
         }
@@ -250,6 +266,7 @@ export function renderStrategyMarkdown(
   comparisons: readonly ArmComparison[],
   meta: Record<string, unknown>,
   arms: readonly string[],
+  control: string = CONTROL_ARM,
 ): string {
   const lines = ['# Task-strategy benchmark', ''];
   for (const [k, v] of Object.entries(meta)) lines.push(`- **${k}:** ${String(v)}`);
@@ -258,9 +275,11 @@ export function renderStrategyMarkdown(
   // every arm's gates differ from the design: the comparison is void for it.
   // A finished task's gates approved, so every gate criterion of its
   // contract should pass post hoc. Disagreement means the grader and the
-  // runtime read the contract differently (the pilot requires >= 95%).
+  // runtime read the contract differently (the pilot requires >= 95%). The
+  // ablation arms never check their contract, so they say nothing about it.
   const finished = rows.flatMap((r) =>
-    r.contract?.status === 'complete'
+    r.contract?.status === 'complete' &&
+    (STRATEGY_ARMS[r.arm]?.options?.contract ?? 'enforced') === 'enforced'
       ? r.contract.criteria.filter((c) => c.enforce === 'gate' && c.pass !== null)
       : [],
   );
@@ -296,11 +315,12 @@ export function renderStrategyMarkdown(
       lines.push(`| ${book} | ${cells.join(' | ')} |`);
     }
     lines.push('', 'Cells: P1 passes / trials · mean P2 · median wall time.', '');
+    lines.push(...renderCostTable(rows.filter((r) => r.modelId === modelId), arms), '');
     for (const c of comparisons.filter((x) => x.modelId === modelId)) {
       const interval = (d: Interval | null) =>
         d ? `${signed(d.estimate)} [${signed(d.low)}, ${signed(d.high)}]` : '—';
       lines.push(
-        `- **${c.arm} − ${CONTROL_ARM}** (${c.pairs} pairs): P2 ${interval(c.p2Delta)}; P3 ${interval(c.p3Delta)}; P1 discordant ${c.p1.armOnly}/${c.p1.controlOnly} (McNemar p=${c.p1.p.toFixed(3)}, Holm ${c.p1.pHolm.toFixed(3)}); wall ×${c.wallRatio === null ? '—' : c.wallRatio.toFixed(2)}${c.newFailureModes.length > 0 ? `; new failure modes: ${c.newFailureModes.join(', ')}` : ''}`,
+        `- **${c.arm} − ${control}** (${c.pairs} pairs): P2 ${interval(c.p2Delta)}; P3 ${interval(c.p3Delta)}; P1 discordant ${c.p1.armOnly}/${c.p1.controlOnly} (McNemar p=${c.p1.p.toFixed(3)}, Holm ${c.p1.pHolm.toFixed(3)}); wall ×${c.wallRatio === null ? '—' : c.wallRatio.toFixed(2)}${c.newFailureModes.length > 0 ? `; new failure modes: ${c.newFailureModes.join(', ')}` : ''}`,
       );
     }
     lines.push('');
@@ -309,4 +329,41 @@ export function renderStrategyMarkdown(
     'Per-class figures are descriptive. The decision rule (docs/task-strategies.md §6) reads the P2 interval, the pooled P1 discordance, the wall ratio and new failure modes together.',
   );
   return `${lines.join('\n')}\n`;
+}
+
+function thousands(n: number | null): string {
+  return n === null ? '—' : `${(n / 1000).toFixed(1)}K`;
+}
+
+/**
+ * Per arm: what it cost in context, how fast the engine ran, how often the
+ * daemon compacted, and which strategy the daemon actually resolved (the
+ * `auto` arm's pick, and any fallback).
+ */
+function renderCostTable(rows: readonly StrategyTrialRow[], arms: readonly string[]): string[] {
+  const lines = [
+    '| Arm | Peak prompt (median) | First request (median) | Decode t/s (median) | Compactions | Resolved |',
+    '|---|---|---|---|---|---|',
+  ];
+  for (const arm of arms) {
+    const trials = rows.filter((r) => r.arm === arm);
+    if (trials.length === 0) continue;
+    const values = (pick: (e: TrialEngineMetrics) => number | null) =>
+      trials.flatMap((r) => {
+        const v = r.engine ? pick(r.engine) : null;
+        return v === null ? [] : [v];
+      });
+    const resolved = new Map<string, number>();
+    for (const r of trials) {
+      const key = r.engine?.resolvedStrategy
+        ? `${r.engine.resolvedStrategy}${r.engine.resolvedSource ? ` (${r.engine.resolvedSource})` : ''}`
+        : 'unknown';
+      resolved.set(key, (resolved.get(key) ?? 0) + 1);
+    }
+    const decode = median(values((e) => e.decodeTps));
+    lines.push(
+      `| ${arm} | ${thousands(median(values((e) => e.peakPromptTokens)))} | ${thousands(median(values((e) => e.firstPromptTokens)))} | ${decode === null ? '—' : decode.toFixed(1)} | ${trials.reduce((n, r) => n + (r.compactions ?? 0), 0)} | ${[...resolved].map(([k, n]) => `${k} ×${n}`).join(', ')} |`,
+    );
+  }
+  return lines;
 }

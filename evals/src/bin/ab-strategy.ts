@@ -10,6 +10,7 @@ import { repoRoot } from '../native-bin.ts';
 import { defaultProvider } from '../providers.ts';
 import { slugifyForDirName } from '../runner.ts';
 import {
+  CONTROL_ARM,
   STRATEGY_BENCHMARK_BOOKS,
   STRATEGY_PILOT_BOOKS,
   armOrder,
@@ -61,6 +62,8 @@ const OWN_FLAGS = [
   'judge',
   'judge-validity',
   'mlx-source-home',
+  'control',
+  'summary',
 ] as const;
 
 /** The latest version of a book in the gilde data the daemon will read. */
@@ -144,6 +147,12 @@ async function main(): Promise<void> {
   const count = args.flags.count ? Number(args.flags.count) : 1;
   const timeoutMs = args.flags.timeout ? parseDuration(String(args.flags.timeout)) : undefined;
   const dataDir = gildeDataDir();
+  // The arm every other arm is paired with: stepwise for the strategy
+  // comparison, outcome-bare for the contract ablation.
+  const control = args.flags.control ? String(args.flags.control) : CONTROL_ARM;
+  if (!arms.some((a) => a.arm === control)) {
+    throw new Error(`--control ${control} is not among the arms (${arms.map((a) => a.arm).join(', ')})`);
+  }
 
   const missing: string[] = [];
   for (const id of books) {
@@ -176,6 +185,10 @@ async function main(): Promise<void> {
     books: books.join(', '),
     arms: arms.map((a) => a.arm).join(', '),
     replicates: count,
+    control,
+    // A forced engine window (the context-size leg) changes what every arm
+    // can hold, so it is part of the run's identity.
+    ...(process.env.GEZEL_LLAMA_NUM_CTX ? { numCtx: process.env.GEZEL_LLAMA_NUM_CTX } : {}),
     timeout: timeoutMs ? `${Math.round(timeoutMs / 60_000)}m` : 'scenario default',
     gildeDataDir: dataDir,
     gitSha: await gitSha(),
@@ -243,6 +256,15 @@ async function main(): Promise<void> {
       }
     }
   }
+  if (args.flags['grade-only'] === true) {
+    // A grade-only pass is not given the run's --count: read it off the trials.
+    const perCell = new Map<string, number>();
+    for (const r of rows) {
+      const key = `${r.modelId}/${r.craftbookId}/${r.arm}`;
+      perCell.set(key, (perCell.get(key) ?? 0) + 1);
+    }
+    meta.replicates = Math.max(0, ...perCell.values());
+  }
   // P3: judge each graded trial once (the pinned judge, three samples), then
   // read the scores back into its row.
   const validity = args.flags['judge-validity'] === true;
@@ -265,8 +287,12 @@ async function main(): Promise<void> {
   const comparisons = compareArms(
     rows,
     arms.map((a) => a.arm),
+    control,
   );
   meta.finishedAt = new Date().toISOString();
+  // Several comparisons over one run root (the strategy arms against
+  // stepwise, the contract ablation against outcome-bare) each get a name.
+  const summaryName = args.flags.summary ? String(args.flags.summary) : 'strategy-summary';
   const judgeValidity = validity
     ? await runJudgeValidity(rows, sourcesFor, { log: (line) => console.log(line) })
     : null;
@@ -279,14 +305,15 @@ async function main(): Promise<void> {
       comparisons,
       meta,
       arms.map((a) => a.arm),
+      control,
     ) + (judgeValidity ? `\n${renderJudgeValidityMarkdown(judgeValidity)}` : '');
   await writeFile(
-    join(root, 'strategy-summary.json'),
+    join(root, `${summaryName}.json`),
     JSON.stringify({ meta, rows, comparisons, judgeValidity }, null, 2),
   );
-  await writeFile(join(root, 'strategy-summary.md'), markdown);
+  await writeFile(join(root, `${summaryName}.md`), markdown);
   console.log(`\n${markdown}`);
-  console.log(`[ab-strategy] summary: ${join(root, 'strategy-summary.md')}`);
+  console.log(`[ab-strategy] summary: ${join(root, `${summaryName}.md`)}`);
 }
 
 const invokedDirectly =
