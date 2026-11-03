@@ -737,7 +737,14 @@ describe('SettingsView', () => {
 
   it('keeps developer areas for debug mode or an install that uses them', async () => {
     vi.mocked(api.listInstalledToolsets).mockResolvedValue({ toolsets: [] } as never);
-    const developer = ['ollama', 'codexCli', 'anthropicCli', 'remoteServers', 'toolsets'];
+    const developer = [
+      'ollama',
+      'codexCli',
+      'anthropicCli',
+      'remoteServers',
+      'toolsets',
+      'accounts',
+    ];
     const plain = render(<SettingsView />);
     await screen.findByTestId('settings-nav-general');
     await waitFor(() =>
