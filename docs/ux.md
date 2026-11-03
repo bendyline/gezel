@@ -1314,7 +1314,7 @@ changes; a long value ends in an ellipsis.
 **Tab rows fit by shedding labels, not by scrolling.** A tab row that
 names where you can go must show every destination at once. The project
 section tabs and the compact conversation tabs (Chat / Task / Skills /
-References) render through `FittedTabsList`, which steps down in three
+Files) render through `FittedTabsList`, which steps down in three
 stages as the row narrows: every label; icons with the current tab still
 named beside its icon; icons alone. Labels win whenever they fit, so a
 desktop window never shows an icon row it has room to spell out. An
@@ -1550,7 +1550,7 @@ screen's New task / scheduled / Night Shift control is the reference.
 
 **A menu never runs off the window.** Radix flips a panel to the other side
 when it doesn't fit, but a list taller than *either* side — the chat rail's
-References menu grows with every file a gezel touches — still spills past the
+Files menu grows with every file a gezel touches — still spills past the
 edge, because Radix measures the room and leaves the clamping to CSS. The
 shared `.app-nav-menu` panel takes
 `max-height: calc(var(--radix-popper-available-height, 100vh) - 0.75rem)` and

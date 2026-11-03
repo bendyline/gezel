@@ -3605,7 +3605,7 @@ button.timeline-session-divider-child::before {
 }
 
 /* Every rail section fills the available space. Reference selection lives
-   in the References tab's dropdown rather than taking width from the viewer. */
+   in the Files tab's dropdown rather than taking width from the viewer. */
 .chat-rail-section-body {
   display: flex;
   flex: 1;
@@ -3617,9 +3617,17 @@ button.timeline-session-divider-child::before {
    directly without this chrome. */
 .chat-rail-section-tabs {
   display: flex;
+  align-items: center;
   gap: 0.25rem;
   padding: 0.2rem 0.2rem 0;
   flex: 0 0 auto;
+}
+
+.chat-rail-section-label {
+  flex: 0 0 auto;
+  margin-right: 0.25rem;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
 }
 
 .chat-rail-section-tab {
