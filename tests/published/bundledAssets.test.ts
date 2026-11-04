@@ -212,6 +212,32 @@ describe('service bundled assets', () => {
  * list from the resolver's own table: a fifth worker is covered the moment it
  * is registered, without touching this file.
  */
+describe('capacitor bundled assets', () => {
+  const capacitor = packages.find((p) => p.dir === 'capacitor')!;
+
+  it('stages the knowledge worker and the SQLite it loads', () => {
+    expect(existsSync(resolve(capacitor.dist, 'knowledge-worker.js'))).toBe(true);
+    expect(existsSync(resolve(capacitor.dist, 'sqlite3.wasm'))).toBe(true);
+  });
+
+  it('stages license texts for what its bundles compile in', () => {
+    expect(existsSync(resolve(capacitor.dist, 'licenses/npm/manifest.json'))).toBe(true);
+  });
+
+  it('stages the Kokoro dictionaries speech plans phonemes from', () => {
+    for (const file of ['lexicon-us-en.txt.gz', 'lexicon-gb-en.txt.gz', 'LICENSE']) {
+      expect(existsSync(resolve(capacitor.path, 'kokoro-lexicon', file)), file).toBe(true);
+    }
+  });
+
+  it('lists them in the tarball, with the staged native payloads', () => {
+    const shipped = capacitor.pkg.files ?? [];
+    for (const entry of ['dist', 'kokoro-lexicon', 'native', 'embedding-manifest.json']) {
+      expect(shipped).toContain(entry);
+    }
+  });
+});
+
 describe('service worker entrypoints', () => {
   const daemonEntry = pathToFileURL(resolve(service.dist, 'bin/gezeld.js')).href;
   const ownerEntry = (name: string, fallback: string) =>

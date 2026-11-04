@@ -83,7 +83,7 @@ test('downloads every exact package version, including gezk, before strict consu
   assert.deepEqual(specs, publishedSpecs);
   assert.ok(specs.some((spec) => spec.startsWith('@bendyline/gezk@')));
   assert.ok(
-    specs.some((spec) => spec.startsWith('gezel@')),
+    specs.some((spec) => spec.startsWith('gezel-cli@')),
     'unscoped aliases are verified too',
   );
   const tarballDir = fixture.packs[0][fixture.packs[0].indexOf('--pack-destination') + 1];

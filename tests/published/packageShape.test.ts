@@ -8,6 +8,7 @@
  */
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { isBuiltin } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
@@ -107,8 +108,12 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // Offline page demos now ship the shared font stylesheet (~217 KB gzip)
   // and its licenses alongside the commands, rather than fetching fonts.
   '@bendyline/gezel-cli': 500_000, //                  373 KB
+  // Nearly all of this is the two platforms' prebuilt llama.cpp, the pinned
+  // native release's mobile SDKs. `test:published` measures whatever is staged,
+  // so a run on a clean checkout sees only the JavaScript; `pnpm pack` stages
+  // the rest. Offline speech adds its own runtime once one ships here.
+  '@bendyline/gezel-capacitor': 33_000_000, //          22 MB
   // The unscoped short names hold one bin file each.
-  gezel: 10_000, //                                     ~2 KB
   'gezel-cli': 10_000, //                               ~2 KB
   gezeld: 10_000, //                                    ~2 KB
   'gezel-mcp': 10_000, //                               ~2 KB
@@ -355,6 +360,43 @@ describe('published package payloads', () => {
         }
       }
       expect(dangling).toEqual([]);
+    },
+  );
+
+  /**
+   * A declaration that imports a devDependency resolves here and in any check
+   * that installs the whole release set, but not for someone who installs this
+   * one package. `skipLibCheck` then hides the error and the type quietly
+   * becomes `any`. Capacitor's `createMobileKnowledge` options did this with
+   * inference's internal catalog host.
+   */
+  it.each(packages.filter((p) => p.typed))(
+    '$name declares only packages a consumer installs',
+    ({ name, path, pkg }) => {
+      const installed = new Set([
+        name,
+        ...Object.keys(pkg.dependencies ?? {}),
+        ...Object.keys(pkg.peerDependencies ?? {}),
+        ...Object.keys(pkg.optionalDependencies ?? {}),
+      ]);
+      const declarations = packed
+        .get(name)!
+        .files.map((file) => file.path.replace(/\\/g, '/'))
+        .filter((file) => file.endsWith('.d.ts') || file.endsWith('.d.mts'));
+      const missing = new Set<string>();
+      for (const declaration of declarations) {
+        const source = readFileSync(resolve(path, declaration), 'utf8');
+        // Anchored to statements: doc comments quote prose like `from "drained"`.
+        const statements = /^\s*(?:import|export|\})[^'"\n]*\bfrom\s+['"]([^'"\n]+)['"]/gm;
+        for (const [, specifier] of source.matchAll(statements)) {
+          if (!specifier || specifier.startsWith('.') || specifier.startsWith('node:')) continue;
+          if (isBuiltin(specifier)) continue;
+          const parts = specifier.split('/');
+          const owner = specifier.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]!;
+          if (!installed.has(owner)) missing.add(`${specifier} in ${declaration}`);
+        }
+      }
+      expect([...missing]).toEqual([]);
     },
   );
 

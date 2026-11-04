@@ -66,8 +66,7 @@ function packedManifests(): Map<string, PackageJson> {
   // faster in general, this avoids paying the unusually high CLI cold-start
   // cost once per package on Windows. Select by directory, never by name: the
   // workspace root is also named `gezel`, so `--filter gezel` packs the whole
-  // repository too, and a release-stamped root version then sorts after the
-  // alias package's tarball and replaces its manifest below.
+  // repository too.
   const packArgs = [
     '--recursive',
     ...packages.flatMap(({ dir }) => ['--filter', `./packages/${dir}`]),

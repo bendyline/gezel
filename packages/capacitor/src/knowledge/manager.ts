@@ -33,7 +33,11 @@ type CatalogState = KnowledgeState['catalogs'][number];
 
 export interface MobileKnowledgeOptions extends KnowledgeWorkerUrls {
   plugin?: GezelKnowledgePlugin;
-  /** The catalog host; tests supply one in place of the worker. */
+  /**
+   * The catalog host; tests supply one in place of the worker.
+   * @internal Stripped from the declarations: its type is inference's internal
+   * surface, which an installed package does not have.
+   */
   host?: KnowledgeCatalogHost & { terminate(): void };
   /** Catalogs the person turned off; an installed catalog is on unless listed. */
   readDisabled(): readonly string[];

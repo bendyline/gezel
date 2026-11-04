@@ -856,7 +856,7 @@ program
         : await ensureCliProjectLead(client, projectId);
       let readiness = await checkRunReadiness(client, gezelId);
       if (!readiness.ready && canOfferRunSetup()) {
-        // A first `npx gezel run …` in a terminal sets up a model and then
+        // A first `npx gezel-cli run …` in a terminal sets up a model and then
         // runs the request, instead of sending the person off to `gezel`.
         // Keep the path indirect so Ink stays out of the main bin.
         const tuiModule = '../tui/index.js';

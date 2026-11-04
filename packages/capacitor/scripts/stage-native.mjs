@@ -71,8 +71,19 @@ async function verifyFiles(root, manifest) {
 // native build refreshes the runtime's notices.
 const LICENSE_INPUTS = 'native/licenses/';
 
-export async function verifyProducerSources(manifest, repo, warn = console.warn) {
+/**
+ * `allowStale` is for packs outside a release. A native release is cut from a
+ * merged commit, so a pull request that changes the wrapper sources cannot pin
+ * its own, and failing its packs would make that change impossible to merge.
+ */
+export async function verifyProducerSources(
+  manifest,
+  repo,
+  warn = console.warn,
+  { allowStale = false } = {},
+) {
   const staleNotices = [];
+  const staleSources = [];
   for (const [name, sha] of Object.entries(manifest.sources ?? {})) {
     const file = path.resolve(repo, name);
     if (!file.startsWith(`${path.resolve(repo)}${path.sep}`))
@@ -83,10 +94,14 @@ export async function verifyProducerSources(manifest, repo, warn = console.warn)
     );
     if (current === sha) continue;
     const relative = path.relative(path.resolve(repo), file).split(path.sep).join('/');
-    if (!relative.startsWith(LICENSE_INPUTS))
-      throw new Error(`Restage the native runtime after changing ${name}`);
-    staleNotices.push(name);
+    if (relative.startsWith(LICENSE_INPUTS)) staleNotices.push(name);
+    else if (allowStale) staleSources.push(name);
+    else throw new Error(`Restage the native runtime after changing ${name}`);
   }
+  if (staleSources.length)
+    warn(
+      `Native runtime ${manifest.packageVersion} predates changes to ${staleSources.join(', ')}; a release needs a new native build first.`,
+    );
   if (staleNotices.length)
     warn(
       `Native runtime ${manifest.packageVersion} predates changes to ${staleNotices.join(', ')}; its license notices refresh with the next native build.`,

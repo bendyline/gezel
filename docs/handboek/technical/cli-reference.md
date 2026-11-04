@@ -23,17 +23,17 @@ The command line needs Node.js 24 or newer. Check with `node --version`; if it i
 To try Gezel without installing anything else, run:
 
 ```bash
-npx gezel
+npx gezel-cli
 ```
 
 To keep it installed:
 
 ```bash
-npm install -g gezel
+npm install -g gezel-cli
 gezel
 ```
 
-The `gezel` package is the short name for `@bendyline/gezel-cli`, and the two are the same program. If you installed `@bendyline/gezel-cli` before, keep using it, or remove it with `npm uninstall -g @bendyline/gezel-cli` before you install `gezel`. They both provide the `gezel` command, and npm will not install a second one over the first.
+The `gezel-cli` package is the short name for `@bendyline/gezel-cli`, and the two are the same program. If you installed `@bendyline/gezel-cli` before, keep using it, or remove it with `npm uninstall -g @bendyline/gezel-cli` before you install `gezel-cli`. They both provide the `gezel` command, and npm will not install a second one over the first.
 
 The CLI is one of Gezel's public JavaScript packages. See [Gezel on npm](npm-packages.md) for the complete package map and the SDKs to use when a shell command is not the right integration boundary.
 

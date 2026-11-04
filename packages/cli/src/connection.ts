@@ -908,17 +908,15 @@ function isIncompatibleDaemonError(error: unknown): error is GezelSdkError {
 /**
  * The command that updates this CLI, judged by where it was installed from.
  * Installing a second package that also provides `gezel` fails while the first
- * is installed, so the hint names the one in use: the short names (`gezel`,
- * `gezel-cli`) nest this package inside their own folder, and npx keeps its
- * trees under `_npx/`, where only `@latest` fetches a newer version.
+ * is installed, so the hint names the one in use: the short name `gezel-cli`
+ * nests this package inside its own folder, and npx keeps its trees under
+ * `_npx/`, where only `@latest` fetches a newer version.
  */
 export function cliUpdateCommand(moduleUrl: string = import.meta.url): string {
   const path = fileURLToPath(moduleUrl).replaceAll('\\', '/');
-  if (path.includes('/_npx/')) return 'npx gezel@latest';
-  const shortName = /\/node_modules\/(gezel|gezel-cli)\/node_modules\/@bendyline\/gezel-cli\//.exec(
-    path,
-  )?.[1];
-  return `npm install -g ${shortName ?? '@bendyline/gezel-cli'}`;
+  if (path.includes('/_npx/')) return 'npx gezel-cli@latest';
+  const shortName = path.includes('/node_modules/gezel-cli/node_modules/@bendyline/gezel-cli/');
+  return `npm install -g ${shortName ? 'gezel-cli' : '@bendyline/gezel-cli'}`;
 }
 
 /**

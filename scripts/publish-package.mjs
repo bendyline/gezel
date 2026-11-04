@@ -103,7 +103,11 @@ if (workspaceDependencies.length > 0 && !materialized.materialized) {
 let result;
 let spawnError;
 try {
-  result = spawnPnpmSync(args, { cwd: packageDir, stdio: 'inherit' });
+  result = spawnPnpmSync(args, {
+    cwd: packageDir,
+    stdio: 'inherit',
+    env: { ...process.env, GEZEL_REQUIRE_CURRENT_NATIVE: '1' },
+  });
   spawnError = result.error;
 } catch (error) {
   spawnError = error;

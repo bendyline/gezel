@@ -14,9 +14,9 @@ installs a current one.
 npm install -g @bendyline/gezel-cli
 ```
 
-The unscoped [`gezel`](https://www.npmjs.com/package/gezel) package is the short
-name for this one: `npx gezel` runs it without installing, and
-`npm install -g gezel` installs the same program. Install one of the two
+The unscoped [`gezel-cli`](https://www.npmjs.com/package/gezel-cli) package is the
+short name for this one: `npx gezel-cli` runs it without installing, and
+`npm install -g gezel-cli` installs the same program. Install one of the two
 globally, not both: they both provide the `gezel` command.
 
 Then choose where the AI runs.

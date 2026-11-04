@@ -104,6 +104,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
+      # Capacitor's tarball carries the pinned native release's mobile SDKs, and
+      # its plugin sources must match them. A pull request cannot pin a native
+      # release built from its own merge, so nothing earlier enforces this, and
+      # publish-package.mjs refusing it mid-release would strand the packages
+      # that had already gone out. Fail here instead.
+      - name: Require the pinned native release to match its sources
+        run: node scripts/stage-capacitor-native.mjs --require-current
+
       # The prewarm runs service source under tsx, which loads the embedder
       # from inference's built `dist/` through its `./internal/*` export; that
       # dist in turn imports core, catalog, client and knowledge, and
@@ -284,7 +292,7 @@ jobs:
           GEZEL_RELEASE_DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
         run: |
           set -euo pipefail
-          args=(--ignore-packages=packages/ui,packages/mobile,packages/capacitor,packages/eval-viewer,packages/sharp-compat,packages/phonemizer-compat,packages/ml-runtime,packages/libreoffice-extension,evals)
+          args=(--ignore-packages=packages/ui,packages/mobile,packages/eval-viewer,packages/sharp-compat,packages/phonemizer-compat,packages/ml-runtime,packages/libreoffice-extension,evals)
           if [[ "$GEZEL_RELEASE_DRY_RUN" == "1" ]]; then
             args+=(--dry-run)
           fi

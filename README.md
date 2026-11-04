@@ -29,7 +29,7 @@ Gezel is a free, open-source desktop app that gives you a crew of AI helpers (a 
 
 The minimum runs everyday models for chat, drafting and focused single tasks. The recommended tier adds larger models for multi-step work with tools. Models download the first time you use them. Without hardware like this, you can use a cloud plan instead.
 
-[gezel.com](https://gezel.com/#download) picks the right installer for your machine, and every build is also on the [releases page](https://github.com/bendyline/gezel/releases). Prefer a terminal? The command line needs Node.js 24 or newer (`brew install node` on a Mac, `winget install OpenJS.NodeJS.LTS` on Windows, `nvm install 24` anywhere), then `npx gezel` to try it, or `npm install -g gezel` to keep it. (`gezel` is the short name for `@bendyline/gezel-cli`.) The [CLI reference](https://gezel.com/docs/cli-reference/) covers the rest, and [Gezel on a server](https://gezel.com/docs/gezel-on-a-server/) a headless install.
+[gezel.com](https://gezel.com/#download) picks the right installer for your machine, and every build is also on the [releases page](https://github.com/bendyline/gezel/releases). Prefer a terminal? The command line needs Node.js 24 or newer (`brew install node` on a Mac, `winget install OpenJS.NodeJS.LTS` on Windows, `nvm install 24` anywhere), then `npx gezel-cli` to try it, or `npm install -g gezel-cli` to keep it and run it as `gezel`. (`gezel-cli` is the short name for `@bendyline/gezel-cli`.) The [CLI reference](https://gezel.com/docs/cli-reference/) covers the rest, and [Gezel on a server](https://gezel.com/docs/gezel-on-a-server/) a headless install.
 
 Linux installers require glibc 2.38 and the GCC 14.1 C++ runtime or newer, on both x64 and arm64. Ubuntu 24.04 LTS with current updates and Debian 13 meet these requirements; Ubuntu 22.04, Debian 12 and RHEL 9 do not. See the [native runtime requirements](docs/native-runtime-requirements.md) for details.
 
@@ -79,7 +79,7 @@ The main workspace packages are:
 | [`@bendyline/gezel-ui`](packages/ui) | React application served by the daemon |
 | [`@bendyline/gezel-app`](packages/app) | Electron shell, supervisor, and installers |
 | [`@bendyline/gezel-cli`](packages/cli) | Headless `gezel` command-line client |
-| [`gezel`](packages/alias-gezel), [`gezel-cli`](packages/alias-gezel-cli), [`gezeld`](packages/alias-gezeld), [`gezel-mcp`](packages/alias-gezel-mcp) | Unscoped short names that run the scoped packages' commands, so `npx gezel` works |
+| [`gezel-cli`](packages/alias-gezel-cli), [`gezeld`](packages/alias-gezeld), [`gezel-mcp`](packages/alias-gezel-mcp) | Unscoped short names that run the scoped packages' commands, so `npx gezel-cli` works |
 | [`@bendyline/gezel-catalog`](packages/catalog) | Bundled gezel, model, toolset, and craftbook catalogs |
 | [`@bendyline/gezel-sdk`](packages/sdk) | Preferred extension and embedding surface |
 

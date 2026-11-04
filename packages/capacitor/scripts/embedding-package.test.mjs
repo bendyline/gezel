@@ -10,6 +10,22 @@ import {
   writeEmbeddingManifest,
 } from './embedding-package.mjs';
 const hash = (value) => createHash('sha256').update(value).digest('hex');
+
+// Capacitor generates an app manifest pinning capacitor-swift-pm exactly to the
+// app's own version, so an exact pin here cannot resolve against any other
+// Capacitor the peer range allows. The consumer fixtures pin the one version
+// that would still pass, which hid this until a fresh install took 8.6.0.
+test('the Swift package accepts every Capacitor the peer range allows', async () => {
+  const root = path.resolve(import.meta.dirname, '..');
+  const { peerDependencies } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+  const [, minimum] = /^\^(\d+\.\d+\.\d+)$/.exec(peerDependencies['@capacitor/core']) ?? [];
+  assert.ok(minimum, 'the peer range is a caret range');
+  const manifest = await readFile(path.join(root, 'Package.swift'), 'utf8');
+  assert.match(
+    manifest,
+    new RegExp(`capacitor-swift-pm\\.git", from: "${minimum.replaceAll('.', '\\.')}"`),
+  );
+});
 test('installed package doctor checks both compatibility and complete native inventories', async (t) => {
   const root = await mkdtemp(path.join(tmpdir(), 'gezel-plugin-consumer-'));
   t.after(() => rm(root, { recursive: true, force: true }));

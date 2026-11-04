@@ -29,7 +29,7 @@ function fixture(t) {
   writeFileSync(join(root, 'packages/core/src/browser.ts'), developmentSource);
   writeFileSync(
     join(root, 'scripts/published-packages.mjs'),
-    "export const PUBLISHED_PACKAGE_DIRS = ['core', 'alias-gezel'];\n",
+    "export const PUBLISHED_PACKAGE_DIRS = ['core', 'alias-gezel-cli'];\n",
   );
   writeFileSync(
     join(root, 'scripts/prepare-package.mjs'),
@@ -103,7 +103,7 @@ test('a passing consumer run leaves core source untouched and exits successfully
   // The workspace root shares the `gezel` name, so packages are selected by directory.
   assert.match(
     result.stdout,
-    /--filter \.\/packages\/core --filter \.\/packages\/alias-gezel pack/,
+    /--filter \.\/packages\/core --filter \.\/packages\/alias-gezel-cli pack/,
   );
   assert.doesNotMatch(result.stdout, /rehearsal: FAILED/);
   assert.equal(readFileSync(join(root, 'packages/core/src/browser.ts'), 'utf8'), developmentSource);
