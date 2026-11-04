@@ -13,8 +13,9 @@ subcategory:
 
 The Gezel image is the whole of Gezel in one container: the service, the web
 version of the workshop, the command line, and every engine that runs models
-on your own hardware. Nothing else needs installing. The only thing it
-downloads is the model you choose.
+on your own hardware. Nothing else needs installing. What it downloads is
+models: the one you choose, and smaller ones it uses to search your files and
+to read pictures, along with a web browser for tasks that visit websites.
 
 You need Docker. On Linux, Docker Engine; on Windows and macOS, Docker
 Desktop works too, with the limits under [Good to know](#good-to-know).
@@ -79,6 +80,14 @@ docker run --rm -v "$PWD:$PWD" -w "$PWD" -v gezel:/gezel ghcr.io/bendyline/gezel
 Mounting the folder at the same path inside the container keeps each folder
 its own project. Gezel reads the folder and writes its results to
 `./gezel-out`; it changes nothing else there.
+
+A Windows path cannot be used inside the container, so in PowerShell give
+the folder a path of its own there, named after it:
+
+```powershell
+docker run --rm -v "${PWD}:/projects/board-notes" -w /projects/board-notes -v gezel:/gezel ghcr.io/bendyline/gezel `
+  do summarize-long "Summarize these notes for the board" --out ./gezel-out
+```
 
 If a Gezel container is already running on the same volume, use it instead
 of starting a second one (Gezel refuses to run twice on one volume):
@@ -153,9 +162,9 @@ docker rm -f gezel
 docker run -d --name gezel -p 127.0.0.1:6228:6228 -v gezel:/gezel ghcr.io/bendyline/gezel
 ```
 
-Image versions match the [command line's](cli-reference.md): `ghcr.io/bendyline/gezel:1.2.11`
-is the same Gezel as `npm install -g @bendyline/gezel-cli@1.2.11`. The same
-images are on Docker Hub as `bendyline/gezel`.
+Image versions match the [command line's](cli-reference.md): `ghcr.io/bendyline/gezel:1.2.12`
+is the same Gezel as `npm install -g @bendyline/gezel-cli@1.2.12`. The first
+image is 1.2.12. The same images are on Docker Hub as `bendyline/gezel`.
 
 Back up the `gezel` volume like any other data. It holds plain files; see
 [Where files live](where-files-live.md).

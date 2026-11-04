@@ -1,6 +1,17 @@
-import { readFileSync, readlinkSync } from 'node:fs';
 import { mkdir, open, readFile, rm, stat, utimes } from 'node:fs/promises';
-import { hostname as osHostname } from 'node:os';
+import {
+  LOCK_HEARTBEAT_INTERVAL_MS,
+  LOCK_STALE_AFTER_MS,
+  type LockIdentity,
+  currentLockIdentity,
+  foreignHolderMessage,
+  parseLockFile,
+  procStartTicks,
+  sharesPidNamespace,
+} from '@bendyline/gezel/native';
+
+export type { LockIdentity };
+export { currentLockIdentity, parseLockFile, procStartTicks, sharesPidNamespace };
 
 /**
  * Thrown when a gezel home already has a live daemon. The CLI's `gezel
@@ -15,7 +26,7 @@ export class SingleInstanceError extends Error {
   ) {
     super(
       holderHost !== undefined
-        ? `Another Gezel daemon (host "${holderHost}", pid ${holderPid}) is using this home. If it runs in a container, run commands inside that container with \`docker exec <container> gezel …\` instead of starting a second container on the same volume.`
+        ? foreignHolderMessage({ pid: holderPid, hostname: holderHost })
         : holderPid > 0
           ? `Another gezel daemon is already running for this home (pid ${holderPid}). Stop it first with \`gezel stop\`, or use a different GEZEL_HOME.`
           : `Could not acquire the single-instance lock at ${lockPath}.`,
@@ -28,27 +39,8 @@ export interface RuntimeLock {
   release(): Promise<void>;
 }
 
-/**
- * Who holds a lock. A pid alone identifies a process only inside one pid
- * namespace on one boot: two containers sharing a volume each see the
- * other's pid as dead (or as an unrelated process), which let a one-shot
- * `docker run … gezel do` reclaim a serving container's live lock. The
- * namespace, boot and host fields say when a pid check is meaningful; a
- * holder outside our namespace is judged by the lock file's heartbeat.
- */
-export interface LockIdentity {
-  pid: number;
-  hostname?: string;
-  bootId?: string;
-  pidNs?: string;
-  /** Process start time in clock ticks since boot (`/proc/<pid>/stat` field 22). */
-  startTicks?: string;
-  /** Random per-process id; tells our own heartbeat whether the lock is still ours. */
-  instance?: string;
-}
-
-const HEARTBEAT_INTERVAL_MS = 10_000;
-const STALE_AFTER_MS = 40_000;
+// A holder's identity (core's lock-identity.ts) is what let a one-shot
+// `docker run … gezel do` stop reclaiming a serving container's live lock.
 
 function defaultIsAlive(pid: number): boolean {
   try {
@@ -61,44 +53,6 @@ function defaultIsAlive(pid: number): boolean {
   }
 }
 
-function readTrimmed(path: string): string | undefined {
-  try {
-    return readFileSync(path, 'utf8').trim() || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function procStartTicks(pid: number | 'self'): string | undefined {
-  if (process.platform !== 'linux') return undefined;
-  const stat = readTrimmed(`/proc/${pid}/stat`);
-  if (!stat) return undefined;
-  // comm (field 2) may contain spaces and parentheses; fields resume after
-  // the last ')'. starttime is field 22 overall, the 20th after comm.
-  const rest = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
-  return rest[19];
-}
-
-export function currentLockIdentity(): LockIdentity {
-  const linux = process.platform === 'linux';
-  let pidNs: string | undefined;
-  if (linux) {
-    try {
-      pidNs = readlinkSync('/proc/self/ns/pid');
-    } catch {
-      pidNs = undefined;
-    }
-  }
-  return {
-    pid: process.pid,
-    hostname: osHostname(),
-    bootId: linux ? readTrimmed('/proc/sys/kernel/random/boot_id') : undefined,
-    pidNs,
-    startTicks: procStartTicks('self'),
-    instance: `${process.pid}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
-  };
-}
-
 /**
  * The pid stays on the first line so a daemon from before the identity
  * record (which parses the leading integer) still reads it as held instead
@@ -108,47 +62,12 @@ function serializeIdentity(identity: LockIdentity): string {
   return `${identity.pid}\n${JSON.stringify({ v: 1, ...identity })}\n`;
 }
 
-export function parseLockFile(text: string): LockIdentity | null {
-  const [first, second] = text.split('\n');
-  const pid = Number.parseInt((first ?? '').trim(), 10);
-  if (!Number.isFinite(pid)) return null;
-  if (!second?.trim()) return { pid };
-  try {
-    const record = JSON.parse(second) as Partial<LockIdentity>;
-    const text = (value: unknown) => (typeof value === 'string' && value ? value : undefined);
-    return {
-      pid,
-      hostname: text(record.hostname),
-      bootId: text(record.bootId),
-      pidNs: text(record.pidNs),
-      startTicks: text(record.startTicks),
-      instance: text(record.instance),
-    };
-  } catch {
-    return { pid };
-  }
-}
-
 async function readHolder(lockPath: string): Promise<LockIdentity | null> {
   try {
     return parseLockFile(await readFile(lockPath, 'utf8'));
   } catch {
     return null;
   }
-}
-
-/**
- * Whether a pid check against `holder` means anything here. Any field the
- * holder recorded must match ours; a legacy pid-only record is assumed to be
- * in our namespace, which is how it was judged before.
- */
-export function sharesPidNamespace(holder: LockIdentity, me: LockIdentity): boolean {
-  const same = (a: string | undefined, b: string | undefined) => !a || !b || a === b;
-  return (
-    same(holder.hostname, me.hostname) &&
-    same(holder.bootId, me.bootId) &&
-    same(holder.pidNs, me.pidNs)
-  );
 }
 
 async function lockMtimeMs(lockPath: string): Promise<number | null> {
@@ -211,7 +130,7 @@ export async function acquireSingleInstanceLock(opts: {
   const startTicksOf = opts.startTicksOf ?? procStartTicks;
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const staleAfterMs = opts.staleAfterMs ?? STALE_AFTER_MS;
+  const staleAfterMs = opts.staleAfterMs ?? LOCK_STALE_AFTER_MS;
   await mkdir(opts.runtimeDir, { recursive: true });
 
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -222,7 +141,7 @@ export async function acquireSingleInstanceLock(opts: {
       } finally {
         await handle.close();
       }
-      return holdLock(opts.lockPath, me, opts.heartbeatIntervalMs ?? HEARTBEAT_INTERVAL_MS);
+      return holdLock(opts.lockPath, me, opts.heartbeatIntervalMs ?? LOCK_HEARTBEAT_INTERVAL_MS);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
       const holder = await readHolder(opts.lockPath);

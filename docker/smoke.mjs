@@ -173,6 +173,19 @@ async function main() {
   );
   assert(second.status !== 0, 'the second container exits');
   assert(`${second.stdout}${second.stderr}`.includes('docker exec'), 'and says to use docker exec');
+  // A one-shot command reads the serving container's runtime files from the
+  // volume; their pid and loopback port mean nothing in its own namespace.
+  const oneShot = spawnSync(
+    'docker',
+    ['run', '--rm', '-v', `${volume}:/gezel`, '-e', 'GEZEL_MOCK_PROVIDER=1', image, 'run', 'hi'],
+    { encoding: 'utf8', timeout: 120_000 },
+  );
+  const oneShotText = `${oneShot.stdout}${oneShot.stderr}`;
+  assert(oneShot.status !== 0, 'a one-shot command on the same volume exits');
+  assert(
+    oneShotText.includes('docker exec') && !/\n\s+at /.test(oneShotText),
+    'and says to use docker exec, without a stack trace',
+  );
 
   step('with no network, the service still starts');
   docker(['rm', '-f', name]);

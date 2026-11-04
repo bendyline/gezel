@@ -30,6 +30,7 @@ import {
   authorizeLocalOwner,
 } from '@bendyline/gezel-app-sdk';
 import {
+  DaemonInAnotherNamespaceError,
   GezelApiError,
   GezelClient,
   LiveDaemonUnhealthyError,
@@ -192,7 +193,9 @@ export async function connectOwned(
       ...(process.env.GEZEL_HOME ? { home: process.env.GEZEL_HOME } : {}),
     },
   }).catch((error: unknown) => {
-    throw isIncompatibleDaemonError(error) ? incompatibleDaemonCliError(error) : error;
+    throw isIncompatibleDaemonError(error)
+      ? incompatibleDaemonCliError(error)
+      : (localDaemonCliError(error) ?? error);
   });
   if (authorized.daemon.mode === 'spawned' && options.announceSpawn !== false) {
     process.stderr.write(spawnedDaemonNotice(authorized.daemon.pid));
@@ -406,9 +409,8 @@ export async function authorizeLocalOwnedDaemon(
     });
     return await (deps.connect ?? defaultConnectAsOwner)(authorized);
   } catch (error) {
-    if (error instanceof LiveDaemonUnhealthyError) {
-      throw unhealthyLocalDaemonError(error.pid, error.baseUrl);
-    }
+    const local = localDaemonCliError(error);
+    if (local) throw local;
     if (!(error instanceof GezelSdkError) || error.code !== 'daemon_not_running') {
       throw cliGrantError(error, 'the local Gezel daemon');
     }
@@ -428,6 +430,15 @@ function defaultConnectAsOwner(
   authorized: LocalAuthorizedConnection,
 ): Promise<{ client: GezelClient; baseUrl: string }> {
   return connectionFromAuthorization(authorized, 'The local Gezel owner authorization');
+}
+
+/** A discovery refusal worth one plain line instead of a stack trace. */
+function localDaemonCliError(error: unknown): CliError | null {
+  if (error instanceof LiveDaemonUnhealthyError) {
+    return unhealthyLocalDaemonError(error.pid, error.baseUrl);
+  }
+  if (error instanceof DaemonInAnotherNamespaceError) return new CliError(error.message);
+  return null;
 }
 
 function unhealthyLocalDaemonError(pid: number, baseUrl: string): CliError {

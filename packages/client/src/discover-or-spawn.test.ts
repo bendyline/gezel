@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { GezelClient } from './client.js';
 import {
   DaemonExitedDuringStartupError,
+  DaemonInAnotherNamespaceError,
   type SpawnLike,
   SpawnedDaemonExitedError,
   discoverOrSpawn,
@@ -360,6 +361,8 @@ describe('discoverOrSpawn', () => {
         spawnFn,
         readRuntimeFn: async () => sampleRuntime,
         isProcessAliveFn: () => true,
+        // Real file I/O would settle after the clock below has already moved.
+        readForeignLockHolderFn: async () => null,
         clientFactory,
       });
 
@@ -469,6 +472,53 @@ describe('discoverOrSpawn', () => {
       spawnFn,
       readRuntimeFn,
       isProcessAliveFn,
+      clientFactory: fakeClient,
+    });
+    expect(spawnFn).toHaveBeenCalledTimes(1);
+    expect(result.outcome).toBe('spawned');
+  });
+
+  // A one-shot `docker run … gezel do` on a volume a running container serves
+  // read pid 7 from its runtime files, found an unrelated pid 7 of its own
+  // alive (often itself), failed health against its own loopback and dumped
+  // LiveDaemonUnhealthyError. With that container gone it could never run.
+  it.each([false, true])(
+    'refuses a home a daemon in another container is serving (forceSpawn=%s)',
+    async (forceSpawn) => {
+      const spawnFn = vi.fn(() => makeFakeChild());
+      await expect(
+        discoverOrSpawn({
+          daemonEntry: '/fake/gezeld.js',
+          forceSpawn,
+          spawnFn,
+          readRuntimeFn: async () => null,
+          readForeignLockHolderFn: async () => ({
+            holder: { pid: 7, hostname: '3f2a9c1b' },
+            alive: true,
+          }),
+          isProcessAliveFn: () => true,
+          clientFactory: fakeClient,
+        }),
+      ).rejects.toThrow(DaemonInAnotherNamespaceError);
+      expect(spawnFn).not.toHaveBeenCalled();
+    },
+  );
+
+  it('spawns over what a container that stopped serving left behind', async () => {
+    const spawnFn = vi.fn(() => makeFakeChild());
+    let reads = 0;
+    const result = await discoverOrSpawn({
+      daemonEntry: '/fake/gezeld.js',
+      pollIntervalMs: 5,
+      timeoutMs: 200,
+      spawnFn,
+      // readRuntime ignores the leftover files until our child takes the lock.
+      readRuntimeFn: async () => (++reads === 1 ? null : spawnedRuntime),
+      readForeignLockHolderFn: async () => ({
+        holder: { pid: 7, hostname: '3f2a9c1b' },
+        alive: false,
+      }),
+      isProcessAliveFn: () => true,
       clientFactory: fakeClient,
     });
     expect(spawnFn).toHaveBeenCalledTimes(1);

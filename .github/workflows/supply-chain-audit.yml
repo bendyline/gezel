@@ -2,6 +2,8 @@
 # and reports lower-severity findings without failing. Advisories are published
 # against our pinned versions on npm's clock, not ours, so this schedule keeps
 # new high/moderate/low findings visible without turning them into release gates.
+# The published container images are scanned the same way, since they also carry
+# operating-system packages.
 name: Supply-chain audit
 
 on:
@@ -32,3 +34,59 @@ jobs:
         run: pnpm audit:lockfile
       - name: Production dependency vulnerability audit
         run: pnpm audit:vulnerabilities --audit-level=critical
+
+  image:
+    # The published images carry Ubuntu packages and a bundled node tree that
+    # the lockfile audit above never sees. Fails only on a critical finding
+    # with a fix available, which a rebuild or a base-digest bump would ship;
+    # unfixed criticals and everything lower are reported in the summary.
+    name: Container image vulnerability alarm (${{ matrix.tag }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        tag: [latest, vulkan, cuda]
+    env:
+      IMAGE: ghcr.io/bendyline/gezel:${{ matrix.tag }}
+      # Grype v0.121.0, pinned by digest like every other image we run.
+      GRYPE: ghcr.io/anchore/grype@sha256:621d56d1d68106b787022c81546f7e0a36202a25d1239f0c20195fab8c16f7ea
+    steps:
+      - name: Scan
+        run: |
+          # stdout, not a mounted file: the scanner's user cannot write the workspace.
+          docker run --rm "$GRYPE" "registry:$IMAGE" --platform linux/amd64 -o json > report.json
+      - name: Report
+        run: |
+          {
+            echo "### \`$IMAGE\`"
+            echo
+            echo '| Severity | Findings | With a fix |'
+            echo '| --- | --- | --- |'
+            jq -r '
+              [.matches[] | {s: .vulnerability.severity, f: (.vulnerability.fix.state == "fixed")}]
+              | group_by(.s)[]
+              | "| \(.[0].s) | \(length) | \(map(select(.f)) | length) |"' report.json
+            echo
+            critical=$(jq -r '
+              .matches[] | select(.vulnerability.severity == "Critical")
+              | "| \(.vulnerability.id) | \(.artifact.name) \(.artifact.version) | \(.vulnerability.fix.versions // [] | join(", ") | if . == "" then "none yet" else . end) |"' report.json | sort -u)
+            if [[ -n "$critical" ]]; then
+              echo '| Critical | Package | Fixed in |'
+              echo '| --- | --- | --- |'
+              echo "$critical"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          fixable=$(jq '[.matches[] | select(.vulnerability.severity == "Critical" and .vulnerability.fix.state == "fixed")] | length' report.json)
+          if (( fixable > 0 )); then
+            echo "::error::$IMAGE has $fixable critical finding(s) with a fix available; rebuild the image or bump its base digest."
+            exit 1
+          fi
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: image-scan-${{ matrix.tag }}
+          path: report.json
+          retention-days: 30
+          if-no-files-found: ignore

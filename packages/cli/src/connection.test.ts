@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GezelSdkError } from '@bendyline/gezel-app-sdk';
 import {
+  DaemonInAnotherNamespaceError,
   GezelApiError,
   type GezelClient,
   LiveDaemonUnhealthyError,
@@ -415,6 +416,16 @@ describe('local owner authorization for `gezel run`', () => {
 
     await expect(authorizeLocalOwnedDaemon({ authorizeOwner })).rejects.toThrow(
       /\(pid 9182\) is running but did not answer/,
+    );
+  });
+
+  it('points at docker exec when another container serves this home', async () => {
+    const authorizeOwner = vi
+      .fn()
+      .mockRejectedValue(new DaemonInAnotherNamespaceError(7, '3f2a9c1b'));
+
+    await expect(authorizeLocalOwnedDaemon({ authorizeOwner })).rejects.toThrow(
+      /host "3f2a9c1b".*docker exec <container> gezel/,
     );
   });
 

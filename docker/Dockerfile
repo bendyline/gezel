@@ -53,8 +53,8 @@ RUN set -eux; \
 RUN set -eux; \
     groupadd --gid 10001 gezel; \
     useradd --uid 10001 --gid gezel --home-dir /gezel --no-create-home --shell /usr/sbin/nologin gezel; \
-    mkdir -p /gezel /work; \
-    chown gezel:gezel /gezel /work
+    mkdir -p /gezel; \
+    chown gezel:gezel /gezel
 
 COPY node/ /opt/gezel/node/
 COPY pnpm/ /opt/gezel/pnpm/
@@ -88,7 +88,10 @@ ENV PATH="/opt/gezel/node:/opt/gezel/app:${PATH}" \
     NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
 
 USER gezel
-WORKDIR /work
+# The user's home, which project inference never turns into a project, so a
+# bare `docker exec gezel gezel run …` lands in Default as on the desktop. A
+# WORKDIR of its own became a "work" project, crew and all, on the first run.
+WORKDIR /gezel
 VOLUME ["/gezel"]
 EXPOSE 6228
 STOPSIGNAL SIGTERM
