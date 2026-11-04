@@ -57,8 +57,10 @@ if (tarballDirFlag !== -1 && !process.argv[tarballDirFlag + 1]) {
   throw new Error('--tarball-dir requires a directory path');
 }
 // Gilde content rides in the service's install: 0.3.5's new project types
-// (+5.8 MiB) took the 1.2.11 rehearsal to 900.4 MiB.
-const MAX_NODE_MODULES_BYTES = 950 * 1024 * 1024;
+// (+5.8 MiB) took the 1.2.11 rehearsal to 900.4 MiB. Capacitor's prebuilt engines
+// and dictionaries (+39 MiB) took it to 939.7 MiB, though only this check installs
+// them beside the service: no real consumer holds both.
+const MAX_NODE_MODULES_BYTES = 1000 * 1024 * 1024;
 
 function validateArgs(args) {
   for (let index = 0; index < args.length; index += 1) {
@@ -115,6 +117,7 @@ const IMPORTABLE = [
   '@bendyline/gezel-catalog',
   '@bendyline/gezel-knowledge',
   '@bendyline/gezel-mcp',
+  '@bendyline/gezel-capacitor',
 ];
 
 const failures = [];
@@ -592,6 +595,25 @@ try {
     ok('installed declarations typecheck without skipping library errors');
   }
 
+  // The doctor re-hashes every file against the manifest `prepack` wrote, so it
+  // proves the prebuilt engines survived packing and installing, byte for byte.
+  step('checking the installed Capacitor package');
+  const capacitorProbe = join(consumer, 'probe-capacitor.mjs');
+  writeFileSync(
+    capacitorProbe,
+    [
+      "import { verifyCapacitorPackage } from '@bendyline/gezel-capacitor/packaging';",
+      'const { native, files } = await verifyCapacitorPackage();',
+      'console.log(`${native.ios.version} ${Object.keys(files).length}`);',
+    ].join('\n'),
+  );
+  const capacitor = run(process.execPath, [capacitorProbe], { cwd: consumer });
+  if (capacitor.status !== 0) fail(`Capacitor doctor failed\n${capacitor.stderr}`);
+  else
+    ok(
+      `Capacitor doctor verified native ${capacitor.stdout.trim().replace(' ', ' and ')} pinned files`,
+    );
+
   // ── 4. The runtime-resolved specifiers ─────────────────────────────────
   step('resolving the runtime-resolved specifiers');
   const resolveProbe = join(consumer, 'probe-resolve.mjs');
@@ -704,7 +726,7 @@ try {
     else ok(`gezel ${args.join(' ')}`);
   }
 
-  // `npx gezel` installs the unscoped short names, which hold nothing but a
+  // `npx gezel-cli` installs an unscoped short name, which holds nothing but a
   // hand-over to the scoped package's command. Each must print exactly what
   // the command it stands for prints.
   const gezeldBin = join(
@@ -717,7 +739,6 @@ try {
     'gezeld.js',
   );
   for (const shortName of [
-    { name: 'gezel', bin: 'gezel.js', target: bin },
     { name: 'gezel-cli', bin: 'gezel.js', target: bin },
     { name: 'gezeld', bin: 'gezeld.js', target: gezeldBin },
   ]) {

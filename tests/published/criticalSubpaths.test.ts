@@ -126,15 +126,9 @@ const RUNTIME_RESOLVED: ReadonlyArray<{
   },
   {
     specifier: '@bendyline/gezel-cli/package.json',
-    from: 'alias-gezel',
-    mode: 'require',
-    usedBy: 'bin/gezel.js — `npx gezel` finds the CLI command through its manifest',
-  },
-  {
-    specifier: '@bendyline/gezel-cli/package.json',
     from: 'alias-gezel-cli',
     mode: 'require',
-    usedBy: 'bin/gezel.js — finds the CLI command through its manifest',
+    usedBy: 'bin/gezel.js — `npx gezel-cli` finds the CLI command through its manifest',
   },
   {
     specifier: '@bendyline/gezel-service/package.json',

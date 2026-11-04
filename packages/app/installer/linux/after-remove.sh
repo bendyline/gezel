@@ -87,7 +87,7 @@ refresh_desktop_caches() (
 # The data stays, but the discovery files must not outlive the service. Every
 # later Gezel on this machine (the npm CLI, the VS Code extension, an app on the
 # app SDK) reads runtime/service-role, finds a machine engine, and will not
-# start local models while it fails to answer: after an uninstall, `npx gezel`
+# start local models while it fails to answer: after an uninstall, `npx gezel-cli`
 # answered every message with "fetch failed". Same file list after-install
 # clears. Root deletes inside a directory the service account owns, so a
 # symlinked parent is refused rather than followed.

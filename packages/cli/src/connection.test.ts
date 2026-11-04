@@ -199,14 +199,11 @@ describe('incompatible daemon errors', () => {
     expect(cliUpdateCommand(`file:///usr/local/lib/${entry}`)).toBe(
       'npm install -g @bendyline/gezel-cli',
     );
-    expect(cliUpdateCommand(`file:///usr/local/lib/node_modules/gezel/${entry}`)).toBe(
-      'npm install -g gezel',
-    );
     expect(cliUpdateCommand(`file:///usr/local/lib/node_modules/gezel-cli/${entry}`)).toBe(
       'npm install -g gezel-cli',
     );
     expect(cliUpdateCommand(`file:///Users/a/.npm/_npx/40b59497924eb6bb/${entry}`)).toBe(
-      'npx gezel@latest',
+      'npx gezel-cli@latest',
     );
   });
 

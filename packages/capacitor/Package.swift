@@ -12,7 +12,9 @@ let package = Package(
     products: [.library(name: "BendylineGezelCapacitor", targets: ["GezelCapacitor"])],
     dependencies: [
         .package(name: "GezelRuntime", path: "native/ios"),
-        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.2")
+        // Matches the @capacitor/core peer range. An app pins this package exactly to
+        // its own Capacitor, so an exact version here would refuse every other one.
+        .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", from: "8.5.2")
     ],
     targets: [.target(name: "GezelCapacitor", dependencies: [
         .product(name: "GezelRuntime", package: "GezelRuntime"),

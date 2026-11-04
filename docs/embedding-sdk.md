@@ -209,8 +209,9 @@ payloads. Trust the npm/release archive's external integrity first: an internal
 manifest alone is not proof of origin. `stageNative` is also exported for build
 pipelines. `configureCapacitorProject({ projectRoot, platform })` raises generated iOS/Android deployment floors to the SDK minimum after `cap sync`, preserving higher app requirements.
 
-The Capacitor package remains a private preview pending its public release;
-these APIs do not publish it. Native packaging retains the release policy in
+`@bendyline/gezel-capacitor` is published to npm with each release, carrying the
+pinned native release's SDKs ([npm release](npm-release.md#the-capacitor-package-and-its-native-payload)).
+Native packaging retains the release policy in
 [`native/runtime/PUBLIC-DISTRIBUTION.md`](../native/runtime/PUBLIC-DISTRIBUTION.md).
 Device qualification is reported as recorded by the native release, never
 inferred from TypeScript tests or a successful build.

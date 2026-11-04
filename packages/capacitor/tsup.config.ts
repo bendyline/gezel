@@ -4,7 +4,7 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   entry: ['src/index.ts'],
   format: ['esm'],
-  dts: true,
+  dts: { compilerOptions: { stripInternal: true } },
   target: 'es2022',
   splitting: false,
   // Names the packages bundled in, for scripts/stage-bundled-licenses.mjs.

@@ -6,8 +6,8 @@ version line.
 
 ## What ships
 
-Fifteen packages under the `@bendyline` scope, all public API under semver,
-plus four unscoped short names (below):
+Sixteen packages under the `@bendyline` scope, all public API under semver,
+plus three unscoped short names (below):
 
 | Package | What it is |
 |---|---|
@@ -24,16 +24,16 @@ plus four unscoped short names (below):
 | `@bendyline/gezel-script-runtime` | Portable, capability-mediated script execution: the `ScriptExecutor` contract and the QuickJS-WASM executor |
 | `@bendyline/gezel-mcp` | The stdio MCP server |
 | `@bendyline/gezel-inference` | The on-device inference runtime |
+| `@bendyline/gezel-capacitor` | On-device Gezel for iOS and Android apps, with prebuilt engines ([below](#the-capacitor-package-and-its-native-payload)) |
 | `@bendyline/gezel-service` | `gezeld`, plus the bundled web UI and handboek |
 | `@bendyline/gezel-cli` | The `gezel` command line |
 
-The short names exist so `npx gezel` works. Each lives in `packages/alias-*`
+The short names exist so `npx gezel-cli` works. Each lives in `packages/alias-*`
 and holds one bin file that finds the scoped package's command through its
 `package.json` and imports it:
 
 | Package | Runs |
 |---|---|
-| `gezel` | `gezel` from `@bendyline/gezel-cli` |
 | `gezel-cli` | `gezel` from `@bendyline/gezel-cli` |
 | `gezeld` | `gezeld` from `@bendyline/gezel-service` |
 | `gezel-mcp` | `gezel-mcp` from `@bendyline/gezel-mcp` |
@@ -525,8 +525,8 @@ Its first CI release will be `1.0.0`, independent of where the other lines are.
 
 ### The unscoped short names
 
-`gezel`, `gezel-cli`, `gezeld` and `gezel-mcp` bootstrap the same way, each at
-the `0.1.0` in its checkout manifest. They have no build and import nothing at
+`gezel-cli`, `gezeld` and `gezel-mcp` bootstrapped the same way, each at the
+`0.1.0` in its checkout manifest. They have no build and import nothing at
 build time, so no `prepare-package.mjs` run is needed. Each depends on one
 scoped package through `workspace:*`, which `pnpm publish` turns into that
 package's version on disk: publish from a checkout whose `packages/cli`,
@@ -534,17 +534,65 @@ package's version on disk: publish from a checkout whose `packages/cli`,
 `main` is).
 
 ```bash
-for d in alias-gezel alias-gezel-cli alias-gezeld alias-gezel-mcp; do
+for d in alias-gezel-cli alias-gezeld alias-gezel-mcp; do
   (cd "packages/$d" && pnpm publish --access public --no-provenance --no-git-checks)
 done
 ```
 
-`npx gezel` works as soon as that publish is visible. Register a trusted
+`npx gezel-cli` works as soon as that publish is visible. Register a trusted
 publisher for each one, as in step 2 above. From then on multi-semantic-release
 releases each short name with its scoped package: a release of
-`@bendyline/gezel-cli` gives `gezel` and `gezel-cli` a patch release pinned to
-it. Their own version lines start at `1.0.0` and do not match the scoped
-package's, and `gezel --version` always reports the CLI's.
+`@bendyline/gezel-cli` gives `gezel-cli` a patch release pinned to it. Their own
+version lines start at `1.0.0` and do not match the scoped package's, and
+`gezel --version` always reports the CLI's.
+
+Two things about a new unscoped name only show up at the real publish:
+
+- **npm can refuse the name.** A name that returns 404 and passes
+  `npm publish --dry-run` can still fail with `E403 Package name too similar to
+  existing packages`. On 2026-11-04 that refused `gezel` (similar to `gaze` and
+  `level`) and `gezk` (similar to `gaze`), which is why the command line's short
+  name is `gezel-cli`. A scoped name is exempt. The installed command is still
+  `gezel`, because that comes from the package's `bin`, not its name.
+- **A new package first appears as `0.0.0-stage`,** a placeholder npm writes
+  while it processes the publish. `latest` points at it until the real version
+  lands, a minute to several minutes later, and until then `npx <name>` fails
+  with `could not determine executable to run`. That is not a broken publish.
+
+### The Capacitor package and its native payload
+
+`@bendyline/gezel-capacitor` is the one package whose tarball carries prebuilt
+engines: the `gezel-mobile-<version>-{ios,android}.tar.gz` SDKs of the native
+release pinned in `native-manifest.ts`. They are never committed, and its
+`prepack` stages them through
+[`scripts/stage-capacitor-native.mjs`](../scripts/stage-capacitor-native.mjs),
+so every path that packs it works unattended. The trust root is the desktop
+engine resolver's: the pinned `SHA256SUMS_DIGEST` vouches for `SHA256SUMS`, which
+vouches for each archive. A build someone staged on purpose (`0.0.0-ci.*` in
+`mobile-native.yml`) is left alone, except by a release.
+
+The plugin sources in the tarball must match those engines, and `prepack`
+compares each SDK's recorded `sources` with the checkout. A native release is
+cut from a merged commit, so a pull request that changes `native/runtime` cannot
+pin its own. Ordinary packs therefore only warn. **A release refuses that drift**:
+`publish-npm.yml` runs `stage-capacitor-native.mjs --require-current` before
+anything publishes, and `publish-package.mjs` sets
+`GEZEL_REQUIRE_CURRENT_NATIVE=1` for the publish itself. If the gate fails, cut a
+native release, pin it with `scripts/pin-native-release.mjs`, and dispatch again.
+
+The offline speech runtime is optional and is not in the native release, so a
+tarball built this way carries the speech API and dictionaries, and `status()`
+reports speech unavailable. See the package README's "Offline speech".
+
+Bootstrap it like any other package, at the `0.1.0` in its manifest. It depends
+on `packages/core` and `packages/app-sdk` through `workspace:*`, so publish from
+a checkout whose versions of those are on npm, and only after checking that the
+build imports nothing newer than them:
+
+```bash
+pnpm build
+(cd packages/capacitor && pnpm publish --access public --no-provenance --no-git-checks)
+```
 
 ### `ENONPMTOKEN` is not a missing secret
 

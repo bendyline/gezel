@@ -12,8 +12,10 @@ if (require.resolve('@bendyline/gezel-capacitor/package.json') !== path.join(roo
   throw new Error('Capacitor must be able to resolve the plugin package metadata.');
 const ios = await verifyRuntime(path.join(root, 'native/ios'), 'ios');
 const android = await verifyRuntime(path.join(root, 'native/android'), 'android');
-await verifyProducerSources(ios, path.resolve(root, '../..'));
-await verifyProducerSources(android, path.resolve(root, '../..'));
+// scripts/publish-package.mjs sets this, so only a real publish refuses drift.
+const allowStale = process.env.GEZEL_REQUIRE_CURRENT_NATIVE !== '1';
+await verifyProducerSources(ios, path.resolve(root, '../..'), console.warn, { allowStale });
+await verifyProducerSources(android, path.resolve(root, '../..'), console.warn, { allowStale });
 if (ios.packageVersion !== android.packageVersion)
   throw new Error('Stage the same native version for both platforms before packing.');
 console.log(`Verified Capacitor native payloads (${ios.packageVersion}).`);

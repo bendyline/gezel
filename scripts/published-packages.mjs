@@ -43,6 +43,9 @@ export const PUBLISHED_PACKAGES = [
   { dir: 'knowledge', typed: true },
   { dir: 'mcp', typed: true },
   { dir: 'inference', typed: true },
+  // Carries the pinned native release's mobile SDKs, which its `prepack` stages
+  // through scripts/stage-capacitor-native.mjs. They are never committed.
+  { dir: 'capacitor', typed: true },
   { dir: 'service', typed: true },
   // Spawn-only: the service resolves `run-action` and executes it as a
   // subprocess, never imports it, so it emits no declarations.
@@ -51,9 +54,8 @@ export const PUBLISHED_PACKAGES = [
   { dir: 'script-stdlib', typed: false },
   // Bin-only: its public contract is the `gezel` command line.
   { dir: 'cli', typed: false },
-  // Unscoped short names, so `npx gezel` works. Each is one bin file that
+  // Unscoped short names, so `npx gezel-cli` works. Each is one bin file that
   // hands over to the scoped package's command; nothing to build or type.
-  { dir: 'alias-gezel', typed: false },
   { dir: 'alias-gezel-cli', typed: false },
   { dir: 'alias-gezeld', typed: false },
   { dir: 'alias-gezel-mcp', typed: false },
@@ -78,7 +80,6 @@ export const VERSIONED_NOT_PUBLISHED = ['app', 'vscode'];
 export const RELEASE_IGNORED_PACKAGE_PATHS = [
   'packages/ui',
   'packages/mobile',
-  'packages/capacitor',
   'packages/eval-viewer',
   'packages/sharp-compat',
   'packages/phonemizer-compat',

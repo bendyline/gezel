@@ -1,7 +1,7 @@
 {
   "name": "gezel-cli",
   "version": "0.1.0",
-  "description": "Another name for the gezel command line (@bendyline/gezel-cli). `npx gezel` is the short way to run it.",
+  "description": "Gezel on the command line, under its short name so `npx gezel-cli` works. Assemble a team of AI helpers and put them to work from your terminal.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "cli", "terminal", "tui"],
   "homepage": "https://gezel.com",

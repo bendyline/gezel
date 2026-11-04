@@ -8,7 +8,7 @@ Most people never start it directly: the `gezel` command line starts the
 service when it needs one.
 
 ```bash
-npx gezel
+npx gezel-cli
 ```
 
 To run the service on its own, for example on a server:

@@ -71,6 +71,18 @@ test('refuses to repack stale native wrapper sources', async (t) => {
   await assert.rejects(verifyProducerSources(manifest, f.root), /Restage/);
 });
 
+test('a pack outside a release warns about stale wrapper sources instead of failing', async (t) => {
+  const f = await fixture(t);
+  const manifest = { packageVersion: '1.2.3', sources: { 'runtime.bin': sha('verified') } };
+  await writeFile(path.join(f.root, 'runtime.bin'), 'edited');
+  const warnings = [];
+  await verifyProducerSources(manifest, f.root, (message) => warnings.push(message), {
+    allowStale: true,
+  });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /needs a new native build/);
+});
+
 test('warns instead of failing when only the license inventory changed', async (t) => {
   const f = await fixture(t);
   const licenses = path.join(f.root, 'native/licenses');
