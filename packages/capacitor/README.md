@@ -93,7 +93,7 @@ there is no browser runtime stub pretending to run a local model.
 ## Offline speech
 
 `createMobileSpeech()` adds Whisper dictation and Kokoro narration on the device,
-through the `GezelSpeech` plugin and the optional gezel-speech runtime
+through the `GezelOfflineSpeech` plugin and the optional gezel-speech runtime
 (whisper.cpp and ONNX Runtime, built by
 [`native/mobile/speech/build.py`](../../native/mobile/speech/build.py)). Without
 a staged runtime the package still builds, and `status()` reports speech

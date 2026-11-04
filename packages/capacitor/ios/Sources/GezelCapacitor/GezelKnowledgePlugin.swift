@@ -124,7 +124,7 @@ public final class GezelKnowledgePlugin: CAPPlugin, CAPBridgedPlugin {
 
     /// A query's unit vector from the installed model; token ids come from the profile's tokenizer.
     @objc public func embed(_ call: CAPPluginCall) {
-        if let reason = GezelSpeechPlugin.unavailableReason { call.reject(reason, "unavailable"); return }
+        if let reason = GezelOfflineSpeechPlugin.unavailableReason { call.reject(reason, "unavailable"); return }
         encoder.async { [self] in
             #if canImport(GezelSpeech)
             do {
@@ -155,7 +155,7 @@ public final class GezelKnowledgePlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject(error.localizedDescription, "failed")
             }
             #else
-            call.reject(GezelSpeechPlugin.unavailableReason ?? "", "unavailable")
+            call.reject(GezelOfflineSpeechPlugin.unavailableReason ?? "", "unavailable")
             #endif
         }
     }

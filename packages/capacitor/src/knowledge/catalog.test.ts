@@ -7,7 +7,7 @@ import {
 } from './catalog.js';
 
 // What the native stores accept (SpeechModels.java, SpeechModelStore in
-// GezelSpeechPlugin.swift, MAX_ARCHIVE in both GezelKnowledge plugins): a
+// GezelOfflineSpeechPlugin.swift, MAX_ARCHIVE in both GezelKnowledge plugins): a
 // pinned download outside these rules would fail on every device.
 const STORE_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;

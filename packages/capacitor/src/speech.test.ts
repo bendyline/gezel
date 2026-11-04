@@ -2,7 +2,7 @@ import { KOKORO_VOICES, SPEECH_MODEL_CATALOG } from '@bendyline/gezel/speech-mod
 import { describe, expect, it, vi } from 'vitest';
 import { MOBILE_SPEECH_MODELS, mobileSpeechModel } from './speech-catalog.js';
 import {
-  type GezelSpeechPlugin,
+  type GezelOfflineSpeechPlugin,
   MobileSpeechError,
   createMobileSpeech,
   kokoroWordTimings,
@@ -47,10 +47,10 @@ function rejection(message: string, code: string) {
   return Object.assign(new Error(message), { code });
 }
 
-function fixture(overrides: Partial<GezelSpeechPlugin> = {}) {
+function fixture(overrides: Partial<GezelOfflineSpeechPlugin> = {}) {
   const listeners: ((event: { id: string; receivedBytes: number; totalBytes: number }) => void)[] =
     [];
-  const plugin: GezelSpeechPlugin = {
+  const plugin: GezelOfflineSpeechPlugin = {
     status: vi.fn(async () => ({ available: true, models: [] })),
     install: vi.fn(async ({ id }) => ({ id })),
     cancelInstall: vi.fn(async () => undefined),
@@ -64,7 +64,7 @@ function fixture(overrides: Partial<GezelSpeechPlugin> = {}) {
       return { remove: async () => void listeners.splice(listeners.indexOf(listener), 1) };
     }),
     ...overrides,
-  } as GezelSpeechPlugin;
+  } as GezelOfflineSpeechPlugin;
   const speech = createMobileSpeech({
     plugin,
     lexicon: async () => LEXICON,

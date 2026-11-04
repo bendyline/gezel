@@ -11,10 +11,10 @@ import GezelSpeech
 /// GezelSpeech framework, with models the host downloads on request. One
 /// request runs at a time; models stay loaded between requests and are
 /// released after a quiet spell or when the app leaves the foreground.
-@objc(GezelSpeechPlugin)
-public final class GezelSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
-    public let identifier = "GezelSpeechPlugin"
-    public let jsName = "GezelSpeech"
+@objc(GezelOfflineSpeechPlugin)
+public final class GezelOfflineSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "GezelOfflineSpeechPlugin"
+    public let jsName = "GezelOfflineSpeech"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "status", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "install", returnType: CAPPluginReturnPromise),

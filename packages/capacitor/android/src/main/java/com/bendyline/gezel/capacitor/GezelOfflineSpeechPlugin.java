@@ -21,8 +21,8 @@ import org.json.JSONArray;
  * request runs at a time; models stay loaded between requests and are
  * released after a quiet spell or when the app leaves the foreground.
  */
-@CapacitorPlugin(name = "GezelSpeech")
-public final class GezelSpeechPlugin extends Plugin {
+@CapacitorPlugin(name = "GezelOfflineSpeech")
+public final class GezelOfflineSpeechPlugin extends Plugin {
     private static final long IDLE_RELEASE_MS = 120_000;
     private final ExecutorService worker = Executors.newSingleThreadExecutor();
     private final ExecutorService downloads = Executors.newSingleThreadExecutor();

@@ -18,7 +18,7 @@ import {
 /**
  * Offline speech on this device: Whisper dictation and Kokoro narration.
  *
- * The native GezelSpeech plugin runs the engines and stores verified model
+ * The native GezelOfflineSpeech plugin runs the engines and stores verified model
  * files; this module chooses files from the catalog, normalizes audio, and
  * plans Kokoro's phonemes in JavaScript with the same dictionaries the desktop
  * daemon uses (no eSpeak NG). Nothing downloads or loads a model until a
@@ -61,7 +61,7 @@ interface NativeSegment {
 }
 
 /** App-owned native speech. Model ids and file names are validated natively; JavaScript never supplies paths. */
-export interface GezelSpeechPlugin {
+export interface GezelOfflineSpeechPlugin {
   status(): Promise<{
     available: boolean;
     reason?: string;
@@ -99,7 +99,7 @@ export interface GezelSpeechPlugin {
   ): Promise<PluginListenerHandle>;
 }
 
-export const GezelSpeech = registerPlugin<GezelSpeechPlugin>('GezelSpeech');
+export const GezelOfflineSpeech = registerPlugin<GezelOfflineSpeechPlugin>('GezelOfflineSpeech');
 
 export interface MobileSpeechStatus {
   /** The engine is in this build and can load. */
@@ -166,7 +166,7 @@ export interface MobileSpeechSynthesis {
 export interface MobileSpeechOptions {
   /** Kokoro's pronunciation dictionary as text, for American (`us`) or British (`gb`) voices. */
   lexicon(language: 'us' | 'gb'): Promise<string>;
-  plugin?: GezelSpeechPlugin;
+  plugin?: GezelOfflineSpeechPlugin;
   /** Waits before each retry of an interrupted download that saved no new bytes. */
   downloadRetryDelaysMs?: readonly number[];
 }
@@ -222,7 +222,7 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
 
 /** Run one native request, cancelling it natively when the signal aborts. */
 async function request<T>(
-  plugin: GezelSpeechPlugin,
+  plugin: GezelOfflineSpeechPlugin,
   signal: AbortSignal | undefined,
   run: (requestId: string) => Promise<T>,
 ): Promise<T> {
@@ -382,7 +382,7 @@ export function kokoroWordTimings(
 }
 
 export function createMobileSpeech(options: MobileSpeechOptions) {
-  const plugin = options.plugin ?? GezelSpeech;
+  const plugin = options.plugin ?? GezelOfflineSpeech;
   const lexicons = new Map<'us' | 'gb', Promise<KokoroLexicon>>();
   const lexicon = (language: 'us' | 'gb') => {
     const cached = lexicons.get(language);
@@ -415,7 +415,7 @@ export function createMobileSpeech(options: MobileSpeechOptions) {
     models: MOBILE_SPEECH_MODELS,
 
     async status(): Promise<MobileSpeechStatus> {
-      let value: Awaited<ReturnType<GezelSpeechPlugin['status']>>;
+      let value: Awaited<ReturnType<GezelOfflineSpeechPlugin['status']>>;
       try {
         value = await plugin.status();
       } catch (error) {
