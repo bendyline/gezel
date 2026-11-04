@@ -1,0 +1,38 @@
+{
+  "name": "gezel-cli",
+  "version": "0.1.0",
+  "description": "Another name for the gezel command line (@bendyline/gezel-cli). `npx gezel` is the short way to run it.",
+  "license": "MIT",
+  "keywords": ["gezel", "ai", "agents", "local-first", "cli", "terminal", "tui"],
+  "homepage": "https://gezel.com",
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/alias-gezel-cli"
+  },
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "bin": {
+    "gezel": "./bin/gezel.js"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": ["bin"],
+  "dependencies": {
+    "@bendyline/gezel-cli": "workspace:*"
+  }
+}

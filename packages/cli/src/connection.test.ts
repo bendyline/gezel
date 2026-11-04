@@ -15,6 +15,7 @@ import {
   applyHome,
   authorizeLocalOwnedDaemon,
   cliGrantError,
+  cliUpdateCommand,
   cliUserDaemonEnv,
   describeMachineEngineBroker,
   ensureCliProjectLead,
@@ -191,6 +192,22 @@ describe('incompatible daemon errors', () => {
       systemService: false,
     });
     expect(error.message).toContain('npm install -g @bendyline/gezel-cli');
+  });
+
+  it('names the package the CLI was installed from', () => {
+    const entry = 'node_modules/@bendyline/gezel-cli/dist/bin/gezel-main.js';
+    expect(cliUpdateCommand(`file:///usr/local/lib/${entry}`)).toBe(
+      'npm install -g @bendyline/gezel-cli',
+    );
+    expect(cliUpdateCommand(`file:///usr/local/lib/node_modules/gezel/${entry}`)).toBe(
+      'npm install -g gezel',
+    );
+    expect(cliUpdateCommand(`file:///usr/local/lib/node_modules/gezel-cli/${entry}`)).toBe(
+      'npm install -g gezel-cli',
+    );
+    expect(cliUpdateCommand(`file:///Users/a/.npm/_npx/40b59497924eb6bb/${entry}`)).toBe(
+      'npx gezel@latest',
+    );
   });
 
   it('never suggests stopping a machine-wide service from the CLI', () => {

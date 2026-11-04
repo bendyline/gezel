@@ -108,7 +108,7 @@ import { stderrProgress } from '../progress-output.js';
 import { resolveRunGezel } from '../run-gezel.js';
 import { RunProgress } from '../run-progress.js';
 import { resolveRunPrompt } from '../run-prompt.js';
-import { checkRunReadiness } from '../run-readiness.js';
+import { canOfferRunSetup, checkRunReadiness } from '../run-readiness.js';
 import { RunOutput } from '../run-reply.js';
 import { registerSecretCommands } from '../secrets-command.js';
 import {
@@ -824,7 +824,7 @@ program
   .option('-g, --gezel <ref>', "gezel id or name (default: this project's crew lead)")
   .addHelpText(
     'after',
-    '\nExamples:\n  gezel run "Summarize this project"\n  printf \'Summarize these notes:\\nThe launch is Friday.\\n\' | gezel run -\n  gezel run - < prompt.txt\n\nA sole - reads UTF-8 stdin to EOF. Empty input is rejected.\nReplies go to stdout; diagnostics go to stderr.',
+    '\nExamples:\n  gezel run "Summarize this project"\n  printf \'Summarize these notes:\\nThe launch is Friday.\\n\' | gezel run -\n  gezel run - < prompt.txt\n\nA sole - reads UTF-8 stdin to EOF. Empty input is rejected.\nReplies go to stdout; diagnostics go to stderr.\nWith no model set up yet, a run in a terminal first offers to download one,\nthen runs the prompt.',
   )
   .action(async (promptParts: string[], opts: { gezel?: string }) => {
     const prompt = await resolveRunPrompt(promptParts);
@@ -854,7 +854,29 @@ program
       const gezelId = opts.gezel
         ? await resolveRunGezel(client, opts.gezel)
         : await ensureCliProjectLead(client, projectId);
-      const readiness = await checkRunReadiness(client, gezelId);
+      let readiness = await checkRunReadiness(client, gezelId);
+      if (!readiness.ready && canOfferRunSetup()) {
+        // A first `npx gezel run …` in a terminal sets up a model and then
+        // runs the request, instead of sending the person off to `gezel`.
+        // Keep the path indirect so Ink stays out of the main bin.
+        const tuiModule = '../tui/index.js';
+        const { launchRunSetup } = (await import(tuiModule)) as typeof import('../tui/index.js');
+        // A service warning written mid-frame would tear the setup screens.
+        const runLogLevel = getLogLevel();
+        if (!process.env.GEZEL_LOG_LEVEL) setLogLevel('error');
+        let finished: boolean;
+        try {
+          finished = await launchRunSetup({ client });
+        } finally {
+          setLogLevel(runLogLevel);
+        }
+        if (!finished) {
+          console.error('Setup stopped. Your request was not run.');
+          process.exitCode = 130;
+          return;
+        }
+        readiness = await checkRunReadiness(client, gezelId);
+      }
       if (!readiness.ready) {
         console.error(readiness.message);
         process.exitCode = 1;

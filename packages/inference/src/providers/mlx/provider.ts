@@ -2611,6 +2611,11 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           truncatedSalvage,
           bareInvokeRepaired,
         } = salvaged;
+        // A prose-shaped call such as lookup_record({}) was ordinary TEXT
+        // to the Hermes grammar, not a constrained tool envelope. Missing
+        // arguments in that salvage cannot establish a decoding violation.
+        // Keep provenance by id through coercion and duplicate collapse.
+        const proseCallIds = new Set(proseRepaired.map((call) => call.id));
         const rawTurnContentBeforeReasoning = turnContent;
 
         // Reasoning-tag extraction applies regardless of which (if any)
@@ -3258,18 +3263,23 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
             );
             const grammarContractViolation =
               missingRequired.length > 0 &&
+              !proseCallIds.has(call.id) &&
               hermesRequiredArgGrammarRequested(body) &&
               !this.forceSequentialToolGrammar;
-            if (grammarContractViolation) {
-              this.forceSequentialToolGrammar = true;
-              log.warn(
-                `turn#${seq}.${turn} required-argument grammar contract violation tool=${call.function.name} missing=${missingRequired.join(',')} — latching this session to sequential decode`,
-              );
+            if (missingRequired.length > 0) {
+              if (grammarContractViolation) {
+                this.forceSequentialToolGrammar = true;
+                log.warn(
+                  `turn#${seq}.${turn} required-argument grammar contract violation tool=${call.function.name} missing=${missingRequired.join(',')} — latching this session to sequential decode`,
+                );
+              }
               // Do not send a call that the advertised schema proves cannot
-              // pass validation. Keeping it out of the bridge also avoids
-              // poisoning the session-wide unresolved-failure ledger before
-              // the sequential retry gets a chance to recover.
-              output = `ERROR: ${call.function.name} was not executed because the constrained decoder omitted required fields: ${missingRequired.join(', ')}. The runtime switched this session to sequential decoding; retry the call once.`;
+              // pass validation, regardless of how it was parsed. A rejected
+              // prose salvage gets ordinary corrective feedback and retains
+              // speculation; native grammar violations keep the circuit breaker.
+              output = grammarContractViolation
+                ? `ERROR: ${call.function.name} was not executed because the constrained decoder omitted required fields: ${missingRequired.join(', ')}. The runtime switched this session to sequential decoding; retry the call once.`
+                : `ERROR: ${call.function.name} was not executed because its arguments are missing required fields: ${missingRequired.join(', ')}. Retry the call with all declared required fields.`;
             } else {
               try {
                 const budgetChars = computeToolBudgetChars(
@@ -3300,6 +3310,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // the next iteration, and the log now makes the skew explicit.
               if (
                 validatorReportedMissingRequiredArgs(output) &&
+                !proseCallIds.has(call.id) &&
                 hermesRequiredArgGrammarRequested(body) &&
                 !this.forceSequentialToolGrammar
               ) {

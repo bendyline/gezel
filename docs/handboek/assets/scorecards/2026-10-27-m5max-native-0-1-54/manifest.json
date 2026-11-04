@@ -6,18 +6,33 @@
   "files": [
     {
       "path": "packages/core/src/scorecard/data/runs/2026-10-27-m5max-native-0-1-54.json",
-      "bytes": 69516,
-      "sha256": "d45d223445ca9c1fe52666689c4f751c3beea303f62082862e4fb9ae58b5abab"
+      "bytes": 70970,
+      "sha256": "a2cd69c130dff3d643752ed4cf857298af5477d5bcbfca0635cc577cf37c3a2c"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/scorecard.json",
-      "bytes": 69516,
-      "sha256": "d45d223445ca9c1fe52666689c4f751c3beea303f62082862e4fb9ae58b5abab"
+      "bytes": 70970,
+      "sha256": "a2cd69c130dff3d643752ed4cf857298af5477d5bcbfca0635cc577cf37c3a2c"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/analysis.json",
-      "bytes": 920839,
-      "sha256": "a021a41f060f59510aec8ce59cdc05661c0c6a55f20fc9713f6d26eb01ef2f3d"
+      "bytes": 924590,
+      "sha256": "441142615852fdddd873c8151383a49486a4a5a3f0369f9ce81de07b04f45582"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/mlx-prefill-recovery.json",
+      "bytes": 975317,
+      "sha256": "5dbe9b5277f2265a83e9e01d9616cc5a771aafc4b786b541ece0472702074592"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/mlx-prefill-recovery.md",
+      "bytes": 2570,
+      "sha256": "ee820b5af0dd712e813175e38065290bd52d9a07f993bfc6d59a2d2a0552f742"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/mlx-prefill-recovery.csv",
+      "bytes": 72863,
+      "sha256": "2888ab05db544b77622f96188a05b423ae174e339ee737bdd4ef7b3353d1da2b"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/judging.json",
@@ -26,8 +41,8 @@
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/performance.json",
-      "bytes": 1971168,
-      "sha256": "789eb1c9ec0a89fccada36a345662e9ddbedb185c053a5324e8475e1e0e51a8a"
+      "bytes": 2063320,
+      "sha256": "99920a543ec143cc0a114ecc4d8659f342110935c69de4f9f9ab49114811318f"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/completion-audit.json",
@@ -41,18 +56,18 @@
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/scorecard-details.json",
-      "bytes": 24771470,
-      "sha256": "e7168109a5adc07bfe7d43449198839eb7819a19252a363f66d9861c631302f0"
+      "bytes": 24850632,
+      "sha256": "eb337733db318f16aaba89f1bc394cf2f7f47bde393b2c3aef2c429f020c558b"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/verification.json",
-      "bytes": 516,
-      "sha256": "23bcefa36a88499778cbafa0af1e44315f8e2db467ab62ed0cc40ddfc6508f36"
+      "bytes": 891,
+      "sha256": "1dd54bf172bf52d82c1ae9a946466890a5c5632d60d1989bba531599bebb2c77"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/report.md",
-      "bytes": 35357,
-      "sha256": "fc3326de98b9e002327040be0c43812ef86b4861729d9fe2887f002ff590d02e"
+      "bytes": 37216,
+      "sha256": "705a7af0693456a7bd3859060cefd17a69d38cb2b56a44bddb86365013e4db3a"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/failure-evidence.md",
@@ -73,6 +88,11 @@
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/supervision-notes.md",
       "bytes": 367577,
       "sha256": "4860d8c842d19f60e697861750e2167b12104f1a4431d6ec0c86268effa9d680"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/original-report.md",
+      "bytes": 35357,
+      "sha256": "fc3326de98b9e002327040be0c43812ef86b4861729d9fe2887f002ff590d02e"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-10-27-m5max-native-0-1-54/trials.csv",

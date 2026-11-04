@@ -7,6 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   type ApiCompatVerdict,
   type ApiIncompatibilityCode,
@@ -905,6 +906,22 @@ function isIncompatibleDaemonError(error: unknown): error is GezelSdkError {
 }
 
 /**
+ * The command that updates this CLI, judged by where it was installed from.
+ * Installing a second package that also provides `gezel` fails while the first
+ * is installed, so the hint names the one in use: the short names (`gezel`,
+ * `gezel-cli`) nest this package inside their own folder, and npx keeps its
+ * trees under `_npx/`, where only `@latest` fetches a newer version.
+ */
+export function cliUpdateCommand(moduleUrl: string = import.meta.url): string {
+  const path = fileURLToPath(moduleUrl).replaceAll('\\', '/');
+  if (path.includes('/_npx/')) return 'npx gezel@latest';
+  const shortName = /\/node_modules\/(gezel|gezel-cli)\/node_modules\/@bendyline\/gezel-cli\//.exec(
+    path,
+  )?.[1];
+  return `npm install -g ${shortName ?? '@bendyline/gezel-cli'}`;
+}
+
+/**
  * Say which side is out of date and what to run. Accepts the SDK's
  * `daemon_incompatible` error, whose `cause` carries the verdict, or a
  * verdict the CLI reached itself.
@@ -917,7 +934,7 @@ export function incompatibleDaemonCliError(source: GezelSdkError | IncompatibleD
   const service = `the Gezel service${verdict.version ? ` (${verdict.version})` : ''}`;
   if (verdict.code === 'client-too-old') {
     return new CliError(
-      `This gezel CLI is older than ${service} supports. Update it with \`npm install -g @bendyline/gezel-cli\`, then try again.`,
+      `This gezel CLI is older than ${service} supports. Update it with \`${cliUpdateCommand()}\`, then try again.`,
     );
   }
   if (verdict.code === 'machine-engine-role') {

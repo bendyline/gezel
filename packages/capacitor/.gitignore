@@ -3,3 +3,4 @@
 /android/.gradle/
 /.build/
 /.swiftpm/
+/kokoro-lexicon/

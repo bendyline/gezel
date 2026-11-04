@@ -2126,7 +2126,7 @@ function DaemonSettingsView() {
                     }
                     aria-label="Reserve a share of my quota per day until reset"
                   />
-                  <span>I have at least</span>
+                  <span>I have less than</span>
                   <input
                     type="number"
                     min={0}
@@ -2141,7 +2141,7 @@ function DaemonSettingsView() {
                     disabled={config?.nightShift?.quotaReserve?.perDay?.enabled !== true}
                     aria-label="Daily quota reserve percent"
                   />
-                  <span>% quota per day before it resets:</span>
+                  <span>% of my quota per day left before it resets</span>
                 </label>
                 <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
                   The daily reserve scales with the time left: 10% a day with 4 days until reset

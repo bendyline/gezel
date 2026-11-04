@@ -15,18 +15,41 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+const VERSION = /^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/;
+/** GEZEL_SPEECH_ABI in native/mobile/speech/gezel_speech.h, as the plugins' bindings expect it. */
+export const SPEECH_ABI = 3;
+
 export async function verifyRuntime(root, target) {
-  const realRoot = await realpath(root);
   const manifest = JSON.parse(await readFile(path.join(root, 'sdk-manifest.json'), 'utf8'));
   if (
     manifest.scope !== 'provider-model-runtime' ||
     manifest.target !== target ||
     manifest.gezelABIVersion !== 1 ||
-    !/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(manifest.packageVersion) ||
+    !VERSION.test(manifest.packageVersion) ||
     !Object.keys(manifest.files ?? {}).length
   ) {
     throw new Error(`Expected a staged ${target} provider/model runtime`);
   }
+  return verifyFiles(root, manifest);
+}
+
+/** The optional offline speech runtime (native/mobile/speech/build.py --package). */
+export async function verifySpeech(root, target) {
+  const manifest = JSON.parse(await readFile(path.join(root, 'sdk-manifest.json'), 'utf8'));
+  if (
+    manifest.scope !== 'speech-runtime' ||
+    manifest.target !== target ||
+    manifest.speechABIVersion !== SPEECH_ABI ||
+    !VERSION.test(manifest.packageVersion) ||
+    !Object.keys(manifest.files ?? {}).length
+  ) {
+    throw new Error(`Expected a staged ${target} speech runtime`);
+  }
+  return verifyFiles(root, manifest);
+}
+
+async function verifyFiles(root, manifest) {
+  const realRoot = await realpath(root);
   for (const [name, sha] of Object.entries(manifest.files)) {
     const file = path.resolve(root, name);
     if (
@@ -71,12 +94,24 @@ export async function verifyProducerSources(manifest, repo, warn = console.warn)
   return staleNotices;
 }
 
-export async function stageNative(
+export function stageNative(
   target,
   source,
   destination = path.join(packageRoot, 'native', target),
 ) {
-  const manifest = await verifyRuntime(source, target);
+  return stage(source, destination, (root) => verifyRuntime(root, target));
+}
+
+export function stageSpeech(
+  target,
+  source,
+  destination = path.join(packageRoot, 'native', `speech-${target}`),
+) {
+  return stage(source, destination, (root) => verifySpeech(root, target));
+}
+
+async function stage(source, destination, verify) {
+  const manifest = await verify(source);
   await mkdir(path.dirname(destination), { recursive: true });
   const work = await mkdtemp(`${destination}.stage-`);
   const previous = `${work}/previous`;
@@ -89,7 +124,7 @@ export async function stageNative(
       await mkdir(path.dirname(destination), { recursive: true });
       await cp(path.join(source, name), destination);
     }
-    await verifyRuntime(`${work}/next`, target);
+    await verify(`${work}/next`);
     try {
       await access(destination);
       moved = true;
@@ -108,8 +143,11 @@ export async function stageNative(
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const [target, source] = process.argv.slice(2);
-  if (!['ios', 'android'].includes(target) || !source)
-    throw new Error('Usage: node scripts/stage-native.mjs ios|android <staged-runtime>');
-  await stageNative(target, path.resolve(source));
+  const [, speech, platform] = /^(speech-)?(ios|android)$/.exec(target ?? '') ?? [];
+  if (!platform || !source)
+    throw new Error(
+      'Usage: node scripts/stage-native.mjs ios|android|speech-ios|speech-android <staged-runtime>',
+    );
+  await (speech ? stageSpeech : stageNative)(platform, path.resolve(source));
   console.log(`Prepared Gezel Capacitor ${target} package.`);
 }

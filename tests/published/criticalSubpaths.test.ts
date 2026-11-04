@@ -125,6 +125,30 @@ const RUNTIME_RESOLVED: ReadonlyArray<{
       'src/index.ts ScriptInit contract and the SDK module embedded by portable runtime hosts',
   },
   {
+    specifier: '@bendyline/gezel-cli/package.json',
+    from: 'alias-gezel',
+    mode: 'require',
+    usedBy: 'bin/gezel.js — `npx gezel` finds the CLI command through its manifest',
+  },
+  {
+    specifier: '@bendyline/gezel-cli/package.json',
+    from: 'alias-gezel-cli',
+    mode: 'require',
+    usedBy: 'bin/gezel.js — finds the CLI command through its manifest',
+  },
+  {
+    specifier: '@bendyline/gezel-service/package.json',
+    from: 'alias-gezeld',
+    mode: 'require',
+    usedBy: 'bin/gezeld.js — finds the daemon command through its manifest',
+  },
+  {
+    specifier: '@bendyline/gezel-mcp/package.json',
+    from: 'alias-gezel-mcp',
+    mode: 'require',
+    usedBy: 'bin/gezel-mcp.js — finds the MCP server command through its manifest',
+  },
+  {
     specifier: '@bendyline/gezel-script-runtime/quickjs',
     from: 'service',
     mode: 'import',

@@ -1,0 +1,38 @@
+{
+  "name": "gezel-mcp",
+  "version": "0.1.0",
+  "description": "Gezel's MCP server, gezel-mcp, under its short name. Same program as @bendyline/gezel-mcp.",
+  "license": "MIT",
+  "keywords": ["gezel", "ai", "agents", "local-first", "mcp", "model-context-protocol"],
+  "homepage": "https://gezel.com",
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/alias-gezel-mcp"
+  },
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "bin": {
+    "gezel-mcp": "./bin/gezel-mcp.js"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": ["bin"],
+  "dependencies": {
+    "@bendyline/gezel-mcp": "workspace:*"
+  }
+}

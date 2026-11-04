@@ -31,19 +31,25 @@ const AUTHENTICODE_VALID = 0;
 /** The update path travels in the environment so it is never parsed as PowerShell. */
 const UPDATE_FILE_VARIABLE = 'GEZEL_UPDATE_FILE';
 
-// Errors are written as plain text: left to PowerShell, -EncodedCommand
-// reports them on stderr as CLIXML.
-const SIGNATURE_SCRIPT = [
+// Cmdlets and core types only. AppLocker and App Control policies run
+// PowerShell in Constrained Language Mode, which refuses .NET static members
+// and constructors; one `[Console]::OutputEncoding` line made every update
+// fail on those PCs, and an installed copy cannot update itself past a broken
+// check. A failure comes back as JSON on stdout: left to PowerShell,
+// -EncodedCommand reports it on stderr as CLIXML. Every non-ASCII character is
+// escaped, because stdout uses the console code page and a localized message
+// in Shift-JIS can carry a 0x5C byte that reads as a JSON backslash.
+export const SIGNATURE_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   "$ProgressPreference = 'SilentlyContinue'",
-  '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
   'try {',
   `  $signature = Get-AuthenticodeSignature -LiteralPath $env:${UPDATE_FILE_VARIABLE}`,
-  '  [pscustomobject]@{ Status = [int]$signature.Status; StatusMessage = $signature.StatusMessage; Subject = $signature.SignerCertificate.Subject } | ConvertTo-Json -Compress',
+  '  $report = @{ Status = [int]$signature.Status; StatusMessage = [string]$signature.StatusMessage; Subject = $signature.SignerCertificate.Subject }',
   '} catch {',
-  '  [Console]::Error.WriteLine($_.Exception.Message)',
-  '  exit 1',
+  '  $report = @{ Error = [string]$_.Exception.Message }',
   '}',
+  '$json = $report | ConvertTo-Json -Compress',
+  "-join ($json.ToCharArray() | ForEach-Object { if ([int]$_ -lt 128) { [string]$_ } else { '\\u{0:x4}' -f [int]$_ } })",
 ].join('\n');
 
 /** -EncodedCommand sidesteps powershell.exe's command-line quoting rules entirely. */
@@ -118,7 +124,8 @@ function parseSignatureReport(output: string): SignatureReport {
     parsed = undefined;
   }
   if (typeof parsed === 'object' && parsed !== null) {
-    const { Status, StatusMessage, Subject } = parsed as Record<string, unknown>;
+    const { Status, StatusMessage, Subject, Error: failure } = parsed as Record<string, unknown>;
+    if (typeof failure === 'string') throw signatureCheckError(failure);
     if (typeof Status === 'number' && (Subject === null || typeof Subject === 'string')) {
       return {
         status: Status,

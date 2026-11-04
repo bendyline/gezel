@@ -19,7 +19,7 @@ Every package published from the Gezel repository exposes a public, semver-versi
 
 | You want to… | Start with |
 | --- | --- |
-| Use gezel from a terminal or server | [`@bendyline/gezel-cli`](cli-reference.md) |
+| Use gezel from a terminal or server | [`gezel`](cli-reference.md), the short name for `@bendyline/gezel-cli` |
 | Write an automation that runs inside Gezel | [`@bendyline/gezel-sdk`](writing-scripts-with-gezel-sdk.md) |
 | Let a desktop or Node app use the user's Gezel models | [`@bendyline/gezel-app-sdk`](building-connected-apps-with-gezel-app-sdk.md) |
 | Run on-device models inside your own app, with or without Gezel installed | `@bendyline/gezel-app-sdk` together with `@bendyline/gezel-inference` |
@@ -29,14 +29,20 @@ Every package published from the Gezel repository exposes a public, semver-versi
 | Build, check, or search `.gezk` knowledge catalogs in code | `@bendyline/gezel-knowledge` |
 | Share Gezel's schemas or parse its files | `@bendyline/gezel` |
 
-For example, the command-line install is:
+For example, to try the command line without installing it:
 
 ```bash
-npm install -g @bendyline/gezel-cli
+npx gezel
+```
+
+To install it:
+
+```bash
+npm install -g gezel
 gezel
 ```
 
-To try it without installing, name the package: `npx -p @bendyline/gezel-cli gezel`. Always name the `@bendyline/` package with `npx`. A bare `npx gezel` outside a folder where the CLI is installed asks npm for an unrelated package called `gezel`.
+Install one of `gezel` and `@bendyline/gezel-cli` globally, not both: they are the same program and both provide the `gezel` command.
 
 A library belongs in the application that uses it:
 
@@ -63,6 +69,8 @@ npm install @bendyline/gezel-app-sdk
 | `@bendyline/gezel-inference` | The on-device inference runtime: native engines such as llama.cpp and MLX, model download and verification, the on-device embedder, knowledge search, and the OpenAI-compatible routes. It holds no product state: no gezels, projects, chats, or tools. | Applications that host on-device models in their own process through `@bendyline/gezel-app-sdk` (`host: { inferenceOnly: true }`). Everyone else receives it through `@bendyline/gezel-service`. |
 | `@bendyline/gezel-service` | `gezeld`, the local daemon. It owns state, provider routing, chat sessions, tools, tasks, engines, and the HTTP API, and includes the browser UI and Handboek. | Headless operators and applications deliberately embedding or managing a Gezel daemon. |
 | `@bendyline/gezel-cli` | The `gezel` terminal interface, one-shot runner, service manager, model and engine manager, media commands, and Handboek exporter. It does not expose a supported JavaScript API. | People using [the gezel command line](cli-reference.md). |
+| `gezel` | The short name for `@bendyline/gezel-cli`, so `npx gezel` works. It installs that package and runs its `gezel` command. | People trying or installing the command line. |
+| `gezel-cli`, `gezeld`, `gezel-mcp` | Short names for `@bendyline/gezel-cli`, the `gezeld` command in `@bendyline/gezel-service`, and `@bendyline/gezel-mcp`. Each installs that package and runs its command. | Anyone who leaves off the `@bendyline/` scope. |
 
 ## Packages that work together
 

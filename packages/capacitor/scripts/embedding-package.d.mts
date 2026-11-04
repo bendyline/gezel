@@ -8,6 +8,13 @@ export function stageNative(
   source: string,
   destination?: string,
 ): Promise<void>;
+export function verifySpeech(root: string, target: 'ios' | 'android'): Promise<unknown>;
+/** Stage the optional offline speech runtime (native/mobile/speech/build.py --package). */
+export function stageSpeech(
+  target: 'ios' | 'android',
+  source: string,
+  destination?: string,
+): Promise<void>;
 
 export function configureCapacitorProject(options: {
   projectRoot: string;

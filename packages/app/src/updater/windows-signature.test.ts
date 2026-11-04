@@ -1,11 +1,14 @@
+import { execFile } from 'node:child_process';
 import { copyFile, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   type RunPowerShell,
   SIGNATURE_CHECK_ERROR_CODE,
   SIGNATURE_CHECK_TIMEOUT_MS,
+  SIGNATURE_SCRIPT,
   createWindowsUpdateSignatureVerifier,
   parseDistinguishedName,
   signatureCheckEnvironment,
@@ -136,6 +139,33 @@ describe('Windows update signature check', () => {
     }
   });
 
+  it('reports a failure the script caught as a coded error', async () => {
+    const missing = createWindowsUpdateSignatureVerifier(
+      reporting({ Error: `File ${UPDATE_FILE} was not found.` }),
+    );
+    await expect(missing(['Bendyline LLC'], UPDATE_FILE)).rejects.toMatchObject({
+      code: SIGNATURE_CHECK_ERROR_CODE,
+      message: `Windows update signature check failed: File ${UPDATE_FILE} was not found.`,
+    });
+  });
+
+  it('reads a localized message the script escaped to ASCII', async () => {
+    const verify = createWindowsUpdateSignatureVerifier(
+      async () =>
+        '{"Status":2,"StatusMessage":"Die Datei ist nicht signiert \\u00fcberpr\\u00fcft","Subject":null}',
+    );
+    await expect(verify(['Bendyline LLC'], UPDATE_FILE)).resolves.toBe(
+      'Authenticode status 2: Die Datei ist nicht signiert überprüft',
+    );
+  });
+
+  it('uses nothing Constrained Language Mode refuses', () => {
+    // AppLocker and App Control policies put PowerShell in Constrained
+    // Language Mode, which refuses .NET static members, constructors and
+    // Add-Type. A PC under one could never update past a check that uses them.
+    expect(SIGNATURE_SCRIPT).not.toMatch(/::|\[System\.|New-Object|Add-Type|\[Console\]/i);
+  });
+
   describe.skipIf(process.platform !== 'win32')('with Windows PowerShell', () => {
     let directory = '';
 
@@ -164,8 +194,58 @@ describe('Windows update signature check', () => {
 
       await expect(verifyWindowsUpdateSignature(['Bendyline LLC'], missing)).rejects.toMatchObject({
         code: SIGNATURE_CHECK_ERROR_CODE,
-        message: `Windows update signature check failed: powershell.exe failed (1): File ${missing} was not found.`,
+        message: `Windows update signature check failed: File ${missing} was not found.`,
       });
+    });
+
+    // Switches the session to Constrained Language Mode, as an AppLocker or
+    // App Control policy would, then runs the given script inside it.
+    const constrainedPowerShell: RunPowerShell = async (encodedCommand, env, timeoutMs) => {
+      const outer = [
+        "$ErrorActionPreference = 'Stop'",
+        "$ExecutionContext.SessionState.LanguageMode = 'ConstrainedLanguage'",
+        'Invoke-Expression $env:GEZEL_TEST_SCRIPT',
+      ].join('\n');
+      const powershell = join(
+        process.env.SystemRoot ?? 'C:\\Windows',
+        'System32',
+        'WindowsPowerShell',
+        'v1.0',
+        'powershell.exe',
+      );
+      const { stdout } = await promisify(execFile)(
+        powershell,
+        [
+          '-NoProfile',
+          '-NonInteractive',
+          '-InputFormat',
+          'None',
+          '-EncodedCommand',
+          Buffer.from(outer, 'utf16le').toString('base64'),
+        ],
+        {
+          env: {
+            ...env,
+            GEZEL_TEST_SCRIPT: Buffer.from(encodedCommand, 'base64').toString('utf16le'),
+          },
+          timeout: timeoutMs,
+        },
+      );
+      return stdout;
+    };
+
+    it('works under Constrained Language Mode', { timeout: 60_000 }, async () => {
+      // The control proves the harness is constrained: the line that broke
+      // updates in 1.26307.102 must fail under it.
+      const broken = Buffer.from(
+        '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+        'utf16le',
+      ).toString('base64');
+      await expect(constrainedPowerShell(broken, process.env, 30_000)).rejects.toThrow();
+
+      const signed = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe');
+      const verify = createWindowsUpdateSignatureVerifier(constrainedPowerShell);
+      await expect(verify(['Microsoft Windows'], signed)).resolves.toBeNull();
     });
   });
 });

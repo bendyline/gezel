@@ -3,8 +3,8 @@ import { lstat, readFile, readdir, realpath, writeFile } from 'node:fs/promises'
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EmbeddingPackageManifestSchema } from '@bendyline/gezel/app-models';
-import { stageNative, verifyRuntime } from './stage-native.mjs';
-export { stageNative, verifyRuntime };
+import { stageNative, stageSpeech, verifyRuntime, verifySpeech } from './stage-native.mjs';
+export { stageNative, stageSpeech, verifyRuntime, verifySpeech };
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 async function filesIn(root, relative = '') {
@@ -40,6 +40,21 @@ async function payload(root, target) {
     privacyManifests: actual.filter((name) => name.endsWith('.xcprivacy')),
   };
 }
+const exists = (file) =>
+  lstat(file).then(
+    () => true,
+    () => false,
+  );
+/** The optional speech runtime, verified exactly as staged; null when this build has none. */
+async function speechPayload(root, target) {
+  const directory = path.join(root, 'native', `speech-${target}`);
+  if (!(await exists(directory))) return null;
+  const runtime = await verifySpeech(directory, target);
+  const actual = (await filesIn(directory)).filter((name) => name !== 'sdk-manifest.json').sort();
+  if (JSON.stringify(actual) !== JSON.stringify(Object.keys(runtime.files).sort()))
+    throw new Error(`Unexpected ${target} speech file inventory`);
+  return runtime.packageVersion;
+}
 /** Build-time provenance. The package tarball's registry integrity authenticates this manifest. */
 export async function writeEmbeddingManifest(root = packageRoot) {
   const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
@@ -47,7 +62,9 @@ export async function writeEmbeddingManifest(root = packageRoot) {
   if (native.ios.version !== native.android.version)
     throw new Error('iOS and Android native package versions differ');
   const files = {};
-  for (const directory of ['dist', 'ios/Sources', 'android/src', 'native']) {
+  for (const directory of ['dist', 'kokoro-lexicon', 'ios/Sources', 'android/src', 'native']) {
+    // Speech dictionaries are optional, like the speech runtime they serve.
+    if (directory === 'kokoro-lexicon' && !(await exists(path.join(root, directory)))) continue;
     for (const name of await filesIn(path.join(root, directory))) {
       if (name.endsWith('.map')) continue;
       const relative = `${directory}/${name}`;
@@ -113,6 +130,9 @@ export async function verifyCapacitorPackage(root = packageRoot) {
   const native = { ios: await payload(root, 'ios'), android: await payload(root, 'android') };
   if (JSON.stringify(native) !== JSON.stringify(value.native))
     throw new Error('Embedding compatibility metadata changed');
+  // Speech files are pinned with every other native file above; this checks their own manifests too.
+  await speechPayload(root, 'ios');
+  await speechPayload(root, 'android');
   return value;
 }
 

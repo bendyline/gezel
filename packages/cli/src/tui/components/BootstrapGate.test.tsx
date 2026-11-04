@@ -9,7 +9,7 @@ import { type RenderOptions, Text, render, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NATIVE_TOOLKIT } from '../bootstrap.js';
-import { BootstrapGate } from './BootstrapGate.js';
+import { BootstrapGate, type BootstrapNextStep, ExitWhenReady } from './BootstrapGate.js';
 
 type InkHarness = ReturnType<typeof renderInk>;
 const mounted: InkHarness[] = [];
@@ -397,6 +397,47 @@ describe('BootstrapGate interactions', () => {
   });
 });
 
+describe('BootstrapGate for gezel run', () => {
+  it('hands over once setup is done, so the run can start its request', async () => {
+    const onReady = vi.fn();
+    const harness = mountGate(createClient(), <ExitWhenReady onReady={onReady} />, 'run');
+
+    await harness.waitUntilExit();
+    expect(onReady).toHaveBeenCalledOnce();
+  });
+
+  it('never reports ready when the person leaves with Ctrl+C', async () => {
+    const onReady = vi.fn();
+    const client = createClient({
+      listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
+      listCatalogItems: vi.fn(async (kind: string) =>
+        kind === 'chat-model' ? { items: [chatModel({ name: 'Small' })] } : { items: [] },
+      ),
+    });
+    const harness = mountGate(client, <ExitWhenReady onReady={onReady} />, 'run');
+
+    await vi.waitFor(() => expect(harness.text()).toContain('Recommended — Download Small'));
+    harness.write('\x03');
+    await harness.waitUntilExit();
+    expect(onReady).not.toHaveBeenCalled();
+  });
+
+  it('says that leaving setup skips the request, not that a TUI opens', async () => {
+    const client = createClient({
+      listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
+      listCatalogItems: vi.fn(async (kind: string) =>
+        kind === 'chat-model' ? { items: [chatModel({ name: 'Small' })] } : { items: [] },
+      ),
+    });
+    const harness = mountGate(client, <Text>READY</Text>, 'run');
+
+    await vi.waitFor(() => {
+      expect(harness.text()).toContain('Not now — stop without running your request');
+      expect(harness.text()).not.toContain('open the TUI');
+    });
+  });
+});
+
 function InputOwner({ onCtrlC }: { onCtrlC: () => void }) {
   useInput((input, key) => {
     if (key.ctrl && input === 'c') onCtrlC();
@@ -407,9 +448,12 @@ function InputOwner({ onCtrlC }: { onCtrlC: () => void }) {
 function mountGate(
   client: ReturnType<typeof createClient>,
   child: ReactNode = <Text>READY</Text>,
+  nextStep?: BootstrapNextStep,
 ): InkHarness {
   const harness = renderInk(
-    <BootstrapGate client={client as unknown as GezelClient}>{child}</BootstrapGate>,
+    <BootstrapGate client={client as unknown as GezelClient} nextStep={nextStep}>
+      {child}
+    </BootstrapGate>,
   );
   mounted.push(harness);
   return harness;

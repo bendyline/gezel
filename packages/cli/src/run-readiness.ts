@@ -100,6 +100,23 @@ export async function checkRunReadiness(
   };
 }
 
+/**
+ * Whether a run that is not ready may show the first-time setup screens
+ * instead of the setup message. They need a person at a keyboard: stdin for
+ * the choices and stderr to draw on, since stdout carries only the reply.
+ * Piped prompts (`gezel run -`), CI and scripts keep the download-free message.
+ */
+export function canOfferRunSetup(
+  io: {
+    stdin: { isTTY?: boolean };
+    stderr: { isTTY?: boolean };
+  } = process,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  if (env.CI) return false;
+  return io.stdin.isTTY === true && io.stderr.isTTY === true;
+}
+
 export function formatRunSetupMessage(input: {
   provider: LocalProvider;
   engineMissing: boolean;

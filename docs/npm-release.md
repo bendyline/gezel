@@ -6,7 +6,8 @@ version line.
 
 ## What ships
 
-Fourteen packages, all under the `@bendyline` scope, all public API under semver:
+Fifteen packages under the `@bendyline` scope, all public API under semver,
+plus four unscoped short names (below):
 
 | Package | What it is |
 |---|---|
@@ -22,12 +23,28 @@ Fourteen packages, all under the `@bendyline` scope, all public API under semver
 | `@bendyline/gezel-script-stdlib` | Standard gate-script library |
 | `@bendyline/gezel-script-runtime` | Portable, capability-mediated script execution: the `ScriptExecutor` contract and the QuickJS-WASM executor |
 | `@bendyline/gezel-mcp` | The stdio MCP server |
+| `@bendyline/gezel-inference` | The on-device inference runtime |
 | `@bendyline/gezel-service` | `gezeld`, plus the bundled web UI and handboek |
 | `@bendyline/gezel-cli` | The `gezel` command line |
 
+The short names exist so `npx gezel` works. Each lives in `packages/alias-*`
+and holds one bin file that finds the scoped package's command through its
+`package.json` and imports it:
+
+| Package | Runs |
+|---|---|
+| `gezel` | `gezel` from `@bendyline/gezel-cli` |
+| `gezel-cli` | `gezel` from `@bendyline/gezel-cli` |
+| `gezeld` | `gezeld` from `@bendyline/gezel-service` |
+| `gezel-mcp` | `gezel-mcp` from `@bendyline/gezel-mcp` |
+
+They read the manifest rather than importing an exported bin path because the
+scoped versions published before the short names existed export no such path,
+and a short name bootstrapped by hand depends on one of those.
+
 Three tiers, and the tier is a property of the manifest, not a list:
 
-- **Published** — the fourteen above.
+- **Published** — the nineteen above.
 - **Versioned but not published** — `packages/app` and `packages/vscode`.
   multi-semantic-release versions, tags and changelogs them, but they stay
   `private: true`, and [`scripts/publish-package.mjs`](../scripts/publish-package.mjs)
@@ -505,6 +522,29 @@ shape and consumer gate covers it. Do that in the same change that creates the
 package: `packageShape.test.ts` fails on an unaccounted-for workspace
 directory, which is the reminder.
 Its first CI release will be `1.0.0`, independent of where the other lines are.
+
+### The unscoped short names
+
+`gezel`, `gezel-cli`, `gezeld` and `gezel-mcp` bootstrap the same way, each at
+the `0.1.0` in its checkout manifest. They have no build and import nothing at
+build time, so no `prepare-package.mjs` run is needed. Each depends on one
+scoped package through `workspace:*`, which `pnpm publish` turns into that
+package's version on disk: publish from a checkout whose `packages/cli`,
+`packages/service` and `packages/mcp` versions are already on npm (a fresh
+`main` is).
+
+```bash
+for d in alias-gezel alias-gezel-cli alias-gezeld alias-gezel-mcp; do
+  (cd "packages/$d" && pnpm publish --access public --no-provenance --no-git-checks)
+done
+```
+
+`npx gezel` works as soon as that publish is visible. Register a trusted
+publisher for each one, as in step 2 above. From then on multi-semantic-release
+releases each short name with its scoped package: a release of
+`@bendyline/gezel-cli` gives `gezel` and `gezel-cli` a patch release pinned to
+it. Their own version lines start at `1.0.0` and do not match the scoped
+package's, and `gezel --version` always reports the CLI's.
 
 ### `ENONPMTOKEN` is not a missing secret
 

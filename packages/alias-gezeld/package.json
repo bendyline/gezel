@@ -1,0 +1,38 @@
+{
+  "name": "gezeld",
+  "version": "0.1.0",
+  "description": "The Gezel background service, gezeld, under its short name. Same program as @bendyline/gezel-service.",
+  "license": "MIT",
+  "keywords": ["gezel", "ai", "agents", "local-first", "daemon", "server"],
+  "homepage": "https://gezel.com",
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/alias-gezeld"
+  },
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "bin": {
+    "gezeld": "./bin/gezeld.js"
+  },
+  "exports": {
+    "./package.json": "./package.json"
+  },
+  "files": ["bin"],
+  "dependencies": {
+    "@bendyline/gezel-service": "workspace:*"
+  }
+}

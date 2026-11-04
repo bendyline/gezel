@@ -4,7 +4,13 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { stageNative, verifyProducerSources, verifyRuntime } from './stage-native.mjs';
+import {
+  SPEECH_ABI,
+  stageNative,
+  stageSpeech,
+  verifyProducerSources,
+  verifyRuntime,
+} from './stage-native.mjs';
 
 const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
 async function fixture(t) {
@@ -32,6 +38,21 @@ test('stages only verified bytes and preserves the last package on a bad update'
   await writeFile(path.join(f.root, 'runtime.bin'), 'altered');
   await assert.rejects(stageNative('ios', f.root, destination), /integrity/);
   assert.equal(await readFile(path.join(destination, 'runtime.bin'), 'utf8'), 'verified');
+});
+
+test("stages a speech runtime only with its own scope and the plugins' ABI", async (t) => {
+  const f = await fixture(t);
+  const destination = path.join(f.root, 'speech');
+  await assert.rejects(stageSpeech('ios', f.root, destination), /speech runtime/);
+  Object.assign(f.manifest, { scope: 'speech-runtime', speechABIVersion: SPEECH_ABI });
+  delete f.manifest.gezelABIVersion;
+  await f.save();
+  await stageSpeech('ios', f.root, destination);
+  assert.equal(await readFile(path.join(destination, 'runtime.bin'), 'utf8'), 'verified');
+  await assert.rejects(stageNative('ios', f.root, path.join(f.root, 'runtime')), /provider\/model/);
+  f.manifest.speechABIVersion = SPEECH_ABI + 1;
+  await f.save();
+  await assert.rejects(stageSpeech('ios', f.root, destination), /speech runtime/);
 });
 
 test('rejects wrong-platform and escaping manifests', async (t) => {

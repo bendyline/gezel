@@ -619,7 +619,7 @@ try {
     [
       "import { Client } from '@modelcontextprotocol/sdk/client/index.js';",
       "import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';",
-      `const server = ${JSON.stringify(join(consumer, 'node_modules', '@bendyline', 'gezel-mcp', 'dist', 'server.js'))};`,
+      'const server = process.argv[2];',
       'const transport = new StdioClientTransport({',
       '  command: process.execPath,',
       '  args: [server],',
@@ -639,9 +639,25 @@ try {
       'await client.close();',
     ].join('\n'),
   );
-  const mcp = run(process.execPath, [mcpProbe], { cwd: consumer });
+  const mcpServer = join(consumer, 'node_modules', '@bendyline', 'gezel-mcp', 'dist', 'server.js');
+  const mcp = run(process.execPath, [mcpProbe, mcpServer], { cwd: consumer });
   if (mcp.status !== 0) fail(`MCP stdio smoke failed\n${mcp.stdout}\n${mcp.stderr}`);
   else ok(`MCP initialized over stdio and listed ${mcp.stdout.trim()} tools`);
+  // The unscoped `gezel-mcp` hands over to the scoped package's launcher; the
+  // same probe through it proves it reaches the full server.
+  const mcpShortName = join(consumer, 'node_modules', 'gezel-mcp', 'bin', 'gezel-mcp.js');
+  const mcpViaShortName = run(process.execPath, [mcpProbe, mcpShortName], { cwd: consumer });
+  if (mcpViaShortName.status !== 0) {
+    fail(
+      `MCP stdio smoke through gezel-mcp failed\n${mcpViaShortName.stdout}\n${mcpViaShortName.stderr}`,
+    );
+  } else if (mcpViaShortName.stdout.trim() !== mcp.stdout.trim()) {
+    fail(
+      `gezel-mcp listed ${mcpViaShortName.stdout.trim()} tools; @bendyline/gezel-mcp listed ${mcp.stdout.trim()}`,
+    );
+  } else {
+    ok('the gezel-mcp short name serves the same MCP tools');
+  }
 
   const spectralEntry = join(spectralRoot, 'dist', 'run-action.js');
   const spectral = run(process.execPath, [spectralEntry], {
@@ -686,6 +702,38 @@ try {
     });
     if (result.status !== 0) fail(`gezel ${args.join(' ')}\n${result.stderr}`);
     else ok(`gezel ${args.join(' ')}`);
+  }
+
+  // `npx gezel` installs the unscoped short names, which hold nothing but a
+  // hand-over to the scoped package's command. Each must print exactly what
+  // the command it stands for prints.
+  const gezeldBin = join(
+    consumer,
+    'node_modules',
+    '@bendyline',
+    'gezel-service',
+    'dist',
+    'bin',
+    'gezeld.js',
+  );
+  for (const shortName of [
+    { name: 'gezel', bin: 'gezel.js', target: bin },
+    { name: 'gezel-cli', bin: 'gezel.js', target: bin },
+    { name: 'gezeld', bin: 'gezeld.js', target: gezeldBin },
+  ]) {
+    const shortBin = join(consumer, 'node_modules', shortName.name, 'bin', shortName.bin);
+    const env = { ...process.env, GEZEL_VERSION: '0.0.0-consumer' };
+    const expected = run(process.execPath, [shortName.target, '--version'], { cwd: consumer, env });
+    const actual = run(process.execPath, [shortBin, '--version'], { cwd: consumer, env });
+    if (actual.status !== 0) {
+      fail(`${shortName.name} --version\n${actual.stderr}`);
+    } else if (expected.status !== 0 || actual.stdout !== expected.stdout) {
+      fail(
+        `${shortName.name} --version printed ${JSON.stringify(actual.stdout)}; its scoped command printed ${JSON.stringify(expected.stdout)}`,
+      );
+    } else {
+      ok(`${shortName.name} --version matches its scoped command (${actual.stdout.trim()})`);
+    }
   }
 
   // A fresh-home one-shot owns an in-process daemon. Its structured startup

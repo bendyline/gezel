@@ -1,0 +1,2106 @@
+{
+  "package": "@bendyline/gilde",
+  "version": "0.3.5",
+  "catalogs": [
+    {
+      "id": "caselaw-alaska-part-0001",
+      "publisherId": "bendyline",
+      "name": "Alaska caselaw — CAP jurisdiction collection — 1887–2019 (part-0001)",
+      "description": "10749 historical CAP case records, selected by CAP's jurisdiction label. Part of Alaska caselaw — CAP jurisdiction collection; see the collection index for complete coverage. Preserves CAP's Alaska jurisdiction assignment, including 21 U.S. District Court for the District of Alaska records printed in Federal Supplement, Third Series. Court names remain explicit; this is not exclusively state-court material. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.1",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "6621e47a07a66b211ca390daf94c7f709a606223",
+        "path": "catalogs/caselaw-alaska-part-0001/releases/2026.10.1/caselaw-alaska-part-0001-2026.10.1.gezk"
+      },
+      "sha256": "d7566e0ef822769dd652029a47f0dd9c126a593e2fffcc1469f1e004f8b23a06",
+      "archiveBytes": 1041433404,
+      "documents": 10749,
+      "chunks": 349739,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "regional-australia-nz",
+      "publisherId": "bendyline",
+      "name": "Australia & New Zealand",
+      "description": "The Outback, the Great Barrier Reef, and the landscapes of Aotearoa New Zealand. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "d4230ec88eb690b6a3080ec3db266d2dda6aa595",
+        "path": "regional-australia-nz/releases/2026.10.5/regional-australia-nz-2026.10.5.gezk"
+      },
+      "sha256": "480278e70527bed741fbf6c0adde56f6536bc3f292095528406c5fe0f45547ab",
+      "archiveBytes": 656303575,
+      "documents": 41935,
+      "chunks": 260916,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-brazil",
+      "publisherId": "bendyline",
+      "name": "Brazil & the Atlantic Coast",
+      "description": "The Amazon, Rio de Janeiro, and the largest country in South America. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "78c2b8c623bd2bbb88034ea018dedc77da2b46da",
+        "path": "regional-brazil/releases/2026.10.5/regional-brazil-2026.10.5.gezk"
+      },
+      "sha256": "64c447e90f34527109cba3384dfffd93e3b57531f4b02ea2f01a01ffbb0674d3",
+      "archiveBytes": 179568946,
+      "documents": 13684,
+      "chunks": 75757,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-britain-ireland",
+      "publisherId": "bendyline",
+      "name": "Britain & Ireland",
+      "description": "England, Scotland, Wales, Northern Ireland, and the Republic of Ireland. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "66de43addd9facc1a298c4d1c70cc4f41bc92ebf",
+        "path": "regional-britain-ireland/releases/2026.10.5/regional-britain-ireland-2026.10.5.gezk"
+      },
+      "sha256": "0d4fb07dba595043e79babb2934e485fab7c89d195b4dbe3fa78c0f431bf964c",
+      "archiveBytes": 1806920322,
+      "documents": 117084,
+      "chunks": 726232,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-california-southwest",
+      "publisherId": "bendyline",
+      "name": "California & the Southwest",
+      "description": "California, Nevada, Utah, Arizona, and New Mexico: from the redwoods to the desert. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "7f899a23c9516cddb7d3e46b3c67833931e69bfc",
+        "path": "regional-california-southwest/releases/2026.10.5/regional-california-southwest-2026.10.5.gezk"
+      },
+      "sha256": "1c37c7ac87a0b8e318ff9376810ac5704294a9d7f6637586b4761631032ad6c2",
+      "archiveBytes": 625436566,
+      "documents": 38632,
+      "chunks": 242413,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-canada-alaska",
+      "publisherId": "bendyline",
+      "name": "Canada & Alaska",
+      "description": "The Great White North and the Last Frontier: from the Atlantic to the Pacific to the Arctic. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "c881393658ce81b644750485a1db7a58d9787b66",
+        "path": "regional-canada-alaska/releases/2026.10.5/regional-canada-alaska-2026.10.5.gezk"
+      },
+      "sha256": "e7c99a8a7ecab550a38b507a89daee155411648d1d77b99a029cca4e5435213a",
+      "archiveBytes": 745539215,
+      "documents": 55149,
+      "chunks": 301644,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-central-eastern-europe",
+      "publisherId": "bendyline",
+      "name": "Central & Eastern Europe",
+      "description": "Poland, the Baltics, the Visegrád countries, the Balkans, and Ukraine. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "4e0b33c78539201ef7fd195dc719db0ba79ab6fd",
+        "path": "regional-central-eastern-europe/releases/2026.10.5/regional-central-eastern-europe-2026.10.5.gezk"
+      },
+      "sha256": "22201539c5ccce9486b6d6b9dd5b820216761ac8b3f6218553e701bd6dc9eda0",
+      "archiveBytes": 1110297031,
+      "documents": 78116,
+      "chunks": 468386,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-east-southern-africa",
+      "publisherId": "bendyline",
+      "name": "East & Southern Africa",
+      "description": "From the Great Rift Valley to the Cape: Kenya, Ethiopia, Tanzania, South Africa, and Madagascar. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "af5e1e90b34c1106495c8cb16d5bdd1a988399e6",
+        "path": "regional-east-southern-africa/releases/2026.10.5/regional-east-southern-africa-2026.10.5.gezk"
+      },
+      "sha256": "6c364c18874ea00b8104871258c7b6de14d67bd650e457508b5a1fc3ef5c7049",
+      "archiveBytes": 211805262,
+      "documents": 15274,
+      "chunks": 91030,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-east-asia",
+      "publisherId": "bendyline",
+      "name": "East Asia",
+      "description": "China, Japan, Korea, Taiwan, and Mongolia: ancient dynasties and modern megacities. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "fa84db3d44e28a231ea698739badb83bb03c1dbc",
+        "path": "regional-east-asia/releases/2026.10.5/regional-east-asia-2026.10.5.gezk"
+      },
+      "sha256": "5064156237952c4ec269a497530eed4925b1ed78fe9acb71545aa5153b5d8829",
+      "archiveBytes": 590759179,
+      "documents": 44122,
+      "chunks": 281458,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "bendyline-how-to-books",
+      "publisherId": "bendyline",
+      "name": "How-to books",
+      "description": "Every English book on Project Gutenberg's \"How To ...\" bookshelf that PG marks public domain, split into chapter documents, plus original task-focused how-to guides that cite those chapters. Covers cooking, gardening, crafts, building, animals, outdoor skills, household management, and more. Historical practices are reproduced as written; guides add modern safety notes.",
+      "language": "en",
+      "license": "Public Domain Mark 1.0; Creative Commons Attribution-ShareAlike 4.0 International",
+      "category": "manuals",
+      "version": "2026.10.8",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "1027f9a0df24cd2e00a5f9360ef35ee6b231ae3a",
+        "path": "catalogs/bendyline-how-to-books/releases/2026.10.8/bendyline-how-to-books-2026.10.8.gezk"
+      },
+      "sha256": "565a55d995be86c31eeba3042911b57b24ada6a6a9d07ed90ddabb29fc65736d",
+      "archiveBytes": 2125681218,
+      "documents": 69635,
+      "chunks": 599009,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "regional-mexico-central-america",
+      "publisherId": "bendyline",
+      "name": "Mexico, Central America & the Caribbean",
+      "description": "Ancient civilizations, tropical coasts, and the island paradise of the Caribbean. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "3385a2dd0ddc93a21417d12bd4fab1cf2b0b9fff",
+        "path": "regional-mexico-central-america/releases/2026.10.5/regional-mexico-central-america-2026.10.5.gezk"
+      },
+      "sha256": "585c064a364f8964b9c03846d8fd95103912833c51a6f5fd2249bb0b8de4c227",
+      "archiveBytes": 724822056,
+      "documents": 46317,
+      "chunks": 295492,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "microsoftdocs-dotnet-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: .NET and C#",
+      "description": "Preserved English .NET and C# documentation from dotnet/docs, with normalized Markdown, complete selected code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "b1fcb295359dbc34f271f12e2700d601beb0472d",
+        "path": "catalogs/microsoftdocs-dotnet-en/releases/2026.10.16/microsoftdocs-dotnet-en-2026.10.16.gezk"
+      },
+      "sha256": "87093d8f7481e21bdca875d056d36c3dd033e308c51634360cb4ed7afcb897e8",
+      "archiveBytes": 366913633,
+      "documents": 20170,
+      "chunks": 131793,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-aspnet-core-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: ASP.NET Core",
+      "description": "Preserved English ASP.NET Core documentation from dotnet/AspNetCore.Docs, with normalized Markdown, selected complete code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "8e98e54000c5ab1ceb5a642e032618df711445f1",
+        "path": "catalogs/microsoftdocs-aspnet-core-en/releases/2026.10.16/microsoftdocs-aspnet-core-en-2026.10.16.gezk"
+      },
+      "sha256": "9d7d09ab7459b2ba13f85ef1a988a3162d4425c2a8f93fad655604659393dcdb",
+      "archiveBytes": 163363533,
+      "documents": 12339,
+      "chunks": 49928,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-azure-ai-platform-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: Azure AI, Foundry, and Machine Learning",
+      "description": "Preserved English Azure AI, Foundry, and Machine Learning documentation from MicrosoftDocs/azure-ai-docs, with normalized Markdown, selected complete code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "567a82cbeb0495c883e8b881dc7edb6ebf862bcd",
+        "path": "catalogs/microsoftdocs-azure-ai-platform-en/releases/2026.10.16/microsoftdocs-azure-ai-platform-en-2026.10.16.gezk"
+      },
+      "sha256": "4bf3f6623dfde1ba39991914beb368873ac7392b5979301fef1cf431d5649829",
+      "archiveBytes": 194138333,
+      "documents": 2843,
+      "chunks": 76488,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-azure-apps-compute-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: Azure applications and compute",
+      "description": "Preserved English Azure applications and compute documentation from MicrosoftDocs/azure-docs, with normalized Markdown, selected complete code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "b5d56258524c0a07e86a2da2d44247ab4337ebae",
+        "path": "catalogs/microsoftdocs-azure-apps-compute-en/releases/2026.10.16/microsoftdocs-azure-apps-compute-en-2026.10.16.gezk"
+      },
+      "sha256": "961b069c1e11b9161b8644abb921f9f1a425112aa858e15fc42317a99a7c5c12",
+      "archiveBytes": 214948800,
+      "documents": 4307,
+      "chunks": 79469,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-azure-data-aiot-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: Azure data, storage, and IoT",
+      "description": "Preserved English Azure data, storage, and IoT documentation from MicrosoftDocs/azure-docs, with normalized Markdown, selected complete code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "9ee4ece969b141ae622c869f39fa0f5f07dfb99d",
+        "path": "catalogs/microsoftdocs-azure-data-aiot-en/releases/2026.10.16/microsoftdocs-azure-data-aiot-en-2026.10.16.gezk"
+      },
+      "sha256": "227026d9e92fcaa8963cecc6e6adf448e2685469d3f47964fa7c3c8098256cc8",
+      "archiveBytes": 191714614,
+      "documents": 3976,
+      "chunks": 69497,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-azure-management-hybrid-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: Azure management and hybrid infrastructure",
+      "description": "Preserved English Azure management and hybrid infrastructure documentation from MicrosoftDocs/azure-docs, with normalized Markdown, selected complete code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "07f189daea7c23928f3ae43be265e766c1272b8c",
+        "path": "catalogs/microsoftdocs-azure-management-hybrid-en/releases/2026.10.16/microsoftdocs-azure-management-hybrid-en-2026.10.16.gezk"
+      },
+      "sha256": "ba50df4cf2f6d4084a5691fc90c9ebf8f2c1152a20900eb99226b0630b385bc1",
+      "archiveBytes": 141135398,
+      "documents": 2996,
+      "chunks": 52893,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-azure-network-security-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: Azure networking and security",
+      "description": "Preserved English Azure networking and security documentation from MicrosoftDocs/azure-docs, with normalized Markdown, selected complete code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "e9566be7981a221bb06df51368a82bc99b1f37d9",
+        "path": "catalogs/microsoftdocs-azure-network-security-en/releases/2026.10.16/microsoftdocs-azure-network-security-en-2026.10.16.gezk"
+      },
+      "sha256": "f4b8c3ffb420c0df83c55bf8f16c0cb755f18d6b28df84606cc97c6fb1d63f9c",
+      "archiveBytes": 117617354,
+      "documents": 2311,
+      "chunks": 42748,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-entity-framework-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: Entity Framework",
+      "description": "Preserved English Entity Framework documentation from dotnet/EntityFramework.Docs, with normalized Markdown, complete selected code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "2eef24dcecd02ace7bec8bc1ae45e27852d701cf",
+        "path": "catalogs/microsoftdocs-entity-framework-en/releases/2026.10.16/microsoftdocs-entity-framework-en-2026.10.16.gezk"
+      },
+      "sha256": "c5a0ab0681b7b4ae9a23de2c28422e704f8e80818b950fef39f2cd3892005a51",
+      "archiveBytes": 27775828,
+      "documents": 1157,
+      "chunks": 9413,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-microsoft-365-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: Microsoft 365 and Copilot",
+      "description": "Preserved English Microsoft 365 and Copilot documentation from MicrosoftDocs/microsoft-365-docs, with normalized Markdown, selected complete code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "b433d7d90336e8ca5f4aace81ad6048db046cc39",
+        "path": "catalogs/microsoftdocs-microsoft-365-en/releases/2026.10.16/microsoftdocs-microsoft-365-en-2026.10.16.gezk"
+      },
+      "sha256": "c762ac01127659425025ae3d5d372b473f3442f49418a6195c57fdbdf67797c2",
+      "archiveBytes": 43294560,
+      "documents": 1246,
+      "chunks": 14792,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-powershell-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: PowerShell",
+      "description": "Preserved English PowerShell documentation from MicrosoftDocs/PowerShell-Docs, with normalized Markdown, complete selected code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "d70a48d5611650587ad3e6b1c1993cdf19ed26c7",
+        "path": "catalogs/microsoftdocs-powershell-en/releases/2026.10.16/microsoftdocs-powershell-en-2026.10.16.gezk"
+      },
+      "sha256": "33a8d07b9ea1262733d56a90b9a7d51fb1c37cf9590103ff71a065e9f51de56f",
+      "archiveBytes": 149225979,
+      "documents": 3079,
+      "chunks": 76602,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-sql-server-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: SQL Server and Azure SQL",
+      "description": "Preserved English SQL Server and Azure SQL documentation from MicrosoftDocs/sql-docs, with normalized Markdown, complete selected code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "c47ef55197f4fa1a04e7937d18d0e3bd49dcdfc1",
+        "path": "catalogs/microsoftdocs-sql-server-en/releases/2026.10.16/microsoftdocs-sql-server-en-2026.10.16.gezk"
+      },
+      "sha256": "719d9899503f6c75f123166d6da7d2344d32e5e987c231b55ae0931f4311b8e5",
+      "archiveBytes": 393189372,
+      "documents": 13848,
+      "chunks": 148351,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-windows-apps-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: Windows app development",
+      "description": "Preserved English Windows app development documentation from MicrosoftDocs/windows-dev-docs, with normalized Markdown, selected complete code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "eeb8b68d7999246c7c64ae69bd499bca6719e72e",
+        "path": "catalogs/microsoftdocs-windows-apps-en/releases/2026.10.16/microsoftdocs-windows-apps-en-2026.10.16.gezk"
+      },
+      "sha256": "75080d8f446e10b50e4b8f4a5b47203ef008e2073f2b3ec5f202d89acffb9751",
+      "archiveBytes": 98458605,
+      "documents": 2791,
+      "chunks": 35751,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "microsoftdocs-windows-server-en",
+      "publisherId": "bendyline",
+      "name": "Microsoft technology: Windows Server",
+      "description": "Preserved English Windows Server documentation from MicrosoftDocs/windowsserverdocs, with normalized Markdown, complete selected code examples, source revisions, and license notices.",
+      "language": "en",
+      "license": "Creative Commons Attribution 4.0; MIT License",
+      "category": "technology",
+      "version": "2026.10.16",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "e7779ec3aa278028e60043194bb0e2fb9f2a4998",
+        "path": "catalogs/microsoftdocs-windows-server-en/releases/2026.10.16/microsoftdocs-windows-server-en-2026.10.16.gezk"
+      },
+      "sha256": "02841655316b1be1dc292922bf00caf8dcad7bbcaf0ce30ba066589473d77ca1",
+      "archiveBytes": 80733192,
+      "documents": 2562,
+      "chunks": 28073,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "caselaw-nevada-part-0001",
+      "publisherId": "bendyline",
+      "name": "Nevada caselaw — CAP jurisdiction collection — 1865–2019 (part-0001)",
+      "description": "13707 historical CAP case records, selected by CAP's jurisdiction label. Part of Nevada caselaw — CAP jurisdiction collection; see the collection index for complete coverage. Preserves CAP's Nevada jurisdiction assignment: 13,688 Supreme Court records, 18 Court of Appeals records, and one historical Eureka County District Court record. Coverage reflects this pinned historical archive, not every decision issued by those courts. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.1",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "29be2e59831494f20eeb71675ecc791b7e460e66",
+        "path": "catalogs/caselaw-nevada-part-0001/releases/2026.10.1/caselaw-nevada-part-0001-2026.10.1.gezk"
+      },
+      "sha256": "54125a78a84fd136fdc74b6af95c7fb148990f312757867f89105520fc76e479",
+      "archiveBytes": 766348339,
+      "documents": 13707,
+      "chunks": 270375,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "regional-north-africa",
+      "publisherId": "bendyline",
+      "name": "North Africa",
+      "description": "Morocco, Egypt, Tunisia, and the Sahara Desert. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "3fb8428a62a9d869bf81a94b99a849f78bcadb0e",
+        "path": "regional-north-africa/releases/2026.10.5/regional-north-africa-2026.10.5.gezk"
+      },
+      "sha256": "8d5ff0ee2a07d9a1132f2f268525b5d4b08e26c774f180eb028248f383ff5f3b",
+      "archiveBytes": 287400453,
+      "documents": 18207,
+      "chunks": 115983,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-northern-eurasia",
+      "publisherId": "bendyline",
+      "name": "Northern Eurasia",
+      "description": "Russia, Siberia, the Caucasus, and Central Asia: the vast Eurasian heartland and the Silk Road. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "45839ab2b1a14c4b91af41b85e584d7bbeaa84db",
+        "path": "regional-northern-eurasia/releases/2026.10.5/regional-northern-eurasia-2026.10.5.gezk"
+      },
+      "sha256": "42369396a32666cf7cd43c48c7092de366139901d10bbe644cb2d613a28c9e65",
+      "archiveBytes": 305963890,
+      "documents": 22805,
+      "chunks": 131829,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-northern-europe",
+      "publisherId": "bendyline",
+      "name": "Northern Europe & Scandinavia",
+      "description": "The Nordic countries, the Baltic states, and Iceland: fjords, forests, and the Northern Lights. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "0cae5239f67ff3b046a7f583fb8f3fd7651b976b",
+        "path": "regional-northern-europe/releases/2026.10.5/regional-northern-europe-2026.10.5.gezk"
+      },
+      "sha256": "556ca64e346311f118eba1c7991af93ae49382ae74871a2c77dd0316b6a2a55a",
+      "archiveBytes": 762431198,
+      "documents": 56804,
+      "chunks": 310815,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-pacific-northwest",
+      "publisherId": "bendyline",
+      "name": "Pacific Northwest",
+      "description": "Washington, Oregon, and British Columbia. Rainforests, mountains, and coffee. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "c06c674c61fe985933e11bb9b089dd704fcab1e3",
+        "path": "regional-pacific-northwest/releases/2026.10.5/regional-pacific-northwest-2026.10.5.gezk"
+      },
+      "sha256": "888c772e0201e6c8cde6eb8544e9d4b261a3955a599f7cf43b38104f7e8c7273",
+      "archiveBytes": 319980410,
+      "documents": 23564,
+      "chunks": 128003,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-rockies-plains",
+      "publisherId": "bendyline",
+      "name": "Rocky Mountains & Great Plains",
+      "description": "Montana, Wyoming, Colorado, the Dakotas, Nebraska, Kansas, and Oklahoma. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "35ae6635591480426d9171280415e187b7206849",
+        "path": "regional-rockies-plains/releases/2026.10.5/regional-rockies-plains-2026.10.5.gezk"
+      },
+      "sha256": "b807200a931384e5c24d143ef903edbfecbe38396a49f11f2df3281e913c990c",
+      "archiveBytes": 435471098,
+      "documents": 30167,
+      "chunks": 178985,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-south-asia",
+      "publisherId": "bendyline",
+      "name": "South Asia",
+      "description": "India, Pakistan, Bangladesh, Sri Lanka, and Nepal: ancient civilizations, the Himalayas, and vibrant cultures. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "89bee026dc3de4516b42a673f70c2a9a451eb0f3",
+        "path": "regional-south-asia/releases/2026.10.5/regional-south-asia-2026.10.5.gezk"
+      },
+      "sha256": "616ef32e8518f6a1c45a1c8b4a6b520f0e97a233f229d4c4c85207cca1b4560f",
+      "archiveBytes": 835208590,
+      "documents": 60868,
+      "chunks": 383893,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-southeast-asia",
+      "publisherId": "bendyline",
+      "name": "Southeast Asia",
+      "description": "Thailand, Vietnam, Indonesia, Malaysia, Philippines, and more. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "ef59d6f7563c68837b067dcc1f95b751c312e27b",
+        "path": "regional-southeast-asia/releases/2026.10.5/regional-southeast-asia-2026.10.5.gezk"
+      },
+      "sha256": "a35d9a65dbde2e7a4997d933f74bb21ebd40c10eac4e99801935da1897e30a26",
+      "archiveBytes": 625575387,
+      "documents": 38380,
+      "chunks": 270460,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-american-south",
+      "publisherId": "bendyline",
+      "name": "The American South",
+      "description": "From Texas eastward to Virginia: Louisiana, the Gulf Coast, the Carolinas, and Appalachia. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "dfb04f3da19232bcb743c10041d70bdfd9224fbe",
+        "path": "regional-american-south/releases/2026.10.5/regional-american-south-2026.10.5.gezk"
+      },
+      "sha256": "8c43c7f12c40084f76a74c437a6763edff986519b15173e2b82f4c324eba610a",
+      "archiveBytes": 1085237379,
+      "documents": 70904,
+      "chunks": 439832,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-andes-amazon",
+      "publisherId": "bendyline",
+      "name": "The Andes & Amazon",
+      "description": "Northern South America: Colombia, Venezuela, Ecuador, Peru, Bolivia, and the Amazon basin. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "5a0f96e47209adc8ea2ba96236e6ad227f6eda51",
+        "path": "regional-andes-amazon/releases/2026.10.5/regional-andes-amazon-2026.10.5.gezk"
+      },
+      "sha256": "78028deb9bcd7b857bc7e8953097893896c4a43194265d58e837db113c0bc62d",
+      "archiveBytes": 127369863,
+      "documents": 8937,
+      "chunks": 53690,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-mediterranean",
+      "publisherId": "bendyline",
+      "name": "The Mediterranean",
+      "description": "The sunny shores of Southern Europe: Spain, France, Italy, Greece, and more. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "3f957f7449eb58198e00d902c1a14afd2622ceab",
+        "path": "regional-mediterranean/releases/2026.10.5/regional-mediterranean-2026.10.5.gezk"
+      },
+      "sha256": "ee494b56f3f45c5091e4910a01add478526411b2690b2349c21b78f4b1581c5f",
+      "archiveBytes": 943048163,
+      "documents": 62863,
+      "chunks": 388916,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-middle-east",
+      "publisherId": "bendyline",
+      "name": "The Middle East",
+      "description": "The cradle of civilization: Türkiye, the Levant, Arabia, Iran, and Iraq. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "2501de34782026579755e9278fbc5b80122e7105",
+        "path": "regional-middle-east/releases/2026.10.5/regional-middle-east-2026.10.5.gezk"
+      },
+      "sha256": "61ed47a749515f12d7143007028d2d728e693cff3313637c798f6072e8ab4bab",
+      "archiveBytes": 585983336,
+      "documents": 41136,
+      "chunks": 252608,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-midwest",
+      "publisherId": "bendyline",
+      "name": "The Midwest & Great Lakes",
+      "description": "The Great Lakes region: Illinois, Michigan, Ohio, Wisconsin, Minnesota, Iowa, and Missouri. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "6340bf7f1004cf40abd77e02d1a3e3590fe16504",
+        "path": "regional-midwest/releases/2026.10.5/regional-midwest-2026.10.5.gezk"
+      },
+      "sha256": "bb1dedf564cd6df60ea87f35802c8e5e903e2a01a92a0e6b0167edd64df82bdc",
+      "archiveBytes": 1076135722,
+      "documents": 73584,
+      "chunks": 445819,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-northeast",
+      "publisherId": "bendyline",
+      "name": "The Northeast & Eastern Canada",
+      "description": "New England, the Mid-Atlantic, and Eastern Canada: Boston to New York to Montréal. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "20138722fd6370eefeb6951910145f32ce164e76",
+        "path": "regional-northeast/releases/2026.10.5/regional-northeast-2026.10.5.gezk"
+      },
+      "sha256": "44829fc8895d22e9d5c0b8ce13740f9c31bcc6249167f54bd0f8253d2160a68e",
+      "archiveBytes": 1796262324,
+      "documents": 114444,
+      "chunks": 692263,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-pacific-islands",
+      "publisherId": "bendyline",
+      "name": "The Pacific Islands & Hawaii",
+      "description": "Melanesia, Micronesia, and Polynesia — from Papua New Guinea and Fiji to Tahiti and Hawaii. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "56ff2bb24aeb62673b9b6ff7695354a3e50249b1",
+        "path": "regional-pacific-islands/releases/2026.10.5/regional-pacific-islands-2026.10.5.gezk"
+      },
+      "sha256": "2e81acf55ba5bba2fa8b57635a25943048593f629ce7f8311cac41f7eb7c897e",
+      "archiveBytes": 268108735,
+      "documents": 15626,
+      "chunks": 104587,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-southern-cone",
+      "publisherId": "bendyline",
+      "name": "The Southern Cone & Patagonia",
+      "description": "Argentina, Chile, Uruguay, and Paraguay: the Pampas, the Andes, and Patagonian wilderness. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "f2aef3194ef664a49bea5439af568f54d5117a26",
+        "path": "regional-southern-cone/releases/2026.10.5/regional-southern-cone-2026.10.5.gezk"
+      },
+      "sha256": "dbf4c6191cc6a5159c045262b413375a90ff226545f2c79d7b285da6db948019",
+      "archiveBytes": 100524782,
+      "documents": 7293,
+      "chunks": 41045,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "caselaw-us-300-399-part-0001",
+      "publisherId": "bendyline",
+      "name": "U.S. Reports volumes 300–399 — Caselaw Access Project — 1910–1970 (part-0001)",
+      "description": "61926 historical CAP case records, selected by selected reporter volumes. Part of U.S. Reports volumes 300–399 — Caselaw Access Project; see the collection index for complete coverage. Every CAP case record in U.S. Reports volumes 300–399, preserving source jurisdiction, court labels, and decision dates, including four source dates earlier than the books' 1937–1970 period. This bounded historical reporter collection contains the earlier 347–349 pilot in full; installing both duplicates those records. It is not the complete U.S. Reports or federal collection. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "94a61d4cd5cebd25c2d8dfe1d9e4b303bd0394ac",
+        "path": "catalogs/caselaw-us-300-399-part-0001/releases/2026.10.2/caselaw-us-300-399-part-0001-2026.10.2.gezk"
+      },
+      "sha256": "28fd2603b3cf26b445d0cd830da87316ce561b2f000ce1dc92fddaaad5680def",
+      "archiveBytes": 1033287056,
+      "documents": 61926,
+      "chunks": 453624,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "caselaw-us-347-349",
+      "publisherId": "bendyline",
+      "name": "U.S. Reports, volumes 347–349 — CAP pilot",
+      "description": "2,142 historical case records from U.S. Reports volumes 347–349 in one searchable archive, supplied by the Caselaw Access Project. Includes case metadata, citation links across volumes, separately labeled opinions, footnotes, and original page references. This source selection is not a complete court term or current-law collection; OCR may contain errors.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "995f76f3e27f2d8da3c1c942cab5154d9796fe74",
+        "path": "catalogs/caselaw-us-347-349/releases/2026.10.5/caselaw-us-347-349-2026.10.5.gezk"
+      },
+      "sha256": "db08e80f8c6880791e5ace109a43c55f5f95083289f735188e0b9fdaafe41712",
+      "archiveBytes": 30128630,
+      "documents": 2142,
+      "chunks": 12847,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "caselaw-utah-part-0001",
+      "publisherId": "bendyline",
+      "name": "Utah caselaw — Caselaw Access Project — 1861–1992 (part-0001)",
+      "description": "15254 historical CAP case records, selected by CAP's jurisdiction label. Part of Utah caselaw — Caselaw Access Project; see the collection index for complete coverage. Preserves CAP's Utah jurisdiction assignment: 16,874 Supreme Court records, 6,029 Court of Appeals records under two source court labels, and one historical Salt Lake City Register and Receiver record. Coverage reflects the pinned historical archive, not every decision issued by those courts. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.1",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "78e440be173db65870676d66bf2ece7dc717d805",
+        "path": "catalogs/caselaw-utah-part-0001/releases/2026.10.1/caselaw-utah-part-0001-2026.10.1.gezk"
+      },
+      "sha256": "a20e5631af22cb336e2d381ffe7122b5f890e45b8a8a334beeca6fbc0df2a3ef",
+      "archiveBytes": 1020134686,
+      "documents": 15254,
+      "chunks": 353653,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "caselaw-utah-part-0002",
+      "publisherId": "bendyline",
+      "name": "Utah caselaw — Caselaw Access Project — 1993–2019 (part-0002)",
+      "description": "7650 historical CAP case records, selected by CAP's jurisdiction label. Part of Utah caselaw — Caselaw Access Project; see the collection index for complete coverage. Preserves CAP's Utah jurisdiction assignment: 16,874 Supreme Court records, 6,029 Court of Appeals records under two source court labels, and one historical Salt Lake City Register and Receiver record. Coverage reflects the pinned historical archive, not every decision issued by those courts. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.1",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "d18d500f53269c4ce638b9554f69a787c2d3e2c1",
+        "path": "catalogs/caselaw-utah-part-0002/releases/2026.10.1/caselaw-utah-part-0002-2026.10.1.gezk"
+      },
+      "sha256": "8c1a4adfca5a235b6d9e9e7d54e0be7dec613d772fc5d2a395037573535e6aae",
+      "archiveBytes": 729473439,
+      "documents": 7650,
+      "chunks": 254207,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "caselaw-washington-part-0001",
+      "publisherId": "bendyline",
+      "name": "Washington caselaw — Caselaw Access Project — 1854–1930 (part-0001)",
+      "description": "20139 historical CAP case records, selected by CAP's jurisdiction label. Part of Washington caselaw — Caselaw Access Project; see the collection index for complete coverage. Preserves CAP's Washington jurisdiction assignment: 41,045 Supreme Court records, 65,131 Court of Appeals records under four source court labels, and one historical Washington District Court record. Includes territorial-era records and upstream dates from 1854 through 2019. Coverage reflects the pinned historical archive, not every decision issued by those courts. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.1",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "43c18bf0b9647cb2936fa013466ed22bfa496642",
+        "path": "catalogs/caselaw-washington-part-0001/releases/2026.10.1/caselaw-washington-part-0001-2026.10.1.gezk"
+      },
+      "sha256": "5b231618c96b58dbd3a5e2c08af168c4e5389c5917c0d5fabd6525503c82ed67",
+      "archiveBytes": 976861117,
+      "documents": 20139,
+      "chunks": 357368,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "caselaw-washington-part-0002",
+      "publisherId": "bendyline",
+      "name": "Washington caselaw — Caselaw Access Project — 1931–1978 (part-0002)",
+      "description": "18778 historical CAP case records, selected by CAP's jurisdiction label. Part of Washington caselaw — Caselaw Access Project; see the collection index for complete coverage. Preserves CAP's Washington jurisdiction assignment: 41,045 Supreme Court records, 65,131 Court of Appeals records under four source court labels, and one historical Washington District Court record. Includes territorial-era records and upstream dates from 1854 through 2019. Coverage reflects the pinned historical archive, not every decision issued by those courts. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.1",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "9b3b618d97937b908bc65e348eafbe4b874e8633",
+        "path": "catalogs/caselaw-washington-part-0002/releases/2026.10.1/caselaw-washington-part-0002-2026.10.1.gezk"
+      },
+      "sha256": "67ccebb661f9ef5364c6b5d6dada2d20e775208752ac26dc6ceb5798d3935b42",
+      "archiveBytes": 1014748849,
+      "documents": 18778,
+      "chunks": 337434,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "caselaw-washington-part-0003",
+      "publisherId": "bendyline",
+      "name": "Washington caselaw — Caselaw Access Project — 1979–1997 (part-0003)",
+      "description": "28210 historical CAP case records, selected by CAP's jurisdiction label. Part of Washington caselaw — Caselaw Access Project; see the collection index for complete coverage. Preserves CAP's Washington jurisdiction assignment: 41,045 Supreme Court records, 65,131 Court of Appeals records under four source court labels, and one historical Washington District Court record. Includes territorial-era records and upstream dates from 1854 through 2019. Coverage reflects the pinned historical archive, not every decision issued by those courts. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.1",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "c7628014dcca6657e7948358e8fa8a86bef68f39",
+        "path": "catalogs/caselaw-washington-part-0003/releases/2026.10.1/caselaw-washington-part-0003-2026.10.1.gezk"
+      },
+      "sha256": "bd877fffb8d6f0571ca1eec32f96b774945f61005ae9f56c29785d4bb31f705d",
+      "archiveBytes": 966631618,
+      "documents": 28210,
+      "chunks": 354418,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "caselaw-washington-part-0004",
+      "publisherId": "bendyline",
+      "name": "Washington caselaw — Caselaw Access Project — 1998–2010 (part-0004)",
+      "description": "24936 historical CAP case records, selected by CAP's jurisdiction label. Part of Washington caselaw — Caselaw Access Project; see the collection index for complete coverage. Preserves CAP's Washington jurisdiction assignment: 41,045 Supreme Court records, 65,131 Court of Appeals records under four source court labels, and one historical Washington District Court record. Includes territorial-era records and upstream dates from 1854 through 2019. Coverage reflects the pinned historical archive, not every decision issued by those courts. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.1",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "ee318cbea19f8910182e5d8ce41b065ea5535945",
+        "path": "catalogs/caselaw-washington-part-0004/releases/2026.10.1/caselaw-washington-part-0004-2026.10.1.gezk"
+      },
+      "sha256": "f0f30d2eda66f80e823421db3eae52f0c0b4cf97fb46105f3bf786cf26c6c013",
+      "archiveBytes": 921147918,
+      "documents": 24936,
+      "chunks": 344643,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "caselaw-washington-part-0005",
+      "publisherId": "bendyline",
+      "name": "Washington caselaw — Caselaw Access Project — 2011–2019 (part-0005)",
+      "description": "14114 historical CAP case records, selected by CAP's jurisdiction label. Part of Washington caselaw — Caselaw Access Project; see the collection index for complete coverage. Preserves CAP's Washington jurisdiction assignment: 41,045 Supreme Court records, 65,131 Court of Appeals records under four source court labels, and one historical Washington District Court record. Includes territorial-era records and upstream dates from 1854 through 2019. Coverage reflects the pinned historical archive, not every decision issued by those courts. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.1",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "008a40f5d78997c6dca56e5e608c3402fbbef6f4",
+        "path": "catalogs/caselaw-washington-part-0005/releases/2026.10.1/caselaw-washington-part-0005-2026.10.1.gezk"
+      },
+      "sha256": "42e89af25537adbd12392277196ec9575cc16765352ed842787a70002adb814f",
+      "archiveBytes": 564116391,
+      "documents": 14114,
+      "chunks": 208727,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    },
+    {
+      "id": "regional-west-central-africa",
+      "publisherId": "bendyline",
+      "name": "West & Central Africa",
+      "description": "From the Sahel and the Gulf of Guinea to the Congo Basin rainforests. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "e2f90287cddd010eeedb40374e3d606ba95a65f8",
+        "path": "regional-west-central-africa/releases/2026.10.5/regional-west-central-africa-2026.10.5.gezk"
+      },
+      "sha256": "6995c91e5d040321a9a7a3d651cf6b8bb7a0471e3d336e1c00044697b79c0b15",
+      "archiveBytes": 159785912,
+      "documents": 11702,
+      "chunks": 69089,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-western-europe",
+      "publisherId": "bendyline",
+      "name": "Western Europe",
+      "description": "France, the Benelux countries, Germany, Switzerland, Austria, and the Alps. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.3",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "7ee811f8611ab6afc777d2d0fa9e3e9372455727",
+        "path": "regional-western-europe/releases/2026.10.3/regional-western-europe-2026.10.3.gezk"
+      },
+      "sha256": "28bdf1b47e473a07277d3e11f5144258920ecf07692a75760879542130389f05",
+      "archiveBytes": 236421652,
+      "documents": 6166,
+      "chunks": 85240,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-western-europe-east",
+      "publisherId": "bendyline",
+      "name": "Western Europe — East",
+      "description": "All other locations within the frozen Western Europe coverage, including existing neighboring-region overlap. Duplicate anchors in Britain & Ireland at or north of 51°N remain solely in that catalog; southern overlap is retained. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "cd78b6c8f29feb98e2480c65943846d2384ef69e",
+        "path": "regional-western-europe-east/releases/2026.10.5/regional-western-europe-east-2026.10.5.gezk"
+      },
+      "sha256": "cb71cd568f82310d260fb3193941709b5877edd6d5c38377073fb2113f19e60f",
+      "archiveBytes": 1033030788,
+      "documents": 65715,
+      "chunks": 438914,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "regional-western-europe-west",
+      "publisherId": "bendyline",
+      "name": "Western Europe — West",
+      "description": "France, Benelux and Iberian locations within the frozen Western Europe coverage. Reference articles organized by geographic region.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.5",
+      "huggingface": {
+        "repo": "Bendyline/regional-knowledge",
+        "revision": "81aa7e21a0885a1e1f982d6f78b1c5334830c03a",
+        "path": "regional-western-europe-west/releases/2026.10.5/regional-western-europe-west-2026.10.5.gezk"
+      },
+      "sha256": "b564db0825e9c1a767be9ec1b6af64316e7b352fba12505a2e7e74fea003980b",
+      "archiveBytes": 516171813,
+      "documents": 33068,
+      "chunks": 214839,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-arts",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Arts & Architecture",
+      "description": "Arts & Architecture reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "981f67dedaa44f0dd666e0ef9c20e42ed7571b45",
+        "path": "wikipedia-arts/releases/2026.10.2/wikipedia-arts-2026.10.2.gezk"
+      },
+      "sha256": "a5c14053eead33ed4870b339d6f8028121a83dd02bba1469db1c8adb9c10cb3e",
+      "archiveBytes": 288797896,
+      "documents": 22313,
+      "chunks": 110030,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-astronomy",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Astronomy & Space",
+      "description": "Astronomy & Space reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "358650d9d3d6dad438d1b92a7b11a72c24f26623",
+        "path": "wikipedia-astronomy/releases/2026.10.2/wikipedia-astronomy-2026.10.2.gezk"
+      },
+      "sha256": "bf99f6c3fcec7d853de05834e457a55e89bd01d703f54daf632003669947ab71",
+      "archiveBytes": 229627033,
+      "documents": 20137,
+      "chunks": 99504,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-biology",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Biology & Nature",
+      "description": "Biology & Nature reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "8d5fc48398180cde49f395c91b34e8bc15cf60a7",
+        "path": "wikipedia-biology/releases/2026.10.2/wikipedia-biology-2026.10.2.gezk"
+      },
+      "sha256": "cb78dabca71b0a12623f226c5b669e74d450240321742f927889e863fd720597",
+      "archiveBytes": 1700366383,
+      "documents": 178243,
+      "chunks": 767814,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-business",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Business & Economics",
+      "description": "Business & Economics reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "26749394b2506b1db15ec3a9a0e30b243717f8e6",
+        "path": "wikipedia-business/releases/2026.10.2/wikipedia-business-2026.10.2.gezk"
+      },
+      "sha256": "b2a6fea91609c07124c8a198377f5b3830976c2eb8902f98bb833c1d475217cb",
+      "archiveBytes": 1957224305,
+      "documents": 131646,
+      "chunks": 805942,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-people-business",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Business People",
+      "description": "Businesspeople, executives, entrepreneurs, investors, bankers and chefs.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "ca2a0f65d955904e9094ef3eaca18f5a748569b0",
+        "path": "wikipedia-people-business/releases/2026.10.2/wikipedia-people-business-2026.10.2.gezk"
+      },
+      "sha256": "530e14c9e1d1bc2cee599994c574621b00d07b3fc3e123544d43da5ba01df73f",
+      "archiveBytes": 659097201,
+      "documents": 52650,
+      "chunks": 279976,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-people-entertainment",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Entertainers",
+      "description": "Actors, musicians, singers, directors, presenters, comedians and other entertainers.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "bb86ea31df5d7df50cce380cb0a154915e3090ff",
+        "path": "wikipedia-people-entertainment/releases/2026.10.2/wikipedia-people-entertainment-2026.10.2.gezk"
+      },
+      "sha256": "51bb3c82cec20d8fa298ff6d8240bd30d6f8b14a5aaf8a52cac7833f6996dee5",
+      "archiveBytes": 3760927011,
+      "documents": 273360,
+      "chunks": 1695677,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-film-tv",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Film, Television & Radio",
+      "description": "Films, television series and episodes, animation, their characters and franchises, and the television and radio channels, stations and broadcasters that carry them.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "5ca3e462f28196cc61504082eccdf6d8e9188b15",
+        "path": "wikipedia-film-tv/releases/2026.10.2/wikipedia-film-tv-2026.10.2.gezk"
+      },
+      "sha256": "8df9342cee86191aa1fbabebe2b7fe6e2b1e1929e0f0318db66ac5045024785e",
+      "archiveBytes": 4810402092,
+      "documents": 300019,
+      "chunks": 2084065,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-food-drink",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Food & Drink",
+      "description": "Food & Drink reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "5d0533180fc515f7e3ae73a5cc97790f8ea2a366",
+        "path": "wikipedia-food-drink/releases/2026.10.2/wikipedia-food-drink-2026.10.2.gezk"
+      },
+      "sha256": "eb1702ef665befbb003e9ee4f5e5fdb5c239ba2f704abb07b2699283d18d0b94",
+      "archiveBytes": 185850938,
+      "documents": 14826,
+      "chunks": 79368,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-games",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Games",
+      "description": "Games reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "eb9d40280de307b497b9b2c6c1356bc1a3485293",
+        "path": "wikipedia-games/releases/2026.10.2/wikipedia-games-2026.10.2.gezk"
+      },
+      "sha256": "606e58635f239348eb03ae8c728495bed2b6665e9730933f7670c10cf227c86c",
+      "archiveBytes": 660035226,
+      "documents": 37622,
+      "chunks": 266613,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-general",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: General Knowledge",
+      "description": "Concepts, organizations, awards, events, schools and other English Wikipedia articles that no subject catalog covers.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "ef85688c1b6a92f9052cfefb3628d1ad2ddec131",
+        "path": "wikipedia-general/releases/2026.10.2/wikipedia-general-2026.10.2.gezk"
+      },
+      "sha256": "6966ee90939c31053680d3025657feb67226afe53470dfb8f1b8f4d16d1f55cd",
+      "archiveBytes": 5314861417,
+      "documents": 300017,
+      "chunks": 2064756,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-geography",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Geography & Places",
+      "description": "Natural and human-built places — settlements, landscapes and landmarks, together with the campuses, castles, museums and monuments that stand on them.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "9e237971c8bf0e8c0f75a97f883a1ddb489a6d5a",
+        "path": "wikipedia-geography/releases/2026.10.2/wikipedia-geography-2026.10.2.gezk"
+      },
+      "sha256": "918df59f5fd3fea39627bd5f40a1fedf9ffff72c11886e6a5aaaf5c54f4e7e2d",
+      "archiveBytes": 11501351070,
+      "documents": 954357,
+      "chunks": 5077915,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-history",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: History",
+      "description": "History reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "518f43347d88737194308946c281f90a0f537305",
+        "path": "wikipedia-history/releases/2026.10.2/wikipedia-history-2026.10.2.gezk"
+      },
+      "sha256": "85986e6a93a092ac860ea909b6c44d1bdf5b700b142c932249d73a8423da3dad",
+      "archiveBytes": 2929650419,
+      "documents": 105138,
+      "chunks": 1106858,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-language",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Language & Linguistics",
+      "description": "Language & Linguistics reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "0f28f52564d4da164feb1ac5ef6b232a1d05720c",
+        "path": "wikipedia-language/releases/2026.10.2/wikipedia-language-2026.10.2.gezk"
+      },
+      "sha256": "0ff94fb29d377aea3cc5d9b81ede783dd6b0a574e325debd0cc0520c66b5dddb",
+      "archiveBytes": 488973143,
+      "documents": 38366,
+      "chunks": 209947,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-law",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Law",
+      "description": "Law reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "db22343d95f328437b3ad2ef5aa302cae42564fa",
+        "path": "wikipedia-law/releases/2026.10.2/wikipedia-law-2026.10.2.gezk"
+      },
+      "sha256": "ea7695f795e1ccce72e5e9c21a7d3187c3d5d8e79eea2c2279247609154ac87c",
+      "archiveBytes": 577738310,
+      "documents": 30458,
+      "chunks": 211164,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-literature",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Literature",
+      "description": "Literature reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "f80ee799453a5dfcf5c3fb2450d02183229f47af",
+        "path": "wikipedia-literature/releases/2026.10.2/wikipedia-literature-2026.10.2.gezk"
+      },
+      "sha256": "dd694a11dae954529b68a174b8e581003115d4320ecd6bd760a65c1f90b72637",
+      "archiveBytes": 1806270535,
+      "documents": 108128,
+      "chunks": 711378,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-mathematics",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Mathematics",
+      "description": "Mathematics reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "bc88247468d3a865bcd1cb32f5b64addd559ffa4",
+        "path": "wikipedia-mathematics/releases/2026.10.2/wikipedia-mathematics-2026.10.2.gezk"
+      },
+      "sha256": "bfa5e69d17b4ac19b23f01a3a6a90b3d99ec0cc4d15147513e7ad4862d1d0962",
+      "archiveBytes": 355557920,
+      "documents": 16237,
+      "chunks": 144310,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-medicine",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Medicine & Health",
+      "description": "Medicine & Health reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "b5749c355f9da3d9af5ad212918b12c72262ec04",
+        "path": "wikipedia-medicine/releases/2026.10.2/wikipedia-medicine-2026.10.2.gezk"
+      },
+      "sha256": "8e02c066de72bbebb09f73bc8bd61a0cac3a74d79d2852d2d29a18c8d8f8ac24",
+      "archiveBytes": 407197456,
+      "documents": 19644,
+      "chunks": 161472,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-military",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Military",
+      "description": "Military reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "8ca6bcbac77e54f76c807c503da834097659df9a",
+        "path": "wikipedia-military/releases/2026.10.2/wikipedia-military-2026.10.2.gezk"
+      },
+      "sha256": "701ffab0f3895975a58503233ccdec3af78e47b05cf8f53631d4e136a62aea1a",
+      "archiveBytes": 2099094386,
+      "documents": 93407,
+      "chunks": 787375,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-people-military",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Military People",
+      "description": "Soldiers, officers, commanders and other military personnel.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "25b4d91d842922ea423a9fc2c67c153b119d9806",
+        "path": "wikipedia-people-military/releases/2026.10.2/wikipedia-people-military-2026.10.2.gezk"
+      },
+      "sha256": "4a674bcb013c197f909eec9e2f17b171efb7a823e3bd6c5738e2f7d3124745ac",
+      "archiveBytes": 931384772,
+      "documents": 64946,
+      "chunks": 370372,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-music",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Music",
+      "description": "Music reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "ebf4076b0acd7a40dad1708473b9dbb5992fed84",
+        "path": "wikipedia-music/releases/2026.10.2/wikipedia-music-2026.10.2.gezk"
+      },
+      "sha256": "bdede29944c181f70dddcb000dbe1053fbfc3b32d6b38c693b804ad9de53100c",
+      "archiveBytes": 4225129620,
+      "documents": 329503,
+      "chunks": 1950670,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-people-other",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Other Notable People",
+      "description": "People known for something other than the fields above: socialites, criminals, centenarians, victims and more.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "b697d468519eb81db8b345f10dcb2909a0765d25",
+        "path": "wikipedia-people-other/releases/2026.10.2/wikipedia-people-other-2026.10.2.gezk"
+      },
+      "sha256": "003c9d1cdad1d9fbaee365ebac87ae1fd376617a537a3ede52adde56f717d3cf",
+      "archiveBytes": 893030833,
+      "documents": 64989,
+      "chunks": 357540,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-people-politics",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Politicians, Royalty & Jurists",
+      "description": "Politicians, heads of state, monarchs and nobility, diplomats, judges, lawyers, officials and activists.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "6a55865b8087e18e536b1a0e248ebd709834f3d1",
+        "path": "wikipedia-people-politics/releases/2026.10.2/wikipedia-people-politics-2026.10.2.gezk"
+      },
+      "sha256": "26b84603d97dc3a2669646d33f9708e4536f2862490ee98bbc691e139d362ef3",
+      "archiveBytes": 4425017480,
+      "documents": 370009,
+      "chunks": 1816652,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-politics",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Politics & Government",
+      "description": "Politics & Government reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "187252fea6d9a0cf0e973bc1d589f85e454801bc",
+        "path": "wikipedia-politics/releases/2026.10.2/wikipedia-politics-2026.10.2.gezk"
+      },
+      "sha256": "04f5e35bdfeec67dedf35aad10c40c3ca8088cb39c73bd3ec8bfd73c4a4090f4",
+      "archiveBytes": 2286165550,
+      "documents": 131737,
+      "chunks": 982040,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-religion-philosophy",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Religion & Philosophy",
+      "description": "Religion & Philosophy reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "c5e38248e9c2108cda667169fb2a90aec81a0201",
+        "path": "wikipedia-religion-philosophy/releases/2026.10.2/wikipedia-religion-philosophy-2026.10.2.gezk"
+      },
+      "sha256": "192d1cd23c9a4287b238a8290d37faabac3c2b7aa3227e4f9a638e5689a3634e",
+      "archiveBytes": 557919713,
+      "documents": 25242,
+      "chunks": 207214,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-people-religion",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Religious Figures",
+      "description": "Clergy, saints, theologians, missionaries and other religious figures.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "0fd2c944cfcf15387356bbf8c4665585f014fc38",
+        "path": "wikipedia-people-religion/releases/2026.10.2/wikipedia-people-religion-2026.10.2.gezk"
+      },
+      "sha256": "ef7f3a3dcd5e1d4a84cfda544edd61697d82f96f59c810d99e415f73c92b64a8",
+      "archiveBytes": 684614678,
+      "documents": 58730,
+      "chunks": 276814,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-science",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Science",
+      "description": "Science reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "fb998a6163c5b2c3cdd936611523538be34f5919",
+        "path": "wikipedia-science/releases/2026.10.2/wikipedia-science-2026.10.2.gezk"
+      },
+      "sha256": "724a4eb93cad5840edf577ddc8627861dd7b1d05b81c735e995fbbce96ceb475",
+      "archiveBytes": 811667383,
+      "documents": 45818,
+      "chunks": 316978,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-people-science",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Scientists & Scholars",
+      "description": "Scientists, physicians, engineers, inventors, academics, historians, philosophers and educators.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "37aa06fc83c551c787a0805a3c7a01391b1df3a0",
+        "path": "wikipedia-people-science/releases/2026.10.2/wikipedia-people-science-2026.10.2.gezk"
+      },
+      "sha256": "e265acc655fd7296e9f6bda374b0204232304f4b74d0e40380963d35b3419935",
+      "archiveBytes": 2649697071,
+      "documents": 210742,
+      "chunks": 1087081,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-sports",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Sports & Games",
+      "description": "Sports & Games reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "9c20f97050cf4c290c364651f213ea9066108d93",
+        "path": "wikipedia-sports/releases/2026.10.2/wikipedia-sports-2026.10.2.gezk"
+      },
+      "sha256": "fa400b6a0847e98652f62392c1ca9c4d073cecc3ade8dbdfc619377883a9e56d",
+      "archiveBytes": 5790318835,
+      "documents": 401081,
+      "chunks": 2995388,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-people-sports",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Sportspeople",
+      "description": "Athletes, players, coaches, referees and other people in sport.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "026b49e8bb884dd789a675270e7523d55a37b86a",
+        "path": "wikipedia-people-sports/releases/2026.10.2/wikipedia-people-sports-2026.10.2.gezk"
+      },
+      "sha256": "b7c4a6e227ea161fb09683ede8e03f5e9ed51e4fb8c0056bc49787035d66ee51",
+      "archiveBytes": 5876282081,
+      "documents": 552558,
+      "chunks": 2919373,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-technology",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Technology",
+      "description": "Technology reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "f985796534cc50022e254a89d57a810997103e1f",
+        "path": "wikipedia-technology/releases/2026.10.2/wikipedia-technology-2026.10.2.gezk"
+      },
+      "sha256": "6d2f46502bc20a8085195bcd7f7517291cb3b23ebe02e7b5fcf4d73b7a73e2c3",
+      "archiveBytes": 980926885,
+      "documents": 72776,
+      "chunks": 405735,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-transportation",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Transportation",
+      "description": "Transportation reference articles from the English Wikipedia 2026-10-01 snapshot.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "97b15a66957a86ac3063efc387ea8b646112d566",
+        "path": "wikipedia-transportation/releases/2026.10.2/wikipedia-transportation-2026.10.2.gezk"
+      },
+      "sha256": "5d7ce5ac639abbfbb2a86418b19c4882431ddaab7494f9fd0c83c4eadbbd544b",
+      "archiveBytes": 2423197441,
+      "documents": 189147,
+      "chunks": 1025889,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "wikipedia-people-arts",
+      "publisherId": "bendyline",
+      "name": "Wikipedia: Writers & Artists",
+      "description": "Writers, poets, journalists, painters, sculptors, photographers, architects and designers.",
+      "language": "en",
+      "license": "CC BY-SA 4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by-sa/4.0/",
+      "category": "encyclopedia",
+      "version": "2026.10.2",
+      "huggingface": {
+        "repo": "Bendyline/wikipedia-knowledge",
+        "revision": "98e0f93f7423806fb7b1de7273c5d821ef1b77da",
+        "path": "wikipedia-people-arts/releases/2026.10.2/wikipedia-people-arts-2026.10.2.gezk"
+      },
+      "sha256": "39d810dde96c8f09274b439c7bede817fffeb145d1e671c08f39f68788a9143b",
+      "archiveBytes": 2968677696,
+      "documents": 231063,
+      "chunks": 1252723,
+      "embeddingProfile": {
+        "id": "multilingual-e5-small@2",
+        "modelRepo": "Xenova/multilingual-e5-small"
+      }
+    },
+    {
+      "id": "caselaw-wyoming-part-0001",
+      "publisherId": "bendyline",
+      "name": "Wyoming caselaw — Caselaw Access Project — 1870–2019 (part-0001)",
+      "description": "10931 historical CAP case records, selected by CAP's jurisdiction label. Part of Wyoming caselaw — Caselaw Access Project; see the collection index for complete coverage. OCR may contain errors; inclusion does not establish current legal authority.",
+      "language": "en",
+      "license": "CC0 1.0 Universal",
+      "category": "reference",
+      "version": "2026.10.3",
+      "huggingface": {
+        "repo": "Bendyline/knowledge",
+        "revision": "a1a7a3436a978cea4d8fef4269c51cd6a6650412",
+        "path": "catalogs/caselaw-wyoming-part-0001/releases/2026.10.3/caselaw-wyoming-part-0001-2026.10.3.gezk"
+      },
+      "sha256": "2a3950c39e86c558c8f9ba6af930bed3faeef4b02c90e0b60422a3181be0a759",
+      "archiveBytes": 1069210109,
+      "documents": 10931,
+      "chunks": 357434,
+      "embeddingProfile": {
+        "id": "bge-small-en-v1.5@1",
+        "modelRepo": "Xenova/bge-small-en-v1.5"
+      }
+    }
+  ],
+  "queryModels": [
+    {
+      "id": "bge-small-en-v1.5@1",
+      "queryInstruction": "Represent this sentence for searching relevant passages: ",
+      "pooling": "mean",
+      "normalized": true,
+      "dimensions": 384,
+      "maxTokens": 512,
+      "model": "onnx/model.onnx",
+      "tokenizer": "tokenizer.json",
+      "files": [
+        {
+          "name": "onnx/model.onnx",
+          "url": "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/ea104dacec62c0de699686887e3f920caeb4f3e3/onnx/model.onnx",
+          "sha256": "828e1496d7fabb79cfa4dcd84fa38625c0d3d21da474a00f08db0f559940cf35",
+          "size": 133093490
+        },
+        {
+          "name": "tokenizer.json",
+          "url": "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/ea104dacec62c0de699686887e3f920caeb4f3e3/tokenizer.json",
+          "sha256": "d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66",
+          "size": 711396
+        },
+        {
+          "name": "tokenizer_config.json",
+          "url": "https://huggingface.co/Xenova/bge-small-en-v1.5/resolve/ea104dacec62c0de699686887e3f920caeb4f3e3/tokenizer_config.json",
+          "sha256": "9261e7d79b44c8195c1cada2b453e55b00aeb81e907a6664974b4d7776172ab3",
+          "size": 366
+        }
+      ]
+    },
+    {
+      "id": "multilingual-e5-small@2",
+      "queryInstruction": "query: ",
+      "pooling": "mean",
+      "normalized": true,
+      "dimensions": 384,
+      "maxTokens": 512,
+      "model": "onnx/model.onnx",
+      "tokenizer": "tokenizer.json",
+      "files": [
+        {
+          "name": "onnx/model.onnx",
+          "url": "https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/onnx/model.onnx",
+          "sha256": "4aa845c27760e06e9a686b9d8b5d440eae4b6612cd09e5b522b716d3941f77ff",
+          "size": 470268533
+        },
+        {
+          "name": "tokenizer.json",
+          "url": "https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer.json",
+          "sha256": "0b44a9d7b51c3c62626640cda0e2c2f70fdacdc25bbbd68038369d14ebdf4c39",
+          "size": 17082730
+        },
+        {
+          "name": "tokenizer_config.json",
+          "url": "https://huggingface.co/Xenova/multilingual-e5-small/resolve/761b726dd34fb83930e26aab4e9ac3899aa1fa78/tokenizer_config.json",
+          "sha256": "a1d6bc8734a6f635dc158508bef000f8e2e5a759c7d92f984b2c86e5ff53425b",
+          "size": 443
+        }
+      ]
+    }
+  ]
+}

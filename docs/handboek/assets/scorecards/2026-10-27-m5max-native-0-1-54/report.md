@@ -1,5 +1,7 @@
 # Final M5 Max dual-engine scorecard — native 0.1.54
 
+**Publication revision, November 3:** MLX first-token prefill rates have now been recovered from all 258 original MLX recordings. The [original report](original-report.md) and trial archive remain unchanged; the additions below are partial observations, separate from aggregate request timings.
+
 **Complete: 516/516 planned trials, three repetitions for every treatment, and zero pending artifact reviews.** Qwen3.8 27B Q4 on llama.cpp recorded the most passes (104/129) and highest mean fixed score (8.26/10). Gemma4 12B Q4 on llama.cpp had the shortest median trial duration (3.89 minutes), with 86/128 eligible passes and one preserved infrastructure exclusion. MLX used substantially less sampled process RSS for both models.
 
 These are comparisons of the installed model/engine configurations on this device. Their quantization formats and speculative decoding differ. Passing the frozen gates does not establish polished or fully correct work: the independent artifact reviews and failure investigations below expose material gaps in some passing outputs.
@@ -58,11 +60,11 @@ The repeated failure concentrations are more actionable than a single overall ra
 
 Latency is measured from trial start. First-token latency includes daemon boot and queueing; it is not the first turn's engine-only TTFT. First action is the first observed tool call. First artifact is the first observed file/artifact write, which can be an intermediate file rather than the final deliverable. Missing observations remain **unknown**.
 
-Decode rates use `metrics.derived.genTokensPerSec`, never the low-token preflight or whole-trial tokens/wall-time fallback. For llama.cpp, each trial rate is generated tokens divided by logged decode time; for MLX, each trial rate is the median of active-decode heartbeat rates. Tables take medians across trials, so these are different measurement estimators. MLX logs prefill token counts without durations: **all MLX prefill rates are unknown**. Engine-log token totals describe observed inference work and can include repeated/cache-related work; they are not unique user text or provider billing.
+Decode rates use `metrics.derived.genTokensPerSec`, never the low-token preflight or whole-trial tokens/wall-time fallback. For llama.cpp, each trial rate is generated tokens divided by logged decode time; for MLX, each trial rate is the median of active-decode heartbeat rates. Tables take medians across trials, so these are different measurement estimators. The original structured MLX metrics lack aggregate prefill rates and exact prefill durations. Rounded first-token rate observations have since been recovered from the recordings; these partial provider-turn observations appear separately below. Engine-log token totals describe observed inference work and can include repeated/cache-related work; they are not unique user text or provider billing.
 
 RSS is the sampled process-tree total (daemon plus descendants), reported in the collector's MB convention. Tables show the median of trial peaks and, separately, the largest observed peak. Shared mappings can affect RSS accounting. System RAM includes the entire host and other applications. These quantities are not interchangeable with model weights or GPU allocation. **macOS GPU utilization and dedicated GPU memory are unknown**, not zero; any zero GPU placeholders in raw reports must not be read as measurements.
 
-| Target | First token, s | First action, s | First write, s (n) | Decode t/s (n) | Prefill t/s (n) |
+| Target | First token, s | First action, s | First write, s (n) | Decode t/s (n) | Aggregate prefill t/s (n) |
 | --- | --- | --- | --- | --- | --- |
 | Qwen · MLX | 27.00 | 32.08 | 109.60 (121/129) | 28.00 (127/129) | unknown (0/129) |
 | Qwen · llama.cpp | 31.48 | 38.71 | 129.29 (124/129) | 28.45 (129/129) | 396.66 (129/129) |
@@ -76,11 +78,31 @@ RSS is the sampled process-tree total (daemon plus descendants), reported in the
 | Gemma · MLX | 15,351,921 | 2,181,928 | 10,975 / 19,215 | 68,586 / 131,028 | 29.01 |
 | Gemma · llama.cpp | 17,342,384 | 2,016,283 | 25,416 / 33,829 | 76,306 / 105,916 | 21.27 |
 
-Coverage across all 516 trials: duration, first token, first action, input/output token totals, process RSS and system RAM **516/516**; first artifact **494/516**; decode rate **514/516**; prefill **258/516** (every llama.cpp trial); GPU utilization **0/516 available**. The two unavailable decode rates are Qwen MLX constrained-comms repetitions 1 and 3. Missing first-write observations include selection/authoring probes and the missing code-review artifact; absence of this timing does not always mean no final file exists. The completion audit lists each unknown cell. Total logged usage is **58,548,677 input and 8,833,913 output tokens**.
+Coverage across all 516 trials: duration, first token, first action, input/output token totals, process RSS and system RAM **516/516**; first artifact **494/516**; decode rate **514/516**; aggregate prefill **258/516** (every llama.cpp trial); recovered observed prefill **258/258 MLX trials** (2,175 partial observations); GPU utilization **0/516 available**. The two unavailable decode rates are Qwen MLX constrained-comms repetitions 1 and 3. Missing first-write observations include selection/authoring probes and the missing code-review artifact; absence of this timing does not always mean no final file exists. The completion audit lists each unknown cell. Total logged usage is **58,548,677 input and 8,833,913 output tokens**.
+
+### Recovered MLX observed prefill
+
+Median of observed rounded first-token prefill rates within each trial, then median across trials. Partial provider-turn coverage, not duration-weighted aggregate throughput or pure prefill time. All attempts are represented, including failures and the original infrastructure exclusion.
+
+| Model | Suite | Trials | Observations | Observed prefill tok/s, median of trial medians |
+| --- | --- | ---: | ---: | ---: |
+| qwen3.8-27b-q4 | all | 129 | 793 | 547.00 |
+| qwen3.8-27b-q4 | core | 33 | 84 | 564.00 |
+| qwen3.8-27b-q4 | productivity | 39 | 213 | 574.00 |
+| qwen3.8-27b-q4 | developer | 30 | 252 | 512.00 |
+| qwen3.8-27b-q4 | complex-work | 27 | 244 | 495.00 |
+| gemma4-12b-q4 | all | 129 | 1382 | 1084.00 |
+| gemma4-12b-q4 | core | 33 | 194 | 1146.00 |
+| gemma4-12b-q4 | productivity | 39 | 415 | 1146.00 |
+| gemma4-12b-q4 | developer | 30 | 360 | 1052.50 |
+| gemma4-12b-q4 | complex-work | 27 | 413 | 712.00 |
+
+
+Exact MLX prefill durations and complete internal-request coverage remain unknown. These rates must not be directly ranked against llama.cpp aggregate prefill throughput. [Recovery method](mlx-prefill-recovery.md), [individual observations and source hashes](mlx-prefill-recovery.json), and [trial CSV](mlx-prefill-recovery.csv).
 
 ### Performance by target and suite
 
-| Suite | Target | Decode t/s | Prefill t/s | RSS median peak, MB | System median peak, MB | Input tokens | Output tokens |
+| Suite | Target | Decode t/s | Aggregate prefill t/s | RSS median peak, MB | System median peak, MB | Input tokens | Output tokens |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | core | Qwen · MLX | 33.00 | unknown | 18023 | 90170 | 797,041 | 208,657 |
 | core | Qwen · llama.cpp | 32.09 | 422.30 | 40546 | 94032 | 1,069,773 | 151,614 |
@@ -99,7 +121,7 @@ Coverage across all 516 trials: duration, first token, first action, input/outpu
 | complex-work | Gemma · MLX | 36.00 | unknown | 11284 | 68776 | 2,378,224 | 588,921 |
 | complex-work | Gemma · llama.cpp | 59.35 | 923.57 | 27947 | 83499 | 3,932,026 | 661,535 |
 
-| Suite | Target | First token, s | First action, s | First write, s | First-write coverage | Decode coverage | Prefill coverage |
+| Suite | Target | First token, s | First action, s | First write, s | First-write coverage | Decode coverage | Aggregate prefill coverage |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | core | Qwen · MLX | 22.87 | 28.26 | 75.24 | 33/33 | 33/33 | 0/33 |
 | core | Qwen · llama.cpp | 21.09 | 29.33 | 72.44 | 33/33 | 33/33 | 33/33 |

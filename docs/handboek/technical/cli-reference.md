@@ -20,14 +20,20 @@ The command line needs Node.js 24 or newer. Check with `node --version`; if it i
 - Ubuntu or Debian: `curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs`
 - Anywhere, with [nvm](https://github.com/nvm-sh/nvm): `nvm install 24`
 
-Then install the command-line package:
+To try Gezel without installing anything else, run:
 
 ```bash
-npm install -g @bendyline/gezel-cli
+npx gezel
+```
+
+To keep it installed:
+
+```bash
+npm install -g gezel
 gezel
 ```
 
-To try it without installing, run `npx -p @bendyline/gezel-cli gezel`. Name the `@bendyline/` package whenever you use `npx`: a bare `npx gezel` outside a folder where the CLI is installed asks npm for an unrelated package.
+The `gezel` package is the short name for `@bendyline/gezel-cli`, and the two are the same program. If you installed `@bendyline/gezel-cli` before, keep using it, or remove it with `npm uninstall -g @bendyline/gezel-cli` before you install `gezel`. They both provide the `gezel` command, and npm will not install a second one over the first.
 
 The CLI is one of Gezel's public JavaScript packages. See [Gezel on npm](npm-packages.md) for the complete package map and the SDKs to use when a shell command is not the right integration boundary.
 
@@ -69,6 +75,8 @@ gezel growth [on|off]       show or set gezel growth (XP and level-ups); off
 gezel run "..."             one-shot: send a prompt, print the reply
 gezel doctor                check the installation
 ```
+
+The first time you use Gezel on a computer, it has no model to answer with. `gezel` and `gezel run` then show the same setup: they suggest a model that fits this computer, download it with your OK, and carry on. `gezel run` goes straight on to your prompt afterward. When `gezel run` is not in a terminal, for example in a script or with its prompt piped in, it prints the setup commands instead and downloads nothing.
 
 A new install starts in `full-play`. For a server nobody is watching, `reactive+tasks` is the better fit: messages, tasks you start and schedules still run, without proactive nudges. [Gezel on a server](gezel-on-a-server.md) covers the rest of a headless setup.
 
