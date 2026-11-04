@@ -1,5 +1,6 @@
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { setFlagsFromString } from 'node:v8';
 import {
   IMPORT_FLAG,
   type ImportBinding,
@@ -20,6 +21,24 @@ import {
  */
 
 const nodeRequire = createRequire(import.meta.url);
+
+/**
+ * Keeps grammars on V8's baseline wasm compiler. Node 24's optimizing tier
+ * (V8 13.6) cannot compile tree-sitter-swift's generated code: it aborts in
+ * `Zone::Expand` at about 2.5 GB, a process fatal no JS handler can catch,
+ * within about 50 parses of ordinary Swift. Any folder holding Swift files
+ * restarted the daemon up to 48 times a day from 2026-09-26. Electron's V8 15
+ * compiles the same grammar at 416 MB.
+ *
+ * Both flags are needed; either one alone still crashes. `--liftoff-only` works
+ * only on the command line, because a runtime set skips V8's flag implications.
+ * Setting them here reaches every host, where argv would mean a launchd unit, a
+ * systemd unit, a logon task and each spawn path. They are process-wide and
+ * reach only modules compiled afterward, so this must run before the first
+ * grammar. Baseline also cuts a pass over 1,500 TypeScript files from a 1.3 GB
+ * peak to 80 MB, for about 0.5 ms more per file.
+ */
+export const WASM_BASELINE_FLAGS = ['--no-wasm-dynamic-tiering', '--no-wasm-tier-up'] as const;
 
 const SIG_CAP = 160;
 
@@ -125,6 +144,7 @@ async function ensureInit(): Promise<boolean> {
   if (initPromise) return initPromise;
   initPromise = (async () => {
     try {
+      for (const flag of WASM_BASELINE_FLAGS) setFlagsFromString(flag);
       const mod = nodeRequire('web-tree-sitter') as {
         Parser: {
           init(opts?: { locateFile?: (f: string) => string }): Promise<void>;
