@@ -5,11 +5,16 @@ if (!new File(gezelNative, 'sdk-manifest.json').isFile()) {
     throw new GradleException('Stage the Gezel Capacitor native package before syncing Android. See @bendyline/gezel-capacitor/README.md.')
 }
 def gezelVersion = new groovy.json.JsonSlurper().parse(new File(gezelNative, 'sdk-manifest.json')).packageVersion
+// Offline speech is optional: without a staged runtime, GezelSpeech reports itself unavailable.
+def gezelSpeech = file('../native/speech-android')
+def speechManifest = new File(gezelSpeech, 'sdk-manifest.json')
+def speechVersion = speechManifest.isFile() ? new groovy.json.JsonSlurper().parse(speechManifest).packageVersion : null
 // Transitive Maven artifacts must also be visible to the consuming app project.
 rootProject.allprojects { repositories {
     google()
     mavenCentral()
     maven { url = uri(new File(gezelNative, 'maven')) }
+    if (speechVersion) maven { url = uri(new File(gezelSpeech, 'maven')) }
 } }
 android {
     namespace 'com.bendyline.gezel.capacitor'
@@ -21,4 +26,5 @@ dependencies {
     implementation project(':capacitor-android')
     implementation 'androidx.activity:activity:1.11.0'
     api "com.bendyline.gezel:gezel-runtime:${gezelVersion}"
+    if (speechVersion) implementation "com.bendyline.gezel:gezel-speech:${speechVersion}"
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   type RunReadinessClient,
+  canOfferRunSetup,
   checkRunReadiness,
   formatRunSetupMessage,
 } from './run-readiness.js';
@@ -130,5 +131,26 @@ describe('formatRunSetupMessage', () => {
     });
     expect(message).toContain('gezel model list --available --provider llama-cpp');
     expect(message).toContain('gezel model pull <id> --provider llama-cpp');
+  });
+});
+
+describe('canOfferRunSetup', () => {
+  const tty = { isTTY: true };
+  const pipe = {};
+
+  it('offers the setup screens to a person at a terminal', () => {
+    expect(canOfferRunSetup({ stdin: tty, stderr: tty }, {})).toBe(true);
+  });
+
+  it('keeps the message when the prompt is piped in, since the choices need the keyboard', () => {
+    expect(canOfferRunSetup({ stdin: pipe, stderr: tty }, {})).toBe(false);
+  });
+
+  it('keeps the message when stderr is captured, since the screens have nowhere to draw', () => {
+    expect(canOfferRunSetup({ stdin: tty, stderr: pipe }, {})).toBe(false);
+  });
+
+  it('never offers setup under CI, even with a pseudo-terminal', () => {
+    expect(canOfferRunSetup({ stdin: tty, stderr: tty }, { CI: 'true' })).toBe(false);
   });
 });

@@ -91,8 +91,8 @@ const INTEGRATION_SUITES = [
  * generated parse tables), and one Turboshaft compilation zone for them can
  * outgrow what the allocator hands back under full-suite pressure. Liftoff,
  * the baseline tier, never builds that graph, and grammar parse speed is
- * irrelevant to tests — so pin wasm to baseline in workers. Production keeps
- * tier-up.
+ * irrelevant to tests — so pin wasm to baseline in workers. Production pins it
+ * too, more strictly: see `WASM_BASELINE_FLAGS` in src/index-store/symbols.ts.
  *
  * `--no-wasm-tier-up` alone is not enough under full-suite pressure: Liftoff's
  * initial grammar compilation still defaults to as many as 128 parallel V8

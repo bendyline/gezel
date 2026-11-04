@@ -1,5 +1,10 @@
 // swift-tools-version: 6.0
+import Foundation
 import PackageDescription
+
+// Offline speech is optional: without a staged runtime, GezelSpeech reports itself unavailable.
+let speech = FileManager.default.fileExists(
+    atPath: Context.packageDirectory + "/native/speech-ios/GezelSpeech.xcframework/Info.plist")
 
 let package = Package(
     name: "BendylineGezelCapacitor",
@@ -13,6 +18,7 @@ let package = Package(
         .product(name: "GezelRuntime", package: "GezelRuntime"),
         .product(name: "Capacitor", package: "capacitor-swift-pm"),
         .product(name: "Cordova", package: "capacitor-swift-pm")
-    ], path: "ios/Sources/GezelCapacitor")],
+    ] + (speech ? ["GezelSpeech"] : []), path: "ios/Sources/GezelCapacitor")]
+        + (speech ? [.binaryTarget(name: "GezelSpeech", path: "native/speech-ios/GezelSpeech.xcframework")] : []),
     swiftLanguageModes: [.v5]
 )

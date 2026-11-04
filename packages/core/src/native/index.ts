@@ -105,6 +105,16 @@ export {
 } from './console-detach.js';
 export type { FileFingerprint } from './file-fingerprint.js';
 export { fileFingerprint, sameFileFingerprint } from './file-fingerprint.js';
+export type { LockIdentity } from './lock-identity.js';
+export {
+  LOCK_HEARTBEAT_INTERVAL_MS,
+  LOCK_STALE_AFTER_MS,
+  currentLockIdentity,
+  foreignHolderMessage,
+  parseLockFile,
+  procStartTicks,
+  sharesPidNamespace,
+} from './lock-identity.js';
 export { LLAMA_ENGINE_VERSION } from './llama-engine-version.js';
 export { ORT_DISABLE_TELEMETRY_ENV, disableOnnxRuntimeTelemetry } from './onnx-telemetry.js';
 export { resolvePlatformKey } from './platform-key.js';

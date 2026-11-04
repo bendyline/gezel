@@ -24,3 +24,9 @@ export function createMobileEmbedding(options: Parameters<typeof createRuntimeEm
   return createRuntimeEmbedding(GezelRuntime, options);
 }
 export { selectModel } from '@bendyline/gezel-app-sdk/browser';
+export * from './speech.js';
+export * from './speech-catalog.js';
+export * from './knowledge/catalog.js';
+export type { GezelKnowledgePlugin } from './knowledge/definitions.js';
+export * from './knowledge/manager.js';
+export type { KnowledgeWorkerUrls } from './knowledge/worker-host.js';

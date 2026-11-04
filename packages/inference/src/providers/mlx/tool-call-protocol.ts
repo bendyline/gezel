@@ -83,9 +83,10 @@ export function applyCallableToolGrammar(
  *
  * This deliberately checks presence only. A present-but-wrongly-typed value
  * remains the MCP validator's job; the MLX Hermes grammar promises only that
- * every declared required key is emitted before the call can close. Seeing a
- * missing key is therefore evidence that the live constrained-decoding path
- * broke its own contract, not an ordinary model validation miss.
+ * every declared required key is emitted before a constrained call can close.
+ * A missing key alone does not establish a decoder fault: calls salvaged from
+ * ordinary prose were not subject to that grammar. The caller must preserve
+ * their origin when deciding whether to disable speculative decoding.
  */
 export function missingTopLevelRequiredToolArgs(
   schema: Record<string, unknown> | undefined,

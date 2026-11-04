@@ -8,11 +8,13 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setTimeout as wait } from 'node:timers/promises';
-import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
+import { foreignHolderMessage, windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { GezelClient } from './client.js';
 import {
+  type ForeignLockHolder,
   type RuntimeInfo,
   isProcessAlive as defaultIsProcessAlive,
+  readForeignLockHolder as defaultReadForeignLockHolder,
   readRuntime as defaultReadRuntime,
 } from './discovery.js';
 import { createTrustingFetch } from './node-tls.js';
@@ -31,6 +33,21 @@ export class LiveDaemonUnhealthyError extends Error {
       options,
     );
     this.name = 'LiveDaemonUnhealthyError';
+  }
+}
+
+/**
+ * This home is served by a live daemon in another pid namespace, typically
+ * another container on the same volume. It cannot be adopted from here (its
+ * loopback port is not ours) and must not get a second writer beside it.
+ */
+export class DaemonInAnotherNamespaceError extends Error {
+  constructor(
+    public readonly pid: number,
+    public readonly hostname: string | undefined,
+  ) {
+    super(foreignHolderMessage({ pid, hostname }));
+    this.name = 'DaemonInAnotherNamespaceError';
   }
 }
 
@@ -185,6 +202,7 @@ export interface DiscoverOrSpawnOptions {
   spawnFn?: SpawnLike;
   readRuntimeFn?: (home?: string) => Promise<RuntimeInfo | null>;
   isProcessAliveFn?: (pid: number) => boolean;
+  readForeignLockHolderFn?: (home?: string) => Promise<ForeignLockHolder | null>;
   /**
    * Override the client factory for tests — lets us assert health() behavior.
    * The factory now receives the daemon's `cert` (when present) so it can
@@ -222,11 +240,20 @@ export async function discoverOrSpawn(
     spawnFn = nodeSpawn,
     readRuntimeFn = defaultReadRuntime,
     isProcessAliveFn = defaultIsProcessAlive,
+    readForeignLockHolderFn = defaultReadForeignLockHolder,
     clientFactory = defaultClientFactory,
   } = opts;
 
   const deadline = Date.now() + timeoutMs;
 
+  // A daemon in another container on this volume can be neither adopted (its
+  // loopback port is not ours) nor joined by a second writer. `readRuntime`
+  // already ignores its runtime files; a dead one's lock is reclaimed by the
+  // daemon spawned below.
+  const foreign = await readForeignLockHolderFn(home);
+  if (foreign?.alive) {
+    throw new DaemonInAnotherNamespaceError(foreign.holder.pid, foreign.holder.hostname);
+  }
   const existing = forceSpawn ? null : await readRuntimeFn(home);
   if (existing && isProcessAliveFn(existing.pid)) {
     const client = clientFactory({

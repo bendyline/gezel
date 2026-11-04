@@ -51,8 +51,7 @@ embedding and relevance models; the Python environment for video.
 | Path | What |
 | --- | --- |
 | `/opt/gezel/{app,node,pnpm,duckdb,native-bin}` | the runtime, read-only |
-| `/gezel` | the volume; `GEZEL_HOME=/gezel/home` inside it, so the home's 0700 never lands on a mount root |
-| `/work` | the working directory for one-shot commands |
+| `/gezel` | the volume, the `gezel` user's `HOME` and the working directory; `GEZEL_HOME=/gezel/home` inside it, so the home's 0700 never lands on a mount root. A command run here uses the Default project, like the desktop CLI run from a home folder |
 | `/projects` | where compose mounts folders to add as projects |
 
 The process runs as uid/gid 10001 under `tini`. The image sets:

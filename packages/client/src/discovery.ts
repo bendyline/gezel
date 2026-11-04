@@ -1,4 +1,12 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
+import { join } from 'node:path';
+import {
+  LOCK_STALE_AFTER_MS,
+  type LockIdentity,
+  currentLockIdentity,
+  parseLockFile,
+  sharesPidNamespace,
+} from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 
 export interface RuntimeInfo {
@@ -28,6 +36,9 @@ export interface RuntimeInfo {
  */
 export async function readRuntime(home?: string): Promise<RuntimeInfo | null> {
   const paths = gezelPaths(home);
+  // Written in another pid namespace (another container on a shared volume):
+  // its pid is some unrelated process here and its port is not our loopback.
+  if (await readForeignLockHolder(home)) return null;
   try {
     const [portRaw, tokenRaw, pidRaw] = await Promise.all([
       readFile(paths.runtime.port, 'utf8'),
@@ -59,6 +70,34 @@ export async function readRuntime(home?: string): Promise<RuntimeInfo | null> {
       baseUrl: `${scheme}://127.0.0.1:${port}`,
       cert,
     };
+  } catch {
+    return null;
+  }
+}
+
+export interface ForeignLockHolder {
+  holder: LockIdentity;
+  /** Its heartbeat moved within the stale bound, so it is still serving. */
+  alive: boolean;
+}
+
+/**
+ * The daemon holding this home's lock when it runs in another pid namespace:
+ * another container on a shared volume. Its runtime `pid` means nothing here,
+ * where that number is some unrelated process (often this one), so callers
+ * judge it by the lock's heartbeat instead. Null when there is no lock or its
+ * holder shares our namespace, where a pid check is meaningful.
+ */
+export async function readForeignLockHolder(
+  home?: string,
+  now: number = Date.now(),
+): Promise<ForeignLockHolder | null> {
+  const lockPath = join(gezelPaths(home).runtime.dir, 'lock');
+  try {
+    const [text, info] = await Promise.all([readFile(lockPath, 'utf8'), stat(lockPath)]);
+    const holder = parseLockFile(text);
+    if (!holder || sharesPidNamespace(holder, currentLockIdentity())) return null;
+    return { holder, alive: now - info.mtimeMs <= LOCK_STALE_AFTER_MS };
   } catch {
     return null;
   }

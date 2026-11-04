@@ -21,14 +21,13 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { consumerCheckFailureSummary, consumerCheckReportPath } from './consumer-check-report.mjs';
 import { spawnPnpmSync } from './pnpm-cli.mjs';
-import { publishedPackageNames } from './published-packages.mjs';
+import { PUBLISHED_PACKAGE_DIRS } from './published-packages.mjs';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const outputFlag = process.argv.indexOf('--output');
 const suppliedOutput = outputFlag === -1 ? null : process.argv[outputFlag + 1];
 if (outputFlag !== -1 && !suppliedOutput) throw new Error('--output requires a directory path');
 
-const packageNames = publishedPackageNames(repoRoot);
 const coreVersion = JSON.parse(
   readFileSync(resolve(repoRoot, 'packages/core/package.json'), 'utf8'),
 ).version;
@@ -86,11 +85,13 @@ try {
     stdio: 'inherit',
   });
 
-  console.log(`rehearsal: packing ${packageNames.length} packages to ${outputDir}`);
+  console.log(`rehearsal: packing ${PUBLISHED_PACKAGE_DIRS.length} packages to ${outputDir}`);
+  // Select by directory, never by name: the workspace root is also named
+  // `gezel`, so `--filter gezel` would pack the whole repository as well.
   runPnpm(
     [
       '--recursive',
-      ...packageNames.flatMap((name) => ['--filter', name]),
+      ...PUBLISHED_PACKAGE_DIRS.flatMap((dir) => ['--filter', `./packages/${dir}`]),
       'pack',
       '--pack-destination',
       outputDir,

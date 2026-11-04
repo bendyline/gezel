@@ -17,6 +17,9 @@ const publishedSpecs = PUBLISHED_PACKAGE_DIRS.map((dir) => {
 const serviceSpec = publishedSpecs.find((spec) => spec.startsWith('@bendyline/gezel-service@'));
 if (!serviceSpec) throw new Error('published package list must include @bendyline/gezel-service');
 
+// The spec is the last `npm pack` argument; the alias packages are unscoped.
+const packedSpec = (args) => args.at(-1);
+
 function registryFixture({
   availableAfterMs = 0,
   delayedSpec,
@@ -39,8 +42,7 @@ function registryFixture({
         if (command === 'npm') {
           packs.push(args);
           if (spawnError) return { error: spawnError, status: null };
-          const spec = args.find((arg) => arg.startsWith('@bendyline/'));
-          const delayed = delayedSpec === undefined || spec === delayedSpec;
+          const delayed = delayedSpec === undefined || packedSpec(args) === delayedSpec;
           return { status: !delayed || elapsedMs >= availableAfterMs ? 0 : 1 };
         }
         assert.equal(command, process.execPath);
@@ -76,10 +78,14 @@ test('downloads every exact package version, including gezk, before strict consu
   const specs = fixture.packs.map((args) => {
     assert.equal(args[0], 'pack');
     assert.ok(args.includes('--prefer-online'), 'cached registry metadata must be revalidated');
-    return args.find((arg) => arg.startsWith('@bendyline/'));
+    return packedSpec(args);
   });
   assert.deepEqual(specs, publishedSpecs);
   assert.ok(specs.some((spec) => spec.startsWith('@bendyline/gezk@')));
+  assert.ok(
+    specs.some((spec) => spec.startsWith('gezel@')),
+    'unscoped aliases are verified too',
+  );
   const tarballDir = fixture.packs[0][fixture.packs[0].indexOf('--pack-destination') + 1];
   assert.deepEqual(fixture.consumers, [
     [
@@ -105,9 +111,7 @@ test('survives an eight-minute publish-time scan without redownloading ready sib
     8 * 60_000 + 15_000,
   );
   assert.equal(fixture.consumers.length, 1);
-  const attemptsBySpec = Map.groupBy(fixture.packs, (args) =>
-    args.find((arg) => arg.startsWith('@bendyline/')),
-  );
+  const attemptsBySpec = Map.groupBy(fixture.packs, packedSpec);
   assert.ok(attemptsBySpec.get(serviceSpec).length > 1);
   for (const [spec, attempts] of attemptsBySpec) {
     if (spec !== serviceSpec)

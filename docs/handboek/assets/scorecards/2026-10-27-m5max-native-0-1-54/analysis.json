@@ -33993,5 +33993,150 @@
         ]
       ]
     }
+  },
+  "mlxPrefillRecovery": {
+    "file": "mlx-prefill-recovery.json",
+    "method": "Median of observed rounded first-token prefill rates within each trial, then median across trials. Partial provider-turn coverage, not duration-weighted aggregate throughput or pure prefill time. All attempts are represented, including failures and the original infrastructure exclusion.",
+    "coverage": {
+      "recordedMlxTrials": 258,
+      "recoveredMlxTrials": 258,
+      "observations": 2175,
+      "structuredObservations": 0,
+      "malformedLines": 0,
+      "exactDuplicates": 0,
+      "capabilityExcludedTrials": 1
+    },
+    "groups": [
+      {
+        "targetId": "qwen-mlx",
+        "model": "qwen3.8-27b-q4",
+        "suite": "all",
+        "trials": 129,
+        "observations": 793,
+        "observedPrefillTokensPerSec": {
+          "samples": 129,
+          "median": 547,
+          "min": 155,
+          "max": 862.5
+        }
+      },
+      {
+        "targetId": "qwen-mlx",
+        "model": "qwen3.8-27b-q4",
+        "suite": "core",
+        "trials": 33,
+        "observations": 84,
+        "observedPrefillTokensPerSec": {
+          "samples": 33,
+          "median": 564,
+          "min": 397,
+          "max": 805.5
+        }
+      },
+      {
+        "targetId": "qwen-mlx",
+        "model": "qwen3.8-27b-q4",
+        "suite": "productivity",
+        "trials": 39,
+        "observations": 213,
+        "observedPrefillTokensPerSec": {
+          "samples": 39,
+          "median": 574,
+          "min": 494,
+          "max": 862.5
+        }
+      },
+      {
+        "targetId": "qwen-mlx",
+        "model": "qwen3.8-27b-q4",
+        "suite": "developer",
+        "trials": 30,
+        "observations": 252,
+        "observedPrefillTokensPerSec": {
+          "samples": 30,
+          "median": 512,
+          "min": 155,
+          "max": 735.5
+        }
+      },
+      {
+        "targetId": "qwen-mlx",
+        "model": "qwen3.8-27b-q4",
+        "suite": "complex-work",
+        "trials": 27,
+        "observations": 244,
+        "observedPrefillTokensPerSec": {
+          "samples": 27,
+          "median": 495,
+          "min": 259,
+          "max": 807
+        }
+      },
+      {
+        "targetId": "gemma-mlx",
+        "model": "gemma4-12b-q4",
+        "suite": "all",
+        "trials": 129,
+        "observations": 1382,
+        "observedPrefillTokensPerSec": {
+          "samples": 129,
+          "median": 1084,
+          "min": 231,
+          "max": 1921
+        }
+      },
+      {
+        "targetId": "gemma-mlx",
+        "model": "gemma4-12b-q4",
+        "suite": "core",
+        "trials": 33,
+        "observations": 194,
+        "observedPrefillTokensPerSec": {
+          "samples": 33,
+          "median": 1146,
+          "min": 603,
+          "max": 1463.5
+        }
+      },
+      {
+        "targetId": "gemma-mlx",
+        "model": "gemma4-12b-q4",
+        "suite": "productivity",
+        "trials": 39,
+        "observations": 415,
+        "observedPrefillTokensPerSec": {
+          "samples": 39,
+          "median": 1146,
+          "min": 893,
+          "max": 1921
+        }
+      },
+      {
+        "targetId": "gemma-mlx",
+        "model": "gemma4-12b-q4",
+        "suite": "developer",
+        "trials": 30,
+        "observations": 360,
+        "observedPrefillTokensPerSec": {
+          "samples": 30,
+          "median": 1052.5,
+          "min": 231,
+          "max": 1534.5
+        }
+      },
+      {
+        "targetId": "gemma-mlx",
+        "model": "gemma4-12b-q4",
+        "suite": "complex-work",
+        "trials": 27,
+        "observations": 413,
+        "observedPrefillTokensPerSec": {
+          "samples": 27,
+          "median": 712,
+          "min": 461.5,
+          "max": 1058
+        }
+      }
+    ]
   }
 }

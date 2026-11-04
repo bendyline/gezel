@@ -90,6 +90,92 @@ unavailable, preserve it and show the reason; do not silently pick another model
 bridges and contract tests. `connect()` requires a native Capacitor platform;
 there is no browser runtime stub pretending to run a local model.
 
+## Offline speech
+
+`createMobileSpeech()` adds Whisper dictation and Kokoro narration on the device,
+through the `GezelOfflineSpeech` plugin and the optional gezel-speech runtime
+(whisper.cpp and ONNX Runtime, built by
+[`native/mobile/speech/build.py`](../../native/mobile/speech/build.py)). Without
+a staged runtime the package still builds, and `status()` reports speech
+unavailable.
+
+```ts
+import { createMobileSpeech } from '@bendyline/gezel-capacitor';
+
+// The dictionaries ship in this package under kokoro-lexicon/; serve them as
+// web assets and hand back the inflated text.
+const speech = createMobileSpeech({ lexicon: (language) => fetchLexiconText(language) });
+await speech.install('whisper-base.en', { onProgress: console.log }); // explicit, resumable
+const transcript = await speech.transcribe({ wav, model: 'whisper-base.en', words: true });
+await speech.synthesize({ text, voice: 'af_heart', onChunk: play });
+```
+
+- **Models.** `MOBILE_SPEECH_MODELS` downloads the same pinned Whisper files and
+  Kokoro voices as `@bendyline/gezel/speech-models` (a test holds them in step),
+  and Kokoro's int8 export of the same timestamped model (92 MB instead of
+  326 MB), so word timings survive. Native code stores only declared files in
+  app-private, no-backup storage, verifies each SHA-256, and resumes partial files
+  with `Range`. JavaScript names models and files; it never supplies paths.
+  `install()` retries interrupted transfers while they keep saving bytes.
+- **Narration.** Phonemes are planned in JavaScript by `@bendyline/gezel/kokoro`
+  from the dictionaries in `kokoro-lexicon/`, so no eSpeak NG (GPL-3) ships.
+  Each sentence comes back as 24 kHz PCM with word timings from the model's
+  durations.
+- **Lifecycle.** One request runs at a time and `AbortSignal` cancels it natively.
+  Models stay loaded between requests, are released after two idle minutes, and
+  are released, with any request stopped and any download paused, when the app
+  leaves the foreground.
+- **Staging.** `build.py ios|android --package VERSION` lays out a verified
+  payload; `node scripts/stage-native.mjs speech-ios|speech-android <payload>`
+  stages it under `native/speech-<platform>`. Android adds the `gezel-speech` AAR
+  (it loads `libc++_shared.so` from `gezel-llama` of the same NDK); iOS adds the
+  `GezelSpeech` binary target. The JNI binding is compiled into the library, so
+  apps build no native code. `GEZEL_SPEECH_ABI` pairs the plugins with the
+  library.
+
+## Knowledge catalogs
+
+`createMobileKnowledge()` is the App SDK's knowledge client (`state`, `update`,
+`retrieve`) for Gilde knowledge catalogs on the device, with the daemon routes'
+semantics: give it to an embedding connection as `knowledge`, and
+`knowledgeContext()` grounds requests exactly as it does on a desktop.
+
+```ts
+import { connectEmbeddingRuntime, createMobileKnowledge } from '@bendyline/gezel-capacitor';
+
+// Serve dist/knowledge-worker.js and dist/sqlite3.wasm as web assets.
+const knowledge = createMobileKnowledge({
+  workerUrl: '/assets/knowledge-worker.js',
+  wasmUrl: '/assets/sqlite3.wasm',
+  readDisabled: () => JSON.parse(localStorage.getItem('knowledge-off') ?? '[]'),
+  writeDisabled: (ids) => localStorage.setItem('knowledge-off', JSON.stringify(ids)),
+});
+const connection = { ...(await connectEmbeddingRuntime()), knowledge };
+```
+
+- **Catalogs.** `mobileKnowledgeCatalogs` is a snapshot of Gilde's catalog
+  items (`scripts/refresh-knowledge-catalog.ts`), each pinned to an immutable
+  Hugging Face revision, SHA-256 and size. The `GezelKnowledge` plugin downloads
+  one `.gezk` archive per catalog into app-private, no-backup storage, verifies
+  it, and resumes with `Range` like speech models; an update replaces the
+  version it supersedes only once it is verified.
+- **Reading in place.** Every archive entry is stored uncompressed, so nothing is
+  extracted. A Web Worker runs the daemon's catalog host over Gezel's own
+  catalog reader on sqlite-wasm, whose read-only VFS fetches 64 KB blocks with
+  synchronous range requests: from `/_gezel_knowledge/` on Android (the app's
+  `WebViewClient` must call `KnowledgeFiles.intercept` first) and from
+  Capacitor's file URL on iOS.
+- **Search.** The daemon's `searchUnifiedCatalogs`, with its vector floors.
+  Each catalog's embedding profile downloads its pinned query model with the
+  archive. Questions are tokenized by the profile's own tokenizer and embedded
+  by the speech runtime's ONNX Runtime (`gezel_speech_embed`), so query vectors
+  match the desktop's. Without the relevance model, `retrieve` admits only what
+  Gezel's bar for unjudged passages admits, which is vector evidence; until the
+  query model is installed a catalog is searched by keyword and contributes no
+  passages. `rerank: 'required'` and `prepare-reranker` are refused.
+- **Licenses.** The worker and the tokenizer compile third-party code into
+  `dist/`; the build stages their license texts in `dist/licenses/npm/`.
+
 ## Local development and distribution
 
 This is a local preview; registry publication is not required. The producer

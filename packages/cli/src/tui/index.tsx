@@ -1,7 +1,7 @@
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { render } from 'ink';
 import { App } from './App.js';
-import { BootstrapGate } from './components/BootstrapGate.js';
+import { BootstrapGate, ExitWhenReady } from './components/BootstrapGate.js';
 import { startTuiRuntimeDiagnostics } from './memory-diagnostics.js';
 
 export interface LaunchTuiOpts {
@@ -36,4 +36,26 @@ export async function launchTui(opts: LaunchTuiOpts): Promise<void> {
   } finally {
     await diagnostics.stop();
   }
+}
+
+/**
+ * Show the first-time setup screens on their own, for a `gezel run` in a
+ * terminal that found no model. Resolves true once setup hands over (a model
+ * chosen, or "Not now"), false when the person leaves with Ctrl+C. The screens
+ * draw on stderr: stdout carries only the reply, even when it is redirected.
+ */
+export async function launchRunSetup(opts: { client: GezelClient }): Promise<boolean> {
+  let finished = false;
+  const instance = render(
+    <BootstrapGate client={opts.client} nextStep="run">
+      <ExitWhenReady
+        onReady={() => {
+          finished = true;
+        }}
+      />
+    </BootstrapGate>,
+    { stdout: process.stderr, exitOnCtrlC: false },
+  );
+  await instance.waitUntilExit();
+  return finished;
 }

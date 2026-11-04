@@ -99,6 +99,23 @@ type ModelChoice =
 const MAX_ALTERNATIVE_MODELS = 6;
 
 /**
+ * What follows setup: the TUI, or the one `gezel run` request that found no
+ * model. Only the way out reads differently — for `run`, leaving setup means
+ * the request does not run.
+ */
+export type BootstrapNextStep = 'tui' | 'run';
+
+const SKIP_HINTS: Record<BootstrapNextStep, string> = {
+  tui: 'open the TUI without a local model',
+  run: 'stop without running your request',
+};
+
+const CONTINUE_OPTIONS: Record<BootstrapNextStep, { label: string; hint: string }> = {
+  tui: { label: 'Continue to Gezel', hint: 'configure this later' },
+  run: { label: 'Stop here', hint: 'set this up later' },
+};
+
+/**
  * First-run TUI setup. It only intervenes for the local providers selected by
  * the daemon's device bootstrap; configured cloud/external-engine users pass
  * straight through.
@@ -106,8 +123,10 @@ const MAX_ALTERNATIVE_MODELS = 6;
 export function BootstrapGate(props: {
   client: GezelClient;
   children: ReactNode;
+  nextStep?: BootstrapNextStep;
 }): JSX.Element {
   const { client, children } = props;
+  const nextStep = props.nextStep ?? 'tui';
   const { exit } = useApp();
   const [screen, setScreen] = useState<Screen>({
     kind: 'loading',
@@ -514,7 +533,7 @@ export function BootstrapGate(props: {
           hint: `${formatDownloadSize(model.approxSizeBytes)} · ${fitLabel(model.fit)}`,
           value: `chat:${model.id}`,
         })),
-      { label: 'Not now', hint: 'open the TUI without a local model', value: 'skip' },
+      { label: 'Not now', hint: SKIP_HINTS[nextStep], value: 'skip' },
     ];
     return (
       <BootstrapFrame
@@ -557,7 +576,7 @@ export function BootstrapGate(props: {
       <BootstrapChoiceList
         options={[
           ...(screen.retry ? [{ label: 'Try again', hint: 'resume setup', value: 'retry' }] : []),
-          { label: 'Continue to Gezel', hint: 'configure this later', value: 'continue' },
+          { ...CONTINUE_OPTIONS[nextStep], value: 'continue' },
         ]}
         onSelect={(value) => {
           if (value === 'retry') screen.retry?.();
@@ -566,6 +585,21 @@ export function BootstrapGate(props: {
       />
     </BootstrapFrame>
   );
+}
+
+/**
+ * Ends the Ink app once setup hands over, for a caller that wants the setup
+ * screens and nothing after them (`gezel run`). It is mounted only when the
+ * gate reaches ready, so `onReady` never fires for Ctrl+C.
+ */
+export function ExitWhenReady(props: { onReady: () => void }): null {
+  const { onReady } = props;
+  const { exit } = useApp();
+  useEffect(() => {
+    onReady();
+    exit();
+  }, [exit, onReady]);
+  return null;
 }
 
 function BootstrapFrame(props: { title: string; children: ReactNode }): JSX.Element {

@@ -22,5 +22,9 @@ if(APPLE)
   set_target_properties(GezelSpeech PROPERTIES FRAMEWORK TRUE FRAMEWORK_VERSION A
     MACOSX_FRAMEWORK_IDENTIFIER com.bendyline.gezel.speech PUBLIC_HEADER gezel_speech.h)
 elseif(ANDROID)
+  # The Capacitor plugin's JNI binding rides in the same library, so apps load
+  # prebuilt code only. Gezel's own app keeps its separate binding.
+  target_sources(GezelSpeech PRIVATE speech_jni.cpp)
+  target_include_directories(GezelSpeech PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../android")
   target_link_options(GezelSpeech PRIVATE "-Wl,-z,max-page-size=16384" "-Wl,--exclude-libs,ALL")
 endif()

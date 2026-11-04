@@ -64,10 +64,13 @@ function packedManifests(): Map<string, PackageJson> {
 
   // Pack every relevant workspace package in one pnpm process. Besides being
   // faster in general, this avoids paying the unusually high CLI cold-start
-  // cost once per package on Windows.
+  // cost once per package on Windows. Select by directory, never by name: the
+  // workspace root is also named `gezel`, so `--filter gezel` packs the whole
+  // repository too, and a release-stamped root version then sorts after the
+  // alias package's tarball and replaces its manifest below.
   const packArgs = [
     '--recursive',
-    ...packages.flatMap(({ name }) => ['--filter', name]),
+    ...packages.flatMap(({ dir }) => ['--filter', `./packages/${dir}`]),
     'pack',
     '--pack-destination',
     destination,
@@ -89,10 +92,14 @@ function packedManifests(): Map<string, PackageJson> {
     );
   }
 
-  const manifests = readdirSync(destination)
-    .filter((file) => file.endsWith('.tgz'))
-    .map((file) => readPackedManifest(join(destination, file)));
-  return new Map(manifests.map((manifest) => [manifest.name, manifest]));
+  const byName = new Map<string, PackageJson>();
+  for (const file of readdirSync(destination).filter((name) => name.endsWith('.tgz'))) {
+    const manifest = readPackedManifest(join(destination, file));
+    if (byName.has(manifest.name))
+      throw new Error(`pnpm pack produced two ${manifest.name} tarballs`);
+    byName.set(manifest.name, manifest);
+  }
+  return byName;
 }
 
 const packedByName = packedManifests();

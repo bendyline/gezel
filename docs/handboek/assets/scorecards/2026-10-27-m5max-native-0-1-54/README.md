@@ -13,6 +13,9 @@ to publish this report.
 | [Judgments](judging.md) | Human-readable advisory reviews |
 | [Judge data](judging.json) | Every trial's review disposition, exact reviewed prompts and axes, scores, reasons and source hashes |
 | [Performance](performance.json) | Per-trial timings, actual engine rates, tokens, sampled process RSS, system RAM and availability flags |
+| [MLX prefill recovery](mlx-prefill-recovery.md) | Method and per-model/suite summaries of partial first-token rate observations |
+| [MLX prefill data](mlx-prefill-recovery.json) and [CSV](mlx-prefill-recovery.csv) | 2,175 observations across all 258 MLX trials, with source hashes |
+| [Original report](original-report.md) | Preserved report before MLX prefill recovery |
 | [Aggregate analysis](analysis.json) | Model/engine/suite/treatment aggregates, coverage and matched-success comparisons |
 | [Scorecard](scorecard.json) | Dataset used by Gezel and the website tables |
 | [Complete companion](scorecard-details.json) | All trial results, fixed scores, facts, metrics, host records, postmortems, review specifications and diagnosis replays |
@@ -35,8 +38,11 @@ quality score. Scores are advisory, independent of fixed scores and performance;
 compare like rubrics. Source reviews use at most 20 KiB of each artifact and do
 not claim complete visual or interactive inspection.
 
-Performance covers all attempts, including failures and exclusions. MLX prefill
-and granted context are unknown. macOS GPU telemetry is unavailable: raw zero
+Performance covers all attempts, including failures and exclusions. MLX observed
+prefill was recovered from all original MLX recordings on November 3: 547 tok/s
+for Qwen and 1,084 tok/s for Gemma, as medians of trial medians. These partial,
+rounded first-token rates are not aggregate request throughput. Exact MLX
+prefill durations and granted context remain unknown. macOS GPU telemetry is unavailable: raw zero
 counters accompanied by `available: false` are not measurements. Decode rates
 use different engine estimators, explained in the report. First-artifact latency
 means first write; system memory includes other processes. All unknown values

@@ -16,6 +16,9 @@ on:
       - 'packages/core/**'
       - 'packages/client/**'
       - 'packages/gezk/**'
+      - 'packages/knowledge/**'
+      - 'packages/catalog/**'
+      - 'packages/inference/**'
       - 'packages/sdk/**'
       - 'packages/script-runtime/**'
       - 'packages/script-stdlib/**'
@@ -599,7 +602,7 @@ jobs:
           });
           await withDependencyReadLease(process.cwd(), async ({ leaseEnv }) => {
             const env = { ...process.env, ...leaseEnv };
-            for (const name of ['gezk', 'gezel', 'gezel-client', 'gezel-app-sdk', 'gezel-capacitor']) {
+            for (const name of ['gezk', 'gezel', 'gezel-client', 'gezel-knowledge', 'gezel-catalog', 'gezel-inference', 'gezel-app-sdk', 'gezel-capacitor']) {
               await wait(spawnPnpm(['--filter', `@bendyline/${name}`, 'build'], { env, stdio: 'inherit' }));
             }
             await wait(spawn(process.execPath, ['scripts/check-embedding-consumers.mjs', `--native-${process.env.GEZEL_CONSUMER_PLATFORM}`], { env, stdio: 'inherit' }));

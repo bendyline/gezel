@@ -20,7 +20,7 @@ If the server runs Docker, [Gezel in Docker](gezel-in-docker.md) is the shorter 
 ## What the machine needs
 
 - **Node.js 24 or newer.** The command line checks this and says so if it is missing. On Ubuntu or Debian, `curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash - && sudo apt-get install -y nodejs` installs it; on any system, `nvm install 24` does too.
-- **The command line itself:** `npm install -g @bendyline/gezel-cli`. Use that package name, including with `npx`: `npx -p @bendyline/gezel-cli gezel`. The bare `gezel` package on npm is not ours.
+- **The command line itself:** `npm install -g gezel`, or `npx gezel` to run it without installing. `gezel` is the short name for `@bendyline/gezel-cli`; install one of the two, not both.
 - **For local models on Linux, a recent C library.** Gezel's on-device engines need glibc 2.38 or newer and the GCC 14.1 C++ runtime. Ubuntu 24.04, Debian 13 and Fedora 40 or later meet that floor. Ubuntu 22.04, Debian 12, RHEL 9 and Fedora 39 do not; see the next section.
 - **On Windows,** the Microsoft Visual C++ 2015–2022 Redistributable. The desktop installer adds it for you; an npm install does not.
 - **On macOS,** macOS 13.3 or newer for the on-device engines.

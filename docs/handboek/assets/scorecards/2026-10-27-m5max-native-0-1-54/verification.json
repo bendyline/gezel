@@ -14,8 +14,22 @@
   },
   "repetitionsAllThree": true,
   "originalEvidenceModified": false,
+  "mlxPrefillRecovery": {
+    "recoveredOn": "2026-11-03",
+    "coverage": {
+      "recordedMlxTrials": 258,
+      "recoveredMlxTrials": 258,
+      "observations": 2175,
+      "structuredObservations": 0,
+      "malformedLines": 0,
+      "exactDuplicates": 0,
+      "capabilityExcludedTrials": 1
+    },
+    "recordingsReparsed": true,
+    "sourceArchiveUnchanged": true
+  },
   "frozenIdentityVerifiedAtCompletion": true,
-  "sourceFilesVerified": 3798,
+  "sourceFilesVerified": 4057,
   "newInferenceCalls": 0,
   "newJudgeCalls": 0,
   "schema": "ScorecardDatasetSchema v1"

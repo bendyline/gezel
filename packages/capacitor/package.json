@@ -20,6 +20,7 @@
   },
   "files": [
     "dist",
+    "kokoro-lexicon",
     "ios/Sources",
     "android/src",
     "android/build.gradle",
@@ -43,8 +44,8 @@
     }
   },
   "scripts": {
-    "build": "tsup",
-    "typecheck": "tsc --noEmit",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsup && node scripts/build-knowledge-worker.mjs && node scripts/copy-web-assets.mjs && node scripts/stage-bundled-licenses.mjs",
+    "typecheck": "tsc --noEmit && tsc -p worker",
     "test": "vitest run && node --test scripts/*.test.mjs",
     "stage:native": "node scripts/stage-native.mjs",
     "prepack": "node scripts/verify-package.mjs"
@@ -57,7 +58,11 @@
     "@capacitor/core": "^8.5.2"
   },
   "devDependencies": {
+    "@bendyline/gezel-inference": "workspace:*",
     "@capacitor/core": "8.5.2",
+    "@huggingface/tokenizers": "0.2.0",
+    "@sqlite.org/sqlite-wasm": "3.53.4-build2",
+    "brotli": "1.3.3",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"

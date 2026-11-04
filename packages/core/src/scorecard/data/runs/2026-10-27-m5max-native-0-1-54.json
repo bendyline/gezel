@@ -86,7 +86,7 @@
           "craftbook-author-fanout"
         ]
       },
-      "note": "Completed M5 Max 128 GB comparison: 516 attempts, 349 passes, 165 model-classified failures and two preserved infrastructure exclusions. Every model/engine/scenario/suite has three repetitions. Native 0.1.54, generalist auto. Task measurements include all attempts; 215 bounded artifact reviews retain separate rubrics, including 80 failed trials. Twelve incompatible A/B specifications and one missing artifact receive no numeric score. MLX prefill, macOS GPU utilization and MLX granted context are unknown. Engine-specific quantization, speculative decoding, raw fixed scores, timing, tokens, memory and failure diagnoses are documented in the downloadable report.",
+      "note": "Completed M5 Max 128 GB comparison: 516 attempts, 349 passes, 165 model-classified failures and two preserved infrastructure exclusions. Every model/engine/scenario/suite has three repetitions. Native 0.1.54, generalist auto. Task measurements include all attempts; 215 bounded artifact reviews retain separate rubrics, including 80 failed trials. Twelve incompatible A/B specifications and one missing artifact receive no numeric score. MLX observed prefill was recovered from rounded first-token chat events for all 258 MLX trials; these partial rates are not aggregate request throughput or pure prefill time. macOS GPU utilization and MLX granted context remain unknown. Engine-specific quantization, speculative decoding, raw fixed scores, advisory quality, timing, throughput, memory and failure diagnoses are documented in the downloads.",
       "memoryCoverage": "full"
     }
   ],
@@ -190,6 +190,12 @@
             "median": 33,
             "min": 21,
             "max": 53
+          },
+          "observedPrefillTokensPerSec": {
+            "samples": 33,
+            "median": 564,
+            "min": 397,
+            "max": 805.5
           },
           "durationMs": {
             "samples": 33,
@@ -330,6 +336,12 @@
             "median": 29,
             "min": 14,
             "max": 48
+          },
+          "observedPrefillTokensPerSec": {
+            "samples": 39,
+            "median": 574,
+            "min": 494,
+            "max": 862.5
           },
           "durationMs": {
             "samples": 39,
@@ -492,6 +504,12 @@
             "min": 16,
             "max": 41
           },
+          "observedPrefillTokensPerSec": {
+            "samples": 30,
+            "median": 512,
+            "min": 155,
+            "max": 735.5
+          },
           "durationMs": {
             "samples": 30,
             "median": 1151334,
@@ -633,6 +651,12 @@
             "median": 21,
             "min": 9.5,
             "max": 38
+          },
+          "observedPrefillTokensPerSec": {
+            "samples": 27,
+            "median": 495,
+            "min": 259,
+            "max": 807
           },
           "durationMs": {
             "samples": 27,
@@ -1373,6 +1397,12 @@
             "min": 32,
             "max": 44
           },
+          "observedPrefillTokensPerSec": {
+            "samples": 33,
+            "median": 1146,
+            "min": 603,
+            "max": 1463.5
+          },
           "durationMs": {
             "samples": 33,
             "median": 243986,
@@ -1512,6 +1542,12 @@
             "median": 36,
             "min": 33,
             "max": 49
+          },
+          "observedPrefillTokensPerSec": {
+            "samples": 39,
+            "median": 1146,
+            "min": 893,
+            "max": 1921
           },
           "durationMs": {
             "samples": 39,
@@ -1674,6 +1710,12 @@
             "min": 28,
             "max": 46
           },
+          "observedPrefillTokensPerSec": {
+            "samples": 30,
+            "median": 1052.5,
+            "min": 231,
+            "max": 1534.5
+          },
           "durationMs": {
             "samples": 30,
             "median": 697266.5,
@@ -1815,6 +1857,12 @@
             "median": 36,
             "min": 32,
             "max": 41
+          },
+          "observedPrefillTokensPerSec": {
+            "samples": 27,
+            "median": 712,
+            "min": 461.5,
+            "max": 1058
           },
           "durationMs": {
             "samples": 27,
