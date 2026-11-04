@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { PACKAGE_BUILD_STAGES, runPackageBuilds } from './build-packages.mjs';
 import {
   buildOutputLeasePath,
@@ -54,6 +55,38 @@ test('workspace build stages finish dependencies and staged assets before consum
   assert.ok(index('gezel-libreoffice-extension') < index('gezel-service'));
   assert.ok(index('gezel-service') < index('gezel-app'));
   assert.ok(PACKAGE_BUILD_STAGES[index('gezel-ui')].args.includes('build:all'));
+});
+
+// Consumers read workspace siblings through their built dist, so a stage that
+// starts before its dependency's stage fails on a clean checkout (capacitor's
+// devDependency on inference, 2026-11-04). Optional peers are loaded at runtime.
+test('every staged package builds no earlier than the workspace packages it imports', async () => {
+  const packagesDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'packages');
+  const index = (name) => PACKAGE_BUILD_STAGES.findIndex((stage) => stage.args.includes(name));
+  const late = [];
+  for (const dir of await readdir(packagesDir)) {
+    let manifest;
+    try {
+      manifest = JSON.parse(await readFile(join(packagesDir, dir, 'package.json'), 'utf8'));
+    } catch {
+      continue;
+    }
+    const at = index(manifest.name);
+    if (at < 0) continue;
+    const optional = new Set(
+      Object.entries(manifest.peerDependenciesMeta ?? {})
+        .filter(([, meta]) => meta.optional)
+        .map(([name]) => name),
+    );
+    for (const dependency of Object.keys({
+      ...manifest.dependencies,
+      ...manifest.devDependencies,
+    })) {
+      if (!optional.has(dependency) && index(dependency) > at)
+        late.push(`${manifest.name} needs ${dependency}`);
+    }
+  }
+  assert.deepEqual(late, []);
 });
 
 test(
