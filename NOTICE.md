@@ -294,7 +294,7 @@ copies and their engine- and helper-aware manifest live in
 | **llama.cpp** (`llama-server`, `libllama*`, `libmtmd*`) | tag `v0.9.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
 | **ggml** (`libggml*` — CPU, Metal and BLAS on macOS, CUDA, Vulkan backends) | bundled with llama.cpp, whisper.cpp, and stable-diffusion.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
 | **ds4 / DwarfStar** (`ds4-server` + `metal/*.metal` shaders) | commit `b3f50180` (`main-2026-11-03`) | MIT | [antirez/ds4](https://github.com/antirez/ds4) |
-| **stable-diffusion.cpp** (`sd-server`) | tag `master-975-95b3090` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
+| **stable-diffusion.cpp** (`sd-server`) | tag `master-1050-58bb3c1` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
 | **whisper.cpp** (`whisper-server`) | tag `v1.9.1` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
 | **uv** (precompiled binary, not built from source) | tag `0.11.32` | Apache-2.0 OR MIT | [astral-sh/uv](https://github.com/astral-sh/uv) |
 | **sqlite-vec** (`vec0.dll`, Windows ARM64 only, built from the release amalgamation against SQLite's public-domain headers; every other platform loads the npm prebuild listed above) | tag `v0.1.9` | MIT OR Apache-2.0 | [asg017/sqlite-vec](https://github.com/asg017/sqlite-vec) |

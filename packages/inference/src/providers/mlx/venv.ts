@@ -88,10 +88,14 @@
  * `tool_args_json.py` now mirrors. Verified on an M5 Max against 0.7.1
  * through the real sidecar: gemma4-e4b and qwen3.8-27b + MTP drafter render
  * identical prompt token counts and identical tool-call, JSON and vision
- * output; greedy spec still equals greedy no-spec; 0.7.1-written disk caches
- * load and extend (Gemma 4 rotating, Qwen 3.5 hybrid). Interleaved decode
- * A/B was at parity but measured beside another engine, so it is not a clean
- * throughput number, and context beyond ~10k tokens was not re-measured.
+ * output; 0.7.1-written disk caches load and extend (Gemma 4 rotating,
+ * Qwen 3.5 hybrid). Greedy MTP matches greedy no-spec on code at 0-30k
+ * tokens; on prose both versions flip bf16 one-step ties (top-2 gap 0.125
+ * nats), which two non-speculative decode paths also disagree on, so prose
+ * is not an exactness probe. Clean A/B/B/A decode on qwen3.8-27b-q4: MTP on
+ * the vlm tower at parity to 10k and +19% at 50k; vlm tower without MTP 2.0x
+ * at 50k (7.3 -> 14.8 tok/s), now level with the mlx_lm tower; mlx_lm tower
+ * 0.94x at 0-10k, within run-to-run noise.
  *
  * Keep upgrades explicit and re-sweep the MLX catalog whenever this pin
  * moves. */

@@ -167,6 +167,19 @@ export function evalLlamaSpecTypeOverride(
 }
 
 /**
+ * `GEZEL_EVAL_MLX_SPEC=off` — leave the MTP drafter out of an MLX trial home
+ * even when the source home has one. Speculation arms from the drafter's
+ * presence, and users have no drafter (they are hand-built), so an A/B of the
+ * MLX serving path as users run it has to switch speculation off this way.
+ */
+export function evalMlxSpecOff(env: NodeJS.ProcessEnv = process.env): boolean {
+  const raw = env.GEZEL_EVAL_MLX_SPEC?.trim();
+  if (!raw || raw === 'on') return false;
+  if (raw === 'off') return true;
+  throw new Error(`invalid GEZEL_EVAL_MLX_SPEC="${raw}" (expected on, off)`);
+}
+
+/**
  * For `engine: 'mlx'` trials: where to look for an existing model dir
  * to symlink into the trial home. Defaults to `~/.gezel-dev` (the home
  * `pnpm app` writes to in dev mode), where Mac users running the app
@@ -775,7 +788,11 @@ export async function runTrial(
     }
     if (engine === 'mlx' && opts.modelSourceHome) {
       for (const modelId of sourcedModelDirs.keys()) {
-        if (await linkDrafterIntoTrial({ sourceHome: opts.modelSourceHome, trialHome, modelId })) {
+        if (evalMlxSpecOff()) {
+          log(`[trial] mlx drafter for ${modelId} not linked (GEZEL_EVAL_MLX_SPEC=off)`);
+        } else if (
+          await linkDrafterIntoTrial({ sourceHome: opts.modelSourceHome, trialHome, modelId })
+        ) {
           log(`[trial] linked mlx drafter for ${modelId} (speculative decoding armed)`);
         }
       }
@@ -803,7 +820,9 @@ export async function runTrial(
       log(`[trial] linked mlx/${modelId} from ${mlxSourceHome} into ${trialHome}`);
       // Speculative decoding arms from the drafter's presence, so a trial
       // without it silently measures speculation OFF.
-      if (await linkDrafterIntoTrial({ sourceHome: mlxSourceHome, trialHome, modelId })) {
+      if (evalMlxSpecOff()) {
+        log(`[trial] mlx drafter for ${modelId} not linked (GEZEL_EVAL_MLX_SPEC=off)`);
+      } else if (await linkDrafterIntoTrial({ sourceHome: mlxSourceHome, trialHome, modelId })) {
         log(`[trial] linked mlx drafter for ${modelId} (speculative decoding armed)`);
       }
     }
