@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,7 +6,7 @@ import { type CraftbookContract, executionModeForStrategy } from '@bendyline/gez
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
-import { TaskManager } from './manager.js';
+import { TaskManager, stepOwnerGezelId } from './manager.js';
 
 let home: string;
 let store: Store;
@@ -1253,6 +1254,56 @@ describe('TaskManager spawn craftbooks & children', () => {
     expect(run.nightShift).toEqual({ enabled: true });
     expect(activations).toEqual([{ kind: 'entry', ref: run.ref, stepId: 'triage' }]);
     expect((await tasks.listChildren(host.ref)).map((t) => t.ref)).toEqual([run.ref]);
+  });
+
+  it("gives a scheduled run its host's gezel, strategy and trusted scripts", async () => {
+    // A run of a book whose entry step names no role came up with nobody on
+    // it, and the default overlap rule then skipped every later fire.
+    let script = 'export default () => "v1";';
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Weekly Digest',
+            description: 'Summarize the week for the person.',
+            steps: [{ id: 'write', name: 'Write the digest', terminal: true }],
+            entryStepId: 'write',
+            scripts: { tally: script },
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+    const host = await tasks.create('website', {
+      title: 'Schedule: Weekly Digest',
+      assignee: { kind: 'gezel', gezelId: 'gz-sexton' },
+      steps: [{ name: 'Wait' }],
+      spawnsCraftbookId: 'weekly-digest',
+      cron: { expression: '0 9 * * 1' },
+      strategy: 'generalist',
+      trustScripts: true,
+    });
+    const trusted = createHash('sha256').update(script).digest('hex');
+    expect(host.cliTrustedScriptHashes).toContain(trusted);
+    const activations: Array<{ ref: string; gezelId: string | undefined }> = [];
+    tasks.setStepActivatedHook(async ({ task, newStep }) => {
+      activations.push({ ref: task.ref, gezelId: stepOwnerGezelId(task, newStep) });
+    });
+    // The book changed after the owner vouched for it.
+    script = 'export default () => "v2";';
+
+    const run = await tasks.launchScheduledRun(host.ref);
+    expect(run.assignee).toEqual({ kind: 'gezel', gezelId: 'gz-sexton' });
+    expect(run.strategy).toBe('generalist');
+    expect(run.executionMode).toBe('generalist');
+    expect(run.cliTrustedScriptHashes).toEqual(host.cliTrustedScriptHashes);
+    expect(run.cliTrustedScriptHashes).not.toContain(
+      createHash('sha256').update(script).digest('hex'),
+    );
+    expect(activations).toEqual([{ ref: run.ref, gezelId: 'gz-sexton' }]);
   });
 
   it('binds every shard of a proposal-drafting host to its own proposal', async () => {

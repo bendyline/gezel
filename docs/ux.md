@@ -110,8 +110,11 @@ pacing of a transition. If a first-time user can't quite put a finger on
   navigation, settings, and dialogs keep headings, descriptions, labels, and
   control text non-selectable by default. Chat message bodies, document reading
   surfaces, the composer, and text fields remain selectable; controls inside
-  those surfaces do not. Copyable values outside them opt in with
-  `.gz-selectable-text` (preformatted output is selectable too).
+  those surfaces do not. Chrome stays copyable where people copy from it:
+  commands, paths, and identifiers go in `<code>`, and error text carries
+  `role="alert"` or `.error`; all three are selectable everywhere except inside
+  a control. Other copyable values opt in with `.gz-selectable-text`
+  (preformatted output is selectable too).
 - **Spelling is American English** everywhere a person reads it: UI
   strings, Handboek articles, starter prompts, and prompt text a model may
   echo back. *Practice*, *color*, *organize*, *labeled*, *catalog*, *gray*.

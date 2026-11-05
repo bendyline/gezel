@@ -23,14 +23,14 @@ Desktop works too, with the limits under [Good to know](#good-to-know).
 ## Your workshop in a browser
 
 ```sh
-docker run -d --name gezel -p 127.0.0.1:6228:6228 -v gezel:/gezel ghcr.io/bendyline/gezel
+docker run -d --name gezel -p 127.0.0.1:6230:6230 -v gezel:/gezel ghcr.io/bendyline/gezel
 docker logs gezel
 ```
 
-The log ends with a link like `http://localhost:6228/?setup=…`. Open it, pick
+The log ends with a link like `http://localhost:6230/?setup=…`. Open it, pick
 a name and a password, and you have the first account on this Gezel. The link
 works once, for an hour; if it runs out, run `docker logs gezel` again after
-opening `http://localhost:6228`, and a new one appears.
+opening `http://localhost:6230`, and a new one appears.
 
 Everything Gezel keeps (your crew, projects, chats, memories and models)
 lives in the `gezel` volume, so removing the container and starting a new one
@@ -56,13 +56,13 @@ address they would use for OpenAI. Make a key for each program:
 docker exec gezel gezel integrations token create my-notebook
 ```
 
-Then point the program at `http://localhost:6228/v1` with that key. The key
+Then point the program at `http://localhost:6230/v1` with that key. The key
 appears in Settings → Integrations, where you can see when it was last used
 and revoke it. To have a model ready without opening the workshop, name it
 when you start the container:
 
 ```sh
-docker run -d --name gezel -p 127.0.0.1:6228:6228 -v gezel:/gezel \
+docker run -d --name gezel -p 127.0.0.1:6230:6230 -v gezel:/gezel \
   -e GEZEL_PULL_MODEL=<model id> ghcr.io/bendyline/gezel
 ```
 
@@ -117,7 +117,7 @@ To start without the setup link (for a server you set up by script), give
 the first account's name and keep its password in a file:
 
 ```sh
-docker run -d --name gezel -p 127.0.0.1:6228:6228 -v gezel:/gezel \
+docker run -d --name gezel -p 127.0.0.1:6230:6230 -v gezel:/gezel \
   -e GEZEL_OWNER_NAME=you -e GEZEL_OWNER_PASSWORD_FILE=/run/secrets/owner \
   -v ./owner-password.txt:/run/secrets/owner:ro ghcr.io/bendyline/gezel
 ```
@@ -159,8 +159,15 @@ Pull the new image and start a new container on the same volume:
 ```sh
 docker pull ghcr.io/bendyline/gezel
 docker rm -f gezel
-docker run -d --name gezel -p 127.0.0.1:6228:6228 -v gezel:/gezel ghcr.io/bendyline/gezel
+docker run -d --name gezel -p 127.0.0.1:6230:6230 -v gezel:/gezel ghcr.io/bendyline/gezel
 ```
+
+The 1.2.12 image answered on port 6228, and newer images answer on 6230. If
+you started Gezel with `-p 127.0.0.1:6228:6228`, start the new container with
+the command above. Everything in the volume carries over, accounts and keys
+included: sign in again at `http://localhost:6230`, and point programs that
+use Gezel's models at `http://localhost:6230/v1`. To keep using 6228, start
+it with `-p 127.0.0.1:6228:6228 -e GEZEL_CONTAINER_PORT=6228` instead.
 
 Image versions match the [command line's](cli-reference.md): `ghcr.io/bendyline/gezel:1.2.12`
 is the same Gezel as `npm install -g @bendyline/gezel-cli@1.2.12`. The first
@@ -171,10 +178,10 @@ Back up the `gezel` volume like any other data. It holds plain files; see
 
 ## Good to know
 
-- **The Gezel app uses port 6228 too.** If it runs on the same computer,
-  publish another port and tell the container the address to print in its
-  setup link:
-  `-p 127.0.0.1:6300:6228 -e GEZEL_PUBLIC_URL=http://localhost:6300`, then
+- **The container uses port 6230, so it can run beside the Gezel app**,
+  which uses 6228. To publish another port, tell the container the address
+  to print in its setup link:
+  `-p 127.0.0.1:6300:6230 -e GEZEL_PUBLIC_URL=http://localhost:6300`, then
   open `http://localhost:6300`.
 - **On a Mac, Docker cannot use the graphics chip**, so models run on the
   processor and are slow. Use the Gezel app on a Mac.

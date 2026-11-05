@@ -473,7 +473,7 @@ export function FileInspector({
           )}
         </div>
         <div className="filemap-fileview-stats">
-          <span className="filemap-fileview-path">{path}</span>
+          <span className="filemap-fileview-path gz-selectable-text">{path}</span>
           {known?.lines !== undefined && (
             <span className="filemap-chip">{Math.round(known.lines)} lines</span>
           )}

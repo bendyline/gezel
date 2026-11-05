@@ -388,9 +388,15 @@ export class AccountManager {
     input: { name: string; password: string },
     meta: SessionMeta,
   ): Promise<SignInResult> {
-    const retry = this.throttle.retryAfterSeconds(input.name, meta.address);
-    if (retry > 0) {
-      throw new AccountError('throttled', 'Too many tries. Wait a moment and try again.', retry);
+    // Counted as a failure before the slow check below, so concurrent tries
+    // cannot all slip past the lockout while the first ones are still hashing.
+    const attempt = this.throttle.begin(input.name, meta.address);
+    if (!attempt.allowed) {
+      throw new AccountError(
+        'throttled',
+        'Too many tries. Wait a moment and try again.',
+        attempt.retryAfterSeconds,
+      );
     }
     const key = nameKey(input.name);
     const account = [...this.accounts.values()].find((a) => nameKey(a.name) === key);
@@ -404,11 +410,10 @@ export class AccountManager {
     }
     const usable = ok && account && !account.disabledAt && isKnownAccountRole(account.role);
     if (!usable || !account) {
-      this.throttle.recordFailure(input.name, meta.address);
       await this.logFailure(input.name, meta.address);
       throw new AccountError('sign_in_failed', 'That name or password is not right.');
     }
-    this.throttle.recordSuccess(input.name, meta.address);
+    this.throttle.recordSuccess(input.name, meta.address, attempt);
     return this.serialize(async () => {
       let current = this.accounts.get(account.id) ?? account;
       if (needsRehash(current.passwordHash, this.scrypt)) {

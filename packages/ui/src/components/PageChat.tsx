@@ -1,9 +1,15 @@
-import { type GezelSummary, type PageChatOptions, roleForMatching } from '@bendyline/gezel';
+import {
+  type GezelSummary,
+  type PageChatOptions,
+  displayName,
+  roleForMatching,
+} from '@bendyline/gezel';
 import { memo, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { ChatComposer } from './ChatComposer.js';
 import { ProjectTimeline } from './ProjectTimeline.js';
 import { SessionSwitcher } from './SessionSwitcher.js';
+import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 
 /** Host-owned UI: neither draft text nor transcript crosses into the page. */
 export const PageChat = memo(function PageChat({
@@ -77,8 +83,10 @@ function PageConversation({
   const [sessionId, setSessionId] = useState<string>();
   const [fresh, setFresh] = useState(false);
   const [revision, setRevision] = useState(0);
+  const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
+  const name = displayName(gezel, roleBasedNameOnlyMode);
   return (
-    <section className="page-chat task-detail-chat" aria-label={`Chat with ${gezel.name}`}>
+    <section className="page-chat task-detail-chat" aria-label={`Chat with ${name}`}>
       {options.variant !== 'composer' && (
         <ProjectTimeline
           projectId={projectId}
@@ -90,7 +98,7 @@ function PageConversation({
               setSessionId(id);
             }
           }}
-          emptyPlaceholder={`Talk with ${gezel.name}.`}
+          emptyPlaceholder={`Talk with ${name}.`}
         />
       )}
       <ChatComposer

@@ -18,6 +18,7 @@ import {
   modelExistsOnlyReadOnly,
   modelStorageRoots,
 } from '../../models/storage-roots.js';
+import { resolveImageEditCapability } from '../../providers/image/img2img-support.js';
 import { NoLocalImageModelError } from '../../providers/image/local-factory.js';
 import type { ImageModelPullRegistry } from '../../providers/image/pull-registry.js';
 import {
@@ -25,6 +26,7 @@ import {
   ImageGenerationCancelledError,
   type ImageGenerationProgress,
   type ImageProvider,
+  ImageSourceRequiredError,
 } from '../../providers/image/types.js';
 import { registerImageEnsureRoutes } from './image-ensure-routes.js';
 import { v1ImageStylesRoutes } from './v1-image-styles.js';
@@ -68,6 +70,22 @@ function qualified(catalogId: string): string {
   return `${ENGINE}:${catalogId}`;
 }
 
+/**
+ * Made only to change a picture it is given. Generations here take no source
+ * picture, so such a model can never render one: it is left out of the list
+ * and refused by name, never handed a blank page.
+ */
+function editsOnly(modelId: string, declared: boolean | undefined): boolean {
+  return resolveImageEditCapability({ modelId, editOnly: declared }).editOnly;
+}
+
+function editOnlyError(name: string) {
+  return apiError(
+    'edit_only_model',
+    `${name} only changes a picture it is given and cannot draw a new one. Pick another image model.`,
+  );
+}
+
 function downloadBytes(manifest: ImageModelManifest): number {
   return (
     manifest.approxSizeBytes + manifest.auxiliaryFiles.reduce((n, f) => n + f.approxSizeBytes, 0)
@@ -101,6 +119,7 @@ function generationError(err: unknown): { code: string; message: string } {
   if (err instanceof ImageGenerationCancelledError) return { code: 'cancelled', message };
   if (err instanceof ImageCapacityError) return { code: err.code, message };
   if (err instanceof NoLocalImageModelError) return { code: err.code, message };
+  if (err instanceof ImageSourceRequiredError) return { code: err.code, message };
   const code = (err as { code?: unknown } | null)?.code;
   if (code === 'capacity-denied') return { code: 'capacity_denied', message };
   return { code: 'image_generation_failed', message };
@@ -112,7 +131,8 @@ function generationError(err: unknown): { code: string; message: string } {
  *   GET    /models                   Installed and downloadable image models,
  *                                    with this machine's fit. Never part of
  *                                    `/v1/models`, so chat pickers never
- *                                    offer them.
+ *                                    offer them. Models that only change a
+ *                                    given picture are left out.
  *   POST   /models/ensure            `{model: "sd-cpp:<id>"}` → ready, or a
  *                                    background download (`job_id`).
  *   GET    /models/ensure/:jobId     Snapshot of a download.
@@ -159,6 +179,7 @@ export function v1ImagesRoutes(ctx: ImagesRouteContext): Hono {
       const manifest = item.manifest;
       if (manifest.kind !== 'image-model') continue;
       seen.add(manifest.id);
+      if (editsOnly(manifest.id, manifest.editOnly)) continue;
       const fit = fitById.get(manifest.id);
       const isInstalled = installedIds.has(manifest.id);
       data.push({
@@ -179,7 +200,7 @@ export function v1ImagesRoutes(ctx: ImagesRouteContext): Hono {
     }
     // Installed models the catalog no longer lists still render.
     for (const model of installed) {
-      if (seen.has(model.id)) continue;
+      if (seen.has(model.id) || editsOnly(model.id, model.editOnly)) continue;
       data.push({
         id: qualified(model.id),
         object: 'image_model',
@@ -199,8 +220,17 @@ export function v1ImagesRoutes(ctx: ImagesRouteContext): Hono {
       return c.json(apiError('unsupported_backend', `Image models are ${ENGINE}:<id>`), 400);
     }
     const provider = await ctx.images.current();
-    const installed = await provider.listInstalledModels();
-    if (installed.some((m) => m.id === id)) {
+    const [installed, item] = await Promise.all([
+      provider.listInstalledModels(),
+      ctx.catalog.get('image-model', id).catch(() => null),
+    ]);
+    const local = installed.find((m) => m.id === id);
+    const listed = item?.manifest.kind === 'image-model' ? item.manifest : undefined;
+    // Downloading one would fetch gigabytes no generation here can use.
+    if (editsOnly(id, local?.editOnly ?? listed?.editOnly)) {
+      return c.json(editOnlyError(local?.name ?? listed?.name ?? model), 409);
+    }
+    if (local) {
       return c.json({ status: 'ready', model_id: qualified(id) });
     }
     const refusal = await wontRunRefusal(() => imageModelFit(fitContext, id));
@@ -256,16 +286,16 @@ export function v1ImagesRoutes(ctx: ImagesRouteContext): Hono {
       return c.json(apiError('unsupported_backend', `Image models are ${ENGINE}:<id>`), 400);
     }
     const modelId = requested ?? (await provider.resolveDefaultModelId?.());
-    if (!modelId || !installed.some((m) => m.id === modelId)) {
+    const chosen = modelId ? installed.find((m) => m.id === modelId) : undefined;
+    if (!modelId || !chosen) {
       const error = requested
         ? apiError('model_not_installed', `${request.model} is not installed; ensure it first`)
         : apiError('no_local_image_model', new NoLocalImageModelError().message);
       return c.json(error, 409);
     }
+    if (editsOnly(modelId, chosen.editOnly)) return c.json(editOnlyError(chosen.name), 409);
     const style = request.style
-      ? installed
-          .find((model) => model.id === modelId)
-          ?.loras?.find((lora) => lora.id === request.style && lora.purpose === 'style')
+      ? chosen.loras?.find((lora) => lora.id === request.style && lora.purpose === 'style')
       : undefined;
     if (request.style && !style) {
       return c.json(

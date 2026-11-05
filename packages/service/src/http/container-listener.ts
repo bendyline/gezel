@@ -21,7 +21,15 @@ declare module 'hono' {
   }
 }
 
-export const DEFAULT_CONTAINER_PORT = 6228;
+/**
+ * Not the daemon's 6228. On a computer that also has the Gezel app, its
+ * machine service holds host port 6228, pinned without a fallback on Linux
+ * and Windows, so publishing 6228 either fails to start the container or,
+ * when the container comes up first, knocks out the machine service. The
+ * docs publish this same port on both sides, which keeps the setup link
+ * (built from it) right without `GEZEL_PUBLIC_URL`.
+ */
+export const DEFAULT_CONTAINER_PORT = 6230;
 
 /**
  * Routes that trust "can read this account's runtime/" or "is on this

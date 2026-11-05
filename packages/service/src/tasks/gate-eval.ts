@@ -33,7 +33,7 @@ import {
 } from '@bendyline/gezel/checks';
 import ts from 'typescript';
 import { parseFrontmatter } from '../index-store/frontmatter.js';
-import { lineReviewVerdictFailure } from './review-verdict.js';
+import { lineReviewVerdictOutcome } from './review-verdict.js';
 
 /**
  * Read-only workspace view a static gate evaluates against. Backed by the
@@ -424,12 +424,11 @@ export async function evaluateGate(
   const outcomes: GateCheckOutcome[] = [];
   for (const c of mechanical) {
     const outcome = await evalCheck(c, ws, deps);
-    if (outcome.ok) {
-      const failure = await lineReviewVerdictFailure(c, checks, ws);
-      if (failure) {
-        outcome.ok = false;
-        outcome.detail = failure;
-      }
+    // A reviewer's line verdict is read as a verdict, not two regexes.
+    const verdict = await lineReviewVerdictOutcome(c, checks, ws);
+    if (verdict) {
+      outcome.ok = verdict.ok;
+      outcome.detail = verdict.detail;
     }
     outcomes.push(outcome);
   }

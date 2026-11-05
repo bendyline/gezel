@@ -14,6 +14,9 @@
   border-radius: var(--radius-md);
   font-size: 0.82rem;
   line-height: 1.45;
+  /* People paste the explanation and its technical details into a report. */
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .settings-notice > span,

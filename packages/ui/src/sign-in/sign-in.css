@@ -107,3 +107,14 @@
   font-size: var(--text-md);
   border-radius: var(--radius-md);
 }
+
+/* Commands are typed into a terminal: set as code, which keeps them
+   selectable on a screen that is otherwise chrome. */
+.gz-sign-in-hint code {
+  padding: 0.05rem 0.3rem;
+  color: var(--text);
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  font-size: 0.9em;
+  overflow-wrap: anywhere;
+}

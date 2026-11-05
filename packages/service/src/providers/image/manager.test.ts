@@ -7,6 +7,7 @@ import { Store } from '../../fs/store.js';
 import { createRemotesRegistry } from '../../remotes/registry.js';
 import { ImageProviderManager } from './manager.js';
 import { MockImageProvider } from './mock.js';
+import { RemoteImageProvider } from './remote-image.js';
 
 function fakeSecrets(): SecretStore {
   const map = new Map<string, string>();
@@ -180,6 +181,35 @@ describe('ImageProviderManager', () => {
     expect((await mgr.providerForModel('remote:this-machine/sdxl-base-1.0')).name).toBe(
       'remote:This machine',
     );
+  });
+
+  it('marks only the machine broker as rendering on this computer', async () => {
+    const mgr = new ImageProviderManager({ home, store, secrets: fakeSecrets(), env: {} });
+    const remotes = await createRemotesRegistry({ home });
+    for (const [remoteId, managed] of [
+      ['this-machine', 'machine-engine'],
+      ['office-pc', undefined],
+    ] as const) {
+      remotes.setEphemeral({
+        remoteId,
+        baseUrl: 'https://192.168.1.20:6229',
+        displayName: remoteId,
+        token: 't',
+        pinnedIdentityKey: 'test-key',
+        pinnedIdentityFingerprint: `fp-${remoteId}`,
+        scopes: ['remote-inference'],
+        pairedAt: Date.now(),
+        ...(managed ? { managed } : {}),
+      });
+    }
+    mgr.setRemotes(remotes);
+
+    const broker = await mgr.providerForModel('remote:this-machine/sdxl-base-1.0');
+    const paired = await mgr.providerForModel('remote:office-pc/sdxl-base-1.0');
+    expect(broker).toBeInstanceOf(RemoteImageProvider);
+    expect(paired).toBeInstanceOf(RemoteImageProvider);
+    expect((broker as RemoteImageProvider).onThisComputer).toBe(true);
+    expect((paired as RemoteImageProvider).onThisComputer).toBe(false);
   });
 
   it('keeps the effective mock provider local when a broker is present', async () => {

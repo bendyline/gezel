@@ -258,10 +258,10 @@ describe('line-based reviewer verdict enforcement', () => {
     expect(result.message).toContain('reports FAIL');
   });
   it.each([
-    'Amounts PASS Numbering PASS Dates PASS',
     'Amounts PASS\nDates were not reviewed',
-    'PASS — amounts look right',
     'Amounts PASS\n  FAIL — bad date',
+    '# Verdict',
+    '',
   ])('rejects malformed or incomplete verdict text: %s', async (text) => {
     expect((await evaluate(text)).decision).toBe('reject');
   });
@@ -270,6 +270,70 @@ describe('line-based reviewer verdict enforcement', () => {
       (await evaluate('Amounts reconcile PASS\nNumbers continue PASS\nDue dates match terms PASS'))
         .decision,
     ).toBe('approve');
+  });
+  // A rejected review routes back to its revise step, which on invoice-run
+  // re-spawns the whole fanout crew; three of these and the task pauses.
+  it.each([
+    ['a heading', '# Verdict\n\nAmounts reconcile PASS\nDue dates match terms PASS'],
+    [
+      'a heading that carries the verdict',
+      '## Verdict: PASS\n\n1. Amounts reconcile — PASS\n2. Due dates match terms — PASS',
+    ],
+    [
+      'bold labels and decisions',
+      '**Verdict**\n\n- **Amounts reconcile:** **PASS**\n- **Due dates match terms:** __PASS__\n\n**Overall: PASS**',
+    ],
+    ['"fail" explaining a passing line', 'Amounts reconcile PASS - no checks fail'],
+    [
+      'explanation after the decision',
+      '- Amounts reconcile: PASS — every invoice traces to billables.json\n- Numbers continue: PASS (2026-041 through 2026-044)',
+    ],
+    ['a leading decision', 'PASS — amounts look right'],
+    ['several passing criteria on one line', 'Amounts PASS Numbering PASS Dates PASS'],
+    [
+      'a table',
+      '| Criterion | PASS/FAIL |\n| --- | :---: |\n| Amounts reconcile | PASS |\n| Due dates match terms | PASS |',
+    ],
+    [
+      'a detail line using "fail" in prose',
+      'Amounts reconcile PASS\n  none of the amounts fail to trace\nDue dates match terms PASS',
+    ],
+    ['a detail line ending in "failed"', 'Amounts reconcile PASS\n  - checked four; none failed'],
+    ['lower-case decisions', 'Amounts reconcile: pass\nDue dates match terms: passed.'],
+    [
+      'a code fence and a rule',
+      '```\nAmounts reconcile PASS\n---\nDue dates match terms PASS\n```',
+    ],
+  ])('accepts a passing verdict written with %s', async (_shape, text) => {
+    const result = await evaluate(text);
+    expect(result.message).toBeUndefined();
+    expect(result.decision).toBe('approve');
+  });
+  it.each([
+    ['a line ending in FAIL', 'Amounts reconcile PASS\nDue dates match terms FAIL'],
+    [
+      'a bold FAIL with its gap on the same line',
+      'Amounts reconcile PASS\n- **Due dates match terms:** **FAIL** — 2026-043 is due on the 15th',
+    ],
+    [
+      'a FAIL followed by an explanation',
+      'Amounts reconcile PASS\nDue dates match terms: FAIL (2026-043 is due on the 15th)',
+    ],
+    ['a heading that carries FAIL', '## Verdict: FAIL\n\nAmounts reconcile PASS'],
+    [
+      'a FAIL table cell',
+      '| Criterion | Result |\n|---|---|\n| Amounts reconcile | PASS |\n| Due dates | FAIL |',
+    ],
+    ['a lower-case fail as the decision', 'Amounts reconcile PASS\nDue dates match terms: fail'],
+    ['a capitalized Failed', 'Amounts reconcile PASS\nDue dates: Failed — 2026-043'],
+    ['PASS and FAIL on one line', 'Amounts reconcile PASS — the earlier FAIL is fixed'],
+    ['a negated lower-case pass', 'Amounts reconcile PASS\nDue dates match terms: did not pass'],
+    ['a contracted negation', "Amounts reconcile PASS\nDue dates match terms: doesn't pass"],
+    ['a negated PASS', 'Amounts reconcile PASS\nDue dates match terms: NOT PASS'],
+  ])('rejects a verdict with %s', async (_shape, text) => {
+    const result = await evaluate(text);
+    expect(result.decision).toBe('reject');
+    expect(result.message).toContain('FAIL');
   });
   it('leaves ordinary text regex gates alone', async () => {
     const result = await evaluateStepGate({

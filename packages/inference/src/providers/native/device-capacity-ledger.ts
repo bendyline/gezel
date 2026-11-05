@@ -4,7 +4,14 @@ import { join } from 'node:path';
 import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import type { NativeCapacityCommand, NativeCapacityReply } from '@bendyline/gezel';
 import { CapacityDeniedError } from './capacity-broker.js';
-import { readProcessIdentities } from './process-identity.js';
+import {
+  ProcessIdentityCache,
+  processAlive,
+  type readProcessIdentities,
+  sharedProcessIdentities,
+} from './process-identity.js';
+
+export { processAlive };
 
 // Keep the newer builtin behind a runtime require. The current tsup/esbuild
 // target rewrites a static `node:sqlite` import to the nonexistent npm package
@@ -48,29 +55,33 @@ function gb(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
-export function processAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
-  }
-}
-
 /**
  * SQLite's process lock makes check-and-reserve atomic across GEZEL_HOME values.
  * Reservations survive a broker restart. A dead parent does not free the memory
  * of a surviving engine child, and a live owner never loses a lease to a TTL.
  */
 export class DeviceCapacityLedger {
+  private readonly identityCache: ProcessIdentityCache | undefined;
+
   constructor(
     private readonly options: {
       directory: string;
       sample: () => Promise<DeviceCapacitySample>;
       alive?: (pid: number) => boolean;
       identities?: typeof readProcessIdentities;
+      identityCache?: ProcessIdentityCache;
     },
-  ) {}
+  ) {
+    // An injected reader still goes through a cache, so tests see the reads
+    // production makes. An injected `alive` alone checks liveness only.
+    this.identityCache =
+      options.identityCache ??
+      (options.identities
+        ? new ProcessIdentityCache({ read: options.identities, alive: options.alive })
+        : options.alive
+          ? undefined
+          : sharedProcessIdentities);
+  }
 
   async execute(command: NativeCapacityCommand): Promise<NativeCapacityReply> {
     const sample = await this.options.sample();
@@ -85,18 +96,30 @@ export class DeviceCapacityLedger {
         .prepare('SELECT claim FROM claims')
         .all()
         .map((row) => JSON.parse(String(row.claim)) as Claim);
-      const pids = snapshot.flatMap((claim) => [
-        claim.ownerPid,
-        ...(claim.childPid === undefined ? [] : [claim.childPid]),
-      ]);
-      if (command.action === 'acquire') pids.push(command.ownerPid);
-      if (command.action === 'bind') pids.push(command.childPid);
+      const record: number[] = [];
+      if (command.action === 'acquire' && !snapshot.some((claim) => claim.id === command.id))
+        record.push(command.ownerPid);
+      if (command.action === 'bind') record.push(command.childPid);
+      // Stamps only decide which reservations are stale, and a stale one costs
+      // someone only while a request waits for memory. With no request
+      // waiting, liveness alone prunes, so the status check that runs before
+      // every engine request reads no stamps.
+      const confirm = new Map<number, string[]>();
+      const stamp = (pid: number | undefined, identity: string | undefined) => {
+        if (pid !== undefined && identity !== undefined)
+          confirm.set(pid, [...(confirm.get(pid) ?? []), identity]);
+      };
+      if (command.action === 'acquire' || snapshot.some((claim) => claim.phase === 'waiting')) {
+        for (const claim of snapshot) {
+          stamp(claim.childPid, claim.childIdentity);
+          // An owner's stamp is only consulted while its claim is queued.
+          if (claim.phase === 'waiting') stamp(claim.ownerPid, claim.ownerIdentity);
+        }
+      }
       // OS probes may spawn a helper. Never hold SQLite's writer lock while awaiting one.
-      const probe =
-        this.options.identities ?? (this.options.alive ? undefined : readProcessIdentities);
       const identities =
-        command.action !== 'release' && probe
-          ? await probe(pids).catch(() => new Map<number, string>())
+        command.action !== 'release' && this.identityCache
+          ? await this.identityCache.lookup(record, confirm).catch(() => new Map<number, string>())
           : new Map<number, string>();
       db.exec('BEGIN IMMEDIATE');
       try {

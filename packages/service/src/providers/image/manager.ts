@@ -127,6 +127,7 @@ export class ImageProviderManager {
           token: remote.token,
           fetch,
           defaultModelId: async () => (await this.store.readConfig()).defaultImageModel?.['sd-cpp'],
+          onThisComputer: remote.managed === 'machine-engine',
         }),
       };
       this.remoteCache.set(remote.remoteId, cached);

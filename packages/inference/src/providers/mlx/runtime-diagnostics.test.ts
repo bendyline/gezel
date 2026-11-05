@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { UnsupportedResponseFormatError, mlxHttpError } from './runtime-diagnostics.js';
+import {
+  MLX_IMAGE_RESERVED_CHARS,
+  UnsupportedResponseFormatError,
+  estimatePromptTokens,
+  mlxHttpError,
+} from './runtime-diagnostics.js';
+import { TOOL_IMAGES_MESSAGE } from './tool-image-retention.js';
 
 const sidecar = (detail: string) => JSON.stringify({ detail });
 
@@ -34,5 +40,33 @@ describe('mlxHttpError', () => {
       expect(err).not.toBeInstanceOf(UnsupportedResponseFormatError);
       expect(err.message).toMatch(/^\[Mac AI\] engine returned/);
     }
+  });
+});
+
+describe('estimatePromptTokens', () => {
+  it('counts an attached image as its patch reservation, not its base64 bytes', () => {
+    // A 1536x1152 render is ~4.5 MB of base64: read as text it was ~1.1M tokens.
+    const picture = 'A'.repeat(4_500_000);
+    const text = [
+      { role: 'system', content: 'You are an Illustrator.' },
+      { role: 'user', content: 'Draw a workbench.' },
+    ];
+    const withImage = [...text, { role: 'user', content: TOOL_IMAGES_MESSAGE, images: [picture] }];
+    const withoutImage = [...text, { role: 'user', content: TOOL_IMAGES_MESSAGE }];
+
+    const added =
+      estimatePromptTokens(withImage, undefined) - estimatePromptTokens(withoutImage, undefined);
+    expect(added).toBe(MLX_IMAGE_RESERVED_CHARS / 4);
+    expect(
+      estimatePromptTokens(
+        [...text, { role: 'user', content: 'x', images: [picture, picture] }],
+        [{ type: 'function', function: { name: 'generate_image' } }],
+      ),
+    ).toBeLessThan(10_000);
+
+    // An unstringifiable transcript still estimates nothing, images or not.
+    const circular: Record<string, unknown> = { images: [picture] };
+    circular.self = circular;
+    expect(estimatePromptTokens(circular, undefined)).toBe(0);
   });
 });

@@ -561,19 +561,21 @@ tens of gigabytes of disk. Hosted inference grants it to its host.
 - `app.images.models({ signal })` lists installed and downloadable models as
   `sd-cpp:<catalogId>`, apart from `/v1/models`, with `fit`, `license`,
   `commercial_use`, `renders_text`, `prompt_style` and `hardware_tier`.
-  `shared` marks a model another store owns, which `remove` refuses.
+  `shared` marks a model another store owns, which `remove` refuses. Models
+  that only change a picture they are given, such as Qwen Image Edit, are left
+  out: generation here draws new pictures.
 - `app.images.ensure(model)` returns `ready` or a background download's
   `jobId`; `ensureEvents(jobId)` streams its progress and `cancelEnsure(jobId)`
   stops it. A model that cannot run on this computer refuses with
-  `model_wont_run`.
+  `model_wont_run`, and one that only changes pictures with `edit_only_model`.
 - `app.images.generate({ prompt, model, aspectRatio, quality, seed },
   { onProgress, signal })` returns the PNG bytes and the size, seed and model
   used. Progress phases are `queued`, `loading_model` (weights load inside the
   first render after the engine starts), `sampling` and `decoding`. Renders
   run one at a time. Aborting the signal stops the render by stopping the
   engine, so the next render reloads its weights. Failures carry codes such as
-  `image_capacity` (not enough graphics memory), `no_local_image_model` and
-  `model_not_installed`.
+  `image_capacity` (not enough graphics memory), `no_local_image_model`,
+  `model_not_installed` and `edit_only_model`.
 
 ### Live inference progress
 

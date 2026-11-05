@@ -133,13 +133,14 @@ describe('indexing in Activity', () => {
     expect(trigger).toHaveAccessibleName('Activity — All quiet');
   });
 
-  it('tracks concurrent project scans independently and expires batch-only pulses', async () => {
+  it('tracks concurrent projects independently and expires batch-only pulses', async () => {
     await mount();
     vi.useFakeTimers();
     await progress({});
     await progress({ projectId: 'shop', gezelId: 'noor', gezelName: 'Noor' });
+    // A later phase of Squisq's job, not a second job.
     await progress({ phase: 'review', state: 'progress', detail: '3 files reviewed' });
-    const trigger = screen.getByRole('button', { name: 'Activity — 3 working · Saara, Noor' });
+    const trigger = screen.getByRole('button', { name: 'Activity — 2 working · Saara, Noor' });
     expect(within(trigger).getByText('+1')).toBeVisible();
     expect(trigger.querySelectorAll('.activity-control-avatar')).toHaveLength(2);
 
@@ -152,5 +153,68 @@ describe('indexing in Activity', () => {
     const working = screen.getByRole('region', { name: 'Working' });
     expect(within(working).getByText('Scanning · Shop')).toBeVisible();
     expect(within(working).queryByText(/Squisq/)).toBeNull();
+  });
+
+  it('counts one catch-up drive once across its phases and its model slot', async () => {
+    const at = '2026-10-02T12:00:00.000Z';
+    const queues = {
+      providers: {
+        mlx: {
+          running: 1,
+          queuedInteractive: 0,
+          queuedBackground: 0,
+          concurrency: 2,
+          // The Librarian's study call: no chat session, so the snapshot
+          // counts it as anonymous background work.
+          active: [{ gezelId: 'saara', projectId: 'squisq', job: 'summary', runningForMs: 2_000 }],
+          pending: [],
+        },
+      },
+      sessions: [],
+      cache: [],
+      at,
+      taskRunner: { pendingCount: 0, pendingByGezel: {}, pendingByProject: {} },
+    };
+    vi.mocked(api.getActivityStatus).mockResolvedValue({
+      items: [
+        {
+          id: 'background:running',
+          section: 'working',
+          title: 'Background work',
+          detail: '1 background operation running.',
+          questionIds: [],
+        },
+      ],
+      questions: [],
+      queues,
+      at,
+    } as never);
+    render(
+      <ActivityProvider>
+        <ActivityControl />
+      </ActivityProvider>,
+    );
+    await screen.findByRole('button', { name: 'Activity — 1 working · Saara' });
+    vi.useFakeTimers();
+
+    // The drive opens without a worker, wraps the static rescan's own start
+    // and end, then reports media and study batches.
+    await progress({ gezelId: undefined, gezelName: undefined, detail: 'Index catch-up' });
+    await progress({});
+    await progress({ state: 'ended', detail: '2305 files in 10s' });
+    await progress({ phase: 'shadow', state: 'progress', detail: '2 media files described' });
+    await progress({ phase: 'enrich', state: 'progress', detail: '8 files enriched' });
+    const trigger = screen.getByRole('button', { name: 'Activity — 1 working · Saara' });
+    fireEvent.click(trigger);
+    const working = screen.getByRole('region', { name: 'Working' });
+    expect(within(working).getByText('Studying · Squisq')).toBeVisible();
+    expect(within(working).queryByText('Background work')).toBeNull();
+
+    // A quiet stretch between batches does not end a job that started.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(trigger).toHaveAccessibleName('Activity — 1 working · Saara');
+    expect(within(working).getByText('Studying · Squisq')).toBeVisible();
   });
 });

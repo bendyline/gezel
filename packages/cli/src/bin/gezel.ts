@@ -117,6 +117,7 @@ import {
   registerSecurityCommands,
 } from '../settings-command.js';
 import { installSignalCleanup } from '../signal-cleanup.js';
+import { startRestartWanted, startShortfall, startShortfallMessage } from '../start-reuse.js';
 import {
   type CleanupFlags,
   formatBackupPlan,
@@ -338,26 +339,25 @@ program
         return;
       }
 
-      // A pinned port or the web UI are launch-time choices: the web token is
-      // minted at boot and web mode serves plain HTTP a browser can use. Reuse
-      // a running daemon that already has them. Replace one that does not only
+      // A pinned port, the web UI and accounts are launch-time choices: the web
+      // token is minted at boot and web mode serves plain HTTP a browser can
+      // use. Reuse a running daemon that already has them. Replace one that does not only
       // when asked, since it may be serving the desktop app or running tasks.
       if (port !== undefined || opts.web) {
         const runtime = await readRuntime();
         const running = runtime && isProcessAlive(runtime.pid) ? runtime : null;
-        const reuse =
-          running !== null && (await runtimeServes(running, { port, web: opts.web === true }));
-        if (running && !reuse) {
-          const wanted = opts.web ? 'with the web UI' : `on port ${port}`;
+        const want = {
+          port,
+          web: opts.web === true,
+          accounts: opts.web === true && opts.accounts === true,
+        };
+        const shortfall = running ? await startShortfall(running, want, { readWebUiToken }) : null;
+        const reuse = running !== null && shortfall === null;
+        if (running && shortfall) {
           if (!opts.restart) {
-            const retry = ['gezel start', ...(port !== undefined ? [`--port ${port}`] : [])];
-            if (opts.web) retry.push('--web');
-            throw new CliError(
-              `gezeld is already running for this home ${opts.web ? 'without the web UI' : `on port ${running.port}`} (pid ${running.pid}).\n` +
-                `Restart it ${wanted} with \`${[...retry, '--restart'].join(' ')}\`, or stop it first with \`gezel stop\`.`,
-            );
+            throw new CliError(startShortfallMessage(shortfall, running, want));
           }
-          console.error(`Restarting gezeld (pid ${running.pid}) ${wanted}…`);
+          console.error(`Restarting gezeld (pid ${running.pid}) ${startRestartWanted(want)}…`);
           if (!(await stopDaemonPid(running.pid))) {
             throw new CliError(`failed to confirm gezeld pid=${running.pid} stopped`);
           }
@@ -367,7 +367,7 @@ program
           daemonEntry: entry,
           detached: true,
           env: spawnEnv,
-          // Never adopt a daemon that lacks the requested port or transport.
+          // Never adopt a daemon that lacks the requested port, transport or accounts.
           // A forced spawn accepts only its own process, so losing a race
           // fails here instead of reporting someone else's daemon.
           forceSpawn: !reuse,
@@ -396,18 +396,11 @@ program
     },
   );
 
-/** Whether a running daemon already has what `start --port` / `--web` asked for. */
-async function runtimeServes(
-  runtime: { port: number; baseUrl: string },
-  want: { port: number | undefined; web: boolean },
-): Promise<boolean> {
-  if (want.port !== undefined && runtime.port !== want.port) return false;
-  if (!want.web) return true;
-  if (new URL(runtime.baseUrl).protocol !== 'http:') return false;
+/** The running daemon's per-launch web UI token, or '' when it published none. */
+async function readWebUiToken(): Promise<string> {
   const { readFile } = await import('node:fs/promises');
   const { gezelPaths } = await import('@bendyline/gezel/paths');
-  const token = await readFile(gezelPaths().runtime.webUiToken, 'utf8').catch(() => '');
-  return token.trim().length > 0;
+  return readFile(gezelPaths().runtime.webUiToken, 'utf8').catch(() => '');
 }
 
 /**

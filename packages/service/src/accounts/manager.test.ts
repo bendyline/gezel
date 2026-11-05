@@ -3,10 +3,16 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { HistoryEvent } from '@bendyline/gezel';
 import { accountSessionsFile, accountsFile, tokensFile } from '@bendyline/gezel/paths';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTokenStore } from '../http/token-store.js';
 import { AccountError, AccountManager } from './manager.js';
 import { hashPassword, needsRehash, verifyPassword } from './passwords.js';
+
+// A pass-through spy, so a test can count how many tries reached the slow check.
+vi.mock('./passwords.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./passwords.js')>();
+  return { ...actual, verifyPassword: vi.fn(actual.verifyPassword) };
+});
 
 const FAST = { N: 2 ** 10, r: 8, p: 1 };
 const homes: string[] = [];
@@ -118,6 +124,40 @@ describe('AccountManager', () => {
     );
     expect(throttled.code).toBe('throttled');
     expect(throttled.retryAfterSeconds).toBeGreaterThan(0);
+  });
+
+  it('counts a burst of concurrent tries before any password check runs', async () => {
+    const { manager } = await open();
+    await manager.create({ name: 'Mike', password: 'longenough' });
+    vi.mocked(verifyPassword).mockClear();
+    const results = await Promise.all(
+      Array.from({ length: 30 }, () =>
+        refusal(manager.signIn({ name: 'Mike', password: 'wrong-pass' }, { address: '10.0.0.9' })),
+      ),
+    );
+    // Five free failures, then the sixth starts the backoff, same as one at a time.
+    expect(vi.mocked(verifyPassword)).toHaveBeenCalledTimes(6);
+    expect(results.filter((e) => e.code === 'sign_in_failed')).toHaveLength(6);
+    expect(results.filter((e) => e.code === 'throttled')).toHaveLength(24);
+  });
+
+  it('forgives the name and address after a right password', async () => {
+    let at = 1_000_000;
+    const { manager } = await open({ now: () => at });
+    await manager.create({ name: 'Mike', password: 'longenough' });
+    const address = { address: '10.0.0.9' };
+    for (let i = 0; i < 5; i++) {
+      await refusal(manager.signIn({ name: 'Mike', password: 'wrong-pass' }, address));
+    }
+    await manager.signIn({ name: 'Mike', password: 'longenough' }, address);
+    at += 1;
+    for (let i = 0; i < 6; i++) {
+      const err = await refusal(manager.signIn({ name: 'Mike', password: 'wrong-pass' }, address));
+      expect(err.code).toBe('sign_in_failed');
+    }
+    expect(
+      (await refusal(manager.signIn({ name: 'Mike', password: 'longenough' }, address))).code,
+    ).toBe('throttled');
   });
 
   it('refuses to sign in a role this build does not know', async () => {

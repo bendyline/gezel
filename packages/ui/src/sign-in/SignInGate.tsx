@@ -97,9 +97,14 @@ function SetupForm({
             required
           />
           <p className="gz-sign-in-hint">
-            {codeAvailable
-              ? 'The setup link and its code are in the log. Run docker logs with the name of the container, then open the link it shows.'
-              : 'Get a new setup link from the container with: docker exec <container> gezel account setup-link'}
+            {codeAvailable ? (
+              'The setup link and its code are in the log. Run docker logs with the name of the container, then open the link it shows.'
+            ) : (
+              <>
+                Get a new setup link from the container with:{' '}
+                <code>docker exec &lt;container&gt; gezel account setup-link</code>
+              </>
+            )}
           </p>
         </div>
       )}
@@ -198,7 +203,8 @@ function SignInForm({ notice }: { notice?: string }) {
       </button>
       <p className="gz-sign-in-hint">
         Forgot your password? Someone who can sign in can set a new one in Settings, then Accounts.
-        From the container: docker exec &lt;container&gt; gezel account reset-password &lt;name&gt;
+        From the container:{' '}
+        <code>docker exec &lt;container&gt; gezel account reset-password &lt;name&gt;</code>
       </p>
     </form>
   );

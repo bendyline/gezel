@@ -405,16 +405,8 @@ export class StableDiffusionCppProvider implements ImageProvider {
     const height = input.height ?? defaultDimension;
     const resolvedLoras = await this.resolveLoras(modelId, input.loras ?? []);
     let loras = resolvedLoras.loras;
-    // A speed LoRA's recipe is what makes its few steps valid, so it wins
-    // over a style's.
-    const render =
-      loras.find((l) => l.purpose === 'speed')?.render ?? loras.find((l) => l.render)?.render;
-    const steps = input.steps ?? render?.steps ?? (await this.defaultSampleSteps(modelId));
     const seed = input.seed ?? Math.floor(Math.random() * 2_147_483_647);
     const started = Date.now();
-    log.info(
-      `[sd-cpp] generate model=${modelId ?? 'default'} steps=${steps} explicitSteps=${input.steps !== undefined} size=${width}x${height}${loras.length > 0 ? ` loras=${loras.map((l) => l.id).join(',')}` : ''}`,
-    );
 
     // Model selection: sd-server serves one model per process. When a
     // request targets a different installed model than the one currently
@@ -468,6 +460,18 @@ export class StableDiffusionCppProvider implements ImageProvider {
       }
       if (signal?.aborted) throw new ImageGenerationCancelledError();
 
+      const settingsNotes: string[] = [...resolvedLoras.notes];
+      if (loras.length > 0) {
+        loras = await this.lorasTheEngineHas(baseUrl, loras, request.signal, settingsNotes);
+      }
+      // Read only after the engine's list: a fast mode's 4 steps and CFG 1
+      // on the bare model it was dropped from render mush.
+      const render = loraRenderOverrides(loras);
+      const steps = input.steps ?? render?.steps ?? (await this.defaultSampleSteps(modelId));
+      log.info(
+        `[sd-cpp] generate model=${modelId ?? 'default'} steps=${steps} explicitSteps=${input.steps !== undefined} size=${width}x${height}${loras.length > 0 ? ` loras=${loras.map((l) => l.id).join(',')}` : ''}`,
+      );
+
       // Drive sd-server's A1111-compatible endpoints (`/sdapi/v1/txt2img`
       // and `/sdapi/v1/img2img`). Unlike the OpenAI `/v1/images/*` shape
       // — which reads only prompt/n/size and takes steps/seed/cfg from the
@@ -476,10 +480,6 @@ export class StableDiffusionCppProvider implements ImageProvider {
       // actually take effect. `cfg_scale` is set per model (distilled /
       // Flux-flow models need CFG 1; others inherit the server default).
       const cfg = render?.cfg ?? (modelId ? MODEL_CFG_DEFAULTS.get(modelId) : undefined);
-      const settingsNotes: string[] = [...resolvedLoras.notes];
-      if (loras.length > 0) {
-        loras = await this.lorasTheEngineHas(baseUrl, loras, request.signal, settingsNotes);
-      }
       let inputImages = input.inputImages ?? [];
       // Capability gate: models whose architecture doesn't honor init
       // latents on the pinned sd-server fall back to txt2img instead of
@@ -1237,6 +1237,16 @@ export interface InstalledLora {
   render?: ImageLoraRender;
   approxSizeBytes: number;
   installedAt: string;
+}
+
+/**
+ * The render settings the applied LoRAs set. A speed LoRA's recipe is what
+ * makes its few steps valid, so it wins over a style's.
+ */
+function loraRenderOverrides(applied: readonly InstalledLora[]): ImageLoraRender | undefined {
+  return (
+    applied.find((l) => l.purpose === 'speed')?.render ?? applied.find((l) => l.render)?.render
+  );
 }
 
 /**

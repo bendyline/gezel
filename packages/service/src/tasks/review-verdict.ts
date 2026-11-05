@@ -1,45 +1,155 @@
 import type { GateCheck, GateWorkspaceReader } from '@bendyline/gezel';
 
-/** Recognize the existing catalog's explicit line-verdict contract, not arbitrary regex checks. */
-export async function lineReviewVerdictFailure(
+const PASS_LINE = '\\bPASS\\s*$';
+const FAIL_LINE = '\\bFAIL\\s*$';
+
+/**
+ * Which half of the catalog's line-verdict contract `check` is: a
+ * `contains /\bPASS\s*$/m` paired with a `notContains /\bFAIL\s*$/m` on the
+ * same file. Arbitrary regex checks are never recognized.
+ */
+function verdictHalf(check: GateCheck, checks: readonly GateCheck[]): 'pass' | 'fail' | null {
+  if (check.kind !== 'contains' && check.kind !== 'notContains') return null;
+  const half = check.kind === 'contains' ? 'pass' : 'fail';
+  if (check.pattern !== (half === 'pass' ? PASS_LINE : FAIL_LINE) || !check.flags?.includes('m'))
+    return null;
+  const partnerKind = half === 'pass' ? 'notContains' : 'contains';
+  const partnerPattern = half === 'pass' ? FAIL_LINE : PASS_LINE;
+  const paired = checks.some(
+    (c) =>
+      (c.kind === 'contains' || c.kind === 'notContains') &&
+      c.kind === partnerKind &&
+      c.file === check.file &&
+      Boolean(c.artifact) === Boolean(check.artifact) &&
+      c.pattern === partnerPattern &&
+      c.flags?.includes('m'),
+  );
+  return paired ? half : null;
+}
+
+/** A decision word written as one: capitalized or in capitals, anywhere on the line. */
+const MARKED_DECISION = /^(?:PASS(?:ED|ES)?|FAIL(?:S|ED|ING)?)$/i;
+/**
+ * A lower-case decision word counts only where the book asks for one: last
+ * on a criterion line. On an indented detail line it is prose ("none failed").
+ */
+const FINAL_DECISION = /^(?:pass(?:ed|es)?|fail(?:s|ed)?)$/i;
+/** "t" is what splitting leaves of "didn't" and "doesn't". */
+const NEGATION = /^(?:not|never|no|nor|cannot|t)$/i;
+
+function lineDecision(line: string, detail: boolean): { pass: boolean; fail: boolean } {
+  // Splitting on everything but letters and digits sheds markdown (`**`,
+  // `__`, `#`, `|`, list marks) and punctuation in one pass.
+  const words = line.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const isMarked = (word: string) => /^[A-Z]/.test(word) && MARKED_DECISION.test(word);
+  const lastIndex = words.length - 1;
+  const decided = words.some(isMarked)
+    ? words.flatMap((word, i) => (isMarked(word) ? [i] : []))
+    : !detail && lastIndex >= 0 && FINAL_DECISION.test(words[lastIndex]!)
+      ? [lastIndex]
+      : [];
+  // "Dates did not pass" judges the criterion failed, not passed.
+  const fails = (i: number) => /^f/i.test(words[i]!) || NEGATION.test(words[i - 1] ?? '');
+  return {
+    pass: decided.some((i) => !fails(i)),
+    fail: decided.some(fails),
+  };
+}
+
+const isTableSeparator = (line: string | undefined): boolean =>
+  line !== undefined && /^[\s|:-]+$/.test(line) && line.includes('-') && line.includes('|');
+
+/** Layout around the criteria: headings, labels, rules, fences. Only asked of lines with no decision. */
+function isScaffolding(trimmed: string): boolean {
+  return (
+    !/[A-Za-z0-9]/.test(trimmed) ||
+    /^(?:>\s*)*#{1,6}(?:\s|$)/.test(trimmed) ||
+    /:$/.test(trimmed.replace(/[*_]+$/, '')) ||
+    /^(\*\*|__|\*|_)\S.*\1$/.test(trimmed)
+  );
+}
+
+interface LineVerdict {
+  criteria: number;
+  /** The first line whose decision is FAIL. */
+  failed?: string;
+  /** The first line that judges nothing where a criterion was expected. */
+  undecided?: string;
+}
+
+/**
+ * Read a reviewer's verdict the way models actually write one: headings,
+ * bold, tables, and an explanation beside the decision. Strict only where
+ * it matters: a FAIL anywhere, in any formatting, fails the review, and a
+ * line that names a criterion without judging it is not read as a pass.
+ */
+export function readLineVerdict(text: string): LineVerdict {
+  const lines = text.split(/\r?\n/);
+  const verdict: LineVerdict = { criteria: 0 };
+  const quote = (line: string) => `"${line.trim().slice(0, 120)}"`;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const trimmed = line.trim();
+    if (!trimmed || /^(?:```|~~~)/.test(trimmed)) continue;
+    const detail = verdict.criteria > 0 && /^\s+\S/.test(line);
+    const { pass, fail } = lineDecision(line, detail);
+    // A header row names the columns ("Criterion | PASS/FAIL"), not a verdict.
+    if (trimmed.includes('|') && isTableSeparator(lines[i + 1]) && pass === fail) continue;
+    if (fail) {
+      verdict.failed ??= pass
+        ? `a line reports both PASS and FAIL: ${quote(line)}`
+        : `a criterion reports FAIL: ${quote(line)}`;
+      continue;
+    }
+    if (pass) {
+      verdict.criteria++;
+      continue;
+    }
+    if (detail || isScaffolding(trimmed)) continue;
+    verdict.undecided ??= `a line has no PASS or FAIL decision: ${quote(line)}`;
+  }
+  return verdict;
+}
+
+/**
+ * The verdict for one half of the line-verdict contract, replacing that
+ * check's raw regex outcome; null for every other check. The regexes alone
+ * read layout, not judgment: a heading or a bold PASS failed the review and
+ * sent invoice-run back to re-spawn its whole crew, while a FAIL that was
+ * not the line's last word passed it.
+ */
+export async function lineReviewVerdictOutcome(
   check: GateCheck,
   checks: readonly GateCheck[],
   ws: GateWorkspaceReader,
-): Promise<string | null> {
-  if (
-    check.kind !== 'notContains' ||
-    check.pattern !== '\\bFAIL\\s*$' ||
-    !check.flags?.includes('m')
-  )
-    return null;
-  const paired = checks.some(
-    (c) =>
-      c.kind === 'contains' &&
-      c.file === check.file &&
-      Boolean(c.artifact) === Boolean(check.artifact) &&
-      c.pattern === '\\bPASS\\s*$' &&
-      c.flags?.includes('m'),
-  );
-  if (!paired) return null;
-  const reject = (reason: string) =>
-    `${check.file}: invalid review verdict — ${reason}. Write one criterion per line, ending in PASS or FAIL; resolve every failed criterion before advancing.`;
+): Promise<{ ok: boolean; detail: string } | null> {
+  const half = verdictHalf(check, checks);
+  if (!half || (check.kind !== 'contains' && check.kind !== 'notContains')) return null;
+  const invalid = (reason: string) => ({
+    ok: false,
+    detail: `${check.file}: invalid review verdict — ${reason}. Write one criterion per line, each with one PASS or FAIL decision.`,
+  });
+  let text: string | null | undefined;
   try {
-    const text = check.artifact ? await ws.readArtifact?.(check.file) : await ws.read(check.file);
-    if (!text?.trim()) return reject('the verdict is missing or empty');
-    let criteria = 0;
-    for (const line of text.split(/\r?\n/)) {
-      if (!line.trim()) continue;
-      const decisions = line.match(/\b(?:PASS|FAIL)\b/gi) ?? [];
-      if (decisions.some((word) => word.toUpperCase() === 'FAIL'))
-        return reject('a criterion reports FAIL');
-      if (decisions.length === 1 && /\S.*\sPASS\s*$/.test(line.trim())) {
-        criteria++;
-      } else if (!(criteria > 0 && /^\s+\S/.test(line) && decisions.length === 0)) {
-        return reject('a line has missing, ambiguous, or incorrectly placed decision text');
-      }
-    }
-    return criteria > 0 ? null : reject('no criterion verdicts were provided');
+    text = check.artifact ? await ws.readArtifact?.(check.file) : await ws.read(check.file);
   } catch {
-    return reject('the verdict could not be read');
+    return half === 'pass' ? invalid('the verdict could not be read') : null;
   }
+  if (!text?.trim()) return half === 'pass' ? invalid('the verdict is missing or empty') : null;
+  const verdict = readLineVerdict(text);
+  if (half === 'fail') {
+    return verdict.failed
+      ? {
+          ok: false,
+          detail: `${check.file}: the review failed — ${verdict.failed}. Resolve every failed criterion before advancing.`,
+        }
+      : { ok: true, detail: `${check.file}: no criterion reports FAIL` };
+  }
+  if (verdict.undecided) return invalid(verdict.undecided);
+  if (verdict.criteria === 0 && !verdict.failed)
+    return invalid('no criterion verdicts were provided');
+  return {
+    ok: true,
+    detail: `${check.file}: ${verdict.criteria} criterion ${verdict.criteria === 1 ? 'line reads' : 'lines read'} PASS`,
+  };
 }

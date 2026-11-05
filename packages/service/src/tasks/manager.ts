@@ -929,6 +929,13 @@ export class TaskManager {
        * the request resolver derives it from the launching session.
        */
       requestRef?: Task['requestRef'];
+      /**
+       * Script hashes the owner already vouched for, carried from a schedule
+       * host to its runs. The hashes, never `trustScripts`: a run launches the
+       * book's current version, and re-hashing that would trust scripts
+       * changed since the owner vouched for them.
+       */
+      trustedScriptHashes?: readonly string[];
     },
   ): Promise<Task> {
     const project = await this.store.getProject(projectId);
@@ -1206,15 +1213,18 @@ export class TaskManager {
       ...(strategy ? { strategy } : {}),
       ...(strategyOptions ? { strategyOptions } : {}),
       craftbook,
-      ...(input.trustScripts
+      ...(input.trustScripts || extras?.trustedScriptHashes?.length
         ? {
             cliTrustedScriptHashes: [
-              ...new Set(
-                [
-                  ...Object.values(craftbook.scripts ?? {}),
-                  ...Object.values(spawnsCraftbook?.scripts ?? {}),
-                ].map((source) => createHash('sha256').update(source).digest('hex')),
-              ),
+              ...new Set([
+                ...(extras?.trustedScriptHashes ?? []),
+                ...(input.trustScripts
+                  ? [
+                      ...Object.values(craftbook.scripts ?? {}),
+                      ...Object.values(spawnsCraftbook?.scripts ?? {}),
+                    ].map((source) => createHash('sha256').update(source).digest('hex'))
+                  : []),
+              ]),
             ],
           }
         : {}),
@@ -4159,21 +4169,41 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     // The current book, not the host's snapshot: that snapshot was
     // interpolated with the host's context, and a fix to the book should
     // reach the next scheduled run.
-    const run = await this.create(parent.projectId, {
-      title: parent.title,
-      ...(template?.description ? { description: template.description } : {}),
-      craftbookId: source.catalogId,
-      ...(source.sourceId ? { craftbookSourceId: source.sourceId } : {}),
-      ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
-      // A cron fire is as unattended as a night-shift one.
-      ...(template?.diffpackCapable ? { deliveryMode: 'propose' as const } : {}),
-      ...(parent.nightShift?.enabled ? { nightShift: { enabled: true } } : {}),
-      ...(parent.roleBasedNameOnlyMode !== undefined
-        ? { roleBasedNameOnlyMode: parent.roleBasedNameOnlyMode }
-        : {}),
-      parentTaskRef: parent.ref,
-      createdBy: parent.createdBy,
-    });
+    const run = await this.create(
+      parent.projectId,
+      {
+        title: parent.title,
+        ...(template?.description ? { description: template.description } : {}),
+        craftbookId: source.catalogId,
+        ...(source.sourceId ? { craftbookSourceId: source.sourceId } : {}),
+        ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
+        // Every run is the host's, as a cloned one was: its gezel, its mode and
+        // the scripts its owner trusted. Without the gezel, a book whose entry
+        // step names no role started with nobody on it, and the default overlap
+        // rule then skipped every later fire behind that idle run. A step's own
+        // role still resolves; the host's gezel only fills what nothing names.
+        ...(parent.assignee.kind === 'gezel' ? { assignee: parent.assignee } : {}),
+        // An outcome request fails the launch when the run's book cannot render
+        // as one, so an outcome host's runs resolve their strategy afresh.
+        ...(parent.strategy && parent.strategy !== 'outcome'
+          ? { strategy: parent.strategy }
+          : !parent.strategy && parent.executionMode
+            ? { executionMode: parent.executionMode }
+            : {}),
+        ...(parent.strategyOptions ? { strategyOptions: parent.strategyOptions } : {}),
+        // A cron fire is as unattended as a night-shift one.
+        ...(template?.diffpackCapable ? { deliveryMode: 'propose' as const } : {}),
+        ...(parent.nightShift?.enabled ? { nightShift: { enabled: true } } : {}),
+        ...(parent.roleBasedNameOnlyMode !== undefined
+          ? { roleBasedNameOnlyMode: parent.roleBasedNameOnlyMode }
+          : {}),
+        parentTaskRef: parent.ref,
+        createdBy: parent.createdBy,
+      },
+      parent.cliTrustedScriptHashes
+        ? { trustedScriptHashes: parent.cliTrustedScriptHashes }
+        : undefined,
+    );
     // `create()` hands only an auto-advanced entry to the activation hook;
     // an ordinary entry is dispatched here, as `spawnChild` does.
     const entryStep =

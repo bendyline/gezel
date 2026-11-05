@@ -445,6 +445,8 @@
    opting their surrounding toolbars, author labels, or navigation in. */
 .msg-body,
 .msg-body-rich,
+.msg-failed-banner,
+.msg-warning-banner,
 .msg-handoff-note-headline,
 .msg-handoff-note-context,
 .msg-handoff-note-full,
