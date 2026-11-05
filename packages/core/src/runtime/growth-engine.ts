@@ -55,7 +55,7 @@ export class PortableGrowth {
       ...prev,
       signals,
       xp,
-      lastComputedAt: new Date().toISOString(),
+      lastComputedAt: store.now(),
     };
     // One threshold at a time, and only when nothing is already waiting.
     if (
@@ -77,11 +77,13 @@ export class PortableGrowth {
         state,
         frontmatter: gezel?.parsed.frontmatter ?? {},
         allowKlerk: opts.allowKlerk,
+        // The lookback compares against note days the store dated with this clock.
+        now: () => new Date(store.now()),
         ...(opts.allowKlerk
           ? { inputBudget: await this.deps.proposalBudget().catch(() => 6_000) }
           : {}),
       });
-      state.pendingLevelUp = { toLevel, proposals, createdAt: new Date().toISOString() };
+      state.pendingLevelUp = { toLevel, proposals, createdAt: store.now() };
       await store.writeGezelGrowth(gezelId, state);
       log.info(`${gezelId} reached level ${toLevel} (${proposals.length} proposals)`);
       await this.deps

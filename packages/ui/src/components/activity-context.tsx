@@ -23,8 +23,12 @@ import { setVisibleInterval } from '../visible-interval.js';
 import {
   INDEX_ACTIVITY_LINGER_MS,
   type IndexProgress,
+  type IndexingJob,
+  foldIndexingJob,
   indexingActivityId,
   indexingActivityItem,
+  indexingJobLive,
+  withoutIndexingBackground,
 } from './indexing-activity.js';
 
 interface ActivityState {
@@ -147,21 +151,22 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     }, 5_000);
     const controller = new AbortController();
     const indexTimers = new Map<string, ReturnType<typeof setTimeout>>();
-    const indexStarted = new Set<string>();
+    const indexJobs = new Map<string, IndexingJob>();
     const indexingChanged = (event: IndexProgress) => {
       const id = indexingActivityId(event);
       clearTimeout(indexTimers.get(id));
       indexTimers.delete(id);
-      if (event.state === 'started') indexStarted.add(id);
-      if (event.state === 'ended') indexStarted.delete(id);
-      setIndexProgress((current) => new Map(current).set(id, event));
+      const job = foldIndexingJob(indexJobs.get(id), event);
+      indexJobs.set(id, job);
+      setIndexProgress((current) => new Map(current).set(id, job.shown));
       // A start is a live operation until its end, even during a long scan.
       // Batch-only pulses and completion receipts fade after a quiet spell.
-      if (!indexStarted.has(id)) {
+      if (!indexingJobLive(job)) {
         indexTimers.set(
           id,
           setTimeout(() => {
             indexTimers.delete(id);
+            indexJobs.delete(id);
             setIndexProgress((current) => {
               const next = new Map(current);
               next.delete(id);
@@ -231,7 +236,7 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
         if (!controller.signal.aborted) {
           for (const timer of indexTimers.values()) clearTimeout(timer);
           indexTimers.clear();
-          indexStarted.clear();
+          indexJobs.clear();
           setIndexProgress(new Map());
         }
       }
@@ -248,19 +253,16 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh]);
   const clearReceipts = useCallback(() => setReceipts([]), []);
-  const combinedSnapshot = useMemo(
-    () =>
-      snapshot
-        ? {
-            ...snapshot,
-            items: [
-              ...snapshot.items,
-              ...[...indexProgress.values()].map((event) => indexingActivityItem(event, projects)),
-            ],
-          }
-        : null,
-    [snapshot, indexProgress, projects],
-  );
+  const combinedSnapshot = useMemo(() => {
+    if (!snapshot) return null;
+    const indexing = [...indexProgress.values()].map((event) =>
+      indexingActivityItem(event, projects),
+    );
+    return {
+      ...snapshot,
+      items: [...withoutIndexingBackground(snapshot.items, snapshot.queues, indexing), ...indexing],
+    };
+  }, [snapshot, indexProgress, projects]);
   const value = useMemo(
     () => ({
       snapshot: combinedSnapshot,

@@ -3,5 +3,5 @@
 # hostname has one.
 {$GEZEL_HOSTNAME} {
 	tls internal
-	reverse_proxy gezel:6228
+	reverse_proxy gezel:6230
 }

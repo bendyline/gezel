@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RecognitionManager } from './manager.js';
+import { MockRecognitionProvider } from './mock.js';
 
 let home: string;
 beforeEach(async () => {
@@ -33,5 +34,37 @@ describe('RecognitionManager without a llama.cpp engine', () => {
     const ready = await manager.health();
     expect(ready.state).not.toBe('not-configured');
     expect(ensureEngine).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('RecognitionManager shutdown', () => {
+  it('stops the engine and never starts another one', async () => {
+    const provider = new MockRecognitionProvider();
+    const stop = vi.spyOn(provider, 'shutdown');
+    const manager = new RecognitionManager({ home, env: {}, provider });
+
+    await manager.shutdown();
+
+    expect(stop).toHaveBeenCalledOnce();
+    await expect(
+      manager.recognize({ bytes: Buffer.from('late'), mimeType: 'image/png', mode: 'describe' }),
+    ).rejects.toThrow('Image recognition has stopped.');
+    expect(provider.calls).toHaveLength(0);
+    expect(await manager.isAvailable()).toBe(false);
+  });
+
+  it('stops a provider that was still being built', async () => {
+    const stop = vi.spyOn(MockRecognitionProvider.prototype, 'shutdown');
+    try {
+      const manager = new RecognitionManager({ home, env: { GEZEL_MOCK_PROVIDER: '1' } });
+      const building = manager.current();
+
+      await manager.shutdown();
+
+      expect(stop).toHaveBeenCalledOnce();
+      expect(stop.mock.contexts[0]).toBe(await building);
+    } finally {
+      stop.mockRestore();
+    }
   });
 });

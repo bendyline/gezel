@@ -578,6 +578,20 @@ export function describeSubmission(shard: ScorecardDataset): { title: string; bo
 
 const execFileAsync = promisify(execFile);
 
+const BENCH_RESULT_LABEL = 'bench-result';
+
+/**
+ * gh refuses the whole issue when a label is missing from the repository
+ * ("could not add label: 'bench-result' not found"). Read gh's own stderr: the
+ * error message also repeats the command line, which names the label and
+ * carries the whole shard.
+ */
+function labelMissing(error: unknown): boolean {
+  const { stderr, message } = (error ?? {}) as { stderr?: unknown; message?: unknown };
+  const text = typeof stderr === 'string' && stderr ? stderr : String(message ?? error);
+  return /could not add label/i.test(text) || text.includes(`'${BENCH_RESULT_LABEL}' not found`);
+}
+
 /** `gezel bench submit <file>`: a prefilled issue, through `gh` when it is installed. */
 export async function submitBench(
   file: string,
@@ -600,25 +614,34 @@ export async function submitBench(
     throw new CliError(`${file} holds ${shard.runs.length} runs; submit one run per issue.`);
   }
   const { title, body } = describeSubmission(shard);
-  const params = new URLSearchParams({ title, labels: 'bench-result' });
+  const params = new URLSearchParams({ title, labels: BENCH_RESULT_LABEL });
   // GitHub caps URLs; the full shard travels in the body only through gh.
   const url = `https://github.com/${BENCH_SUBMIT_REPO}/issues/new?${params.toString()}`;
   const gh =
     deps.gh ??
     (async (args: string[]) => (await execFileAsync('gh', args, { encoding: 'utf8' })).stdout);
-  try {
-    const stdout = await gh([
+  const createIssue = (labeled: boolean) =>
+    gh([
       'issue',
       'create',
       '--repo',
       BENCH_SUBMIT_REPO,
       '--title',
       title,
-      '--label',
-      'bench-result',
+      ...(labeled ? ['--label', BENCH_RESULT_LABEL] : []),
       '--body',
       body,
     ]);
+  try {
+    let stdout: string;
+    try {
+      stdout = await createIssue(true);
+    } catch (error) {
+      // The label only sorts submissions; an issue without it still reaches
+      // the maintainers, which beats sending the person to a web form.
+      if (!labelMissing(error)) throw error;
+      stdout = await createIssue(false);
+    }
     const issueUrl = stdout.trim().split('\n').pop() ?? '';
     io.out(`Opened ${issueUrl}`);
     return { title, body, url, issueUrl };

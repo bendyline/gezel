@@ -23,6 +23,8 @@ const id = randomBytes(4).toString('hex');
 const name = `gezel-smoke-${id}`;
 const volume = `gezel-smoke-${id}`;
 const port = 20000 + Math.floor(Math.random() * 20000);
+// The image's GEZEL_CONTAINER_PORT, which the docs publish on both sides.
+const containerPort = 6230;
 const base = `http://127.0.0.1:${port}`;
 const cleanup = [];
 
@@ -78,7 +80,7 @@ function runService(extra = []) {
     '--name',
     name,
     '-p',
-    `127.0.0.1:${port}:6228`,
+    `127.0.0.1:${port}:${containerPort}`,
     '-v',
     `${volume}:/gezel`,
     '-e',
@@ -104,7 +106,7 @@ async function main() {
     name,
     'node',
     '-e',
-    "require('node:http').get({host:'127.0.0.1',port:6228,path:'/api/health',headers:{Host:'attacker.example'}},r=>process.exit(r.statusCode===403?0:1))",
+    `require('node:http').get({host:'127.0.0.1',port:${containerPort},path:'/api/health',headers:{Host:'attacker.example'}},r=>process.exit(r.statusCode===403?0:1))`,
   ]);
   assert(foreign.status === 0, 'a hostname nobody configured is refused');
   assert((await call('GET', '/api/projects')).status === 401, 'the API needs a sign-in');
@@ -112,8 +114,13 @@ async function main() {
   step('the setup link creates the first account');
   // The service logs to stderr; docker logs replays both streams.
   const logs = spawnSync('docker', ['logs', name], { encoding: 'utf8' });
-  const code = /\?setup=([0-9A-Z-]+)/.exec(`${logs.stdout}${logs.stderr}`)?.[1];
+  const link = /(\S+)\?setup=([0-9A-Z-]+)/.exec(`${logs.stdout}${logs.stderr}`);
+  const code = link?.[2];
   assert(Boolean(code), 'the logs carry a setup link');
+  assert(
+    link?.[1] === `http://localhost:${containerPort}/`,
+    `the setup link names the documented address (got ${link?.[1]})`,
+  );
   const setup = await call('POST', '/v1/apps/signin/setup', {
     body: { code, name: 'Smoke', password: 'smoke-password' },
   });

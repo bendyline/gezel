@@ -5,6 +5,7 @@ import type { ChatComposerProps } from './ChatComposer.js';
 import { PageChat } from './PageChat.js';
 
 const composer = vi.hoisted(() => vi.fn());
+const timeline = vi.hoisted(() => vi.fn());
 vi.mock('../api.js', async () => {
   const { createMockApi } = await import('../test-utils/mockApi.js');
   return { api: createMockApi() };
@@ -20,14 +21,14 @@ vi.mock('./ChatComposer.js', () => ({
   },
 }));
 vi.mock('./ProjectTimeline.js', () => ({
-  ProjectTimeline: ({
-    gezelId,
-    activeSessionId,
-  }: { gezelId: string; activeSessionId?: string }) => (
-    <span>
-      Timeline {gezelId} {activeSessionId}
-    </span>
-  ),
+  ProjectTimeline: (props: { gezelId: string; activeSessionId?: string }) => {
+    timeline(props);
+    return (
+      <span>
+        Timeline {props.gezelId} {props.activeSessionId}
+      </span>
+    );
+  },
 }));
 vi.mock('./SessionSwitcher.js', () => ({ SessionSwitcher: () => <span>Threads</span> }));
 
@@ -69,6 +70,16 @@ describe('native page chat', () => {
     await waitFor(() =>
       expect(composer.mock.lastCall?.[0]).toMatchObject({ gezelId: 'ada', sessionId: undefined }),
     );
+  });
+  it('names the gezel by role when names and poppetjes are off', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ roleBasedNameOnlyMode: true } as never);
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [{ id: 'mira', name: 'Mira', role: 'Opponent', roleBasedName: 'opponent' }],
+    } as never);
+    render(<PageChat projectId="board" options={{}} />);
+    expect(await screen.findByRole('region', { name: 'Chat with opponent' })).toBeInTheDocument();
+    expect(timeline.mock.lastCall?.[0]).toMatchObject({ emptyPlaceholder: 'Talk with opponent.' });
+    expect(screen.queryByText(/Mira/)).not.toBeInTheDocument();
   });
   it('never substitutes another recipient when a requested crew member is absent', async () => {
     render(<PageChat projectId="board" options={{ gezelId: 'outside' }} />);

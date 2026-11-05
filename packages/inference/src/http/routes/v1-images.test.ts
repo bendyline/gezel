@@ -80,6 +80,60 @@ describe('/v1/images on hosted inference', () => {
     expect(chat.data.some((m) => m.id.startsWith('sd-cpp:'))).toBe(false);
   });
 
+  it('leaves out models that only change a picture, and refuses them by name', async () => {
+    const provider = new MockImageProvider({
+      preinstalled: [
+        // Listed without the flag, as an engine older than it would: the
+        // catalog and the assessment map still know it only edits.
+        {
+          id: 'qwen-image-edit-2511-q4',
+          name: 'Qwen Image Edit',
+          approxSizeBytes: 1,
+          installedAt: '2026-11-01T00:00:00Z',
+        },
+        // Not in the catalog, so only its own listing says so.
+        {
+          id: 'private-edit-model',
+          name: 'Private edit model',
+          approxSizeBytes: 1,
+          installedAt: '2026-11-01T00:00:00Z',
+          editOnly: true,
+        },
+        { id: 'sd-1.5', name: 'SD 1.5', approxSizeBytes: 1, installedAt: '2026-11-01T00:00:00Z' },
+      ],
+    });
+    const generated = vi.spyOn(provider, 'generate');
+    const request = await start(provider);
+
+    const ids = AppImageModelListSchema.parse(
+      await (await request('/v1/images/models')).json(),
+    ).data.map((m) => m.id);
+    expect(ids).toContain('sd-cpp:sd-1.5');
+    expect(ids).not.toContain('sd-cpp:qwen-image-edit-2511-q4');
+    expect(ids).not.toContain('sd-cpp:private-edit-model');
+
+    const render = await request('/v1/images/generations', {
+      body: { prompt: 'a lighthouse', model: 'sd-cpp:qwen-image-edit-2511-q4' },
+    });
+    expect(render.status).toBe(409);
+    expect(await render.json()).toMatchObject({
+      error: {
+        code: 'edit_only_model',
+        message: expect.stringContaining('Qwen Image Edit only changes a picture'),
+      },
+    });
+    expect(generated).not.toHaveBeenCalled();
+
+    // Not installed: the catalog's declaration keeps an app from fetching
+    // gigabytes no generation here can use.
+    await provider.deleteModel('qwen-image-edit-2511-q4');
+    const ensure = await request('/v1/images/models/ensure', {
+      body: { model: 'sd-cpp:qwen-image-edit-2511-q4' },
+    });
+    expect(ensure.status).toBe(409);
+    expect(await ensure.json()).toMatchObject({ error: { code: 'edit_only_model' } });
+  });
+
   it('installs a model through ensure, then renders it as a PNG', async () => {
     const request = await start(new MockImageProvider());
     const before = await request('/v1/images/generations', { body: { prompt: 'a lighthouse' } });

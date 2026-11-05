@@ -304,24 +304,26 @@ describe('PID reuse does not preserve old memory claims', () => {
   });
 
   it('removes a queued claim when its owner PID is reused', async () => {
-    const { ledger, identities } = await fixture();
+    const { ledger, make, identities } = await fixture();
     const held = request(90, false, 3);
     await ledger.execute(held);
     const old = request(20);
     expect((await ledger.execute(old)).state).toBe('waiting');
     identities.set(1, 'replacement-owner');
     await ledger.execute({ action: 'release', id: held.id });
-    expect((await ledger.execute(request(20, false, 2))).state).toBe('granted');
+    // A fresh coordinator reads the stamp; this one trusts its cached stamp
+    // for a few seconds first (see process-identity.test.ts in inference).
+    expect((await make().execute(request(20, false, 2))).state).toBe('granted');
     expect((await ledger.execute({ action: 'status', id: old.id })).state).toBe('released');
   });
 
   it('keeps an engine reservation when its birth stamp cannot be read', async () => {
-    const { ledger, identities } = await fixture();
+    const { ledger, make, identities } = await fixture();
     const held = request(90);
     await ledger.execute(held);
     await ledger.execute({ action: 'bind', id: held.id, childPid: 101 });
     identities.clear();
-    expect((await ledger.execute(request(20, false, 2))).state).toBe('waiting');
+    expect((await make().execute(request(20, false, 2))).state).toBe('waiting');
   });
 
   it('preserves legacy claims with no captured birth stamp', async () => {
@@ -354,7 +356,8 @@ it('does not prune a claim acquired while another coordinator probes older proce
     alive: (pid) => live.has(pid),
     identities: probe,
   });
-  const pending = slow.execute({ action: 'status', id: old.id });
+  // A waiting request is what makes a coordinator read stamps at all.
+  const pending = slow.execute(request(30, false, 3));
   await vi.waitFor(() => expect(probe).toHaveBeenCalled());
   await ledger.execute({ action: 'release', id: old.id });
   identities.set(101, 'replacement-engine');

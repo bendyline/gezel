@@ -72,7 +72,7 @@ COPY image.json /opt/gezel/image.json
 ENV PATH="/opt/gezel/node:/opt/gezel/app:${PATH}" \
     GEZEL_HOME=/gezel/home \
     GEZEL_CONTAINER=1 \
-    GEZEL_CONTAINER_PORT=6228 \
+    GEZEL_CONTAINER_PORT=6230 \
     GEZEL_PORT=16228 \
     GEZEL_INSECURE_TRANSPORT=1 \
     GEZEL_SERVICE_ROLE=user \
@@ -93,7 +93,7 @@ USER gezel
 # WORKDIR of its own became a "work" project, crew and all, on the first run.
 WORKDIR /gezel
 VOLUME ["/gezel"]
-EXPOSE 6228
+EXPOSE 6230
 STOPSIGNAL SIGTERM
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
   CMD ["gezel-entrypoint", "health"]

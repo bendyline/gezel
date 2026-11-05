@@ -120,6 +120,7 @@ import type {
 } from '../types.js';
 import {
   asyncHandoffClosing,
+  asyncHandoffRecipient,
   immediateFileWriteClosing,
   isSuccessfulAsyncHandoff,
 } from './async-file-handoff.js';
@@ -143,6 +144,7 @@ import {
 } from './reasoning-stream.js';
 import { applyMlxRequestShape } from './request-shape.js';
 import {
+  MLX_IMAGE_RESERVED_CHARS,
   PRE_FIRST_BYTE_BASE_MS,
   buildMidStreamDropMessage,
   buildPreFirstByteAbortMessage,
@@ -930,7 +932,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
       if (typeof m.content === 'string') total += m.content.length;
       // The sidecar bounds images to 1024px. Reserve patch tokens without
       // counting base64 bytes as language tokens or treating pixels as free.
-      total += (m.images?.length ?? 0) * 8192;
+      total += (m.images?.length ?? 0) * MLX_IMAGE_RESERVED_CHARS;
       if (m.tool_calls) {
         for (const tc of m.tool_calls)
           total += tc.function.arguments.length + tc.function.name.length;
@@ -1795,7 +1797,8 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         //   - STREAMING_IDLE_MS: budget between two consecutive SSE
         //     content events once tokens are flowing. Generous enough
         //     to cover a heavy reasoning gap on a 26B model.
-        const approxPromptTokens = estimatePromptTokens(this.messages, body.tools);
+        // The request as sent: an image retired from it costs no prefill.
+        const approxPromptTokens = estimatePromptTokens(body.messages, body.tools);
         const PRE_FIRST_BYTE_IDLE_MS = computePreFirstByteBudgetMs(approxPromptTokens);
         const PRE_FIRST_BYTE_PER_PROGRESS_MS = PRE_FIRST_BYTE_IDLE_MS;
         const STREAMING_IDLE_MS = 300_000;
@@ -3147,7 +3150,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           tool_calls: toolCalls,
         });
         let abortDueToFailureLoop: ToolFailureLoop | null = null;
-        let asyncHandoffCount = 0;
+        const asyncHandoffRecipients: (string | undefined)[] = [];
         let terminalActionClosing: string | null = null;
         const toolImages: string[] = [];
         const immediateFileWritePaths: string[] = [];
@@ -3328,7 +3331,7 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               askedQuestionThisTurn = true;
             }
             if (isSuccessfulAsyncHandoff(call.function.name, output)) {
-              asyncHandoffCount++;
+              asyncHandoffRecipients.push(asyncHandoffRecipient(output));
             }
             if (
               (immediateFileWriteTurn || writeContinuationActive) &&
@@ -3525,13 +3528,13 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           );
           return fullText;
         }
-        if (asyncHandoffCount > 0) {
-          const closingText = asyncHandoffClosing(asyncHandoffCount);
+        if (asyncHandoffRecipients.length > 0) {
+          const closingText = asyncHandoffClosing(asyncHandoffRecipients);
           this.messages.push({ role: 'assistant', content: closingText });
           fullText = closingText;
           log.info(
             `turn#${seq} END async-handoff-bail afterMs=${Date.now() - start} ` +
-              `handoffs=${asyncHandoffCount} loopTurns=${turn + 1}`,
+              `handoffs=${asyncHandoffRecipients.length} loopTurns=${turn + 1}`,
           );
           return fullText;
         }

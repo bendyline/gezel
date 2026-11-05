@@ -2944,6 +2944,9 @@ export async function startProductService(
       await shutdownStep('Windows script sandbox', () => windowsScriptSandboxStopped);
       await shutdownStep('image provider', () => imageProvider.shutdown());
       await shutdownStep('video provider', () => videoProvider.shutdown());
+      // After cameras and index enrichment, its last background callers. The
+      // vision engine is its own process and outlives the daemon unless stopped.
+      await shutdownStep('image recognition', () => recognition.shutdown());
       await shutdownStep('speech recognition', () => stt.shutdown());
       await shutdownStep('speech synthesis', () => tts.shutdown());
       clearInterval(idleSummarizerTimer);

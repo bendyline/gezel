@@ -12,7 +12,7 @@ import {
 import { type RunningService, startService } from './service.js';
 
 // The container listener as a container runs it: GEZEL_CONTAINER on (forced,
-// since the test is not in one), an ephemeral port instead of 6228, and the
+// since the test is not in one), an ephemeral port instead of 6230, and the
 // accounts it requires.
 let svc: RunningService;
 let home: string;
@@ -220,7 +220,7 @@ describe('container listener settings', () => {
     expect(off.refusedBecause).toContain('GEZEL_CONTAINER_FORCE');
     expect(resolveContainerListener({ GEZEL_CONTAINER: '1' }, () => true)).toEqual({
       enabled: true,
-      port: 6228,
+      port: 6230,
     });
     expect(resolveContainerListener({}, () => true).enabled).toBe(false);
   });

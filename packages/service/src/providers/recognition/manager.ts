@@ -39,6 +39,7 @@ export class RecognitionManager {
   private readonly ensureEngine?: () => Promise<{ detail: string } | undefined>;
   /** In-flight recognitions keyed by cache key — see {@link recognize}. */
   private readonly inFlight = new Map<string, Promise<ImageRecognition>>();
+  private closed = false;
 
   constructor(opts: RecognitionManagerOptions) {
     this.home = opts.home;
@@ -54,6 +55,7 @@ export class RecognitionManager {
   }
 
   async current(): Promise<RecognitionProvider> {
+    if (this.closed) throw new Error('Image recognition has stopped.');
     // The engine arrived after this provider was built (a background
     // download finished and stamped its path): build again so it is used.
     if (this.provider && this.builtWithEngine !== this.engineBinary()) {
@@ -68,7 +70,7 @@ export class RecognitionManager {
         ...(this.env ? { env: this.env } : {}),
       })
         .then((p) => {
-          this.provider = p;
+          if (!this.closed) this.provider = p;
           return p;
         })
         .finally(() => {
@@ -158,7 +160,19 @@ export class RecognitionManager {
     await this.cache.clear();
   }
 
+  /**
+   * Stop the engine for good. A provider still being built is stopped once it
+   * arrives, and nothing is built after this, so a late request cannot start
+   * an engine that outlives the daemon.
+   */
   async shutdown(): Promise<void> {
-    await this.provider?.shutdown().catch(() => {});
+    this.closed = true;
+    const provider = this.provider;
+    const building = this.building;
+    this.provider = null;
+    this.building = null;
+    await provider?.shutdown().catch(() => {});
+    const late = await building?.catch(() => null);
+    await late?.shutdown().catch(() => {});
   }
 }

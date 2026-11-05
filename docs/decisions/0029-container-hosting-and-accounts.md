@@ -2,6 +2,9 @@
 
 Status: Accepted (2026-11). Amends [0004](0004-accounts-and-project-acls.md) option (c).
 Contracts: [container.md](../container.md), [accounts.md](../accounts.md).
+Amended (2026-11): the container listener moved from 6228 to 6230 after the
+1.2.12 image, because the desktop app's machine service holds host port 6228
+([container.md](../container.md#the-container-listener)).
 
 ## Context
 
@@ -11,7 +14,7 @@ both make local AI depend on the host's C library, Node and drivers. A Docker
 image fixes that, and it should be one command:
 
 ```sh
-docker run -d --name gezel -p 127.0.0.1:6228:6228 -v gezel:/gezel ghcr.io/bendyline/gezel
+docker run -d --name gezel -p 127.0.0.1:6230:6230 -v gezel:/gezel ghcr.io/bendyline/gezel
 ```
 
 Five things stood in the way:
@@ -39,7 +42,7 @@ Five things stood in the way:
 1. **A container listener, never a widened loopback app.** With
    `GEZEL_CONTAINER=1` and a container detected, the daemon builds a second
    app (`buildApp` with a host policy and a route denylist) and binds it on
-   `0.0.0.0:6228`. The main listener stays on loopback for the in-container
+   `0.0.0.0:6230`. The main listener stays on loopback for the in-container
    CLI, MCP children and the healthcheck. The container's network namespace
    and Docker's publish (`127.0.0.1:` by default) bound who can connect. The
    listener requires a signed-in account or an app token, never the owner

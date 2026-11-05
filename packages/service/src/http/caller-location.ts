@@ -64,3 +64,6 @@ export const CAMERA_PIXELS_WITHHELD =
 
 export const CAMERA_PIXELS_CLOUD_ENGINE =
   "This camera's pictures stay on this computer, so they can't be sent to a cloud image engine. Pick an on-device image model, or turn on Let cloud AI see these pictures for this camera.";
+
+export const CAMERA_PIXELS_PAIRED_ENGINE =
+  "This camera's pictures stay on this computer, so they can't be sent to another computer's image engine. Pick an image model on this computer, or turn on Let cloud AI see these pictures for this camera.";

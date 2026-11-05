@@ -564,6 +564,8 @@
   user-select: none;
 }
 
+/* Chrome still holds text people copy: commands, paths and identifiers set
+   in `code`, and what went wrong (`[role="alert"]`, `.error`). */
 :where(
     input:not([type]),
     input[type="email"],
@@ -577,11 +579,24 @@
     [contenteditable=""],
     [contenteditable="true"],
     [contenteditable="plaintext-only"],
+    code,
+    kbd,
     pre,
+    samp,
+    [role="alert"],
+    .error,
     .gz-selectable-text
   ) {
   -webkit-user-select: text;
   user-select: text;
+}
+
+/* An identifier, shortcut or error drawn inside a control is part of the
+   control: dragging across a button or menu row must not select it. */
+:where(button, select, summary, [role="button"], [role="tab"], [role="menuitem"], [role="option"])
+  :where(code, kbd, samp, [role="alert"], .error) {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Form controls don't inherit font-family by default in most browsers —

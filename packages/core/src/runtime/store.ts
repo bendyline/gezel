@@ -56,6 +56,10 @@ export class PortableStore {
   get version(): string {
     return this.repo.version;
   }
+  /** The clock every stored timestamp comes from; logic comparing against them reads this. */
+  now(): string {
+    return this.repo.now();
+  }
   private run<T>(operation: (repo: PortableRepository) => Promise<T>): Promise<T> {
     return this.repo.run(() => operation(this.repo));
   }

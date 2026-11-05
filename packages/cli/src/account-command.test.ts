@@ -44,7 +44,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     },
     listAccountSessions: async () => ({ sessions: [] }),
     signOutAccountEverywhere: async () => ({ signedOut: 2 }),
-    createSetupLink: async () => ({ code: 'ABCDE', url: 'http://localhost:6228/?setup=ABCDE' }),
+    createSetupLink: async () => ({ code: 'ABCDE', url: 'http://localhost:6230/?setup=ABCDE' }),
     ...overrides,
   };
   const program = new Command().exitOverride();
@@ -110,6 +110,6 @@ describe('gezel account', () => {
   it('prints the setup link', async () => {
     const { run, lines } = harness();
     await run('setup-link');
-    expect(lines[0]).toContain('http://localhost:6228/?setup=ABCDE');
+    expect(lines[0]).toContain('http://localhost:6230/?setup=ABCDE');
   });
 });

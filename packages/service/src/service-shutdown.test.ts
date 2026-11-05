@@ -60,4 +60,18 @@ describe('service shutdown', () => {
 
     expect(drainBackground).toHaveBeenCalledOnce();
   }, 30_000);
+
+  it('stops the image recognition engine', async () => {
+    process.env.GEZEL_MOCK_PROVIDER = '1';
+    process.env.GEZEL_SECRETS_BACKEND = 'file';
+    process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP = '1';
+    home = await mkdtemp(join(tmpdir(), 'gezel-service-shutdown-'));
+    service = await startService({ home });
+    const recognitionStopped = vi.spyOn(service.context.recognition, 'shutdown');
+
+    await service.stop();
+    stopped = true;
+
+    expect(recognitionStopped).toHaveBeenCalledOnce();
+  }, 30_000);
 });

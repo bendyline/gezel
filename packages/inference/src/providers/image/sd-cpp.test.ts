@@ -5,6 +5,9 @@ import { join } from 'node:path';
 import { ImageModelAuxiliaryFileSchema } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  MODEL_CFG_DEFAULTS,
+  MODEL_SAMPLER_DEFAULTS,
+  MODEL_SAMPLE_STEP_DEFAULTS,
   StableDiffusionCppProvider,
   parseSamplingProgress,
   withoutEngineDirectives,
@@ -1276,6 +1279,75 @@ describe('StableDiffusionCppProvider LoRAs', () => {
       'Soft watercolor does not fit flux-2-klein-4b-q4, so it was left out.',
       'missing-style is not installed here, so the picture was drawn without it.',
       'The image engine could not load Pixel art, so it was left out.',
+    ]);
+  });
+
+  it("renders on the model's own settings when the engine drops its fast mode", async () => {
+    await installLora('qwen-image-edit-2511-lightning-4step', {
+      name: 'Fast mode',
+      purpose: 'speed',
+      baseModels: ['qwen-image-edit-2511-q4'],
+      render: { steps: 4, cfg: 1, sampler: 'euler', scheduler: 'simple' },
+    });
+    await installLora('qwen-image-edit-2511-anime', {
+      name: 'Anime',
+      purpose: 'style',
+      baseModels: ['qwen-image-edit-2511-q4'],
+      render: { steps: 30 },
+    });
+    // The engine sees the style but not the fast mode.
+    const { calls, fetchImpl } = engine(['qwen-image-edit-2511-anime/lora.safetensors']);
+    const provider = new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      loraRoots: loraRoots(),
+      fetchImpl,
+    });
+
+    const out = await provider.generate({
+      prompt: 'make the car blue',
+      model: 'qwen-image-edit-2511-q4',
+      inputImages: [{ data: Buffer.from('car'), mimeType: 'image/png' }],
+      loras: [{ id: 'qwen-image-edit-2511-lightning-4step' }, { id: 'qwen-image-edit-2511-anime' }],
+    });
+
+    const render = calls.find((c) => c.url.endsWith('/txt2img'))!;
+    // The style still applies, and its recipe with it; the dropped fast
+    // mode's 4 steps, CFG 1, sampler and scheduler do not.
+    expect(render.body).toMatchObject({
+      steps: 30,
+      cfg_scale: MODEL_CFG_DEFAULTS.get('qwen-image-edit-2511-q4'),
+      lora: [{ path: 'qwen-image-edit-2511-anime/lora.safetensors', multiplier: 1 }],
+    });
+    expect(render.body!.sampler_name).toBe(MODEL_SAMPLER_DEFAULTS.get('qwen-image-edit-2511-q4'));
+    expect(render.body).not.toHaveProperty('scheduler');
+    expect(out.meta.steps).toBe(30);
+    expect(out.meta.loras).toEqual([{ id: 'qwen-image-edit-2511-anime', name: 'Anime' }]);
+    expect(out.meta.settingsNotes).toEqual([
+      'The image engine could not load Fast mode, so it was left out.',
+    ]);
+
+    // With nothing applied, the model's own steps and CFG stand.
+    const bare = engine([]);
+    const out2 = await new StableDiffusionCppProvider({
+      baseUrl: 'http://fake:9081',
+      modelsRoot,
+      loraRoots: loraRoots(),
+      fetchImpl: bare.fetchImpl,
+    }).generate({
+      prompt: 'make the car blue',
+      model: 'qwen-image-edit-2511-q4',
+      inputImages: [{ data: Buffer.from('car'), mimeType: 'image/png' }],
+      loras: [{ id: 'qwen-image-edit-2511-lightning-4step' }],
+    });
+    expect(bare.calls.find((c) => c.url.endsWith('/txt2img'))!.body).toMatchObject({
+      steps: MODEL_SAMPLE_STEP_DEFAULTS.get('qwen-image-edit-2511-q4'),
+      cfg_scale: MODEL_CFG_DEFAULTS.get('qwen-image-edit-2511-q4'),
+      lora: [],
+    });
+    expect(out2.meta.steps).toBe(MODEL_SAMPLE_STEP_DEFAULTS.get('qwen-image-edit-2511-q4'));
+    expect(out2.meta.settingsNotes).toEqual([
+      'The image engine could not load Fast mode, so it was left out.',
     ]);
   });
 

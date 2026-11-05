@@ -23,6 +23,7 @@ import { type Context, Hono } from 'hono';
 
 import { capAgentImageSize } from '../../providers/image/agent-size.js';
 import { NoLocalImageModelError } from '../../providers/image/factory.js';
+import { RemoteImageProvider } from '../../providers/image/remote-image.js';
 import { sdCppHonorsNegativePrompt } from '../../providers/image/sd-cpp.js';
 import {
   type ImageInputBytes,
@@ -32,6 +33,7 @@ import {
 import { parseRemoteModelId } from '../../providers/remote/model-id.js';
 import {
   CAMERA_PIXELS_CLOUD_ENGINE,
+  CAMERA_PIXELS_PAIRED_ENGINE,
   CAMERA_PIXELS_WITHHELD,
   callerMaySeeFilePixels,
   cameraKeepsFileLocal,
@@ -120,7 +122,7 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         c,
         projectId,
         req.inputImages,
-        providerKind(provider.name),
+        imageEnginePlacement(provider),
       );
       if (withheld) return c.json({ error: withheld }, 403);
       try {
@@ -514,12 +516,24 @@ function buildPrompt(
  * must be allowed to see the camera's pictures. Base64 inputs carry no path,
  * so only the routes that hand out a keyframe's bytes guard them.
  */
+/**
+ * Where an engine renders, for a camera's pictures. A paired server's provider
+ * names itself local, but it renders on another computer with whatever engine
+ * that server has picked, a cloud one included, and it can change that at any
+ * time, so this side cannot vouch for it. The machine broker is a paired
+ * remote by transport only: it runs on this computer and renders on-device.
+ */
+function imageEnginePlacement(provider: ImageProvider): 'this-computer' | 'paired' | 'cloud' {
+  if (provider instanceof RemoteImageProvider && !provider.onThisComputer) return 'paired';
+  return providerKind(provider.name) === 'cloud' ? 'cloud' : 'this-computer';
+}
+
 async function cameraInputWithheld(
   ctx: ServiceContext,
   c: Context,
   projectId: string,
   inputs: ImageInputSource[],
-  engine: 'local' | 'cloud',
+  engine: 'this-computer' | 'paired' | 'cloud',
 ): Promise<string | null> {
   const project = await ctx.store.getProject(projectId).catch(() => null);
   if (!project) return null;
@@ -529,6 +543,7 @@ async function cameraInputWithheld(
     const file = await ctx.store.resolveProjectArtifactReadPath(projectId, stripped);
     if (!file || !(await cameraKeepsFileLocal(ctx, project, file))) continue;
     if (engine === 'cloud') return CAMERA_PIXELS_CLOUD_ENGINE;
+    if (engine === 'paired') return CAMERA_PIXELS_PAIRED_ENGINE;
     if (!(await callerMaySeeFilePixels(ctx, c, project, file))) return CAMERA_PIXELS_WITHHELD;
   }
   return null;

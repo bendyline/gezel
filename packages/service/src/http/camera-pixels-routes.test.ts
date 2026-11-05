@@ -4,7 +4,12 @@ import { join, resolve } from 'node:path';
 import type { ProjectConnectorBinding } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { CAMERA_PIXELS_CLOUD_ENGINE, CAMERA_PIXELS_WITHHELD } from './caller-location.js';
+import { RemoteImageProvider } from '../providers/image/remote-image.js';
+import {
+  CAMERA_PIXELS_CLOUD_ENGINE,
+  CAMERA_PIXELS_PAIRED_ENGINE,
+  CAMERA_PIXELS_WITHHELD,
+} from './caller-location.js';
 import type { ServiceContext } from './context.js';
 import { imageGenRoutes } from './routes/image-gen.js';
 import { renderRoutes } from './routes/render.js';
@@ -41,12 +46,21 @@ function camera(allowCloudModels: boolean): ProjectConnectorBinding {
   };
 }
 
-function harness(opts: { session: string; engine: string; allowCloud?: boolean }) {
+function harness(opts: {
+  session: string;
+  engine: string;
+  allowCloud?: boolean;
+  provider?: unknown;
+}) {
   const reached = new Error('reached the engine');
   const generate = vi.fn(async () => {
     throw reached;
   });
-  const provider = { name: opts.engine, generate, listInstalledModels: async () => [] };
+  const provider = opts.provider ?? {
+    name: opts.engine,
+    generate,
+    listInstalledModels: async () => [],
+  };
   const ctx = {
     store: {
       getProject: async (id: string) => ({ id, connectors: [camera(opts.allowCloud ?? false)] }),
@@ -161,6 +175,53 @@ describe('camera keyframes in the image tools', () => {
     const h = harness({ session: 'copilot', engine: 'google-ai', allowCloud: true });
     expect((await h.render(KEYFRAME)).status).toBe(200);
     expect(await h.image(KEYFRAME)).toEqual({ status: 500, error: 'reached the engine' });
+  });
+
+  // A paired server names itself local but renders with whatever engine it
+  // has picked, which can be a cloud one this computer cannot see.
+  function pairedServer(onThisComputer: boolean) {
+    const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => {
+      throw new Error('reached the engine');
+    });
+    const provider = new RemoteImageProvider({
+      remoteId: onThisComputer ? 'machine' : 'office-pc',
+      label: onThisComputer ? 'This computer' : 'Office PC',
+      baseUrl: 'https://192.168.1.20:6229',
+      token: 't',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      onThisComputer,
+    });
+    return { provider, fetch };
+  }
+
+  it("never sends a keyframe to a paired server's engine", async () => {
+    const paired = pairedServer(false);
+    const h = harness({ session: 'llama-cpp', engine: 'unused', provider: paired.provider });
+    expect(await h.image(KEYFRAME)).toEqual({ status: 403, error: CAMERA_PIXELS_PAIRED_ENGINE });
+    expect(paired.fetch).not.toHaveBeenCalled();
+  });
+
+  it("uses this computer's machine engine for a keyframe", async () => {
+    const broker = pairedServer(true);
+    const h = harness({ session: 'llama-cpp', engine: 'unused', provider: broker.provider });
+    expect(await h.image(KEYFRAME)).toEqual({ status: 500, error: 'reached the engine' });
+    expect(broker.fetch.mock.calls.map(([url]) => String(url))).toContain(
+      'https://192.168.1.20:6229/v1/remote/image/generate',
+    );
+  });
+
+  it('lets a paired server use a camera that allows cloud AI, and other images', async () => {
+    const allowed = pairedServer(false);
+    const h = harness({
+      session: 'llama-cpp',
+      engine: 'unused',
+      provider: allowed.provider,
+      allowCloud: true,
+    });
+    expect(await h.image(KEYFRAME)).toEqual({ status: 500, error: 'reached the engine' });
+    const other = pairedServer(false);
+    const h2 = harness({ session: 'llama-cpp', engine: 'unused', provider: other.provider });
+    expect(await h2.image(CHART)).toEqual({ status: 500, error: 'reached the engine' });
   });
 
   it('leaves images outside the camera alone', async () => {

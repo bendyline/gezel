@@ -32,13 +32,21 @@ export interface RemoteImageProviderOpts {
    * no model runs this one there instead of the broker's alphabetically first.
    */
   defaultModelId?: () => Promise<string | undefined>;
+  /**
+   * The machine broker: this computer's own engine host, which renders
+   * on-device only. Any other paired server renders on another computer with
+   * whatever engine it has picked, a cloud one included.
+   */
+  onThisComputer?: boolean;
 }
 
 export class RemoteImageProvider implements ImageProvider {
   readonly name: string;
+  readonly onThisComputer: boolean;
 
   constructor(private readonly opts: RemoteImageProviderOpts) {
     this.name = `remote:${opts.label}`;
+    this.onThisComputer = opts.onThisComputer ?? false;
   }
 
   private headers(): Record<string, string> {

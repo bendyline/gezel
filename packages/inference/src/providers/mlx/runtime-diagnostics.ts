@@ -166,11 +166,29 @@ export function buildMidStreamDropMessage(
   return `[Mac AI] the on-device engine dropped the connection mid-turn (${got}). This usually means the mlx server crashed, ran out of memory, or was restarted while the turn was streaming — this turn's work was lost. Retry the turn; if it keeps happening, restart the engine in Settings → On-device.`;
 }
 
+/**
+ * Prompt characters one attached image stands for. The sidecar bounds images
+ * to 1024px, so their patch tokens are bounded too, and base64 bytes are never
+ * read as language tokens.
+ */
+export const MLX_IMAGE_RESERVED_CHARS = 8192;
+
 /** Estimate request tokens from message bodies and serialized tool schemas. */
 export function estimatePromptTokens(messages: unknown, tools: unknown): number {
   let chars = 0;
   try {
-    chars += JSON.stringify(messages)?.length ?? 0;
+    // Counted as base64, one generated picture read as ~1.1M tokens: an
+    // image gezel's six renders and reads put the estimate past 6M while the
+    // engine prefilled 14K (qwen3.8-27b, 2026-11-04).
+    let images = 0;
+    const text = JSON.stringify(messages, (key, value: unknown) => {
+      if (key === 'images' && Array.isArray(value)) {
+        images += value.length;
+        return undefined;
+      }
+      return value;
+    });
+    chars += (text?.length ?? 0) + images * MLX_IMAGE_RESERVED_CHARS;
   } catch {
     /* circular or unstringifiable */
   }

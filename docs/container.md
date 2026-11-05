@@ -59,7 +59,7 @@ The process runs as uid/gid 10001 under `tini`. The image sets:
 | Variable | Value | Why |
 | --- | --- | --- |
 | `GEZEL_CONTAINER` | `1` | turns on the container listener (below) |
-| `GEZEL_CONTAINER_PORT` | `6228` | the published port |
+| `GEZEL_CONTAINER_PORT` | `6230` | the published port (below) |
 | `GEZEL_PORT` | `16228` | the internal loopback listener: in-container CLI, MCP children, healthcheck |
 | `GEZEL_INSECURE_TRANSPORT` | `1` | that loopback is the container's own |
 | `GEZEL_SERVICE_ROLE` | `user` | a full product daemon, never the engine broker |
@@ -93,7 +93,7 @@ anything else runs `gezel <args>`. `gezeld` runs directly, not under
 `http/container-listener.ts`. Enabled when `GEZEL_CONTAINER=1` and the
 process is in a container (`/.dockerenv`, `/run/.containerenv`, or a
 container cgroup); `GEZEL_CONTAINER_FORCE=1` overrides the detection. It
-binds `0.0.0.0:6228` with a second app from `buildApp(…, { listener:
+binds `0.0.0.0:6230` with a second app from `buildApp(…, { listener:
 'container' })`:
 
 - **Host policy.** Loopback names always; an IP literal only with
@@ -113,9 +113,19 @@ binds `0.0.0.0:6228` with a second app from `buildApp(…, { listener:
   labeled "from the network" in Integrations.
 - **Ollama emulation** is never mounted.
 
-The listener speaks plain HTTP. The default publish (`127.0.0.1:6228`)
+The listener speaks plain HTTP. The default publish (`127.0.0.1:6230`)
 keeps it on the Docker host. Anything wider goes through a TLS proxy
 (`docker/compose.lan.yaml`, Caddy) or the explicit `GEZEL_LAN=plain-http`.
+
+**Why 6230, not the daemon's 6228.** On a computer that also has the
+desktop app, its machine service holds host port 6228, pinned without a
+fallback on Linux (`gezeld.service`) and Windows (`GezelService`). A
+container publishing 6228 there either fails to start or, if it comes up
+first (a restart policy at boot), keeps the machine service from binding.
+The guides publish the same port on both sides because the setup link is
+built from the listener's port, so `-p 127.0.0.1:6230:6230` prints a
+working link without `GEZEL_PUBLIC_URL`. The 1.2.12 image used 6228; a
+deployment that must keep it sets `GEZEL_CONTAINER_PORT=6228`.
 
 ## One home, one daemon
 

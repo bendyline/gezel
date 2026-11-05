@@ -18,9 +18,10 @@ services:
     restart: unless-stopped
     stop_grace_period: 30s
     # 127.0.0.1 keeps Gezel on this computer. Publishing on all addresses
-    # is the LAN file's job, behind HTTPS.
+    # is the LAN file's job, behind HTTPS. Not 6228: the Gezel app's
+    # machine service holds that port on the computers that have it.
     ports:
-      - "127.0.0.1:6228:6228"
+      - "127.0.0.1:6230:6230"
     volumes:
       # Everything Gezel keeps: crews, projects, chats, memories, models.
       - gezel:/gezel

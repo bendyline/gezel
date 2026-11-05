@@ -449,6 +449,60 @@ describe('gezel bench submit', () => {
     expect(body).toContain('"schemaVersion": 1');
   });
 
+  // What execFile rejects with: the message repeats the command line, label and all.
+  const ghFailure = (stderr: string) =>
+    Object.assign(new Error(`Command failed: gh issue create --label bench-result\n${stderr}`), {
+      stderr,
+    });
+
+  it('files the issue without the label when the repository has no such label', async () => {
+    const out: string[] = [];
+    const gh = vi
+      .fn()
+      .mockRejectedValueOnce(ghFailure("could not add label: 'bench-result' not found\n"))
+      .mockResolvedValueOnce('https://github.com/bendyline/gezel/issues/43\n');
+    const result = await submitBench(
+      'bench.json',
+      { out: (l) => out.push(l), note: vi.fn() },
+      { readFile: async () => JSON.stringify(shard), gh },
+    );
+    expect(result.issueUrl).toBe('https://github.com/bendyline/gezel/issues/43');
+    expect(out).toEqual(['Opened https://github.com/bendyline/gezel/issues/43']);
+    expect(gh).toHaveBeenCalledTimes(2);
+    expect(gh.mock.calls[0]?.[0]).toContain('--label');
+    const retry = gh.mock.calls[1]?.[0] as string[];
+    expect(retry).not.toContain('--label');
+    expect(retry).not.toContain('bench-result');
+    expect(retry).toEqual(expect.arrayContaining(['--title', result.title, '--body', result.body]));
+  });
+
+  it('does not retry other gh failures, and falls back once a retry fails too', async () => {
+    const signedOut = vi
+      .fn()
+      .mockRejectedValue(ghFailure('To get started with GitHub CLI, please run:  gh auth login\n'));
+    const first = await submitBench(
+      'bench.json',
+      { out: vi.fn(), note: vi.fn() },
+      { readFile: async () => JSON.stringify(shard), gh: signedOut },
+    );
+    expect(first.issueUrl).toBeUndefined();
+    expect(signedOut).toHaveBeenCalledTimes(1);
+
+    const out: string[] = [];
+    const stillFailing = vi
+      .fn()
+      .mockRejectedValueOnce(ghFailure("could not add label: 'bench-result' not found\n"))
+      .mockRejectedValueOnce(ghFailure('HTTP 502: Bad Gateway\n'));
+    const second = await submitBench(
+      'bench.json',
+      { out: (l) => out.push(l), note: vi.fn() },
+      { readFile: async () => JSON.stringify(shard), gh: stillFailing },
+    );
+    expect(second.issueUrl).toBeUndefined();
+    expect(stillFailing).toHaveBeenCalledTimes(2);
+    expect(out[0]).toBe('Open this page and attach the file to the issue:');
+  });
+
   it('falls back to the new-issue page when gh is missing, and rejects a non-shard', async () => {
     const out: string[] = [];
     const result = await submitBench(
