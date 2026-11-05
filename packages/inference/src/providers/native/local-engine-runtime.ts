@@ -11,7 +11,7 @@ import {
   resolveDs4LaunchCtx,
   resolveDs4VisionLaunch,
 } from '../ds4/build-provider.js';
-import { ds4VisionResidentBytes } from '../ds4/residency.js';
+import { type Ds4MemorySource, ds4VisionResidentBytes } from '../ds4/residency.js';
 import { buildLlamaCppProvider, ensureLlamaEngineStatus } from '../llama-cpp/build-provider.js';
 import { readGgufSummaryAsync } from '../llama-cpp/gguf-metadata-async.js';
 import { type GgufSummary, effectiveLazyTensorBytes } from '../llama-cpp/gguf-metadata.js';
@@ -719,10 +719,8 @@ export class LocalEngineRuntime {
               ssdStreamingSupported?: boolean;
               ssdStreamingBackends?: string[];
               cacheExpertsBytes?: number;
-              fullResidencyMemory?: import(
-                '../ds4/residency.js',
-              ).Ds4MemorySource['fullResidencyMemory'];
-              streamingMemory?: import('../ds4/residency.js').Ds4MemorySource['streamingMemory'];
+              fullResidencyMemory?: Ds4MemorySource['fullResidencyMemory'];
+              streamingMemory?: Ds4MemorySource['streamingMemory'];
               maxLaunchCtx?: number;
               visionEncoder?: { sizeBytes: number };
             };
