@@ -532,6 +532,43 @@ describe('grounding checks', () => {
     expect((await citationsResolve(okWs, 'brief.md')).ok).toBe(true);
   });
 
+  it('citationsResolve with proposed forgives the files a plan says it will create', async () => {
+    // The shape qwen3.5-9b wrote four times on refactor-module (2026-11-01).
+    const plan = [
+      '## Target',
+      '- `src/normalize-name.js` — the shared normalization module',
+      '- `src/format-name.js` imports it',
+      '## Stages',
+      '1. **Files created:** `src/normalize-name.js` (new file)',
+      '2. **Files modified:** `src/report.js`',
+      'Also see `src/ghost.js`.',
+    ].join('\n');
+    const files = {
+      'plan.md': plan,
+      'src/format-name.js': 'x',
+      'src/report.js': 'x',
+    };
+    const strict = await citationsResolve(ws(files), 'plan.md', { minCitations: 2 });
+    expect(strict.unresolved).toEqual(['src/normalize-name.js', 'src/ghost.js']);
+
+    const planned = await citationsResolve(ws(files), 'plan.md', {
+      minCitations: 2,
+      proposed: true,
+    });
+    expect(planned.forgiven).toEqual(['src/normalize-name.js']);
+    // An unmarked missing file is still a fabrication.
+    expect(planned.unresolved).toEqual(['src/ghost.js']);
+    expect(planned.ok).toBe(false);
+
+    // A plan must still cite real files: proposed paths never count toward the minimum.
+    const onlyNew = await citationsResolve(
+      ws({ 'plan.md': 'Create `src/a.js` and `src/b.js` (new).' }),
+      'plan.md',
+      { minCitations: 2, proposed: true },
+    );
+    expect(onlyNew.ok).toBe(false);
+  });
+
   it('citationsResolve resolves citations the capped listing dropped', async () => {
     const files: Record<string, string> = {
       'brief.md': 'Per (source: signed/q3.md) and (source: signed/fake.md).',

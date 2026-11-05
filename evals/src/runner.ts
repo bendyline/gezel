@@ -2650,6 +2650,68 @@ export function readContextOverflowFromLog(daemonLogPath?: string): string | nul
   return `context overflow: ${raw[1]} tokens needed but only ${raw[2]} available`;
 }
 
+/** A turn the daemon ended on a context overflow. */
+export interface ContextOverflowEvent {
+  reason: string;
+  /** The session's id prefix, as the turn's `runSend#<prefix>` lines print it. */
+  sessionPrefix: string;
+}
+
+/**
+ * Turns that failed on a context overflow, read from each turn's own exit
+ * line (logged at debug, the eval default). An overflow the daemon recovered
+ * from by compacting has no such line. Null when the log has no turn lines
+ * at all, so a caller can fall back to {@link readContextOverflowFromLog}.
+ */
+export function readContextOverflowEventsFromLog(
+  daemonLogPath?: string,
+): ContextOverflowEvent[] | null {
+  if (!daemonLogPath || !existsSync(daemonLogPath)) return [];
+  let text: string;
+  try {
+    text = readFileSync(daemonLogPath, 'utf8');
+  } catch {
+    return [];
+  }
+  if (!text.includes('runSend#')) return null;
+  return [
+    ...text.matchAll(
+      /runSend#([0-9a-f]{8}) EXIT throw afterMs=\d+ (On-device model ran out of working memory: [^\n]+)/g,
+    ),
+  ].map((match) => ({ sessionPrefix: match[1]!, reason: match[2]! }));
+}
+
+/**
+ * The overflow that ends this trial, if any. For a scenario that names its
+ * own tasks, only an overflow in one of their sessions does; `foreign`
+ * remembers the sessions already judged to be elsewhere, so each is logged
+ * once and looked up once.
+ */
+export async function trialContextOverflow(
+  scenario: EvalScenario,
+  ctx: EvalContext,
+  daemonLogPath: string | undefined,
+  foreign: Set<string>,
+  log: (line: string) => void,
+): Promise<string | null> {
+  const own = scenario.ownTasks ? await scenario.ownTasks(ctx).catch(() => null) : null;
+  if (!own || own.taskRefs.length === 0) return readContextOverflowFromLog(daemonLogPath);
+  const events = readContextOverflowEventsFromLog(daemonLogPath);
+  if (events === null) return readContextOverflowFromLog(daemonLogPath);
+  const pending = events.filter((event) => !foreign.has(event.sessionPrefix));
+  if (pending.length === 0) return null;
+  const { sessions } = await ctx.client.listChatSessions({ projectId: own.projectId });
+  for (const event of pending) {
+    const session = sessions.find((s) => s.id.startsWith(event.sessionPrefix));
+    if (session?.taskRef && own.taskRefs.includes(session.taskRef)) return event.reason;
+    foreign.add(event.sessionPrefix);
+    log(
+      `[poll] context overflow in session ${event.sessionPrefix}, which is not the task's; not ending the trial (${event.reason})`,
+    );
+  }
+  return null;
+}
+
 export async function pollUntilDone(
   scenario: EvalScenario,
   args: {
@@ -2740,6 +2802,7 @@ export async function pollUntilDone(
   // Per-trial dedup map for the `logChanged` channel — scenarios use
   // this for sniff lines that repeat every poll cycle.
   const seenLines = new Map<string, string>();
+  const foreignOverflowSessions = new Set<string>();
   const logChanged = (key: string, line: string): void => {
     if (seenLines.get(key) === line) return;
     seenLines.set(key, line);
@@ -3110,13 +3173,19 @@ export async function pollUntilDone(
         ...finalSniffOf(),
       };
     }
-    const contextOverflow = readContextOverflowFromLog(args.daemonLogPath);
+    const contextOverflow = await trialContextOverflow(
+      scenario,
+      ctx,
+      args.daemonLogPath,
+      foreignOverflowSessions,
+      args.log,
+    ).catch(() => readContextOverflowFromLog(args.daemonLogPath));
     if (contextOverflow) {
       args.log(`[poll] terminal: context overflow (${contextOverflow})`);
       return {
         success: false,
         reason: contextOverflow,
-        failureMode: 'spawn-error',
+        failureMode: 'context-overflow',
         ...finalSniffOf(),
       };
     }

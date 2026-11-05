@@ -1,3 +1,6 @@
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
+import { errorResult } from './tool-contracts.js';
+
 export interface TaskStepMutationScope {
   taskRef: string;
   sessionStepId: string;
@@ -43,10 +46,29 @@ export function taskStepMutationRejection(scope: TaskStepMutationScope): string 
  * so callers return it verbatim instead of decorating it with retry advice.
  */
 export function staleTaskStepRefusal(err: unknown): string | null {
+  return daemonRefusal(err, 'stale_task_step');
+}
+
+/**
+ * The daemon's refusal of a task launch from a turn that answers a
+ * scheduled check-in (`check_in_turn`, service scope-guard), or null. Like
+ * {@link staleTaskStepRefusal}, the hint is the whole instruction.
+ */
+export function checkInTurnRefusal(err: unknown): string | null {
+  return daemonRefusal(err, 'check_in_turn');
+}
+
+/** {@link checkInTurnRefusal} as the task tools' non-retryable result. */
+export function checkInTurnResult(err: unknown): CallToolResult | null {
+  const hint = checkInTurnRefusal(err);
+  return hint ? errorResult(hint, { code: 'check_in_turn', retryable: false }) : null;
+}
+
+function daemonRefusal(err: unknown, code: string): string | null {
   const details = (err as { details?: unknown } | null | undefined)?.details;
   if (!details || typeof details !== 'object') return null;
   const { error, hint } = details as { error?: unknown; hint?: unknown };
-  return error === 'stale_task_step' && typeof hint === 'string' && hint.trim() ? hint : null;
+  return error === code && typeof hint === 'string' && hint.trim() ? hint : null;
 }
 
 /**

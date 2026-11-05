@@ -68,6 +68,13 @@ const HAS_INLINE_SOURCE = /\((?:source|sources|src)\s*:/i;
 /** `[source/brief.md]`: a path in brackets, not a link's text (no `(` after it). */
 const BRACKETED_PATH = /\[((?:[\w.-]+\/)*[\w.-]+\.[a-z][a-z0-9]{0,5})\](?!\()/gi;
 const URL_LIKE = /^(?:[a-z][\w+.-]*:\/\/|mailto:)/i;
+/**
+ * A file a note can name without a folder. Anything else without a `/` in a
+ * `(source: data/audit.json, summary.overall_score)` note is a pointer into
+ * the file beside it, not a second source.
+ */
+const FILE_NAME =
+  /\.(?:md|markdown|txt|csv|tsv|jsonl?|ya?ml|toml|ini|html?|xml|log|rst|pdf|docx?|pptx?|xlsx?|odt|odp|ods|rtf|epub|[cm]?[jt]sx?|py|rb|go|rs|java|kt|cs|cpp|c|h|sh|sql)$/i;
 const MAX_FOLDER_FILES = 50;
 const TEXT_FILE = /\.(?:md|markdown|txt|csv|tsv|json|ya?ml|html?|xml|log|rst)$/i;
 /** A container this check cannot read as text; like a URL, it is cited but unchecked. */
@@ -81,8 +88,22 @@ function refFromLine(text: string): string | null {
   if (ticked) return ticked;
   const url = /\b(?:https?:\/\/|knowledge:\/\/)[^\s)>\]]+/i.exec(text)?.[0];
   if (url) return url;
-  const path = /(?:^|\s)((?:[\w.-]+\/)*[\w.-]+\.[a-z][a-z0-9]{0,5})\b/i.exec(text)?.[1];
+  const path = /(?:^|[\s(])((?:[\w.-]+\/)*[\w.-]+\.[a-z][a-z0-9]{0,5})\b/i.exec(text)?.[1];
   return path ?? null;
+}
+
+/** `| [13] | `source/x.md` |` or `| 2 | source/x.md |`: a Sources table row, else null. */
+function tableReference(line: string): { n: number; ref: string } | null {
+  if (!/^\s*\|/.test(line)) return null;
+  const cells = line
+    .trim()
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((cell) => cell.trim());
+  const index = cells.findIndex((cell) => /^\[?\d{1,3}\]?\.?$/.test(cell));
+  if (index === -1) return null;
+  const ref = refFromLine(cells.slice(index + 1).join(' '));
+  return ref ? { n: Number(/\d+/.exec(cells[index]!)![0]), ref } : null;
 }
 
 /** Split the document into its body and the `n -> reference` map of its Sources section. */
@@ -100,6 +121,12 @@ function splitReferences(markdown: string): { body: string; refs: Map<number, st
       continue;
     }
     if (level > 0) {
+      // Models often lay the list out as a table (qwen3.8-27b, 2026-11-02).
+      const row = tableReference(line);
+      if (row) {
+        if (!refs.has(row.n)) refs.set(row.n, row.ref);
+        continue;
+      }
       // Several references can share a line: "[1] tasks/1/menu.md [2] tasks/1/scope.md".
       const inline = [...line.matchAll(/\[(\d{1,3})\]\s*:?\s*/g)];
       if (inline.length > 1) {
@@ -124,6 +151,11 @@ function splitReferences(markdown: string): { body: string; refs: Map<number, st
   return { body: body.join('\n'), refs };
 }
 
+/** The `n -> reference` entries a document's own Sources / References section defines. */
+export function sourceListReferences(markdown: string): ReadonlyMap<number, string> {
+  return splitReferences(markdown).refs;
+}
+
 /**
  * Turn inline `(source: a, b)` notes, and bracketed paths like
  * `[source/brief.md]`, into `[n]` markers that share numbers with the Sources
@@ -134,10 +166,15 @@ function numberInlineSources(body: string, refs: Map<number, string>): string {
   let next = Math.max(0, ...refs.keys()) + 1;
   const bracketed = body.replace(BRACKETED_PATH, (_whole, path: string) => `(source: ${path})`);
   return bracketed.replace(INLINE_SOURCE, (_whole, list: string) => {
+    const items = list
+      .split(/[,;]/)
+      .map((raw) => refFromLine(raw) ?? raw.trim().replace(/^`+|`+$/g, ''))
+      .filter((ref) => ref !== '');
+    const isSource = (ref: string) =>
+      URL_LIKE.test(ref) || ref.includes('/') || FILE_NAME.test(ref);
+    const named = items.some(isSource) ? items.filter(isSource) : items;
     const numbers: number[] = [];
-    for (const raw of list.split(/[,;]/)) {
-      const ref = refFromLine(raw) ?? raw.trim().replace(/^`+|`+$/g, '');
-      if (!ref) continue;
+    for (const ref of named) {
       const key = ref.toLowerCase();
       let n = byRef.get(key);
       if (n === undefined) {

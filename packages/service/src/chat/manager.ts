@@ -587,6 +587,10 @@ import {
   renderTurnIntentPrelude,
   resolveTurnIntentPlan,
 } from './turn-intent-plan.js';
+import {
+  isSuccessfulAsyncHandoffToolCall,
+  isSuccessfulTaskLaunchToolCall,
+} from './turn-terminal-actions.js';
 import { buildUnsavedFileClaimNudge, detectUnsavedFileClaim } from './unsaved-file-claim.js';
 import { UsageTracker } from './usage.js';
 import {
@@ -1062,6 +1066,8 @@ export interface MessageGezelArgs {
    *  control until a quiet window. The scheduler passes true for
    *  project nudges. */
   ambient?: boolean;
+  /** The scheduler's check-in: the reply reports and may not start a task (`isCheckInTurn`). */
+  checkIn?: boolean;
   /**
    * Shape-of-deliverable hint for this specific message. Since
    * `messageGezel` reuses the target's main project session (not a
@@ -1096,6 +1102,8 @@ interface InflightTurn {
    * rebuilds that never see the send's opts.
    */
   turnIntent?: TurnIntentMode;
+  /** The turn answers a scheduled check-in; see `MessageGezelArgs.checkIn`. */
+  checkIn?: true;
   /**
    * Whose turn this is, for a turn that never builds a live session state:
    * a fixed-function gezel calls its tool without one. Without it the
@@ -2641,6 +2649,11 @@ export class ChatManager extends LocalEngineRuntime {
     if (this.states.get(sessionId)?.record.visitorAccess) return false;
     const origin = this.inflight.get(sessionId)?.origin;
     return origin === 'direct-user' || origin === 'question-answer';
+  }
+
+  /** True while the session's turn answers a scheduled check-in. */
+  isCheckInTurn(sessionId: string): boolean {
+    return this.inflight.get(sessionId)?.checkIn === true;
   }
 
   /**
@@ -4930,6 +4943,7 @@ export class ChatManager extends LocalEngineRuntime {
         },
         ...(args.lane ? { lane: args.lane } : {}),
         ...(args.ambient ? { ambient: true } : {}),
+        ...(args.checkIn ? { checkIn: true } : {}),
       })
         .then(
           async () => {
@@ -6075,6 +6089,7 @@ export class ChatManager extends LocalEngineRuntime {
       coalescable?: boolean;
       lane?: Lane;
       ambient?: boolean;
+      checkIn?: boolean;
       messageOrigin?: TurnMessageOrigin;
       fileTurnIntent?: FileTurnIntent;
     },
@@ -6579,6 +6594,7 @@ export class ChatManager extends LocalEngineRuntime {
         ...(args.stepId ? { stepId: args.stepId } : {}),
         ...(args.lane ? { lane: args.lane } : {}),
         ...(args.ambient ? { ambient: true } : {}),
+        ...(args.checkIn ? { checkIn: true } : {}),
         ...(args.expectedDeliverable ? { expectedDeliverable: args.expectedDeliverable } : {}),
       });
       await this.store.writePendingHandoffs(queue);
@@ -7021,6 +7037,8 @@ export class ChatManager extends LocalEngineRuntime {
        * pass both.
        */
       ambient?: boolean;
+      /** The turn answers a scheduled check-in; see `MessageGezelArgs.checkIn`. */
+      checkIn?: boolean;
       /** Cap output tokens on tool-loop continuation iterations — see
        *  SendAndWaitOpts.continuationMaxTokens. Reaction turns on lean
        *  game projects pass a tight value. */
@@ -7121,6 +7139,7 @@ export class ChatManager extends LocalEngineRuntime {
       from?: NonNullable<ChatMessage['from']>;
       lane?: Lane;
       ambient?: boolean;
+      checkIn?: boolean;
       continuationMaxTokens?: number;
       standalone?: boolean;
       requiredTool?: string;
@@ -7140,6 +7159,7 @@ export class ChatManager extends LocalEngineRuntime {
       startedAt: Date.now(),
       origin: resolveTurnMessageOrigin(opts),
       ...(opts?.turnIntent ? { turnIntent: opts.turnIntent } : {}),
+      ...(opts?.checkIn ? { checkIn: true } : {}),
     };
     this.inflight.set(sessionId, inflightTurn);
     // Claim a clean question slot synchronously with the in-flight lock.
@@ -9488,14 +9508,11 @@ export class ChatManager extends LocalEngineRuntime {
               log.info(
                 `session ${sessionId}: confirmation-only prompt satisfied -- skipping continuation nudge`,
               );
-            } else if (completedAsyncHandoff) {
-              // message_gezel/delegate_* intentionally parks delivery until
-              // this sender releases its turn. A closing-summary nudge keeps
-              // the sender alive, so the parked recipient can never start;
-              // weak models then repeat the same handoff and create duplicate
-              // work. The successful handoff IS the terminal action.
+            } else if (completedAsyncHandoff || drained.some(isSuccessfulTaskLaunchToolCall)) {
+              // The handoff or launch IS the terminal action; see
+              // turn-terminal-actions.ts for why a closing nudge here hurts.
               log.info(
-                `session ${sessionId}: async handoff completed — releasing sender so the parked recipient can start`,
+                `session ${sessionId}: ${completedAsyncHandoff ? 'async handoff' : 'task launch'} completed — releasing the slot for the work it started`,
               );
             } else if (unresolvedToolFailures.length > 0) {
               stallReason = 'tool-failed';
@@ -17649,16 +17666,6 @@ function isReadOnlyToolName(name: string): boolean {
   // be a false positive, but the project's naming discipline makes that
   // unlikely enough that the simpler rule wins.
   return /^(?:list|read|get|search|has|suggest)_/.test(name);
-}
-
-function isSuccessfulAsyncHandoffToolCall(toolCall: ChatMessageToolCall): boolean {
-  if (!toolCall.success) return false;
-  return (
-    toolCall.name === 'message_gezel' ||
-    toolCall.name === 'ask_gezel' ||
-    toolCall.name === 'ask_specialist' ||
-    toolCall.name.startsWith('delegate_')
-  );
 }
 
 /**

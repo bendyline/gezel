@@ -366,6 +366,14 @@ export interface EvalScenario {
   /** Polled every `pollIntervalMs` (default 5000). */
   successCheck: (ctx: EvalContext) => Promise<SuccessCheckResult>;
   /**
+   * The tasks the trial is judged on, for a scenario that runs one. A
+   * context overflow then ends the trial only in a session one of them owns
+   * (`ChatSession.taskRef`). One in a side conversation, such as a scheduled
+   * check-in or a gezel's message to another, is left to the progress
+   * watchdogs. Unset, or null before the task exists: any overflow ends it.
+   */
+  ownTasks?: (ctx: EvalContext) => Promise<{ projectId: string; taskRefs: string[] } | null>;
+  /**
    * Optional setup hook. Called after the meester exists and the trial
    * daemon is fully booted, but *before* the kickoff prompt is sent.
    * Use this to seed workspace files, pre-populate artifacts, or set up
@@ -667,6 +675,13 @@ export type FailureMode =
   | 'crash'
   | 'engine-crash'
   | 'interrupted'
+  /**
+   * The engine refused a request larger than its context window. Not a
+   * spawn failure: the engine ran, and the prompt the trial built did not
+   * fit, which is a real cost of that setup (a strategy that carries 86
+   * tools overflows a 32K window on its first request).
+   */
+  | 'context-overflow'
   /**
    * A native engine (sd-server render, etc.) started a job and then
    * went silent for the whole soft window. Infra failure — distinct

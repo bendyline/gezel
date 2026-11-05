@@ -69,9 +69,12 @@ const WORKSPACE_EVAL_TOOLSET_IDS = [
   // Without these the topic-only branch has no first action at all: the step
   // says "FIRST call `search`" and `search` does not exist for the worker.
   //
-  // Safe to add for every book: the per-step kit intersection narrows the
-  // roster back down, so a non-research step does not carry web tools just
-  // because they are installed.
+  // Safe to add for every book: these installs are a per-gezel override,
+  // and the step kits narrow the worker's roster beneath it whenever the
+  // worker holds several steps (a generalist or outcome owner), so a book
+  // that needs no web tools does not carry them. A worker running ONE
+  // step keeps the override whole: that is the product's rule for an
+  // explicit install, and the stepwise arm's specialists have no override.
   'builtin.memory',
   'builtin.documents',
   'builtin.web',
@@ -2272,6 +2275,25 @@ export function craftbookScenarioFromSpec(bookSpec: CraftbookEvalSpec): EvalScen
         }
       }
     },
+    // A workflow trial is judged on its task alone, so only its sessions'
+    // overflows end it. Fanout shards count as the task's own.
+    ...(spec.mode === 'workflow'
+      ? {
+          async ownTasks(ctx: EvalContext) {
+            const projectName = spec.setup?.projectName;
+            const projectId = projectName ? await findProjectId(ctx.client, projectName) : null;
+            if (!projectId) return null;
+            const { tasks } = await ctx.client.listProjectTasks(projectId);
+            const own = new Set(
+              tasks.filter((task) => taskMatchesCraftbook(task, spec)).map((task) => task.ref),
+            );
+            for (const task of tasks) {
+              if (task.parentTaskRef && own.has(task.parentTaskRef)) own.add(task.ref);
+            }
+            return { projectId, taskRefs: [...own] };
+          },
+        }
+      : {}),
     async successCheck(ctx): Promise<SuccessCheckResult> {
       pollsSeen += 1;
       const projectName = spec.setup?.projectName;

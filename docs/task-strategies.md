@@ -45,16 +45,30 @@ Precedence, highest first:
    `tuning.taskStrategy` override. It is read for the model the owner will
    actually run: the assignee's model, or for an auto-assigned single-owner
    task the Generalist gezel's model. An outcome pick that cannot render for
-   this book (no contract, owner steps, branches) falls back to the tier rule
-   below, with a warning naming the reason.
-5. The tier rule, `generalistMode`'s `auto`: generalist for hosted frontier
-   providers and stepwise for on-device models. It never picks outcome.
+   this book (no contract, owner steps, branches) falls back to
+   `generalistMode`'s task rule, with a warning naming the reason.
+5. The default for a model nobody measured: outcome without the recipe on
+   device (`llama-cpp`, `mlx`, `ds4`, `ollama`, and a paired device's
+   `remote`), falling back to stepwise for a book that cannot render.
+   Elsewhere it is `generalistMode`'s task rule: generalist for hosted
+   frontier providers, stepwise for the rest (`mock` among them).
 
-So `auto` picks outcome only where the benchmark measured it for that model.
 The pick ships as a gilde patch (the catalog read is tolerant, so older builds
 ignore the field), and live gilde updates carry a new measurement to users
-without an app release. Picks as of round 1 (2026-10-28): Gemma 4 E4B outcome
-without the recipe, Qwen 3.8 27B outcome, Qwen 3.5 9B stepwise.
+without an app release. Picks as of 2026-11-04: Gemma 4 E4B, Qwen 3.5 9B,
+Ornith 1.5 9B and Qwen 3.8 27B all run outcome without the recipe. Round 2
+scored the 9B higher with the recipe as advice, but the recipe overflowed a
+32K window on powerpoint-deck, and a later screen tied the two on five of six
+books. Round 1 had picked the 27B with the recipe and the 9B stepwise. Every
+measured on-device model beat stepwise at a third of the wall time or less,
+which is why an unmeasured one starts there.
+
+A new model gets its own pick when it differs from a measured one in more than
+quantization. Another quant of the same weights inherits the pick (Q3 and
+below get a screen). A fine-tune kept its base's strategy in the one case
+measured, Ornith 1.5 9B on Qwen 3.5 9B (2026-11-04), so a six-book screen
+settles only whether the recipe helps. Another size in a family gets the
+screen too.
 
 `generalistMode` still decides the Meester's kickoff shape. A system job is
 always stepwise. Fanout children inherit the parent's strategy.
@@ -169,7 +183,9 @@ folds the book into one terminal step, `outcome`:
   `onEnter`. The authoring note comes from the producing step.
 - **The tool surface** reads `craftbook.sourceSteps` (the original steps and
   the fanout template's, as `each-<id>`) through `taskSurfaceSteps`, so a tool
-  a procedure names stays callable.
+  a procedure names stays callable. It is the union of those steps' kits, also
+  for an owner with its own toolset installs: the installs cap the union rather
+  than replacing it, so the owner does not carry its whole roster.
 - **Refused** (`outcomeRenderGap`): no contract, or one with nothing checked;
   a step the person does; `runWhen`; script branches; an activation gate; an
   `onEnter` after the entry step; any `onExit`. Each depends on the recipe's
@@ -233,6 +249,17 @@ Things that used to differ by strategy without anyone choosing it:
   silent strategy trial, and at least 20 on one making no real progress.
   It never presses "Try again" on a paused strategy task: a pause ends the
   trial, so every arm gets the same gate budget.
+- **Context overflows.** A trial ends on an overflow only in its own task's
+  sessions (`EvalScenario.ownTasks`). A scheduled check-in that overflowed a
+  crew lead's session ended a stepwise trial whose steps were done
+  (2026-11-03), and stepwise holds more sessions for such a side
+  conversation to land in.
+- **Check-ins.** The Meester's scheduled check-in may not start a task: the
+  daemon refuses a launch from the turn that answers it (`check_in_turn`).
+  Small models had answered "how far along is each goal?" by launching a
+  status-report book, which then took turns on the one engine slot beside
+  the trial's task, in 4 of 144 round-1 trials and 2 of 47 early round-2
+  ones.
 
 ## 6. Measuring
 

@@ -520,6 +520,22 @@ describe('McpBridge', () => {
     expect(readResult).toContain('Test content.');
   });
 
+  it('saves a Markdown artifact line for line, so a one-per-line verdict stays one per line', async () => {
+    // Prose normalization once joined these into one line, and the review
+    // gate then rejected a correct verdict (invoice-run, 2026-11-01).
+    const verdict = [
+      'One invoice per billable client: PASS',
+      'Every amount traces to a ledger entry: PASS',
+      'Due dates match client terms: PASS',
+    ].join('\n');
+    expect(
+      await bridge.callTool('write_artifact', { path: 'reviews/verdict.md', content: verdict }),
+    ).toMatch(/Wrote reviews\/verdict\.md/);
+    expect(await bridge.callTool('read_artifact', { path: 'reviews/verdict.md' })).toContain(
+      'One invoice per billable client: PASS\nEvery amount traces to a ledger entry: PASS\n',
+    );
+  });
+
   it('reads a workspace path that starts with the drawer name as the workspace', async () => {
     expect(
       await bridge.callTool('write_file', {

@@ -96,6 +96,7 @@ export * from './request-track/eta.js';
 export * from './request-track/duration-seeds.js';
 export * from './request-track/resolve.js';
 export * from './binary-document.js';
+export * from './yaml-valid.js';
 export * from './scorecard/index.js';
 export * from './device-safety.js';
 export * from './toolset-trust.js';

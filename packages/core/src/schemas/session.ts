@@ -497,6 +497,8 @@ export const PendingGezelMessageSchema = z.object({
   stepId: z.string().optional(),
   lane: z.enum(['interactive', 'background']).optional(),
   ambient: z.boolean().optional(),
+  /** A scheduled check-in, whose reply turn may not start a task. */
+  checkIn: z.boolean().optional(),
   expectedDeliverable: ExpectedDeliverableSchema.optional(),
 });
 export type PendingGezelMessage = z.infer<typeof PendingGezelMessageSchema>;

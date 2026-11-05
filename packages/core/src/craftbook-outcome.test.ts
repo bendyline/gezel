@@ -164,15 +164,28 @@ describe('resolveAutoTaskStrategy', () => {
     ).toEqual({ strategy: 'outcome', source: 'model', fallback: 'stepwise' });
   });
 
-  it('falls back to the tier rule for a model with no measurement', () => {
-    expect(resolveAutoTaskStrategy({ providerName: 'llama-cpp', tier: 'small' })).toEqual({
-      strategy: 'stepwise',
-      source: 'tier',
-      fallback: 'stepwise',
-    });
-    expect(resolveAutoTaskStrategy({ providerName: 'anthropic', tier: 'cloud' }).strategy).toBe(
-      'generalist',
+  it('runs an unmeasured on-device model as an outcome without the recipe', () => {
+    for (const providerName of ['llama-cpp', 'mlx', 'ds4', 'ollama', 'remote']) {
+      expect(resolveAutoTaskStrategy({ providerName, tier: 'small' })).toEqual({
+        strategy: 'outcome',
+        options: { procedure: 'none' },
+        source: 'tier',
+        fallback: 'stepwise',
+      });
+    }
+    expect(resolveAutoTaskStrategy({ generalistMode: 'auto', providerName: 'mlx' }).strategy).toBe(
+      'outcome',
     );
+  });
+
+  it('keeps the tier rule for an unmeasured model off device', () => {
+    expect(resolveAutoTaskStrategy({ providerName: 'anthropic', tier: 'cloud' })).toEqual({
+      strategy: 'generalist',
+      source: 'tier',
+      fallback: 'generalist',
+    });
+    expect(resolveAutoTaskStrategy({ providerName: 'mock' }).strategy).toBe('stepwise');
+    expect(resolveAutoTaskStrategy({ providerName: undefined }).strategy).toBe('stepwise');
   });
 
   it("lets an explicit generalistMode win over the model's measurement", () => {
@@ -180,6 +193,9 @@ describe('resolveAutoTaskStrategy', () => {
     expect(
       resolveAutoTaskStrategy({ generalistMode: 'off', providerName: 'llama-cpp', affinity }),
     ).toEqual({ strategy: 'stepwise', source: 'tier', fallback: 'stepwise' });
+    expect(
+      resolveAutoTaskStrategy({ generalistMode: 'off', providerName: 'llama-cpp' }).strategy,
+    ).toBe('stepwise');
     expect(
       resolveAutoTaskStrategy({ generalistMode: 'on', providerName: 'llama-cpp', affinity })
         .strategy,

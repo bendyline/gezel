@@ -39,6 +39,7 @@ import {
   isProseFile,
   parseCitationNumbers,
 } from '@bendyline/gezel';
+import { sourceListReferences } from '@bendyline/gezel/checks';
 import type { ToolGroundingHooks } from '../providers/mcp-bridge.js';
 
 const log = createLogger('grounding');
@@ -82,6 +83,10 @@ interface Entry extends EvidenceItem {
 
 /** `[3]`, `[1, 4]`, `[2-5]` with the space before them; the line structure is kept. */
 const MARKER_WITH_SPACE = /[ \t]*\[\d{1,3}(?:\s*(?:[-–]|,)\s*\d{1,3})*\](?!\()/g;
+
+/** A file's own Sources heading: its list, not this session's, says what its numbers mean. */
+const OWN_SOURCE_LIST =
+  /^#{1,6}\s*(?:sources|references|citations|bibliography|works cited|bronnen)\b/im;
 
 /** Remove `[n]` markers from text bound for a document, keeping indentation and lines. */
 export function removeCitationMarkers(text: string): string {
@@ -453,7 +458,8 @@ export class EvidenceLedger {
    * sources at the foot of the file, unless it already lists its own.
    */
   private withSourceList(original: string): string {
-    if (/^#{1,6}\s*(?:sources|references|bibliography|bronnen)\b/im.test(original)) return original;
+    const ownList = OWN_SOURCE_LIST.exec(original);
+    if (ownList) return this.withLedgerMarkersWrittenOut(original, ownList.index);
     // A marker for a number this session never issued points at nothing in
     // the file either; drop it rather than list a source that does not exist.
     const known = (n: number) => this.entries.has(n) || n <= this.floor;
@@ -480,6 +486,40 @@ export class EvidenceLedger {
         return `[${n}] ${name}${link}`;
       });
     return `${content.trimEnd()}\n\n## Sources\n\n${lines.join('\n')}\n`;
+  }
+
+  /**
+   * A file with its own Sources list can still carry this session's numbers:
+   * `[5]` beside a list that stops at 2, or `[13]` beside a list with no
+   * numbers. Nothing in the file says what they mean, so its reader, and a
+   * task's `claimsGrounded` gate, sees a citation to nothing (5 of 48 Gemma
+   * deliverables, 2026-11-01). Each number this session issued that the
+   * file's own list does not define is written out as the source it stands
+   * for, `(source: path)`; one without a source is dropped.
+   */
+  private withLedgerMarkersWrittenOut(original: string, listStart: number): string {
+    const own = sourceListReferences(original);
+    const body = original.slice(0, listStart).replace(MARKER_WITH_SPACE, (marker) => {
+      const numbers = parseCitationNumbers(/\[([^\]]+)\]/.exec(marker)?.[1] ?? '');
+      const ours = (n: number) => !own.has(n) && this.entries.has(n);
+      if (!numbers.some(ours)) return marker;
+      const kept = numbers.filter((n) => !ours(n));
+      const refs = [
+        ...new Set(
+          numbers.flatMap((n) => {
+            const ref = ours(n) ? this.entries.get(n)?.ref : undefined;
+            return ref ? [ref] : [];
+          }),
+        ),
+      ];
+      const space = /^[ \t]*/.exec(marker)?.[0] ?? '';
+      const parts = [
+        ...(kept.length > 0 ? [`[${kept.join(', ')}]`] : []),
+        ...(refs.length > 0 ? [`(source: ${refs.join('; ')})`] : []),
+      ];
+      return parts.length > 0 ? `${space || ' '}${parts.join(' ')}` : '';
+    });
+    return body + original.slice(listStart);
   }
 
   /**

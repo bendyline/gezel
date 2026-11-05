@@ -224,7 +224,8 @@ const GateCheckVariants = [
    * `file` parses as source code. For `.ts/.tsx/.js/.mjs/.cjs/.jsx` the
    * service runs a syntax-only TypeScript transpile (milliseconds, zero
    * spawns) and the failure message carries the first diagnostic with
-   * line:column; `.html` delegates to the inline-`jsParses` path. The
+   * line:column; `.html` delegates to the inline-`jsParses` path; `.yaml`
+   * and `.yml` must load as YAML whose top level is a mapping or a list. The
    * code-class floor that catches truncated/unbalanced files a
    * `minBytes`-only gate happily waves through.
    */
@@ -335,6 +336,11 @@ const GateCheckVariants = [
     minCitations: z.number().int().nonnegative().optional(),
     corpus: z.array(z.string().min(1)).min(1).optional(),
     artifact: z.boolean().optional(),
+    /**
+     * The file is a plan: a missing path a line marks as new or to be created
+     * is not a fabrication. Leave off for anything that cites sources.
+     */
+    proposed: z.boolean().optional(),
   }),
   /**
    * Require observable source acquisition during this activation. When

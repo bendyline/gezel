@@ -99,6 +99,8 @@ export function sessionRouteGuard(
     isProjectLinked?: LinkedProjectAccessCheck;
     /** Whether the session's in-flight turn was started by the user. */
     isUserDirectedTurn?: (sessionId: string) => boolean;
+    /** Whether the session's in-flight turn answers a scheduled check-in. */
+    isCheckInTurn?: (sessionId: string) => boolean;
     /** The task's persisted status, or null when there is no such task. */
     taskStatus?: TaskStatusLookup;
     /** Why this session's step binding can no longer move the task, or null. */
@@ -125,6 +127,7 @@ export function sessionRouteGuard(
       opts.isUserDirectedTurn,
       opts.taskStatus,
       opts.staleStepSession,
+      opts.isCheckInTurn,
     );
     if (!allowed.ok) {
       const logTo = allowed.routine && opts.logRoutine ? { log: opts.logRoutine } : opts;
@@ -145,6 +148,17 @@ export type StaleStepSessionLookup = (
 
 /** Error code the MCP task tools recognize as "this turn is stale; end it". */
 export const STALE_TASK_STEP_CODE = 'stale_task_step';
+
+/** A session tried to start a task while answering a scheduled check-in. */
+export const CHECK_IN_TURN_CODE = 'check_in_turn';
+
+/**
+ * Read by the model through the task tools' error. A check-in asks for a
+ * report, and the turn ends with one: a refusal that only says no is
+ * retried word for word.
+ */
+export const CHECK_IN_TURN_HINT =
+  "this is a check-in, so it cannot start a task. Answer it in your reply: what's done, what's left, and what is blocking the next step. Do not retry.";
 
 /** A session tried to write a note about the person outside the person's own turn. */
 export const PERSON_MEMORY_NEEDS_USER_TURN_CODE = 'person_memory_needs_user_turn';
@@ -236,6 +250,7 @@ async function isSessionRouteAllowed(
   isUserDirectedTurn?: (sessionId: string) => boolean,
   taskStatus?: TaskStatusLookup,
   staleStepSession?: StaleStepSessionLookup,
+  isCheckInTurn?: (sessionId: string) => boolean,
 ): Promise<SessionRouteDecision> {
   const path = c.req.path;
   const method = c.req.method.toUpperCase();
@@ -351,6 +366,9 @@ async function isSessionRouteAllowed(
     // The owner or the CLI vouches for a recipe's scripts; a gezel creating
     // the task cannot vouch for scripts it may have written itself.
     if (method === 'POST' && /^\/tasks\/?$/.test(rest)) {
+      if (isCheckInTurn?.(sessionId(auth))) {
+        return sessionDeny(CHECK_IN_TURN_HINT, CHECK_IN_TURN_CODE);
+      }
       const body = await readJsonSafe(c);
       if (body?.trustScripts) {
         return sessionDeny('trusting custom scripts requires the owner or the CLI');

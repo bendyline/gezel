@@ -283,6 +283,7 @@ import {
 } from './solo-loop-policy.js';
 import { validateSourceContent } from './source-validation.js';
 import {
+  checkInTurnResult,
   sessionReboundToCurrentPass,
   staleTaskStepRefusal,
   taskStepMutationRejection,
@@ -5552,6 +5553,8 @@ async function runInvokeCraftbook({
       },
     );
   } catch (err) {
+    const checkIn = checkInTurnResult(err);
+    if (checkIn) return checkIn;
     const details = (err as { details?: { code?: unknown; param?: unknown } }).details;
     if (details?.code === 'task-input' && typeof details.param === 'string') {
       const paramSchema = await api
@@ -9388,7 +9391,7 @@ server.tool(
       // and the model gets a path-level "craftbookId: exactly one of
       // craftbookId or steps must be provided" message — enough to
       // self-correct on the next call.
-      return errorResult(`create_task failed: ${unwrapApiError(err)}`);
+      return checkInTurnResult(err) ?? errorResult(`create_task failed: ${unwrapApiError(err)}`);
     }
   },
 );

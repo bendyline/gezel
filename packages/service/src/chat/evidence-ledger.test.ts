@@ -483,6 +483,43 @@ describe('EvidenceLedger', () => {
     ).toBe('reject');
   });
 
+  it('writes out the numbers a file with its own source list does not define', () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('');
+    ledger.labelToolResult('read_file', { path: 'data/stats.json' }, '{"delta_pp": 0.23}');
+    ledger.labelToolResult('read_file', { path: 'source/brief.md' }, 'The limit is 0.20 points.');
+    ledger.labelToolResult('fetch_url', { url: 'https://example.com/guide' }, 'A guide.');
+    // An unnumbered list: every marker is this session's number.
+    const unnumbered = {
+      path: 'readout.md',
+      content:
+        'The rate moved 0.23 points [1], past the 0.20 limit [2].\n\n## Sources\n\n- data/stats.json\n- source/brief.md\n',
+    };
+    expect(ledger.checkProseFileWrite('write_file', unnumbered)).toEqual({
+      kind: 'allow',
+      args: {
+        path: 'readout.md',
+        content:
+          'The rate moved 0.23 points (source: data/stats.json), past the 0.20 limit (source: source/brief.md).\n\n## Sources\n\n- data/stats.json\n- source/brief.md\n',
+      },
+    });
+    // The file's own [1] stands; the session's [3] is written out; an
+    // unknown [7] is left for the reader (and the gate) to see.
+    const mixed = {
+      path: 'readout.md',
+      content:
+        'The rate moved 0.23 points [1, 3]. See items[7] too.\n\n## Sources\n\n[1] data/stats.json\n',
+    };
+    expect(ledger.checkProseFileWrite('write_file', mixed)).toEqual({
+      kind: 'allow',
+      args: {
+        path: 'readout.md',
+        content:
+          'The rate moved 0.23 points [1] (source: https://example.com/guide). See items[7] too.\n\n## Sources\n\n[1] data/stats.json\n',
+      },
+    });
+  });
+
   it('passes a grounded insert with its markers removed, and ignores non-document tools', () => {
     const ledger = new EvidenceLedger();
     ledger.beginTurn('');

@@ -149,6 +149,56 @@ describe('claimsGrounded', () => {
     expect(r.ok).toBe(true);
   });
 
+  it('reads a Sources list laid out as a table', async () => {
+    const report = [
+      'The pilot covered 18 SKUs [13].',
+      'Refund leakage fell from 14.2% to 8.9% [13].',
+      '',
+      '## Sources',
+      '',
+      '| Ref | Document |',
+      '|-----|----------|',
+      '| [13] | `source/brief.md` |',
+    ].join('\n');
+    const r = await claimsGrounded(
+      workspace({ 'report.md': report, 'source/brief.md': BRIEF }),
+      'report.md',
+    );
+    expect(r.counts.badCitations).toBe(0);
+    expect(r.ok).toBe(true);
+    expect(r.sources.read).toEqual(['source/brief.md']);
+  });
+
+  it('reads a field named beside its file as part of that file, not a second source', async () => {
+    const report =
+      'Refund leakage fell from 14.2% to 8.9% (source: source/brief.md, `pilot.leakage`).';
+    const r = await claimsGrounded(
+      workspace({ 'report.md': report, 'source/brief.md': BRIEF }),
+      'report.md',
+    );
+    expect(r.ok).toBe(true);
+    expect(r.sources.missing).toEqual([]);
+  });
+
+  it('reads a path a reference line puts in parentheses', async () => {
+    const report = [
+      'The pilot covered 18 SKUs [1].',
+      '',
+      '## References',
+      '[1] Returns brief: the pilot scope. (source/brief.md) [2] Scope note (tasks/1/scope.md)',
+    ].join('\n');
+    const r = await claimsGrounded(
+      workspace({
+        'report.md': report,
+        'source/brief.md': BRIEF,
+        'tasks/1/scope.md': 'A household of 4.',
+      }),
+      'report.md',
+    );
+    expect(r.counts.badCitations).toBe(0);
+    expect(r.ok).toBe(true);
+  });
+
   it('accepts arithmetic on sourced figures, in the sentence or beside it', async () => {
     const deck = [
       '# Refund leakage',

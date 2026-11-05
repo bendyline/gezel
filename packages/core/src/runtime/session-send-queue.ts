@@ -35,6 +35,8 @@ export interface QueuedSendOptions {
   lane?: Lane;
   /** Truly-deferrable housekeeping; see `EnqueueRequest.ambient`. */
   ambient?: boolean;
+  /** A scheduled check-in, whose turn reports and may not start a task. */
+  checkIn?: boolean;
   continuationMaxTokens?: number;
   fileTurnIntent?: FileTurnIntent;
   /** Persist and deliver to the model but never render a transcript bubble. */
@@ -130,7 +132,7 @@ function runOptionsOf<O extends QueuedSendOptions>(opts: O): QueuedRunOptions<O>
   ] as const) {
     if (!out[key]) delete out[key];
   }
-  for (const key of ['ambient', 'hidden', 'nudge', 'standalone'] as const) {
+  for (const key of ['ambient', 'checkIn', 'hidden', 'nudge', 'standalone'] as const) {
     if (out[key] !== true) delete out[key];
   }
   return out as QueuedRunOptions<O>;

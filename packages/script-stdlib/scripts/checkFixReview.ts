@@ -102,6 +102,35 @@ function looksLikeCitedFile(token: string): boolean {
   return CITED_FILE_EXTENSIONS.has(ext);
 }
 
+/** A File cell that names no file: the finding is about the whole change. */
+const NO_FILE_CELL =
+  /^(?:n\/?a|none|all|all files|various|multiple|general|overall|global|everywhere|project-wide|repo-wide|-|—|–)$/i;
+
+/**
+ * The files a findings-table File cell cites. Reviewers write "N/A",
+ * "All Files", "src/a.js, src/b.js", "`src/a.js` [2]" or "src/a.js (helper)",
+ * and reading the whole cell as one path reported each of those as a
+ * fabricated file: 6 Gemma stepwise trials in one round (2026-11-01).
+ */
+function fileCellPaths(cell: string): string[] {
+  const bare = cell
+    .replace(/\[\d{1,3}(?:\s*[-–,]\s*\d{1,3})*\]/g, ' ')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(/<br\s*\/?>/gi, ',');
+  if (NO_FILE_CELL.test(bare.trim())) return [];
+  return bare
+    .split(/[,;&]|\band\b/)
+    .flatMap((part) => part.trim().split(/\s+/))
+    .map((token) => normPath(token).replace(/:\d+(?:-\d+)?$/, ''))
+    .filter(
+      (p) =>
+        p !== '' &&
+        !NO_FILE_CELL.test(p) &&
+        !/[{}*?]/.test(p) &&
+        (p.includes('/') || looksLikeCitedFile(p)),
+    );
+}
+
 /** Strip citation decoration so `./src/x.ts`, `a/src/x.ts`, `src/x.ts` compare equal. */
 function normPath(p: string): string {
   return p
@@ -255,8 +284,7 @@ if (!reviewPath) {
     // must resolve somewhere real.
     const cited = new Set<string>();
     for (const r of rows) {
-      const cell = normPath(r.file.replace(/:\d+(-\d+)?$/, ''));
-      if (cell && cell !== '-' && cell !== '—') cited.add(cell);
+      for (const path of fileCellPaths(r.file)) cited.add(path);
     }
     for (const m of report.matchAll(/`([^`\s]+?\.[A-Za-z0-9]{1,8})(?::\d+(?:-\d+)?)?`/g)) {
       const p = m[1];
