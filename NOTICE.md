@@ -379,7 +379,9 @@ helpers from **NumCpp** (MIT, © David Pilger). Its stb_image, stb_image_write,
 and stb_image_resize code is taken under the public-domain option. CUDA builds
 also compile **SageAttention** kernels (Apache-2.0, © Jintao Zhang and Haofeng
 Huang), parts of which are adapted from FlashInfer (Apache-2.0, © FlashInfer
-team). The binary embeds tokenizer vocabularies: CLIP's BPE merges (MIT, © 2021
+team), and NVIDIA's **CUTLASS** 3.9.2 templates for its INT8, INT4 and BF16
+matrix kernels and CuTe attention (BSD-3-Clause, © NVIDIA Corporation &
+Affiliates). The binary embeds tokenizer vocabularies: CLIP's BPE merges (MIT, © 2021
 OpenAI), the T5 and UMT5 tokenizers (Apache-2.0, Google), Qwen2 merges
 (Apache-2.0, Alibaba Cloud), a Mistral tokenizer (Apache-2.0, Mistral AI), and
 the Gemma 3 tokenizer, which Google distributes with Gemma under the Gemma Terms
