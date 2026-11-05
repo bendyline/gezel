@@ -74,7 +74,7 @@ export async function handlePortableGrowthRoute(
       ? Date.parse(response.state.lastComputedAt)
       : 0;
     // A stale sheet refreshes its signals in the background, never offering a level-up.
-    if (Date.now() - computedAt > 6 * 60 * 60 * 1000)
+    if (Date.parse(host.store.now()) - computedAt > 6 * 60 * 60 * 1000)
       void host.growth
         .refresh(gezelId, { allowKlerk: false, createPending: false })
         .catch((error) => log.warn(`growth refresh failed for ${gezelId}`, error));
@@ -90,7 +90,7 @@ export async function handlePortableGrowthRoute(
       const { pending, proposal } = step(
         pendingProposal(state, typeof body.proposalId === 'string' ? body.proposalId : undefined),
       );
-      const now = new Date().toISOString();
+      const now = host.store.now();
       const fm =
         (await host.store.getGezel(gezelId))?.parsed.frontmatter ?? gezel.parsed.frontmatter;
       let adopted: GezelTrait | undefined;
@@ -129,7 +129,7 @@ export async function handlePortableGrowthRoute(
       const proposalId = typeof body.proposalId === 'string' ? body.proposalId : undefined;
       await host.store.writeGezelGrowth(
         gezelId,
-        step(declinedGrowthState(state, proposalId, new Date().toISOString())),
+        step(declinedGrowthState(state, proposalId, host.store.now())),
       );
       return payload();
     });
@@ -144,7 +144,7 @@ export async function handlePortableGrowthRoute(
       const state = await host.store.readGezelGrowth(gezelId);
       await host.store.writeGezelGrowth(
         gezelId,
-        retiredTraitState(state, traitId, new Date().toISOString()),
+        retiredTraitState(state, traitId, host.store.now()),
       );
       return payload();
     });
