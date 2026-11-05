@@ -682,6 +682,21 @@ def abort_verify_round(verify) -> None:
         abort()
 
 
+def shared_kv_after_round(verify, rejected: int, slice_after_reject):
+    """The drafter's shared-KV view for the next round.
+
+    mlx-vlm 0.7.12 lets a target rebuild that view from its committed caches
+    (Gemma 4's ``shared_kv_from_cache``): ``verify.commit`` then empties the
+    verify window and records ``committed_shared_kv``. Slicing the emptied
+    window would hand the drafter no context, which costs acceptance, never
+    exactness. Targets without the hook (the Qwen 3.5 family) keep the slice.
+    """
+    committed = getattr(verify, "committed_shared_kv", None)
+    if committed is not None:
+        return committed
+    return slice_after_reject(verify.shared_kv_states, rejected)
+
+
 def assisted_rounds(model, spec: SpecState, cache, hidden_tokens: List[int],
                     last_output, first_bonus: int, max_tokens: int, *,
                     sampler, processors, history):
@@ -734,9 +749,13 @@ def assisted_rounds(model, spec: SpecState, cache, hidden_tokens: List[int],
     hidden = _mtp_draft_hidden(lm, hidden)
 
     kv_offset = _mtp_cache_offset_max(cache)
+    rebuild_shared_kv = getattr(lm, "shared_kv_from_cache", None)
+    if callable(rebuild_shared_kv):
+        shared_kv = rebuild_shared_kv(cache)
     drafter.set_shared_kv(
         shared_kv, kv_offset, position=_mtp_draft_position(kv_offset), kv_valid_len=kv_offset
     )
+    release_shared_kv = getattr(drafter, "release_shared_kv", None)
 
     b = int(first_bonus)
     emitted = 1
@@ -753,6 +772,8 @@ def assisted_rounds(model, spec: SpecState, cache, hidden_tokens: List[int],
                 b, hidden, None, bs, draw, token_dtype, **draft_kwargs
             )
             mx.async_eval(draft_tokens)
+            if callable(release_shared_kv):
+                release_shared_kv()
 
             verify_input = mx.concatenate(
                 [mx.array([[b]], dtype=token_dtype), draft_tokens], axis=1
@@ -806,8 +827,8 @@ def assisted_rounds(model, spec: SpecState, cache, hidden_tokens: List[int],
         hidden = _mtp_draft_hidden(lm, verify.hidden[:, accepted : accepted + 1, :])
         b = new_tokens[-1] if new_tokens else b
 
-        shared_kv = _slice_shared_kv_after_reject(
-            verify.shared_kv_states, bs - (accepted + 1)
+        shared_kv = shared_kv_after_round(
+            verify, bs - (accepted + 1), _slice_shared_kv_after_reject
         )
         kv_offset += accepted + 1
         drafter.set_shared_kv(

@@ -16,7 +16,10 @@ delimiters from the reasoning-budget sampler configuration, so both launch and
 request budgets are silently dropped. The patch registers those delimiters,
 preserves the next recipient header at forced cutoffs, and replays that full
 header into the lazy tool grammar when a shorter natural terminator is its
-prefix. Direct tool responses also activate the grammar without requiring the
+prefix. v0.9.0 (#31374) also ends forcing when an end tag arrives that the
+forced sequence did not supply (the prompt already closed the block); the patch
+keeps that, but a shorter end matched *inside* the forced header no longer cuts
+the header short. Direct tool responses also activate the grammar without requiring the
 generation prompt, which lazy samplers do not receive. Regression tests cover
 both transitions. It also fixes unconstrained nested
 JSON values (`additionalProperties: {}` and `items: {}`), which were wrongly

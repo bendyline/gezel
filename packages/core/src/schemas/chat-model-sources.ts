@@ -156,6 +156,26 @@ export const ChatModelLlamaCppSourceSchema = z
 export type ChatModelLlamaCppSource = z.infer<typeof ChatModelLlamaCppSourceSchema>;
 
 /**
+ * One measured ds4 memory line: what ds4-server planned at `ctxTokens`, and
+ * how much that grows per added context token. Author both points from real
+ * launches at two windows — ds4 prints the totals at load — so a launch at
+ * any other window is priced as `bytes + bytesPerToken × (ctx − ctxTokens)`.
+ */
+const Ds4MemoryLineShape = {
+  /** Window, in tokens, the bytes were measured at. */
+  ctxTokens: z.number().int().positive(),
+  /** Bytes each added context token costs in this mode (KV, buffers, graph reserve). */
+  bytesPerToken: z.number().int().positive(),
+};
+
+/**
+ * Backends whose ds4 build can stream a family's routed experts from SSD.
+ * ds4 picks Metal on macOS and CUDA on Linux.
+ */
+export const Ds4StreamingBackendSchema = z.enum(['metal', 'cuda']);
+export type Ds4StreamingBackend = z.infer<typeof Ds4StreamingBackendSchema>;
+
+/**
  * Per-entry ds4 (DwarfStar) source. ds4 loads supported routed-MoE GGUFs
  * (including DeepSeek V4/V4.1, GLM 5.2/5.3, and Qwen3.8 Flash Next), so the
  * shape mirrors
@@ -193,6 +213,10 @@ export const ChatModelDs4SourceSchema = z
      *
      * This is a footprint at ONE context window — {@link residentCtxTokens}.
      * Pair it with {@link kvBytesPerToken} to price any other window.
+     *
+     * Builds that read {@link streamingMemory} and {@link fullResidencyMemory}
+     * price each launch mode from those instead; this stays the streamed
+     * figure every other reader (lists, fallbacks, older builds) quotes.
      */
     residentBytes: z.number().int().positive().optional(),
     /**
@@ -291,11 +315,51 @@ export const ChatModelDs4SourceSchema = z
     ssdStreaming: z.boolean().optional(),
     /**
      * Whether this model family implements ds4's routed-expert
-     * `--ssd-streaming` mode. Defaults to true for existing entries. Qwen3.8
-     * Flash Next sets false: its n-gram table is always read from disk, but
-     * its routed experts currently have no SSD-streaming implementation.
+     * `--ssd-streaming` mode. Defaults to true for existing entries. Set false
+     * for a family whose pinned ds4 cannot stream it; ds4 refuses such a
+     * launch at startup.
      */
     ssdStreamingSupported: z.boolean().optional(),
+    /**
+     * Backends whose ds4 implements streaming for this family. Absent → every
+     * backend. Qwen3.8 streams on Metal only; ds4 refuses it on CUDA.
+     */
+    ssdStreamingBackends: z.array(Ds4StreamingBackendSchema).min(1).optional(),
+    /**
+     * Measured working set with every routed expert resident (no
+     * `--ssd-streaming`): resident weights, KV and buffers — ds4's
+     * `memory: … planned` total, without a vision encoder. Gezel reserves this
+     * for a fully loaded launch. Absent → a conservative 96 GiB floor for any
+     * family that can stream, because {@link residentBytes} then describes the
+     * streamed launch.
+     */
+    fullResidencyMemory: z
+      .object({
+        workingSetBytes: z.number().int().positive(),
+        ...Ds4MemoryLineShape,
+      })
+      .optional(),
+    /**
+     * Measured streamed footprint, everything ds4 holds besides the routed-
+     * expert cache budget: resident non-routed weights, context buffers, KV
+     * and the graph reserve, without a vision encoder. ds4 prints these at load
+     * (`Qwen SSD: … static weights, … graph reserve` and `memory: …`); the
+     * prefill expert staging is part of the `--ssd-streaming-cache-experts`
+     * budget, so it is not counted here. Declaring this lets Gezel size the
+     * expert cache to this device's local-model budget instead of a generic
+     * 24 GiB headroom.
+     */
+    streamingMemory: z
+      .object({
+        fixedBytes: z.number().int().positive(),
+        ...Ds4MemoryLineShape,
+        /**
+         * Smallest expert cache worth streaming with. A device that cannot
+         * fit it beside {@link fixedBytes} is told the model needs more memory.
+         */
+        minCacheBytes: z.number().int().positive().optional(),
+      })
+      .optional(),
     /**
      * Model-specific graph prefill cap passed as `--prefill-chunk`. Qwen3.8
      * needs a 1K cap on memory-constrained Macs because its transient Metal

@@ -2606,12 +2606,16 @@ export function ds4EvalLaunchOverridesForModel(
     config: {
       providerConcurrency: { ds4: 1 },
       ds4SsdStreaming: ssdStreaming,
-      ...(ssdStreaming ? { ds4CacheExpertsGb: cacheExpertsGb } : {}),
+      // A measured streamed footprint lets the daemon size the cache to the
+      // budget; forcing the RAM tier here would override that plan.
+      ...(ssdStreaming && !runtimeHints?.streamingMeasured
+        ? { ds4CacheExpertsGb: cacheExpertsGb }
+        : {}),
       ds4NumCtx: numCtx,
     },
     minTrialTimeoutMs: 120 * 60_000,
     hardProgressTimeoutMs: 45 * 60_000,
-    summary: `ds4 eval override: bin=${bin?.path ?? 'MISSING'} model=${model ?? 'MISSING'} vision=${visionEncoder ?? 'off'} numCtx=${numCtx} prefillChunk=${runtimeHints?.prefillChunk ?? 'engine-default'} ramGb=${Math.round(totalRamGb)} residency=${ssdStreaming ? `ssd-streaming cache=${cacheExpertsGb}GB` : 'full'} concurrency=1 capacityBudget=${capacityBudgetGb}GB tuning=catalog startup=1200s hardProgressTimeout=45m minTrialTimeout=120m`,
+    summary: `ds4 eval override: bin=${bin?.path ?? 'MISSING'} model=${model ?? 'MISSING'} vision=${visionEncoder ?? 'off'} numCtx=${numCtx} prefillChunk=${runtimeHints?.prefillChunk ?? 'engine-default'} ramGb=${Math.round(totalRamGb)} residency=${ssdStreaming ? `ssd-streaming cache=${runtimeHints?.streamingMeasured ? 'planned' : `${cacheExpertsGb}GB`}` : 'full'} concurrency=1 capacityBudget=${capacityBudgetGb}GB tuning=catalog startup=1200s hardProgressTimeout=45m minTrialTimeout=120m`,
   };
 }
 

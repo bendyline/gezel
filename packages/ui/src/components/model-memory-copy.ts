@@ -113,6 +113,12 @@ export interface Ds4MemoryCopyInput {
    * quoting it understates the real cost by tens of gigabytes.
    */
   fullyResident?: boolean | undefined;
+  /**
+   * `residentBytes` is the catalog's measurement for the launch mode. A fully
+   * loaded launch then quotes it instead of the download, which for a model
+   * with disk-only tables (Qwen3.8's 95 GiB of n-grams) is several times larger.
+   */
+  memoryMeasured?: boolean | undefined;
 }
 
 function ds4ContextBytes(input: Ds4MemoryCopyInput): number | null {
@@ -133,7 +139,11 @@ export function ds4MemoryHeadline(input: Ds4MemoryCopyInput): string | null {
   // Fully resident: the whole GGUF is in memory, so the download size IS the
   // weights figure. The catalog's streaming `residentBytes` (an expert-cache
   // budget) describes a different launch and would understate this one.
-  if (input.fullyResident) return `${formatMemoryBytes(input.approxSizeBytes)} in memory`;
+  if (input.fullyResident) {
+    const bytes =
+      input.memoryMeasured && input.residentBytes ? input.residentBytes : input.approxSizeBytes;
+    return `${formatMemoryBytes(bytes)} in memory`;
+  }
   if (!input.residentBytes) return null;
   const projected = ds4ContextBytes(input) !== null;
   return `${projected ? '' : '~'}${formatMemoryBytes(input.residentBytes)} in memory`;
@@ -143,6 +153,9 @@ export function ds4SizeTitle(input: Ds4MemoryCopyInput): string {
   if (input.fullyResident) {
     // The streaming sentence below is false in this mode, and it was the
     // unconditional opening of this tooltip.
+    if (input.memoryMeasured && input.residentBytes) {
+      return `${formatBytes(input.approxSizeBytes)} on disk, and this device has the memory to hold every expert — nothing streams from SSD. About ${formatMemoryBytes(input.residentBytes)} stays in memory while the model is loaded. That generates roughly ten times faster than the streaming fallback.`;
+    }
     return `${formatBytes(input.approxSizeBytes)} on disk, and this device has the memory to hold all of it — nothing streams from SSD. That generates roughly ten times faster than the streaming fallback, and the memory stays occupied for as long as the model is loaded.`;
   }
   const onDisk = `${formatBytes(input.approxSizeBytes)} on disk — routed experts stream from it instead of loading, so the download size is not what the model occupies.`;

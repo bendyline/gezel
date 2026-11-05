@@ -1,12 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { createLogger } from '@bendyline/gezel';
+import { createLogger, ds4SsdStreamingSupported } from '@bendyline/gezel';
 import { type GezelConfig, estimateLlamaCppResidentBytes } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { MlxRuntimeStatusBus } from '../../python/mlx-runtime-status-bus.js';
 import { resolveCatalogLlamaCppEngineConfig } from '../catalog-model-config.js';
 import {
   buildDs4Provider,
+  ds4RamTieredContext,
   resolveDs4LaunchCtx,
   resolveDs4VisionLaunch,
 } from '../ds4/build-provider.js';
@@ -716,6 +717,12 @@ export class LocalEngineRuntime {
               kvBytesPerToken?: number;
               residentCtxTokens?: number;
               ssdStreamingSupported?: boolean;
+              ssdStreamingBackends?: string[];
+              cacheExpertsBytes?: number;
+              fullResidencyMemory?: import(
+                '../ds4/residency.js',
+              ).Ds4MemorySource['fullResidencyMemory'];
+              streamingMemory?: import('../ds4/residency.js').Ds4MemorySource['streamingMemory'];
               maxLaunchCtx?: number;
               visionEncoder?: { sizeBytes: number };
             };
@@ -733,8 +740,10 @@ export class LocalEngineRuntime {
                 ds4ProjectedResidentBytes,
                 ds4ResidentBytesForMode,
                 ds4ResidentLine,
+                planDs4MeasuredLaunch,
                 shouldUseDs4SsdStreaming,
               } = await import('../ds4/residency.js');
+              const { totalMemoryBytes } = await import('../../system/host-memory.js');
               // Bill the window this model will actually launch with. The
               // authored footprint is a measurement at `residentCtxTokens`, so
               // without this a raised context reserves the old number and the
@@ -748,37 +757,51 @@ export class LocalEngineRuntime {
                 installed,
                 ds4Block,
               );
-              const line = ds4ResidentLine({
-                residentBytes: bytes,
-                kvBytesPerToken: ds4Block?.kvBytesPerToken,
-                residentCtxTokens: ds4Block?.residentCtxTokens,
+              const totalRamBytes = totalMemoryBytes();
+              const ds4Override = config.modelContextOverrides?.[`ds4:${modelId}`];
+              const contextFloor = minViableLocalContextTokens();
+              const numCtx = resolveDs4LaunchCtx({
+                configured: ds4Override ?? config.ds4NumCtx,
+                ramTieredCtx: ds4RamTieredContext(totalRamBytes),
+                catalogMaxCtx: ds4Block?.maxLaunchCtx,
+                minViableContextTokens:
+                  ds4Override !== undefined ? Math.min(contextFloor, ds4Override) : contextFloor,
               });
-              if (line) {
-                const { totalMemoryBytes } = await import('../../system/host-memory.js');
-                bytes = ds4ProjectedResidentBytes(
-                  line,
-                  resolveDs4LaunchCtx({
-                    configured:
-                      config.modelContextOverrides?.[`ds4:${modelId}`] ?? config.ds4NumCtx,
-                    ramTieredCtx: totalMemoryBytes() / 1024 ** 3 >= 192 ? 262_144 : 131_072,
-                    catalogMaxCtx: ds4Block?.maxLaunchCtx,
-                    minViableContextTokens: minViableLocalContextTokens(),
-                  }),
-                );
+              const streamingSupported = ds4SsdStreamingSupported(ds4Block, process.platform);
+              const ssdStreaming = shouldUseDs4SsdStreaming({
+                configured: config.ds4SsdStreaming,
+                ...(streamingSupported !== undefined
+                  ? { ssdStreamingSupported: streamingSupported }
+                  : {}),
+                modelSizeBytes: ds4Block?.residentWeightBytes ?? block.approxSizeBytes,
+                totalRamBytes,
+                ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
+              });
+              const measured = planDs4MeasuredLaunch({
+                source: ds4Block,
+                numCtx,
+                ssdStreaming,
+                totalRamBytes,
+                budgetBytes:
+                  ssdStreaming && ds4Block?.streamingMemory
+                    ? await (await import('./device-capacity.js')).deviceModelBudgetBytes(config)
+                    : undefined,
+                sidecarBytes: visionResidentBytes,
+                configuredCacheGb: config.ds4CacheExpertsGb,
+              });
+              if (measured) {
+                bytes = measured.workingSetBytes;
+              } else {
+                const line = ds4ResidentLine({
+                  residentBytes: bytes,
+                  kvBytesPerToken: ds4Block?.kvBytesPerToken,
+                  residentCtxTokens: ds4Block?.residentCtxTokens,
+                });
+                if (line) bytes = ds4ProjectedResidentBytes(line, numCtx);
+                bytes =
+                  ds4ResidentBytesForMode(bytes, ssdStreaming, streamingSupported) +
+                  visionResidentBytes;
               }
-              bytes = ds4ResidentBytesForMode(
-                bytes,
-                shouldUseDs4SsdStreaming({
-                  configured: config.ds4SsdStreaming,
-                  ...(ds4Block?.ssdStreamingSupported !== undefined
-                    ? { ssdStreamingSupported: ds4Block.ssdStreamingSupported }
-                    : {}),
-                  modelSizeBytes: ds4Block?.residentWeightBytes ?? block.approxSizeBytes,
-                  ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
-                }),
-                ds4Block?.ssdStreamingSupported,
-              );
-              bytes += visionResidentBytes;
             }
           }
         } else if (block?.approxSizeBytes) {
@@ -1145,6 +1168,21 @@ export class LocalEngineRuntime {
      * the only guard against a window the engine cannot actually serve.
      */
     contextCeilingTokens?: number;
+    /** ds4 only: whether the launch would stream routed experts from SSD. */
+    ssdStreaming?: boolean;
+    /** ds4 only: `plannedResidentBytes` comes from the entry's measurement for this mode. */
+    memoryMeasured?: boolean;
+    /**
+     * ds4 only, streamed launches with a measured footprint: the expert cache
+     * the launcher would choose, so the model list's fit verdict comes from the
+     * same plan instead of a copy of its headroom rule.
+     */
+    expertCache?: {
+      cacheBytes: number;
+      requestedBytes: number;
+      clamped: boolean;
+      safe: boolean;
+    };
   }> {
     let residentContextWindow: number | undefined;
     for (const resident of this.peekResidentLocalProviders(name, modelId)) {
@@ -1342,7 +1380,9 @@ export class LocalEngineRuntime {
         throw new ModelNotInstalledError(name, modelId);
       }
       const { totalMemoryBytes } = await import('../../system/host-memory.js');
-      const ramTieredCtx = totalMemoryBytes() / 1024 ** 3 >= 192 ? 262_144 : 131_072;
+      // The launcher's own tier: 64K below 96 GiB, so a smaller Mac is quoted
+      // the window and footprint it will actually launch with.
+      const ramTieredCtx = ds4RamTieredContext(totalMemoryBytes());
       const ds4Override = config.modelContextOverrides?.[`ds4:${modelId}`];
       const ds4Floor =
         ds4Override !== undefined ? Math.min(contextFloor, ds4Override) : contextFloor;
@@ -1395,6 +1435,7 @@ export class LocalEngineRuntime {
         ds4ProjectedResidentBytes,
         ds4ResidentBytesForMode,
         ds4ResidentLine,
+        planDs4MeasuredLaunch,
         shouldUseDs4SsdStreaming,
       } = await import('../ds4/residency.js');
       const ds4Line = ds4ResidentLine({
@@ -1408,39 +1449,73 @@ export class LocalEngineRuntime {
         installed,
         ds4Source,
       );
+      const streamingSupported = ds4SsdStreamingSupported(ds4Source, process.platform);
       const ssdStreaming = shouldUseDs4SsdStreaming({
         configured: config.ds4SsdStreaming,
-        ...(ds4Source?.ssdStreamingSupported !== undefined
-          ? { ssdStreamingSupported: ds4Source.ssdStreamingSupported }
-          : {}),
+        ...(streamingSupported !== undefined ? { ssdStreamingSupported: streamingSupported } : {}),
         modelSizeBytes:
           ds4Source?.residentWeightBytes ??
           ds4Source?.approxSizeBytes ??
           installed?.approxSizeBytes,
         ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
       });
-      const plannedResidentBytes = ds4Line
-        ? ds4ResidentBytesForMode(
-            ds4ProjectedResidentBytes(ds4Line, effective),
-            ssdStreaming,
-            ds4Source?.ssdStreamingSupported,
-          ) + visionResidentBytes
-        : await this.resolveResidentBytes('ds4', modelId);
+      // A measurement for this launch's mode prices it exactly — the window
+      // moves only that mode's slope, and a streamed launch carries the cache
+      // the launcher would choose. Unmeasured entries keep the authored line.
+      const measured = planDs4MeasuredLaunch({
+        source: ds4Source,
+        numCtx: effective,
+        ssdStreaming,
+        totalRamBytes: totalMemoryBytes(),
+        budgetBytes:
+          ssdStreaming && ds4Source?.streamingMemory
+            ? await (await import('./device-capacity.js')).deviceModelBudgetBytes(config)
+            : undefined,
+        sidecarBytes: visionResidentBytes,
+        configuredCacheGb: config.ds4CacheExpertsGb,
+      });
+      const plannedResidentBytes = measured
+        ? measured.workingSetBytes
+        : ds4Line
+          ? ds4ResidentBytesForMode(
+              ds4ProjectedResidentBytes(ds4Line, effective),
+              ssdStreaming,
+              streamingSupported,
+            ) + visionResidentBytes
+          : await this.resolveResidentBytes('ds4', modelId);
       return {
         contextWindow: useResidentOr(effective, Math.min(effective, ds4Floor)),
         plannedResidentBytes,
-        ...(ds4Line
+        ssdStreaming,
+        ...(measured
           ? {
-              weightsResidentBytes:
-                ds4ResidentBytesForMode(
-                  ds4Line.contextFreeBytes,
-                  ssdStreaming,
-                  ds4Source?.ssdStreamingSupported,
-                ) + visionResidentBytes,
+              memoryMeasured: true,
+              weightsResidentBytes: measured.contextFreeBytes,
               kvFixedBytesPerSlot: 0,
-              kvBytesPerTokenPerSlot: ds4Line.kvBytesPerToken,
+              kvBytesPerTokenPerSlot: measured.bytesPerToken,
+              ...(measured.cache
+                ? {
+                    expertCache: {
+                      cacheBytes: measured.cache.cacheGb * 1024 ** 3,
+                      requestedBytes: measured.cache.requestedGb * 1024 ** 3,
+                      clamped: measured.cache.clamped,
+                      safe: measured.cache.safe,
+                    },
+                  }
+                : {}),
             }
-          : {}),
+          : ds4Line
+            ? {
+                weightsResidentBytes:
+                  ds4ResidentBytesForMode(
+                    ds4Line.contextFreeBytes,
+                    ssdStreaming,
+                    streamingSupported,
+                  ) + visionResidentBytes,
+                kvFixedBytesPerSlot: 0,
+                kvBytesPerTokenPerSlot: ds4Line.kvBytesPerToken,
+              }
+            : {}),
         ...(nativeWindow ? { nativeContextWindow: nativeWindow } : {}),
         ...(ds4Override !== undefined ? { overrideContextTokens: ds4Override } : {}),
         ...(ds4AutoContextWindow !== undefined ? { autoContextWindow: ds4AutoContextWindow } : {}),

@@ -1,3 +1,4 @@
+import { ds4SsdStreamingSupported } from '@bendyline/gezel';
 import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import {
   ds4VisionResidentBytes,
@@ -121,6 +122,7 @@ export function ds4Routes(ctx: EngineContext): Hono {
             allowUninstalled: true,
             standalone: true,
           });
+          const streamingSupported = ds4SsdStreamingSupported(manifest.ds4, process.platform);
           plans[manifest.id] = {
             ...(plan.contextWindow ? { effectiveContextWindow: plan.contextWindow } : {}),
             ...(plan.autoContextWindow !== undefined
@@ -144,27 +146,34 @@ export function ds4Routes(ctx: EngineContext): Hono {
             ...(plan.weightsResidentBytes !== undefined
               ? { contextFreeResidentBytes: plan.weightsResidentBytes }
               : {}),
-            fullyResident: !shouldUseDs4SsdStreaming({
-              ...(ds4Config.ds4SsdStreaming !== undefined
-                ? { configured: ds4Config.ds4SsdStreaming }
-                : {}),
-              ...(manifest.ds4.residentWeightBytes !== undefined ||
-              manifest.ds4.approxSizeBytes !== undefined
-                ? {
-                    modelSizeBytes:
-                      manifest.ds4.residentWeightBytes ?? manifest.ds4.approxSizeBytes,
-                  }
-                : {}),
-              ...(manifest.ds4.ssdStreamingSupported !== undefined
-                ? { ssdStreamingSupported: manifest.ds4.ssdStreamingSupported }
-                : {}),
-              ...(manifest.ds4.visionEncoder &&
-              nativeVisionEnabledFor(ds4Config.nativeVision, manifest.id)
-                ? {
-                    companionBytes: ds4VisionResidentBytes(manifest.ds4.visionEncoder.sizeBytes),
-                  }
-                : {}),
-            }),
+            ...(plan.expertCache ? { expertCache: plan.expertCache } : {}),
+            ...(plan.memoryMeasured ? { memoryMeasured: true } : {}),
+            fullyResident:
+              plan.ssdStreaming !== undefined
+                ? !plan.ssdStreaming
+                : !shouldUseDs4SsdStreaming({
+                    ...(ds4Config.ds4SsdStreaming !== undefined
+                      ? { configured: ds4Config.ds4SsdStreaming }
+                      : {}),
+                    ...(manifest.ds4.residentWeightBytes !== undefined ||
+                    manifest.ds4.approxSizeBytes !== undefined
+                      ? {
+                          modelSizeBytes:
+                            manifest.ds4.residentWeightBytes ?? manifest.ds4.approxSizeBytes,
+                        }
+                      : {}),
+                    ...(streamingSupported !== undefined
+                      ? { ssdStreamingSupported: streamingSupported }
+                      : {}),
+                    ...(manifest.ds4.visionEncoder &&
+                    nativeVisionEnabledFor(ds4Config.nativeVision, manifest.id)
+                      ? {
+                          companionBytes: ds4VisionResidentBytes(
+                            manifest.ds4.visionEncoder.sizeBytes,
+                          ),
+                        }
+                      : {}),
+                  }),
           };
         } catch {
           // A model whose plan can't be resolved (capacity denial, missing

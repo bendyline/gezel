@@ -10,6 +10,7 @@ import {
   ds4ResidentLine,
   ds4VisionResidentBytes,
   planDs4ExpertCache,
+  planDs4MeasuredLaunch,
   shouldUseDs4SsdStreaming,
 } from '@bendyline/gezel-inference/internal/providers/ds4/residency';
 import { describe, expect, it } from 'vitest';
@@ -165,7 +166,7 @@ describe('DS4 residency policy', () => {
         catalogResidentBytes: 36 * GB,
         totalRamBytes: 128 * GB,
       }),
-    ).toEqual({ cacheGb: 32, requestedGb: 32, clamped: false, safe: true });
+    ).toEqual({ cacheGb: 32, requestedGb: 32, clamped: false, safe: true, limit: 'headroom' });
 
     expect(
       planDs4ExpertCache({
@@ -174,7 +175,7 @@ describe('DS4 residency policy', () => {
         catalogResidentBytes: 80 * GB,
         totalRamBytes: 128 * GB,
       }),
-    ).toEqual({ cacheGb: 88, requestedGb: 96, clamped: true, safe: true });
+    ).toEqual({ cacheGb: 88, requestedGb: 96, clamped: true, safe: true, limit: 'headroom' });
   });
 
   it('reserves the broker ceiling for a fully resident model', () => {
@@ -262,5 +263,87 @@ describe('DS4 residency policy', () => {
     });
     expect(line?.contextFreeBytes).toBe(0);
     expect(ds4ProjectedResidentBytes(line!, 0)).toBe(0);
+  });
+  describe('measured launch memory', () => {
+    // Shaped like Qwen3.8 Flash Next Q2: ~45 GiB fully loaded at 64K, a
+    // ~13 GiB streamed footprint beside an 8 GiB expert cache.
+    const source = {
+      cacheExpertsBytes: 8 * GB,
+      fullResidencyMemory: {
+        workingSetBytes: 45 * GB,
+        ctxTokens: 65_536,
+        bytesPerToken: 36 * 1024,
+      },
+      streamingMemory: {
+        fixedBytes: 13 * GB,
+        ctxTokens: 65_536,
+        bytesPerToken: 64 * 1024,
+        minCacheBytes: 4 * GB,
+      },
+    };
+
+    it('reserves a measured full residency at its working set, without the 96 GiB floor', () => {
+      const plan = planDs4MeasuredLaunch({
+        source,
+        numCtx: 131_072,
+        ssdStreaming: false,
+        totalRamBytes: 96 * GB,
+        sidecarBytes: 1 * GB,
+      });
+      const kvAt64k = 36 * 1024 * 65_536;
+      expect(plan).toEqual({
+        workingSetBytes: 45 * GB + kvAt64k + 1 * GB,
+        contextFreeBytes: 45 * GB - kvAt64k + 1 * GB,
+        bytesPerToken: 36 * 1024,
+      });
+      expect(plan!.workingSetBytes).toBeLessThan(DS4_FULL_RESIDENCY_RESERVATION_BYTES);
+    });
+
+    it('leaves an unmeasured mode to the catalog path', () => {
+      const base = { numCtx: 65_536, totalRamBytes: 64 * GB, budgetBytes: 48 * GB };
+      expect(planDs4MeasuredLaunch({ ...base, source: {}, ssdStreaming: false })).toBeUndefined();
+      expect(planDs4MeasuredLaunch({ ...base, source: {}, ssdStreaming: true })).toBeUndefined();
+      expect(
+        planDs4MeasuredLaunch({ ...base, budgetBytes: undefined, source, ssdStreaming: true }),
+      ).toBeUndefined();
+    });
+
+    it('sizes a measured streamed cache to the device budget instead of the 24 GiB headroom', () => {
+      const streamed = (ramGb: number) =>
+        planDs4MeasuredLaunch({
+          source,
+          numCtx: 65_536,
+          ssdStreaming: true,
+          totalRamBytes: ramGb * GB,
+          budgetBytes: 0.75 * ramGb * GB,
+          sidecarBytes: 1 * GB,
+        });
+
+      // 32 GiB: a 24 GiB budget holds the 14 GiB footprint and the full 8 GiB cache.
+      expect(streamed(32)).toEqual({
+        workingSetBytes: 22 * GB,
+        contextFreeBytes: 14 * GB - 64 * 1024 * 65_536 + 8 * GB,
+        bytesPerToken: 64 * 1024,
+        cache: { cacheGb: 8, requestedGb: 8, clamped: false, safe: true, limit: 'model-budget' },
+      });
+      // The generic rule would have refused it outright.
+      expect(
+        planDs4ExpertCache({
+          catalogCacheBytes: 8 * GB,
+          catalogResidentBytes: 22 * GB,
+          totalRamBytes: 32 * GB,
+        }).safe,
+      ).toBe(false);
+      // 24 GiB: 18 GiB of budget leaves exactly the 4 GiB minimum.
+      expect(streamed(24)?.cache).toEqual({
+        cacheGb: 4,
+        requestedGb: 8,
+        clamped: true,
+        safe: true,
+        limit: 'model-budget',
+      });
+      // 16 GiB: below the entry's minimum cache, so it needs more memory.
+      expect(streamed(16)?.cache?.safe).toBe(false);
+    });
   });
 });

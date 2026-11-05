@@ -64,7 +64,12 @@ interface LooseManifest {
     quantization?: string;
     chatTemplateOverride?: string;
   };
-  ds4?: { residentBytes?: number };
+  ds4?: {
+    residentBytes?: number;
+    residentWeightBytes?: number;
+    approxSizeBytes?: number;
+    fullResidencyMemory?: { workingSetBytes: number };
+  };
 }
 
 /**
@@ -263,6 +268,17 @@ export function lintChatModelManifest(manifest: LooseManifest): ManifestLintRepo
       detail:
         'ds4 block without `ds4.residentBytes` — ds4 streams experts from SSD, so its resident set cannot be ' +
         'derived from the on-disk size and the broker falls back to a crude 48 GiB clamp',
+    });
+  }
+  // A fully loaded launch holds every resident weight plus KV and buffers, so
+  // a measurement below the weights was taken from the wrong launch.
+  const ds4Weights = manifest.ds4?.residentWeightBytes ?? manifest.ds4?.approxSizeBytes;
+  const ds4FullSet = manifest.ds4?.fullResidencyMemory?.workingSetBytes;
+  if (ds4FullSet !== undefined && ds4Weights !== undefined && ds4FullSet < ds4Weights) {
+    errors.push({
+      modelId,
+      rule: 'ds4-full-residency-below-weights',
+      detail: `ds4.fullResidencyMemory.workingSetBytes (${ds4FullSet}) is below the ${ds4Weights} bytes of weights it must hold — measure it from a launch without --ssd-streaming`,
     });
   }
 

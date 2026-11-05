@@ -79,9 +79,23 @@
  * instead of consuming the Metal working set. Do not treat the library pin
  * alone as proof that every community conversion is correct or fits.
  *
+ * 0.7.12 (2026-11-05): the project moved to Neywa-Labs/mlx-vlm; same PyPI
+ * name. It resolves mlx 0.32.4 (mlx-audio pins it exactly) and transformers
+ * 5.22. Every private `speculative.mtp` helper the assisted round loop calls
+ * is unchanged for Qwen 3.5; Gemma 4 targets now rebuild the drafter's shared
+ * KV from committed caches, which `shared_kv_after_round` follows. Its
+ * qwen3_coder parser keeps "null" as text in a string parameter, which
+ * `tool_args_json.py` now mirrors. Verified on an M5 Max against 0.7.1
+ * through the real sidecar: gemma4-e4b and qwen3.8-27b + MTP drafter render
+ * identical prompt token counts and identical tool-call, JSON and vision
+ * output; greedy spec still equals greedy no-spec; 0.7.1-written disk caches
+ * load and extend (Gemma 4 rotating, Qwen 3.5 hybrid). Interleaved decode
+ * A/B was at parity but measured beside another engine, so it is not a clean
+ * throughput number, and context beyond ~10k tokens was not re-measured.
+ *
  * Keep upgrades explicit and re-sweep the MLX catalog whenever this pin
  * moves. */
-export const MLX_DEFAULT_PACKAGE_SPEC = 'mlx-vlm==0.7.1';
+export const MLX_DEFAULT_PACKAGE_SPEC = 'mlx-vlm==0.7.12';
 
 /** Venv name passed to `UvRuntime.ensureVenv` (and its dir basename). */
 export const MLX_VENV_NAME = 'mlx';
@@ -103,7 +117,8 @@ export function mlxVenvPackages(packageSpec?: string): string[] {
   // a dependency (0.6.6 did, which is the only reason the old list
   // worked). Dropping this pin kills the batch engine at import time.
   // 0.31.3 is also the combination used for the 0.7.1 Qwen4-Exp batch
-  // compatibility check above; keep it independent of mlx-vlm's deps.
+  // compatibility check and the 0.7.12 verification above; keep it
+  // independent of mlx-vlm's deps.
   return [
     packageSpec ?? MLX_DEFAULT_PACKAGE_SPEC,
     'mlx-lm==0.31.3',

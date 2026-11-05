@@ -19,7 +19,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { normalizeChatModelCatalogId } from '@bendyline/gezel';
+import { ds4SsdStreamingSupported, normalizeChatModelCatalogId } from '@bendyline/gezel';
 import { gildeDataDir } from '@bendyline/gezel-catalog';
 import { type ChatProvider, isLocalEngine } from './providers.ts';
 
@@ -61,6 +61,8 @@ interface EngineBlock {
   disabledReason?: unknown;
   residentWeightBytes?: number;
   ssdStreamingSupported?: boolean;
+  ssdStreamingBackends?: string[];
+  streamingMemory?: unknown;
   prefillChunk?: number;
   maxLaunchCtx?: number;
   draftModel?: { filename?: string };
@@ -69,7 +71,10 @@ interface EngineBlock {
 
 export interface Ds4RuntimeHints {
   residentWeightBytes?: number;
+  /** Whether ds4 can stream this entry on this host's backend. */
   ssdStreamingSupported?: boolean;
+  /** The entry measures its streamed footprint, so the daemon sizes the expert cache itself. */
+  streamingMeasured?: boolean;
   prefillChunk?: number;
   maxLaunchCtx?: number;
 }
@@ -181,13 +186,13 @@ export function chatModelDs4RuntimeHints(modelId: string): Ds4RuntimeHints | und
   const id = normalizeChatModelCatalogId(modelId) ?? modelId;
   const block = loadIndex().get(id)?.blocks.ds4;
   if (!block) return undefined;
+  const streamingSupported = ds4SsdStreamingSupported(block, process.platform);
   return {
     ...(block.residentWeightBytes !== undefined
       ? { residentWeightBytes: block.residentWeightBytes }
       : {}),
-    ...(block.ssdStreamingSupported !== undefined
-      ? { ssdStreamingSupported: block.ssdStreamingSupported }
-      : {}),
+    ...(streamingSupported !== undefined ? { ssdStreamingSupported: streamingSupported } : {}),
+    ...(block.streamingMemory !== undefined ? { streamingMeasured: true } : {}),
     ...(block.prefillChunk !== undefined ? { prefillChunk: block.prefillChunk } : {}),
     ...(block.maxLaunchCtx !== undefined ? { maxLaunchCtx: block.maxLaunchCtx } : {}),
   };
