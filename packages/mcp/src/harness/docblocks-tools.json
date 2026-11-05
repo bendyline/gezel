@@ -1,5 +1,5 @@
 {
-  "docblocksVersion": "2.7.5",
+  "docblocksVersion": "2.7.13",
   "tools": [
     {
       "name": "convert_document",
@@ -751,21 +751,25 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 256,
-                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "description": "A write root id from list_roots."
                   },
                   "path": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 4096,
-                    "pattern": "^(?!\\/)(?![A-Za-z]:)(?!.*(?:^|\\/)(?:\\.{1,2})(?:\\/|$))(?!.*\\/\\/)(?!.*[\\\\\\u0000-\\u001f\\u007f])(?!.*\\/$).+$"
+                    "pattern": "^(?!\\/)(?![A-Za-z]:)(?!.*(?:^|\\/)(?:\\.{1,2})(?:\\/|$))(?!.*\\/\\/)(?!.*[\\\\\\u0000-\\u001f\\u007f])(?!.*\\/$).+$",
+                    "description": "Path below that root."
                   },
                   "ifExists": {
                     "type": "string",
-                    "const": "error"
+                    "const": "error",
+                    "description": "Create the file; fails if one is already there."
                   },
                   "expectedSha256": {
                     "type": "null",
-                    "default": null
+                    "default": null,
+                    "description": "Omit or null when creating a file."
                   }
                 },
                 "required": ["rootId", "path", "ifExists"],
@@ -775,18 +779,25 @@
                 "type": "object",
                 "properties": {
                   "rootId": {
-                    "$ref": "#/properties/destination/anyOf/0/properties/rootId"
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "description": "A write root id from list_roots."
                   },
                   "path": {
-                    "$ref": "#/properties/destination/anyOf/0/properties/path"
+                    "$ref": "#/properties/destination/anyOf/0/properties/path",
+                    "description": "Path below that root."
                   },
                   "ifExists": {
                     "type": "string",
-                    "const": "replace"
+                    "const": "replace",
+                    "description": "Replace the file already at this path; fails if nothing is there."
                   },
                   "expectedSha256": {
                     "type": "string",
-                    "pattern": "^[a-f0-9]{64}$"
+                    "pattern": "^[a-f0-9]{64}$",
+                    "description": "SHA-256 of the file now at this path (the sha256 returned when it was saved), not of the artifact being saved."
                   }
                 },
                 "required": ["rootId", "path", "ifExists", "expectedSha256"],
