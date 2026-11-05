@@ -75,6 +75,7 @@ import {
   SHORTHAND_FLAG,
   craftbookForShorthand,
   craftbookShorthandArgv,
+  localCraftbookNamed,
   shorthandEcho,
   workspaceCraftbookId,
 } from '../craftbook-shorthand.js';
@@ -130,7 +131,7 @@ import {
 } from '../storage-format.js';
 import { copyTaskOutput } from '../task-output.js';
 import { craftbookStartRequest, normalizeCraftbooks } from '../tui/craftbook-start.js';
-import { unknownCommandMessage } from '../unknown-command.js';
+import { closestCommand, unknownCommandMessage } from '../unknown-command.js';
 import { runWorkflow } from '../workflow-command.js';
 import { unsupportedNodeMessage } from './node-version.js';
 
@@ -200,11 +201,21 @@ async function resolveCraftbookShorthand(
   parts: string[],
 ): Promise<{ client: GezelClient; id: string }> {
   const word = parts[0] ?? '';
-  const unknown = unknownCommandMessage(parts, builtinCommandNames());
+  const builtins = builtinCommandNames();
+  const unknown = unknownCommandMessage(parts, builtins);
+  // A word one slip from a built-in is a typo unless a craftbook answers to
+  // it. Ask a service that is already running, else the disk; never start one.
+  let running: GezelClient | null = null;
+  if (closestCommand(word, builtins)) {
+    running = await connectRunning(cliGlobals()).catch(() => null);
+    const project = cliGlobals().project;
+    const folder = resolvePath(typeof project === 'string' ? project : process.cwd());
+    if (!running && !(await localCraftbookNamed(word, folder))) throw new CliError(unknown);
+  }
   let client: GezelClient;
   let id: string | undefined;
   try {
-    client = await connectOwned(cliGlobals());
+    client = running ?? (await connectOwned(cliGlobals()));
     const preview = await previewRunProject(client, cliGlobals());
     const [config, items] = await Promise.all([
       client.getConfig(),
@@ -890,6 +901,8 @@ program
         } else if (ev.type === 'delta') {
           progress.settle();
           reply.push(ev.content);
+        } else if (ev.type === 'tool') {
+          reply.toolCalled();
         } else if (ev.type === 'complete') {
           progress.settle();
           // The saved message stands in for providers that send it whole.

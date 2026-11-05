@@ -94,6 +94,8 @@ async function linkedWorkspaceAccessAllowed(
 export function sessionRouteGuard(
   opts: {
     log?: (msg: string) => void;
+    /** For refusals the caller expects and falls back from. Defaults to `log`. */
+    logRoutine?: (msg: string) => void;
     isProjectLinked?: LinkedProjectAccessCheck;
     /** Whether the session's in-flight turn was started by the user. */
     isUserDirectedTurn?: (sessionId: string) => boolean;
@@ -124,7 +126,10 @@ export function sessionRouteGuard(
       opts.taskStatus,
       opts.staleStepSession,
     );
-    if (!allowed.ok) return denySessionRoute(c, opts, allowed.reason, allowed.code);
+    if (!allowed.ok) {
+      const logTo = allowed.routine && opts.logRoutine ? { log: opts.logRoutine } : opts;
+      return denySessionRoute(c, logTo, allowed.reason, allowed.code);
+    }
     return next();
   };
 }
@@ -151,7 +156,10 @@ export const PERSON_MEMORY_NEEDS_USER_TURN_CODE = 'person_memory_needs_user_turn
 export const PERSON_MEMORY_NEEDS_USER_TURN_HINT =
   'notes about the person can be saved only while they are talking with you. Save this to your own memory instead (scope "gezel"), and do not retry with scope "user".';
 
-type SessionRouteDecision = { ok: true } | { ok: false; reason: string; code?: string };
+type SessionRouteDecision =
+  | { ok: true }
+  /** `routine`: a refusal the caller expects and handles, logged at `logRoutine`. */
+  | { ok: false; reason: string; code?: string; routine?: boolean };
 const SESSION_ALLOW: SessionRouteDecision = { ok: true };
 
 function sessionDeny(reason: string, code?: string): SessionRouteDecision {
@@ -678,7 +686,11 @@ async function isSessionRouteAllowed(
   }
 
   if ((path === '/api/tasks' || path === '/api/tasks/') && method === 'GET') {
-    return auth.team ? SESSION_ALLOW : sessionDeny('global task listing requires a coordinator');
+    // `list_tasks` asks for this first and falls back to its own project, so
+    // refusing a worker is routine and is not logged as a warning.
+    return auth.team
+      ? SESSION_ALLOW
+      : { ok: false, reason: 'global task listing requires a coordinator', routine: true };
   }
 
   // Explicit install-global MCP capabilities. Local craftbook templates are

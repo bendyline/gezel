@@ -113,6 +113,11 @@ describe('hosting Gezel inside an application', () => {
     const record = await gezel.client.getProject(plain.id);
     expect(record.workingDir).toBe(join(root, 'plain'));
     expect(record.projectType).toBeUndefined();
+
+    // Nothing names the folder's crew to the app, so a chat with no role
+    // goes to the project's lead.
+    const chat = await plain.openChat();
+    expect(chat.gezelId).toBe(record.voormanGezelId);
   }, 120_000);
 
   it("chats with the project's gezel by role", async () => {

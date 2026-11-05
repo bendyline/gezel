@@ -641,7 +641,7 @@
 /* The Overview page docks under its tab the same way, through this editor's
    12px gap rather than Task detail's 1rem. */
 .craftbook-editor > .task-view-panel {
-  margin-top: calc(-0.75rem - 1px);
+  margin-top: -0.75rem;
 }
 /* Task detail's narrow layout: stack the view keys above a full-width bench. */
 @container craftbook-editor (max-width: 480px) {
@@ -659,7 +659,12 @@
     padding-block: 0.5rem;
     border-bottom: 1px solid var(--border);
     border-radius: var(--radius-md);
-    margin-bottom: 0;
+  }
+  .craftbook-bench-row .task-tab-btn.active::after {
+    content: none;
+  }
+  .craftbook-editor > .task-view-panel {
+    border-top-left-radius: 8px;
   }
 }
 .craftbook-chat-pane {

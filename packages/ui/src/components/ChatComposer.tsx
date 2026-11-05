@@ -39,6 +39,7 @@ import { AutosaveStatus } from './AutosaveStatus.js';
 import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
 import { ChatNarrateButton } from './ChatNarrateButton.js';
 import { ChatRecipientPicker } from './ChatRecipientPicker.js';
+import { ComposerExpandButton } from './ComposerExpandButton.js';
 import { ComposerImageClipboard } from './ComposerImageClipboard.js';
 import { ComposerImageSettingsBar } from './ComposerImageSettingsBar.js';
 import { ComposerReviewStrip, ComposerSparkleMenu } from './ComposerSparkleMenu.js';
@@ -92,36 +93,6 @@ interface ComposerDraftSnapshot {
   source: string;
   /** User/programmatic edit generation when the submission started. */
   editVersion: number;
-}
-
-/** Chevrons pushing apart — the draft is about to take the window. */
-function ExpandDraftIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M5 6.4 8 3.4l3 3M11 9.6l-3 3-3-3"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
-
-/** The same chevrons closing back toward the bottom strip. */
-function CollapseDraftIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path
-        d="M5 3.4l3 3 3-3M11 12.6l-3-3-3 3"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 /**
@@ -240,6 +211,13 @@ export interface ChatComposerProps {
    * fronts and stays anchored to the same right edge in both modes.
    */
   addressLineTrailing?: ReactNode;
+  /**
+   * Whether the draft has taken the chat window. Uncontrolled by default;
+   * project chat owns it so the size survives a flip to terminal mode, whose
+   * composer carries the same key.
+   */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
   /**
    * Project-chat pivot hook. Fires the first time a draft picks up
    * an `@<otherGezel>` mention (other than the current primary) so
@@ -416,6 +394,8 @@ export function ChatComposer({
   stepId,
   belowAddressLine,
   addressLineTrailing,
+  expanded: expandedProp,
+  onExpandedChange,
   onPivotToMention,
   passiveCcGezelIds,
   onPassiveCcConsumed,
@@ -458,11 +438,13 @@ export function ChatComposer({
    * pasted in — is unreadable through a three-line slot, and scrolling
    * it inside the slot loses the shape of the thing being written.
    */
-  const [expanded, setExpanded] = useState(false);
+  const [ownExpanded, setOwnExpanded] = useState(false);
+  const expanded = expandedProp ?? ownExpanded;
+  const setExpanded = onExpandedChange ?? setOwnExpanded;
   const expansionAllowed = showAddress && features?.expand !== false;
   useEffect(() => {
-    if (!expansionAllowed) setExpanded(false);
-  }, [expansionAllowed]);
+    if (!expansionAllowed && expanded) setExpanded(false);
+  }, [expansionAllowed, expanded, setExpanded]);
   // The local SSE is only one view of a turn. Navigation, remounts, and a
   // renderer reconnect can drop it while the service keeps generating.
   // Track the service's authoritative in-flight state separately so the
@@ -1979,21 +1961,12 @@ export function ChatComposer({
             />
           )}
           {features?.expand !== false && (
-            <button
-              type="button"
-              className="chat-composer-expand-btn"
-              data-testid="chat-composer-expand"
-              onClick={() => setExpanded((current) => !current)}
-              aria-pressed={expanded}
-              aria-label={expanded ? 'Collapse the draft' : 'Expand the draft'}
-              title={
-                expanded
-                  ? 'Collapse the draft back to a few lines'
-                  : 'Expand the draft to fill the chat window'
-              }
-            >
-              {expanded ? <CollapseDraftIcon /> : <ExpandDraftIcon />}
-            </button>
+            <ComposerExpandButton
+              expanded={expanded}
+              onToggle={() => setExpanded(!expanded)}
+              what="draft"
+              testId="chat-composer-expand"
+            />
           )}
           {addressLineTrailing}
         </div>

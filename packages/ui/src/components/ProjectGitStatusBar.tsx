@@ -927,11 +927,19 @@ export function ProjectGitStatusBar({
                 title="Open the GitHub tab"
               >
                 {chipPhrase}
-                {!chipAttention && lastSynced && (
-                  <span className="muted small" title={formatAbsoluteTime(lastSynced)}>
+                {!chipAttention && status.remoteCheckedAt ? (
+                  <span className="muted small" title={formatAbsoluteTime(status.remoteCheckedAt)}>
                     {' '}
-                    · synced {formatRelativeTime(lastSynced, { seconds: true })}
+                    · checked {formatRelativeTime(status.remoteCheckedAt, { seconds: true })}
                   </span>
+                ) : (
+                  !chipAttention &&
+                  lastSynced && (
+                    <span className="muted small" title={formatAbsoluteTime(lastSynced)}>
+                      {' '}
+                      · synced {formatRelativeTime(lastSynced, { seconds: true })}
+                    </span>
+                  )
                 )}
               </button>
             )}

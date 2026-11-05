@@ -109,6 +109,32 @@ describe('list_tasks for a worker', () => {
     expect((await stack(true).request('/api/tasks')).status).toBe(200);
   });
 
+  it("logs a worker's refusal as routine, since the tool expects it and falls back", async () => {
+    const warned: string[] = [];
+    const routine: string[] = [];
+    const app = new Hono();
+    app.use('*', async (c, next) => {
+      c.set('auth', {
+        appId: `session:${SESSION}`,
+        scopes: ['session'],
+        projectId: PROJECT,
+        gezelId: GEZEL,
+        team: false,
+      } as never);
+      await next();
+    });
+    app.use(
+      '/api/*',
+      sessionRouteGuard({ log: (m) => warned.push(m), logRoutine: (m) => routine.push(m) }),
+    );
+    app.all('*', (c) => c.json({ ok: true }));
+
+    expect((await app.request('/api/tasks')).status).toBe(403);
+    expect(routine).toEqual([expect.stringContaining('DENY')]);
+    expect((await app.request('/api/config')).status).toBe(403);
+    expect(warned).toEqual([expect.stringContaining('/api/config')]);
+  });
+
   it('the own-project listing the tool falls back to is open to a worker', async () => {
     const app = stack(false);
     expect((await app.request(`/api/projects/${PROJECT}/tasks?status=active`)).status).toBe(200);

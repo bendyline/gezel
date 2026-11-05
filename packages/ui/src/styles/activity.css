@@ -175,6 +175,99 @@
     animation: none;
   }
 }
+/* A soft traffic light over the four sections: Needs you is blush, Working
+   and Next share one honey zone, Ready is sage (the workshop's green, not
+   --success mint). Each tone has a light (the indicator dot), a wash (the
+   zone's paper) and an edge (its hairline). Washes sit lighter than the
+   panel's tan so the honey still reads as yellow on parchment. */
+.activity-panel {
+  --activity-attention: #c4604c;
+  --activity-attention-wash: #f4e2d8;
+  --activity-attention-edge: #e2c1b2;
+  --activity-active: #cf9a2e;
+  --activity-active-wash: #f5eaca;
+  --activity-active-edge: #e2cf9c;
+  --activity-done: #6f8d58;
+  --activity-done-wash: #e3ead4;
+  --activity-done-edge: #c5d2ae;
+  /* Mixed into a zone's wash for the insets inside it (keys, strips, rows),
+     so they read as paler paper of the same tone instead of tan chips. */
+  --activity-inset: #fff;
+}
+[data-theme="dark"] .activity-panel {
+  --activity-attention: #e48b77;
+  --activity-attention-wash: #322426;
+  --activity-attention-edge: #573a36;
+  --activity-active: #e2b55c;
+  --activity-active-wash: #2f2a1e;
+  --activity-active-edge: #57482a;
+  --activity-done: #a2c088;
+  --activity-done-wash: #242c23;
+  --activity-done-edge: #3f4f38;
+  --activity-inset: var(--gezel-paper-canvas);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .activity-panel {
+    --activity-attention: #e48b77;
+    --activity-attention-wash: #322426;
+    --activity-attention-edge: #573a36;
+    --activity-active: #e2b55c;
+    --activity-active-wash: #2f2a1e;
+    --activity-active-edge: #57482a;
+    --activity-done: #a2c088;
+    --activity-done-wash: #242c23;
+    --activity-done-edge: #3f4f38;
+    --activity-inset: var(--gezel-paper-canvas);
+  }
+}
+.activity-panel [data-tone="attention"] {
+  --tone: var(--activity-attention);
+  --tone-wash: var(--activity-attention-wash);
+  --tone-edge: var(--activity-attention-edge);
+}
+.activity-panel [data-tone="active"] {
+  --tone: var(--activity-active);
+  --tone-wash: var(--activity-active-wash);
+  --tone-edge: var(--activity-active-edge);
+}
+.activity-panel [data-tone="done"] {
+  --tone: var(--activity-done);
+  --tone-wash: var(--activity-done-wash);
+  --tone-edge: var(--activity-done-edge);
+}
+/* The light is lit only when its section holds something, so color on the
+   panel always means there is something to read. */
+.activity-light {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text-muted) 45%, transparent);
+}
+.activity-section-links [data-lit] .activity-light,
+.activity-section:not(.is-empty) .activity-light {
+  background: var(--tone);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 22%, transparent);
+}
+/* Running work breathes, like the titlebar key's dot. */
+.activity-section-links [data-section="working"][data-lit] .activity-light,
+.activity-section[data-section="working"]:not(.is-empty) .activity-light {
+  animation: activity-light-breathe 2.4s ease-in-out infinite;
+}
+@keyframes activity-light-breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--tone) 14%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--tone) 30%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-panel .activity-light {
+    animation: none;
+  }
+}
 .activity-panel-header {
   display: flex;
   align-items: start;
@@ -200,26 +293,72 @@
 }
 .activity-section-links .btn {
   display: flex;
+  align-items: center;
   gap: 0.5rem;
   flex: 1;
   white-space: nowrap;
   font-size: var(--text-sm);
 }
-.activity-section-links span,
-.activity-section h3 span {
+.activity-section-links .activity-light {
+  width: 7px;
+  height: 7px;
+}
+.activity-section-links .activity-count,
+.activity-section h3 .activity-count {
   color: var(--muted);
   font-weight: 400;
 }
 .activity-panel-scroll {
-  padding: 0 1rem 1rem;
+  padding: 0.75rem 1rem 1rem;
   overflow: auto;
   overscroll-behavior: contain;
   min-height: 0;
 }
+/* Each section is a zone of tinted paper whose edges line up with the
+   section keys above. An empty one keeps only a faint outline. */
 .activity-section {
-  scroll-margin-top: 1rem;
-  padding: 1rem 0;
-  border-bottom: 1px solid var(--border);
+  scroll-margin-top: 0.75rem;
+  padding: 0.85rem 0.9rem 0.9rem;
+  border: 1px solid var(--tone-edge);
+  border-radius: var(--radius-lg);
+  background: var(--tone-wash);
+}
+.activity-section + .activity-section {
+  margin-top: 0.6rem;
+}
+.activity-section:not(.is-empty) {
+  --surface: color-mix(in srgb, var(--activity-inset) 40%, var(--tone-wash));
+}
+/* A card takes its zone's tone, so a finished report is not edged in the
+   terracotta that asks for a decision. */
+.activity-section:not(.is-empty) .pending-question {
+  border-color: color-mix(in srgb, var(--tone) 60%, var(--tone-edge));
+  background: color-mix(in srgb, var(--tone) 5%, transparent);
+}
+.activity-section.is-empty {
+  padding-block: 0.7rem;
+  border-color: color-mix(in srgb, var(--text) 9%, transparent);
+  background: transparent;
+}
+/* Working and Next are one zone: when both are lit (or both empty) they
+   join into a single card with a hairline between them. */
+.activity-section[data-tone="active"]:not(.is-empty):has(
+    + .activity-section[data-tone="active"]:not(.is-empty)
+  ),
+.activity-section[data-tone="active"].is-empty:has(
+    + .activity-section[data-tone="active"].is-empty
+  ) {
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.activity-section[data-tone="active"]:not(.is-empty)
+  + .activity-section[data-tone="active"]:not(.is-empty),
+.activity-section[data-tone="active"].is-empty + .activity-section[data-tone="active"].is-empty {
+  margin-top: 0;
+  border-top-style: dashed;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 .activity-section h3 {
   display: flex;
@@ -237,6 +376,9 @@
   margin: 0.75rem 0;
   overflow-wrap: anywhere;
 }
+.activity-section > :last-child {
+  margin-bottom: 0;
+}
 .activity-context {
   color: var(--muted);
   font-size: var(--text-xs);
@@ -248,7 +390,7 @@
   font-size: var(--text-sm);
 }
 .activity-work {
-  border-left: 2px solid var(--border);
+  border-left: 2px solid var(--tone-edge, var(--border));
   padding-left: 0.75rem;
 }
 .activity-work > p:not(.activity-context) {
@@ -273,7 +415,7 @@
 }
 .activity-warning {
   padding: 0.75rem;
-  margin-top: 1rem;
+  margin-bottom: 0.6rem;
   border: 1px solid var(--accent);
   border-radius: var(--radius-md);
 }
@@ -331,6 +473,9 @@
   }
   .activity-panel .btn {
     min-height: 40px;
+  }
+  .activity-section {
+    padding-inline: 0.7rem;
   }
   .activity-queue .queue-meter-panel-action:not(.queue-meter-panel-action-stop) {
     min-width: 32px;

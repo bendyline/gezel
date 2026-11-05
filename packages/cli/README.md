@@ -352,6 +352,11 @@ app already includes it:
 npm install -g @huggingface/transformers@^4.3.1
 ```
 
+npm 12 then reports that the install scripts of `onnxruntime-node` and
+`protobufjs` were blocked. That is expected and harmless: the first only
+downloads CUDA libraries Gezel does not use, and the second only checks
+versions.
+
 In a project install, also add the `overrides` from the
 [`@bendyline/gezel-service` README](https://www.npmjs.com/package/@bendyline/gezel-service),
 which keep Kokoro on the same Transformers.js copy as the service.

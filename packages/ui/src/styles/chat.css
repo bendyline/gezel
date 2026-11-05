@@ -3695,6 +3695,25 @@ button.timeline-session-divider-child::before {
   white-space: nowrap;
 }
 
+/* A menu holding any image gives every row the thumbnail's square, so names
+   line up and rows keep one height whether a row shows a photo or a glyph. */
+.chat-rail-reference-menu.has-thumbs .chat-rail-reference-menu-item {
+  padding-block: 0.25rem;
+}
+
+.chat-rail-reference-menu.has-thumbs .chat-rail-reference-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+}
+
+.chat-rail-reference-menu-thumb {
+  flex: 0 0 2rem;
+  width: 2rem;
+}
+
 .chat-rail-task-menu-item {
   min-width: 0;
 }

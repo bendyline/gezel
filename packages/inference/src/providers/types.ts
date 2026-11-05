@@ -622,6 +622,10 @@ export interface EngineLaunchSnapshot {
 export interface ModelInfo {
   id: string;
   name: string;
+  /** One short line a picker shows beside the name. */
+  description?: string;
+  /** Heading a picker lists this model under; see core's `ModelInfoSchema`. */
+  group?: string;
   supportsReasoning?: boolean;
   reasoningEfforts?: string[];
   defaultReasoningEffort?: string;

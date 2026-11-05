@@ -278,7 +278,7 @@ describe('GitManager.sync — state machine', () => {
     expect(await manager.status(syncedProject)).toMatchObject({ syncStale: false });
   });
 
-  it('invalidates a completed sync after an external branch switch', async () => {
+  it('re-arms Sync when an external branch switch lands on a branch GitHub lacks', async () => {
     if (!gitAvailable) return;
     const fix = await setupFixture();
     await manager.sync(fix.project);
@@ -287,8 +287,24 @@ describe('GitManager.sync — state machine', () => {
     await runGit(['checkout', '-b', 'outside-gezel'], { cwd: fix.workdir });
     expect(await manager.status(syncedProject)).toMatchObject({
       syncStale: true,
-      syncStaleReason: 'branch-changed',
+      syncStaleReason: 'no-upstream',
     });
+  });
+
+  it('stays up to date across outside commits and branch switches GitHub knows', async () => {
+    if (!gitAvailable) return;
+    const fix = await setupFixture();
+    await manager.sync(fix.project);
+    const syncedProject = (await store.getProject(fix.project.id)) as ProjectDetail;
+
+    await runGit(['checkout', '-b', 'side', '-q'], { cwd: fix.workdir });
+    await runGit(['push', '-u', 'origin', 'side', '-q'], { cwd: fix.workdir });
+    await runGit(['checkout', 'main', '-q'], { cwd: fix.workdir });
+    await writeFile(join(fix.workdir, 'notes.txt'), 'outside edit\n', 'utf8');
+    await commitAll(fix.workdir, 'outside commit');
+
+    // The commit shows as one to send; nothing about it makes the view of GitHub stale.
+    expect(await manager.status(syncedProject)).toMatchObject({ syncStale: false, ahead: 1 });
   });
 
   it('does not count a Gezel branch switch as a completed sync', async () => {
@@ -307,21 +323,31 @@ describe('GitManager.sync — state machine', () => {
     });
   });
 
-  it('does not count a newer fetch as a completed sync', async () => {
+  it('counts a newer fetch as a look at GitHub but not as a completed sync', async () => {
     if (!gitAvailable) return;
     const fix = await setupFixture();
     await manager.sync(fix.project);
-    const oldSync = new Date(Date.now() - 60_000).toISOString();
+    const oldSync = new Date(Date.now() - 60 * 24 * 60 * 60_000).toISOString();
     await store.updateProjectGitHub(fix.project.id, { lastSyncedAt: oldSync, branch: 'main' });
     const beforeFetch = (await store.getProject(fix.project.id)) as ProjectDetail;
 
+    // The GitHub tab's background fetch, every five minutes while it is open.
     await manager.fetch(beforeFetch);
     const afterFetch = (await store.getProject(fix.project.id)) as ProjectDetail;
     expect(afterFetch.github?.lastSyncedAt).toBe(oldSync);
-    expect(await manager.status(afterFetch)).toMatchObject({
-      syncStale: true,
-      syncStaleReason: 'git-activity',
-    });
+    const status = await manager.status(afterFetch);
+    expect(status).toMatchObject({ syncStale: false, ahead: 0, behind: 0 });
+    expect(Date.parse(status.remoteCheckedAt ?? '')).toBeGreaterThan(Date.parse(oldSync));
+  });
+
+  it('keeps an up-to-date checkout fresh when its record predates the saved branch', async () => {
+    if (!gitAvailable) return;
+    const fix = await setupFixture();
+    await manager.sync(fix.project);
+    const synced = (await store.getProject(fix.project.id)) as ProjectDetail;
+    const { branch: _branch, ...github } = synced.github!;
+    const legacy: ProjectDetail = { ...synced, github };
+    expect(await manager.status(legacy)).toMatchObject({ syncStale: false });
   });
 
   it('pulls when the remote is ahead (fast-forward)', async () => {

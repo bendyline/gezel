@@ -374,6 +374,7 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
     ctx.store.projectLinksTo(sourceProjectId, targetProjectId);
   const scopedSessionRoutes = sessionRouteGuard({
     log: (m) => sessionRouteLog.warn(m),
+    logRoutine: (m) => sessionRouteLog.debug(m),
     isProjectLinked,
     isUserDirectedTurn: (sessionId) => ctx.chat.isUserDirectedTurn(sessionId),
     taskStatus: async (projectId, num) =>

@@ -49,7 +49,7 @@ export class GezelProject {
 
   /**
    * Open (or resume) a conversation with one of this project's gezels, by id
-   * or by role.
+   * or by role; with neither, its lead.
    */
   openChat(opts: Omit<OpenChatOptions, 'projectId'> = {}): Promise<GezelChat> {
     return openChat({ client: this.daemon.client }, { ...opts, projectId: this.id });

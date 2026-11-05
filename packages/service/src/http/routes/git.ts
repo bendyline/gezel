@@ -95,6 +95,7 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
       ...(status.hasUpstream !== undefined ? { hasUpstream: status.hasUpstream } : {}),
       ...(status.syncStale !== undefined ? { syncStale: status.syncStale } : {}),
       ...(status.syncStaleReason ? { syncStaleReason: status.syncStaleReason } : {}),
+      ...(status.remoteCheckedAt ? { remoteCheckedAt: status.remoteCheckedAt } : {}),
       hasPat: status.hasPat,
       credentialSource: status.credentialSource,
     };

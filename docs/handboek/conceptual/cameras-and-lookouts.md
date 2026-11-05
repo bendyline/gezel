@@ -13,7 +13,7 @@ The pictures never leave your computer unless you say so.
 
 ## Add a camera
 
-1. Open the project, then **About → Connections → Add connection**, and choose **Webcam**.
+1. Open the project's **Connections** tab, choose **Add connection**, then **Webcam**.
 2. Pick the camera and press **Take a test picture** to check the view.
 3. Choose **what to keep**:
    - **Moments**: only what the camera found worth noting (the default),

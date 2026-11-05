@@ -209,7 +209,7 @@ await gezel.close();
 
 `Gezel` is the central object: the connection, the models, and the projects. Most work then happens in a `GezelProject`, because chats and app tools are both project-scoped — having the project means never passing its id back in. Everything after `connectOrHost` is identical whether the daemon is the user's or yours, so application code never branches on it; read `gezel.mode` if you want to tell.
 
-`ensureProject` returns the project it created. Pass no `package` and it simply binds the folder to a project, which is all an app that ships no `.gezapp` needs. For a project that already exists — one an earlier run made, or one the person made themselves — use `gezel.openProject(id)`.
+`ensureProject` returns the project it created. Pass no `package` and it simply binds the folder to a project, which is all an app that ships no `.gezapp` needs. Such a project's crew is a Builder the daemon recruits as its lead, so call `project.openChat()` with no `role`: a chat opened without a `gezelId` or `role` goes to the project's lead (`project.leadGezelId`). For a project that already exists — one an earlier run made, or one the person made themselves — use `gezel.openProject(id)`.
 
 ### What hosting does
 

@@ -111,6 +111,16 @@ export class ReplyPrinter {
   }
 
   /**
+   * A tool ran. Providers join the text of each tool round with nothing
+   * between, so narration ran into the answer: "…move date.Lisbon office…".
+   * Marked like a cut-out call, it becomes a paragraph break only if text
+   * follows, and nothing at all before the reply or at its end.
+   */
+  toolCalled(): void {
+    this.raw += CUT;
+  }
+
+  /**
    * End of the reply. `committed` is the saved message, printed when the
    * stream carried no visible text (providers that send it whole). Returns
    * whether anything was printed.
@@ -160,6 +170,10 @@ export class RunOutput {
 
   push(chunk: string): void {
     this.current.push(chunk);
+  }
+
+  toolCalled(): void {
+    this.current.toolCalled();
   }
 
   /** One assistant message was saved; later deltas belong to the next one. */

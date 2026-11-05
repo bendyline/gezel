@@ -16,6 +16,7 @@ const apiMocks = vi.hoisted(() => ({
   fetchProjectArtifactBlob: vi.fn(),
   fetchProjectWorkspaceBlob: vi.fn(),
   fetchDocumentBlob: vi.fn(),
+  fetchProjectThumbnail: vi.fn(),
   readProjectArtifact: vi.fn(),
   readDocument: vi.fn(),
   readProjectWorkspaceFile: vi.fn(),
@@ -81,6 +82,7 @@ beforeEach(() => {
   apiMocks.fetchProjectArtifactBlob.mockResolvedValue(new Blob(['media']));
   apiMocks.fetchProjectWorkspaceBlob.mockResolvedValue(new Blob(['media']));
   apiMocks.fetchDocumentBlob.mockResolvedValue(new Blob(['media']));
+  apiMocks.fetchProjectThumbnail.mockRejectedValue(new Error('no thumbnails in tests'));
   apiMocks.getProjectSkills.mockResolvedValue({
     skills: [{ name: 'summarize', source: '.claude/skills/summarize/SKILL.md' }],
   });
@@ -938,6 +940,59 @@ describe('ChatReferences reference picker', () => {
         path: 'design.docx',
       });
     });
+  });
+
+  it('shows image files as thumbnails in the Files dropdown', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockRejectedValue(new Error('Preview unavailable in picker test'));
+    apiMocks.fetchProjectThumbnail.mockImplementation(async (_projectId, path: string) => {
+      if (path.endsWith('broken.png')) throw new GezelApiError('no thumbnail', 404);
+      return new Blob(['jpeg']);
+    });
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onToolActivity }) => (
+          <button
+            type="button"
+            onClick={() => {
+              for (const path of ['sessions/run/tool-0-img-0.png', 'broken.png', 'outline.md']) {
+                onToolActivity({ name: 'read_artifact', path, success: true, durationMs: 1 });
+              }
+            }}
+          >
+            Add references
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Add references' }));
+    await user.click(await screen.findByRole('tab', { name: 'Files' }));
+
+    const shot = await screen.findByRole('menuitem', { name: 'tool-0-img-0.png' });
+    expect(shot.closest('.chat-rail-reference-menu')).toHaveClass('has-thumbs');
+    await waitFor(() =>
+      expect(shot.querySelector('.chat-rail-reference-menu-thumb img')).not.toBeNull(),
+    );
+    expect(apiMocks.fetchProjectThumbnail).toHaveBeenCalledWith(
+      'project-1',
+      'sessions/run/tool-0-img-0.png',
+      160,
+      expect.anything(),
+      'artifact',
+    );
+
+    const broken = screen.getByRole('menuitem', { name: 'broken.png' });
+    await waitFor(() =>
+      expect(broken.querySelector('.chat-rail-reference-menu-icon')).toHaveClass('fa-file-image'),
+    );
+    expect(broken.querySelector('.chat-rail-reference-menu-thumb')).toBeNull();
+
+    const outline = screen.getByRole('menuitem', { name: 'outline.md' });
+    expect(outline.querySelector('.chat-rail-reference-menu-thumb')).toBeNull();
+    expect(outline.querySelector('.chat-rail-reference-menu-icon')).not.toBeNull();
   });
 
   it('adds every successful path from a batched workspace read', async () => {

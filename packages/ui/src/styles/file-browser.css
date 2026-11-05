@@ -1190,6 +1190,15 @@ button.danger {
   padding: 0;
 }
 
+/* The Connections tab: what flows into the project (connectors, with the
+   lookouts that act on cameras) and the toolsets its crew can reach, drawn
+   with the settings-page recipe. Left-aligned like the Tools tab. */
+.project-connections-page {
+  width: 100%;
+  max-width: 64rem;
+  padding: clamp(1rem, 2.5vw, 2rem) clamp(1rem, 3vw, 2.5rem) 3rem;
+}
+
 /* Connections brings its own heading; drop its top margin so it lines up
    with the section divider like every other section title. */
 .gz-settings-section .gz-mail-header h3 {

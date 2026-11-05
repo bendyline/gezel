@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type BootstrapChatModel,
   NATIVE_TOOLKIT,
+  nativeToolkitTitle,
   orderInstalledChatModels,
   pickAccessoryModels,
   rankChatModels,
@@ -86,6 +87,17 @@ function mediaModel(
     },
   } as unknown as CatalogItemSummary;
 }
+
+describe('nativeToolkitTitle', () => {
+  it('says chat needs the toolkit only when the engine chat runs on is missing', () => {
+    expect(nativeToolkitTitle(NATIVE_TOOLKIT, 'llama-cpp')).toContain('to run chat models');
+    expect(nativeToolkitTitle(['sd-server', 'whisper-server', 'uv'], 'llama-cpp')).toBe(
+      'Some optional Gezel engines are not installed yet',
+    );
+    expect(nativeToolkitTitle(['uv'], 'mlx')).toContain('to run chat models');
+    expect(nativeToolkitTitle(['llama-server'], 'mlx')).toContain('optional');
+  });
+});
 
 describe('rankChatModels', () => {
   it('puts the daemon-style recommendation first and keeps only comfortable alternatives', () => {

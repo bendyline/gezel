@@ -1380,17 +1380,19 @@ button.bench-step-foot:disabled {
 
 /* The Task overview "page": docks up to merge under the active Task tab —
    same fill, hidden seam — exactly like the step panel docks under a selected
-   step's foot. The active tab (z-index 2, no bottom border) covers this
-   panel's top border where they meet. */
+   step's foot. Its top edge meets the bench row's bottom, where the active
+   tab's seam patch (see .task-tab-btn.active::after) covers this panel's top
+   border. The Task tab sits flush with the left edge, so that corner is
+   square: a rounded one curls away from the tab's straight side. */
 .task-view-panel {
-  margin-top: calc(-1rem - 1px);
+  margin-top: -1rem;
   margin-bottom: 0.75rem;
   display: flex;
   flex-direction: column;
   gap: 1rem;
   padding: 0.9rem 1rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 0 8px 8px 8px;
   background: var(--panel, var(--surface));
   position: relative;
   z-index: 0;
@@ -1521,9 +1523,32 @@ button.bench-step-foot:disabled {
   color: var(--text);
   position: relative;
   z-index: 2;
-  /* Drop over the bench-row divider so the tab's open bottom covers that 1px
-     segment — no seam between the active tab and the view it feeds into. */
-  margin-bottom: -1px;
+}
+
+/* The tab's open bottom: a patch of its own fill over the 1px line beneath
+   it (the bench-row divider, or the docked panel's top border), so the tab
+   and the view read as one surface. It spans the padding box only, so the
+   tab's side borders stop at the line and meet it in a clean corner instead
+   of poking a stub through it, as extending the whole tab down did. The
+   patch starts 1px inside the tab: at fractional display scaling two edges
+   meeting on the same partial pixel each antialias, and a faint seam shows
+   where the tab ends. */
+.task-tab-btn.active::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: inherit;
+}
+
+/* Fractional scaling also blends a 1px border across two device rows. Over a
+   docked panel the row beneath is panel fill too, so the patch can run one
+   pixel deeper and cover both. */
+.task-bench-row.has-docked-panel .task-tab-btn.active::after {
+  bottom: -2px;
+  height: 3px;
 }
 
 .task-tab-btn:focus-visible {
@@ -1551,7 +1576,14 @@ button.bench-step-foot:disabled {
     padding-block: 0.5rem;
     border-bottom: 1px solid var(--border);
     border-radius: var(--radius-md);
-    margin-bottom: 0;
+  }
+
+  .task-tab-btn.active::after {
+    content: none;
+  }
+
+  .task-view-panel {
+    border-top-left-radius: 8px;
   }
 }
 

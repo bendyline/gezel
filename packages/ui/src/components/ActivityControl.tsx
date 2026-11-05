@@ -34,11 +34,19 @@ const ActivityTaskStep = lazy(() =>
   import('./ActivityTaskStep.js').then((module) => ({ default: module.ActivityTaskStep })),
 );
 
-const SECTIONS: { id: ActivitySection; label: string; empty: string }[] = [
-  { id: 'needs-you', label: 'Needs you', empty: 'Nothing needs your attention.' },
-  { id: 'working', label: 'Working', empty: 'No work is running right now.' },
-  { id: 'next', label: 'Next', empty: 'Nothing waiting or scheduled.' },
-  { id: 'ready', label: 'Ready', empty: 'New results will appear here.' },
+// A soft traffic light: decisions, work in motion, finished results.
+type SectionTone = 'attention' | 'active' | 'done';
+
+const SECTIONS: { id: ActivitySection; label: string; empty: string; tone: SectionTone }[] = [
+  {
+    id: 'needs-you',
+    label: 'Needs you',
+    empty: 'Nothing needs your attention.',
+    tone: 'attention',
+  },
+  { id: 'working', label: 'Working', empty: 'No work is running right now.', tone: 'active' },
+  { id: 'next', label: 'Next', empty: 'Nothing waiting or scheduled.', tone: 'active' },
+  { id: 'ready', label: 'Ready', empty: 'New results will appear here.', tone: 'done' },
 ];
 
 function countSection(items: ActivityItem[], section: ActivitySection) {
@@ -337,16 +345,23 @@ export function ActivityControl() {
               </button>
             )}
             <div className="activity-section-links" aria-label="Activity sections">
-              {SECTIONS.map(({ id, label }) => (
-                <button
-                  type="button"
-                  className="btn secondary"
-                  key={id}
-                  onClick={() => setSectionRequest({ section: id })}
-                >
-                  {label} <span>{countSection(items, id)}</span>
-                </button>
-              ))}
+              {SECTIONS.map(({ id, label, tone }) => {
+                const count = countSection(items, id);
+                return (
+                  <button
+                    type="button"
+                    className="btn secondary"
+                    key={id}
+                    data-section={id}
+                    data-tone={tone}
+                    data-lit={count > 0 || undefined}
+                    onClick={() => setSectionRequest({ section: id })}
+                  >
+                    <span aria-hidden="true" className="activity-light" />
+                    {label} <span className="activity-count">{count}</span>
+                  </button>
+                );
+              })}
             </div>
             <div className="activity-panel-scroll">
               {stale && (
@@ -370,7 +385,7 @@ export function ActivityControl() {
               {!snapshot && !stale && <output>Checking your work…</output>}
               {navigationError && <p role="alert">{navigationError}</p>}
               {snapshot &&
-                SECTIONS.map(({ id, label, empty }) => {
+                SECTIONS.map(({ id, label, empty, tone }) => {
                   const rows = sortedItems.filter(
                     (item) =>
                       item.section === id && !item.questionIds.length && !representedByQueue(item),
@@ -379,15 +394,19 @@ export function ActivityControl() {
                   const cards = sortedQuestions.filter(
                     (q) => id === (isReadyQuestion(q) ? 'ready' : 'needs-you'),
                   );
+                  const isEmpty = !rows.length && !cards.length && !crew?.count;
                   return (
                     <section
-                      className="activity-section"
+                      className={`activity-section${isEmpty ? ' is-empty' : ''}`}
                       id={`activity-${id}`}
                       key={id}
                       aria-label={label}
+                      data-section={id}
+                      data-tone={tone}
                     >
                       <h3 tabIndex={-1}>
-                        {label} <span>{countSection(items, id)}</span>
+                        <span aria-hidden="true" className="activity-light" />
+                        {label} <span className="activity-count">{countSection(items, id)}</span>
                       </h3>
                       {cards.map((q) => (
                         <div
@@ -514,9 +533,7 @@ export function ActivityControl() {
                           </article>
                         );
                       })}
-                      {!rows.length && !cards.length && !crew?.count && (
-                        <p className="activity-empty">{empty}</p>
-                      )}
+                      {isEmpty && <p className="activity-empty">{empty}</p>}
                     </section>
                   );
                 })}

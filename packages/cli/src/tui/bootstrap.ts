@@ -94,6 +94,40 @@ export const NATIVE_TOOLKIT: ReadonlyArray<NativeEngineName> = [
   'llama-server',
 ];
 
+/** What each native engine lets Gezel do, as the first-run screen names it. */
+export function nativeEngineUse(engine: NativeEngineName): string {
+  switch (engine) {
+    case 'llama-server':
+      return 'runs chat models on this computer';
+    case 'uv':
+      return 'runs local helpers such as voices and image reading';
+    case 'sd-server':
+      return 'makes images';
+    case 'whisper-server':
+      return 'turns speech into text';
+    case 'ds4-server':
+      return 'runs DeepSeek V4 models';
+    case 'duckdb':
+      return 'queries spreadsheets and data files';
+  }
+}
+
+/**
+ * The first-run heading for a toolkit with `missing` engines. It says chat
+ * needs the toolkit only when the engine `provider` chats through is among
+ * them: a person whose chat already works was told the toolkit was "needed
+ * to run AI models locally" when only images, speech and helpers were missing.
+ */
+export function nativeToolkitTitle(
+  missing: ReadonlyArray<NativeEngineName>,
+  provider: BootstrapChatProvider,
+): string {
+  // MLX runs in a Python runtime that uv provides.
+  return missing.includes(provider === 'mlx' ? 'uv' : 'llama-server')
+    ? 'The engine Gezel needs to run chat models on this computer is not installed yet'
+    : 'Some optional Gezel engines are not installed yet';
+}
+
 /** The device facts model ranking reads, from the daemon's memory profile. */
 export function recoDevice(
   memory: Awaited<ReturnType<GezelClient['getMemoryProfile']>>,

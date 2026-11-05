@@ -859,15 +859,27 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   });
 
   /**
-   * A small JPEG of a workspace photo for grids, albums and the morning view.
+   * A small JPEG of a photo for grids, albums, the morning view and the chat
+   * rail's Files menu. `kind` picks the tree (workspace by default, or the
+   * artifacts drawer or the shared library, as the reference routes do).
    * Cached per account outside the workspace; 404 when the path is not a
    * photo this machine can read.
    */
   app.get('/:id/index/thumb', async (c) => {
     const id = c.req.param('id');
-    const rel = c.req.query('path') ?? '';
-    if (!rel) return c.json({ error: 'path is required' }, 400);
-    const base = await ctx.store.projectWorkspaceDir(id).catch(() => null);
+    const query = ReferenceFileLocationRequestSchema.safeParse({
+      kind: c.req.query('kind') ?? 'workspace',
+      path: c.req.query('path'),
+    });
+    if (!query.success) return c.json({ error: 'path is required' }, 400);
+    const { kind } = query.data;
+    const rel = referenceRelativePath(query.data);
+    const base =
+      kind === 'artifact'
+        ? ctx.store.projectArtifactsDir(id)
+        : kind === 'document'
+          ? ctx.store.documentsDir()
+          : await ctx.store.projectWorkspaceDir(id).catch(() => null);
     const abs = base ? safeJoin(base, rel) : null;
     if (!base || !abs || !(await realpathContained(base, abs))) {
       return c.json({ error: 'not found' }, 404);
@@ -875,7 +887,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const thumb = await thumbnailFor({
       cacheDir: projectThumbnailsDir(ctx.home, id),
       absPath: abs,
-      relPath: rel,
+      relPath: kind === 'workspace' ? rel : `${kind}:${rel}`,
       width: Number(c.req.query('w') ?? 320),
     });
     if (!thumb) return c.json({ error: 'no thumbnail for this file' }, 404);

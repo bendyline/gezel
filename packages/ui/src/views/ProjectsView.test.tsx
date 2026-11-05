@@ -974,7 +974,6 @@ describe('ProjectsView', () => {
       'Memories',
       'Workspace',
       'Access',
-      'Toolsets',
       'Preferences',
       'History',
       'Archive',
@@ -986,7 +985,6 @@ describe('ProjectsView', () => {
       '#project-about-memories',
       '#project-about-workspace',
       '#project-about-access',
-      '#project-about-toolsets',
       '#project-about-preferences',
       '#project-about-history',
       '#project-about-archive',
@@ -994,25 +992,20 @@ describe('ProjectsView', () => {
     // The page renders its sections in the order the index lists them.
     const sections = Array.from(document.querySelectorAll('.project-about-main > section'));
     expect(sections.map((section) => `#${section.id}`)).toEqual(hrefs);
-    expect(document.querySelector('#project-about-connections')).toBeNull();
+    // Connections and Toolsets live on their own tab.
+    expect(document.querySelector('#project-connections')).toBeNull();
+    expect(screen.queryByTestId('toolsets-editor')).not.toBeInTheDocument();
   });
 
-  it('reveals project connection settings while WIP features are on', async () => {
-    vi.mocked(api.getConfig).mockResolvedValue({
-      provider: 'mock',
-      showWorkInProgressFeatures: true,
-    } as never);
-
+  it('gives Connections and Toolsets their own tab, without preview features', async () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');
-    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('tab', { name: 'Connections' }));
 
-    const toc = await screen.findByRole('navigation', { name: 'About sections' });
-    expect(await within(toc).findByRole('link', { name: 'Connections' })).toHaveAttribute(
-      'href',
-      '#project-about-connections',
-    );
-    expect(document.querySelector('#project-about-connections')).not.toBeNull();
+    expect(await screen.findByRole('button', { name: 'Add connection' })).toBeInTheDocument();
+    expect(document.querySelector('#project-connections')).not.toBeNull();
+    expect(screen.getByRole('heading', { name: 'Toolsets' })).toBeInTheDocument();
+    expect(screen.getByTestId('toolsets-editor')).toBeInTheDocument();
   });
 
   it('keeps a failed project-document edit dirty and retries it', async () => {
@@ -2154,13 +2147,14 @@ describe('ProjectsView', () => {
     await screen.findByTestId('project-chat');
 
     expect(screen.getByRole('tab', { name: 'Chat' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Connections' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
     for (const name of ['Overview', 'Tasks', 'Tools', 'Workspace', 'Artifacts', 'Village view']) {
       expect(screen.queryByRole('tab', { name })).not.toBeInTheDocument();
     }
 
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
-    expect(screen.getByText(/Chat and Settings always stay/i)).toBeInTheDocument();
+    expect(screen.getByText(/Chat, Connections and Settings always stay/i)).toBeInTheDocument();
     const tasksToggle = screen.getByRole('checkbox', { name: 'Tasks' });
     expect(tasksToggle).not.toBeChecked();
     fireEvent.click(tasksToggle);

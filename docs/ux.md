@@ -469,8 +469,9 @@ Don't restyle a settings page per surface; extend the recipe and this section.
 - **Group by the question a person is asking.** For a project: Crew (who
   works here), About and Mission (what the work is), Memories, Workspace
   (where the files live and what may change them), Access (what reaches
-  beyond this project), Toolsets, Preferences (how the work is tailored),
-  History, and Archive. One section titled "Settings" that held fifteen
+  beyond this project), Preferences (how the work is tailored), History,
+  and Archive. Connections and Toolsets have their own tab (see "The
+  Connections tab"). One section titled "Settings" that held fifteen
   unrelated controls is what this replaced: the only way to find anything in
   it was to read all of it. A setting sits beside the thing it changes, so
   the Crew Lead picker goes under the crew it picks from, not eight fields
@@ -1264,6 +1265,21 @@ tasks in a paused project, are not listed. They will not run until someone
 resumes them, and listing them buried live work under every paused shard.
 The Tasks view is where paused work lives.
 
+**The panel reads as a soft traffic light.** Each section is a zone of tinted
+paper: **Needs you** is blush, **Working** and **Next** share one honey zone
+(joined into a single card with a dashed hairline when both hold work), and
+**Ready** is sage, the workshop's green rather than `--success` mint. A small
+indicator light leads each heading and each section key, and is lit only when
+that section holds something. An empty section drops its wash for a faint
+outline and an unlit ring, so color on the panel always means something to
+read. Working's light breathes like the titlebar dot. Inside a lit zone, insets
+(keys, context strips, report rows) take a paler tint of the zone instead of the
+panel's tan, and a question card's border takes the zone's tone, so a finished
+report is never edged in the terracotta that asks for a decision. The tones are
+the `--activity-*` tokens in [styles/activity.css](../packages/ui/src/styles/activity.css);
+keep them pastel, with washes lighter than the parchment so honey still reads as
+yellow on tan.
+
 
 **Dialog vs AlertDialog.** Use `AlertDialog` only for confirmations that
 interrupt a destructive or significant action (delete a gezel, discard
@@ -1278,6 +1294,18 @@ options and the choices themselves carry the meaning (Copilot / OpenAI /
 Ollama, engagement modes, tempo, a task's status), use **keys in a tray** — see
 [Controls: keys in trays](#controls-keys-in-trays). The Home + Settings
 provider switches are this pattern.
+
+**A model list shows what each row is.** A provider sends a short model `name`
+and, when the name alone does not say what the model is for, a one-line
+`description`. The picker shows that line beside the row (`Select.Item`'s
+`trailing`), never in the closed control, and the name never carries it as an
+em-dash suffix. When a list mixes aliases that choose a model for the person
+(Claude Code's `default` and `best`) with the models themselves, each row carries
+a `group`. The picker heads each group with a `Select.Label` and sets the unset
+row ("Gezel default") and Other… apart with separators, so no choice reads as a
+heading. Models are listed from fastest to most capable, never alphabetically
+by id. A badge every row would carry, such as " · reasoning" when every model
+reasons, is dropped.
 
 **Native `<select>`s share one face.** Every single-choice native select
 takes the recipe in [styles/foundation.css](../packages/ui/src/styles/foundation.css):
@@ -1340,6 +1368,13 @@ prompt drafts and a code-city map beside its board, none of which it needed.
 Hiding is only a default: an explicit choice in Project Settings → Project
 tabs always wins (the boxes show the default), and the tab a person is on
 stays visible, so opening a file into Artifacts never lands on a missing tab.
+
+**The Connections tab holds what the project reaches outside itself.** Its
+Connections section (the outside sources mirrored in, with the Lookouts that
+act on a camera) and its Toolsets section (the tools every gezel here can
+use) are drawn with the settings-page recipe. It shows for every project,
+like Chat and Settings, because any kind of project can take a mailbox or a
+toolset.
 
 **Activity lists what happened to the work.** The Overview's Recent activity
 and the History view ask for `audience: 'person'` outside debug mode: project,
@@ -2004,11 +2039,14 @@ the primary key's `title`. Chat delegates the split to Squisq's
 lets Shift+Enter reach the normal paragraph-break behavior.
 
 **The draft can take the window.** An icon key at the right end of the To
-line — past the recipient picker and the compose-mode tabs, so the frame's
-size control sits with the frame's other keys rather than crowding Send —
-toggles the composer between its three-line strip and the top ~80% of the
-chat column, because a brief or a PRD is unreadable through a slot and
-scrolling it inside the slot loses the shape of the thing being written.
+line — past the recipient picker and immediately before the compose-mode
+tabs, so the frame's size control sits with the frame's other keys rather
+than crowding Send — toggles the composer between its three-line strip and
+the top ~80% of the chat column, because a brief or a PRD is unreadable
+through a slot and scrolling it inside the slot loses the shape of the thing
+being written. The size belongs to the frame, not to the mode: terminal mode
+carries the same key on the same pixels of its toolbar, and flipping between
+chat and terminal keeps the frame expanded or collapsed as it was.
 It is a size change, not a mode: the To line, the toolbar, and every key
 stay exactly where they were, the transcript keeps the remaining fifth
 rather than disappearing, and the draft, its attachments, and its autosave
@@ -2017,7 +2055,10 @@ preference for the next minute. Expanded, the editor *fills* its frame
 instead of growing with the text; an empty box that filled as you typed
 would put the caret somewhere different on every keystroke. The glyph is
 chevrons pushing apart, closing back together once expanded, and carries
-`title` + `aria-label` + `aria-pressed` like every other icon key.
+`title` + `aria-label` + `aria-pressed` like every other icon key. It and the
+recipient picker's **+** are flat keys, like the tools beside Send: no fill
+or border at rest, a wash on hover, and the wash stays while the picker is
+open or the draft is expanded.
 
 **Take photo is the camera's one door.** The composer toolbar's camera key
 sits between Insert image and Attach file and inserts `![Photo](…)` into the
@@ -2963,7 +3004,11 @@ they name and says plainly nothing is replaced. A photo folder's Overview gains
 **Albums** and **On this day** below the first look, and the morning view
 shows last night's albums and this day in earlier years; a folder without
 either shows nothing extra. Titlebar search gives a workspace photo hit a 3rem
-tile beside its text, like Knowledge results.
+tile beside its text, like Knowledge results. The chat rail's Files menu shows
+an image as a 2rem tile in place of its file glyph (from the workspace, the
+artifacts drawer or the library, by `PhotoThumb`'s `kind`); once a menu holds
+one, every glyph sits in a 2rem square so names stay aligned, and a format the
+cache cannot shrink keeps its glyph.
 
 **A file says what it is, one line above it.** When the Librarian has
 summarized a file, its project viewer and the Documents area show that

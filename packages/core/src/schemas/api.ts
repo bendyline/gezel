@@ -3445,6 +3445,14 @@ export const GenerateGezelAboutRequestSchema = z.object({
 export const ModelInfoSchema = z.object({
   id: z.string(),
   name: z.string(),
+  /** One short line a picker shows beside the name, never in the closed control. */
+  description: z.string().optional(),
+  /**
+   * Heading a picker lists this model under. Models sharing one are listed
+   * together, groups in the order they first appear; ungrouped models come
+   * first without a heading.
+   */
+  group: z.string().optional(),
   supportsReasoning: z.boolean().optional(),
   reasoningEfforts: z.array(z.string()).optional(),
   defaultReasoningEffort: z.string().optional(),

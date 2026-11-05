@@ -60,7 +60,7 @@ const FIT_LABEL: Record<BootstrapChatModel['fit'], string> = {
   'too-big': 'too big',
 };
 
-/** Catalog chat models for `engine`, best first, the way the first-run picker ranks them. */
+/** Catalog chat models for `engine`, recommended first, the way the first-run picker ranks them. */
 export async function availableChatModels(
   client: ModelChoiceClient,
   engine: ChatEngine,
@@ -102,7 +102,11 @@ export function formatAvailableChatModels(input: {
   const measuredWidth = measured
     ? Math.max('not measured'.length, ...ranked.map((m) => (measured.get(m.id) ?? '').length))
     : 0;
-  const lines = [`${engine} chat models for this machine, best first:`];
+  // Not "best first": the recommendation is a deliberate first download, often
+  // smaller and lower-scoring than larger models that also fit.
+  const lines = [
+    `${engine} chat models for this machine, the recommended first download on top, then by catalog ranking:`,
+  ];
   ranked.forEach((model, index) => {
     const notes = [
       index === 0 ? 'recommended' : '',

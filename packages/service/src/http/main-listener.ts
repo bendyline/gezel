@@ -140,11 +140,16 @@ export async function bindMainListener(
     return code && !err.message.includes(code) ? `${err.message} (${code})` : err.message;
   };
   const rawServer = server as unknown as NodeJS.EventEmitter;
+  // An app hosting this daemon through the app SDK destroys its own
+  // connection on close(), and a warning for that reset lands on the app's
+  // stderr. Every other session error stays a warning.
+  const hostedByApp = Boolean(process.env.GEZEL_SDK_HOST_APP?.trim());
   if (cert) {
     rawServer.on('sessionError', (err: unknown) => {
-      log.warn(
-        `[http] h2 session error — every stream multiplexed on that connection drops: ${describeSocketError(err)}`,
-      );
+      const message = `[http] h2 session error — every stream multiplexed on that connection drops: ${describeSocketError(err)}`;
+      const peerReset = (err as NodeJS.ErrnoException | undefined)?.code === 'ECONNRESET';
+      if (hostedByApp && peerReset) log.debug(message);
+      else log.warn(message);
     });
     rawServer.on('tlsClientError', (err: unknown) => {
       log.debug(`[http] TLS client error: ${describeSocketError(err)}`);

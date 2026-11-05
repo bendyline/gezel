@@ -12,6 +12,7 @@ export type SectionIconName =
   | 'proposals'
   | 'github'
   | 'mail'
+  | 'connections'
   | 'village'
   | 'guide'
   | 'diagram'
@@ -123,6 +124,14 @@ const SECTION_PATHS: Record<Exclude<SectionIconName, 'tasks' | 'settings'>, JSX.
     <>
       <rect x="3.5" y="5.5" width="17" height="13" rx="1.5" />
       <path d="M4.5 7l7.5 6 7.5-6" />
+    </>
+  ),
+  // Plug — outside sources and tools wired into the project
+  connections: (
+    <>
+      <path d="M9 3v4M15 3v4" />
+      <path d="M6.5 7h11v4a5.5 5.5 0 0 1-11 0z" />
+      <path d="M12 16.5V21" />
     </>
   ),
   // Two houses on a street

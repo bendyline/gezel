@@ -26,6 +26,7 @@ import { FileTypeIcon } from './FileTypeIcon.js';
 import { FittedTabsList } from './FittedTabsList.js';
 import { GezelIcon } from './GezelIcon.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
+import { PhotoThumb } from './PhotoThumb.js';
 import { StepTracker } from './StepTracker.js';
 import { taskStepStatus } from './TaskStepTracker.js';
 import type { ToolActivity } from './chat-bubbles.js';
@@ -796,6 +797,7 @@ export function ChatReferences({
                   <span className="muted small">Showing</span>
                   <ReferenceTabMenu
                     variant="picker"
+                    projectId={resolvedProjectId}
                     refs={references}
                     activeKey={effectiveActive.key}
                     selected
@@ -890,6 +892,7 @@ export function ChatReferences({
                 {hasReferences &&
                   (references.length > 1 ? (
                     <ReferenceTabMenu
+                      projectId={resolvedProjectId}
                       refs={references}
                       activeKey={effectiveActive.key}
                       selected={activeTab === 'references'}
@@ -1368,7 +1371,13 @@ function TaskTabMenu({
   );
 }
 
+/** Raster formats the daemon's thumbnail cache may be able to shrink. */
+function hasPhotoThumbnail(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(path);
+}
+
 function ReferenceTabMenu({
+  projectId,
   refs,
   activeKey,
   selected,
@@ -1376,6 +1385,7 @@ function ReferenceTabMenu({
   onSelect,
   variant = 'tab',
 }: {
+  projectId: string;
   refs: Reference[];
   activeKey: string | null;
   selected: boolean;
@@ -1387,6 +1397,7 @@ function ReferenceTabMenu({
     .find((reference) => reference.key === activeKey)
     ?.path.split('/')
     .pop();
+  const showThumbs = refs.some((reference) => hasPhotoThumbnail(reference.path));
   return (
     <DropdownMenu.Root
       onOpenChange={(open) => {
@@ -1410,7 +1421,7 @@ function ReferenceTabMenu({
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
-          className="app-nav-menu chat-rail-reference-menu"
+          className={`app-nav-menu chat-rail-reference-menu${showThumbs ? ' has-thumbs' : ''}`}
           sideOffset={4}
           align="start"
           aria-label="Choose file"
@@ -1418,6 +1429,7 @@ function ReferenceTabMenu({
           {refs.map((reference) => {
             const active = reference.key === activeKey;
             const name = reference.path.split('/').pop() || reference.path;
+            const icon = <FileTypeIcon name={name} className="chat-rail-reference-menu-icon" />;
             return (
               <DropdownMenu.Item
                 key={reference.key}
@@ -1441,7 +1453,19 @@ function ReferenceTabMenu({
                     </svg>
                   )}
                 </span>
-                <FileTypeIcon name={name} className="chat-rail-reference-menu-icon" />
+                {hasPhotoThumbnail(name) ? (
+                  <PhotoThumb
+                    projectId={reference.projectId ?? projectId}
+                    path={reference.path}
+                    kind={reference.kind}
+                    width={160}
+                    alt=""
+                    className="chat-rail-reference-menu-thumb"
+                    fallback={icon}
+                  />
+                ) : (
+                  icon
+                )}
                 <span className="chat-rail-reference-menu-name">{name}</span>
               </DropdownMenu.Item>
             );

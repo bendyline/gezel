@@ -516,7 +516,9 @@
 .home-workshop-conversation .chat-rail-main {
   flex: 1;
   min-height: 0;
-  background: var(--home-card);
+  /* The app canvas, as under a project's chat: beige in light mode,
+     near-black gray in dark. The workshop cards are whiter or browner. */
+  background: var(--bg);
   overflow: hidden;
 }
 /* The shared chat-rail grid reserves a 22rem column for the references
