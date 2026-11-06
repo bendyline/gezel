@@ -639,9 +639,12 @@
   margin-top: calc(-1.65rem - 1px);
 }
 /* The Overview page docks under its tab the same way, through this editor's
-   12px gap rather than Task detail's 1rem. */
+   12px gap rather than Task detail's 1rem. Overview is the first tab, flush
+   with the left edge, so that corner is square: a rounded one curls away
+   from the tab's straight side. */
 .craftbook-editor > .task-view-panel {
   margin-top: -0.75rem;
+  border-top-left-radius: 0;
 }
 /* Task detail's narrow layout: stack the view keys above a full-width bench. */
 @container craftbook-editor (max-width: 480px) {

@@ -154,7 +154,7 @@ describe('GreetingBand', () => {
     expect(screen.getAllByRole('tab').map((tab) => tab.textContent)).toEqual([
       greetingForHour(new Date().getHours()),
       'Night shift',
-      'Make something',
+      'Create',
       'Handboek',
     ]);
     expect(screen.getByRole('button', { name: '1 waiting on you' })).toBeVisible();
@@ -168,7 +168,7 @@ describe('GreetingBand', () => {
     renderBand({ collapsed: true, makeSomething: <div>starter cards</div>, onTabChange });
     screen.getByRole('tab', { name: GREETING }).focus();
     await userEvent.setup().keyboard('{ArrowRight}');
-    expect(screen.getByRole('tab', { name: 'Make something' })).toHaveFocus();
+    expect(screen.getByRole('tab', { name: 'Create' })).toHaveFocus();
     expect(onTabChange).toHaveBeenCalledWith('make');
   });
 

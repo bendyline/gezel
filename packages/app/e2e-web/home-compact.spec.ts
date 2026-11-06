@@ -32,7 +32,7 @@ test('Home keeps the draft reachable beside starters on an established install',
     document.documentElement.style.setProperty('--safe-area-inset-top', '59px');
     document.documentElement.style.setProperty('--safe-area-inset-bottom', '34px');
   });
-  await page.getByRole('tab', { name: 'Make something', exact: true }).click();
+  await page.getByRole('tab', { name: 'Create', exact: true }).click();
   await expect(page.locator('.home-make-card').first()).toBeVisible();
   const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
   await expect(conversation).toHaveAttribute('inert');
@@ -47,7 +47,7 @@ test('Home keeps the draft reachable beside starters on an established install',
   const editor = page.getByTestId('meester-chat').locator('.squisq-wysiwyg-editor').first();
   const draft = 'Keep this draft while browsing plans';
   await editor.fill(draft);
-  await page.getByRole('tab', { name: 'Make something', exact: true }).click();
+  await page.getByRole('tab', { name: 'Create', exact: true }).click();
   await expect(page.locator('.home-make-card').first()).toBeVisible();
   await expect(conversation).toHaveAttribute('inert');
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();

@@ -2731,7 +2731,7 @@ const GezelConfigObject = z.object({
     .optional(),
   /**
    * What the person said they want help with, as interest-area ids in the
-   * order they were picked. It orders what the welcome, Make something and
+   * order they were picked. It orders what the welcome, Home's Create tab and
    * the galleries offer; it never hides anything and never enters a prompt.
    * Raw strings so a build that does not know an id keeps it on the next
    * save; read it through `resolveInterestAreas`. `askedAt` is stamped on an

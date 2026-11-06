@@ -547,7 +547,20 @@ reference the variable, never the family name:
 This is already wired globally: `h1`–`h6` opt into the serif, and a small
 set of long-form surfaces (chat message bodies, the Home intro card) opt in
 explicitly. Everything else inherits the sans by default. So in practice you
-almost never set `font-family` yourself. The two things to actively watch:
+almost never set `font-family` yourself.
+
+**Reports are the exception: one sans throughout.** Reports, plans and notes
+are working documents, read for their facts. Gezellig's serif titles and
+numerals make a night-shift report read like an essay. Every Squisq surface
+that shows one renders with `gezelReportTheme` / `gezelReportThemeForMode`
+([chat-theme.ts](../packages/ui/src/components/chat-theme.ts)), which keeps
+the chat palette and page rhythm and sets headings and body in Hanken Grotesk.
+Those surfaces are the report reader, the Home status and night-review
+panels, and the rail's document preview. Chat, the Handboek and albums keep
+the serif. A new surface that shows a report uses the report theme, never
+`gezelChatTheme`.
+
+The two things to actively watch:
 
 - **Links stay sans even inside a heading.** A link styled with
   `font: inherit` (e.g. `.home-link`) placed inside an `<h3>`/`<h4>` will
@@ -655,7 +668,8 @@ rolled up on every return to Home in that run. It also steps aside whenever
 the meester's thread holds a failed turn or a reply that arrived while the
 person was away, because the conversation, with its Retry, is what they came
 back to, not the tip of the day. Collapsed, its tab bar stays visible; selecting any tab reopens its
-content. Labels wrap on narrow screens so every destination remains visible.
+content. On narrow screens a long label breaks onto a second line inside its
+tab, so every destination stays visible and every tab stays on the seam.
 The introduction reads from its
 top, because an empty timeline does not pin to the bottom. In compact, its
 figure sits beside the title only, so the openers get the full width. The compact title bar leads with the
@@ -1055,15 +1069,22 @@ key as `Task.requestRef`.
 
 Home's intro starts with the greeting tab, named for the time of day like the
 headline inside it (**Good morning**, **Good afternoon**, **Good evening**),
-followed by **Night shift** when a review is available, **Make something**, and
+followed by **Night shift** when a review is available, **Create**, and
 **Handboek** with the "What is gezel?" article. The greeting tab shows the
 current status report when available, otherwise the tip of the day; the report
 has no separate tab. The named tabs remain visible when the intro is collapsed,
 and selecting any of them expands its content, including the already-selected
 tab. Selecting the tab whose panel is open rolls the intro up, like the chevron.
 A collapsed intro shows no tab as selected, since no panel is showing.
-Unlike dense project tab rows, this small set wraps its labels instead of
-dropping them at narrow widths. The date belongs inside the greeting tab, not in
+The intro is a pull-down shade, so its tabs are connected tabs (see
+[Patterns](#patterns)): the tab row is a rail one step darker than the paper
+(`--home-rail`), the open tab takes the sheet's paper, keeps a 2px accent on
+its top edge and erases the seam under it, and the sheet ends in a hem of the
+same rail tone that rides up with it when it rolls. Unselected tabs carry no
+chrome until hovered. Unlike dense project tab rows, this small set never
+drops labels at narrow widths, and it never wraps onto a second row either: a
+tab on an upper row would have no seam to join. A long label breaks inside
+its own tab instead. The date belongs inside the greeting tab, not in
 a tab label. The header stays
 above the conversation. When open, its content overlays 90% of the chat area's
 height, with a shadow over the exposed chat strip below. The conversation keeps
@@ -1071,9 +1092,9 @@ its full layout and draft behind the sheet. Clicking the exposed strip rolls
 the sheet up to the tab bar and returns focus to chat; that click never activates
 a chat control underneath. Escape does the same. The roll takes 160ms and skips
 motion when reduced motion is requested. Tab content scrolls inside the sheet;
-Make something uses the full content width without the figure.
+The Create tab uses the full content width without the figure.
 
-Home's **Make something** tab offers six broad starting points: Research
+Home's **Create** tab offers six broad starting points: Research
 report, Word document, Slide deck, PDF report, Website, and Animated slideshow.
 Each key has artwork, a plain name, and a short description of the declared
 output. **See all** opens the full plan gallery, whose **Start here** shelf
@@ -1096,7 +1117,7 @@ whole description belongs to the launch sheet, not the key. The trays use
 `auto-fill` columns, so the shorter project shelf keeps keys the size of the
 plans above it instead of stretching them.
 
-Each Make something key is an ordinary **key** of the theme (`--key-bg`,
+Each Create key is an ordinary **key** of the theme (`--key-bg`,
 `--key-border`, `--key-shadow`), holding the book's 64px mark as a
 `--radius-md` tile on its category ground (see Workshop Marks below). The
 tiles carry the color, so the card stays quiet and never uses a fixed light
@@ -1333,7 +1354,11 @@ cannot join anything when the tab's own row and the band below share a
 background, which is how the first attempt read as a chip parked in the
 address line. Reach for this only when the tab genuinely sits on the seam of
 what it switches; a tab floating above unrelated content has nothing to
-connect to and should be an underline tab or keys instead.
+connect to and should be an underline tab or keys instead. Home's intro tabs
+are the larger reference: there the host row is tinted a step off the panel's
+fill, so the open tab reads as the top of the panel, and unselected tabs are
+bare labels rather than recessed keys, which suits a row of named
+destinations better than a two-way switch.
 
 **A tab's scope picker sits beside that tab.** When one tab's content is
 scoped by a choice the others ignore — the gezel screen's Chat, scoped to a
@@ -1850,7 +1875,7 @@ first wherever work is offered, and every item stays reachable:
 - New Project orders its category rail and its sections by area, orders the
   types inside each section, and lands on the first category that serves the
   person. **All** is the first key of the rail.
-- Home's Make something draws its cards from the starters and the
+- Home's Create tab draws its cards from the starters and the
   `first-project` books, the person's areas first, with one place kept for
   another area (`pickWithRange`) so a single pick never makes gezel look like
   it does one thing. Its project shelf picks catalog project types the same

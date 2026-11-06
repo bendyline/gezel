@@ -275,6 +275,27 @@ describe('EvidenceLedger', () => {
     expect(briefless.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
   });
 
+  // research-to-document on "A story about ponies and unicorns", 2026-11-06:
+  // the runtime's own step-finished reply quoted the task title, and a step
+  // session the runtime started had no person's words to find it in.
+  it("takes the session's task title and step names as given, with no turn begun", () => {
+    const reply = 'Finished "Finish". "A story about ponies and unicorns" is complete.';
+    const task = {
+      title: 'A story about ponies and unicorns',
+      craftbook: { name: 'Word Document from Content or Research', steps: [{ name: 'Finish' }] },
+    };
+    const ledger = new EvidenceLedger();
+    ledger.setSessionGiven(personGivenText({ messages: [], clockLines: [], task }));
+    ledger.add('retrieval', 'Every pony in the valley had a name.', { title: 'notes.md' });
+    expect(ledger.grounding(reply)?.problems).toEqual([]);
+
+    const untold = new EvidenceLedger();
+    untold.add('retrieval', 'Every pony in the valley had a name.', { title: 'notes.md' });
+    expect(untold.grounding(reply)?.problems.map((p) => p.missing)).toEqual([
+      ['A story about ponies and unicorns'],
+    ]);
+  });
+
   it('names the source files the conversation mentions when nothing was read yet', () => {
     const ledger = new EvidenceLedger();
     ledger.beginTurn('Reconcile memo-product.md and finance.csv into synthesis.md.');

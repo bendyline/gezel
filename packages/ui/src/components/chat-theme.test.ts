@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   GEZEL_CHAT_THEME_ID,
   GEZEL_LIGHT_SURFACE,
+  GEZEL_REPORT_FONT,
   gezelChatTheme,
   gezelChatThemeForMode,
+  gezelReportThemeForMode,
 } from './chat-theme.js';
 
 describe('gezelChatTheme', () => {
@@ -16,6 +18,18 @@ describe('gezelChatTheme', () => {
   it('uses the warm mushroom-beige reading surface', () => {
     expect(GEZEL_LIGHT_SURFACE.background).toBe('#f1e9e1');
     expect(GEZEL_LIGHT_SURFACE.backgroundLight).toBe('#e8dfd7');
+  });
+});
+
+describe.each(['light', 'dark'] as const)('gezelReportThemeForMode(%s)', (mode) => {
+  it('sets reports in the app sans and leaves chat in the serif', () => {
+    const report = gezelReportThemeForMode(mode);
+    const chat = gezelChatThemeForMode(mode);
+    expect(report.typography.titleFont).toEqual(GEZEL_REPORT_FONT);
+    expect(report.typography.bodyFont).toEqual(GEZEL_REPORT_FONT);
+    expect(chat.typography.titleFont).not.toEqual(GEZEL_REPORT_FONT);
+    expect(report.colors).toEqual(chat.colors);
+    expect(report.pageStyle).toEqual(chat.pageStyle);
   });
 });
 

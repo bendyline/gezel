@@ -60,7 +60,7 @@
 }
 
 .app.app-compact .home-workshop-greeting-top {
-  padding: 8px var(--app-main-pad-inline, 0.75rem);
+  padding: 6px var(--app-main-pad-inline, 0.75rem) 0;
 }
 
 .app.app-compact .home-workshop-headline {
@@ -71,7 +71,8 @@
   margin-top: 10px;
 }
 
-/* Keep all intro labels visible, wrapping beside the collapse key. */
+/* Keep all intro labels visible beside the collapse key. The tabs stay on
+   one row on the seam; a long label breaks inside its own tab. */
 .app.app-compact .home-workshop-greeting-top {
   gap: 8px;
   flex-wrap: wrap;
@@ -79,11 +80,15 @@
 
 .app.app-compact .home-workshop-tab {
   min-height: 44px;
+  padding-inline: 10px;
 }
 
+/* A collapsed band's chips wrap below the tabs, so they carry the bottom
+   inset the tab row gives up to stand on the seam. */
 .app.app-compact .home-workshop-collapsed-chips {
   order: 1;
   width: 100%;
+  padding-bottom: 8px;
 }
 
 /* The meester's welcome gives its words the full width: beside the figure

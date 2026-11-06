@@ -5,7 +5,7 @@ import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useLayoutEffect, useMemo, useRef } from 'react';
 import welcome from '../../../../docs/handboek/conceptual/welcome.md?raw';
 import mark from '../assets/gezel-mark.png';
-import { gezelChatTheme } from '../components/chat-theme.js';
+import { gezelReportTheme } from '../components/chat-theme.js';
 import { IntroArticleControls } from '../views/home/IntroArticleControls.js';
 import { IntroArticleDocument } from '../views/home/IntroArticleDocument.js';
 import { NightReviewSummary } from '../views/home/NightReviewSummary.js';
@@ -92,7 +92,7 @@ export function StartupDocuments({
             <div className="home-workshop-status-body">
               <LinearDocView
                 doc={doc}
-                theme={gezelChatTheme}
+                theme={gezelReportTheme}
                 thinMargins
                 imageDisplayMode="thumbnail"
               />

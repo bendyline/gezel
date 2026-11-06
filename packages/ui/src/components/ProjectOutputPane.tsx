@@ -1,4 +1,12 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
 import {
@@ -344,8 +352,10 @@ export function ProjectOutputPane({
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   // F5 toggles maximize; Esc exits it. preventDefault on F5 keeps the
-  // Electron renderer from hard-reloading the whole app.
-  useEffect(() => {
+  // Electron renderer from hard-reloading the whole app. A layout effect, so
+  // the keys work from the first frame the pane is drawn maximized: as a
+  // passive effect, an Esc in the gap after a slow render did nothing.
+  useLayoutEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'F5') {
         e.preventDefault();

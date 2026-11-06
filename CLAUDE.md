@@ -360,7 +360,7 @@ What the person said they want help with: `config.interests.areas`, ids from
 legal are held, with ids but no key). The welcome asks only a new install
 (`shouldAskInterests`: a `firstUseAt` within the week, not yet answered or
 skipped); Settings → General holds the same picker. The answer **orders** what
-is offered (the welcome's `firstProjectsFor`, Make something's `pickWithRange`,
+is offered (the welcome's `firstProjectsFor`, Create's `pickWithRange`,
 New Task's For you shelf, New Project's rail, Knowledge's suggestions through
 `orderByInterests`) and **never hides** anything or enters a prompt. An item's
 areas come from its gilde `category` through one map, unless its identity

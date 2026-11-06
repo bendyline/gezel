@@ -107,7 +107,10 @@ export function removeCitationMarkers(text: string): string {
  * invented number). So do the writer's own name and the project's (a report
  * signed "Rafiq" was refused, 2026-10-10), and the project's about and
  * mission, which every session reads as its standing brief (a postmortem
- * restating the about's "500-rate spike" was refused, 2026-10-20).
+ * restating the about's "500-rate spike" was refused, 2026-10-20). So do the
+ * task's title and the names of its book and steps, which the runtime's own
+ * step-finished reply quotes ("A story about ponies and unicorns" is
+ * complete. was flagged as an unsourced quote, 2026-11-06).
  */
 export function personGivenText(parts: {
   messages: readonly string[];
@@ -116,6 +119,10 @@ export function personGivenText(parts: {
   project?: { name?: string; about?: string; missionObjectives?: string } | null | undefined;
   /** The person's own selected text: rewriting it is not inventing it. */
   subjectStateLine?: string | null | undefined;
+  task?:
+    | { title?: string; craftbook?: { name?: string; steps?: ReadonlyArray<{ name?: string }> } }
+    | null
+    | undefined;
 }): string {
   return [
     ...parts.messages,
@@ -125,6 +132,9 @@ export function personGivenText(parts: {
     parts.project?.about ?? '',
     parts.project?.missionObjectives ?? '',
     parts.subjectStateLine ?? '',
+    parts.task?.title ?? '',
+    parts.task?.craftbook?.name ?? '',
+    ...(parts.task?.craftbook?.steps ?? []).map((step) => step.name ?? ''),
   ].join('\n');
 }
 
@@ -292,6 +302,8 @@ export class EvidenceLedger {
   /** Numbers at or below this were issued before this process: real, but their text is gone. */
   private readonly floor: number;
   private given = '';
+  /** Given text that holds for the whole session; see `setSessionGiven`. */
+  private sessionGiven = '';
   private turnStart: number;
   /** Consecutive refusals by write target, spanning task continuation turns. */
   private readonly refusals = new Map<string, number>();
@@ -350,6 +362,15 @@ export class EvidenceLedger {
     this.unverifiedPlaces.clear();
   }
 
+  /**
+   * What counts as given for every turn of the session. A task step session
+   * is started by the runtime, not the person, so `beginTurn` may never run
+   * for it, and without this its own task title read as an unsourced quote.
+   */
+  setSessionGiven(given: string): void {
+    this.sessionGiven = given;
+  }
+
   /** Number one piece of evidence; the same text from the same place keeps its number. */
   add(
     kind: Entry['kind'],
@@ -371,7 +392,7 @@ export class EvidenceLedger {
 
   check(text: string): TextGrounding {
     return groundText(text, [...this.entries.values()], {
-      given: this.given,
+      given: this.sessionGiven ? `${this.sessionGiven}\n${this.given}` : this.given,
       opaque: (n) => n <= this.floor,
     });
   }

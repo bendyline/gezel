@@ -115,6 +115,21 @@ run's subject. Only a task without a subject falls back to the task title,
 current phase, phase prompt, and declared inputs; generic handoff boilerplate
 is never the query.
 
+A keyword hit must hold a word the person typed, in the text it injects or
+in its file name (`isGrounded` in
+[project-retrieval.ts](../packages/service/src/search/project-retrieval.ts)).
+A word naming what to make (story, report, essay, …; `isFormatWord` in
+[query-terms.ts](../packages/service/src/index-store/query-terms.ts)) counts
+only in the file name, unless the request names nothing else: a beer history
+that calls itself "a story of control" is no source for "A story about
+ponies and unicorns", while "fix the report" still finds `report.md`.
+
+An excerpt is the hit's lines re-read from disk, kept only when they hold at
+least half the words the index matched; otherwise the index's own text is
+injected. A file's summary is filed at a placeholder range of line 1, and a
+markdown file's chunks are numbered from the body after its frontmatter, so
+the bare range is not enough to find the text.
+
 The follow-up hint under the injected rows names `search` and `read_document`
 only when the turn wired them.
 

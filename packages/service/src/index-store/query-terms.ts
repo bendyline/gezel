@@ -107,6 +107,44 @@ export function groundingWords(text: string): string[] {
 }
 
 /**
+ * Words that name what a request should produce, and that prose also uses in
+ * passing. They stay in the search, because a person may mean their own
+ * `report.md`, but a body that merely uses one shares no subject with the
+ * request: "A story about ponies and unicorns" was handed a beer history
+ * that called itself "a story of control" (2026-11-06). Names of a format
+ * itself (PowerPoint, deck) are left out: a body that says one is about it.
+ */
+const FORMAT_WORDS = new Set(
+  [
+    'story',
+    'tale',
+    'poem',
+    'poetry',
+    'fable',
+    'limerick',
+    'haiku',
+    'sonnet',
+    'lyrics',
+    'essay',
+    'article',
+    'report',
+    'document',
+    'memo',
+    'letter',
+    'email',
+    'blog',
+    'post',
+    'presentation',
+    'outline',
+    'summary',
+  ].map(baseForm),
+);
+
+export function isFormatWord(word: string): boolean {
+  return FORMAT_WORDS.has(baseForm(word));
+}
+
+/**
  * Does `text` contain a word the person typed? A token grounds a query word
  * when it starts with that word as typed ("render" grounds "renderer") or is
  * another form of it ("parties" grounds "party", "stored" grounds "store").

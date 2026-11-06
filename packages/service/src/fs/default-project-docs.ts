@@ -74,6 +74,50 @@ Word, PDF, PowerPoint, and Excel documents work too. Drop one in and its text be
 You can delete this document once the library has content of its own; it will not come back.
 `;
 
+/**
+ * The starter's body as earlier builds wrote it (frontmatter left off, since
+ * only the body is compared). A library seeded then still holds that wording,
+ * and it is just as much Gezel's own words: an August copy was cited as a
+ * source for a story about ponies (2026-11-06). Append the outgoing body here
+ * whenever the starter text changes.
+ */
+export const SHARED_LIBRARY_STARTER_EARLIER_BODIES: readonly string[] = [
+  `# About this library
+
+This is the shared document library. Everything filed here is readable by every gezel you work with, in every project — so it is the right home for the things that should be true everywhere: how you want writing to sound, what your team is trying to do, the rules a reviewer should apply, reference material worth keeping.
+
+## How your gezels use it
+
+Gezels see a listing of this library in every conversation, and they search its contents when a question touches team policy, guidelines, or conventions. You do not have to point them at a file: filing it here is enough.
+
+Word, PDF, PowerPoint, and Excel documents work too. Drop one in and its text becomes searchable alongside your markdown.
+
+## Filing suggestions
+
+- Keep documents that apply everywhere at the top level.
+- Put knowledge that only matters to one project in a folder named after it.
+- A short, plain title beats a clever one — it is what a gezel sees first.
+
+You can delete this document once the library has content of its own; nothing re-creates it.`,
+  `# About this library
+
+This is the shared document library. Everything filed here is readable by every gezel you work with, in every project. That makes it the right home for things that should be true everywhere: how you want writing to sound, what your team is trying to do, the rules a reviewer should apply, and reference material worth keeping.
+
+## How your gezels use it
+
+Gezels see a list of this library's documents in every conversation, and they search its contents when a question touches team policy, guidelines, or conventions. You do not have to point them at a file: filing it here is enough.
+
+Word, PDF, PowerPoint, and Excel documents work too. Drop one in and its text becomes searchable alongside your Markdown.
+
+## Filing suggestions
+
+- Keep documents that apply everywhere at the top level.
+- Put knowledge that only matters to one project in a folder named after it.
+- A short, plain title beats a clever one — it is what a gezel sees first.
+
+You can delete this document once the library has content of its own; it will not come back.`,
+];
+
 export const SHARED_PROJECT_MISSION_MD = `- Keep the library trustworthy: what it says should be true, current, and consistent with itself.
 - Keep it findable — clear names, sensible folders, no duplicate answers to the same question in two places.
 - Capture durable cross-project knowledge here rather than leaving it in a chat transcript.

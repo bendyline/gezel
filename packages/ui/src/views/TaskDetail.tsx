@@ -158,16 +158,21 @@ export function TaskDetail({
     (CompleteStepGateInfo & { stepId: string }) | null
   >(null);
   const [addStepOpen, setAddStepOpen] = useState(false);
-  const [tab, setTab] = useState<'task' | 'chat'>('task');
+  // Chat is where a running task is followed. A draft's description and
+  // outcomes are edited on Task, and a task assigned to the person has no
+  // chat, so those two open there instead.
+  const [tab, setTab] = useState<'task' | 'chat'>(() =>
+    task.status === 'draft' || task.assignee.kind === 'user' ? 'task' : 'chat',
+  );
   // What the task has made. A run's own events re-read it, so the deck shows
   // up here the moment it is published rather than on the next visit.
   const [resultVersion, setResultVersion] = useState(0);
   useTaskEvents(task.projectId, task.ref, () => setResultVersion((v) => v + 1));
   const result = useTaskResult(task, `${task.updatedAt}:${resultVersion}`);
-  // Task / Chat / each bench step form one mutually-exclusive tab set. A task
-  // opens on the Task overview (no step selected); clicking a bench step opens
-  // its panel, and clicking Task/Chat deselects the step again. `null` means a
-  // task-wide view (Task or Chat) is showing.
+  // Chat / Task / each bench step form one mutually-exclusive tab set. A task
+  // opens on a task-wide view (no step selected); clicking a bench step opens
+  // its panel, and clicking Chat/Task deselects the step again. `null` means a
+  // task-wide view (Chat or Task) is showing.
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const handleSelectStep = useCallback((stepId: string) => {
     setSelectedStepId(stepId);
@@ -652,19 +657,19 @@ export function TaskDetail({
           <fieldset className="task-tab-rail" aria-label="Task view">
             <button
               type="button"
-              aria-pressed={selectedStepId === null && tab === 'task'}
-              className={`task-tab-btn${selectedStepId === null && tab === 'task' ? ' active' : ''}`}
-              onClick={() => handleSelectTab('task')}
-            >
-              Task
-            </button>
-            <button
-              type="button"
               aria-pressed={selectedStepId === null && tab === 'chat'}
               className={`task-tab-btn${selectedStepId === null && tab === 'chat' ? ' active' : ''}`}
               onClick={() => handleSelectTab('chat')}
             >
               Chat{sessions.length > 0 ? ` (${sessions.length})` : ''}
+            </button>
+            <button
+              type="button"
+              aria-pressed={selectedStepId === null && tab === 'task'}
+              className={`task-tab-btn${selectedStepId === null && tab === 'task' ? ' active' : ''}`}
+              onClick={() => handleSelectTab('task')}
+            >
+              Task
             </button>
           </fieldset>
         </div>

@@ -1382,8 +1382,7 @@ button.bench-step-foot:disabled {
    same fill, hidden seam — exactly like the step panel docks under a selected
    step's foot. Its top edge meets the bench row's bottom, where the active
    tab's seam patch (see .task-tab-btn.active::after) covers this panel's top
-   border. The Task tab sits flush with the left edge, so that corner is
-   square: a rounded one curls away from the tab's straight side. */
+   border. The Task tab sits second, after Chat, so no corner meets it. */
 .task-view-panel {
   margin-top: -1rem;
   margin-bottom: 0.75rem;
@@ -1392,7 +1391,7 @@ button.bench-step-foot:disabled {
   gap: 1rem;
   padding: 0.9rem 1rem;
   border: 1px solid var(--border);
-  border-radius: 0 8px 8px 8px;
+  border-radius: 8px;
   background: var(--panel, var(--surface));
   position: relative;
   z-index: 0;
@@ -1422,11 +1421,9 @@ button.bench-step-foot:disabled {
 .bench-viewport.is-panning * {
   cursor: grabbing;
 }
-/* Overflowing routes need breathing room at both ends so even their first
-   and last stops can reach the centre. Short routes keep their usual fit. */
 .bench-scroll .bench-viewport > .step-tracker {
-  padding-left: max(0.75rem, var(--tracker-leading-space, 0px));
-  padding-right: max(0.75rem, var(--tracker-trailing-space, 0px));
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
 }
 .bench-scrollbar {
   position: relative;
@@ -1580,10 +1577,6 @@ button.bench-step-foot:disabled {
 
   .task-tab-btn.active::after {
     content: none;
-  }
-
-  .task-view-panel {
-    border-top-left-radius: 8px;
   }
 }
 

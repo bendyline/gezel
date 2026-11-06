@@ -31,7 +31,7 @@ import { StepTracker } from './StepTracker.js';
 import { taskStepStatus } from './TaskStepTracker.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-command.js';
-import { gezelChatThemeForMode } from './chat-theme.js';
+import { gezelReportThemeForMode } from './chat-theme.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 import { useCompactLayout } from './useCompactLayout.js';
@@ -1910,10 +1910,9 @@ function RenderedMarkdownPreview({
         : undefined,
     [markdown, projectId, reportPath],
   );
-  // Same theme the chat bubbles render with — defined in
-  // [chat-theme.ts](./chat-theme.ts). Gezel-tinted surface (warm/sage,
-  // not Squisq's stock cool slate-blue) so the previewer reads as part
-  // of the app chrome.
+  // The report theme from [chat-theme.ts](./chat-theme.ts): chat's palette in
+  // the app's sans. Gezel-tinted surface (warm/sage, not Squisq's stock cool
+  // slate-blue) so the previewer reads as part of the app chrome.
   const surface = effective === 'dark' ? GEZEL_DARK_SURFACE : GEZEL_LIGHT_SURFACE;
   if (!doc) return <pre className="chat-rail-viewer-raw">{markdown}</pre>;
   if (displayMode === 'slideshow') {
@@ -1930,12 +1929,12 @@ function RenderedMarkdownPreview({
     );
   }
   // Files in the rail are working documents — reports, plans, notes — rendered
-  // with the same theme as chat and the rail's own reading surface.
+  // in the report theme on the rail's own reading surface.
   return (
     <div className="chat-rail-viewer-markdown">
       <LinearDocView
         doc={doc}
-        theme={gezelChatThemeForMode(effective)}
+        theme={gezelReportThemeForMode(effective)}
         surface={surface}
         fenceRenderers={fenceRenderers}
         thinMargins={compact}

@@ -21,6 +21,7 @@ import {
   MINIMAL_FOOTPRINT_MAX_WINDOW,
   PROMPT_FOOTPRINT_POLICY,
   type TaskDeliverable,
+  asksForFiction,
   buildToolReceipt,
   estimateTokens,
   findAskCycleOrDepth,
@@ -28,6 +29,7 @@ import {
   isAnswerEnvelope,
   isOwnerStep,
   leanSession,
+  mainContentParamKey,
   plainRoleTitle,
   projectLeadGezelId,
   projectTypeTurnRules,
@@ -733,6 +735,17 @@ function hasSocialConnectorBinding(
       !binding.disabled &&
       SOCIAL_CONNECTOR_TYPE_PREFIXES.some((prefix) => binding.type.startsWith(prefix)),
   );
+}
+
+/**
+ * What a task was asked to make: its title and the book's main subject, else
+ * the first line of its description. Only the lead, so a factual brief that
+ * asks for a closing poem somewhere in its body stays factual.
+ */
+export function taskRequestText(task: Task): string {
+  const key = mainContentParamKey(task.craftbook.paramSchema);
+  const subject = key ? task.craftbookParams?.[key]?.trim() : undefined;
+  return [task.title, subject || task.description?.split('\n')[0]].filter(Boolean).join('\n');
 }
 
 export type { TurnMessageOrigin };
@@ -15306,10 +15319,15 @@ export class ChatManager extends LocalEngineRuntime {
     ];
     // Factual writing follows the gezel's role, or its explicit setting, and
     // is on for any session that can write into a person's open document.
+    // The task the session works can turn it either way: a contract that asks
+    // for grounding turns it on, a request for a story or a poem turns it off.
     // Resolved before either tool surface: it keeps the lookups on the roster.
     const appToolNames = appToolBindings.flatMap((binding) =>
       binding.tools.map((tool) => tool.name),
     );
+    const workTask = record.visitorAccess
+      ? null
+      : (taskContext?.task ?? (await this.subagentTask(record)));
     const factualWriting = record.visitorAccess
       ? { on: false, reason: 'off' as const }
       : resolveFactualWriting({
@@ -15319,16 +15337,13 @@ export class ChatManager extends LocalEngineRuntime {
           ...(gezel?.role ? { role: gezel.role } : {}),
           ...(gezel?.roleBasedName ? { roleBasedName: gezel.roleBasedName } : {}),
           toolNames: appToolNames,
-          taskGrounded: await (async () => {
-            const groundingTask = taskContext?.task ?? (await this.subagentTask(record));
-            // The write-time check enforces the contract, so an eval arm that
-            // shows or hides the contract runs without it.
-            return (
-              !!groundingTask &&
-              taskContractMode(groundingTask) === 'enforced' &&
-              contractAsksForGrounding(groundingTask.craftbook.contract)
-            );
-          })(),
+          // The write-time check enforces the contract, so an eval arm that
+          // shows or hides the contract runs without it.
+          taskGrounded:
+            !!workTask &&
+            taskContractMode(workTask) === 'enforced' &&
+            contractAsksForGrounding(workTask.craftbook.contract),
+          fiction: !!workTask && asksForFiction(taskRequestText(workTask)),
         });
     const factualLookupPreference: FactualLookupPreference =
       project?.knowledgeCatalogs?.mode === 'off'
@@ -15341,6 +15356,15 @@ export class ChatManager extends LocalEngineRuntime {
     const evidenceLedger = this.evidenceLedgerFor(
       record,
       factualWriting.on && providerUsesManagedMcpBridge(record.providerName),
+    );
+    evidenceLedger?.setSessionGiven(
+      personGivenText({
+        messages: [],
+        clockLines: [],
+        gezelName: gezel?.name,
+        project,
+        task: workTask,
+      }),
     );
     const promptSurface = await resolveSessionToolSurface({
       surface: 'prompt',

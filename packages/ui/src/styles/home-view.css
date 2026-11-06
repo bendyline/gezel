@@ -51,6 +51,9 @@
   --home-border: var(--paper-3);
   --home-hair: var(--rule);
   --home-user: color-mix(in srgb, var(--gezel-paper-workshop) 58%, var(--gezel-paper-inset));
+  /* The intro's tab row and the sheet's hem: the shade's rails, a step
+     off the paper so the open tab and the sheet below read as one cloth. */
+  --home-rail: var(--home-surf2);
   --home-amber: color-mix(in srgb, var(--gezel-terra-bright) 7%, transparent);
   --home-amber-bd: color-mix(in srgb, var(--gezel-terra-bright) 30%, transparent);
   /* Provenance mono — JetBrains isn't bundled; system mono is fine at 11px. */
@@ -89,6 +92,7 @@
   --home-border: #3a342b;
   --home-hair: #4a4234;
   --home-user: #322d25;
+  --home-rail: color-mix(in srgb, var(--home-workshop-paper) 70%, black);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .home-workshop {
@@ -104,6 +108,7 @@
     --home-border: #3a342b;
     --home-hair: #4a4234;
     --home-user: #322d25;
+    --home-rail: color-mix(in srgb, var(--home-workshop-paper) 70%, black);
   }
 }
 
@@ -160,11 +165,15 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 54px;
-  background: var(--paper);
+  /* No bottom padding: the tabs stand on the seam, and the open one erases
+     its stretch of it so the sheet hangs from that tab like a pulled shade. */
+  padding: 8px 54px 0;
+  background: var(--home-rail);
   border-bottom: 1px solid var(--home-hair);
 }
-/* The conversation keeps its full layout behind the rolling intro sheet. */
+/* The conversation keeps its full layout behind the rolling intro sheet.
+   The hem is the shade's bottom rail: it rides up with the sheet when it
+   rolls, so the edge reads as cloth with weight, not a box being clipped. */
 .home-workshop-intro-sheet {
   grid-area: 2 / 1;
   align-self: start;
@@ -173,7 +182,8 @@
   min-height: 0;
   overflow: hidden;
   background: var(--paper);
-  box-shadow: 0 16px 24px -8px var(--titlebar-pane-shadow);
+  border-bottom: 3px solid var(--home-rail);
+  box-shadow: 0 1px 0 var(--home-hair), 0 16px 24px -8px var(--titlebar-pane-shadow);
   visibility: visible;
   transition: height 160ms ease-out, visibility 0s;
 }
@@ -424,55 +434,76 @@
   color: var(--ink-3);
   font-weight: 400;
 }
-/* Intro labels remain visible at narrow widths, wrapping without scrolling. */
+/* Connected tabs (docs/ux.md): each tab stands on the header's bottom seam,
+   reaching 1px past it, and the open one takes the sheet's fill with no
+   bottom edge, so tab and sheet are one surface. Every tab must stay on
+   that seam, so the row never wraps: a label breaks onto a second line
+   inside its tab instead. Selectors carry the list class because the Tabs
+   primitive's `.gz-tabs-trigger` rules have equal weight and may load later. */
 .home-workshop-tabs {
   border: 0;
-  margin: 0;
+  margin: 0 0 -1px;
   padding: 0;
   display: flex;
-  align-items: center;
-  gap: 4px;
+  align-self: stretch;
+  align-items: stretch;
+  gap: 2px;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   overflow: visible;
   flex: 1;
 }
-.home-workshop-tab {
+.home-workshop-tabs .home-workshop-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 1 auto;
   font-family: var(--font-ui);
   font-size: var(--text-sm);
   font-weight: 500;
+  line-height: 1.2;
+  text-align: center;
   color: var(--ink-2);
   background: transparent;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  /* Square bottom corners keep the active underline a straight bar; a
-     radius there bends the border up at both ends. */
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  padding: 6px 8px;
-  min-height: 32px;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  padding: 4px 14px;
+  min-height: 40px;
   cursor: pointer;
-  white-space: nowrap;
+  white-space: normal;
   transition: background 0.12s, color 0.12s, border-color 0.12s;
 }
-.home-workshop-tab:hover {
-  color: var(--ink-2);
-  background: var(--home-card);
-}
-.home-workshop-tab[data-state="active"] {
+.home-workshop-tabs .home-workshop-tab:hover {
   color: var(--ink);
-  background: var(--home-card);
-  border-bottom-color: var(--accent);
+  background: color-mix(in srgb, var(--paper) 55%, transparent);
 }
-/* A collapsed band shows no panel, so no tab reads as selected. The Tabs
-   primitive's own `.gz-tabs-trigger[data-state="active"]` also draws the
-   underline, so this must override it rather than skip the rule above. */
-.home-workshop-greeting-collapsed .home-workshop-tab[data-state="active"] {
+/* The 2px accent on the top edge follows the rounded corners: the border
+   draws one pixel of it and the inset shadow the other. */
+.home-workshop-tabs .home-workshop-tab[data-state="active"] {
+  color: var(--ink);
+  background: var(--paper);
+  border-color: var(--home-hair);
+  border-top-color: var(--accent);
+  box-shadow: inset 0 1px 0 var(--accent);
+}
+.home-workshop-tabs .home-workshop-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+/* A collapsed band shows no panel, so no tab reads as selected or joined. */
+.home-workshop-greeting-collapsed .home-workshop-tabs .home-workshop-tab[data-state="active"] {
   color: var(--ink-2);
   background: transparent;
-  border-bottom-color: transparent;
+  border-color: transparent;
+  box-shadow: none;
 }
-.home-workshop-greeting-collapsed .home-workshop-tab[data-state="active"]:hover {
-  background: var(--home-card);
+.home-workshop-greeting-collapsed
+  .home-workshop-tabs
+  .home-workshop-tab[data-state="active"]:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--paper) 55%, transparent);
 }
 
 /* Tour content rendered inline in the left column (replaces the greeting

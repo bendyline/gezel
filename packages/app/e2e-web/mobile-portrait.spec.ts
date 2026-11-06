@@ -91,7 +91,7 @@ for (const profile of [
       await page.getByRole('button', { name: /^Home ·/ }).click();
       await expect(page.getByTestId('home-workshop')).toBeVisible();
       await capture('home');
-      await page.getByRole('tab', { name: 'Make something', exact: true }).click();
+      await page.getByRole('tab', { name: 'Create', exact: true }).click();
       await capture('home-starters');
       await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
       await openProject(page, world!.projectId);
