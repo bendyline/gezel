@@ -243,6 +243,11 @@ test('sd.cpp CUDA legs build against the llama CUDA leg they share a key with', 
     /\$env:SD_BACKEND_TAG -eq '1'/,
     'the Windows CUDA sd-server must land in the -cuda key, not over the portable build',
   );
+  assert.match(
+    sdWindows,
+    /if \(\$arm64Cuda\) \{[^}]*'-DCMAKE_POLICY_DEFAULT_CMP0091=NEW'/,
+    "without it sd.cpp's own CUDA objects build against the static C runtime on win32-arm64",
+  );
 });
 
 test('the CUDA whisper-server builds against its key-mate llama leg, statically', () => {
