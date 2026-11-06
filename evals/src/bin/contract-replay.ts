@@ -3,9 +3,11 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import {
   type CraftbookContract,
   type Task,
+  compareSemver,
   interpolateContextDeep,
   taskInterpolationContext,
 } from '@bendyline/gezel';
+import { gildeDataDir } from '@bendyline/gezel-catalog';
 import { repoRoot } from '../native-bin.ts';
 import { type ContractGrade, gradeContract } from '../strategy/contract-grade.ts';
 import { assertKnownFlags, parseArgs } from './args.ts';
@@ -21,8 +23,9 @@ import { assertKnownFlags, parseArgs } from './args.ts';
  *     --drafts evals/runs/contract-drafts-2026-11-05/blind \
  *     --out evals/runs/contract-drafts-2026-11-05/replay.json
  *
- * A book with a reviewed contract in `--reference` (default
- * ../gilde/tools/contracts) is compared gate against gate. A book without
+ * A book whose latest version in the gilde data directory `--reference`
+ * carries a contract is compared gate against gate (default: the gilde
+ * the evals resolve; pass `../gilde/data` for unreleased edits). A book without
  * one is compared with the trial's own eval verdict, and only on trials whose
  * recorded steps name every drafted deliverable, since an older version of the
  * book may have written elsewhere. Contracts are interpolated per trial from
@@ -72,16 +75,47 @@ async function readContracts(dir: string): Promise<Map<string, CraftbookContract
   return out;
 }
 
+/** The contract each book's latest released version carries, from a gilde data directory. */
+async function readCatalogContracts(dataDir: string): Promise<Map<string, CraftbookContract>> {
+  const out = new Map<string, CraftbookContract>();
+  const root = join(dataDir, 'craftbook-templates');
+  for (const shard of await readdir(root).catch(() => [])) {
+    for (const id of await readdir(join(root, shard)).catch(() => [])) {
+      const manifest = await readJson<{ yankedVersions?: string[] }>(
+        join(root, shard, id, 'manifest.json'),
+      );
+      if (!manifest) continue;
+      const yanked = new Set(manifest.yankedVersions ?? []);
+      const versions = (await readdir(join(root, shard, id, 'versions')).catch(() => []))
+        .filter((v) => !yanked.has(v) && /^\d+\.\d+\.\d+$/.test(v))
+        .sort(compareSemver);
+      const latest = versions.at(-1);
+      if (!latest) continue;
+      const book = await readJson<{ contract?: CraftbookContract }>(
+        join(root, shard, id, 'versions', latest, 'craftbook.json'),
+      );
+      if (book?.contract) out.set(id, book.contract);
+    }
+  }
+  return out;
+}
+
 /** Trial directories under a run root: …/craftbook-<book>/<trial>/{state,result}.json. */
 async function findTrials(root: string, depth = 0): Promise<string[]> {
   if (depth > 7) return [];
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
-  if (entries.some((e) => e.name === 'state.json') && entries.some((e) => e.name === 'result.json')) {
+  if (
+    entries.some((e) => e.name === 'state.json') &&
+    entries.some((e) => e.name === 'result.json')
+  ) {
     return [root];
   }
   const out: string[] = [];
   for (const entry of entries) {
-    if (!entry.isDirectory() || ['workspace', 'artifacts', 'sessions', 'recording'].includes(entry.name)) {
+    if (
+      !entry.isDirectory() ||
+      ['workspace', 'artifacts', 'sessions', 'recording'].includes(entry.name)
+    ) {
       continue;
     }
     out.push(...(await findTrials(join(root, entry.name), depth + 1)));
@@ -110,7 +144,9 @@ async function readJson<T>(path: string): Promise<T | null> {
 }
 
 async function judgeMean(trialDir: string): Promise<number | null> {
-  const judge = await readJson<{ mean?: number; promptVersion?: number }>(join(trialDir, 'judge.json'));
+  const judge = await readJson<{ mean?: number; promptVersion?: number }>(
+    join(trialDir, 'judge.json'),
+  );
   return judge?.promptVersion === 2 && typeof judge.mean === 'number' ? judge.mean : null;
 }
 
@@ -137,9 +173,15 @@ function mean(values: number[]): string {
   return values.length ? (values.reduce((a, b) => a + b, 0) / values.length).toFixed(2) : '-';
 }
 
-const judged = (rows: ReplayRow[]) => mean(rows.flatMap((r) => (r.judge === null ? [] : [r.judge])));
+const judged = (rows: ReplayRow[]) =>
+  mean(rows.flatMap((r) => (r.judge === null ? [] : [r.judge])));
 
-function compareTable(rows: ReplayRow[], label: string, other: string, passes: (r: ReplayRow) => boolean): string[] {
+function compareTable(
+  rows: ReplayRow[],
+  label: string,
+  other: string,
+  passes: (r: ReplayRow) => boolean,
+): string[] {
   const lines = [
     `## ${label} (${rows.length} trials)`,
     '',
@@ -187,8 +229,8 @@ async function main(): Promise<void> {
     .map(abs);
   if (!roots.length || !args.flags.drafts) throw new Error('--runs-dir and --drafts are required');
   const drafts = await readContracts(abs(String(args.flags.drafts)));
-  const reference = await readContracts(
-    abs(String(args.flags.reference ?? join(repoRoot(), '..', 'gilde', 'tools', 'contracts'))),
+  const reference = await readCatalogContracts(
+    args.flags.reference ? abs(String(args.flags.reference)) : gildeDataDir(),
   );
   const onlyBooks = args.flags.books ? new Set(String(args.flags.books).split(',')) : null;
 

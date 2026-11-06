@@ -178,16 +178,19 @@ every model that runs it meets the same bar and no model writes its own. In
 gilde, `node tools/draft-contract.mjs --missing` drafts them with Claude Opus
 from each book's latest version (never its `test.json`), parses and lints each
 draft, and gives a draft with problems a repair turn. Drafts land in
-`tools/contract-drafts/` for review; a reviewed one moves to `tools/contracts/`,
-and `add-contract.mjs --write` releases it. Until a person reviews it, a draft
+`tools/contract-drafts/` for review, a folder gilde does not commit, and
+`add-contract.mjs --from <folder> --write` releases the reviewed ones as new
+book versions. From then on a contract lives only in its book's versions, and
+changing it is an ordinary new version. Until a person reviews it, a draft
 enforces only checks of a file's form and its citations; the content patterns
 are shown, not enforced, and the model's whole draft stays in `drafted.full`
 for the reviewer who promotes them. `--reapply` re-derives every draft when
 that policy changes, without calling the model.
 
 Before release, `evals/src/bin/contract-replay.ts` grades saved trials with
-the drafted contract and the reviewed one (or the trial's own eval verdict
-when the book has none), from the files each trial left, and names the
+the drafted contract and the released one, or with the trial's own eval
+verdict when the book has none (`--reference ../gilde/data` includes
+unreleased versions). It reads the files each trial left and names the
 drafted criteria that block passing work. On the 18 benchmark books
 (2026-11-05, 1,440 trials) the drafted gates agreed with the reviewed ones on
 89% of trials, blocked 37 of 437 trials the judge rated 7 or higher (reviewed:
