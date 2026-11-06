@@ -3330,16 +3330,6 @@ button.timeline-session-divider-child::before {
   }
 }
 
-.timeline-msg-faded {
-  opacity: 0.55;
-  transition: opacity 120ms ease;
-}
-
-.timeline-msg-faded:hover {
-  /* Hover restores nearly-full opacity so users can read older context. */
-  opacity: 0.92;
-}
-
 /* ── Memories tab (Gezels view) ─────────────────────────────────── */
 
 .memories-pane {

@@ -47,6 +47,7 @@ import { ComposerTaskBar } from './ComposerTaskBar.js';
 import { GezelIcon } from './GezelIcon.js';
 import { createGezelMediaProvider } from './GezelMediaProvider.js';
 import { createPromptDraftMediaProvider } from './PromptDraftMediaProvider.js';
+import { GEZEL_WRITE_CANVAS } from './SquisqIntegration/write-canvas.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import { humanizeChatError } from './chat-error-copy.js';
 import {
@@ -2006,6 +2007,7 @@ export function ChatComposer({
           </div>
         )}
         <EditorShell
+          {...GEZEL_WRITE_CANVAS}
           ariaLabel="Message"
           // Squisq installs its placeholder on mount. Refresh it when the
           // recipient changes or the draft is reset, but never remount just

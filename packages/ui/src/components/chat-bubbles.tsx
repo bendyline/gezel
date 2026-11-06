@@ -72,7 +72,11 @@ import { ToolDiffBlock } from './ToolDiffBlock.js';
 import { WorkChunksCount } from './WorkChunksCount.js';
 import { markdownToChatDoc, prepareChatMarkdown } from './chat-markdown.js';
 import type { OpenChatReference } from './chat-open-command.js';
-import { GEZEL_LIGHT_SURFACE, gezelChatThemeForMode } from './chat-theme.js';
+import {
+  GEZEL_LIGHT_SURFACE,
+  gezelChatThemeForMode,
+  gezelReportThemeForMode,
+} from './chat-theme.js';
 import { ToolAudioRow, ToolImageRow, ToolVideoRow } from './chat-tool-media.js';
 import { citationFromHref, evidenceTitle, linkifyCitations } from './citation-linkify.js';
 import { formatElapsedClock } from './elapsed-time.js';
@@ -3881,9 +3885,12 @@ export function RenderedMarkdown({
   markdown,
   mediaProvider,
   fontFamily,
+  register = 'chat',
 }: {
   markdown: string;
   mediaProvider?: MediaProvider | null;
+  /** `report` for a document shown outside a bubble: a report, a plan, step instructions. */
+  register?: 'chat' | 'report';
   /**
    * Per-gezel chat-bubble font (a CSS `font-family` value). Squisq's
    * LinearDocView sets its own `bodyFont` from the theme's typography and
@@ -3914,7 +3921,8 @@ export function RenderedMarkdown({
   // verbatim, so the GEZEL_CHAT_FONTS family value drops straight in.
   const effective = useEffectiveTheme();
   const theme = useMemo<Theme>(() => {
-    const readingTheme = gezelChatThemeForMode(effective);
+    const readingTheme =
+      register === 'report' ? gezelReportThemeForMode(effective) : gezelChatThemeForMode(effective);
     if (!fontFamily) return readingTheme;
     // GEZEL_CHAT_FONTS families are ready-to-use CSS strings (e.g.
     // `'JetBrains Mono'`). `resolveFontFamily` passes a raw string family
@@ -3927,7 +3935,7 @@ export function RenderedMarkdown({
       ...readingTheme,
       typography: { ...readingTheme.typography, bodyFont: font, titleFont: font },
     };
-  }, [fontFamily, effective]);
+  }, [fontFamily, effective, register]);
   // Theme + font choices live in [chat-theme.ts](./chat-theme.ts) so
   // bubble bodies and the attachment previewer in
   // [ChatReferences.tsx](./ChatReferences.tsx) stay in lockstep.

@@ -81,6 +81,7 @@ import {
   withOutsideInMarkdownEditing,
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
+import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import {
   WorkspaceIndexPane,
@@ -3683,6 +3684,7 @@ function ProjectFileEditor({
   return (
     <div className="editor-wrap" style={{ height: '100%' }}>
       <EditorShell
+        {...GEZEL_WRITE_CANVAS}
         initialMarkdown={autosave.desiredValue()}
         fileName={file.path}
         readOnly={isReadOnly}
@@ -3880,6 +3882,7 @@ function HtmlFileViewer({
       ) : (
         <div className="editor-wrap">
           <EditorShell
+            {...GEZEL_WRITE_CANVAS}
             key={`${file.source}:${file.path}`}
             initialMarkdown={sourceAutosave.desiredValue()}
             fileName={file.path}
@@ -4036,6 +4039,7 @@ function ProjectDocEditor({
     >
       <div className="editor-wrap">
         <EditorShell
+          {...GEZEL_WRITE_CANVAS}
           ariaLabel={label}
           initialMarkdown={autosave.desiredValue()}
           onChange={handleDocChange}

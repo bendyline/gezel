@@ -18,6 +18,7 @@ import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { DeliverableCard } from '../components/DeliverableCard.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { PromptDialog } from '../components/PromptDialog.js';
+import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
 import { TaskOutputsList } from '../components/TaskOutputsList.js';
 import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
@@ -722,6 +723,7 @@ export function TaskDetail({
             </div>
             <div className="task-description-editor">
               <EditorShell
+                {...GEZEL_WRITE_CANVAS}
                 ariaLabel="Task description"
                 key={`description-${task.ref}-${descriptionKey}`}
                 initialMarkdown={task.description ?? ''}
@@ -777,6 +779,7 @@ export function TaskDetail({
                 from the user's vantage point, no scrolling required. */}
             <div className="task-notes-composer">
               <EditorShell
+                {...GEZEL_WRITE_CANVAS}
                 ariaLabel="Task note"
                 key={`composer-${composerKey}`}
                 initialMarkdown=""
@@ -868,6 +871,7 @@ export function TaskDetail({
                     </header>
                     <div className="task-note-body">
                       <EditorShell
+                        {...GEZEL_WRITE_CANVAS}
                         ariaLabel="Task note"
                         key={editing ? `edit-${n.id}` : n.id}
                         initialMarkdown={n.text}

@@ -164,16 +164,6 @@ export function referencedFilesOf(message: TimelineMessage): readonly Referenced
   return message.referencedArtifacts.map((path) => ({ kind: 'artifact' as const, path }));
 }
 
-export function withinHours(iso: string | undefined, ms: number): boolean {
-  if (!iso) return false;
-  try {
-    const t = new Date(iso).getTime();
-    return Date.now() - t <= ms;
-  } catch {
-    return false;
-  }
-}
-
 export function formatProviderLabel(p: ProviderName): string {
   switch (p) {
     case 'copilot':

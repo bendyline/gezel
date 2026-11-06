@@ -24,6 +24,7 @@ import {
   withOutsideInMarkdownEditing,
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
+import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 import { recordDocumentUsed } from '../components/document-quick-list.js';
 import { looksBinary } from '../components/file-browser/index.js';
 import { markdownEquivalent } from '../components/markdown-baseline.js';
@@ -304,6 +305,7 @@ function OutsideInEditor({
       )}
       <div className="editor-wrap">
         <EditorShell
+          {...GEZEL_WRITE_CANVAS}
           initialMarkdown={autosave.desiredValue()}
           // The visible file is CSV/XLSX/etc., but EditorShell is editing the
           // generated Markdown companion. Passing the visible extension makes

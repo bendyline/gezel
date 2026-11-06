@@ -1,6 +1,7 @@
 import { EditorProvider, WysiwygEditor, useEditorContext } from '@bendyline/squisq-editor-react';
 import { useEffect, useRef } from 'react';
 import { useEffectiveTheme } from '../../theme.js';
+import { GEZEL_WRITE_CANVAS } from '../SquisqIntegration/write-canvas.js';
 
 /**
  * Editable Squisq WYSIWYG pane for the transformation dialog's "after"
@@ -60,9 +61,13 @@ export function TransformAfterEditor({ value, onChange, ariaLabel }: TransformAf
         allowRecording={false}
         allowNarrate={false}
         mentionProvider={null}
+        themeInheritance={GEZEL_WRITE_CANVAS.themeInheritance}
       >
         <AfterEditorBridge value={value} onChange={onChange} />
-        <WysiwygEditor className="gz-transform-after-wysiwyg" />
+        <WysiwygEditor
+          className="gz-transform-after-wysiwyg"
+          writeCanvasSettings={GEZEL_WRITE_CANVAS.writeCanvasSettings}
+        />
       </EditorProvider>
     </section>
   );

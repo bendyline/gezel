@@ -2,6 +2,7 @@ import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import { type FocusEvent, useCallback, useEffect, useRef } from 'react';
 import { useEffectiveTheme } from '../theme.js';
+import { GEZEL_WRITE_CANVAS } from './SquisqIntegration/write-canvas.js';
 
 interface MarkdownFieldProps {
   /** Current markdown value. Read once at mount — remount via `key` to reset. */
@@ -92,6 +93,7 @@ export function MarkdownField({
   return (
     <div className="markdown-field" onBlur={handleBlur}>
       <EditorShell
+        {...GEZEL_WRITE_CANVAS}
         ariaLabel={accessibleName ?? placeholder ?? 'Markdown'}
         initialMarkdown={value}
         initialView="wysiwyg"

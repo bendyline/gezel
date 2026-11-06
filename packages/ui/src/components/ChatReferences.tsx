@@ -27,6 +27,7 @@ import { FittedTabsList } from './FittedTabsList.js';
 import { GezelIcon } from './GezelIcon.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
 import { PhotoThumb } from './PhotoThumb.js';
+import { GEZEL_WRITE_CANVAS } from './SquisqIntegration/write-canvas.js';
 import { StepTracker } from './StepTracker.js';
 import { taskStepStatus } from './TaskStepTracker.js';
 import type { ToolActivity } from './chat-bubbles.js';
@@ -1751,6 +1752,7 @@ function ReferenceCodePreview({ path, content }: { path: string; content: string
   return (
     <div className="chat-rail-viewer-code">
       <EditorShell
+        {...GEZEL_WRITE_CANVAS}
         key={path}
         initialMarkdown={content}
         fileName={path}

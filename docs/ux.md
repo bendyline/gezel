@@ -556,9 +556,19 @@ that shows one renders with `gezelReportTheme` / `gezelReportThemeForMode`
 ([chat-theme.ts](../packages/ui/src/components/chat-theme.ts)), which keeps
 the chat palette and page rhythm and sets headings and body in Hanken Grotesk.
 Those surfaces are the report reader, the Home status and night-review
-panels, and the rail's document preview. Chat, the Handboek and albums keep
+panels, and the rail's document preview. `RenderedMarkdown` takes
+`register="report"` for the same reason: the document a question attaches,
+a draft plan, and a step's instructions. Chat, the Handboek and albums keep
 the serif. A new surface that shows a report uses the report theme, never
 `gezelChatTheme`.
+
+**Editors write in the sans too.** Every Squisq editor's Write view uses
+`--font-ui` for headings and body. Without this, Squisq mirrors the
+document's theme fonts, and a document with no theme falls back to
+`standard`'s serif headings. Spread `GEZEL_WRITE_CANVAS`
+([write-canvas.ts](../packages/ui/src/components/SquisqIntegration/write-canvas.ts))
+onto every new `EditorShell`. The theme still governs Play, previews and
+exports. View → "Editor styling from theme" brings it back for one editor.
 
 The two things to actively watch:
 
