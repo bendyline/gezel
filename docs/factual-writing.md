@@ -139,7 +139,10 @@ synthesis the check cannot judge, and acronyms and code identifiers ("UTC",
 sentence works out from two of its own sourced numbers (a sum or difference)
 counts as sourced, and so does today's date. A decimal also matches the same
 quantity stated a thousandfold ("5.18 s" for 5180 ms), a name matches its
-plural or possessive, common technical acronyms (HTTP, UTC, API) are
+plural or possessive, a month or weekday matches an ISO date that falls in
+or on it ("September" for `2026-09-01`), a day written beside its month
+matches the ISO date ("July 9, 2026" or "9 July" for `2026-07-09`, bound to
+the year when the sentence gives one), common technical acronyms (HTTP, UTC, API) are
 vocabulary rather than names, and a name inside a file attribution
 ("(timeline.md, Notes)") never anchors a number.
 Each sentence ends up as one of:

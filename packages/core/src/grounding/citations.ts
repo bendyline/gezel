@@ -158,6 +158,7 @@ const MONTHS = [
   'november',
   'december',
 ];
+const MONTH_NAME = MONTHS.map((m) => m[0]!.toUpperCase() + m.slice(1)).join('|');
 const SMALL_NUMBERS = [
   'zero',
   'one',
@@ -229,6 +230,43 @@ export interface Claim {
   percent?: boolean;
   /** A time of day ("14:38"), checked whole and never as a name's attribute. */
   clock?: boolean;
+  /** A day written beside its month ("July 9", "9th of July, 2026"), which an ISO date also states. */
+  day?: DayOfMonth;
+}
+
+export interface DayOfMonth {
+  /** 1–12. */
+  month: number;
+  /** The year written with the day, when there is one. */
+  year?: string;
+}
+
+const MONTH_BEFORE_DAY = new RegExp(
+  `\\b(${MONTH_NAME})\\s+(?:\\d{1,2}(?:st|nd|rd|th)?\\s*[-–—]\\s*)?$`,
+);
+const MONTH_AFTER_DAY = new RegExp(
+  `^\\s+(?:of\\s+)?(${MONTH_NAME})\\b(?:,?\\s+(1\\d{3}|20\\d{2})\\b)?`,
+);
+const YEAR_AFTER_DAY = /^,?\s+(1\d{3}|20\d{2})\b/;
+
+/**
+ * "July 9, 2026" against a git log that says `2026-07-09`: the month matched
+ * the log's `2026-07` and the day matched nothing, so a correct date read as
+ * invented (engineering-retrospective, contract replay 2026-11-06). Only a
+ * day beside its month is read as one; a bare 9 is still a count.
+ */
+function dayOfMonth(before: string, after: string, digits: string): DayOfMonth | undefined {
+  const day = Number(digits);
+  if (!/^\d{1,2}$/.test(digits) || day < 1 || day > 31) return undefined;
+  const monthOf = (name: string | undefined) => MONTHS.indexOf((name ?? '').toLowerCase()) + 1;
+  const lead = MONTH_BEFORE_DAY.exec(before);
+  if (lead) {
+    const year = YEAR_AFTER_DAY.exec(after)?.[1];
+    return { month: monthOf(lead[1]), ...(year ? { year } : {}) };
+  }
+  const trail = MONTH_AFTER_DAY.exec(after);
+  if (trail) return { month: monthOf(trail[1]), ...(trail[2] ? { year: trail[2] } : {}) };
+  return undefined;
 }
 
 /**
@@ -278,9 +316,10 @@ export function extractClaims(text: string): Claim[] {
   const add = (
     kind: ClaimKind,
     value: string,
-    flags: { approx?: boolean; percent?: boolean; clock?: boolean } = {},
+    flags: { approx?: boolean; percent?: boolean; clock?: boolean; day?: DayOfMonth } = {},
   ) => {
-    const key = `${kind}:${value.toLowerCase()}`;
+    // "9 tickets on July 9" states a count and a date, checked apart.
+    const key = `${kind}:${value.toLowerCase()}${flags.day ? `@${flags.day.month}` : ''}`;
     if (!seen.has(key)) {
       seen.add(key);
       claims.push({
@@ -289,6 +328,7 @@ export function extractClaims(text: string): Claim[] {
         ...(flags.approx ? { approx: true } : {}),
         ...(flags.percent ? { percent: true } : {}),
         ...(flags.clock ? { clock: true } : {}),
+        ...(flags.day ? { day: flags.day } : {}),
       });
     }
   };
@@ -305,18 +345,21 @@ export function extractClaims(text: string): Claim[] {
     const digits = (m[1] ?? '').replace(/,/g, '');
     const value = Number(digits);
     const at = m.index ?? 0;
-    if (isEnumerator(numeric.slice(0, at), numeric.slice(at + m[0].length), value)) continue;
+    const before = numeric.slice(0, at);
+    const after = numeric.slice(at + m[0].length);
+    if (isEnumerator(before, after, value)) continue;
     // No one writes a year with a thousands separator: "~1,270 rps" is a rate.
     if (/^(1[0-9]{3}|20[0-9]{2})$/.test(digits) && !(m[1] ?? '').includes(',')) add('year', digits);
-    else if (Number.isFinite(value))
+    else if (Number.isFinite(value)) {
+      const day = dayOfMonth(before, after, digits);
       add('number', digits, {
         approx: APPROXIMATE.test(unquoted.slice(Math.max(0, at - 24), at)),
         percent: /^\s*(?:%|percent\b)/i.test(unquoted.slice(at + m[0].length)),
+        ...(day ? { day } : {}),
       });
+    }
   }
-  for (const m of unquoted.matchAll(
-    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\b/g,
-  )) {
+  for (const m of unquoted.matchAll(new RegExp(`\\b(${MONTH_NAME})\\b`, 'g'))) {
     // "May" as a modal verb is lowercase; capitalized mid-sentence it is the month.
     if (m.index !== 0 || m[1] !== 'May') add('month', m[1] ?? '');
   }
@@ -461,6 +504,11 @@ function claimFound(claim: Claim, evidence: string): boolean {
     return new RegExp(`\\b\\d{4}-${month}\\b`).test(evidence);
   }
   if (kind !== 'number') return false;
+  if (claim.day) {
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const iso = `(?<!\\d)${claim.day.year ?? '\\d{4}'}-${pad(claim.day.month)}-${pad(Number(value))}(?!\\d)`;
+    if (new RegExp(iso).test(evidence)) return true;
+  }
   // "9:05" and "09:05" are the same time.
   if (claim.clock) {
     const other = /^0\d:/.test(value) ? value.slice(1) : /^\d:/.test(value) ? `0${value}` : '';

@@ -140,7 +140,16 @@ number, date or quote in a cited sentence must appear in the cited source.
 Names are reported, not counted. A URL or `knowledge://` citation cannot be
 checked offline and counts as unverifiable, and so does a cited PDF or
 Office file: the check reads text, and a container read as text would
-match nothing. What the task was handed (its title, request, launch
+match nothing. An HTML deliverable or source is read as the text its reader
+sees: the head, styles and scripts are dropped, and headings, lists, tables
+and links read as their Markdown forms, so a page's Sources list and its
+`<sup>` footnote links cite the way Markdown's do. A bare file name
+(`[win-fulfillment.md]`) that exactly one workspace file carries reads as
+that file. A parenthesis holding only file names (`(win-fulfillment.md)`,
+`(timeline.md:10–13)`) is a citation when those files exist; one naming a
+file that does not is prose, since a plan names files still to be written.
+The document itself is never its own source, cited or inside a cited folder.
+What the task was handed (its title, request, launch
 parameters and today's date) is given text: a detail found there needs no
 citation. Arithmetic on sourced figures counts as sourced: a sum,
 difference or percent change of two figures stated in the same sentence or
@@ -161,6 +170,31 @@ false positives: two short scare-quoted phrases read as quotations, and one
 run date (given text now covers it). Reports that cite nothing fail because
 every figure in them is uncited; that is the bar working, and a book whose
 deliverable is not a fact-stating document should not carry the check.
+
+### Drafting contracts for the catalog
+
+Contracts are static: written once, reviewed, and released with the book, so
+every model that runs it meets the same bar and no model writes its own. In
+gilde, `node tools/draft-contract.mjs --missing` drafts them with Claude Opus
+from each book's latest version (never its `test.json`), parses and lints each
+draft, and gives a draft with problems a repair turn. Drafts land in
+`tools/contract-drafts/` for review; a reviewed one moves to `tools/contracts/`,
+and `add-contract.mjs --write` releases it. Until a person reviews it, a draft
+enforces only checks of a file's form and its citations; the content patterns
+are shown, not enforced, and the model's whole draft stays in `drafted.full`
+for the reviewer who promotes them. `--reapply` re-derives every draft when
+that policy changes, without calling the model.
+
+Before release, `evals/src/bin/contract-replay.ts` grades saved trials with
+the drafted contract and the reviewed one (or the trial's own eval verdict
+when the book has none), from the files each trial left, and names the
+drafted criteria that block passing work. On the 18 benchmark books
+(2026-11-05, 1,440 trials) the drafted gates agreed with the reviewed ones on
+89% of trials, blocked 37 of 437 trials the judge rated 7 or higher (reviewed:
+33), and passed weak work at the reviewed rate. On ten books without a
+contract (229 trials) they agreed with the eval's own verdict on 80%. What
+still misses is regex breadth: a pattern written without seeing outputs
+misses a phrasing models use.
 
 ## 4. The outcome render
 
