@@ -11,7 +11,7 @@ import zipfile
 
 
 def load(name, file):
-    spec = importlib.util.spec_from_file_location(name, Path(__file__).with_name(file))
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).parent / file)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -19,6 +19,7 @@ def load(name, file):
 
 release = load('release_sdk', 'release-sdk.py')
 stage = load('stage_sdk', 'stage-sdk.py')
+speech = load('speech_build', '../mobile/speech/build.py')
 VERSION = '0.1.99'
 COMMIT = 'a' * 40
 LICENSE_ROOT = Path(__file__).resolve().parents[1] / 'licenses'
@@ -86,6 +87,37 @@ def android_sdk(root):
         write(sdk, base + '.pom', '<project/>')
     inventory(sdk, 'android')
     return sdk
+
+
+def speech_runtime(root, target):
+    """A speech payload as build.py leaves it, laid out by build.py's own package()."""
+    payload = root / 'payload'
+    write(payload, 'LICENSE-whisper.txt', 'fixture MIT notice')
+    for notice in (speech.HERE / 'licenses').glob('*.txt'):
+        shutil.copyfile(notice, payload / notice.name)
+    if target == 'ios':
+        libraries = []
+        for variant in ('ios-arm64', 'ios-arm64-simulator'):
+            library = {'LibraryIdentifier': variant, 'LibraryPath': 'GezelSpeech.framework', 'SupportedPlatform': 'ios'}
+            if variant.endswith('simulator'):
+                library['SupportedPlatformVariant'] = 'simulator'
+            libraries.append(library)
+            for name in ('GezelSpeech', 'Info.plist', 'Headers/gezel_speech.h', 'Modules/module.modulemap'):
+                write(payload, f'GezelSpeech.xcframework/{variant}/GezelSpeech.framework/{name}', 'fixture')
+        write(payload, 'GezelSpeech.xcframework/Info.plist', plistlib.dumps({'AvailableLibraries': libraries}))
+    else:
+        for name in ('libGezelSpeech.so', 'libonnxruntime.so'):
+            write(payload, name, 'fixture shared library')
+    output = root / 'package'
+    speech.package(target, payload, output, VERSION)
+    return output
+
+
+def respeech(root):
+    manifest = json.loads((root / 'sdk-manifest.json').read_text())
+    manifest['files'] = {file.relative_to(root).as_posix(): release.digest(file)
+                         for file in root.rglob('*') if file.is_file() and file.name != 'sdk-manifest.json'}
+    write(root, 'sdk-manifest.json', json.dumps(manifest))
 
 
 class PublicSdkTests(unittest.TestCase):
@@ -190,6 +222,59 @@ class PublicSdkTests(unittest.TestCase):
             inventory(sdk, 'ios')
             with self.assertRaisesRegex(ValueError, 'license provenance'):
                 release.verify_sdk(sdk, 'ios', VERSION)
+
+    def test_both_speech_runtimes_roundtrip_under_their_own_archive_name(self):
+        for target in ('ios', 'android'):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                runtime = speech_runtime(root, target)
+                archive = release.pack(runtime, root / 'release', target, VERSION, COMMIT, 'speech')
+                self.assertEqual(f'gezel-mobile-{VERSION}-speech-{target}.tar.gz', archive.name)
+                release.verify(archive, target, VERSION, COMMIT, 'speech')
+                with self.assertRaises(ValueError):
+                    release.verify(archive, target, VERSION, COMMIT)
+                with self.assertRaises(ValueError):
+                    release.verify(archive, target, '0.1.98', COMMIT, 'speech')
+
+    def test_speech_runtime_built_for_another_abi_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = speech_runtime(Path(directory), 'android')
+            manifest = json.loads((runtime / 'sdk-manifest.json').read_text())
+            manifest['speechABIVersion'] = release.speech_abi() + 1
+            write(runtime, 'sdk-manifest.json', json.dumps(manifest))
+            with self.assertRaisesRegex(ValueError, 'identity'):
+                release.verify_speech(runtime, 'android', VERSION)
+
+    def test_speech_runtime_without_a_simulator_slice_or_notice_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = speech_runtime(Path(directory), 'ios')
+            plist = runtime / 'GezelSpeech.xcframework/Info.plist'
+            libraries = plistlib.loads(plist.read_bytes())['AvailableLibraries'][:1]
+            plist.write_bytes(plistlib.dumps({'AvailableLibraries': libraries}))
+            respeech(runtime)
+            with self.assertRaisesRegex(ValueError, 'simulator'):
+                release.verify_speech(runtime, 'ios', VERSION)
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = speech_runtime(Path(directory), 'ios')
+            (runtime / 'LICENSE-whisper.txt').unlink()
+            respeech(runtime)
+            with self.assertRaisesRegex(ValueError, 'Incomplete speech runtime'):
+                release.verify_speech(runtime, 'ios', VERSION)
+
+    def test_speech_runtime_never_carries_models_or_classes(self):
+        for name in ('GezelSpeech.xcframework/ios-arm64/GezelSpeech.framework/model.int8.onnx',
+                     'models/whisper-tiny.bin', 'GezelSpeech.xcframework/ios-arm64/signing.p12'):
+            self.assertFalse(release.allowed_speech_file(name, 'ios', VERSION), name)
+        notices = {'LICENSE-whisper.txt'}
+        base = {'classes.jar': zip_bytes({}), 'AndroidManifest.xml': b'', 'META-INF/LICENSE-whisper.txt': b'',
+                'jni/arm64-v8a/libGezelSpeech.so': b'', 'jni/arm64-v8a/libonnxruntime.so': b''}
+        release.verify_speech_aar(zip_bytes(base), notices)
+        with self.assertRaisesRegex(ValueError, 'Unexpected'):
+            release.verify_speech_aar(zip_bytes({**base, 'assets/whisper-tiny.bin': b''}), notices)
+        with self.assertRaisesRegex(ValueError, 'classes'):
+            release.verify_speech_aar(zip_bytes({**base, 'classes.jar': zip_bytes({'A.class': b''})}), notices)
+        with self.assertRaisesRegex(ValueError, 'Incomplete'):
+            release.verify_speech_aar(zip_bytes({k: v for k, v in base.items() if 'onnxruntime' not in k}), notices)
 
 
 if __name__ == '__main__':

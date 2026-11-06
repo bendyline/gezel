@@ -46,6 +46,8 @@ TOOLS = [
                     "overwrite": {"type": "boolean"},
                     "meta": {"type": "object"},
                     "tags": {"type": "array"},
+                    "note": {"type": "string", "nullable": True},
+                    "extra": {"description": "declared without a type"},
                 }
             },
         }
@@ -86,14 +88,19 @@ TYPED_VALUES = {
     "overwrite": ["true", "false", "TRUE"],
     "meta": ['{"a": 1}', "{}", '{"nested": {"b": [1, 2]}}'],
     "tags": ["[]", '["x", "y"]', "[1, 2, 3]"],
+    # Untyped: objects and arrays decode, everything else stays text.
+    "extra": ['{"a": 1}', '["x"]', "123", "null", "plain text"],
 }
 
 
 def reference(body: str, tools=TOOLS):
+    # The running interpreter's own mlx_vlm wins; see tool_args_json_test.
     venv = os.path.expanduser("~/.gezel-dev/engines/uv/venvs/mlx/lib")
     for root, dirs, _ in os.walk(venv):
         if "site-packages" in dirs:
-            sys.path.insert(0, os.path.join(root, "site-packages"))
+            site = os.path.join(root, "site-packages")
+            if site not in sys.path:
+                sys.path.append(site)
             break
     try:
         from mlx_vlm.tools.parsers import qwen3_coder  # type: ignore
@@ -121,7 +128,7 @@ def incremental(body: str, splits, tools=TOOLS):
 def random_body(rng: random.Random) -> str:
     params = []
     names = rng.sample(
-        ["path", "content", "mode", "ratio", "overwrite", "meta", "tags", "unknown"],
+        ["path", "content", "mode", "ratio", "overwrite", "meta", "tags", "note", "extra", "unknown"],
         k=rng.randint(1, 5),
     )
     for n in names:

@@ -17,7 +17,7 @@ index 78ff5072..0f5aff66 100644
          "<|start|>", "<|message|>", "<|eom|>", "<|eot|>",
          // ATEM tool-call markup emitted on " to=<tool>" turns.
 diff --git a/common/reasoning-budget.cpp b/common/reasoning-budget.cpp
-index 4884299f..cbf6d7df 100644
+index 81b7c3e5..64b19f44 100644
 --- a/common/reasoning-budget.cpp
 +++ b/common/reasoning-budget.cpp
 @@ -37,10 +37,10 @@ struct token_matcher {
@@ -33,7 +33,7 @@ index 4884299f..cbf6d7df 100644
              state = 0;
          }
          return p;
-@@ -134,7 +134,10 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
+@@ -134,10 +134,16 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
          case REASONING_BUDGET_FORCING:
          {
              // track the end sequence within forced_tokens so it is also reported on DONE
@@ -41,15 +41,23 @@ index 4884299f..cbf6d7df 100644
 +            // A shorter natural end may prefix the forced header. Retain trie
 +            // state through that match so the complete header is replayed to
 +            // the lazy grammar when forcing finishes.
++            const bool on_forced = ctx->force_pos < ctx->forced_tokens.size() &&
++                                   token == ctx->forced_tokens[ctx->force_pos];
 +            const int32_t match = ctx->end_matcher.advance(token, false);
              ctx->force_pos++;
-             if (ctx->force_pos >= ctx->forced_tokens.size()) {
+-            // an end tag that is already in the prompt (e.g. "<think></think>") also ends forcing
+-            if (match >= 0 || ctx->force_pos >= ctx->forced_tokens.size()) {
++            // an end tag that is already in the prompt (e.g. "<think></think>") also ends forcing,
++            // but a match inside the forced sequence itself must not cut that sequence short
++            if ((match >= 0 && !on_forced) || ctx->force_pos >= ctx->forced_tokens.size()) {
                  ctx->state = REASONING_BUDGET_DONE;
+                 ctx->end_match = match;
+                 COM_TRC("%s", "forced sequence complete, done\n");
 diff --git a/tests/test-chat.cpp b/tests/test-chat.cpp
-index 01b2220d..5cb4e803 100644
+index 4d10815e..1a60ccbc 100644
 --- a/tests/test-chat.cpp
 +++ b/tests/test-chat.cpp
-@@ -6594,6 +6594,17 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
+@@ -6819,6 +6819,17 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
      {
          auto tst = peg_tester("models/templates/muse-glimmer.jinja", detailed_debug);
  
@@ -67,7 +75,7 @@ index 01b2220d..5cb4e803 100644
          const std::string call_markup =
              "<atem:function_calls>\n"
              "<atem:invoke name=\"special_function\">\n"
-@@ -7889,34 +7900,68 @@ static void test_chat_session() {
+@@ -8270,34 +8281,68 @@ static void test_chat_json_depth() {
  
  static void test_reasoning_budget_tokens_per_request() {
      LOG_DBG("%s\n", __func__);
@@ -162,22 +170,25 @@ index 01b2220d..5cb4e803 100644
  }
  
 diff --git a/tests/test-reasoning-budget.cpp b/tests/test-reasoning-budget.cpp
-index 3bcc77e1..5f0636cc 100644
+index a50a1082..d49a8fbc 100644
 --- a/tests/test-reasoning-budget.cpp
 +++ b/tests/test-reasoning-budget.cpp
-@@ -316,6 +316,20 @@ static void test_reasoning_budget_end_match() {
+@@ -333,6 +333,23 @@ static void test_reasoning_budget_end_match() {
          llama_sampler_free(sampler);
      }
  
 +    // A natural end can be a prefix of a longer forced channel header (Muse).
-+    // Keep the whole header for replay into the lazy tool grammar.
++    // Keep the whole header for replay into the lazy tool grammar: matching
++    // the shorter end inside the forced sequence must not stop forcing.
 +    {
 +        const llama_tokens header = {101, 103, 104};
 +        auto * sampler = common_reasoning_budget_init(nullptr, start, {header, {101}}, header, 0, REASONING_BUDGET_FORCING);
 +        for (const auto token : header) {
++            GGML_ASSERT(common_reasoning_budget_get_state(sampler) == REASONING_BUDGET_FORCING);
 +            GGML_ASSERT(get_forced_token(sampler, 104) == token);
 +            llama_sampler_accept(sampler, token);
 +        }
++        GGML_ASSERT(common_reasoning_budget_get_state(sampler) == REASONING_BUDGET_DONE);
 +        const llama_tokens * matched = common_reasoning_budget_get_end_match(sampler);
 +        GGML_ASSERT(matched != nullptr && *matched == header);
 +        llama_sampler_free(sampler);

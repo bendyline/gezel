@@ -8,7 +8,7 @@ import type { GezelClient } from '@bendyline/gezel-client/node';
 import { CliError } from './connection.js';
 import { NATIVE_TOOLKIT } from './tui/bootstrap.js';
 
-export const NATIVE_VARIANTS = ['cuda', 'vulkan', 'metal', 'cpu'] as const;
+export const NATIVE_VARIANTS = ['cuda', 'rocm', 'vulkan', 'metal', 'cpu'] as const;
 export type NativeVariant = (typeof NATIVE_VARIANTS)[number];
 
 export type NativeCommandClient = Pick<GezelClient, 'ensureNativeEngine' | 'getNativeEngineStatus'>;

@@ -91,6 +91,19 @@ describe('unrunnableBuildExit', () => {
     expect(unrunnableBuildExit(noKernel, 'vulkan', 'linux')).toBeNull();
   });
 
+  it('counts a ROCm build with no code for this GPU, and its silent driver faults', () => {
+    const noKernel = { ...beforeReady(0xc0000409), panicKind: 'cuda-unsupported-device' };
+    expect(unrunnableBuildExit(noKernel, 'rocm', 'win32')?.summary).toBe(
+      'The ROCm build has no code for this graphics card.',
+    );
+    expect(unrunnableBuildExit(beforeReady(ACCESS_VIOLATION), 'rocm', 'win32')?.summary).toContain(
+      'The ROCm build crashed while starting',
+    );
+    expect(unrunnableBuildExit(beforeReady(null, 'SIGSEGV'), 'rocm', 'linux')?.signal).toBe(
+      'SIGSEGV',
+    );
+  });
+
   it('leaves a crash the engine explained to whatever owns that fault', () => {
     // abort() and an uncaught C++ exception exit 0xc0000409 exactly like a
     // driver fault does (measured on Windows); the printed assertion is the

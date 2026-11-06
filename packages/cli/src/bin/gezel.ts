@@ -2278,7 +2278,7 @@ native
   .description(
     'Download, verify, and activate the native inference toolkit (or one engine with --engine)',
   )
-  .option('--variant <backend>', 'llama.cpp backend: cuda | vulkan | metal | cpu')
+  .option('--variant <backend>', 'llama.cpp backend: cuda | rocm | vulkan | metal | cpu')
   .option('--engine <name>', 'install only this engine, e.g. duckdb or llama-server')
   .action(async (opts: { variant?: string; engine?: string }) => {
     // Validate before connecting so a typo never starts a daemon.

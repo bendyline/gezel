@@ -373,7 +373,36 @@ describe('detectLlamaBackend — caching', () => {
     const written = JSON.parse(
       readFileSync(join(home, 'engines', 'llama-cpp', 'backend.json'), 'utf8'),
     );
-    expect(written.probeSchemaVersion).toBe(2);
+    expect(written.probeSchemaVersion).toBe(3);
+  });
+
+  it('re-probes a Radeon machine cached as vulkan before ROCm shipped', () => {
+    const sys32 = process.env.SYSTEMROOT
+      ? join(process.env.SYSTEMROOT, 'System32')
+      : 'C:\\Windows\\System32';
+    const cacheDir = join(home, 'engines', 'llama-cpp');
+    require('node:fs').mkdirSync(cacheDir, { recursive: true });
+    require('node:fs').writeFileSync(
+      join(cacheDir, 'backend.json'),
+      JSON.stringify({
+        probeSchemaVersion: 2,
+        engineVersion: 'b8892',
+        backend: 'vulkan',
+        reason: 'found C:\\Windows\\System32\\vulkan-1.dll',
+        probedAt: '2026-01-01T00:00:00.000Z',
+      }),
+    );
+    const r = detectLlamaBackend({
+      engineVersion: 'b8892',
+      home,
+      probe: {
+        ...probeWith([join(sys32, 'vulkan-1.dll'), join(sys32, 'amdxc64.dll')]),
+        platform: 'win32',
+        arch: 'x64',
+      },
+    });
+    expect(r.cached).toBe(false);
+    expect(r.backend).toBe('rocm');
   });
 
   it('tolerates a corrupt cache file by re-probing', () => {
@@ -543,7 +572,9 @@ describe('detectLlamaBackend — GPU vendor hint', () => {
     expect(r.vendorHint).toBeUndefined();
   });
 
-  it('Windows: AMD driver DLL present + Vulkan backend → vendorHint=amd', () => {
+  it('Windows: AMD driver DLL present → ROCm preferred, vendorHint=amd', () => {
+    // A preference only: discovery asks the ROCm build which GPUs it can
+    // drive and falls back to Vulkan before launch (rocm-devices.ts).
     const r = detectLlamaBackend({
       engineVersion: 'b8892',
       home,
@@ -553,8 +584,58 @@ describe('detectLlamaBackend — GPU vendor hint', () => {
         arch: 'x64',
       },
     });
-    expect(r.backend).toBe('vulkan');
+    expect(r.backend).toBe('rocm');
+    expect(r.reason).toContain('AMD GPU driver');
     expect(r.vendorHint).toBe('amd');
+  });
+
+  it('Windows on ARM: an AMD driver never prefers ROCm (no ARM build)', () => {
+    const r = detectLlamaBackend({
+      engineVersion: 'b8892',
+      home,
+      probe: {
+        ...probeWith([join(sys32, 'amdxc64.dll')]),
+        platform: 'win32',
+        arch: 'arm64',
+      },
+    });
+    expect(r.backend).toBe('cpu');
+  });
+
+  it('Linux x64: /dev/kfd prefers ROCm over a Vulkan loader; NVIDIA still wins', () => {
+    const rocm = detectLlamaBackend({
+      engineVersion: 'b8892',
+      home,
+      probe: {
+        ...probeWith(['/dev/kfd', '/usr/lib/x86_64-linux-gnu/libvulkan.so.1']),
+        platform: 'linux',
+        arch: 'x64',
+      },
+    });
+    expect(rocm.backend).toBe('rocm');
+
+    const cuda = detectLlamaBackend({
+      engineVersion: 'b8893',
+      home,
+      probe: {
+        ...probeWith(['/dev/kfd', '/usr/lib/x86_64-linux-gnu/libcuda.so.1']),
+        platform: 'linux',
+        arch: 'x64',
+        commandOk: () => true,
+      },
+    });
+    expect(cuda.backend).toBe('cuda');
+
+    const arm = detectLlamaBackend({
+      engineVersion: 'b8894',
+      home,
+      probe: {
+        ...probeWith(['/dev/kfd', '/usr/lib/aarch64-linux-gnu/libvulkan.so.1']),
+        platform: 'linux',
+        arch: 'arm64',
+      },
+    });
+    expect(arm.backend).toBe('vulkan');
   });
 
   it('Windows: Intel driver DLL alone → vendorHint=intel, backend=cpu', () => {

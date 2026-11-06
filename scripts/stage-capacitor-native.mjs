@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Stage the pinned native release's mobile SDKs into `packages/capacitor/native`.
+ * Stage the pinned native release's mobile SDKs and offline speech runtimes
+ * into `packages/capacitor/native` (`ios`, `android`, `speech-ios`, `speech-android`).
  *
  * WHY: @bendyline/gezel-capacitor is the one npm package that carries prebuilt
  * engines, and those engines are never committed. Its `prepack` runs this, so
@@ -20,7 +21,9 @@
  * merged commit, so a pull request that changes `native/runtime` cannot pin
  * its own, and ordinary packs only warn about that drift. A published package
  * must not ship it: the plugin sources in the tarball would be newer than the
- * engines beside them. Run from `publish-npm.yml` before anything publishes.
+ * engines beside them. Nor may it ship without the speech runtime, which apps
+ * such as DocBlocks take this package for. Run from `publish-npm.yml` before
+ * anything publishes.
  *
  * Usage:
  *   node scripts/stage-capacitor-native.mjs
@@ -34,12 +37,29 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as tar from 'tar';
 import {
   stageNative,
+  stageSpeech,
   verifyProducerSources,
   verifyRuntime,
+  verifySpeech,
 } from '../packages/capacitor/scripts/stage-native.mjs';
 
 const RELEASE_BASE = 'https://github.com/bendyline/gezel/releases/download';
 const TARGETS = ['ios', 'android'];
+const PAYLOADS = TARGETS.flatMap((target) => [
+  {
+    target,
+    directory: target,
+    archive: (release) => `gezel-mobile-${release}-${target}.tar.gz`,
+    stage: stageNative,
+  },
+  {
+    target,
+    directory: `speech-${target}`,
+    speech: true,
+    archive: (release) => `gezel-mobile-${release}-speech-${target}.tar.gz`,
+    stage: stageSpeech,
+  },
+]);
 const DOWNLOAD_ATTEMPTS = 3;
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -52,14 +72,22 @@ export function parseNativePin(source) {
   return { release, digest };
 }
 
-/** The hash SHA256SUMS records for one file. */
-export function archiveHash(sums, name) {
+function listedHash(sums, name) {
   for (const line of sums.split('\n')) {
     const match = /^([0-9a-f]{64})\s+\*?(.+)$/.exec(line.trim());
     if (match?.[2] === name) return match[1];
   }
-  throw new Error(`SHA256SUMS does not list ${name}`);
+  return null;
 }
+
+/** The hash SHA256SUMS records for one file. */
+export function archiveHash(sums, name) {
+  const hash = listedHash(sums, name);
+  if (!hash) throw new Error(`SHA256SUMS does not list ${name}`);
+  return hash;
+}
+
+const listsArchive = (sums, name) => listedHash(sums, name) !== null;
 
 async function download(url, fetchImpl) {
   let failure;
@@ -109,33 +137,60 @@ export async function stagePinnedMobileSdks({
   const nativeRoot = join(repoRoot, 'packages/capacitor/native');
   const staged = [];
   const pending = [];
-  for (const target of TARGETS) {
-    const version = await stagedVersion(join(nativeRoot, target));
-    if (needsPinnedPayload(version, release, requireCurrent)) pending.push(target);
+  for (const payload of PAYLOADS) {
+    const version = await stagedVersion(join(nativeRoot, payload.directory));
+    if (needsPinnedPayload(version, release, requireCurrent)) pending.push(payload);
   }
 
-  if (pending.length > 0) {
+  // Checking an older pin for a speech runtime it cannot have must not take
+  // offline packing away; only the release gate insists on the answer.
+  const sumsBytes =
+    pending.length === 0
+      ? null
+      : await download(`${RELEASE_BASE}/native-v${release}/SHA256SUMS`, fetchImpl).catch(
+          (error) => {
+            if (requireCurrent || !pending.every((payload) => payload.speech)) throw error;
+            log(
+              `stage-capacitor-native: could not check native-v${release} for a speech runtime (${error.message}); offline speech stays unavailable`,
+            );
+            return null;
+          },
+        );
+  if (sumsBytes) {
     const base = `${RELEASE_BASE}/native-v${release}`;
-    const sumsBytes = await download(`${base}/SHA256SUMS`, fetchImpl);
     if (sha256(sumsBytes) !== digest) {
       throw new Error(`SHA256SUMS of native-v${release} does not match the pinned digest`);
     }
     const sums = sumsBytes.toString('utf8');
     const work = await mkdtemp(join(tmpdir(), 'gezel-capacitor-native-'));
     try {
-      for (const target of pending) {
-        const name = `gezel-mobile-${release}-${target}.tar.gz`;
+      for (const payload of pending) {
+        const name = payload.archive(release);
+        // Speech joined the release after native-v0.1.57. Without it the
+        // package still builds and its speech status reports unavailable,
+        // which a release must never ship.
+        if (payload.speech && !listsArchive(sums, name)) {
+          if (requireCurrent) {
+            throw new Error(
+              `native-v${release} has no ${payload.directory} runtime. Cut a native release and pin it with scripts/pin-native-release.mjs before publishing @bendyline/gezel-capacitor.`,
+            );
+          }
+          log(
+            `stage-capacitor-native: native-v${release} has no ${payload.directory} runtime; offline speech stays unavailable until one is staged`,
+          );
+          continue;
+        }
         const archive = await download(`${base}/${name}`, fetchImpl);
         if (sha256(archive) !== archiveHash(sums, name)) {
           throw new Error(`${name} does not match SHA256SUMS`);
         }
         const file = join(work, name);
         await writeFile(file, archive);
-        const extracted = await mkdtemp(join(work, `${target}-`));
+        const extracted = await mkdtemp(join(work, `${payload.directory}-`));
         await tar.x({ file, cwd: extracted, strict: true });
-        await stageNative(target, extracted, join(nativeRoot, target));
-        staged.push(target);
-        log(`stage-capacitor-native: staged ${target} from native-v${release}`);
+        await payload.stage(payload.target, extracted, join(nativeRoot, payload.directory));
+        staged.push(payload.directory);
+        log(`stage-capacitor-native: staged ${payload.directory} from native-v${release}`);
       }
     } finally {
       await rm(work, { recursive: true, force: true });
@@ -150,6 +205,7 @@ export async function stagePinnedMobileSdks({
           `${error.message}: native-v${release} predates that change. Cut a native release and pin it with scripts/pin-native-release.mjs before publishing @bendyline/gezel-capacitor.`,
         );
       });
+      await verifySpeech(join(nativeRoot, `speech-${target}`), target);
     }
     log(`stage-capacitor-native: native-v${release} matches its sources`);
   }

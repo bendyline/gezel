@@ -3042,6 +3042,8 @@ describe('craftbook step milestones', () => {
 });
 
 describe('package scripts in the trial home', () => {
+  // Parses every gilde sidecar on first load: under 1 s alone, past 5 s when
+  // the full suite's workers contend for the disk and CPU.
   it('turns them on only for a book that declares package commands', async () => {
     const { loadCraftbookTestSpecsSync } = await import('./test-spec-loader.ts');
     const { evalSpecFromTestSpec } = await import('./adapter.ts');
@@ -3054,5 +3056,5 @@ describe('package scripts in the trial home', () => {
       expect(scenarioFor(id).packageScripts, id).toBe(true);
     }
     expect(scenarioFor('press-release').packageScripts).toBeUndefined();
-  });
+  }, 30_000);
 });

@@ -1,19 +1,22 @@
 /**
  * The veto discovery hands `resolveAvailableLlamaBinary`: a build that
- * crashed here before it was ever ready (llama-quarantine.ts), and on Linux a
- * CUDA build the NVIDIA driver cannot run (nvidia-driver.ts). Both discovery
- * paths — the daemon's and the Electron supervisor's — use this one check,
- * so they cannot disagree about which build launches.
+ * crashed here before it was ever ready (llama-quarantine.ts), on Linux a
+ * CUDA build the NVIDIA driver cannot run (nvidia-driver.ts), and a ROCm
+ * build with no code for any GPU on this machine (rocm-devices.ts). Both
+ * discovery paths — the daemon's and the Electron supervisor's — use this one
+ * check, so they cannot disagree about which build launches.
  *
- * The two reasons are published separately because they mean different
- * things to the person: a quarantine is undone from Settings, a driver
- * blocker by a restart or a driver update, after which the next launch picks
- * CUDA again by itself.
+ * The reasons are published separately because they mean different things
+ * to the person: a quarantine is undone from Settings, a driver blocker by a
+ * restart or a driver update, after which the next launch picks CUDA again by
+ * itself, and a ROCm blocker is usually just a GPU the ROCm build was never
+ * meant for — Vulkan serves it, as it always did.
  */
 
 import type { LlamaBackend } from './llama-backend.js';
 import { type LlamaQuarantineEntry, isBinaryQuarantined } from './llama-quarantine.js';
 import { type NvidiaCudaBlocker, linuxCudaBuildBlocker } from './nvidia-driver.js';
+import type { RocmCheck } from './rocm-devices.js';
 
 /** JSON `NvidiaCudaBlocker`, set by discovery when the CUDA build was passed over. */
 export const LLAMA_CUDA_BLOCKER_ENV = 'GEZEL_LLAMA_CUDA_BLOCKER';
@@ -22,6 +25,8 @@ export interface LlamaBuildCheck {
   isUsable: (backend: LlamaBackend, path: string) => boolean;
   /** Why the CUDA build was passed over, once `isUsable` has been asked about it. */
   cudaBlocker: () => NvidiaCudaBlocker | null;
+  /** What the ROCm build said about this machine, once `isUsable` has been asked about it. */
+  rocmCheck: () => RocmCheck | null;
   /** The skipped backends that were skipped for a quarantine, not a driver. */
   quarantinedOf: (skipped: readonly LlamaBackend[]) => LlamaBackend[];
 }
@@ -31,10 +36,17 @@ export function createLlamaBuildCheck(input: {
   platform: NodeJS.Platform;
   /** Test seam; defaults to reading this host's driver. */
   cudaBlockerFor?: (binaryPath: string) => NvidiaCudaBlocker | null;
+  /**
+   * Asks the ROCm build which GPUs it can drive (`checkRocmBuild`). Without
+   * it a ROCm build is never vetoed for its devices — the caller has no home
+   * to cache the answer in.
+   */
+  rocmCheckFor?: (binaryPath: string) => RocmCheck;
 }): LlamaBuildCheck {
   const blockerFor = input.cudaBlockerFor ?? linuxCudaBuildBlocker;
   const quarantined = new Set<LlamaBackend>();
   let blocker: NvidiaCudaBlocker | null = null;
+  let rocm: RocmCheck | null = null;
   return {
     isUsable: (backend, path) => {
       if (input.quarantine.length > 0 && isBinaryQuarantined(input.quarantine, backend, path)) {
@@ -45,9 +57,14 @@ export function createLlamaBuildCheck(input: {
         blocker = blockerFor(path);
         if (blocker) return false;
       }
+      if (backend === 'rocm' && input.rocmCheckFor) {
+        rocm = input.rocmCheckFor(path);
+        if (rocm.blocker) return false;
+      }
       return true;
     },
     cudaBlocker: () => blocker,
+    rocmCheck: () => rocm,
     quarantinedOf: (skipped) => skipped.filter((backend) => quarantined.has(backend)),
   };
 }

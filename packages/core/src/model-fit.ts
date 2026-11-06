@@ -202,6 +202,23 @@ export function ds4FitsFullResidency(input: Ds4FullResidencyInput): boolean {
   return needed <= totalRamBytes;
 }
 
+/**
+ * Whether ds4 can stream this entry's routed experts on this platform's
+ * backend (Metal on macOS, CUDA elsewhere). Undefined when the entry says
+ * nothing, which callers read as supported. A backend the entry does not
+ * list answers false: ds4 refuses that launch at startup, so streaming must
+ * never be chosen there.
+ */
+export function ds4SsdStreamingSupported(
+  source: { ssdStreamingSupported?: boolean; ssdStreamingBackends?: readonly string[] } | undefined,
+  platform: string,
+): boolean | undefined {
+  if (source?.ssdStreamingSupported === false) return false;
+  const backends = source?.ssdStreamingBackends;
+  if (backends) return backends.includes(platform === 'darwin' ? 'metal' : 'cuda');
+  return source?.ssdStreamingSupported;
+}
+
 export type ModelFitTier = 'fits' | 'fits-offload' | 'tight' | 'too-big';
 
 export interface ModelFitInput {

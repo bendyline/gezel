@@ -79,6 +79,18 @@ const THIRD_PARTY_PATTERNS = [
     source: 'NVIDIA CUDA Toolkit',
   },
 
+  // AMD ROCm runtime, bundled beside llama-server's ROCm build only. Copied
+  // from AMD's pinned ROCm SDK wheels (native/scripts/rocm-sdk-requirements.txt)
+  // by walking ggml-hip.dll's imports; native/engines/llama-cpp/build.ps1 4c.
+  // A DLL a future ROCm adds is deliberately not covered: the signing gate
+  // fails until someone reviews it here and in the license table
+  // (scripts/stage-native-artifact-licenses.mjs ROCM_LICENSES).
+  {
+    pattern:
+      '(?:^|/)(?:native-bin|native/build)/win32-x64-rocm/(?:amdhip64_\\d+|amd_comgr(?:_\\d+)?|rocm_kpack|hipblas|rocblas|rocsolver|libhipblaslt|origami|roctx64)\\.dll$',
+    source: 'AMD ROCm SDK (TheRock wheels)',
+  },
+
   // Prebuilt vendor binaries we download rather than compile. uv.exe and
   // pnpm's optional fastlist helpers are unsigned as published; node.exe and
   // duckdb.exe carry their vendors' own signatures and must keep them —

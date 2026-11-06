@@ -5,6 +5,7 @@ import {
   MLX_FIXED_ENGINE_BYTES,
   MLX_WEIGHTS_MULTIPLIER,
   computeModelFit,
+  ds4SsdStreamingSupported,
   estimateLlamaCppResidentBytes,
   estimateManifestKvBytes,
   estimateMlxResidentBytes,
@@ -329,5 +330,26 @@ describe('estimateLlamaCppResidentBytes — the multimodal projector', () => {
         Math.round(GGUF_BYTES * LLAMA_CPP_WEIGHTS_MULTIPLIER) +
         LLAMA_CPP_VISION_COMPUTE_BYTES,
     );
+  });
+});
+
+describe('ds4SsdStreamingSupported', () => {
+  it('leaves an entry that says nothing to the default', () => {
+    expect(ds4SsdStreamingSupported(undefined, 'darwin')).toBeUndefined();
+    expect(ds4SsdStreamingSupported({}, 'linux')).toBeUndefined();
+    expect(ds4SsdStreamingSupported({ ssdStreamingSupported: true }, 'linux')).toBe(true);
+  });
+
+  it('refuses an explicit opt-out and any backend the entry does not list', () => {
+    expect(ds4SsdStreamingSupported({ ssdStreamingSupported: false }, 'darwin')).toBe(false);
+    const metalOnly = { ssdStreamingSupported: true, ssdStreamingBackends: ['metal'] };
+    expect(ds4SsdStreamingSupported(metalOnly, 'darwin')).toBe(true);
+    expect(ds4SsdStreamingSupported(metalOnly, 'linux')).toBe(false);
+    expect(
+      ds4SsdStreamingSupported(
+        { ssdStreamingSupported: false, ssdStreamingBackends: ['metal'] },
+        'darwin',
+      ),
+    ).toBe(false);
   });
 });

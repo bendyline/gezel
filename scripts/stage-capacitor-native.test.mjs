@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import * as tar from 'tar';
+import { SPEECH_ABI } from '../packages/capacitor/scripts/stage-native.mjs';
 import {
   archiveHash,
   needsPinnedPayload,
@@ -18,7 +19,7 @@ const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const SOURCE = 'native/runtime/stage-sdk.py';
 
 /** A repo with a pin, and a fake release whose archives hold the given source hash. */
-async function fixture(t, { sourceHash, tamper } = {}) {
+async function fixture(t, { sourceHash, tamper, speech = true } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'gezel-stage-native-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const packed = join(root, 'packed');
@@ -49,6 +50,28 @@ async function fixture(t, { sourceHash, tamper } = {}) {
     const archive = await readFile(join(packed, name));
     assets.set(name, archive);
     sums += `${sha256(archive)}  ${name}\n`;
+    if (!speech) continue;
+    const runtime = join(packed, `speech-${target}`);
+    await mkdir(runtime, { recursive: true });
+    await writeFile(join(runtime, 'LICENSE-whisper.txt'), 'notice');
+    await writeFile(
+      join(runtime, 'sdk-manifest.json'),
+      JSON.stringify({
+        scope: 'speech-runtime',
+        target,
+        speechABIVersion: SPEECH_ABI,
+        packageVersion: '1.2.3',
+        files: { 'LICENSE-whisper.txt': sha256('notice') },
+      }),
+    );
+    const speechName = `gezel-mobile-1.2.3-speech-${target}.tar.gz`;
+    await tar.c({ gzip: true, cwd: runtime, file: join(packed, speechName) }, [
+      'sdk-manifest.json',
+      'LICENSE-whisper.txt',
+    ]);
+    const speechArchive = await readFile(join(packed, speechName));
+    assets.set(speechName, speechArchive);
+    sums += `${sha256(speechArchive)}  ${speechName}\n`;
   }
   if (tamper) assets.set('gezel-mobile-1.2.3-ios.tar.gz', Buffer.from('tampered'));
   assets.set('SHA256SUMS', Buffer.from(sums));
@@ -101,11 +124,18 @@ test('keeps a build staged on purpose, and replaces a stale release', () => {
   assert.equal(needsPinnedPayload('0.0.0-ci.9.1', '1.2.3', true), true);
 });
 
-test('stages both platforms from the pinned release, then does nothing', async (t) => {
+test('stages both platforms and their speech runtimes from the pinned release, then does nothing', async (t) => {
   const f = await fixture(t);
-  assert.deepEqual((await stagePinnedMobileSdks(input(f))).staged, ['ios', 'android']);
-  const manifest = join(f.root, 'packages/capacitor/native/ios/sdk-manifest.json');
-  assert.equal(JSON.parse(await readFile(manifest, 'utf8')).packageVersion, '1.2.3');
+  assert.deepEqual((await stagePinnedMobileSdks(input(f))).staged, [
+    'ios',
+    'speech-ios',
+    'android',
+    'speech-android',
+  ]);
+  for (const directory of ['ios', 'speech-android']) {
+    const manifest = join(f.root, `packages/capacitor/native/${directory}/sdk-manifest.json`);
+    assert.equal(JSON.parse(await readFile(manifest, 'utf8')).packageVersion, '1.2.3');
+  }
 
   f.requests.length = 0;
   assert.deepEqual((await stagePinnedMobileSdks(input(f))).staged, []);
@@ -137,6 +167,26 @@ test('the release gate accepts a pinned payload matching its sources', async (t)
   await stagePinnedMobileSdks(input(f, { requireCurrent: true }));
 });
 
+test('a release without speech packs without it, and can never be published', async (t) => {
+  const f = await fixture(t, { speech: false });
+  const logs = [];
+  const { staged } = await stagePinnedMobileSdks(input(f, { log: (line) => logs.push(line) }));
+  assert.deepEqual(staged, ['ios', 'android']);
+  assert.match(logs.join('\n'), /has no speech-ios runtime/);
+  await assert.rejects(
+    stagePinnedMobileSdks(input(f, { requireCurrent: true })),
+    /native-v1\.2\.3 has no speech-ios runtime\. Cut a native release/,
+  );
+});
+
+test('the release gate refuses a package whose speech runtime is missing', async (t) => {
+  const f = await fixture(t);
+  await stagePinnedMobileSdks(input(f));
+  await rm(join(f.root, 'packages/capacitor/native/speech-android'), { recursive: true });
+  f.assets.delete('gezel-mobile-1.2.3-speech-android.tar.gz');
+  await assert.rejects(stagePinnedMobileSdks(input(f, { requireCurrent: true })), /speech/);
+});
+
 test('the release gate replaces a CI build rather than shipping it', async (t) => {
   const f = await fixture(t);
   await stagePinnedMobileSdks(input(f));
@@ -147,4 +197,19 @@ test('the release gate replaces a CI build rather than shipping it', async (t) =
   await writeFile(join(staged, 'sdk-manifest.json'), JSON.stringify(manifest));
   const { staged: replaced } = await stagePinnedMobileSdks(input(f, { requireCurrent: true }));
   assert.deepEqual(replaced, ['ios']);
+});
+
+test('packing offline still works when only a speech runtime is missing', async (t) => {
+  const f = await fixture(t, { speech: false });
+  await stagePinnedMobileSdks(input(f));
+  const logs = [];
+  const offline = input(f, {
+    fetchImpl: async () => {
+      throw new Error('offline');
+    },
+    log: (line) => logs.push(line),
+  });
+  assert.deepEqual((await stagePinnedMobileSdks(offline)).staged, []);
+  assert.match(logs.join('\n'), /could not check native-v1\.2\.3 for a speech runtime/);
+  await assert.rejects(stagePinnedMobileSdks({ ...offline, requireCurrent: true }), /offline/);
 });

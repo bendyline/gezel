@@ -4,7 +4,7 @@
  * launch refusal and first-run recommendations cannot disagree.
  */
 
-export type LlamaCppBackendName = 'cuda' | 'vulkan' | 'metal' | 'cpu';
+export type LlamaCppBackendName = 'cuda' | 'rocm' | 'vulkan' | 'metal' | 'cpu';
 
 export interface LlamaCppBackendExclusionSource {
   excludeBackends?: readonly string[] | undefined;
@@ -13,6 +13,7 @@ export interface LlamaCppBackendExclusionSource {
 
 const BACKEND_LABELS: Record<LlamaCppBackendName, string> = {
   cuda: 'NVIDIA (CUDA)',
+  rocm: 'AMD (ROCm)',
   vulkan: 'Vulkan',
   metal: 'Apple Metal',
   cpu: 'CPU-only',

@@ -34,6 +34,8 @@ TOOLS = [
                     "overwrite": {"type": "boolean"},
                     "meta": {"type": "object"},
                     "ratio": {"type": "number"},
+                    "note": {"type": "string", "nullable": True},
+                    "extra": {"description": "declared without a type"},
                 }
             },
         }
@@ -42,11 +44,18 @@ TOOLS = [
 
 
 def reference(body: str, tools=TOOLS):
-    """Parse via mlx_vlm, or skip when the venv is not importable."""
+    """Parse via mlx_vlm, or skip when the venv is not importable.
+
+    The running interpreter's own mlx_vlm wins; the dev venv is only a
+    fallback. Prepending the venv made every run compare against whatever
+    version the dev venv held, so testing a candidate runtime tested nothing.
+    """
     venv = os.path.expanduser("~/.gezel-dev/engines/uv/venvs/mlx/lib")
     for root, dirs, _ in os.walk(venv):
         if "site-packages" in dirs:
-            sys.path.insert(0, os.path.join(root, "site-packages"))
+            site = os.path.join(root, "site-packages")
+            if site not in sys.path:
+                sys.path.append(site)
             break
     try:
         from mlx_vlm.tools.parsers import qwen3_coder  # type: ignore
@@ -132,12 +141,32 @@ def test_object_param_is_parsed():
     assert_matches('write_file><parameter=meta>{"a": 1}</parameter></function>')
 
 
-def test_null_literal_becomes_none():
+def test_null_literal_in_a_string_param_stays_text():
     assert_matches("write_file><parameter=path>null</parameter></function>")
+    assert incremental("write_file><parameter=path>NULL</parameter></function>", 2)[1] == {"path": "NULL"}
+
+
+def test_null_literal_in_a_nullable_string_param_becomes_none():
+    assert_matches("write_file><parameter=note>null</parameter></function>")
+    assert incremental("write_file><parameter=note>null</parameter></function>", 2)[1] == {"note": None}
+
+
+def test_null_literal_in_an_unknown_param_becomes_none():
+    assert_matches("write_file><parameter=unknown>null</parameter></function>")
 
 
 def test_param_absent_from_schema_is_a_string():
     assert_matches("write_file><parameter=unknown>42</parameter></function>")
+
+
+def test_untyped_param_decodes_objects_and_arrays():
+    assert_matches('write_file><parameter=extra>{"a": [1, 2]}</parameter></function>')
+    assert_matches('write_file><parameter=extra>["x", "y"]</parameter></function>')
+
+
+def test_untyped_param_keeps_scalars_as_text():
+    assert_matches("write_file><parameter=extra>123</parameter></function>")
+    assert_matches("write_file><parameter=extra>not json</parameter></function>")
 
 
 def test_mixed_types_in_one_call():

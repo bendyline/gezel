@@ -2,7 +2,7 @@
  * Runtime backend detection for the bundled llama-server.
  *
  * Phase 2 ships multiple llama-server variants by platform and
- * architecture — CUDA, Vulkan, CPU, or Metal — and this module picks
+ * architecture — CUDA, ROCm, Vulkan, CPU, or Metal — and this module picks
  * which one to launch on a given host. The probe is pure filesystem /
  * linker inspection; it does NOT spawn a GPU workload. Binary
  * availability fallback is handled by `resolveAvailableLlamaBinary`;
@@ -42,7 +42,7 @@ import { dirname, join } from 'node:path';
 import { arch as nodeArch, platform as nodePlatform } from 'node:process';
 import { windowsHeadlessSpawnOptions } from './console-detach.js';
 
-export type LlamaBackend = 'cuda' | 'vulkan' | 'metal' | 'cpu';
+export type LlamaBackend = 'cuda' | 'rocm' | 'vulkan' | 'metal' | 'cpu';
 
 /**
  * Which GPU vendor the host *primarily* has, independent of which
@@ -64,14 +64,14 @@ export interface DetectInput {
   home: string;
   /**
    * User-pinned backend (from `config.llamaCppBackendOverride`). When
-   * set to a concrete backend (`cuda` / `vulkan` / `metal` / `cpu`),
+   * set to a concrete backend (`cuda` / `rocm` / `vulkan` / `metal` / `cpu`),
    * the auto-probe is skipped and the chosen backend is returned
    * verbatim — even if the OS doesn't have the corresponding driver.
    * `resolveNativeBinaryPath` will then fail to find the binary and
    * the supervisor surfaces an actionable error (which is the right
    * behavior — the user picked an unavailable backend, we tell them).
    *
-   * `'auto'` or `undefined` keeps the existing CUDA → Vulkan → CPU
+   * `'auto'` or `undefined` keeps the existing CUDA → ROCm → Vulkan → CPU
    * (or Metal on Mac) probe behavior.
    *
    * Cache bypass: when an override is in effect we don't read OR write
@@ -79,7 +79,7 @@ export interface DetectInput {
    * a future `'auto'` to come back and re-use what was actually a
    * forced choice.
    */
-  override?: 'auto' | 'cuda' | 'vulkan' | 'metal' | 'cpu';
+  override?: 'auto' | LlamaBackend;
   /** Optional injection points for tests. */
   probe?: {
     fileExists?: (path: string) => boolean;
@@ -162,7 +162,7 @@ export interface ResolvedLlamaBinary {
  * expose a Vulkan loader even when the release does not ship a Vulkan build
  * for its architecture (for example Linux ARM64 under Parallels). In auto
  * mode, that should still produce a working on-device engine by selecting the
- * next bundled build in CUDA → Vulkan → CPU order. Explicit user overrides
+ * next bundled build in CUDA/ROCm → Vulkan → CPU order. Explicit user overrides
  * pass `allowFallbacks=false`
  * so a missing pinned backend remains an actionable configuration error.
  *
@@ -187,6 +187,7 @@ export function resolveAvailableLlamaBinary(
 ): ResolvedLlamaBinary | null {
   const fallbackOrder: Record<LlamaBackend, LlamaBackend[]> = {
     cuda: ['cuda', 'vulkan', 'cpu'],
+    rocm: ['rocm', 'vulkan', 'cpu'],
     vulkan: ['vulkan', 'cpu'],
     metal: ['metal', 'cpu'],
     cpu: ['cpu'],
@@ -224,8 +225,10 @@ export function resolveAvailableLlamaBinary(
  *       add aarch64-linux-gnu paths to CUDA/Vulkan lookups.
  *   2 — Windows on ARM probes for the NVIDIA driver (RTX Spark) instead of
  *       answering CPU.
+ *   3 — x64 hosts with an AMD GPU driver prefer the ROCm build, so a cached
+ *       `vulkan` answer on a Radeon machine re-probes.
  */
-const PROBE_SCHEMA_VERSION = 2;
+const PROBE_SCHEMA_VERSION = 3;
 
 interface CacheFile {
   /** Schema version of the probe that wrote this file. Missing on entries written by older versions of Gezel. */
@@ -262,6 +265,20 @@ export const LINUX_CUDA_DRIVER_PATHS = [
   '/lib/aarch64-linux-gnu/libcuda.so.1',
 ];
 
+/**
+ * The AMD compute driver's device node. The amdgpu kernel driver creates it
+ * whenever it can run HIP/HSA work, which is the ROCm build's precondition;
+ * whether that build carries code for this GPU is a separate question,
+ * answered by `rocm-devices.ts` before the build is ever chosen.
+ */
+export const LINUX_AMD_KFD_PATH = '/dev/kfd';
+
+/**
+ * AMD's Windows display driver. Adrenalin and the Pro driver install both;
+ * the HIP runtime the ROCm build bundles talks to the GPU through it.
+ */
+const WINDOWS_AMD_DRIVER_DLLS = ['amdxc64.dll', 'aticfx64.dll'];
+
 const LINUX_VULKAN_LOADER_PATHS = [
   '/usr/lib/x86_64-linux-gnu/libvulkan.so.1',
   '/usr/lib/aarch64-linux-gnu/libvulkan.so.1',
@@ -279,15 +296,24 @@ function windowsSystem32(): string {
  * Resolve the best backend supported by the driver/loader files currently on
  * disk. This deliberately excludes vendor discovery and command execution so
  * it is cheap enough to validate a cached probe on every launch.
+ *
+ * ROCm is preferred over Vulkan on an AMD driver, x64 only (no ROCm build
+ * ships for ARM). It is a preference, not a promise: discovery asks the ROCm
+ * build itself which GPUs it can drive (`rocm-devices.ts`) and falls back to
+ * Vulkan when the answer is none, before anything launches.
  */
 function detectDriverBackend(
   os: 'linux' | 'win32',
   probeFile: (p: string) => boolean,
   arch?: string,
-): { backend: 'cuda' | 'vulkan' | 'cpu'; path?: string } {
+): { backend: 'cuda' | 'rocm' | 'vulkan' | 'cpu'; path?: string } {
   if (os === 'linux') {
     const libcuda = anyExists(LINUX_CUDA_DRIVER_PATHS, probeFile);
     if (libcuda) return { backend: 'cuda', path: libcuda };
+
+    if (arch === 'x64' && probeFile(LINUX_AMD_KFD_PATH)) {
+      return { backend: 'rocm', path: LINUX_AMD_KFD_PATH };
+    }
 
     const libvulkan = anyExists(LINUX_VULKAN_LOADER_PATHS, probeFile);
     if (libvulkan) return { backend: 'vulkan', path: libvulkan };
@@ -300,6 +326,12 @@ function detectDriverBackend(
   // No Vulkan build ships for Windows on ARM (LunarG has no ARM64 SDK), so a
   // Vulkan loader there is no reason to leave the CPU build.
   if (arch === 'arm64') return { backend: 'cpu' };
+
+  const amdDriver = anyExists(
+    WINDOWS_AMD_DRIVER_DLLS.map((dll) => join(sys32, dll)),
+    probeFile,
+  );
+  if (amdDriver) return { backend: 'rocm', path: amdDriver };
 
   const vulkan = anyExists([join(sys32, 'vulkan-1.dll')], probeFile);
   if (vulkan) return { backend: 'vulkan', path: vulkan };
@@ -378,9 +410,9 @@ function detectVendor(
     return 'nvidia';
   }
   if (
-    probeFile(join(sys32, 'aticfx64.dll')) ||
-    probeFile(join(sys32, 'amdxc64.dll')) ||
-    probeFile(join(sys32, 'amdhip64.dll'))
+    WINDOWS_AMD_DRIVER_DLLS.some((dll) => probeFile(join(sys32, dll))) ||
+    probeFile(join(sys32, 'amdhip64.dll')) ||
+    probeFile(join(sys32, 'amdhip64_7.dll'))
   ) {
     return 'amd';
   }
@@ -421,6 +453,14 @@ function detectLinuxOrWin(
     return { backend: 'cuda', reason: `found ${driver.path}`, vendorHint };
   }
 
+  // ── ROCm probe ─────────────────────────────────────────────────
+  // An AMD compute driver. The ROCm build answers for itself which of the
+  // GPUs it has code for (rocm-devices.ts), so a Radeon too old for it — or
+  // an integrated GPU alone — still lands on Vulkan before anything starts.
+  if (driver.backend === 'rocm' && driver.path) {
+    return { backend: 'rocm', reason: `found ${driver.path} (AMD GPU driver)`, vendorHint };
+  }
+
   // ── Vulkan probe ───────────────────────────────────────────────
   if (driver.backend === 'vulkan' && driver.path) {
     // Could probe for a physical device via `vulkaninfo --summary`
@@ -433,7 +473,11 @@ function detectLinuxOrWin(
   if (os === 'win32' && arch === 'arm64') {
     return { backend: 'cpu', reason: 'Windows on ARM without an NVIDIA CUDA driver', vendorHint };
   }
-  return { backend: 'cpu', reason: 'no CUDA driver and no Vulkan loader found', vendorHint };
+  return {
+    backend: 'cpu',
+    reason: 'no CUDA driver, AMD compute driver, or Vulkan loader found',
+    vendorHint,
+  };
 }
 
 export function detectLlamaBackend(input: DetectInput): DetectResult {
@@ -540,11 +584,12 @@ function probeOrCached(input: DetectInput): {
     }
   } else if (plat === 'linux' && (ar === 'x64' || ar === 'arm64')) {
     // arm64 hosts (Jetson, DGX Spark, Grace Hopper) get the same
-    // CUDA → Vulkan → CPU probe as x64. Vulkan is rare on arm64
+    // CUDA → Vulkan → CPU probe as x64, less ROCm, which ships for x64
+    // only. Vulkan is rare on arm64
     // today (no LunarG aarch64 SDK) but the probe is correct either
     // way; if the loader is present we'll try Vulkan and fail
     // through to CPU on launch error.
-    result = detectLinuxOrWin('linux', probeFile, probeCmd, probeReadFile, probeReadDir);
+    result = detectLinuxOrWin('linux', probeFile, probeCmd, probeReadFile, probeReadDir, ar);
   } else if (plat === 'win32' && (ar === 'x64' || ar === 'arm64')) {
     // Windows on ARM ships CPU and CUDA builds: the CUDA one is for RTX Spark
     // (NVIDIA N1X, first supported by CUDA 13.4), first run on one with driver

@@ -26,7 +26,7 @@ import {
   resolveLlamaVariantBinary,
 } from '@bendyline/gezel/native';
 
-const BACKENDS: readonly LlamaBackend[] = ['cuda', 'vulkan', 'metal', 'cpu'];
+const BACKENDS: readonly LlamaBackend[] = ['cuda', 'rocm', 'vulkan', 'metal', 'cpu'];
 
 export function isLlamaBackend(value: string): value is LlamaBackend {
   return BACKENDS.some((backend) => backend === value);

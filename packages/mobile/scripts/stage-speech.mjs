@@ -1,7 +1,22 @@
 import { createHash } from 'node:crypto';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { verifySpeech } from '../../capacitor/scripts/stage-native.mjs';
 import { replaceNativeAssets } from './stage-native-assets.mjs';
+
+/** The speech runtime the app links: @bendyline/gezel-capacitor's, as for any app. */
+export async function appSpeechRuntime(repo, platform) {
+  try {
+    return await verifySpeech(
+      path.join(repo, 'packages/capacitor/native', `speech-${platform}`),
+      platform,
+    );
+  } catch {
+    throw new Error(
+      `Run pnpm mobile:build:speech ${platform} to stage the speech runtime the app links.`,
+    );
+  }
+}
 
 export async function speechPayload(repo, platform) {
   const root = path.join(repo, 'native/mobile/.build', `speech-${platform}`, 'payload');
@@ -9,9 +24,7 @@ export async function speechPayload(repo, platform) {
   try {
     manifest = JSON.parse(await readFile(path.join(root, 'speech-build.json'), 'utf8'));
   } catch {
-    throw new Error(
-      `Build native/mobile/speech/build.py ${platform} --models before syncing speech.`,
-    );
+    throw new Error(`Run pnpm mobile:build:speech ${platform} before syncing speech.`);
   }
   const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
   const pins = JSON.parse(
@@ -41,7 +54,9 @@ export async function speechPayload(repo, platform) {
     !manifest.files['models/whisper-tiny.bin'] ||
     !manifest.files['models/kokoro/model.int8.onnx']
   )
-    throw new Error('Build speech with --models to include the offline speech pack.');
+    throw new Error(
+      `This speech build has no offline speech pack; rebuild it with pnpm mobile:build:speech ${platform}.`,
+    );
   return { root, manifest };
 }
 

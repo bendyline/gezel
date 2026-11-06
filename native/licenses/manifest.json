@@ -2,13 +2,13 @@
   "schemaVersion": 1,
   "engines": {
     "ds4": {
-      "tag": "main-2026-10-21",
-      "commit": "ee7e8405232c8971000cc7ba2b945b00bf6d20d3",
+      "tag": "main-2026-11-03",
+      "commit": "b3f50180ec2c7324892be1f50bc83555ccb8d5e7",
       "files": ["LICENSE-ds4-MIT.txt", "LICENSE-ds4-rax-BSD-3-Clause.txt", "LICENSE-yarn-MIT.txt"]
     },
     "llama-cpp": {
-      "tag": "v0.8.0",
-      "commit": "8642541b255bfb5dc39cd351a178be09013a55d6",
+      "tag": "v0.9.0",
+      "commit": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
       "files": [
         "LICENSE-ggml-MIT.txt",
         "LICENSE-yarn-MIT.txt",
@@ -28,8 +28,8 @@
       ]
     },
     "sd-cpp": {
-      "tag": "master-975-95b3090",
-      "commit": "95b3090664d019fcf8fa032a44d1d4793ba244b8",
+      "tag": "master-1050-58bb3c1",
+      "commit": "58bb3c1b1cd4749e94e39f537e9adfce295dcaee",
       "files": [
         "LICENSE-stable-diffusion-cpp-MIT.txt",
         "LICENSE-ggml-MIT.txt",
@@ -52,6 +52,7 @@
         "LICENSE-stable-diffusion-cpp-openai-clip-MIT.txt",
         "LICENSE-stable-diffusion-cpp-sageattention-APACHE.txt",
         "LICENSE-nvidia-cub-BSD-3-Clause.txt",
+        "LICENSE-nvidia-cutlass-BSD-3-Clause.txt",
         "LICENSE-vulkan-headers-Apache-2.0-OR-MIT.txt",
         "LICENSE-vulkan-loader-APACHE.txt",
         "LICENSE-vulkan-loader-cjson-MIT.txt"

@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyCapacitorPackage, writeEmbeddingManifest } from './embedding-package.mjs';
-import { verifyProducerSources, verifyRuntime } from './stage-native.mjs';
+import { verifyProducerSources, verifyRuntime, verifySpeech } from './stage-native.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Capacitor resolves <plugin>/package.json from the consumer. Without this
@@ -18,6 +18,23 @@ await verifyProducerSources(ios, path.resolve(root, '../..'), console.warn, { al
 await verifyProducerSources(android, path.resolve(root, '../..'), console.warn, { allowStale });
 if (ios.packageVersion !== android.packageVersion)
   throw new Error('Stage the same native version for both platforms before packing.');
+// Offline speech is why apps such as DocBlocks take this package; a publish
+// must never ship without it, or with a runtime from another release.
+if (!allowStale) {
+  for (const target of ['ios', 'android']) {
+    const speech = await verifySpeech(path.join(root, `native/speech-${target}`), target).catch(
+      () => {
+        throw new Error(
+          `Stage the ${target} speech runtime from native-v${ios.packageVersion} before publishing.`,
+        );
+      },
+    );
+    if (speech.packageVersion !== ios.packageVersion)
+      throw new Error(
+        `The ${target} speech runtime is ${speech.packageVersion}, not native-v${ios.packageVersion}.`,
+      );
+  }
+}
 console.log(`Verified Capacitor native payloads (${ios.packageVersion}).`);
 
 await writeEmbeddingManifest(root);

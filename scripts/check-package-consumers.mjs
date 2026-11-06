@@ -59,8 +59,9 @@ if (tarballDirFlag !== -1 && !process.argv[tarballDirFlag + 1]) {
 // Gilde content rides in the service's install: 0.3.5's new project types
 // (+5.8 MiB) took the 1.2.11 rehearsal to 900.4 MiB. Capacitor's prebuilt engines
 // and dictionaries (+39 MiB) took it to 939.7 MiB, though only this check installs
-// them beside the service: no real consumer holds both.
-const MAX_NODE_MODULES_BYTES = 1000 * 1024 * 1024;
+// them beside the service: no real consumer holds both. Capacitor's offline
+// speech runtime (78 MiB: both iOS slices and the Android AAR) took it to 1018.0 MiB.
+const MAX_NODE_MODULES_BYTES = 1100 * 1024 * 1024;
 
 function validateArgs(args) {
   for (let index = 0; index < args.length; index += 1) {

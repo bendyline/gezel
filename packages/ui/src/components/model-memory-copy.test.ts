@@ -186,4 +186,18 @@ describe('ds4 memory copy', () => {
       }),
     ).toBe('~40.0 GB in memory');
   });
+
+  it('quotes a measured full residency instead of a download with disk-only tables', () => {
+    // Qwen3.8 Flash Next: a 137 GiB file whose 95 GiB of n-grams stay on disk.
+    const qwen = {
+      approxSizeBytes: 137 * GiB,
+      residentBytes: 46 * GiB,
+      fullyResident: true,
+      memoryMeasured: true,
+    };
+    expect(ds4MemoryHeadline(qwen)).toBe('46.0 GB in memory');
+    expect(ds4SizeTitle(qwen)).toContain('About 46.0 GB stays in memory');
+    // Unmeasured, the download is still the honest figure.
+    expect(ds4MemoryHeadline({ ...qwen, memoryMeasured: false })).toBe('137.0 GB in memory');
+  });
 });

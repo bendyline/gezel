@@ -93,11 +93,12 @@ there is no browser runtime stub pretending to run a local model.
 ## Offline speech
 
 `createMobileSpeech()` adds Whisper dictation and Kokoro narration on the device,
-through the `GezelOfflineSpeech` plugin and the optional gezel-speech runtime
+through the `GezelOfflineSpeech` plugin and the gezel-speech runtime
 (whisper.cpp and ONNX Runtime, built by
-[`native/mobile/speech/build.py`](../../native/mobile/speech/build.py)). Without
-a staged runtime the package still builds, and `status()` reports speech
-unavailable.
+[`native/mobile/speech/build.py`](../../native/mobile/speech/build.py)). The
+published package carries the runtime from the same native release as its
+engines. A checkout packed without one still builds, and `status()` reports
+speech unavailable.
 
 ```ts
 import { createMobileSpeech } from '@bendyline/gezel-capacitor';
@@ -125,9 +126,11 @@ await speech.synthesize({ text, voice: 'af_heart', onChunk: play });
   Models stay loaded between requests, are released after two idle minutes, and
   are released, with any request stopped and any download paused, when the app
   leaves the foreground.
-- **Staging.** `build.py ios|android --package VERSION` lays out a verified
-  payload; `node scripts/stage-native.mjs speech-ios|speech-android <payload>`
-  stages it under `native/speech-<platform>`. Android adds the `gezel-speech` AAR
+- **Staging.** `pnpm pack` stages the pinned native release's runtime under
+  `native/speech-<platform>`. In this repository, `pnpm mobile:build:speech
+  ios|android` builds one from source and stages it there instead (as
+  `0.0.0-local`, or `--package VERSION`); the Gezel app links speech through
+  this package like any other app. Android adds the `gezel-speech` AAR
   (it loads `libc++_shared.so` from `gezel-llama` of the same NDK); iOS adds the
   `GezelSpeech` binary target. The JNI binding is compiled into the library, so
   apps build no native code. `GEZEL_SPEECH_ABI` pairs the plugins with the

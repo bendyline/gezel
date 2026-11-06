@@ -1703,15 +1703,22 @@ export class NativeEngineSupervisor {
   }
 }
 
-/** High-precision fatal signatures; attribution happens only if the child exits. */
+/**
+ * High-precision fatal signatures; attribution happens only if the child exits.
+ *
+ * The `cuda-*` kinds also cover ROCm builds: ggml's ROCm backend is its CUDA
+ * code compiled with HIP, and it prints the same errors under the name `ROCm`
+ * (`ROCm error: out of memory`). The kinds are wire values, so they keep their
+ * names rather than growing a ROCm twin each.
+ */
 export function classifyNativeEnginePanic(
   line: string,
 ): { kind: NativeEnginePanicKind; line: string } | undefined {
   const clipped = line.trim().slice(0, 1_000);
-  if (/CUDA error:\s*invalid (?:configuration )?argument/i.test(line)) {
+  if (/(?:CUDA|ROCm) error:\s*invalid (?:configuration )?argument/i.test(line)) {
     return { kind: 'cuda-invalid-argument', line: clipped };
   }
-  if (/CUDA error:\s*(?:out of memory|memory allocation)/i.test(line)) {
+  if (/(?:CUDA|ROCm) error:\s*(?:out of memory|memory allocation)/i.test(line)) {
     return { kind: 'cuda-out-of-memory', line: clipped };
   }
   // Vulkan's spellings of the same condition — the backend a non-CUDA
@@ -1723,20 +1730,22 @@ export function classifyNativeEnginePanic(
   ) {
     return { kind: 'vulkan-out-of-memory', line: clipped };
   }
-  if (/CUDA error:\s*(?:an )?illegal memory access/i.test(line)) {
+  if (/(?:CUDA|ROCm) error:\s*(?:an )?illegal memory access/i.test(line)) {
     return { kind: 'cuda-illegal-memory-access', line: clipped };
   }
-  if (/CUDA error:.*device-side assert/i.test(line)) {
+  if (/(?:CUDA|ROCm) error:.*device-side assert/i.test(line)) {
     return { kind: 'cuda-device-assert', line: clipped };
   }
   if (
-    /CUDA error:\s*(?:no kernel image is available|the provided PTX was compiled with an unsupported toolchain)/i.test(
+    /(?:CUDA|ROCm) error:\s*(?:no kernel image is available|invalid device function|the provided PTX was compiled with an unsupported toolchain)/i.test(
       line,
-    )
+    ) ||
+    // rocBLAS names the architecture it has no kernel library for, then aborts.
+    /rocBLAS error: Cannot read .*TensileLibrary.*for GPU arch/i.test(line)
   ) {
     return { kind: 'cuda-unsupported-device', line: clipped };
   }
-  if (/CUDA error:/i.test(line)) return { kind: 'cuda-error', line: clipped };
+  if (/(?:CUDA|ROCm) error:/i.test(line)) return { kind: 'cuda-error', line: clipped };
   if (/assert(?:ion)? failed|GGML_ASSERT/i.test(line)) {
     return { kind: 'assertion-failed', line: clipped };
   }

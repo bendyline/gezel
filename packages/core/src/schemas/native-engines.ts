@@ -62,7 +62,7 @@ export const NativeEngineStatusResponseSchema = z.object({
   release: z.string(),
   pinned: z.boolean(),
   platformKey: z.string().nullable(),
-  llamaBackend: z.enum(['cuda', 'vulkan', 'metal', 'cpu']).optional(),
+  llamaBackend: z.enum(['cuda', 'rocm', 'vulkan', 'metal', 'cpu']).optional(),
   engines: z.array(NativeEngineInstallStatusSchema),
 });
 export type NativeEngineStatusResponse = z.infer<typeof NativeEngineStatusResponseSchema>;

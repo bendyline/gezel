@@ -14,7 +14,10 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type GezelConfig, resolveSecurityPolicy } from '@bendyline/gezel';
 import type { EngineBinaryRegistry } from '@bendyline/gezel-inference/internal/engines/registry';
-import { impliedEngineVariant } from '@bendyline/gezel-inference/internal/engines/resolver';
+import {
+  impliedEngineVariant,
+  llamaDownloadVariant,
+} from '@bendyline/gezel-inference/internal/engines/resolver';
 import {
   listOverlayModelIds,
   modelSearchRoots,
@@ -348,7 +351,9 @@ export class EvalTargets {
       override && override !== 'auto'
         ? override
         : engine === 'llama-server'
-          ? (this.env.GEZEL_LLAMA_DETECTED_BACKEND ?? impliedEngineVariant(engine, this.platform))
+          ? (llamaDownloadVariant(this.env.GEZEL_LLAMA_DETECTED_BACKEND, {
+              platform: this.platform,
+            }) ?? impliedEngineVariant(engine, this.platform))
           : impliedEngineVariant(engine, this.platform);
     const { key, snapshot } = this.deps.engineBinaries.ensure(engine, variant);
     const binPath = await new Promise<string>((resolveBin, rejectBin) => {

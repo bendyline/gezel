@@ -328,6 +328,7 @@ export function updateNotice(state: UpdateState | null, platform?: string): Syst
 
 const BACKEND_LABEL: Record<string, string> = {
   cuda: 'NVIDIA GPU (CUDA)',
+  rocm: 'AMD GPU (ROCm)',
   vulkan: 'GPU (Vulkan)',
   metal: 'GPU (Metal)',
   cpu: 'CPU',

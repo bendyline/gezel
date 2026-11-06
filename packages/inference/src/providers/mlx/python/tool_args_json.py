@@ -22,13 +22,17 @@ chunk by chunk. Everything else (ints, floats, bools, objects, arrays) is
 small and needs the whole value for `_convert_param_value`-style coercion, so
 those are buffered per-parameter and emitted when their `</parameter>` lands.
 
-Semantics are copied from mlx_vlm 0.6.6 `tool_parsers/qwen3_coder.py` and must
-stay identical; `test_tool_args_json.py` asserts that by differential-testing
-every case against the reference parser. In particular:
+Semantics are copied from mlx_vlm 0.7.12 `tools/parsers/qwen3_coder.py` and
+must stay identical; `tool_args_json_test.py` asserts that by differential-
+testing every case against the reference parser. In particular:
 
   * exactly ONE leading and ONE trailing "\\n" is stripped from a value
-  * a literal "null" (any case) becomes JSON null
+  * a literal "null" (any case) becomes JSON null, except in a declared
+    string parameter, which keeps the text unless the schema says
+    `"nullable": true`
   * a parameter absent from the schema is treated as a string
+  * a declared parameter without a type decodes JSON objects and arrays and
+    keeps anything else as text
   * unknown/odd types fall through to `ast.literal_eval`, as upstream does
 
 Chunk boundaries are the hazard throughout: `</parameter>`, `</function>` and
@@ -68,29 +72,59 @@ def arguments_config(func_name: str, tools: Optional[Any]) -> Dict[str, Any]:
     return {}
 
 
+def _declared_string(param: Any) -> bool:
+    return (
+        isinstance(param, dict)
+        and isinstance(param.get("type"), str)
+        and param["type"].strip().lower() in _STRING_TYPES
+    )
+
+
 def is_string_param(param_name: str, param_config: Dict[str, Any]) -> bool:
     """Can this parameter stream, or must its value be buffered whole?
 
     Unknown parameters count as strings — upstream returns the raw value when
-    the schema has no entry, and raw-string is the streamable case.
+    the schema has no entry, and raw-string is the streamable case. A declared
+    parameter without a type is buffered: its value may decode to an object.
+    """
+    if param_name not in param_config:
+        return True
+    param = param_config[param_name]
+    if not isinstance(param, dict) or "type" not in param:
+        return False
+    return str(param["type"]).strip().lower() in _STRING_TYPES
+
+
+def null_text_is_none(param_name: str, param_config: Dict[str, Any]) -> bool:
+    """Whether a complete value of "null" is JSON null for this parameter.
+
+    A declared string keeps the text unless the schema marks it nullable;
+    every other parameter, unknown ones included, reads it as null.
     """
     param = param_config.get(param_name)
-    if not param:
-        return True
-    declared = param.get("type")
-    if declared is None:
-        return True
-    return str(declared).strip().lower() in _STRING_TYPES
+    if _declared_string(param):
+        return param.get("nullable") is True
+    return True
 
 
 def convert_param_value(value: str, param_name: str, param_config: Dict[str, Any]) -> Any:
     """Coerce a complete value, mirroring `_convert_param_value`."""
+    param = param_config.get(param_name)
+    if _declared_string(param):
+        if value.lower() == "null" and param.get("nullable") is True:
+            return None
+        return value
     if value.lower() == "null":
         return None
-    param = param_config.get(param_name)
-    if not param:
+    if param_name not in param_config:
         return value
-    param_type = str(param["type"]).strip().lower() if "type" in param else "string"
+    if not isinstance(param, dict) or "type" not in param:
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return value
+        return decoded if isinstance(decoded, (dict, list)) else value
+    param_type = str(param["type"]).strip().lower()
     if param_type in _STRING_TYPES:
         return value
     if param_type.startswith(("int", "uint", "long", "short", "unsigned")):
@@ -194,10 +228,10 @@ class ToolArgsJsonEncoder:
                 self._leading_stripped = False
                 self._opened_quote = False
                 # NOTE: the opening quote is deliberately NOT emitted yet.
-                # `_convert_param_value` maps a whole value of "null" to JSON
-                # null BEFORE consulting the schema, so even a string-typed
-                # parameter can turn out to be null — and by then a quote
-                # would already be on the wire. Hold the first few bytes.
+                # A whole value of "null" is JSON null for an unknown or
+                # nullable string parameter (`null_text_is_none`) — and by
+                # then a quote would already be on the wire. Hold the first
+                # few bytes.
                 continue
 
             end = self._buf.find(_PARAM_CLOSE)
@@ -228,8 +262,8 @@ class ToolArgsJsonEncoder:
             #   * strip exactly one leading newline
             #   * strip exactly one trailing newline (so the final newline is
             #     held until we know whether anything follows it)
-            #   * a complete value of "null" is JSON null, not a string, so
-            #     the opening quote waits until the value is longer than
+            #   * a complete value of "null" can be JSON null, not a string,
+            #     so the opening quote waits until the value is longer than
             #     "null" or the parameter closes
             if not self._leading_stripped:
                 if chunk.startswith("\n"):
@@ -241,7 +275,11 @@ class ToolArgsJsonEncoder:
                 self._value_buf += chunk
                 if end < 0 and len(self._value_buf) <= 4:
                     break
-                if end >= 0 and self._value_buf.lower() == "null":
+                if (
+                    end >= 0
+                    and self._value_buf.lower() == "null"
+                    and null_text_is_none(self._value_name, self.param_config)
+                ):
                     out.append(f"{json.dumps(self._value_name)}:null")
                     self._in_value = False
                     continue

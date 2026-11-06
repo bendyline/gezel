@@ -17,6 +17,7 @@ import {
   DUCKDB_BINARY_SHA256,
   DUCKDB_VERSION,
   DUCKDB_WINDOWS_PUBLISHER,
+  type LlamaBackend,
   MXC_EXECUTOR_NAME,
   MXC_EXECUTOR_SHA256,
   MXC_LICENSE_SHA256,
@@ -37,7 +38,9 @@ import {
   mxcArch,
   mxcInstallDir,
   mxcTarballEntry,
+  resolveAvailableLlamaBinary,
   resolvePlatformKey,
+  rocmWorthDownloading,
 } from '@bendyline/gezel/native';
 import * as tar from 'tar';
 import {
@@ -121,7 +124,7 @@ export type EngineResolveEvent = NativeEngineResolveEvent | EngineExtractingEven
 export interface ResolveEngineOptions {
   engine: NativeBinaryName;
   home: string;
-  /** GPU backend for llama-server (`cuda`/`vulkan`/`metal`/`cpu`); omit for single-variant engines. */
+  /** GPU backend for llama-server (`cuda`/`rocm`/`vulkan`/`metal`/`cpu`); omit for single-variant engines. */
   variant?: string;
   /** Native release version; defaults to the source pin / `GEZEL_NATIVE_ENGINE_VERSION`. */
   version?: string;
@@ -1024,6 +1027,57 @@ function stripVer(v: string): string {
  * (llama-server on Linux/Windows: cuda / vulkan / cpu) this returns undefined
  * and the decision stays with the caller.
  */
+const LLAMA_DOWNLOAD_BACKENDS: readonly LlamaBackend[] = ['cuda', 'rocm', 'vulkan', 'metal', 'cpu'];
+
+/**
+ * The llama-server build an on-demand install fetches when the probe found
+ * `detected`: the first build down discovery's own fallback chain (ROCm and
+ * CUDA → Vulkan → CPU) that the pinned release publishes for this platform.
+ * Without this, a probe answer the release has no archive for — ROCm before
+ * the release that first carries it, Vulkan on Linux ARM — failed the install
+ * outright instead of taking the next build down.
+ *
+ * ROCm also has to be worth its several hundred megabytes before anything
+ * downloads: `rocmWorthDownloading` (rocm-devices.ts), which says no on
+ * Windows. An explicit `llamaCppBackendOverride` never comes through here.
+ */
+export function llamaDownloadVariant(
+  detected: string | undefined,
+  opts: {
+    platform?: NodeJS.Platform;
+    platformKey?: string | null;
+    version?: string;
+    /** Archive names the release publishes; null when unpinned (every build counts). */
+    archives?: Readonly<Record<string, string>> | null;
+    rocmWorth?: () => boolean;
+  } = {},
+): string | undefined {
+  const platform = opts.platform ?? process.platform;
+  if (platform === 'darwin') return impliedEngineVariant('llama-server', platform);
+  const preferred = LLAMA_DOWNLOAD_BACKENDS.find((backend) => backend === detected);
+  if (!preferred) return detected;
+  const platformKey = opts.platformKey === undefined ? resolvePlatformKey() : opts.platformKey;
+  const version = stripVer(opts.version ?? effectiveEngineRelease());
+  const ext = platform === 'win32' ? 'zip' : 'tar.gz';
+  const archives =
+    opts.archives === undefined
+      ? isPlaceholderDigest(SHA256SUMS_DIGEST) || process.env.GEZEL_NATIVE_ENGINE_VERSION
+        ? null
+        : NATIVE_ENGINE_ARCHIVE_SHA256
+      : opts.archives;
+  const rocmWorth = opts.rocmWorth ?? (() => rocmWorthDownloading({ platform }));
+  const resolved = resolveAvailableLlamaBinary(
+    preferred,
+    (backend) => {
+      const name = `gezel-native-${version}-${platformKey}-${backend}.${ext}`;
+      return !archives || archives[name] ? name : null;
+    },
+    true,
+    (backend) => backend !== 'rocm' || rocmWorth(),
+  );
+  return resolved?.backend ?? preferred;
+}
+
 export function impliedEngineVariant(
   engine: NativeBinaryName,
   platform: NodeJS.Platform,

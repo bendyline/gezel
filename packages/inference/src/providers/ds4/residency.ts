@@ -14,6 +14,10 @@ export { DS4_FULL_RESIDENCY_HEADROOM_BYTES };
  * Conservative floor for the full-residency working set. Exclusivity is an
  * explicit device lease at process startup, not a consequence of this number:
  * the automatic model budget can exceed 96 GiB on larger machines.
+ *
+ * Only for a launch nobody measured: an entry with `fullResidencyMemory` is
+ * reserved at that working set ({@link planDs4MeasuredLaunch}). Flooring a
+ * 45 GiB Qwen3.8 launch here put it over a 96 GiB Mac's 80 GiB budget.
  */
 export const DS4_FULL_RESIDENCY_RESERVATION_BYTES = 96 * GB;
 
@@ -111,6 +115,16 @@ export interface Ds4ExpertCachePlanOptions {
   catalogCacheBytes?: number;
   catalogResidentBytes?: number;
   totalRamBytes?: number;
+  /**
+   * A measured streamed footprint at the launch window, sidecars included
+   * ({@link ds4StreamingFixedBytes}). With {@link budgetBytes} it replaces the
+   * catalog subtraction and the generic 24 GiB headroom.
+   */
+  measuredFixedBytes?: number;
+  /** This device's local-model budget, the ceiling the capacity broker admits under. */
+  budgetBytes?: number;
+  /** Smallest cache the entry says is worth streaming with. */
+  minCacheBytes?: number;
 }
 
 export interface Ds4ExpertCachePlan {
@@ -118,6 +132,11 @@ export interface Ds4ExpertCachePlan {
   requestedGb: number;
   clamped: boolean;
   safe: boolean;
+  /**
+   * What bounded the cache: the device's local-model budget beside a measured
+   * footprint, or the generic {@link DS4_FULL_RESIDENCY_HEADROOM_BYTES}.
+   */
+  limit: 'model-budget' | 'headroom';
 }
 
 /**
@@ -126,23 +145,148 @@ export interface Ds4ExpertCachePlan {
  * the old RAM-tier heuristic which incorrectly gave both models 64 GiB on a
  * 128 GiB Mac. Manual values are still accepted, but clamped so fixed model
  * state + the cache cannot consume the runtime/OS reserve.
+ *
+ * The 24 GiB headroom guards a footprint guessed as `residentBytes −
+ * cacheExpertsBytes`, which omits graph and staging memory ds4 also holds.
+ * An entry with a measured streamed footprint has no such gap, so its cache
+ * may use whatever this device's local-model budget leaves beside it. A fixed
+ * 24 GiB refused Qwen3.8 on 32 GiB Macs whose budget held it with room to spare.
  */
 export function planDs4ExpertCache(opts: Ds4ExpertCachePlanOptions): Ds4ExpertCachePlan {
   const totalRamBytes = opts.totalRamBytes ?? totalMemoryBytes();
   const catalogCacheBytes = opts.catalogCacheBytes ?? 0;
-  const fixedResidentBytes = Math.max(0, (opts.catalogResidentBytes ?? 0) - catalogCacheBytes);
   const fallbackGb = totalRamBytes >= 120 * GB ? 64 : totalRamBytes >= 88 * GB ? 48 : 32;
   const requestedGb =
     opts.configuredGb ?? (catalogCacheBytes > 0 ? catalogCacheBytes / GB : fallbackGb);
-  const safeCacheBytes = totalRamBytes - fixedResidentBytes - DS4_FULL_RESIDENCY_HEADROOM_BYTES;
+  const modelBudget = opts.measuredFixedBytes !== undefined && opts.budgetBytes !== undefined;
+  const safeCacheBytes = modelBudget
+    ? opts.budgetBytes! - opts.measuredFixedBytes!
+    : totalRamBytes -
+      Math.max(0, (opts.catalogResidentBytes ?? 0) - catalogCacheBytes) -
+      DS4_FULL_RESIDENCY_HEADROOM_BYTES;
   const safeCacheGb = Math.floor(safeCacheBytes / GB);
+  const minCacheGb = Math.max(1, Math.ceil((opts.minCacheBytes ?? 0) / GB));
+  const limit = modelBudget ? 'model-budget' : 'headroom';
 
-  if (safeCacheGb < 1) {
-    return { cacheGb: 1, requestedGb, clamped: true, safe: false };
+  if (safeCacheGb < minCacheGb) {
+    return { cacheGb: minCacheGb, requestedGb, clamped: true, safe: false, limit };
   }
 
-  const cacheGb = Math.max(1, Math.min(requestedGb, safeCacheGb));
-  return { cacheGb, requestedGb, clamped: cacheGb !== requestedGb, safe: true };
+  const cacheGb = Math.max(minCacheGb, Math.min(requestedGb, safeCacheGb));
+  return { cacheGb, requestedGb, clamped: cacheGb !== requestedGb, safe: true, limit };
+}
+
+/** A measured ds4 memory line from the catalog: bytes at a window, plus a per-token slope. */
+export interface Ds4MeasuredLine {
+  bytes: number;
+  ctxTokens: number;
+  bytesPerToken: number;
+}
+
+/** Evaluate a measured line at a window, never below its context-free part. */
+export function ds4MeasuredBytesAt(line: Ds4MeasuredLine, ctxTokens: number): number {
+  const contextFree = Math.max(0, line.bytes - line.bytesPerToken * line.ctxTokens);
+  return Math.round(contextFree + line.bytesPerToken * Math.max(0, ctxTokens));
+}
+
+/** The memory fields of a catalog `ds4` block that price a launch. */
+export interface Ds4MemorySource {
+  cacheExpertsBytes?: number | undefined;
+  fullResidencyMemory?:
+    | { workingSetBytes: number; ctxTokens: number; bytesPerToken: number }
+    | undefined;
+  streamingMemory?:
+    | { fixedBytes: number; ctxTokens: number; bytesPerToken: number; minCacheBytes?: number }
+    | undefined;
+}
+
+function fullResidencyLine(source: Ds4MemorySource | undefined): Ds4MeasuredLine | undefined {
+  const m = source?.fullResidencyMemory;
+  return m
+    ? { bytes: m.workingSetBytes, ctxTokens: m.ctxTokens, bytesPerToken: m.bytesPerToken }
+    : undefined;
+}
+
+function streamingLine(source: Ds4MemorySource | undefined): Ds4MeasuredLine | undefined {
+  const m = source?.streamingMemory;
+  return m
+    ? { bytes: m.fixedBytes, ctxTokens: m.ctxTokens, bytesPerToken: m.bytesPerToken }
+    : undefined;
+}
+
+/** Measured streamed footprint without the expert cache, at a window; undefined when unmeasured. */
+export function ds4StreamingFixedBytes(
+  source: Ds4MemorySource | undefined,
+  ctxTokens: number,
+): number | undefined {
+  const line = streamingLine(source);
+  return line ? ds4MeasuredBytesAt(line, ctxTokens) : undefined;
+}
+
+export interface Ds4MeasuredLaunchOptions {
+  source: Ds4MemorySource | undefined;
+  numCtx: number;
+  ssdStreaming: boolean;
+  totalRamBytes: number;
+  /** Local-model budget, needed to size a streamed launch's cache. */
+  budgetBytes?: number | undefined;
+  /** Resident memory beside the model: a vision encoder, a DSpark companion. */
+  sidecarBytes?: number;
+  configuredCacheGb?: number | undefined;
+}
+
+export interface Ds4MeasuredLaunch {
+  /** What the launch holds, sidecars included. The broker reserves exactly this. */
+  workingSetBytes: number;
+  /** The part of {@link workingSetBytes} the window does not move. */
+  contextFreeBytes: number;
+  bytesPerToken: number;
+  /** Streamed launches only. */
+  cache?: Ds4ExpertCachePlan;
+}
+
+/**
+ * Price a launch from the entry's measurement for the chosen mode. Undefined
+ * when that mode is unmeasured (or a streamed launch has no budget to size
+ * against), so callers keep their catalog-`residentBytes` path, including the
+ * 96 GiB full-residency floor that stands in for a missing measurement.
+ */
+export function planDs4MeasuredLaunch(
+  opts: Ds4MeasuredLaunchOptions,
+): Ds4MeasuredLaunch | undefined {
+  const sidecarBytes = opts.sidecarBytes ?? 0;
+  if (!opts.ssdStreaming) {
+    const line = fullResidencyLine(opts.source);
+    if (!line) return undefined;
+    const contextFreeBytes = ds4MeasuredBytesAt(line, 0) + sidecarBytes;
+    return {
+      workingSetBytes: contextFreeBytes + line.bytesPerToken * Math.max(0, opts.numCtx),
+      contextFreeBytes,
+      bytesPerToken: line.bytesPerToken,
+    };
+  }
+  const line = streamingLine(opts.source);
+  if (!line || opts.budgetBytes === undefined) return undefined;
+  const fixedBytes = ds4MeasuredBytesAt(line, opts.numCtx) + sidecarBytes;
+  const cache = planDs4ExpertCache({
+    ...(opts.configuredCacheGb !== undefined ? { configuredGb: opts.configuredCacheGb } : {}),
+    ...(opts.source?.cacheExpertsBytes !== undefined
+      ? { catalogCacheBytes: opts.source.cacheExpertsBytes }
+      : {}),
+    totalRamBytes: opts.totalRamBytes,
+    measuredFixedBytes: fixedBytes,
+    budgetBytes: opts.budgetBytes,
+    ...(opts.source?.streamingMemory?.minCacheBytes !== undefined
+      ? { minCacheBytes: opts.source.streamingMemory.minCacheBytes }
+      : {}),
+  });
+  const cacheBytes = cache.cacheGb * GB;
+  return {
+    workingSetBytes: fixedBytes + cacheBytes,
+    contextFreeBytes: ds4MeasuredBytesAt(line, 0) + sidecarBytes + cacheBytes,
+    bytesPerToken: line.bytesPerToken,
+    cache,
+  };
 }
 
 /** Effective capacity-broker reservation for the chosen DS4 residency mode. */

@@ -491,9 +491,21 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                 const ds4Ceiling = mem
                   ? Math.max(0, mem.totalRamBytes - DS4_FULL_RESIDENCY_HEADROOM_BYTES)
                   : 0;
-                const fitsRecommendedCache = mem && resident ? resident <= ds4Ceiling : true;
+                // A measured streamed footprint comes with the launcher's own
+                // cache plan, sized to this device's local-model budget; only
+                // unmeasured entries fall back to the generic headroom rule.
+                const expertCache = plan?.expertCache;
+                const fitsRecommendedCache = expertCache
+                  ? expertCache.safe && !expertCache.clamped
+                  : mem && resident
+                    ? resident <= ds4Ceiling
+                    : true;
                 const fixedResident = resident ? Math.max(0, resident - cache) : 0;
-                const canRunSafely = mem ? fixedResident + 1024 ** 3 <= ds4Ceiling : true;
+                const canRunSafely = expertCache
+                  ? expertCache.safe
+                  : mem
+                    ? fixedResident + 1024 ** 3 <= ds4Ceiling
+                    : true;
                 const isLightest = resident === lightestResidentBytes;
                 const isInstalled = installed.has(m.id);
                 const retired = isRetiredModel(m);
@@ -515,7 +527,9 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                     className="gz-status-pill gz-status-pill--ok ds4-model-fit"
                     title={`This device holds the whole model in memory — no expert streaming from SSD. That is roughly ten times faster to generate than the streaming fallback${
                       resident
-                        ? `, and costs about ${formatBytes(m.ds4.approxSizeBytes)} of memory while loaded`
+                        ? `, and costs about ${formatBytes(
+                            plan?.memoryMeasured ? resident : m.ds4.approxSizeBytes,
+                          )} of memory while loaded`
                         : ''
                     }.`}
                   >
@@ -536,11 +550,19 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                   ) : canRunSafely ? (
                     <span
                       className="gz-status-pill gz-status-pill--warn ds4-model-fit"
-                      title={`Gezel will reduce this model's expert cache below its ${formatBytes(
-                        resident,
-                      )} target to preserve ${formatBytes(
-                        DS4_FULL_RESIDENCY_HEADROOM_BYTES,
-                      )} for the system and other apps. It should run, but will read from SSD even more often than a normal streaming launch.`}
+                      title={
+                        expertCache
+                          ? `Gezel will reduce this model's expert cache from ${formatBytes(
+                              expertCache.requestedBytes,
+                            )} to ${formatBytes(
+                              expertCache.cacheBytes,
+                            )} to stay within the memory local models may use on this device. It should run, but will read from SSD even more often than a normal streaming launch.`
+                          : `Gezel will reduce this model's expert cache below its ${formatBytes(
+                              resident,
+                            )} target to preserve ${formatBytes(
+                              DS4_FULL_RESIDENCY_HEADROOM_BYTES,
+                            )} for the system and other apps. It should run, but will read from SSD even more often than a normal streaming launch.`
+                      }
                     >
                       reduced cache · much slower
                     </span>
@@ -601,6 +623,7 @@ export function Ds4ModelManager({ onModelsChanged }: { onModelsChanged?: () => v
                     : {}),
                   ...(launchCtx !== undefined ? { effectiveContextWindow: launchCtx } : {}),
                   ...(runsResident ? { fullyResident: true } : {}),
+                  ...(plan?.memoryMeasured ? { memoryMeasured: true } : {}),
                 };
                 const memoryHeadline = ds4MemoryHeadline(memoryCopy);
                 const updateAvailable = installedRow?.updateAvailable === true;

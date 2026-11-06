@@ -9,9 +9,14 @@
 #   - darwin-x64:   CPU (Apple x86_64 can't target Metal)
 #   - linux-x64:    auto — CUDA if nvcc on PATH, else Vulkan if SDK, else CPU
 #
-# Override with LLAMA_BACKEND={metal,vulkan,cuda,cpu}. On Linux the
-# release matrix builds all three non-CPU variants separately; the
-# auto-detection here is for local iteration only.
+# Override with LLAMA_BACKEND={metal,vulkan,cuda,rocm,cpu}. On Linux the
+# release matrix builds every variant separately; the auto-detection here is
+# for local iteration only, and never picks ROCm.
+#
+# ROCm (linux-x64 only) builds against AMD's ROCm SDK from its pip wheels —
+# `rocm[libraries,devel]` plus one `rocm-sdk-device-<gfx>` wheel per target,
+# expanded with `rocm-sdk init` — with ROCM_PATH (or HIP_PATH) naming the
+# devel tree. build-native.yml pins the wheels.
 #
 # Set LLAMA_BACKEND_TAG=1 to emit to `native/build/<platform>-<backend>/`
 # instead of `native/build/<platform>/`. Needed when CI builds multiple
@@ -77,6 +82,15 @@ if [[ "$backend" == "auto" ]]; then
       ;;
   esac
 fi
+if [[ "$backend" == "rocm" && "$platform" != "linux-x64" ]]; then
+  echo "LLAMA_BACKEND=rocm is linux-x64 only here (AMD publishes no ROCm SDK for $platform)" >&2
+  exit 1
+fi
+# The GPU architectures the ROCm build carries kernels for. Release legs set
+# LLAMA_ROCM_TARGETS from build-native.yml; the default is the same list
+# (ROCM_GFX_TARGETS in packages/core/src/native/rocm-devices.ts, which
+# native-payload.test.mjs holds all three to).
+rocm_targets="${LLAMA_ROCM_TARGETS:-gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1200;gfx1201}"
 
 source_map_flags="-ffile-prefix-map=$src=llama.cpp -fmacro-prefix-map=$src=llama.cpp -fdebug-prefix-map=$src=llama.cpp"
 cmake_flags=(
@@ -197,11 +211,28 @@ case "$backend" in
       cmake_flags+=(-DGGML_CUDA_FA_ALL_QUANTS=ON)
     fi
     ;;
+  rocm)
+    rocm_root="${ROCM_PATH:-${HIP_PATH:-}}"
+    if [[ -z "$rocm_root" || ! -x "$rocm_root/lib/llvm/bin/clang" ]]; then
+      echo "LLAMA_BACKEND=rocm needs ROCM_PATH (or HIP_PATH) pointing at an expanded ROCm SDK devel tree (rocm-sdk path --root)" >&2
+      exit 1
+    fi
+    # Upstream's own Linux ROCm recipe: one configure, GCC for the host code
+    # and the CPU variants, ROCm's clang for the HIP device code.
+    cmake_flags+=(
+      -DGGML_HIP=ON
+      -DHIP_PLATFORM=amd
+      "-DGPU_TARGETS=$rocm_targets"
+      "-DCMAKE_PREFIX_PATH=$rocm_root"
+      "-DCMAKE_HIP_COMPILER=$rocm_root/lib/llvm/bin/clang"
+      "-DCMAKE_HIP_FLAGS=$source_map_flags"
+    )
+    ;;
   cpu)
     : # default — no accelerator flags
     ;;
   *)
-    echo "unknown LLAMA_BACKEND=$backend (valid: metal, vulkan, cuda, cpu)" >&2
+    echo "unknown LLAMA_BACKEND=$backend (valid: metal, vulkan, cuda, rocm, cpu)" >&2
     exit 1
     ;;
 esac
@@ -336,9 +367,17 @@ if [[ "$backend" == "cuda" ]]; then
     metadata_cuda_toolkit="$(nvcc --version | sed -n 's/.*release \([^,]*\).*/\1/p' | tail -n1)"
   fi
 fi
-node - "$out_dir/gezel-llama-build.json" "$pinned_commit" "$platform" "$backend" "$metadata_cuda_arch" "$metadata_cuda_toolkit" <<'NODE'
+# A ROCm build records the architectures it carries kernels for; discovery
+# reads them to decide whether this machine's GPUs can use it
+# (packages/core/src/native/rocm-devices.ts).
+metadata_rocm_targets=""
+if [[ "$backend" == "rocm" ]]; then
+  metadata_rocm_targets="$rocm_targets"
+fi
+node - "$out_dir/gezel-llama-build.json" "$pinned_commit" "$platform" "$backend" "$metadata_cuda_arch" "$metadata_cuda_toolkit" "$metadata_rocm_targets" <<'NODE'
 const { writeFileSync } = require('node:fs');
-const [path, revision, platform, backend, cudaArchitectures, cudaToolkit] = process.argv.slice(2);
+const [path, revision, platform, backend, cudaArchitectures, cudaToolkit, rocmTargets] =
+  process.argv.slice(2);
 writeFileSync(
   path,
   `${JSON.stringify({
@@ -349,6 +388,7 @@ writeFileSync(
     backend,
     ...(cudaArchitectures ? { cudaArchitectures: cudaArchitectures.split(';') } : {}),
     ...(cudaToolkit ? { cudaToolkit } : {}),
+    ...(rocmTargets ? { rocmTargets: rocmTargets.split(';').filter(Boolean) } : {}),
   }, null, 2)}\n`,
   'utf8',
 );
@@ -446,6 +486,9 @@ for lib in "$out_dir"/*.so "$out_dir"/*.so.* "$out_dir"/*.dylib "$out_dir"/*.dyl
     # untagged llama build shares out_dir with sd-cpp, which bundles
     # libvulkan.so.1, and whisper-cpp).
     libssl*|libcrypto*|libcudart*|libcublas*|libwhisper*|libvulkan*) ;;
+    # The ROCm runtime, staged by section 7c (rocm_vendor_lib below).
+    libamd*|libhsa-runtime64*|libhip*|librocblas*|librocsolver*|librocroller*|liborigami*) ;;
+    librocm_kpack*|librocprofiler-register*|libroctx64*|librocm_sysdeps_*|libLLVM*|libclang-cpp*) ;;
     *) foreign="${foreign} $(basename "$lib")" ;;
   esac
 done
@@ -605,6 +648,105 @@ if [[ "$os" == "Linux" && "$backend" == "vulkan" ]]; then
   echo "[build] bundled libvulkan.so.1 (from $vulkan_lib)"
 fi
 
+# ── 7c. Linux ROCm runtime bundling ────────────────────────────────
+# Upstream's Linux ROCm tarball leaves the runtime to an installed ROCm. Ours
+# is self-contained like the CUDA variant: everything libggml-hip.so loads
+# from the SDK, found by walking DT_NEEDED rather than listed by name, so a
+# ROCm release that adds a dependency cannot ship an archive missing it. The
+# amdgpu kernel driver is the user's, as NVIDIA's is for CUDA. TheRock links
+# its own copies of system libraries under `librocm_sysdeps_*` names, so glibc
+# and libstdc++ are the only libraries resolved from the host.
+#
+# Vendor bytes stay as AMD published them: no strip, no rpath rewrite (their
+# RPATH already includes $ORIGIN, which reaches every peer in this flat
+# directory). rocm_vendor_lib names them for section 9.
+rocm_vendor_lib() {
+  case "$1" in
+    libamd*|libhsa-runtime64*|libhip*|librocblas*|librocsolver*|librocroller*|liborigami*) return 0 ;;
+    librocm_kpack*|librocprofiler-register*|libroctx64*|librocm_sysdeps_*|libLLVM*|libclang-cpp*) return 0 ;;
+  esac
+  return 1
+}
+if [[ "$os" == "Linux" && "$backend" == "rocm" ]]; then
+  hip_lib="$(find "$out_dir" -maxdepth 1 -name 'libggml-hip.so*' -type f | head -1)"
+  if [[ -z "$hip_lib" ]]; then
+    echo "[build] error: no libggml-hip.so in $out_dir — the HIP backend did not build" >&2
+    exit 1
+  fi
+  rocm_search=(
+    "$rocm_root/lib"
+    "$rocm_root/lib/rocm_sysdeps/lib"
+    "$rocm_root/lib/llvm/lib"
+    "$rocm_root/lib/host-math/lib"
+  )
+  queue=("$hip_lib")
+  bundled="|"
+  while [[ ${#queue[@]} -gt 0 ]]; do
+    current="${queue[0]}"
+    queue=("${queue[@]:1}")
+    while read -r needed; do
+      [[ -n "$needed" ]] || continue
+      case "$bundled" in *"|${needed}|"*) continue ;; esac
+      found_lib=""
+      for dir in "${rocm_search[@]}"; do
+        if [[ -e "$dir/$needed" ]]; then
+          found_lib="$dir/$needed"
+          break
+        fi
+      done
+      [[ -n "$found_lib" ]] || continue
+      bundled="${bundled}${needed}|"
+      # Dereference the SDK's symlinks into the SONAME the loader asks for.
+      cp -L "$found_lib" "$out_dir/$needed"
+      echo "[build] bundled ROCm runtime $needed (needed by $(basename "$current"))"
+      queue+=("$out_dir/$needed")
+    done < <(objdump -p "$current" | awk '/NEEDED/ {print $2}')
+  done
+  for required in libamdhip64.so.7 libhipblas.so.3 librocblas.so.5; do
+    case "$bundled" in
+      *"|${required}|"*) ;;
+      *)
+        echo "[build] error: the ROCm bundle is missing $required — libggml-hip.so no longer needs it, or the SDK layout changed" >&2
+        exit 1
+        ;;
+    esac
+  done
+
+  # rocBLAS finds its kernel library at <its own folder>/rocblas/library and
+  # its kernel packs through ROCM_KPACK_PATH_PREFIX, which the launch sets
+  # (rocm-devices.ts). Only this build's targets; hipBLASLt's library is left
+  # out, and the launch turns hipBLASLt off (ROCBLAS_USE_HIPBLASLT=0).
+  tensile_src="$rocm_root/lib/rocblas/library"
+  mkdir -p "$out_dir/rocblas/library" "$out_dir/kpack"
+  IFS=';' read -r -a rocm_target_list <<<"$rocm_targets"
+  for gfx in "${rocm_target_list[@]}"; do
+    [[ -n "$gfx" ]] || continue
+    # Most targets keep their files flat in the library folder; newer ones
+    # (Strix, gfx1150/gfx1151) in a folder named for the architecture.
+    if [[ ! -f "$tensile_src/TensileLibrary_lazy_$gfx.dat" && ! -f "$tensile_src/$gfx/TensileLibrary_lazy_$gfx.dat" ]]; then
+      echo "[build] error: no rocBLAS kernel library for $gfx under $tensile_src — install the rocm-sdk-device-$gfx wheel" >&2
+      exit 1
+    fi
+    count=0
+    while IFS= read -r -d '' file; do
+      cp -L "$file" "$out_dir/rocblas/library/"
+      count=$((count + 1))
+    done < <(find "$tensile_src" -maxdepth 1 -type f -regextype posix-extended \
+      -regex ".*/([^/]*[_-])?${gfx}[._-][^/]*" -print0)
+    if [[ -d "$tensile_src/$gfx" ]]; then
+      cp -RL "$tensile_src/$gfx" "$out_dir/rocblas/library/"
+      count=$((count + $(find "$tensile_src/$gfx" -type f | wc -l)))
+    fi
+    pack="$rocm_root/.kpack/blas_lib_$gfx.kpack"
+    if [[ ! -f "$pack" ]]; then
+      echo "[build] error: no rocBLAS kernel pack for $gfx at $pack — install the rocm-sdk-device-$gfx wheel" >&2
+      exit 1
+    fi
+    node "$repo_root/scripts/trim-rocm-kpack.mjs" "$pack" "$out_dir/kpack/blas_lib_$gfx.kpack"
+    echo "[build] bundled rocBLAS kernels for $gfx ($count library files)"
+  done
+fi
+
 # ── 8. OpenSSL: not linked, not bundled ────────────────────────────
 # There used to be an OpenSSL bundling step here. At b8892 llama.cpp
 # called find_package(OpenSSL) unconditionally and ignored
@@ -648,12 +790,25 @@ if [[ "$os" == "Linux" ]]; then
   for so in "$out_dir"/*.so "$out_dir"/*.so.*; do
     # The loader has only system dependencies; keep the vendor bytes intact.
     [[ "$(basename "$so")" == libvulkan.so* ]] && continue
+    # AMD's libraries already reach their peers through $ORIGIN (section 7c).
+    rocm_vendor_lib "$(basename "$so")" && continue
     patchelf --set-rpath '$ORIGIN' "$so" 2>/dev/null || true
   done
   shopt -u nullglob
   if [[ "$backend" == "vulkan" ]]; then
     node "$repo_root/scripts/verify-vulkan-payload.mjs" \
       "$out_dir" "$out_dir/libggml-vulkan.so"
+  fi
+  if [[ "$backend" == "rocm" ]]; then
+    # Every ROCm library libggml-hip.so needs resolves inside the bundle, not
+    # from the build host's SDK.
+    unresolved="$(env -u LD_LIBRARY_PATH ldd "$hip_lib" | grep 'not found' || true)"
+    if [[ -n "$unresolved" ]]; then
+      echo "[build] error: libggml-hip.so has unresolved dependencies in the bundle:" >&2
+      echo "$unresolved" >&2
+      exit 1
+    fi
+    echo "[build] ROCm runtime resolves inside the bundle"
   fi
 
 elif [[ "$os" == "Darwin" ]]; then

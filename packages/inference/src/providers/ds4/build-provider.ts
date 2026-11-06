@@ -3,6 +3,7 @@ import {
   DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
   type GezelConfig,
   createLogger,
+  ds4SsdStreamingSupported,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { gezelPaths } from '@bendyline/gezel/paths';
@@ -348,9 +349,12 @@ export async function buildDs4Provider(opts: {
   // build). `shouldUseDs4SsdStreaming` still refuses a model that cannot fit,
   // which is what keeps the flip safe: overriding that on a 90.89 GiB build
   // OOM-killed the engine mid-load on a 121.63 GiB host.
-  const { ds4VisionResidentBytes, planDs4ExpertCache, shouldUseDs4SsdStreaming } = await import(
-    './residency.js'
-  );
+  const {
+    ds4VisionResidentBytes,
+    planDs4ExpertCache,
+    planDs4MeasuredLaunch,
+    shouldUseDs4SsdStreaming,
+  } = await import('./residency.js');
   let visionEncoderSizeBytes = installedModel?.visionEncoderSizeBytes;
   if (vision.enabled && vision.visionEncoderPath && !visionEncoderSizeBytes) {
     const { stat: statVisionEncoder } = await import('node:fs/promises');
@@ -361,11 +365,10 @@ export async function buildDs4Provider(opts: {
   const visionResidentBytes = ds4VisionResidentBytes(
     vision.enabled ? visionEncoderSizeBytes : undefined,
   );
+  const streamingSupported = ds4SsdStreamingSupported(ds4Source, process.platform);
   const ssdStreaming = shouldUseDs4SsdStreaming({
     configured: config.ds4SsdStreaming,
-    ...(ds4Source?.ssdStreamingSupported !== undefined
-      ? { ssdStreamingSupported: ds4Source.ssdStreamingSupported }
-      : {}),
+    ...(streamingSupported !== undefined ? { ssdStreamingSupported: streamingSupported } : {}),
     modelSizeBytes: residentWeightBytes,
     totalRamBytes,
     ...(visionResidentBytes > 0 ? { companionBytes: visionResidentBytes } : {}),
@@ -376,13 +379,30 @@ export async function buildDs4Provider(opts: {
         `model=${modelSizeBytes ?? 'unknown'} bytes, system=${Math.round(totalRamGb)} GiB`,
     );
   }
-  if (config.ds4SsdStreaming === true && ds4Source?.ssdStreamingSupported === false) {
+  if (config.ds4SsdStreaming === true && streamingSupported === false) {
     log.warn(
-      `[ds4] ignored SSD-streaming override for ${effectiveModelId ?? modelPath}; this model keeps its lookup tables on disk but does not implement routed-expert streaming`,
+      `[ds4] ignored SSD-streaming override for ${effectiveModelId ?? modelPath}; ds4 cannot stream this model's routed experts on this backend`,
     );
   }
 
+  // A measured footprint prices the launch for its mode; a measured streamed
+  // footprint also sizes the expert cache against the local-model budget.
+  const modelBudgetBytes =
+    ssdStreaming && ds4Source?.streamingMemory
+      ? await (await import('../native/device-capacity.js')).deviceModelBudgetBytes(config)
+      : undefined;
+  const measuredLaunchWith = (extraResidentBytes: number) =>
+    planDs4MeasuredLaunch({
+      source: ds4Source,
+      numCtx,
+      ssdStreaming,
+      totalRamBytes: totalRamGb * 1024 ** 3,
+      budgetBytes: modelBudgetBytes,
+      sidecarBytes: visionResidentBytes + extraResidentBytes,
+      configuredCacheGb: config.ds4CacheExpertsGb,
+    });
   const cachePlanWith = (extraResidentBytes: number) =>
+    measuredLaunchWith(extraResidentBytes)?.cache ??
     planDs4ExpertCache({
       configuredGb: config.ds4CacheExpertsGb,
       catalogCacheBytes: ds4Source?.cacheExpertsBytes,
@@ -465,7 +485,11 @@ export async function buildDs4Provider(opts: {
   }
   if (cachePlan.clamped) {
     log.warn(
-      `[ds4] clamped expert cache ${cachePlan.requestedGb} → ${cachePlan.cacheGb} GiB to preserve system headroom`,
+      `[ds4] clamped expert cache ${cachePlan.requestedGb} → ${cachePlan.cacheGb} GiB to ${
+        cachePlan.limit === 'model-budget'
+          ? "fit this device's local-model budget"
+          : 'preserve system headroom'
+      }`,
     );
   }
   const cacheExpertsGb = cachePlan.cacheGb;
@@ -519,6 +543,10 @@ export async function buildDs4Provider(opts: {
           ? 'interactive'
           : 'background',
       requirement: async () => {
+        // A measured launch is reserved at exactly its working set: no
+        // full-residency floor, and the expert cache this launch was given.
+        const measured = measuredLaunchWith(dspark.enabled ? dsparkCompanionBytes : 0);
+        if (measured) return { bytes: measured.workingSetBytes, exclusive: !ssdStreaming };
         const {
           ds4AdmissionGpuBytes,
           ds4BaseResidentBytes,
@@ -537,11 +565,7 @@ export async function buildDs4Provider(opts: {
             });
         const workingSetBytes =
           base + visionResidentBytes + (dspark.enabled ? dsparkCompanionBytes : 0);
-        const bytes = ds4ResidentBytesForMode(
-          workingSetBytes,
-          ssdStreaming,
-          ds4Source?.ssdStreamingSupported,
-        );
+        const bytes = ds4ResidentBytesForMode(workingSetBytes, ssdStreaming, streamingSupported);
         const gpuBytes = ds4AdmissionGpuBytes({
           workingSetBytes,
           reservationBytes: bytes,
@@ -629,6 +653,7 @@ export async function buildDs4Provider(opts: {
           `backend=${backendFlag.slice(2)} ctx=${numCtx} ` +
           `prefillChunk=${ds4Source?.prefillChunk ?? 'engine-default'} ` +
           `ssdStreaming=${ssdStreaming} cacheExpertsGiB=${ssdStreaming ? cacheExpertsGb : 0} ` +
+          `memory=${measuredLaunchWith(0) ? 'measured' : 'catalog'} ` +
           `vision=${vision.enabled} mtp=${mtp.enabled} exactSampling=${mtp.exactSampling} (${mtp.reason}) ` +
           `dspark=${dspark.enabled} (${dspark.reason})`,
       );

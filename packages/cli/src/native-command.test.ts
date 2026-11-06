@@ -58,14 +58,14 @@ function clientFor(
 describe('parseNativeVariant', () => {
   it('accepts every published llama backend and an omitted value', () => {
     expect(parseNativeVariant(undefined)).toBeUndefined();
-    for (const variant of ['cuda', 'vulkan', 'metal', 'cpu']) {
+    for (const variant of ['cuda', 'rocm', 'vulkan', 'metal', 'cpu']) {
       expect(parseNativeVariant(variant)).toBe(variant);
     }
   });
 
   it('rejects unknown variants before connecting to the daemon', () => {
-    expect(() => parseNativeVariant('rocm')).toThrow(
-      '--variant must be one of cuda, vulkan, metal, cpu (got "rocm")',
+    expect(() => parseNativeVariant('sycl')).toThrow(
+      '--variant must be one of cuda, rocm, vulkan, metal, cpu (got "sycl")',
     );
   });
 
