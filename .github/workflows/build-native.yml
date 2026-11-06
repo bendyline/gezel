@@ -2223,18 +2223,26 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           ls -la release/
 
-      - name: Verify and stage both public mobile SDKs
+      - name: Verify and stage both public mobile SDKs and speech runtimes
         env:
           VERSION: ${{ steps.pack.outputs.version }}
         run: |
           set -euo pipefail
           for platform in ios android; do
-            archive="gezel-mobile-${VERSION}-${platform}.tar.gz"
             source="mobile-artifacts/mobile-sdk-${platform}"
-            (cd "$source" && sha256sum -c "$archive.sha256")
-            python3 native/runtime/release-sdk.py verify "$source/$archive" \
-              --target "$platform" --version "$VERSION" --commit "$GITHUB_SHA"
-            cp "$source/$archive" release/
+            for kind in sdk speech; do
+              if [[ "$kind" == speech ]]; then
+                archive="gezel-mobile-${VERSION}-speech-${platform}.tar.gz"
+                flags=(--speech)
+              else
+                archive="gezel-mobile-${VERSION}-${platform}.tar.gz"
+                flags=()
+              fi
+              (cd "$source" && sha256sum -c "$archive.sha256")
+              python3 native/runtime/release-sdk.py verify "$source/$archive" "${flags[@]}" \
+                --target "$platform" --version "$VERSION" --commit "$GITHUB_SHA"
+              cp "$source/$archive" release/
+            done
           done
 
       # GitHub caps a single release asset at 2 GiB. Blowing it surfaces as
@@ -2277,7 +2285,8 @@ jobs:
           # Archive names are derived from scripts/native-payload.mjs — the
           # same table the build matrix, the fetch script, and the Electron
           # preflight read. Add a variant there, not here.
-          expected=("gezel-mobile-${VERSION}-ios.tar.gz" "gezel-mobile-${VERSION}-android.tar.gz")
+          expected=("gezel-mobile-${VERSION}-ios.tar.gz" "gezel-mobile-${VERSION}-android.tar.gz"
+                    "gezel-mobile-${VERSION}-speech-ios.tar.gz" "gezel-mobile-${VERSION}-speech-android.tar.gz")
           while read -r key; do
             [[ -n "$key" ]] || continue
             case "$key" in
@@ -2377,6 +2386,10 @@ jobs:
             `gezel-mobile-*-android.tar.gz` contains a folder Maven repository with
             runtime/llama AARs, POMs and licenses; Google ML Kit stays a declared
             dependency resolved by the consumer, with its own usage terms.
+            `gezel-mobile-*-speech-{ios,android}.tar.gz` contain the offline speech
+            runtime (whisper.cpp and ONNX Runtime) that @bendyline/gezel-capacitor
+            stages beside them: a dynamic XCFramework, and a folder Maven repository
+            with the gezel-speech AAR. Speech models are downloaded by the app.
             Mobile SDKs are unsigned libraries, covered by SHA256SUMS and build
             provenance. Each consuming app uses its own app signing identity.
             No app archives, provisioning profiles, private keys, or model weights

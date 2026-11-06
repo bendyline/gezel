@@ -108,11 +108,11 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // Offline page demos now ship the shared font stylesheet (~217 KB gzip)
   // and its licenses alongside the commands, rather than fetching fonts.
   '@bendyline/gezel-cli': 500_000, //                  373 KB
-  // Nearly all of this is the two platforms' prebuilt llama.cpp, the pinned
-  // native release's mobile SDKs. `test:published` measures whatever is staged,
-  // so a run on a clean checkout sees only the JavaScript; `pnpm pack` stages
-  // the rest. Offline speech adds its own runtime once one ships here.
-  '@bendyline/gezel-capacitor': 33_000_000, //          22 MB
+  // Nearly all of this is the pinned native release's mobile SDKs: the two
+  // platforms' prebuilt llama.cpp (22 MB) and offline speech runtimes.
+  // `test:published` measures whatever is staged, so a run on a clean checkout
+  // sees only the JavaScript; `pnpm pack` stages the rest.
+  '@bendyline/gezel-capacitor': 70_000_000, //          51 MB
   // The unscoped short names hold one bin file each.
   'gezel-cli': 10_000, //                               ~2 KB
   gezeld: 10_000, //                                    ~2 KB

@@ -77,7 +77,6 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('platform', choices=['ios', 'android'])
     parser.add_argument('--fetch', action='store_true')
-    parser.add_argument('--models', action='store_true', help='Stage the verified offline speech pack for bundling')
     parser.add_argument('--ndk', default=os.environ.get('ANDROID_NDK_HOME'))
     parser.add_argument('--package', metavar='VERSION', help='Also lay out the payload for @bendyline/gezel-capacitor')
     args = parser.parse_args()
@@ -142,15 +141,17 @@ def main():
     shutil.copy2(whisper / 'LICENSE', payload / 'LICENSE-whisper.txt')
     for notice in (HERE / 'licenses').glob('*.txt'):
         shutil.copy2(notice, payload / notice.name)
-    if args.models:
-        models = payload / 'models'; models.mkdir()
-        shutil.copy2(source('whisper-model', args.fetch), models / 'whisper-tiny.bin')
-        # The pin leaves out espeak-ng-data: it is GPL-3 and only the retired
-        # eSpeak frontend read it.
-        for file, path in source_files('kokoro-model', args.fetch).items():
-            target = models / 'kokoro' / file
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
+    # Always staged: this payload is the one the app links and bundles, and sync
+    # refuses a payload without its pack. Opt-in models let a --package build
+    # (the plugin never ships them) silently strip the app's speech, 2026-11-03.
+    models = payload / 'models'; models.mkdir()
+    shutil.copy2(source('whisper-model', args.fetch), models / 'whisper-tiny.bin')
+    # The pin leaves out espeak-ng-data: it is GPL-3 and only the retired
+    # eSpeak frontend read it.
+    for file, path in source_files('kokoro-model', args.fetch).items():
+        target = models / 'kokoro' / file
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
     manifest = {'pins': PINS, 'bridge': {str(file.relative_to(HERE)): digest(file) for file in HERE.rglob('*') if file.suffix in ['.h', '.cpp', '.txt', '.py', '.json']},
                 'files': {str(file.relative_to(payload)): digest(file) for file in payload.rglob('*') if file.is_file()}}
     (payload / 'speech-build.json').write_text(json.dumps(manifest, indent=2) + '\n')
