@@ -468,6 +468,9 @@
   border: 1px solid transparent;
   border-bottom: 0;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
+  /* The list's margin already reaches past the seam. The primitive's own
+     -1px trigger margin would lift the sheet a pixel above the startup copy. */
+  margin: 0;
   padding: 4px 14px;
   min-height: 40px;
   cursor: pointer;

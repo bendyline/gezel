@@ -124,6 +124,12 @@
   padding: 0;
 }
 
+/* A task opened in its own tab has no back key above its header, so it keeps
+   the top gutter; its chat still runs edge to edge and down to the frame. */
+.app.app-compact .app-main:has(> .task-detail-chat-mode) {
+  padding: var(--app-main-pad-block) 0 0;
+}
+
 /* The chat tab drops its section's padding; the back key keeps the inset
    the header and tabs below it take, instead of wedging into the corner. */
 .app.app-compact .two-col > section:has(> .gezel-detail-chat) > .gezellen-back {
