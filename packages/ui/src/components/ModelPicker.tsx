@@ -1,7 +1,7 @@
 import type { GezmodelEngine, ModelInfo, ProviderName } from '@bendyline/gezel';
 import { composeFitnessBadge } from '@bendyline/gezel';
 import type { ModelFitnessEntry, RemoteServerModelsResponse } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import {
   MODEL_INVENTORY_CHANGED_EVENT,
@@ -171,6 +171,28 @@ async function loadFitness(): Promise<Map<string, ModelFitnessEntry>> {
 
 interface LocalEmptyState {
   activeInstallsCount: number;
+}
+
+interface ModelGroup {
+  label: string | undefined;
+  models: ModelInfo[];
+}
+
+/**
+ * Models bucketed under their `group` heading, in the order each heading
+ * first appears. Ungrouped models lead, without a heading, so a provider
+ * that sends no groups lists exactly as before.
+ */
+function groupModels(models: ModelInfo[]): ModelGroup[] {
+  const buckets = new Map<string | undefined, ModelInfo[]>();
+  for (const model of models) {
+    const bucket = buckets.get(model.group);
+    if (bucket) bucket.push(model);
+    else buckets.set(model.group, [model]);
+  }
+  return [...buckets]
+    .map(([label, members]) => ({ label, models: members }))
+    .sort((a, b) => Number(a.label !== undefined) - Number(b.label !== undefined));
 }
 
 async function probeLocalEmpty(provider: 'mlx' | 'llama-cpp'): Promise<LocalEmptyState | null> {
@@ -375,6 +397,22 @@ export function ModelPicker({
   }
 
   const selectValue = isCustom ? '__CUSTOM__' : value || '__DEFAULT__';
+  const groups = groupModels(models ?? []);
+  const headed = groups.some((group) => group.label !== undefined);
+  // A badge every row carries tells the person nothing.
+  const markReasoning = models?.some((m) => !m.supportsReasoning) ?? false;
+  const renderModel = (m: ModelInfo) => (
+    <Select.Item
+      key={m.id}
+      value={m.id}
+      trailing={
+        m.description ? <span className="model-picker-option-hint">{m.description}</span> : null
+      }
+    >
+      {m.name}
+      {markReasoning && m.supportsReasoning ? ' · reasoning' : ''}
+    </Select.Item>
+  );
   const selectedInfo = value ? models?.find((m) => m.id === value) : undefined;
   const toolsUnknown = selectedInfo && selectedInfo.supportsTools === false;
   // Fresh non-admitted proeve result on the selected local model →
@@ -402,12 +440,21 @@ export function ModelPicker({
         </Select.Trigger>
         <Select.Content>
           <Select.Item value="__DEFAULT__">{placeholder}</Select.Item>
-          {models?.map((m) => (
-            <Select.Item key={m.id} value={m.id}>
-              {m.name}
-              {m.supportsReasoning ? ' · reasoning' : ''}
-            </Select.Item>
-          ))}
+          {groups.map((group) =>
+            group.label === undefined ? (
+              <Fragment key="__ungrouped__">{group.models.map(renderModel)}</Fragment>
+            ) : (
+              <Fragment key={group.label}>
+                <Select.Separator />
+                <Select.Group>
+                  <Select.Label>{group.label}</Select.Label>
+                  {group.models.map(renderModel)}
+                </Select.Group>
+              </Fragment>
+            ),
+          )}
+          {/* Under a heading, these would read as members of the last group. */}
+          {headed && <Select.Separator />}
           {isCustom && <Select.Item value="__CUSTOM__">{value} (custom)</Select.Item>}
           <Select.Item value="__OTHER__">Other…</Select.Item>
         </Select.Content>

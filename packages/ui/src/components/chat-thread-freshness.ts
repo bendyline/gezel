@@ -2,10 +2,9 @@
  * One age past which a chat thread stops counting as "the conversation
  * the user is still in".
  *
- * Three surfaces ask that question and must agree, or the app
+ * Two surfaces ask that question and must agree, or the app
  * contradicts itself: opening a project resumes the last thread
- * ({@link ../components/ProjectChat.tsx}), the timeline fades bubbles
- * from threads nobody is in any more, and the timeline pins the
+ * ({@link ../components/ProjectChat.tsx}), and the timeline pins the
  * composer's thread to the bottom ({@link ./active-thread-pin.ts}).
  * A thread that is fresh enough to resume is fresh enough to pin.
  */

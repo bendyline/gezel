@@ -236,6 +236,27 @@ function cleanCitation(raw: string): string {
     .replace(/[>'"`).,;:]+$/, '');
 }
 
+/** A line that says a file is one the work will make, not one that exists. */
+const PROPOSED_MARKER =
+  /\b(?:new|creates?|created|creating|to be (?:added|created)|will (?:be )?(?:add(?:ed)?|create[ds]?))\b/i;
+
+/**
+ * Paths a plan proposes: any cited path that appears on a line marking it as
+ * new or to be created. Every mention of that path counts, because a plan
+ * names its target module in one section and says it is new in another.
+ */
+function proposedCitations(content: string, re: RegExp): Set<string> {
+  const proposed = new Set<string>();
+  for (const line of stripFencedBlocks(content).split('\n')) {
+    if (!PROPOSED_MARKER.test(line)) continue;
+    for (const cite of extractCitations(line, re)) {
+      const clean = normalizeForKnownMatch(cleanCitation(cite));
+      if (clean) proposed.add(clean);
+    }
+  }
+  return proposed;
+}
+
 export interface CitationsResult extends CheckResult {
   /** Cited paths that resolved to a real workspace file. */
   resolved: string[];
@@ -314,6 +335,13 @@ export async function citationsResolve(
      * like a missing file.
      */
     resolveKnowledge?: (uri: string) => Promise<boolean>;
+    /**
+     * The document is a plan: a missing path it marks as new or to be
+     * created is forgiven like a known path (it never counts toward the
+     * minimum). Off for sources, where "a new study `x.pdf`" would launder
+     * a fabrication.
+     */
+    proposed?: boolean;
   } = {},
 ): Promise<CitationsResult> {
   const content = await ws.read(file);
@@ -359,6 +387,7 @@ export async function citationsResolve(
   const citedPathExists = createCitedPathChecker(ws);
   const corpus = opts.corpus ? new Set(opts.corpus.map((c) => c.toLowerCase())) : null;
   const known = new Set((opts.knownPaths ?? []).map(normalizeForKnownMatch).filter(Boolean));
+  const proposed = opts.proposed ? proposedCitations(content, re) : new Set<string>();
 
   const resolved: string[] = [];
   const unresolved: string[] = [];
@@ -377,8 +406,13 @@ export async function citationsResolve(
       continue;
     }
     if (corpus?.has(c.toLowerCase()) || (await citedPathExists(c))) resolved.push(c);
-    else if (known.has(normalizeForKnownMatch(c)) || globMatchesKnown(c, known)) forgiven.push(c);
-    else unresolved.push(c);
+    else if (
+      known.has(normalizeForKnownMatch(c)) ||
+      globMatchesKnown(c, known) ||
+      proposed.has(normalizeForKnownMatch(c))
+    ) {
+      forgiven.push(c);
+    } else unresolved.push(c);
   }
 
   if (cites.length - forgiven.length < min) {

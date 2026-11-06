@@ -42,6 +42,8 @@ export interface ContractGrade {
   criteria: CriterionGrade[];
   /** P1: every acceptance criterion with checks passed. */
   acceptancePassed: boolean;
+  /** What the runtime would decide: every criterion enforced as a gate passed. */
+  gatePassed: boolean;
   /** P2: the fraction of checked criteria (gate and eval-only) that passed. */
   score: number;
   checked: number;
@@ -54,12 +56,20 @@ interface TrialState {
 
 const MAX_LISTED_FILES = 5_000;
 
-/** The book's own task in the trial: the newest non-child task launched from it with a contract. */
-export function contractTask(tasks: readonly Task[], craftbookId: string): Task | null {
+/**
+ * The book's own task in the trial: the newest non-child task launched from
+ * it with a contract, or with none when `anyContract` (grading a trial that
+ * ran before its book had one).
+ */
+export function contractTask(
+  tasks: readonly Task[],
+  craftbookId: string,
+  anyContract = false,
+): Task | null {
   const fromBook = tasks.filter(
     (t) =>
       !t.parentTaskRef &&
-      t.craftbook.contract &&
+      (anyContract || t.craftbook.contract) &&
       (t.sourceCraftbookIds?.some((s) => s.role === 'main' && s.catalogId === craftbookId) ||
         t.craftbook.id === craftbookId),
   );
@@ -154,9 +164,18 @@ function taskWide(checks: readonly GateCheck[]): GateCheck[] {
   );
 }
 
+export interface GradeContractOptions {
+  /**
+   * Grade against another contract than the one the task ran with (a drafted
+   * one, already interpolated for this task), over the same saved files.
+   */
+  contract?: (task: Task) => CraftbookContract;
+}
+
 export async function gradeContract(
   trialDir: string,
   craftbookId: string,
+  opts: GradeContractOptions = {},
 ): Promise<ContractGrade | null> {
   let state: TrialState;
   try {
@@ -165,9 +184,10 @@ export async function gradeContract(
     return null;
   }
   const tasks = Array.isArray(state.tasks) ? state.tasks : (state.tasks?.tasks ?? []);
-  const task = contractTask(tasks, craftbookId);
-  if (!task?.craftbook.contract) return null;
-  const contract: CraftbookContract = task.craftbook.contract;
+  const task = contractTask(tasks, craftbookId, opts.contract !== undefined);
+  if (!task) return null;
+  const contract = opts.contract?.(task) ?? task.craftbook.contract;
+  if (!contract) return null;
   const reader = trialReader(trialDir, task.projectId);
   const events = await readHistory(trialDir, task.projectId);
   const history = {
@@ -218,6 +238,7 @@ export async function gradeContract(
     status: task.status,
     criteria,
     acceptancePassed: acceptance.every((c) => c.pass === true),
+    gatePassed: criteria.every((c) => c.enforce !== 'gate' || c.pass !== false),
     score: graded.length > 0 ? passed / graded.length : 0,
     checked: graded.length,
     passed,

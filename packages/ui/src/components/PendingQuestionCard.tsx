@@ -1913,7 +1913,7 @@ function DocumentContext({
       {error && <p className="muted small">Couldn't load preview: {error}</p>}
       {content !== null && (
         <div className="pending-question-document-preview">
-          <RenderedMarkdown markdown={previewLines} />
+          <RenderedMarkdown markdown={previewLines} register="report" />
         </div>
       )}
     </div>

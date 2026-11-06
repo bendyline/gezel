@@ -5,7 +5,9 @@
  * Built-in commands always win, and only an exact `command` or id starts
  * work: a mistyped command must reach the unknown-command message, never a
  * task. Fuzzy matching would be dangerous here because bundled craftbooks
- * sit within two edits of built-ins (`ship`/`stop`, `qa`/`do`).
+ * sit within two edits of built-ins (`ship`/`stop`, `qa`/`do`). Nor may a
+ * typo start the service just to look the word up: `gezel stauts` once
+ * started a background daemon before saying "Did you mean status?".
  *
  * The rewrite happens on argv before commander parses it. `do`'s options
  * (`--wait`, `--json`, `--param`) are not root options, so commander would
@@ -14,8 +16,10 @@
 import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { projectLocalCraftbooksRoot } from '@bendyline/gezel/paths';
-import type { StartCraftbook } from './tui/craftbook-start.js';
+import type { CatalogItemSummary } from '@bendyline/gezel';
+import { CatalogService } from '@bendyline/gezel-catalog';
+import { gezelHome, projectLocalCraftbooksRoot } from '@bendyline/gezel/paths';
+import { type StartCraftbook, normalizeCraftbooks } from './tui/craftbook-start.js';
 
 /** Marks a `do` invocation that came from the shorthand. Hidden from help. */
 export const SHORTHAND_FLAG = '--via-craftbook-shorthand';
@@ -103,6 +107,36 @@ export async function workspaceCraftbookId(
     ids.push(id);
   }
   return ids.find((id) => id.toLowerCase() === query);
+}
+
+/**
+ * Whether a craftbook on this machine's disk answers to `word`: the catalog
+ * this CLI ships with, the person's installed items, and the folder's own
+ * `.gezel/craftbooks/`. Read without a service, so a typo of a built-in
+ * (`stauts`) is refused without starting one. Answers true when the disk
+ * cannot be read, leaving the decision to the service.
+ */
+export async function localCraftbookNamed(
+  word: string,
+  workspaceDir: string,
+  catalogItems: () => Promise<ReadonlyArray<CatalogItemSummary>> = bundledCraftbookItems,
+): Promise<boolean> {
+  try {
+    if (craftbookForShorthand(normalizeCraftbooks(await catalogItems(), true), word)) return true;
+    return (await workspaceCraftbookId(workspaceDir, word)) !== undefined;
+  } catch {
+    return true;
+  }
+}
+
+async function bundledCraftbookItems(): Promise<ReadonlyArray<CatalogItemSummary>> {
+  // The service owns the Gilde pin; the catalog's own lookup misses it in a global install.
+  const { bundledGildeDataDir } = await import('@bendyline/gezel-service/handboek');
+  const catalog = new CatalogService(undefined, {
+    localRoot: gezelHome(),
+    contentRoot: bundledGildeDataDir,
+  });
+  return catalog.list('craftbook-template');
 }
 
 function shellWord(token: string): string {

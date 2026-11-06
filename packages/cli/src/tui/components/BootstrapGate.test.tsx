@@ -39,8 +39,9 @@ describe('BootstrapGate interactions', () => {
 
     await vi.waitFor(() => {
       expect(harness.text()).toContain(
-        'The Gezel native toolkit -- needed to run AI models locally -- is not installed yet',
+        'The engine Gezel needs to run chat models on this computer is not installed yet',
       );
+      expect(harness.text()).toContain('image engine: makes images');
       expect(harness.text()).toContain('Install the Gezel native toolkit');
       expect(harness.text()).toContain(
         'Downloaded from https://github.com/bendyline/gezel/releases/',

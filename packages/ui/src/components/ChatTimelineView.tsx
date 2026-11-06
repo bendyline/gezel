@@ -70,7 +70,6 @@ import {
   subscribeOptimisticUserMessages,
 } from './chat-optimistic-events.js';
 import { SessionTreeGuides } from './chat-session-tree-guides.js';
-import { FRESH_THREAD_MAX_AGE_MS } from './chat-thread-freshness.js';
 import { renderDivider, renderTerminalSessionDivider } from './chat-timeline-dividers.js';
 import {
   type OptimisticTimelineMessage,
@@ -83,7 +82,6 @@ import {
   projectFileOpener,
   referencedFilesOf,
   turnFailureShownElsewhere,
-  withinHours,
 } from './chat-timeline-helpers.js';
 import type { ChatTimelineViewProps } from './chat-timeline-props.js';
 import { liveCardsToHide } from './craftbook-card-dedupe.js';
@@ -192,10 +190,9 @@ const PHASE_LABELS: Record<
  * (project-scoped) and `GlobalTimeline` (Meester / global-scoped). The
  * differences are entirely in the data source: see props.
  *
- * Fade rule: a message renders at full opacity when (a) its sessionId
- * matches `activeSessionId`, OR (b) the parent session was active in the
- * last 24h, OR (c) it's a live streaming row. Older sessions get the
- * `timeline-msg-faded` class for ~0.55 opacity (hover restores 0.9).
+ * Older threads render at full contrast like the active one; their session
+ * divider carries the age. A 0.55-opacity fade on threads idle for a day
+ * once left most of a timeline washed out until hovered.
  *
  * Live messages are kept in a mutable frame-coalesced store. Each live
  * session subscribes independently, so token deltas redraw only that
@@ -3220,9 +3217,7 @@ export function ChatTimelineView({
   // Render: walk the threaded item list. Each chat item is a
   // turn-rooted thread — trigger message on top, replies railed
   // underneath — and a session divider fires whenever the thread's
-  // sessionId differs from the previous chat thread's. The fade rule
-  // applies to each completed message bubble; streaming rows are
-  // always full opacity.
+  // sessionId differs from the previous chat thread's.
   //
   // At each session boundary, if the PREVIOUS session's last turn
   // errored (persisted on the session record) AND there's no live
@@ -3409,9 +3404,6 @@ export function ChatTimelineView({
     },
   ): React.ReactNode => {
     const gezel = gezels.get(m.gezelId);
-    const isActive = m.sessionId === activeSessionId;
-    const isRecent = withinHours(m.sessionLastActivityAt, FRESH_THREAD_MAX_AGE_MS);
-    const fade = !isActive && !isRecent;
     // Only surface the project context when (a) we're on a
     // cross-project surface (Meester / global timeline) AND (b) the
     // project isn't the implicit `default` bucket — calling out
@@ -3493,7 +3485,6 @@ export function ChatTimelineView({
         {...(fontFamily ? { fontFamily } : {})}
         {...(fontScale !== 1 ? { fontScale } : {})}
         {...(project ? { projectLabel: project.name } : {})}
-        extraClass={fade ? 'timeline-msg-faded' : undefined}
         projectId={m.projectId}
         mediaProvider={getReadonlyGezelMediaProvider(m.projectId, m.sessionId)}
         {...(files.length > 0 ? { referencedFiles: files } : {})}

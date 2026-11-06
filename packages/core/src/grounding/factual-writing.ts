@@ -181,6 +181,34 @@ export function isFactualRole(role: string | undefined): boolean {
   return FACTUAL_TITLE.test(role);
 }
 
+const FICTION_FORM =
+  '(?:short stor(?:y|ies)|bedtime stor(?:y|ies)|fairy[- ]?tales?|stor(?:y|ies)|tales?|fables?|parables?|poems?|poetry|limericks?|haikus?|sonnets?|ballads?|nursery rhymes?|lullab(?:y|ies)|(?:song )?lyrics|fan ?fic(?:tion)?|screenplays?|novellas?)';
+const FICTION_ADJECTIVES =
+  "(?:short|long|little|quick|brief|funny|silly|sweet|cute|scary|spooky|sad|happy|magical|whimsical|fun|new|original|rhyming|bedtime|children'?s|kids'?|fairy)";
+/**
+ * A request that opens on making a story or a poem: "A story about ponies and
+ * unicorns", "Write me a short poem for my mom". It must lead the request and
+ * say what the piece is about or for, so "a report on short story sales",
+ * "the story of the Roman Empire" and "Story points for the sprint" stay
+ * factual.
+ */
+const FICTION_REQUEST = new RegExp(
+  `(?:^|[.!?\\n]\\s*)(?:(?:now|ok|okay|so|and|then|also),?\\s+)?(?:(?:please\\s+)?(?:can|could|would) you\\s+)?(?:(?:please\\s+)?(?:write|tell|compose|make|create|draft|invent|imagine|craft|pen|give)\\s+(?:me\\s+|us\\s+)?)?(?:a|an|some|one|two|three|\\d+)?\\s*(?:${FICTION_ADJECTIVES}\\s+){0,3}${FICTION_FORM}(?=\\s*$|\\s*[,.!?:;]|\\s+(?:about|for|featuring|starring|where|in which|set in|with|that|involving|called|titled|named)\\b)`,
+  'i',
+);
+const FICTION_WORD = /(?<!non[- ]?)\bfiction(?:al)?\b|\bmake-believe\b|\bonce upon a time\b/i;
+
+/**
+ * True when a piece of work asks for invented content: a story, a poem, a
+ * fable. Nothing in it is a claim to source, so the citation rule does not
+ * apply. A research craftbook launched on "A story about ponies and unicorns"
+ * warned that its own task title was a quote no source showed (2026-11-06).
+ */
+export function asksForFiction(text: string | undefined): boolean {
+  if (!text?.trim()) return false;
+  return FICTION_WORD.test(text) || FICTION_REQUEST.test(text.trim());
+}
+
 export interface FactualWritingInput {
   /** `factualWriting` from gezel.md: an explicit choice wins. */
   override?: boolean;
@@ -194,9 +222,15 @@ export interface FactualWritingInput {
    * held to it the way a stepwise researcher is.
    */
   taskGrounded?: boolean;
+  /**
+   * The work asks for invented content ({@link asksForFiction}). Turns the
+   * rule off whatever the role, unless the gezel or the task's contract
+   * asks for it explicitly.
+   */
+  fiction?: boolean;
 }
 
-export type FactualWritingReason = 'override' | 'role' | 'task' | 'document' | 'off';
+export type FactualWritingReason = 'override' | 'role' | 'task' | 'document' | 'fiction' | 'off';
 
 /** Whether this session writes under the citation rule, and why. */
 export function resolveFactualWriting(input: FactualWritingInput): {
@@ -205,6 +239,7 @@ export function resolveFactualWriting(input: FactualWritingInput): {
 } {
   if (input.override !== undefined)
     return { on: input.override, reason: input.override ? 'override' : 'off' };
+  if (input.fiction && !input.taskGrounded) return { on: false, reason: 'fiction' };
   if (isFactualRole(input.role) || isFactualRole(input.roleBasedName))
     return { on: true, reason: 'role' };
   if (input.taskGrounded) return { on: true, reason: 'task' };

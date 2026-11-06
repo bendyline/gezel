@@ -3,13 +3,13 @@ import { LinearDocView } from '@bendyline/squisq-react';
 import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { useMemo } from 'react';
-import { gezelChatTheme } from '../../components/chat-theme.js';
+import { gezelReportTheme } from '../../components/chat-theme.js';
 import { formatAbsoluteTime } from '../../relative-time.js';
 import { timeAgo } from './utils.js';
 
 /**
  * The meester's dashboard report — the markdown body of the current
- * status report, rendered with squisq like chat bubbles. Shown as a tab
+ * status report, rendered with squisq in the report theme. Shown as a tab
  * panel inside the greeting band, with a refresh affordance that kicks
  * a manual run (completion arrives over SSE; the parent flips
  * `running` while the meester writes).
@@ -37,7 +37,7 @@ export function StatusReportPanel({
         {doc ? (
           <LinearDocView
             doc={doc}
-            theme={gezelChatTheme}
+            theme={gezelReportTheme}
             thinMargins
             imageDisplayMode="thumbnail"
           />

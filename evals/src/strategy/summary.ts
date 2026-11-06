@@ -342,14 +342,14 @@ function thousands(n: number | null): string {
 }
 
 /**
- * Per arm: what it cost in context, how fast the engine ran, how often the
+ * Per arm: what it cost in context and tools, how fast the engine ran, how often the
  * daemon compacted, and which strategy the daemon actually resolved (the
  * `auto` arm's pick, and any fallback).
  */
 function renderCostTable(rows: readonly StrategyTrialRow[], arms: readonly string[]): string[] {
   const lines = [
-    '| Arm | Peak prompt (median) | First request (median) | Decode t/s (median) | Compactions | Resolved |',
-    '|---|---|---|---|---|---|',
+    '| Arm | Peak prompt (median) | First request (median) | Widest tool surface (median) | Decode t/s (median) | Compactions | Resolved |',
+    '|---|---|---|---|---|---|---|',
   ];
   for (const arm of arms) {
     const trials = rows.filter((r) => r.arm === arm);
@@ -367,8 +367,9 @@ function renderCostTable(rows: readonly StrategyTrialRow[], arms: readonly strin
       resolved.set(key, (resolved.get(key) ?? 0) + 1);
     }
     const decode = median(values((e) => e.decodeTps));
+    const tools = median(values((e) => e.peakToolSurface ?? null));
     lines.push(
-      `| ${arm} | ${thousands(median(values((e) => e.peakPromptTokens)))} | ${thousands(median(values((e) => e.firstPromptTokens)))} | ${decode === null ? '—' : decode.toFixed(1)} | ${trials.reduce((n, r) => n + (r.compactions ?? 0), 0)} | ${[...resolved].map(([k, n]) => `${k} ×${n}`).join(', ')} |`,
+      `| ${arm} | ${thousands(median(values((e) => e.peakPromptTokens)))} | ${thousands(median(values((e) => e.firstPromptTokens)))} | ${tools === null ? '—' : tools} | ${decode === null ? '—' : decode.toFixed(1)} | ${trials.reduce((n, r) => n + (r.compactions ?? 0), 0)} | ${[...resolved].map(([k, n]) => `${k} ×${n}`).join(', ')} |`,
     );
   }
   return lines;

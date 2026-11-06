@@ -2731,7 +2731,7 @@ const GezelConfigObject = z.object({
     .optional(),
   /**
    * What the person said they want help with, as interest-area ids in the
-   * order they were picked. It orders what the welcome, Make something and
+   * order they were picked. It orders what the welcome, Home's Create tab and
    * the galleries offer; it never hides anything and never enters a prompt.
    * Raw strings so a build that does not know an id keeps it on the next
    * save; read it through `resolveInterestAreas`. `askedAt` is stamped on an
@@ -3463,6 +3463,14 @@ export const GenerateGezelAboutRequestSchema = z.object({
 export const ModelInfoSchema = z.object({
   id: z.string(),
   name: z.string(),
+  /** One short line a picker shows beside the name, never in the closed control. */
+  description: z.string().optional(),
+  /**
+   * Heading a picker lists this model under. Models sharing one are listed
+   * together, groups in the order they first appear; ungrouped models come
+   * first without a heading.
+   */
+  group: z.string().optional(),
   supportsReasoning: z.boolean().optional(),
   reasoningEfforts: z.array(z.string()).optional(),
   defaultReasoningEffort: z.string().optional(),

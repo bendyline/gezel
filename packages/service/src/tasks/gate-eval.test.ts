@@ -1084,6 +1084,22 @@ describe('evaluateGate — hardened kinds', () => {
     expect(bad.failures[0]).toMatch(/line \d+:\d+/);
   });
 
+  it('sourceParses: a YAML config must load as a mapping or a list', async () => {
+    const ok = await evaluateGate(
+      [{ kind: 'sourceParses', file: 'alerts.yaml' }],
+      reader({ 'alerts.yaml': 'groups:\n  - name: checkout\n    rules: []\n' }),
+    );
+    expect(ok.pass).toBe(true);
+
+    const bad = await evaluateGate(
+      [{ kind: 'sourceParses', file: 'alerts.yml' }],
+      reader({ 'alerts.yml': 'groups:\n  - name: checkout\n    summary: rate: too high\n' }),
+    );
+    expect(bad.pass).toBe(false);
+    expect(bad.failures[0]).toMatch(/not valid YAML/);
+    expect(bad.failures[0]).toMatch(/line 3/);
+  });
+
   it('sourceParses: html delegates to the inline-JS path', async () => {
     const bad = await evaluateGate(
       [{ kind: 'sourceParses', file: 'index.html' }],

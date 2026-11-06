@@ -174,6 +174,43 @@ describe('checkFixReview', () => {
     expect(res.message).toContain('src/ghost.ts');
   });
 
+  it('reads the files a File cell names, not the cell, and skips cells that name none', async () => {
+    h.workspace.set('src/cart.js', 'fixed');
+    h.workspace.set('src/tax.js', 'fixed');
+    h.artifacts.set(
+      REVIEW,
+      reviewDoc({
+        verdict: 'PASS',
+        rows: [
+          '| minor | N/A | - | no tests for the edge case | add one |',
+          '| nit | N/A (Code) | - | wording | reword |',
+          '| nit | All Files | - | trailing spaces | trim |',
+          '| minor | src/cart.js, src/tax.js | 4 | duplicated rounding | share a helper |',
+          '| nit | `src/cart.js:12` [2] | 12 | naming | rename |',
+          '| nit | src/tax.js (rate table) | 3 | magic number | name it |',
+          '| nit | N/A, src/*, etc. | - | lint | run it |',
+        ],
+      }),
+    );
+    const res = await run({});
+    expect(res.decision).toBe('approve');
+  });
+
+  it('still names a fabricated file inside a list cell', async () => {
+    h.workspace.set('src/cart.js', 'fixed');
+    h.artifacts.set(
+      REVIEW,
+      reviewDoc({
+        verdict: 'PASS',
+        rows: ['| minor | src/cart.js, src/ghost.js [3] | 4 | invented | n/a |'],
+      }),
+    );
+    const res = await run({});
+    expect(res.decision).toBe('reject');
+    expect(res.message).toContain('src/ghost.js');
+    expect(res.message).not.toContain('src/cart.js,');
+  });
+
   it('rejects fabricated citations, naming them', async () => {
     h.artifacts.set(
       REVIEW,

@@ -15,6 +15,7 @@ import {
   createVersionCompatibleContentContainer,
   documentVersionBasename,
 } from '../../components/SquisqIntegration/index.js';
+import { GEZEL_WRITE_CANVAS } from '../../components/SquisqIntegration/write-canvas.js';
 import { markdownEquivalent } from '../../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../../components/transform/TransformToolbarButton.js';
 import { useSerializedAutosave } from '../../hooks/useSerializedAutosave.js';
@@ -104,6 +105,7 @@ export function ProjectOutsideInEditor({
   return (
     <div className="editor-wrap" style={{ height: '100%' }}>
       <EditorShell
+        {...GEZEL_WRITE_CANVAS}
         initialMarkdown={autosave.desiredValue()}
         // Detect the mode from the Markdown companion, not the rendered target.
         fileName={sourcePath}

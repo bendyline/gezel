@@ -148,19 +148,40 @@ echo "[build] platform=$platform backend=$backend"
 # ── 4. Configure + build ───────────────────────────────────────────
 build_dir="$src/build-$platform-$backend"
 cmake -S "$src" -B "$build_dir" "${cmake_flags[@]}"
-# Cap parallelism for CUDA on Linux. A bare `-j` lets make fork every ready
-# target at once; that is harmless for the CPU/Vulkan/Metal legs but not
-# once nvcc is involved. Run 36143841437 started ~40 ggml-cuda template
-# instances inside one second on both 16GB hosted runners, and the OOM
-# killer took cc1plus and then the runner agent itself ("received a
-# shutdown signal", exit 143) — never a compile error. llama-cpp compiles
-# the same ggml-cuda sources at -j2 on the same runners. Override with
+# Never run a bare `-j`: it lets make fork every ready target at once. Run
+# 36143841437 started ~40 ggml-cuda template instances inside one second on
+# both 16GB hosted runners, and the OOM killer took cc1plus and then the
+# runner agent itself ("received a shutdown signal", exit 143) — never a
+# compile error. CUDA on Linux stays at -j2, as llama-cpp compiles the same
+# ggml-cuda sources. The other legs got away with a bare `-j` until the
+# master-1050 tree: native-v0.1.58 lost the linux-x64 Vulkan and
+# linux-arm64 CPU runners the same way, both inside src/convert.cpp, and the
+# Metal build that had taken 6 minutes took 82. Elsewhere the cap comes from
+# cores and RAM, as llama-cpp's Darwin branch does. Override with
 # SD_BUILD_JOBS=N.
 jobs_flag="-j"
 if [[ -n "${SD_BUILD_JOBS:-}" ]]; then
   jobs_flag="-j${SD_BUILD_JOBS}"
 elif [[ "$os" == "Linux" && "$backend" == "cuda" ]]; then
   jobs_flag="-j2"
+else
+  # bash 3.2 on the macOS runner: plain arithmetic only.
+  if [[ "$os" == "Darwin" ]]; then
+    build_cores="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 2)"
+    build_mem_gb=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 2147483648) / 1073741824 ))
+  else
+    build_cores="$(nproc 2>/dev/null || echo 2)"
+    build_mem_gb=$(( $(awk '/^MemTotal:/ { print $2 }' /proc/meminfo 2>/dev/null || echo 2097152) / 1048576 ))
+  fi
+  # ~1.5GB per concurrent C++ job.
+  build_jobs=$(( build_mem_gb * 2 / 3 ))
+  if [[ "$build_cores" -lt "$build_jobs" ]]; then
+    build_jobs="$build_cores"
+  fi
+  if [[ "$build_jobs" -lt 2 ]]; then
+    build_jobs=2
+  fi
+  jobs_flag="-j${build_jobs}"
 fi
 echo "[build] parallelism: $jobs_flag"
 cmake --build "$build_dir" --config Release --target sd-server $jobs_flag

@@ -77,11 +77,27 @@ describe('ProjectGitStatusBar', () => {
     });
   });
 
-  it('re-arms Sync when git activity invalidates the last completed sync', async () => {
+  it('dates "Up to date" from the last look at GitHub, not the last Sync', async () => {
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue({
+      ...BASE_STATUS,
+      github: { url: 'https://github.com/foo/bar', lastSyncedAt: '2026-08-13T20:02:38.228Z' },
+      ahead: 0,
+      behind: 0,
+      syncStale: false,
+      remoteCheckedAt: new Date().toISOString(),
+    } as never);
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+
+    expect(await screen.findByText(/Up to date/)).toBeInTheDocument();
+    expect(screen.getByText(/· checked /)).toBeInTheDocument();
+    expect(screen.queryByText(/synced /)).not.toBeInTheDocument();
+  });
+
+  it('re-arms Sync when the branch has nothing on GitHub to compare with', async () => {
     vi.mocked(api.getProjectGitStatus).mockResolvedValue({
       ...BASE_STATUS,
       syncStale: true,
-      syncStaleReason: 'branch-changed',
+      syncStaleReason: 'no-upstream',
     } as never);
     render(<ProjectGitStatusBar projectId="pj-1" />);
 

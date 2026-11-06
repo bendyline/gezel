@@ -1179,6 +1179,7 @@ export class TaskScheduler {
       // a scheduler nudge in the same `interactive` lane.
       lane: 'background',
       ambient: true,
+      checkIn: true,
     });
 
     // Update nudge state. Don't touch `updatedAt` (that's activity), so
@@ -1290,13 +1291,13 @@ function stuckStepGateNudgeText(task: Task, step: TaskCraftbookStep): string {
 function nudgeText(tempo: WorkshopTempo, projectName: string): string {
   switch (tempo) {
     case 'gezellig':
-      return `Hey — just checking in on ${projectName}, no rush. Take a moment to compare where things stand against the project's objectives (missionObjectives.md): are we closer, and is anything drifting off-goal? If something's blocked or the plan needs a tweak, let me know. If the objectives are all met and there's nothing left to do, mark the project stable (update_project status: "stable") and say so. Otherwise it's fine to sit.`;
+      return `Hey — just checking in on ${projectName}, no rush. Take a moment to compare where things stand against the project's objectives (missionObjectives.md): are we closer, and is anything drifting off-goal? If something's blocked or the plan needs a tweak, let me know. If the objectives are all met and there's nothing left to do, mark the project stable (update_project status: "stable") and say so. Otherwise it's fine to sit. A reply here is all I need; don't start a task for it.`;
     case 'druk':
-      return `${projectName} check-in. Where are we against the objectives (missionObjectives.md)? Measure progress against each goal, then tell me what's done, what's left, and what's blocking the next step. If the plan needs updating, say so. If every objective is met, mark the project stable (update_project status: "stable"). If the user needs to decide something, ask them directly.`;
+      return `${projectName} check-in. Where are we against the objectives (missionObjectives.md)? Measure progress against each goal, then tell me what's done, what's left, and what's blocking the next step. If the plan needs updating, say so. If every objective is met, mark the project stable (update_project status: "stable"). If the user needs to decide something, ask them directly. Answer in your reply; don't start a task for it.`;
     case 'dolle-boel':
-      return `${projectName.toUpperCase()} — STATUS?? HOW DO WE STACK UP AGAINST THE OBJECTIVES (missionObjectives.md)?? WHAT'S DONE, WHAT'S LEFT, WHAT IS THE BLOCKER?? IS THE PLAN CURRENT?? IS A STEP READY TO ADVANCE?? IF EVERY OBJECTIVE IS MET, MARK IT STABLE (update_project status: "stable")!! If the user needs to decide something, ASK THEM. This is fine. 🔥`;
+      return `${projectName.toUpperCase()} — STATUS?? HOW DO WE STACK UP AGAINST THE OBJECTIVES (missionObjectives.md)?? WHAT'S DONE, WHAT'S LEFT, WHAT IS THE BLOCKER?? IS THE PLAN CURRENT?? IS A STEP READY TO ADVANCE?? IF EVERY OBJECTIVE IS MET, MARK IT STABLE (update_project status: "stable")!! If the user needs to decide something, ASK THEM. ANSWER RIGHT HERE, NO NEW TASKS!! This is fine. 🔥`;
     default:
-      return `Checking in on ${projectName}. Compare current progress against the project's objectives (missionObjectives.md): how far along is each goal, and is the work still aimed at them? Tell me what's done, what's left, whether the plan needs updating, and whether a step is ready to advance. If every objective is met and the project feels done, mark it stable (update_project status: "stable") and say so. If you need the user to make a call on something, please ask them directly.`;
+      return `Checking in on ${projectName}. Compare current progress against the project's objectives (missionObjectives.md): how far along is each goal, and is the work still aimed at them? Tell me what's done, what's left, whether the plan needs updating, and whether a step is ready to advance. If every objective is met and the project feels done, mark it stable (update_project status: "stable") and say so. If you need the user to make a call on something, please ask them directly. Answer in your reply rather than starting a task for it.`;
   }
 }
 

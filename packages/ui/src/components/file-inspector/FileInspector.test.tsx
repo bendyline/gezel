@@ -176,6 +176,7 @@ describe('FileInspector', () => {
         'photos/beans.png',
         640,
         expect.anything(),
+        'workspace',
       ),
     );
     expect(screen.queryByText('Binary file — no preview.')).toBeNull();

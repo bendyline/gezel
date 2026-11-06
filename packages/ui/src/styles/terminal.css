@@ -582,14 +582,30 @@
    through the composer: the shell is the flex item the chat column
    actually sizes, and the composer inside it is a row of that frame.
    Without this the 80% would be taken twice — once by the shell's
-   content height, once again inside it. */
-.project-chat-compose-shell:has(.chat-composer[data-composer-expanded="true"]) {
+   content height, once again inside it. The terminal shares the state
+   and the key, so it claims the same share the same way. */
+.project-chat-compose-shell:has(
+    :is(.chat-composer, .terminal-composer)[data-composer-expanded="true"]
+  ) {
   flex: 0 0 80%;
   min-height: 0;
 }
 
-.project-chat-compose-main .chat-composer[data-composer-expanded="true"] {
+.project-chat-compose-main :is(.chat-composer, .terminal-composer)[data-composer-expanded="true"] {
   flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* Expanded, the command entry takes everything under the Fire row, the way
+ * chat's editor fills its frame. The fixed height below is what keeps the
+ * collapsed terminal level with chat; here it would cap the slab at three
+ * lines inside an 80% frame. */
+.project-chat-compose-main
+  .terminal-composer[data-composer-expanded="true"]
+  .terminal-composer-input-wrap {
+  height: auto;
+  flex: 1 1 0;
+  min-height: 0;
 }
 
 .project-chat-compose-main {
@@ -894,6 +910,26 @@
  * that space themselves, or they sit against the gallery keys. */
 .terminal-composer-toolbar .compose-mode-tabs {
   margin-left: auto;
+}
+
+/* The expand key rides directly before the tabs, as it does on chat's "To:"
+ * line, so it takes the free space the tabs would otherwise claim: two auto
+ * margins split it and strand the key mid-row. The 0.1rem makes up this row's
+ * smaller gap (0.3rem against the To line's 0.4rem), and the 1px drop is the
+ * same nudge the To line gives its own content, so the key lands on the same
+ * pixels in both modes. */
+.terminal-composer-toolbar .terminal-composer-expand-btn {
+  margin-left: auto;
+  margin-right: 0.1rem;
+}
+
+.terminal-composer-toolbar .terminal-composer-expand-btn + .compose-mode-tabs {
+  margin-left: 0;
+}
+
+.project-chat-compose-main .terminal-composer-expand-btn {
+  position: relative;
+  top: 1px;
 }
 
 /* Terminal composer + folder tree (per-project terminal mode) */

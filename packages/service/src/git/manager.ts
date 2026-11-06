@@ -109,7 +109,8 @@ export interface GitStatus {
   mergeInProgress?: boolean;
   hasUpstream?: boolean;
   syncStale?: boolean;
-  syncStaleReason?: 'never-synced' | 'branch-changed' | 'no-upstream' | 'git-activity';
+  syncStaleReason?: 'never-synced' | 'no-upstream';
+  remoteCheckedAt?: string;
   hasPat: boolean;
   /** For a project with no GitHub link, only a stored PAT is reported (`gh` is never run). */
   credentialSource: GitHubCredentialSource;
@@ -1715,7 +1716,7 @@ export class GitManager {
     const upstreamRef = branch ? await this.resolveUpstreamRef(resolved.dir, branch) : undefined;
     const hasUpstream = upstreamRef !== undefined;
     const counts = upstreamRef ? await this.aheadBehindRefs(resolved.dir, upstreamRef) : undefined;
-    const freshness = await this.syncFreshness(project, resolved.dir, branch, hasUpstream);
+    const freshness = await this.syncFreshness(project, resolved.dir, hasUpstream);
     return {
       github: project.github,
       exists: true,
@@ -2041,54 +2042,43 @@ export class GitManager {
   }
 
   /**
-   * Decide whether `lastSyncedAt` still applies to the checkout we are
-   * looking at. Git may be changed outside Gezel, so combine persisted
-   * metadata with Git's own durable activity markers.
+   * Decide whether `ahead`/`behind` can vouch for "Up to date". They are
+   * exact for local work (commits, resets, branch switches), so the only
+   * doubt is how recently this checkout learned what GitHub has. Any fetch
+   * answers that, whoever ran it: the GitHub tab fetches every five minutes,
+   * and counting that as staleness kept a fully synced checkout stuck on
+   * "Sync to update".
    */
   private async syncFreshness(
     project: ProjectDetail,
     dir: string,
-    branch: string | undefined,
     hasUpstream: boolean,
-  ): Promise<Pick<GitStatus, 'syncStale' | 'syncStaleReason'>> {
+  ): Promise<Pick<GitStatus, 'syncStale' | 'syncStaleReason' | 'remoteCheckedAt'>> {
     const lastSyncedAt = Date.parse(project.github?.lastSyncedAt ?? '');
-    if (!Number.isFinite(lastSyncedAt)) {
+    const fetchedAt = await this.lastFetchAt(dir);
+    const checks = [lastSyncedAt, fetchedAt ?? Number.NaN].filter(Number.isFinite);
+    if (checks.length === 0) {
       return { syncStale: true, syncStaleReason: 'never-synced' };
     }
-    if (branch !== project.github?.branch) {
-      return { syncStale: true, syncStaleReason: 'branch-changed' };
-    }
+    const remoteCheckedAt = new Date(Math.max(...checks)).toISOString();
     if (!hasUpstream) {
-      return { syncStale: true, syncStaleReason: 'no-upstream' };
+      return { syncStale: true, syncStaleReason: 'no-upstream', remoteCheckedAt };
     }
-    const activityAt = await this.latestGitActivityAt(dir);
-    if (activityAt !== undefined && activityAt > lastSyncedAt) {
-      return { syncStale: true, syncStaleReason: 'git-activity' };
-    }
-    return { syncStale: false };
+    return { syncStale: false, remoteCheckedAt };
   }
 
-  /** Latest local HEAD-reflog or fetch activity, without any network call. */
-  private async latestGitActivityAt(dir: string): Promise<number | undefined> {
-    const candidates: number[] = [];
-    try {
-      const { stdout } = await runGit(['reflog', '-1', '--format=%ct', 'HEAD'], { cwd: dir });
-      const seconds = Number.parseInt(stdout.trim(), 10);
-      if (Number.isFinite(seconds)) candidates.push(seconds * 1_000);
-    } catch {
-      // Reflogs can be disabled; FETCH_HEAD still gives us a useful signal.
-    }
+  /** When this checkout last fetched (FETCH_HEAD's mtime), without any network call. */
+  private async lastFetchAt(dir: string): Promise<number | undefined> {
     try {
       const { stdout } = await runGit(['rev-parse', '--git-path', 'FETCH_HEAD'], { cwd: dir });
       const rawPath = stdout.trim();
-      if (rawPath) {
-        const fetchHead = isAbsolute(rawPath) ? rawPath : resolve(dir, rawPath);
-        candidates.push((await stat(fetchHead)).mtimeMs);
-      }
+      if (!rawPath) return undefined;
+      const fetchHead = isAbsolute(rawPath) ? rawPath : resolve(dir, rawPath);
+      return (await stat(fetchHead)).mtimeMs;
     } catch {
       // A repository that has never fetched has no FETCH_HEAD yet.
+      return undefined;
     }
-    return candidates.length > 0 ? Math.max(...candidates) : undefined;
   }
 
   private async withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {

@@ -81,6 +81,7 @@ import {
   withOutsideInMarkdownEditing,
   withOutsideInMetadata,
 } from '../components/SquisqIntegration/index.js';
+import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 import { ToolsetsEditor } from '../components/ToolsetsEditor.js';
 import {
   WorkspaceIndexPane,
@@ -286,8 +287,11 @@ function preloadProjectTab(tab: ProjectTab): void {
     case 'packages':
       loading = loadProjectToolsModule();
       break;
+    case 'connections':
+      loading = loadProjectConnectionsModule();
+      break;
     case 'about':
-      loading = Promise.all([loadProjectConnectionsModule(), loadHistoryModule()]);
+      loading = loadHistoryModule();
       break;
     default:
       break;
@@ -2516,6 +2520,12 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         (projectTabIsVisible(selected, 'map', { debugMode }) || tab === 'map') &&
                         projectViews.view !== null,
                     },
+                    {
+                      value: 'connections',
+                      label: 'Connections',
+                      icon: 'connections',
+                      show: true,
+                    },
                     { value: 'about', label: 'Settings', icon: 'settings', show: true },
                   ] satisfies Array<ProjectSectionTab & { show: boolean }>
                 ).filter((item) => item.show && supportsProjectSection(item.value))}
@@ -2656,23 +2666,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             projectId={selected.id}
                             projectName={selected.name}
                           />
-                        )}
-
-                        {runtimeCapabilities().connections && showWorkInProgressFeatures && (
-                          <section
-                            id="project-about-connections"
-                            className="gz-settings-section project-about-anchor"
-                          >
-                            <ProjectPaneBoundary>
-                              <ProjectConnectionsTab
-                                project={selected}
-                                onProjectChange={setSelected}
-                              />
-                            </ProjectPaneBoundary>
-                            <ProjectPaneBoundary>
-                              <ProjectLookoutsSection projectId={selected.id} />
-                            </ProjectPaneBoundary>
-                          </section>
                         )}
 
                         <SettingsSection
@@ -2946,20 +2939,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           </SettingsSection>
                         )}
 
-                        {runtimeCapabilities().catalog && (
-                          <SettingsSection
-                            id="project-about-toolsets"
-                            className="project-about-anchor"
-                            title="Toolsets"
-                            hint="Available to every gezel working in this project. Project MCP files are discovered automatically."
-                          >
-                            <ToolsetsEditor
-                              scope={{ kind: 'project', projectId: selected.id }}
-                              subject={selected.name}
-                            />
-                          </SettingsSection>
-                        )}
-
                         <SettingsSection
                           id="project-about-preferences"
                           className="project-about-anchor"
@@ -3012,7 +2991,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                           <SettingField
                             label="Project tabs"
-                            hint="Hide the work areas this project doesn’t use. Chat and Settings always stay, and Output appears whenever there is a page to preview."
+                            hint="Hide the work areas this project doesn’t use. Chat, Connections and Settings always stay, and Output appears whenever there is a page to preview."
                           >
                             <div className="gz-setting-options">
                               {PROJECT_TAB_VISIBILITY_OPTIONS.filter((option) =>
@@ -3085,14 +3064,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         {runtimeCapabilities().memories && (
                           <a href="#project-about-memories">Memories</a>
                         )}
-                        {runtimeCapabilities().connections && showWorkInProgressFeatures && (
-                          <a href="#project-about-connections">Connections</a>
-                        )}
                         <a href="#project-about-workspace">Workspace</a>
                         {showAccessSection && <a href="#project-about-access">Access</a>}
-                        {runtimeCapabilities().catalog && (
-                          <a href="#project-about-toolsets">Toolsets</a>
-                        )}
                         <a href="#project-about-preferences">Preferences</a>
                         {runtimeCapabilities().background && (
                           <a href="#project-about-history">History</a>
@@ -3456,6 +3429,36 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     </ProjectPaneBoundary>
                   )}
 
+                  {tab === 'connections' && (
+                    <div className="project-connections-page">
+                      {runtimeCapabilities().connections && (
+                        <section id="project-connections" className="gz-settings-section">
+                          <ProjectPaneBoundary>
+                            <ProjectConnectionsTab
+                              project={selected}
+                              onProjectChange={setSelected}
+                            />
+                          </ProjectPaneBoundary>
+                          <ProjectPaneBoundary>
+                            <ProjectLookoutsSection projectId={selected.id} />
+                          </ProjectPaneBoundary>
+                        </section>
+                      )}
+                      {runtimeCapabilities().catalog && (
+                        <SettingsSection
+                          id="project-toolsets"
+                          title="Toolsets"
+                          hint="Available to every gezel working in this project. Project MCP files are discovered automatically."
+                        >
+                          <ToolsetsEditor
+                            scope={{ kind: 'project', projectId: selected.id }}
+                            subject={selected.name}
+                          />
+                        </SettingsSection>
+                      )}
+                    </div>
+                  )}
+
                   {tab === 'map' && projectViews.view && (
                     <ProjectPaneBoundary>
                       <ProjectViewsPanel
@@ -3681,6 +3684,7 @@ function ProjectFileEditor({
   return (
     <div className="editor-wrap" style={{ height: '100%' }}>
       <EditorShell
+        {...GEZEL_WRITE_CANVAS}
         initialMarkdown={autosave.desiredValue()}
         fileName={file.path}
         readOnly={isReadOnly}
@@ -3878,6 +3882,7 @@ function HtmlFileViewer({
       ) : (
         <div className="editor-wrap">
           <EditorShell
+            {...GEZEL_WRITE_CANVAS}
             key={`${file.source}:${file.path}`}
             initialMarkdown={sourceAutosave.desiredValue()}
             fileName={file.path}
@@ -4034,6 +4039,7 @@ function ProjectDocEditor({
     >
       <div className="editor-wrap">
         <EditorShell
+          {...GEZEL_WRITE_CANVAS}
           ariaLabel={label}
           initialMarkdown={autosave.desiredValue()}
           onChange={handleDocChange}
@@ -4067,7 +4073,8 @@ function supportsProjectSection(section: string): boolean {
   if (section === 'packages' || section === 'approvals') return caps.terminal;
   if (section === 'proposals') return caps.background;
   if (section === 'github') return caps.git;
-  if (section === 'mail' || section === 'connections') return caps.connections;
+  if (section === 'mail') return caps.connections;
+  if (section === 'connections') return caps.connections || caps.catalog;
   if (section === 'map') return caps.index;
   return true;
 }

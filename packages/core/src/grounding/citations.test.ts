@@ -449,6 +449,42 @@ describe('groundText', () => {
     expect(status('Conversion rose to 14.00%.')).toBe('uncited');
   });
 
+  // engineering-retrospective, contract replay 2026-11-06: "July 9, 2026"
+  // against a git log's `2026-07-09` was refused for its 9.
+  it('reads a day beside its month as the ISO date that states it', () => {
+    expect(extractClaims('The fix merged on July 9, 2026.')).toEqual([
+      { kind: 'number', value: '9', day: { month: 7, year: '2026' } },
+      { kind: 'year', value: '2026' },
+      { kind: 'month', value: 'July' },
+    ]);
+    expect(extractClaims('Merged on the 9th of July.')[0]).toEqual({
+      kind: 'number',
+      value: '9',
+      day: { month: 7 },
+    });
+    const ev = [
+      {
+        n: 1,
+        text: 'a1c007 2025-01-15 init\nf3e210 2026-07-09T14:02 fix retry\nOffsite: 2026-07-14 to 2026-07-16',
+      },
+    ];
+    const status = (text: string) => groundText(text, ev).sentences[0]?.status;
+    expect(status('The retry fix merged on July 9, 2026 [1].')).toBe('supported');
+    expect(status('The retry fix merged on 9 July 2026 [1].')).toBe('supported');
+    expect(status('The retry fix merged on July 9th [1].')).toBe('supported');
+    expect(status('The offsite runs July 14–16, 2026 [1].')).toBe('supported');
+    expect(status('The retry fix merged on July 10, 2026 [1].')).toBe('unsupported');
+    // The year written with the day binds the date: 2025 and July 9 each
+    // appear, but never together.
+    expect(status('The retry fix merged on July 9, 2025 [1].')).toBe('unsupported');
+    // A number not beside a month is a count, which the date does not state.
+    expect(status('Nine reviewers, 9 in all, approved it in July [1].')).toBe('unsupported');
+    // A day and a count with the same digits are checked apart.
+    expect(groundText('On July 9, 2026, 9 builds failed [1].', ev).sentences[0]?.missing).toEqual([
+      '9',
+    ]);
+  });
+
   it('matches thousands separators and spelled small numbers', () => {
     const ev = [{ n: 1, text: 'The estate covered 1,426 acres and two mills.' }];
     expect(

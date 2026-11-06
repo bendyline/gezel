@@ -1,11 +1,43 @@
 import { describe, expect, it } from 'vitest';
 import {
+  asksForFiction,
   factualLookupTools,
   factualWritingGuidance,
   isEvidenceTool,
   isFactualRole,
   resolveFactualWriting,
 } from './factual-writing.js';
+
+describe('asksForFiction', () => {
+  it('reads a request for a story or a poem as fiction', () => {
+    for (const text of [
+      'A story about ponies and unicorns',
+      'Write me a short poem for my mom',
+      'Can you write a bedtime story about dragons?',
+      'Please tell us a funny story where the cat wins.',
+      'Thanks! Now write a limerick about Mondays.',
+      'A fictional diary of a lighthouse keeper',
+      'Write a haiku.',
+    ]) {
+      expect(asksForFiction(text), text).toBe(true);
+    }
+  });
+
+  it('leaves factual work with the same words alone', () => {
+    for (const text of [
+      'The story of the Roman Empire',
+      'A report on short story sales in 2025',
+      'Story points for the sprint',
+      'Analyze the themes in Frost’s poems',
+      'Summarize the non-fiction shortlist',
+      'Write a biography of Ada Lovelace',
+      '',
+      undefined,
+    ]) {
+      expect(asksForFiction(text), String(text)).toBe(false);
+    }
+  });
+});
 
 describe('isFactualRole', () => {
   it('holds writers, researchers and reviewers to the citation rule', () => {
@@ -76,6 +108,19 @@ describe('resolveFactualWriting', () => {
       reason: 'task',
     });
     expect(resolveFactualWriting({ override: false, taskGrounded: true }).on).toBe(false);
+  });
+
+  it('lets fiction work turn a writing role off, but not an explicit setting or contract', () => {
+    expect(resolveFactualWriting({ role: 'Copywriter', fiction: true })).toEqual({
+      on: false,
+      reason: 'fiction',
+    });
+    expect(resolveFactualWriting({ override: true, role: 'Copywriter', fiction: true }).on).toBe(
+      true,
+    );
+    expect(
+      resolveFactualWriting({ role: 'Copywriter', fiction: true, taskGrounded: true }).on,
+    ).toBe(true);
   });
 });
 

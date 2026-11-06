@@ -18,15 +18,30 @@
  * `Task.executionMode` two-valued for older readers and the eval harness.
  *
  * `auto` follows evidence: the strategy the benchmark measured for the model
- * that will run the task (its catalog `tuning.taskStrategy`), else
- * `generalistMode`'s task rule, which never picks outcome. See
- * docs/task-strategies.md.
+ * that will run the task (its catalog `tuning.taskStrategy`), else the
+ * default for its kind of provider: outcome without the recipe on device,
+ * `generalistMode`'s task rule everywhere else. See docs/task-strategies.md.
  */
 import {
   type GeneralistModeSetting,
   type TaskExecutionMode,
   resolveTaskExecutionMode,
 } from './generalist-mode.js';
+
+/**
+ * Providers whose unmeasured models run outcome without the recipe under
+ * `auto`: the person's own engines and a paired device's. Every on-device
+ * model the benchmark measured picked it (Gemma 4 E4B, Qwen 3.5 9B, Ornith
+ * 1.5 9B and Qwen 3.8 27B, 2026-11-04), each beating stepwise at a third of
+ * the wall time or less. Bare strings, like `FRONTIER_PROVIDER_NAMES`.
+ */
+export const ON_DEVICE_MODEL_PROVIDER_NAMES: ReadonlyArray<string> = [
+  'llama-cpp',
+  'mlx',
+  'ds4',
+  'ollama',
+  'remote',
+];
 
 export const TASK_STRATEGIES = ['stepwise', 'generalist', 'outcome'] as const;
 export type TaskStrategy = (typeof TASK_STRATEGIES)[number];
@@ -68,11 +83,12 @@ export interface AutoTaskStrategy {
   strategy: TaskStrategy;
   /** Options the model's pick carries (outcome without a recipe). */
   options?: TaskStrategyOptions;
-  /** Where the pick came from: the model's measurement, or the tier rule. */
+  /** Where the pick came from: the model's measurement, or the provider default. */
   source: 'model' | 'tier';
   /**
    * What to run when the pick cannot render for this book (outcome needs a
-   * contract): the tier rule, the choice `auto` made before models had one.
+   * contract): `generalistMode`'s task rule, the choice `auto` made before
+   * models had one.
    */
   fallback: TaskStrategy;
 }
@@ -80,8 +96,9 @@ export interface AutoTaskStrategy {
 /**
  * `auto` for one model. An explicit `generalistMode` (`on` / `off`) is the
  * person's choice about task execution and wins over the model's
- * measurement; under `auto` the measurement wins, and a model without one
- * gets the tier rule.
+ * measurement; under `auto` the measurement wins. A model without one runs
+ * outcome without the recipe on device and `generalistMode`'s task rule
+ * elsewhere.
  */
 export function resolveAutoTaskStrategy(args: {
   generalistMode?: GeneralistModeSetting | undefined;
@@ -92,7 +109,11 @@ export function resolveAutoTaskStrategy(args: {
   const fallback = resolveTaskExecutionMode(args.generalistMode, args.providerName, args.tier);
   const measured =
     args.affinity && isTaskStrategy(args.affinity.strategy) ? args.affinity : undefined;
-  if (!measured || args.generalistMode === 'on' || args.generalistMode === 'off') {
+  const explicit = args.generalistMode === 'on' || args.generalistMode === 'off';
+  if (!measured || explicit) {
+    if (!explicit && ON_DEVICE_MODEL_PROVIDER_NAMES.includes(args.providerName ?? '')) {
+      return { strategy: 'outcome', options: { procedure: 'none' }, source: 'tier', fallback };
+    }
     return { strategy: fallback, source: 'tier', fallback };
   }
   return {

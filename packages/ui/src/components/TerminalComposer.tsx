@@ -3,6 +3,7 @@ import { type ReactNode, Suspense, lazy, useCallback, useRef, useState } from 'r
 import { api } from '../api.js';
 import { Popover, SubmitArrow } from '../primitives/index.js';
 import { CommandsPanel, type CommandsPanelSection } from './CommandsPanel.js';
+import { ComposerExpandButton } from './ComposerExpandButton.js';
 import type { TerminalCodeEditorHandle } from './terminal-editor/TerminalCodeEditor.js';
 import { useTerminalCompletionSources } from './terminal-editor/use-terminal-completion-sources.js';
 
@@ -124,6 +125,8 @@ export function TerminalComposer({
   workingDir,
   contextRow,
   toolbarTrailing,
+  expanded = false,
+  onExpandedChange,
   onSent,
   initialInput,
   onChatEscape,
@@ -139,6 +142,13 @@ export function TerminalComposer({
    * keeps its position across a mode flip.
    */
   toolbarTrailing?: ReactNode;
+  /**
+   * Whether the terminal has taken the chat window. Project chat shares this
+   * with the chat composer so the size survives a mode flip. The toolbar's
+   * expand key appears only when `onExpandedChange` is wired.
+   */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
   /** Optional hook the parent can use to flip a UX state on submit. */
   onSent?: (input: string, result: RunTerminalCommandResponse) => void;
   /**
@@ -237,7 +247,7 @@ export function TerminalComposer({
   }, []);
 
   return (
-    <div className="terminal-composer">
+    <div className="terminal-composer" data-composer-expanded={expanded ? 'true' : undefined}>
       {/* Toolbar — mirrors the squisq editor's top toolbar so the terminal
        * reads as a symmetric sibling of the chat editor. Holds the three
        * galleries (commands / scripts / tasks); picking from any of them
@@ -289,6 +299,15 @@ export function TerminalComposer({
             </Popover.Content>
           </Popover.Root>
         ))}
+        {onExpandedChange && (
+          <ComposerExpandButton
+            expanded={expanded}
+            onToggle={() => onExpandedChange(!expanded)}
+            what="terminal"
+            testId="terminal-composer-expand"
+            className="terminal-composer-expand-btn"
+          />
+        )}
         {toolbarTrailing}
       </div>
       {contextRow}

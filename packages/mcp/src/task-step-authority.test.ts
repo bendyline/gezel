@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  checkInTurnRefusal,
+  checkInTurnResult,
   sessionReboundToCurrentPass,
   staleTaskStepRefusal,
   taskStepMutationRejection,
@@ -77,6 +79,17 @@ describe('staleTaskStepRefusal', () => {
     expect(staleTaskStepRefusal(apiError({ error: 'stale_task_step' }))).toBeNull();
     expect(staleTaskStepRefusal(new Error('boom'))).toBeNull();
     expect(staleTaskStepRefusal(undefined)).toBeNull();
+  });
+
+  it('reads a check-in refusal apart from a stale step', () => {
+    const hint = 'this is a check-in, so it cannot start a task.';
+    expect(checkInTurnRefusal(apiError({ error: 'check_in_turn', hint }))).toBe(hint);
+    expect(staleTaskStepRefusal(apiError({ error: 'check_in_turn', hint }))).toBeNull();
+    expect(checkInTurnRefusal(apiError({ error: 'stale_task_step', hint }))).toBeNull();
+    const result = checkInTurnResult(apiError({ error: 'check_in_turn', hint }));
+    expect(result?.isError).toBe(true);
+    expect(JSON.stringify(result?.content)).toContain(hint);
+    expect(checkInTurnResult(new Error('boom'))).toBeNull();
   });
 });
 

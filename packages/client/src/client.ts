@@ -6608,17 +6608,21 @@ export class GezelClient {
   }
 
   /**
-   * A small JPEG of a workspace photo (`w` snaps to 160, 320 or 640), for
-   * grids and albums. A Blob because `<img src>` cannot carry the token.
+   * A small JPEG of a photo (`w` snaps to 160, 320 or 640), for grids,
+   * albums and file menus. `kind` reads from the artifacts drawer or the
+   * shared library instead of the workspace. A Blob because `<img src>`
+   * cannot carry the token.
    */
   fetchProjectThumbnail(
     id: string,
     path: string,
     width = 320,
     signal?: AbortSignal,
+    kind: 'workspace' | 'artifact' | 'document' = 'workspace',
   ): Promise<Blob> {
+    const tree = kind === 'workspace' ? '' : `&kind=${kind}`;
     return this.readBlob(
-      `/api/projects/${encodeURIComponent(id)}/index/thumb?path=${encodeURIComponent(path)}&w=${width}`,
+      `/api/projects/${encodeURIComponent(id)}/index/thumb?path=${encodeURIComponent(path)}&w=${width}${tree}`,
       'thumbnail fetch failed',
       signal,
     );

@@ -280,6 +280,7 @@ export interface EnsureProjectResult {
 
 export interface OpenChatOptions {
   projectId: string;
+  /** Default, with no `role` either: the project's lead (`leadGezelId`). */
   gezelId?: string;
   /** Role template id or role name, when the app did not keep the gezel id. */
   role?: string;

@@ -160,7 +160,7 @@ export function GreetingBand({
   ];
   if (morning || nightReview || startupReading?.tab === 'night')
     panels.push({ value: 'night', label: 'Night shift' });
-  if (makeSomething) panels.push({ value: 'make', label: 'Make something' });
+  if (makeSomething) panels.push({ value: 'make', label: 'Create' });
   panels.push({ value: 'tour', label: 'Handboek' });
   const activeTab = panels.some((panel) => panel.value === tab) ? tab : 'greeting';
   const startupCopy = startupReading?.tab === activeTab ? startupReading : undefined;
@@ -294,7 +294,7 @@ export function GreetingBand({
 
               {/* The whole standing figure + shelf + label is a poppetje showcase;
             when poppetjes are off (e.g. boring mode) hide it entirely rather
-            than fall back to a letter tile on a shelf. Make something and the
+            than fall back to a letter tile on a shelf. Create and the
             Handboek reader take the sheet's full width instead. */}
               {showPoppetjes && activeTab !== 'make' && activeTab !== 'tour' && (
                 <div className="home-workshop-greeting-right">

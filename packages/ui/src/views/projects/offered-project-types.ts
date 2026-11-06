@@ -9,7 +9,7 @@ import { api } from '../../api.js';
  * The catalog project types a person may start a project from: the
  * work-in-progress gate applied, and `email` left out because New Project
  * offers it as its own kind with mailbox linking. New Project's gallery and
- * Home's Make something read the same list.
+ * Home's Create tab read the same list.
  */
 export async function loadOfferedProjectTypes(
   showWorkInProgressFeatures: boolean,

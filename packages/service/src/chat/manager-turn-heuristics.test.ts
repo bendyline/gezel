@@ -1,4 +1,4 @@
-import { turnStateWanted } from '@bendyline/gezel';
+import { type Task, asksForFiction, turnStateWanted } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   buildContinuationNudge,
@@ -6,9 +6,37 @@ import {
   isNoopConfirmationResponse,
   isSubstantiveExistingWorkspaceFile,
   messageExpressesModifyIntent,
+  taskRequestText,
   unresolvedFailedToolCalls,
 } from './manager.js';
 import { isValidationRepairPrompt } from './validation-repair.js';
+
+describe('taskRequestText', () => {
+  const book = {
+    paramSchema: { type: 'object', properties: { topic: { type: 'string', fromMessage: true } } },
+  };
+
+  it('reads the title and the main subject, so a story request is fiction', () => {
+    const task = {
+      title: 'Ponies',
+      description: '',
+      craftbook: book,
+      craftbookParams: { topic: 'A story about ponies and unicorns' },
+    } as unknown as Task;
+    expect(taskRequestText(task)).toBe('Ponies\nA story about ponies and unicorns');
+    expect(asksForFiction(taskRequestText(task))).toBe(true);
+  });
+
+  it('reads only the first line of a description, so a closing poem keeps a brief factual', () => {
+    const task = {
+      title: 'Valencia deck',
+      description: 'Ten slides on the history of Valencia.\nWrite a short poem for the last slide.',
+      craftbook: { paramSchema: {} },
+    } as unknown as Task;
+    expect(taskRequestText(task)).toBe('Valencia deck\nTen slides on the history of Valencia.');
+    expect(asksForFiction(taskRequestText(task))).toBe(false);
+  });
+});
 
 describe('buildContinuationNudge', () => {
   it('turns an incomplete write_file prefix into a concrete complete-call nudge', () => {

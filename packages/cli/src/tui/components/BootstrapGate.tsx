@@ -25,6 +25,8 @@ import {
   chatModelCandidates,
   fitVerdicts,
   formatDownloadSize,
+  nativeEngineUse,
+  nativeToolkitTitle,
   orderInstalledChatModels,
   pickAccessoryModels,
   rankChatModels,
@@ -438,9 +440,8 @@ export function BootstrapGate(props: {
     );
   }
   if (screen.kind === 'native-choice') {
-    const labels = screen.missing.map(nativeLabel).join(', ');
     return (
-      <BootstrapFrame title="The Gezel native toolkit -- needed to run AI models locally -- is not installed yet">
+      <BootstrapFrame title={nativeToolkitTitle(screen.missing, screen.context.provider)}>
         <Text>{`Gezel can install the verified Gezel native toolkit (native-v${screen.context.nativeStatus.release}) for this device.`}</Text>
         <Text>
           Downloaded from{' '}
@@ -448,12 +449,17 @@ export function BootstrapGate(props: {
             https://github.com/bendyline/gezel/releases/
           </Text>
         </Text>
-        <Text dimColor>Missing: {labels}</Text>
+        <Text dimColor>Not installed:</Text>
+        {screen.missing.map((engine) => (
+          <Text key={engine} dimColor>
+            {`  - ${nativeLabel(engine)}: ${nativeEngineUse(engine)}`}
+          </Text>
+        ))}
         <BootstrapChoiceList
           options={[
             {
               label: 'Install the Gezel native toolkit',
-              hint: 'recommended · engines for chat, images, speech, and local model helpers',
+              hint: `recommended · ${screen.missing.length === 1 ? 'the engine' : `the ${screen.missing.length} engines`} above`,
               value: 'install',
             },
             { label: 'Not now', hint: 'continue to model choices', value: 'skip' },

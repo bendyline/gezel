@@ -41,9 +41,10 @@ export class GezelChat {
     const first = stream.next();
     await this.client.sendToChatSession(this.sessionId, message);
 
+    const paragraphs = new ToolRoundBreaks();
     let pending = await first;
     while (!pending.done) {
-      const event = toTurnEvent(pending.value);
+      const event = paragraphs.apply(toTurnEvent(pending.value));
       if (event.type === 'error') {
         throw new GezelSdkError(event.message, { code: 'turn_failed' });
       }
@@ -103,16 +104,20 @@ export async function openChat(deps: GezelChatDeps, opts: OpenChatOptions): Prom
 /**
  * Resolve which gezel to talk to. An app usually keeps the ids `ensureProject`
  * returned, but addressing by role keeps app code readable and survives a
- * gezel being recreated.
+ * gezel being recreated. With neither, the project's lead answers: a folder
+ * bound without a `.gezapp` has a Builder and nothing names it to the app.
  */
 async function resolveGezelId(client: GezelClient, opts: OpenChatOptions): Promise<string> {
   if (opts.gezelId) return opts.gezelId;
-  if (!opts.role) {
-    throw new GezelSdkError('openChat needs either gezelId or role', {
-      code: 'gezel_not_specified',
-    });
-  }
   const project = await client.getProject(opts.projectId);
+  if (!opts.role) {
+    const lead = await projectLead(client, project);
+    if (lead) return lead;
+    throw new GezelSdkError(
+      `project ${opts.projectId} has no lead gezel; pass openChat a gezelId or role`,
+      { code: 'gezel_not_specified' },
+    );
+  }
   const roster = new Set(project.gezelIds ?? []);
   const { gezels } = await client.listGezels();
   const wanted = opts.role.trim().toLowerCase();
@@ -131,6 +136,48 @@ async function resolveGezelId(client: GezelClient, opts: OpenChatOptions): Promi
     });
   }
   return match.id;
+}
+
+/**
+ * The gezel who answers for a project: its lead, else the Meester in Default
+ * (which never has one), else a solo project's one gezel. Mirrors
+ * `projectLeadGezelId` in core, which this package does not depend on.
+ */
+async function projectLead(
+  client: GezelClient,
+  project: { id: string; voormanGezelId?: string; mode?: string; gezelIds?: string[] },
+): Promise<string | undefined> {
+  if (project.voormanGezelId) return project.voormanGezelId;
+  if (project.id === 'default') {
+    const config = await client.getConfig().catch(() => null);
+    if (config?.meesterGezelId) return config.meesterGezelId;
+  }
+  return project.mode === 'solo' ? project.gezelIds?.[0] : undefined;
+}
+
+/**
+ * Starts the text that follows a tool call on a new paragraph. Providers join
+ * the text of each tool round with nothing between, so an app appending
+ * deltas showed narration running into the answer: "…move date.Lisbon office…".
+ */
+export class ToolRoundBreaks {
+  private wroteText = false;
+  private afterTool = false;
+
+  apply(event: ChatTurnEvent): ChatTurnEvent {
+    if (event.type === 'tool') {
+      this.afterTool = this.wroteText;
+    } else if (event.type === 'complete') {
+      this.wroteText = false;
+      this.afterTool = false;
+    } else if (event.type === 'delta' && event.content.trim()) {
+      const resumes = this.afterTool;
+      this.wroteText = true;
+      this.afterTool = false;
+      if (resumes) return { type: 'delta', content: `\n\n${event.content.trimStart()}` };
+    }
+    return event;
+  }
 }
 
 /**

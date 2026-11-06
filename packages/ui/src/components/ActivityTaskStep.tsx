@@ -227,7 +227,7 @@ function DirectionForm({
       </p>
       {instructions && (
         <div className="activity-step-instructions">
-          <RenderedMarkdown markdown={instructions} />
+          <RenderedMarkdown markdown={instructions} register="report" />
         </div>
       )}
       <div className="activity-step-actions">

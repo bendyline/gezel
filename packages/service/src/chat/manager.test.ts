@@ -1774,6 +1774,41 @@ describe('ChatManager — boot recovery', () => {
 });
 
 describe('ChatManager — parked handoff durability', () => {
+  it('marks the turn that answers a check-in, parked or not', async () => {
+    await store.createGezel({ name: 'Bo', role: 'Reviewer' });
+    const sender = await manager.createSession({ gezelId: 'ada' });
+    mock.scriptStreamThenHang('thinking out loud');
+    const senderTurn = manager.send(sender.id, 'go').catch(() => {});
+    await vi.waitFor(() => expect(mock.calls.some((c) => c.kind === 'send')).toBe(true), {
+      timeout: 5000,
+      interval: 10,
+    });
+    await manager.messageGezel({
+      fromGezelId: 'ada',
+      fromSessionId: sender.id,
+      toGezelIdOrName: 'bo',
+      text: 'Checking in on Default.',
+      checkIn: true,
+    });
+    expect((await store.readPendingHandoffs())[0]).toMatchObject({ checkIn: true });
+    expect(manager.isCheckInTurn(sender.id)).toBe(false);
+
+    mock.scriptStreamThenHang('looking at the objectives');
+    await manager.cancelInflight(sender.id, 'user-stop');
+    await senderTurn;
+    let boSession = '';
+    await vi.waitFor(
+      async () => {
+        boSession = (await store.listSessions({ gezelId: 'bo' }))[0]?.id ?? '';
+        expect(boSession && manager.isCheckInTurn(boSession)).toBe(true);
+      },
+      { timeout: 5000, interval: 25 },
+    );
+    await manager.cancelInflight(boSession, 'user-stop');
+    await manager.drainBackground();
+    expect(manager.isCheckInTurn(boSession)).toBe(false);
+  }, 20_000);
+
   it('records a parked handoff and drops the record once it dispatches', async () => {
     await store.createGezel({ name: 'Bo', role: 'Reviewer' });
     const sender = await manager.createSession({ gezelId: 'ada' });

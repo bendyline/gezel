@@ -1172,6 +1172,44 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     );
   }, 30_000);
 
+  async function seedDocblocks(): Promise<void> {
+    const docblocks = await svc.context.catalog.get('toolset', 'docblocks');
+    if (!docblocks || docblocks.manifest.kind !== 'toolset') {
+      throw new Error('DocBlocks catalog fixture missing');
+    }
+    await store.writeInstalledToolsets({ kind: 'project', projectId: 'default' }, [
+      {
+        toolsetId: 'docblocks',
+        sourceId: docblocks.sourceId,
+        version: docblocks.manifest.version,
+        installedAt: '2026-11-04T00:00:00.000Z',
+        runtime: docblocks.manifest.runtime,
+      },
+    ]);
+  }
+
+  it('ends a turn on a successful launch without asking for a closing summary', async () => {
+    await seedDocblocks();
+    const lead = await store.createGezel({ name: 'Pia', role: 'Planner' });
+    const session = await manager.createSession({ gezelId: lead.id });
+    mock.scriptToolCalls([
+      { name: 'invoke_craftbook', arguments: { craftbookId: 'powerpoint-deck' } },
+    ]);
+    mock.script('');
+
+    await manager.send(session.id, 'Can you create a PowerPoint about the Battle of Ypres?');
+
+    expect(mock.toolCallOutputs[0]?.output).toContain('Invoked craftbook "powerpoint-deck"');
+    const sends = mock.calls.filter((call) => call.kind === 'send');
+    expect(
+      sends.some((call) => /Do not repeat actions that already succeeded/i.test(call.prompt ?? '')),
+    ).toBe(false);
+    const decks = (await store.listProjectTasks('default')).filter(
+      (task) => task.craftbook.id === 'powerpoint-deck',
+    );
+    expect(decks).toHaveLength(1);
+  }, 30_000);
+
   describe('under tools.work-routing', () => {
     beforeEach(() => {
       process.env.GEZEL_FORCE_BEHAVIORS = 'tools.work-routing';

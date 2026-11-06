@@ -111,6 +111,10 @@ export function computeHostEnvironment(
 
   variables.set('GEZEL_HOME', home);
   variables.set('GEZEL_SERVICE_ROLE', 'user');
+  // The daemon writes to this app's stderr, so it logs the connection reset
+  // the app's own close() causes at debug instead of as a warning. Not
+  // GEZEL_HOSTED_BY_APP, which marks a daemon the desktop app owns.
+  variables.set('GEZEL_SDK_HOST_APP', appId);
   // '0' pins an ephemeral port. Unset, gezeld prefers the canonical 6228 —
   // which belongs to the machine broker on a machine install and is the
   // stable /v1 address the user's own Gezel wants — so a private daemon that

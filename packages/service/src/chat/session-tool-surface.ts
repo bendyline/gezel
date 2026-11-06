@@ -608,14 +608,20 @@ export async function resolveSessionToolSurface(
   // D4 step-scoped kit: the active step's deliverable class + gate
   // checks determine the working set; everything outside `kit ∪ floors`
   // drops. Narrows the MIDDLE only — the floors always survive — and
-  // never fights an explicit toolset override or `mode: 'never'`.
+  // never fights `mode: 'never'`. A single step never fights an explicit
+  // toolset override either. An owner holding several steps does narrow
+  // to the union of their kits, with the override as the ceiling. Without
+  // that, a generalist or outcome owner with its own installs carried its
+  // whole roster: 86 tools and a 32K-token first request on powerpoint-deck,
+  // which overflowed a 32K window before the first turn (qwen3.5-9b, 2026-11-02).
+  const ownerHoldsSeveralSteps = (opts.generalistSteps?.length ?? 0) > 1;
   const kit =
     rawAllowlist &&
     opts.activeStep &&
     opts.session.taskRef &&
     opts.session.stepId &&
     opts.mode !== 'never' &&
-    !hasToolsetOverride &&
+    (!hasToolsetOverride || ownerHoldsSeveralSteps) &&
     !stepToolKitDisabled()
       ? unionStepKit(opts.activeStep, surfaceSteps)
       : null;

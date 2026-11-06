@@ -12,6 +12,12 @@ export interface TrialEngineMetrics {
   peakPromptTokens: number | null;
   /** The working session's first request: the first over 8K tokens. */
   firstPromptTokens: number | null;
+  /**
+   * Tools on the widest session the trial ran. Arms are comparable only
+   * when this is: an owner carrying a whole installed roster pays for it in
+   * every request, and that cost is the harness's, not the strategy's.
+   */
+  peakToolSurface: number | null;
   /** Median generation speed over the trial's engine timing lines. */
   decodeTps: number | null;
   /** Median prompt-processing speed. */
@@ -26,6 +32,7 @@ const STOP_PROCESSING = /stop processing: n_tokens = (\d+)/g;
 const DECODE = /\btg =\s*([\d.]+) t\/s/g;
 const PREFILL =
   /prompt processing, n_tokens =\s*\d+, progress = [\d.]+, t =\s*[\d.]+ s \/\s*([\d.]+) tokens per second/g;
+const TOOL_SURFACE = /model-facing tool surface has (\d+) tools/g;
 const FIRST_REQUEST_FLOOR = 8_000;
 
 function median(values: number[]): number | null {
@@ -41,12 +48,14 @@ function numbers(log: string, pattern: RegExp): number[] {
 
 export function parseEngineMetrics(log: string, taskRef?: string): TrialEngineMetrics {
   const prompts = numbers(log, STOP_PROCESSING);
+  const surfaces = numbers(log, TOOL_SURFACE);
   const marker = taskRef
     ? log.split('\n').find((line) => line.includes(`${taskRef} generalist-mode resolved=`))
     : undefined;
   return {
     peakPromptTokens: prompts.length ? Math.max(...prompts) : null,
     firstPromptTokens: prompts.find((n) => n > FIRST_REQUEST_FLOOR) ?? null,
+    peakToolSurface: surfaces.length ? Math.max(...surfaces) : null,
     decodeTps: median(numbers(log, DECODE)),
     prefillTps: median(numbers(log, PREFILL)),
     resolvedStrategy: marker?.match(/ strategy=(\S+)/)?.[1] ?? null,

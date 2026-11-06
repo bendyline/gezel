@@ -150,6 +150,11 @@ describe('computeHostEnvironment', () => {
     expect(variables.get('GEZEL_DISTRIBUTION_PROFILE')).toBe('store');
   });
 
+  it('tells the daemon which app hosts it', () => {
+    const { variables } = computeHostEnvironment('qualla', base, { PATH: '/usr/bin' });
+    expect(variables.get('GEZEL_SDK_HOST_APP')).toBe('qualla');
+  });
+
   it('leaves the profile alone when the app does not declare one', () => {
     const { variables } = computeHostEnvironment('qualla', base, { PATH: '/usr/bin' });
     expect(variables.has('GEZEL_DISTRIBUTION_PROFILE')).toBe(false);

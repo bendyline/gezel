@@ -4,6 +4,7 @@ export {
   type ClaimsGroundedOptions,
   type ClaimsGroundedResult,
   claimsGrounded,
+  sourceListReferences,
 } from './claims.js';
 export { citedPathKey, cleanCitedPath, createCitedPathChecker } from './workspace-exists.js';
 export {

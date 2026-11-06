@@ -99,4 +99,52 @@ describe('TerminalComposer', () => {
     expect(screen.getByTestId('gallery-scripts')).toBeInTheDocument();
     expect(screen.getByTestId('gallery-tasks')).toBeInTheDocument();
   });
+
+  it('carries the expand key just before the mode tabs, as chat does', async () => {
+    const onExpandedChange = vi.fn();
+    const { container, rerender } = render(
+      <TerminalComposer
+        projectId="project-1"
+        workingDir="/work/project"
+        toolbarTrailing={<div data-testid="mode-tabs" />}
+        onExpandedChange={onExpandedChange}
+      />,
+    );
+    await screen.findByLabelText('Terminal command');
+
+    const toggle = screen.getByTestId('terminal-composer-expand');
+    expect(toggle.nextElementSibling).toBe(screen.getByTestId('mode-tabs'));
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    expect(container.querySelector('.terminal-composer')).not.toHaveAttribute(
+      'data-composer-expanded',
+    );
+
+    fireEvent.click(toggle);
+    expect(onExpandedChange).toHaveBeenCalledWith(true);
+
+    rerender(
+      <TerminalComposer
+        projectId="project-1"
+        workingDir="/work/project"
+        toolbarTrailing={<div data-testid="mode-tabs" />}
+        expanded
+        onExpandedChange={onExpandedChange}
+      />,
+    );
+    expect(container.querySelector('.terminal-composer')).toHaveAttribute(
+      'data-composer-expanded',
+      'true',
+    );
+    expect(screen.getByRole('button', { name: 'Collapse the terminal' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+  });
+
+  it('has no expand key when nothing owns the size', async () => {
+    render(<TerminalComposer projectId="project-1" workingDir="/work/project" />);
+    await screen.findByLabelText('Terminal command');
+
+    expect(screen.queryByTestId('terminal-composer-expand')).toBeNull();
+  });
 });

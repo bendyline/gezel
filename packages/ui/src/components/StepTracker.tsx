@@ -118,32 +118,7 @@ function TrackerScroll({
   const measure = useCallback(() => {
     const vp = viewportRef.current;
     if (!vp) return;
-    let leading = 0;
-    let trailing = 0;
-    const track = vp.firstElementChild;
-    const stops = track?.querySelectorAll<HTMLElement>('[data-step-id]');
-    if (centerStepId && track && stops?.length) {
-      const rect = track.getBoundingClientRect();
-      const style = getComputedStyle(track);
-      const leftPadding = Number.parseFloat(style.paddingLeft) || 0;
-      const rightPadding = Number.parseFloat(style.paddingRight) || 0;
-      if (rect.width - leftPadding - rightPadding > vp.clientWidth) {
-        const first = stops[0]!.getBoundingClientRect();
-        const last = stops[stops.length - 1]!.getBoundingClientRect();
-        leading = Math.max(
-          0,
-          Math.round(vp.clientWidth / 2 - (first.left + first.width / 2 - rect.left - leftPadding)),
-        );
-        trailing = Math.max(
-          0,
-          Math.round(vp.clientWidth / 2 - (rect.right - rightPadding - last.left - last.width / 2)),
-        );
-      }
-    }
-    // Apply end spacing before measuring the target: a second React layout
-    // pass can otherwise leave a reopened route at its unpadded offset.
-    vp.style.setProperty('--tracker-leading-space', `${leading}px`);
-    vp.style.setProperty('--tracker-trailing-space', `${trailing}px`);
+    const stops = vp.firstElementChild?.querySelectorAll<HTMLElement>('[data-step-id]');
     const target = Array.from(stops ?? []).find((stop) => stop.dataset.stepId === centerStepId);
     if (target) {
       const vpRect = vp.getBoundingClientRect();
@@ -151,6 +126,10 @@ function TrackerScroll({
       const offset = rect.left + rect.width / 2 - vpRect.left + vp.scrollLeft;
       const layout = [centerStepId, vp.clientWidth, vp.scrollWidth, Math.round(offset)].join(':');
       if (layout !== centeredLayout.current) {
+        // The browser clamps this to the route's ends, so a step near either
+        // end sits at that edge. Padding the ends so every step could reach
+        // the middle opened a task with step 1 pushed halfway across an
+        // empty rail.
         vp.scrollLeft = offset - vp.clientWidth / 2;
         centeredLayout.current = layout;
       }
@@ -167,7 +146,7 @@ function TrackerScroll({
     if (!vp || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);
     ro.observe(vp);
-    // End spacing changes the border box without changing the content box.
+    // Captions that arrive late widen the route without resizing the viewport.
     if (vp.firstElementChild) ro.observe(vp.firstElementChild, { box: 'border-box' });
     return () => ro.disconnect();
   }, [measure, remeasureKey]);

@@ -1574,6 +1574,24 @@
   line-height: 1;
 }
 
+/* The To line's frame keys are flat toolbar keys, like the tools beside
+   Send: no fill or border at rest, a wash on hover. The border stays as a
+   transparent 1px so the key keeps its size when the wash arrives. */
+.chat-composer-recipient-trigger,
+.chat-composer-expand-btn {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  transition: background 120ms ease-out, color 120ms ease-out;
+}
+
+.chat-composer-recipient-trigger:hover,
+.chat-composer-recipient-trigger[data-state="open"],
+.chat-composer-expand-btn:hover,
+.chat-composer-expand-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
 .chat-composer-recipient-trigger {
   width: 1.65rem;
   height: 1.65rem;
@@ -1592,7 +1610,6 @@
   box-shadow: none;
 }
 
-.chat-composer-recipient-trigger:hover,
 .chat-composer-recipient-remove:hover,
 .chat-recipient-add:hover {
   color: var(--accent-text);
@@ -1843,7 +1860,10 @@
 
 .chat-composer-expand-btn[aria-pressed="true"] {
   color: var(--accent-text);
-  border-color: var(--accent);
+}
+
+.chat-composer-expand-btn[aria-pressed="true"]:hover {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
 
 /* The recipient picker's `margin-left: auto` normally opens the gap that

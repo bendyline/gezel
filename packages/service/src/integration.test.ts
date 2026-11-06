@@ -603,6 +603,32 @@ describe('projects API', () => {
     );
     expect(unsafeRevealRes.status).toBe(400);
 
+    // The chat rail's Files menu asks for artifact thumbnails by kind.
+    const pixel = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    const shotsDir = join(svc.context.home, 'projects', 'integtest', 'artifacts', 'shots');
+    await mkdir(shotsDir, { recursive: true });
+    await writeFile(join(shotsDir, 'tool-0-img-0.png'), pixel);
+    const thumbRes = await api(
+      'GET',
+      '/api/projects/integtest/index/thumb?kind=artifact&path=artifacts%2Fshots%2Ftool-0-img-0.png&w=160',
+    );
+    expect(thumbRes.status).toBe(200);
+    expect(thumbRes.headers.get('content-type')).toBe('image/png');
+    expect(Buffer.from(await thumbRes.arrayBuffer()).equals(pixel)).toBe(true);
+    const workspaceThumbRes = await api(
+      'GET',
+      '/api/projects/integtest/index/thumb?path=shots%2Ftool-0-img-0.png&w=160',
+    );
+    expect(workspaceThumbRes.status).toBe(404);
+    const unsafeThumbRes = await api(
+      'GET',
+      '/api/projects/integtest/index/thumb?kind=artifact&path=..%2Fproject.json',
+    );
+    expect(unsafeThumbRes.status).toBe(404);
+
     const delRes = await api('DELETE', '/api/projects/integtest/artifacts/delete?path=notes.md');
     expect(delRes.status).toBe(200);
   });

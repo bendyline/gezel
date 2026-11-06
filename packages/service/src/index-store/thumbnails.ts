@@ -55,9 +55,9 @@ export interface Thumbnail {
 export interface ThumbnailRequest {
   /** The project's thumbnail cache (`projectThumbnailsDir`). */
   cacheDir: string;
-  /** Absolute path of the photo, already checked to sit inside the workspace. */
+  /** Absolute path of the photo, already checked to sit inside its tree. */
   absPath: string;
-  /** Workspace-relative path, part of the cache key. */
+  /** Path within its tree (`artifact:`/`document:` prefixed outside the workspace), part of the cache key. */
   relPath: string;
   width: number;
   platform?: NodeJS.Platform;

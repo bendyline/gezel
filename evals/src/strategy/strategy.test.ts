@@ -357,10 +357,13 @@ describe('round-2 arms and engine metrics', () => {
       '[llama-server] slot      release: id  0 | task 0 | stop processing: n_tokens = 5120, truncated = 0',
       '[llama-server] slot      release: id  0 | task 1 | stop processing: n_tokens = 31200, truncated = 0',
       '[llama-server] slot      release: id  0 | task 2 | stop processing: n_tokens = 38900, truncated = 0',
+      'DEBUG [mcp-bridge] [llama-cpp] model-facing tool surface has 22 tools after role/provider filtering: search_memory',
+      'DEBUG [mcp-bridge] [llama-cpp] model-facing tool surface has 44 tools after role/provider filtering: search_memory',
     ].join('\n');
     expect(parseEngineMetrics(log, 'eval-proj/1')).toEqual({
       peakPromptTokens: 38900,
       firstPromptTokens: 31200,
+      peakToolSurface: 44,
       decodeTps: 30.405,
       prefillTps: 876,
       resolvedStrategy: 'outcome',

@@ -301,6 +301,10 @@ function ProjectChatBody({
   // Per the design: this toggle ONLY lives on per-project chat —
   // Meester (HomeView) and per-gezel (GezelChatTab) do not get it.
   const [composeMode, setComposeMode] = useState<'chat' | 'terminal'>('chat');
+  // Whether the compose frame has taken the chat column. Owned here rather
+  // than by either composer, so an expanded draft stays expanded when the
+  // person flips to the terminal, and the other way round.
+  const [composerExpanded, setComposerExpanded] = useState(false);
   const [chatFocusRequestKey, setChatFocusRequestKey] = useState(0);
   const switchToChat = useCallback(() => {
     setChatFocusRequestKey((key) => key + 1);
@@ -756,6 +760,8 @@ function ProjectChatBody({
                       : undefined
                   }
                   addressLineTrailing={composeModeTabs}
+                  expanded={composerExpanded}
+                  onExpandedChange={setComposerExpanded}
                   draftId={draftId || undefined}
                   onDraftIdChange={(next) => setDraftId(next ?? '')}
                   belowAddressLine={
@@ -798,6 +804,8 @@ function ProjectChatBody({
                     />
                   }
                   toolbarTrailing={composeModeTabs}
+                  expanded={composerExpanded}
+                  onExpandedChange={setComposerExpanded}
                   initialInput={terminalInitialInput}
                   onSent={(input, result) => {
                     setActiveTerminalThreadId(result.threadId);

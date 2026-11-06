@@ -339,14 +339,16 @@ export function ProviderModelSelect({
       </Select.Trigger>
       <Select.Content>
         <Select.Item value={COMPOSITE_INHERIT}>{inheritLabel}</Select.Item>
-        {entries.map((entry) =>
-          entry.models.map((m) => (
+        {entries.map((entry) => {
+          // A badge every one of a provider's rows carries tells the person nothing.
+          const markReasoning = entry.models.some((m) => !m.supportsReasoning);
+          return entry.models.map((m) => (
             <Select.Item key={`${entry.provider}:${m.id}`} value={`${entry.provider}:${m.id}`}>
               {entry.label} — {m.name}
-              {m.supportsReasoning ? ' · reasoning' : ''}
+              {markReasoning && m.supportsReasoning ? ' · reasoning' : ''}
             </Select.Item>
-          )),
-        )}
+          ));
+        })}
       </Select.Content>
     </Select.Root>
   );

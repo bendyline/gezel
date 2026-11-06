@@ -84,6 +84,51 @@ describe('ModelPicker model inventory', () => {
     expect(api.listRemoteServerModels).toHaveBeenCalledTimes(2);
   });
 
+  it('lists grouped models after the ungrouped ones, with descriptions beside the rows', async () => {
+    vi.mocked(api.listProviderModels).mockResolvedValue({
+      provider: 'anthropic-cli',
+      models: [
+        { id: 'default', name: 'Recommended', group: 'For you', supportsReasoning: true },
+        { id: 'haiku', name: 'Haiku', group: 'Models', supportsReasoning: true },
+        { id: 'pinned', name: 'Pinned', supportsReasoning: true },
+        {
+          id: 'fable',
+          name: 'Fable',
+          description: 'Highest capability',
+          group: 'Models',
+          supportsReasoning: true,
+        },
+      ],
+    } as never);
+    render(<ModelPicker provider="anthropic-cli" value="fable" onChange={vi.fn()} />);
+
+    const select = await screen.findByTestId('mock-select');
+    // Every row reasons, so none is badged.
+    expect([...select.querySelectorAll('option')].map((option) => option.textContent)).toEqual([
+      'Provider default',
+      'Pinned',
+      'Recommended',
+      'Haiku',
+      'Fable',
+      'Other…',
+    ]);
+    expect(screen.getByText('Highest capability')).toHaveClass('model-picker-option-hint');
+  });
+
+  it('badges reasoning models only when some rows do not reason', async () => {
+    vi.mocked(api.listProviderModels).mockResolvedValue({
+      provider: 'ollama',
+      models: [
+        { id: 'qwen', name: 'Qwen', supportsReasoning: true },
+        { id: 'llama', name: 'Llama' },
+      ],
+    } as never);
+    render(<ModelPicker provider="ollama" value={undefined} onChange={vi.fn()} />);
+
+    expect(await screen.findByRole('option', { name: 'Qwen · reasoning' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Llama' })).toBeInTheDocument();
+  });
+
   it('keeps reasoning choices keyboard-reachable when the saved effort is unavailable', async () => {
     vi.mocked(api.listProviderModels).mockResolvedValue({
       provider: 'openai',

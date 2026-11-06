@@ -293,6 +293,7 @@ describe('TaskScheduler — ambient project nudges', () => {
       projectId: string;
       text: string;
       lane: 'interactive' | 'background' | undefined;
+      checkIn?: boolean | undefined;
     }> = [];
     let projectActive = false;
     let gezelActive = false;
@@ -332,12 +333,14 @@ describe('TaskScheduler — ambient project nudges', () => {
         projectId: string;
         text: string;
         lane?: 'interactive' | 'background';
+        checkIn?: boolean;
       }) => {
         delivered.push({
           toGezelIdOrName: args.toGezelIdOrName,
           projectId: args.projectId,
           text: args.text,
           lane: args.lane,
+          checkIn: args.checkIn,
         });
         return {
           sessionId: 'mock-session',
@@ -546,6 +549,8 @@ describe('TaskScheduler — ambient project nudges', () => {
     // Ambient nudges must ride the background lane so a user-driven
     // turn sharing the same provider always preempts them.
     expect(chat.delivered[0]!.lane).toBe('background');
+    // The reply reports; the daemon refuses a task launch from it.
+    expect(chat.delivered[0]!.checkIn).toBe(true);
     const record = await store.getProject('cron');
     expect(record!.nudgeState?.consecutiveRapidNudges).toBe(1);
   });

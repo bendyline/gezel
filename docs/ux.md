@@ -469,8 +469,9 @@ Don't restyle a settings page per surface; extend the recipe and this section.
 - **Group by the question a person is asking.** For a project: Crew (who
   works here), About and Mission (what the work is), Memories, Workspace
   (where the files live and what may change them), Access (what reaches
-  beyond this project), Toolsets, Preferences (how the work is tailored),
-  History, and Archive. One section titled "Settings" that held fifteen
+  beyond this project), Preferences (how the work is tailored), History,
+  and Archive. Connections and Toolsets have their own tab (see "The
+  Connections tab"). One section titled "Settings" that held fifteen
   unrelated controls is what this replaced: the only way to find anything in
   it was to read all of it. A setting sits beside the thing it changes, so
   the Crew Lead picker goes under the crew it picks from, not eight fields
@@ -546,7 +547,30 @@ reference the variable, never the family name:
 This is already wired globally: `h1`–`h6` opt into the serif, and a small
 set of long-form surfaces (chat message bodies, the Home intro card) opt in
 explicitly. Everything else inherits the sans by default. So in practice you
-almost never set `font-family` yourself. The two things to actively watch:
+almost never set `font-family` yourself.
+
+**Reports are the exception: one sans throughout.** Reports, plans and notes
+are working documents, read for their facts. Gezellig's serif titles and
+numerals make a night-shift report read like an essay. Every Squisq surface
+that shows one renders with `gezelReportTheme` / `gezelReportThemeForMode`
+([chat-theme.ts](../packages/ui/src/components/chat-theme.ts)), which keeps
+the chat palette and page rhythm and sets headings and body in Hanken Grotesk.
+Those surfaces are the report reader, the Home status and night-review
+panels, and the rail's document preview. `RenderedMarkdown` takes
+`register="report"` for the same reason: the document a question attaches,
+a draft plan, and a step's instructions. Chat, the Handboek and albums keep
+the serif. A new surface that shows a report uses the report theme, never
+`gezelChatTheme`.
+
+**Editors write in the sans too.** Every Squisq editor's Write view uses
+`--font-ui` for headings and body. Without this, Squisq mirrors the
+document's theme fonts, and a document with no theme falls back to
+`standard`'s serif headings. Spread `GEZEL_WRITE_CANVAS`
+([write-canvas.ts](../packages/ui/src/components/SquisqIntegration/write-canvas.ts))
+onto every new `EditorShell`. The theme still governs Play, previews and
+exports. View → "Editor styling from theme" brings it back for one editor.
+
+The two things to actively watch:
 
 - **Links stay sans even inside a heading.** A link styled with
   `font: inherit` (e.g. `.home-link`) placed inside an `<h3>`/`<h4>` will
@@ -654,7 +678,8 @@ rolled up on every return to Home in that run. It also steps aside whenever
 the meester's thread holds a failed turn or a reply that arrived while the
 person was away, because the conversation, with its Retry, is what they came
 back to, not the tip of the day. Collapsed, its tab bar stays visible; selecting any tab reopens its
-content. Labels wrap on narrow screens so every destination remains visible.
+content. On narrow screens a long label breaks onto a second line inside its
+tab, so every destination stays visible and every tab stays on the seam.
 The introduction reads from its
 top, because an empty timeline does not pin to the bottom. In compact, its
 figure sits beside the title only, so the openers get the full width. The compact title bar leads with the
@@ -1054,15 +1079,22 @@ key as `Task.requestRef`.
 
 Home's intro starts with the greeting tab, named for the time of day like the
 headline inside it (**Good morning**, **Good afternoon**, **Good evening**),
-followed by **Night shift** when a review is available, **Make something**, and
+followed by **Night shift** when a review is available, **Create**, and
 **Handboek** with the "What is gezel?" article. The greeting tab shows the
 current status report when available, otherwise the tip of the day; the report
 has no separate tab. The named tabs remain visible when the intro is collapsed,
 and selecting any of them expands its content, including the already-selected
 tab. Selecting the tab whose panel is open rolls the intro up, like the chevron.
 A collapsed intro shows no tab as selected, since no panel is showing.
-Unlike dense project tab rows, this small set wraps its labels instead of
-dropping them at narrow widths. The date belongs inside the greeting tab, not in
+The intro is a pull-down shade, so its tabs are connected tabs (see
+[Patterns](#patterns)): the tab row is a rail one step darker than the paper
+(`--home-rail`), the open tab takes the sheet's paper, keeps a 2px accent on
+its top edge and erases the seam under it, and the sheet ends in a hem of the
+same rail tone that rides up with it when it rolls. Unselected tabs carry no
+chrome until hovered. Unlike dense project tab rows, this small set never
+drops labels at narrow widths, and it never wraps onto a second row either: a
+tab on an upper row would have no seam to join. A long label breaks inside
+its own tab instead. The date belongs inside the greeting tab, not in
 a tab label. The header stays
 above the conversation. When open, its content overlays 90% of the chat area's
 height, with a shadow over the exposed chat strip below. The conversation keeps
@@ -1070,9 +1102,9 @@ its full layout and draft behind the sheet. Clicking the exposed strip rolls
 the sheet up to the tab bar and returns focus to chat; that click never activates
 a chat control underneath. Escape does the same. The roll takes 160ms and skips
 motion when reduced motion is requested. Tab content scrolls inside the sheet;
-Make something uses the full content width without the figure.
+The Create tab uses the full content width without the figure.
 
-Home's **Make something** tab offers six broad starting points: Research
+Home's **Create** tab offers six broad starting points: Research
 report, Word document, Slide deck, PDF report, Website, and Animated slideshow.
 Each key has artwork, a plain name, and a short description of the declared
 output. **See all** opens the full plan gallery, whose **Start here** shelf
@@ -1095,7 +1127,7 @@ whole description belongs to the launch sheet, not the key. The trays use
 `auto-fill` columns, so the shorter project shelf keeps keys the size of the
 plans above it instead of stretching them.
 
-Each Make something key is an ordinary **key** of the theme (`--key-bg`,
+Each Create key is an ordinary **key** of the theme (`--key-bg`,
 `--key-border`, `--key-shadow`), holding the book's 64px mark as a
 `--radius-md` tile on its category ground (see Workshop Marks below). The
 tiles carry the color, so the card stays quiet and never uses a fixed light
@@ -1264,6 +1296,21 @@ tasks in a paused project, are not listed. They will not run until someone
 resumes them, and listing them buried live work under every paused shard.
 The Tasks view is where paused work lives.
 
+**The panel reads as a soft traffic light.** Each section is a zone of tinted
+paper: **Needs you** is blush, **Working** and **Next** share one honey zone
+(joined into a single card with a dashed hairline when both hold work), and
+**Ready** is sage, the workshop's green rather than `--success` mint. A small
+indicator light leads each heading and each section key, and is lit only when
+that section holds something. An empty section drops its wash for a faint
+outline and an unlit ring, so color on the panel always means something to
+read. Working's light breathes like the titlebar dot. Inside a lit zone, insets
+(keys, context strips, report rows) take a paler tint of the zone instead of the
+panel's tan, and a question card's border takes the zone's tone, so a finished
+report is never edged in the terracotta that asks for a decision. The tones are
+the `--activity-*` tokens in [styles/activity.css](../packages/ui/src/styles/activity.css);
+keep them pastel, with washes lighter than the parchment so honey still reads as
+yellow on tan.
+
 
 **Dialog vs AlertDialog.** Use `AlertDialog` only for confirmations that
 interrupt a destructive or significant action (delete a gezel, discard
@@ -1278,6 +1325,18 @@ options and the choices themselves carry the meaning (Copilot / OpenAI /
 Ollama, engagement modes, tempo, a task's status), use **keys in a tray** — see
 [Controls: keys in trays](#controls-keys-in-trays). The Home + Settings
 provider switches are this pattern.
+
+**A model list shows what each row is.** A provider sends a short model `name`
+and, when the name alone does not say what the model is for, a one-line
+`description`. The picker shows that line beside the row (`Select.Item`'s
+`trailing`), never in the closed control, and the name never carries it as an
+em-dash suffix. When a list mixes aliases that choose a model for the person
+(Claude Code's `default` and `best`) with the models themselves, each row carries
+a `group`. The picker heads each group with a `Select.Label` and sets the unset
+row ("Gezel default") and Other… apart with separators, so no choice reads as a
+heading. Models are listed from fastest to most capable, never alphabetically
+by id. A badge every row would carry, such as " · reasoning" when every model
+reasons, is dropped.
 
 **Native `<select>`s share one face.** Every single-choice native select
 takes the recipe in [styles/foundation.css](../packages/ui/src/styles/foundation.css):
@@ -1305,7 +1364,11 @@ cannot join anything when the tab's own row and the band below share a
 background, which is how the first attempt read as a chip parked in the
 address line. Reach for this only when the tab genuinely sits on the seam of
 what it switches; a tab floating above unrelated content has nothing to
-connect to and should be an underline tab or keys instead.
+connect to and should be an underline tab or keys instead. Home's intro tabs
+are the larger reference: there the host row is tinted a step off the panel's
+fill, so the open tab reads as the top of the panel, and unselected tabs are
+bare labels rather than recessed keys, which suits a row of named
+destinations better than a two-way switch.
 
 **A tab's scope picker sits beside that tab.** When one tab's content is
 scoped by a choice the others ignore — the gezel screen's Chat, scoped to a
@@ -1340,6 +1403,13 @@ prompt drafts and a code-city map beside its board, none of which it needed.
 Hiding is only a default: an explicit choice in Project Settings → Project
 tabs always wins (the boxes show the default), and the tab a person is on
 stays visible, so opening a file into Artifacts never lands on a missing tab.
+
+**The Connections tab holds what the project reaches outside itself.** Its
+Connections section (the outside sources mirrored in, with the Lookouts that
+act on a camera) and its Toolsets section (the tools every gezel here can
+use) are drawn with the settings-page recipe. It shows for every project,
+like Chat and Settings, because any kind of project can take a mailbox or a
+toolset.
 
 **Activity lists what happened to the work.** The Overview's Recent activity
 and the History view ask for `audience: 'person'` outside debug mode: project,
@@ -1815,7 +1885,7 @@ first wherever work is offered, and every item stays reachable:
 - New Project orders its category rail and its sections by area, orders the
   types inside each section, and lands on the first category that serves the
   person. **All** is the first key of the rail.
-- Home's Make something draws its cards from the starters and the
+- Home's Create tab draws its cards from the starters and the
   `first-project` books, the person's areas first, with one place kept for
   another area (`pickWithRange`) so a single pick never makes gezel look like
   it does one thing. Its project shelf picks catalog project types the same
@@ -2004,11 +2074,14 @@ the primary key's `title`. Chat delegates the split to Squisq's
 lets Shift+Enter reach the normal paragraph-break behavior.
 
 **The draft can take the window.** An icon key at the right end of the To
-line — past the recipient picker and the compose-mode tabs, so the frame's
-size control sits with the frame's other keys rather than crowding Send —
-toggles the composer between its three-line strip and the top ~80% of the
-chat column, because a brief or a PRD is unreadable through a slot and
-scrolling it inside the slot loses the shape of the thing being written.
+line — past the recipient picker and immediately before the compose-mode
+tabs, so the frame's size control sits with the frame's other keys rather
+than crowding Send — toggles the composer between its three-line strip and
+the top ~80% of the chat column, because a brief or a PRD is unreadable
+through a slot and scrolling it inside the slot loses the shape of the thing
+being written. The size belongs to the frame, not to the mode: terminal mode
+carries the same key on the same pixels of its toolbar, and flipping between
+chat and terminal keeps the frame expanded or collapsed as it was.
 It is a size change, not a mode: the To line, the toolbar, and every key
 stay exactly where they were, the transcript keeps the remaining fifth
 rather than disappearing, and the draft, its attachments, and its autosave
@@ -2017,7 +2090,10 @@ preference for the next minute. Expanded, the editor *fills* its frame
 instead of growing with the text; an empty box that filled as you typed
 would put the caret somewhere different on every keystroke. The glyph is
 chevrons pushing apart, closing back together once expanded, and carries
-`title` + `aria-label` + `aria-pressed` like every other icon key.
+`title` + `aria-label` + `aria-pressed` like every other icon key. It and the
+recipient picker's **+** are flat keys, like the tools beside Send: no fill
+or border at rest, a wash on hover, and the wash stays while the picker is
+open or the draft is expanded.
 
 **Take photo is the camera's one door.** The composer toolbar's camera key
 sits between Insert image and Attach file and inserts `![Photo](…)` into the
@@ -2963,7 +3039,11 @@ they name and says plainly nothing is replaced. A photo folder's Overview gains
 **Albums** and **On this day** below the first look, and the morning view
 shows last night's albums and this day in earlier years; a folder without
 either shows nothing extra. Titlebar search gives a workspace photo hit a 3rem
-tile beside its text, like Knowledge results.
+tile beside its text, like Knowledge results. The chat rail's Files menu shows
+an image as a 2rem tile in place of its file glyph (from the workspace, the
+artifacts drawer or the library, by `PhotoThumb`'s `kind`); once a menu holds
+one, every glyph sits in a 2rem square so names stay aligned, and a format the
+cache cannot shrink keeps its glyph.
 
 **A file says what it is, one line above it.** When the Librarian has
 summarized a file, its project viewer and the Documents area show that

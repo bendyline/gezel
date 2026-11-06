@@ -219,4 +219,22 @@ describe('RunOutput', () => {
     output.complete('');
     expect(output.finish()).toBe(false);
   });
+
+  it('breaks the text before a tool call from the text after it', () => {
+    // npm ship audit, 2026-11: "…the move date.Lisbon office…", the narration
+    // and the answer joined because the provider joins tool rounds bare.
+    let out = '';
+    const output = new RunOutput((text) => {
+      out += text;
+    });
+    output.toolCalled();
+    output.push('I will check the move date.');
+    output.toolCalled();
+    output.toolCalled();
+    output.push('Lisbon office opens in May.');
+    output.toolCalled();
+    output.complete('I will check the move date.Lisbon office opens in May.');
+    expect(output.finish()).toBe(true);
+    expect(out).toBe('I will check the move date.\n\nLisbon office opens in May.');
+  });
 });

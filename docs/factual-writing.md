@@ -24,12 +24,21 @@ decides it once per session build. The order:
    **Sources** keys: "By role", "Always cite" or "Off". The API is
    `POST /api/gezels/:id/settings` `{ factualWriting }`, with `null` to
    follow the role again.
-2. **The role.** Researchers, reviewers and copywriters are covered by
+2. **Fiction work.** A session working a task that asks for a story, a
+   poem, a fable or the like is not factual, whatever the role. `asksForFiction`
+   reads the task's title and its book's main subject (else the first line
+   of its description), and only a request that leads with the piece and says
+   what it is about or for: "A story about ponies and unicorns" is fiction,
+   "the story of the Roman Empire" and "Story points for the sprint" are not.
+   A task whose contract asks for grounded claims stays factual.
+3. **The role.** Researchers, reviewers and copywriters are covered by
    canonical role. So are titles that state facts for a living: writer,
    author, editor, journalist, reporter, historian, biographer, genealogist,
    librarian, archivist, Boekwachter, fact checker. Fiction is excluded by
    title (novelist, poet, screenwriter, Schrijfmaat). Invention is that job.
-3. **The surface.** Any session that can write into a person's open
+   A task whose contract asks for grounded claims turns it on for whoever
+   holds the work.
+4. **The surface.** Any session that can write into a person's open
    document (`doc_insert_text`, `doc_replace_selection`, `slide_insert`) is
    factual whatever the role. Today that means the Office and LibreOffice
    add-ins. It is where an invented date does the most harm and is the
@@ -112,7 +121,12 @@ holds one session's evidence:
   scenarios 3-5x their wall-clock on 2026-10-05/06.
 - **What the person said.** All of the person's messages in the session
   count as evidence that needs no citation. Restating someone's own facts
-  back to them is not invention.
+  back to them is not invention. So do today's date, the gezel's and the
+  project's names, the project's about and mission, and, for a session
+  working a task, the task's title and its book's and steps' names
+  (`setSessionGiven`). The task part holds even when the runtime started the
+  session and the person never wrote in it: the step-finished reply quotes
+  the title ("A story about ponies and unicorns" is complete.).
 
 Numbers are session-wide and never restart. The same text from the same
 place keeps its number. After a daemon restart the ledger is rebuilt from
@@ -139,7 +153,10 @@ synthesis the check cannot judge, and acronyms and code identifiers ("UTC",
 sentence works out from two of its own sourced numbers (a sum or difference)
 counts as sourced, and so does today's date. A decimal also matches the same
 quantity stated a thousandfold ("5.18 s" for 5180 ms), a name matches its
-plural or possessive, common technical acronyms (HTTP, UTC, API) are
+plural or possessive, a month or weekday matches an ISO date that falls in
+or on it ("September" for `2026-09-01`), a day written beside its month
+matches the ISO date ("July 9, 2026" or "9 July" for `2026-07-09`, bound to
+the year when the sentence gives one), common technical acronyms (HTTP, UTC, API) are
 vocabulary rather than names, and a name inside a file attribution
 ("(timeline.md, Notes)") never anchors a number.
 Each sentence ends up as one of:

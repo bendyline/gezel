@@ -14,8 +14,8 @@ npx -p @bendyline/gezel-service gezeld
 
 `gezeld` runs in the foreground and is configured through environment
 variables (see [Environment](#environment)); `npx -p @bendyline/gezel-service gezeld --help`
-lists them. Always name the `@bendyline/` package with `npx`: a bare `npx gezeld`
-outside the folder where you installed it asks npm for an unrelated package.
+lists them. The unscoped [`gezeld`](https://www.npmjs.com/package/gezeld) package
+is the short name for this one, so `npx gezeld --help` runs the same program.
 
 ## What it contains
 
@@ -64,6 +64,15 @@ them. Install each only when this deployment needs it:
 ```bash
 npm install @huggingface/transformers@^4.3.1 kokoro-js@^1.2.1
 ```
+
+npm 12 blocks dependencies' install scripts and ends the install by listing
+`onnxruntime-node`, `protobufjs` and `node-pty` as skipped. For the first two
+that is expected everywhere: `onnxruntime-node`'s script only downloads CUDA
+libraries Gezel does not use, and `protobufjs`'s only checks versions.
+`node-pty` ships prebuilt binaries for Windows and macOS, so it works there
+too. On Linux its script compiles the binary (Python, `make` and a C++
+compiler), so allow it: `npm approve-scripts node-pty` in a project, or
+`npm install -g --allow-scripts=node-pty …` for a global install.
 
 npm consumers should also add two overrides to the application's root
 `package.json` (npm ignores overrides declared by dependencies). `kokoro-js`

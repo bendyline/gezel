@@ -6,6 +6,7 @@ import {
   isBlockingGroundingProblem,
   isDerivedNumber,
 } from '../grounding/citations.js';
+import { htmlAsMarkdown, isHtmlDocument } from './html-text.js';
 import type { CheckResult, WorkspaceLike } from './types.js';
 import { cleanCitedPath } from './workspace-exists.js';
 
@@ -22,12 +23,17 @@ import { cleanCitedPath } from './workspace-exists.js';
  * factual chat. It catches invention, not a wrong source copied faithfully.
  *
  * Citations it reads: `[n]` markers resolved through a Sources / References
- * list, and inline `(source: path)` notes. Cited URLs, `knowledge://`
- * references and PDF or Office files cannot be read here as text, so a
- * sentence citing only those counts as cited but unverified, never as
- * invented. `sources` adds material the facts
- * may come from without being cited (a contract's supplied brief), so a true
- * but uncited detail reads as a citation slip rather than an invention.
+ * list, inline `(source: path)` notes, bracketed paths, and a parenthesis
+ * holding only file names when those files exist (`(win-fulfillment.md)`).
+ * Cited URLs, `knowledge://` references and PDF or Office files cannot be
+ * read here as text, so a sentence citing only those counts as cited but
+ * unverified, never as invented. `sources` adds material the facts may come
+ * from without being cited (a contract's supplied brief), so a true but
+ * uncited detail reads as a citation slip rather than an invention.
+ *
+ * An HTML document or source is read as the text its reader sees
+ * (`htmlAsMarkdown`), so its styles and head are not facts and its headings,
+ * lists and links cite the way their Markdown forms do.
  */
 
 export interface ClaimsGroundedOptions {
@@ -68,10 +74,36 @@ const HAS_INLINE_SOURCE = /\((?:source|sources|src)\s*:/i;
 /** `[source/brief.md]`: a path in brackets, not a link's text (no `(` after it). */
 const BRACKETED_PATH = /\[((?:[\w.-]+\/)*[\w.-]+\.[a-z][a-z0-9]{0,5})\](?!\()/gi;
 const URL_LIKE = /^(?:[a-z][\w+.-]*:\/\/|mailto:)/i;
+/**
+ * A file a note can name without a folder. Anything else without a `/` in a
+ * `(source: data/audit.json, summary.overall_score)` note is a pointer into
+ * the file beside it, not a second source.
+ */
+const FILE_NAME =
+  /\.(?:md|markdown|txt|csv|tsv|jsonl?|ya?ml|toml|ini|html?|xml|log|rst|pdf|docx?|pptx?|xlsx?|odt|odp|ods|rtf|epub|[cm]?[jt]sx?|py|rb|go|rs|java|kt|cs|cpp|c|h|sh|sql)$/i;
 const MAX_FOLDER_FILES = 50;
 const TEXT_FILE = /\.(?:md|markdown|txt|csv|tsv|json|ya?ml|html?|xml|log|rst)$/i;
 /** A container this check cannot read as text; like a URL, it is cited but unchecked. */
 const BINARY_DOCUMENT = /\.(?:pdf|docx?|pptx?|xlsx?|odt|odp|ods|rtf|epub)$/i;
+/**
+ * `(win-fulfillment.md)`, `(corpus/a.md, b.md)`: a parenthesis that holds
+ * only file names. Not after a word or a link's text, so `load(config.json)`
+ * and `[the brief](brief.md)` are not notes.
+ */
+const BARE_PARENTHETICAL = /(?<![\]\w])\(([^()\n]{1,240})\)/g;
+const FILE_TOKEN = /^(?:\.?\/)?(?:[\w.-]+\/)*[\w.-]+\.[a-z][a-z0-9]{0,5}(?::[\d:–-]+)?$/i;
+
+/** The file names a bare parenthetical holds, or none when it holds anything else. */
+function bareFileNames(list: string): string[] {
+  const items = list.split(/[,;]|\band\b/).map((raw) => raw.trim().replace(/^`+|`+$/g, ''));
+  const names = items.every(
+    (item) =>
+      FILE_TOKEN.test(item) &&
+      FILE_NAME.test(item.replace(/:[\d:–-]+$/, '')) &&
+      !BINARY_DOCUMENT.test(item),
+  );
+  return names ? items : [];
+}
 
 /** The single reference a Sources line names: a link target, a backticked path, a URL, or a path-like token. */
 function refFromLine(text: string): string | null {
@@ -81,8 +113,22 @@ function refFromLine(text: string): string | null {
   if (ticked) return ticked;
   const url = /\b(?:https?:\/\/|knowledge:\/\/)[^\s)>\]]+/i.exec(text)?.[0];
   if (url) return url;
-  const path = /(?:^|\s)((?:[\w.-]+\/)*[\w.-]+\.[a-z][a-z0-9]{0,5})\b/i.exec(text)?.[1];
+  const path = /(?:^|[\s(])((?:[\w.-]+\/)*[\w.-]+\.[a-z][a-z0-9]{0,5})\b/i.exec(text)?.[1];
   return path ?? null;
+}
+
+/** `| [13] | `source/x.md` |` or `| 2 | source/x.md |`: a Sources table row, else null. */
+function tableReference(line: string): { n: number; ref: string } | null {
+  if (!/^\s*\|/.test(line)) return null;
+  const cells = line
+    .trim()
+    .replace(/^\||\|$/g, '')
+    .split('|')
+    .map((cell) => cell.trim());
+  const index = cells.findIndex((cell) => /^\[?\d{1,3}\]?\.?$/.test(cell));
+  if (index === -1) return null;
+  const ref = refFromLine(cells.slice(index + 1).join(' '));
+  return ref ? { n: Number(/\d+/.exec(cells[index]!)![0]), ref } : null;
 }
 
 /** Split the document into its body and the `n -> reference` map of its Sources section. */
@@ -100,6 +146,12 @@ function splitReferences(markdown: string): { body: string; refs: Map<number, st
       continue;
     }
     if (level > 0) {
+      // Models often lay the list out as a table (qwen3.8-27b, 2026-11-02).
+      const row = tableReference(line);
+      if (row) {
+        if (!refs.has(row.n)) refs.set(row.n, row.ref);
+        continue;
+      }
       // Several references can share a line: "[1] tasks/1/menu.md [2] tasks/1/scope.md".
       const inline = [...line.matchAll(/\[(\d{1,3})\]\s*:?\s*/g)];
       if (inline.length > 1) {
@@ -124,30 +176,47 @@ function splitReferences(markdown: string): { body: string; refs: Map<number, st
   return { body: body.join('\n'), refs };
 }
 
+/** The `n -> reference` entries a document's own Sources / References section defines. */
+export function sourceListReferences(markdown: string): ReadonlyMap<number, string> {
+  return splitReferences(markdown).refs;
+}
+
 /**
- * Turn inline `(source: a, b)` notes, and bracketed paths like
- * `[source/brief.md]`, into `[n]` markers that share numbers with the Sources
- * list.
+ * Turn inline `(source: a, b)` notes, bracketed paths like
+ * `[source/brief.md]`, and bare `(brief.md)` notes naming a file in
+ * `citable` into `[n]` markers that share numbers with the Sources list.
  */
-function numberInlineSources(body: string, refs: Map<number, string>): string {
+function numberInlineSources(
+  body: string,
+  refs: Map<number, string>,
+  citable: ReadonlySet<string>,
+): string {
   const byRef = new Map([...refs].map(([n, ref]) => [ref.toLowerCase(), n]));
   let next = Math.max(0, ...refs.keys()) + 1;
-  const bracketed = body.replace(BRACKETED_PATH, (_whole, path: string) => `(source: ${path})`);
-  return bracketed.replace(INLINE_SOURCE, (_whole, list: string) => {
-    const numbers: number[] = [];
-    for (const raw of list.split(/[,;]/)) {
-      const ref = refFromLine(raw) ?? raw.trim().replace(/^`+|`+$/g, '');
-      if (!ref) continue;
-      const key = ref.toLowerCase();
-      let n = byRef.get(key);
-      if (n === undefined) {
-        n = next++;
-        refs.set(n, ref);
-        byRef.set(key, n);
-      }
-      numbers.push(n);
+  const numberFor = (ref: string): number => {
+    const key = ref.toLowerCase();
+    let n = byRef.get(key);
+    if (n === undefined) {
+      n = next++;
+      refs.set(n, ref);
+      byRef.set(key, n);
     }
-    return numbers.length > 0 ? `[${numbers.join(', ')}]` : '';
+    return n;
+  };
+  const bracketed = body.replace(BRACKETED_PATH, (_whole, path: string) => `(source: ${path})`);
+  const noted = bracketed.replace(INLINE_SOURCE, (_whole, list: string) => {
+    const items = list
+      .split(/[,;]/)
+      .map((raw) => refFromLine(raw) ?? raw.trim().replace(/^`+|`+$/g, ''))
+      .filter((ref) => ref !== '');
+    const isSource = (ref: string) =>
+      URL_LIKE.test(ref) || ref.includes('/') || FILE_NAME.test(ref);
+    const named = items.some(isSource) ? items.filter(isSource) : items;
+    return named.length > 0 ? `[${named.map(numberFor).join(', ')}]` : '';
+  });
+  return noted.replace(BARE_PARENTHETICAL, (whole, list: string) => {
+    const cited = bareFileNames(list).filter((name) => citable.has(name));
+    return cited.length > 0 ? `[${cited.map(numberFor).join(', ')}]` : whole;
   });
 }
 
@@ -192,18 +261,44 @@ function derivedFromNeighbors(sentences: readonly SentenceGrounding[], i: number
   return unfound.every((c) => isDerivedNumber(c.value, sourced));
 }
 
-/** A source's text: the file itself, or the readable files under a folder. */
-async function readSource(ws: WorkspaceLike, ref: string): Promise<string | null> {
+const readable = (path: string, text: string): string =>
+  isHtmlDocument(path, text) ? htmlAsMarkdown(text) : text;
+
+/**
+ * A source's text: the file itself, or the readable files under a folder.
+ * Never the document being checked, which would ground every claim it makes:
+ * "converted this report (`documents/eval/report.md`) to DOCX" read as a
+ * citation of itself (research-to-document, 2026-11-06 replay).
+ */
+async function readSource(ws: WorkspaceLike, ref: string, self: string): Promise<string | null> {
   const path = cleanCitedPath(ref);
-  if (!path) return null;
+  const isSelf = (f: string) => cleanCitedPath(f).toLowerCase() === self;
+  if (!path || isSelf(path)) return null;
   const text = await ws.read(path).catch(() => null);
-  if (text !== null) return text;
+  if (text !== null) return readable(path, text);
+  const listing = (await ws.list().catch(() => [] as string[])).filter((f) => !isSelf(f));
+  // A digest cites `[win-fulfillment.md]` for corpus/win-fulfillment.md. A
+  // bare name exactly one workspace file carries is that file; a name two
+  // files share stays unresolved.
+  if (!path.includes('/')) {
+    const name = path.toLowerCase();
+    const named = listing.filter((f) => cleanCitedPath(f).toLowerCase().split('/').at(-1) === name);
+    if (named.length === 1) {
+      const found = await ws.read(named[0]!).catch(() => null);
+      if (found !== null) return readable(named[0]!, found);
+    }
+  }
   const prefix = `${path.replace(/\/+$/, '')}/`;
-  const files = (await ws.list().catch(() => [] as string[]))
+  const files = listing
     .filter((f) => cleanCitedPath(f).startsWith(prefix) && TEXT_FILE.test(f))
     .slice(0, MAX_FOLDER_FILES);
   if (files.length === 0) return null;
-  const parts = await Promise.all(files.map((f) => ws.read(f).catch(() => null)));
+  const parts = await Promise.all(
+    files.map(async (f) => {
+      const part = await ws.read(f).catch(() => null);
+      return part === null ? null : readable(f, part);
+    }),
+  );
   const joined = parts.filter((p): p is string => p !== null).join('\n\n');
   return joined.length > 0 ? joined : null;
 }
@@ -225,13 +320,33 @@ export async function claimsGrounded(
     sources: { read: [], missing: [], unverifiable: [] },
     problems: [],
   };
-  const content = await ws.read(file);
-  if (content === null) {
+  const raw = await ws.read(file);
+  if (raw === null) {
     return { ...empty, ok: false, detail: `${file} not found — write the deliverable first.` };
   }
 
-  const { body, refs } = splitReferences(content);
-  const text = numberInlineSources(body, refs);
+  const self = cleanCitedPath(file).toLowerCase();
+  const sourceTexts = new Map<string, Promise<string | null>>();
+  const source = (ref: string): Promise<string | null> => {
+    let text = sourceTexts.get(ref);
+    if (!text) {
+      text = readSource(ws, ref, self);
+      sourceTexts.set(ref, text);
+    }
+    return text;
+  };
+
+  const { body, refs } = splitReferences(readable(file, raw));
+  // A bare `(brief.md)` is a citation only when it names a file that reads:
+  // unlike `(source: …)`, nothing says the writer meant it as one, and a plan's
+  // "(src/cache.ts)" names a file still to be written.
+  const citable = new Set<string>();
+  for (const m of body.matchAll(BARE_PARENTHETICAL)) {
+    for (const name of bareFileNames(m[1]!)) {
+      if (!citable.has(name) && (await source(name)) !== null) citable.add(name);
+    }
+  }
+  const text = numberInlineSources(body, refs, citable);
 
   const evidence: EvidenceItem[] = [];
   const opaque = new Set<number>();
@@ -244,12 +359,12 @@ export async function claimsGrounded(
       unverifiable.push(ref);
       continue;
     }
-    const source = await readSource(ws, ref);
-    if (source === null) {
+    const sourceText = await source(ref);
+    if (sourceText === null) {
       missing.push(ref);
       continue;
     }
-    evidence.push({ n, text: source, ref });
+    evidence.push({ n, text: sourceText, ref });
     read.push(ref);
   }
   let extra = Math.max(0, ...refs.keys()) + 1;
@@ -257,9 +372,9 @@ export async function claimsGrounded(
     if (refs.size > 0 && [...refs.values()].some((r) => r.toLowerCase() === ref.toLowerCase())) {
       continue;
     }
-    const source = await readSource(ws, ref);
-    if (source === null) continue;
-    evidence.push({ n: extra++, text: source, ref });
+    const sourceText = await source(ref);
+    if (sourceText === null) continue;
+    evidence.push({ n: extra++, text: sourceText, ref });
     read.push(ref);
   }
 

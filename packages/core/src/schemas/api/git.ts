@@ -28,15 +28,23 @@ export const GitStatusResponseSchema = z.object({
   /** True when the current branch has an upstream (or matching origin ref). */
   hasUpstream: z.boolean().optional(),
   /**
-   * True when local git activity means the persisted `lastSyncedAt` no
-   * longer describes the current checkout. This is intentionally
-   * conservative: Sync is what clears it.
+   * True when `ahead`/`behind` cannot vouch for "Up to date": the branch
+   * has no upstream, or this checkout has never learned what GitHub has.
    */
   syncStale: z.boolean().optional(),
-  /** Best-effort explanation for why `syncStale` is true. */
+  /**
+   * Best-effort explanation for why `syncStale` is true. `branch-changed`
+   * and `git-activity` come only from older daemons, which treated any fetch
+   * after the last Sync (including the GitHub tab's own) as staleness.
+   */
   syncStaleReason: z
     .enum(['never-synced', 'branch-changed', 'no-upstream', 'git-activity'])
     .optional(),
+  /**
+   * When this checkout last learned what GitHub has: the newer of the last
+   * completed Sync and the last fetch, whoever ran it.
+   */
+  remoteCheckedAt: z.string().optional(),
   /** True when the github toolset has a stored PAT. */
   hasPat: z.boolean(),
   /**

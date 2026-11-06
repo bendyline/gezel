@@ -127,9 +127,9 @@ export function MakeSomething({ projectId, projects }: { projectId: string; proj
   }, [selection]);
 
   return (
-    <section className="home-make" aria-label="Make something">
+    <section className="home-make" aria-label="Create">
       <div className="home-make-heading">
-        <h2>Make something</h2>
+        <h2>Create</h2>
         <button type="button" onClick={() => setSelection(null)}>
           See all
         </button>

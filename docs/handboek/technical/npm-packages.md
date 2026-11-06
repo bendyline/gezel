@@ -42,7 +42,7 @@ npm install -g gezel-cli
 gezel
 ```
 
-Install one of `gezel` and `@bendyline/gezel-cli` globally, not both: they are the same program and both provide the `gezel` command.
+Install one of `gezel-cli` and `@bendyline/gezel-cli` globally, not both: they are the same program and both provide the `gezel` command.
 
 A library belongs in the application that uses it:
 

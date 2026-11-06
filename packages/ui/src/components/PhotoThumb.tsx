@@ -1,25 +1,30 @@
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 
 /**
- * A workspace photo at thumbnail size, from the daemon's per-account cache.
+ * A photo at thumbnail size, from the daemon's per-account cache. `kind`
+ * picks the tree it sits in (the workspace unless told otherwise).
  * Loads when it scrolls into view, so a grid of hundreds asks for the dozen
  * on screen; `<img src>` cannot carry the bearer token, so the bytes arrive
- * as a Blob. A photo this machine cannot read shows its initial, never the
- * browser's broken-image glyph.
+ * as a Blob. A photo this machine cannot read shows `fallback`, else its
+ * initial, never the browser's broken-image glyph.
  */
 export function PhotoThumb({
   projectId,
   path,
+  kind = 'workspace',
   width = 320,
   alt,
   className,
+  fallback,
 }: {
   projectId: string;
   path: string;
+  kind?: 'workspace' | 'artifact' | 'document';
   width?: 160 | 320 | 640;
   alt?: string;
   className?: string;
+  fallback?: ReactNode;
 }) {
   const ref = useRef<HTMLSpanElement>(null);
   const [visible, setVisible] = useState(false);
@@ -52,7 +57,7 @@ export function PhotoThumb({
     let objectUrl: string | null = null;
     setFailed(false);
     api
-      .fetchProjectThumbnail(projectId, path, width, controller.signal)
+      .fetchProjectThumbnail(projectId, path, width, controller.signal, kind)
       .then((blob) => {
         if (controller.signal.aborted) return;
         objectUrl = URL.createObjectURL(blob);
@@ -65,8 +70,9 @@ export function PhotoThumb({
       controller.abort();
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [visible, projectId, path, width]);
+  }, [visible, projectId, path, width, kind]);
 
+  if (failed && fallback !== undefined) return <>{fallback}</>;
   return (
     <span ref={ref} className={`photo-thumb${className ? ` ${className}` : ''}`}>
       {url && !failed ? (

@@ -13,7 +13,7 @@
  */
 
 import { LIGHT_SURFACE, type SurfaceScheme } from '@bendyline/squisq';
-import { type Theme, resolveTheme } from '@bendyline/squisq/schemas';
+import { type FontFamily, type Theme, resolveTheme } from '@bendyline/squisq/schemas';
 
 export const GEZEL_CHAT_THEME_ID = 'gezellig';
 
@@ -70,4 +70,34 @@ const lightChatTheme: Theme = {
 /** The default reading palette needs different link ink on light paper. */
 export function gezelChatThemeForMode(mode: 'light' | 'dark'): Theme {
   return mode === 'light' ? lightChatTheme : gezelChatTheme;
+}
+
+/** The app's bundled UI sans (`--font-ui`), so no font is fetched. */
+export const GEZEL_REPORT_FONT: FontFamily = {
+  custom: { name: 'Hanken Grotesk', fallback: 'system-ui' },
+};
+
+/**
+ * Reports, plans and notes are working documents, read for their facts:
+ * gezellig's serif titles and numerals give a night-shift report the voice of
+ * an essay. Same palette and page rhythm as chat, one neutral sans
+ * throughout. Chat, the Handboek and albums keep the editorial serif.
+ */
+function withReportTypography(theme: Theme): Theme {
+  return {
+    ...theme,
+    typography: {
+      ...theme.typography,
+      bodyFont: GEZEL_REPORT_FONT,
+      titleFont: GEZEL_REPORT_FONT,
+    },
+  };
+}
+
+export const gezelReportTheme: Theme = withReportTypography(gezelChatTheme);
+
+const lightReportTheme: Theme = withReportTypography(lightChatTheme);
+
+export function gezelReportThemeForMode(mode: 'light' | 'dark'): Theme {
+  return mode === 'light' ? lightReportTheme : gezelReportTheme;
 }

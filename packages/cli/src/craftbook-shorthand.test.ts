@@ -1,11 +1,13 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { CatalogItemSummary } from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   SHORTHAND_FLAG,
   craftbookForShorthand,
   craftbookShorthandArgv,
+  localCraftbookNamed,
   shorthandEcho,
   workspaceCraftbookId,
 } from './craftbook-shorthand.js';
@@ -103,6 +105,55 @@ describe('workspaceCraftbookId', () => {
   it('answers nothing for a folder without craftbooks', async () => {
     dir = await mkdtemp(join(tmpdir(), 'gezel-shorthand-'));
     await expect(workspaceCraftbookId(dir, 'qs')).resolves.toBeUndefined();
+  });
+});
+
+describe('localCraftbookNamed', () => {
+  let dir: string | undefined;
+  afterEach(async () => {
+    if (dir) await rm(dir, { recursive: true, force: true });
+    dir = undefined;
+  });
+
+  const catalog =
+    (...books: Array<{ id: string; command?: string }>) =>
+    async () =>
+      books.map(
+        (book) =>
+          ({
+            sourceId: 'bundled',
+            manifest: {
+              kind: 'craftbook-template',
+              name: book.id,
+              version: '1.0.0',
+              steps: [],
+              ...book,
+            },
+          }) as unknown as CatalogItemSummary,
+      );
+
+  it('finds a catalog craftbook by command or id without a service', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'gezel-shorthand-'));
+    const items = catalog({ id: 'status-report', command: 'statusr' });
+    await expect(localCraftbookNamed('statusr', dir, items)).resolves.toBe(true);
+    await expect(localCraftbookNamed('status-report', dir, items)).resolves.toBe(true);
+    await expect(localCraftbookNamed('stauts', dir, items)).resolves.toBe(false);
+  });
+
+  it("finds the folder's own craftbook", async () => {
+    dir = await mkdtemp(join(tmpdir(), 'gezel-shorthand-'));
+    const book = join(dir, '.gezel', 'craftbooks', 'stats');
+    await mkdir(book, { recursive: true });
+    await writeFile(join(book, 'manifest.json'), JSON.stringify({ id: 'stats' }));
+    await expect(localCraftbookNamed('stats', dir, catalog())).resolves.toBe(true);
+  });
+
+  it('leaves the decision to the service when the catalog cannot be read', async () => {
+    dir = await mkdtemp(join(tmpdir(), 'gezel-shorthand-'));
+    const broken = async () => {
+      throw new Error('no gilde');
+    };
+    await expect(localCraftbookNamed('stauts', dir, broken)).resolves.toBe(true);
   });
 });
 

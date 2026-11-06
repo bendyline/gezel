@@ -94,9 +94,13 @@ async function linkedWorkspaceAccessAllowed(
 export function sessionRouteGuard(
   opts: {
     log?: (msg: string) => void;
+    /** For refusals the caller expects and falls back from. Defaults to `log`. */
+    logRoutine?: (msg: string) => void;
     isProjectLinked?: LinkedProjectAccessCheck;
     /** Whether the session's in-flight turn was started by the user. */
     isUserDirectedTurn?: (sessionId: string) => boolean;
+    /** Whether the session's in-flight turn answers a scheduled check-in. */
+    isCheckInTurn?: (sessionId: string) => boolean;
     /** The task's persisted status, or null when there is no such task. */
     taskStatus?: TaskStatusLookup;
     /** Why this session's step binding can no longer move the task, or null. */
@@ -123,8 +127,12 @@ export function sessionRouteGuard(
       opts.isUserDirectedTurn,
       opts.taskStatus,
       opts.staleStepSession,
+      opts.isCheckInTurn,
     );
-    if (!allowed.ok) return denySessionRoute(c, opts, allowed.reason, allowed.code);
+    if (!allowed.ok) {
+      const logTo = allowed.routine && opts.logRoutine ? { log: opts.logRoutine } : opts;
+      return denySessionRoute(c, logTo, allowed.reason, allowed.code);
+    }
     return next();
   };
 }
@@ -141,6 +149,17 @@ export type StaleStepSessionLookup = (
 /** Error code the MCP task tools recognize as "this turn is stale; end it". */
 export const STALE_TASK_STEP_CODE = 'stale_task_step';
 
+/** A session tried to start a task while answering a scheduled check-in. */
+export const CHECK_IN_TURN_CODE = 'check_in_turn';
+
+/**
+ * Read by the model through the task tools' error. A check-in asks for a
+ * report, and the turn ends with one: a refusal that only says no is
+ * retried word for word.
+ */
+export const CHECK_IN_TURN_HINT =
+  "this is a check-in, so it cannot start a task. Answer it in your reply: what's done, what's left, and what is blocking the next step. Do not retry.";
+
 /** A session tried to write a note about the person outside the person's own turn. */
 export const PERSON_MEMORY_NEEDS_USER_TURN_CODE = 'person_memory_needs_user_turn';
 
@@ -151,7 +170,10 @@ export const PERSON_MEMORY_NEEDS_USER_TURN_CODE = 'person_memory_needs_user_turn
 export const PERSON_MEMORY_NEEDS_USER_TURN_HINT =
   'notes about the person can be saved only while they are talking with you. Save this to your own memory instead (scope "gezel"), and do not retry with scope "user".';
 
-type SessionRouteDecision = { ok: true } | { ok: false; reason: string; code?: string };
+type SessionRouteDecision =
+  | { ok: true }
+  /** `routine`: a refusal the caller expects and handles, logged at `logRoutine`. */
+  | { ok: false; reason: string; code?: string; routine?: boolean };
 const SESSION_ALLOW: SessionRouteDecision = { ok: true };
 
 function sessionDeny(reason: string, code?: string): SessionRouteDecision {
@@ -228,6 +250,7 @@ async function isSessionRouteAllowed(
   isUserDirectedTurn?: (sessionId: string) => boolean,
   taskStatus?: TaskStatusLookup,
   staleStepSession?: StaleStepSessionLookup,
+  isCheckInTurn?: (sessionId: string) => boolean,
 ): Promise<SessionRouteDecision> {
   const path = c.req.path;
   const method = c.req.method.toUpperCase();
@@ -343,6 +366,9 @@ async function isSessionRouteAllowed(
     // The owner or the CLI vouches for a recipe's scripts; a gezel creating
     // the task cannot vouch for scripts it may have written itself.
     if (method === 'POST' && /^\/tasks\/?$/.test(rest)) {
+      if (isCheckInTurn?.(sessionId(auth))) {
+        return sessionDeny(CHECK_IN_TURN_HINT, CHECK_IN_TURN_CODE);
+      }
       const body = await readJsonSafe(c);
       if (body?.trustScripts) {
         return sessionDeny('trusting custom scripts requires the owner or the CLI');
@@ -678,7 +704,11 @@ async function isSessionRouteAllowed(
   }
 
   if ((path === '/api/tasks' || path === '/api/tasks/') && method === 'GET') {
-    return auth.team ? SESSION_ALLOW : sessionDeny('global task listing requires a coordinator');
+    // `list_tasks` asks for this first and falls back to its own project, so
+    // refusing a worker is routine and is not logged as a warning.
+    return auth.team
+      ? SESSION_ALLOW
+      : { ok: false, reason: 'global task listing requires a coordinator', routine: true };
   }
 
   // Explicit install-global MCP capabilities. Local craftbook templates are

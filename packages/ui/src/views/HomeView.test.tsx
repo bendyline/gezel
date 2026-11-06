@@ -1050,8 +1050,8 @@ describe('HomeView', () => {
     const user = userEvent.setup();
     render(<HomeView />);
     await screen.findByText('Tip of the day');
-    expect(screen.queryByRole('region', { name: 'Make something' })).not.toBeInTheDocument();
-    for (const name of ['Make something', 'Handboek', GREETING_TAB]) {
+    expect(screen.queryByRole('region', { name: 'Create' })).not.toBeInTheDocument();
+    for (const name of ['Create', 'Handboek', GREETING_TAB]) {
       await user.click(screen.getByRole('button', { name: 'Collapse the greeting' }));
       await user.click(screen.getByRole('tab', { name }));
       expect(screen.getByRole('tabpanel', { name })).toBeVisible();
@@ -1086,8 +1086,8 @@ describe('HomeView', () => {
     expect(api.updateConfig).toHaveBeenCalledWith({ homeGreetingCollapsed: true });
     await waitFor(() => expect(conversation).toHaveFocus());
 
-    await user.click(screen.getByRole('tab', { name: 'Make something' }));
-    expect(screen.getByRole('tabpanel', { name: 'Make something' })).toBeVisible();
+    await user.click(screen.getByRole('tab', { name: 'Create' }));
+    expect(screen.getByRole('tabpanel', { name: 'Create' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Return to Meester chat' })).toBeVisible();
     expect(screen.getByTestId('chat-composer')).toBe(composer);
   });

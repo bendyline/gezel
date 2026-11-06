@@ -106,6 +106,20 @@ test('the build matrix parses into a plausible set of legs', () => {
   }
 });
 
+test('Linux legs name their runner image, so the glibc floor cannot move with ubuntu-latest', () => {
+  const linux = parseMatrix().filter((entry) => entry.platform.startsWith('linux-'));
+  assert.ok(linux.length >= 10, `parsed only ${linux.length} Linux legs`);
+  for (const entry of linux) {
+    const expected = entry.platform === 'linux-arm64' ? 'ubuntu-24.04-arm' : 'ubuntu-24.04';
+    assert.equal(
+      entry.runner,
+      expected,
+      `${entry.engine} ${entry.platform}${entry.variant ? `-${entry.variant}` : ''} must build on ${expected}, the image LINUX_MAX_GLIBC describes`,
+    );
+  }
+  assert.match(workflow, /^ {2}LINUX_MAX_GLIBC: '2\.38'$/m);
+});
+
 test('Apple system inference ships only on Apple silicon and compiles the shared iOS adapter', () => {
   const entries = parseMatrix().filter((entry) => entry.engine === 'apple-fm');
   assert.equal(entries.length, 1);
@@ -213,6 +227,11 @@ test('sd.cpp CUDA legs build against the llama CUDA leg they share a key with', 
     sd,
     /"\$os" == "Linux" && "\$backend" == "cuda" \]\]; then\s+jobs_flag="-j2"/,
     'an uncapped -j runs the hosted runners out of memory under nvcc',
+  );
+  assert.match(
+    sd,
+    /jobs_flag="-j\$\{build_jobs\}"/,
+    'an uncapped -j runs the hosted runners out of memory on the CPU and Vulkan legs too',
   );
   assert.match(workflow, /^ {6}SD_CUDA_ARCH: \$\{\{ matrix\.sd_cuda_arch \|\| '' \}\}$/m);
 

@@ -545,6 +545,17 @@
   border: 1px solid rgba(255, 199, 100, 0.3);
 }
 
+.model-picker-option-hint {
+  margin-inline-start: 0.6rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+.gz-select-item[data-highlighted] .model-picker-option-hint {
+  color: inherit;
+  opacity: 0.78;
+}
+
 /* ── Provider cards in Settings ── */
 
 .provider-card {

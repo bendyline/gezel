@@ -275,6 +275,27 @@ describe('EvidenceLedger', () => {
     expect(briefless.checkProseFileWrite('write_file', write)?.kind).toBe('reject');
   });
 
+  // research-to-document on "A story about ponies and unicorns", 2026-11-06:
+  // the runtime's own step-finished reply quoted the task title, and a step
+  // session the runtime started had no person's words to find it in.
+  it("takes the session's task title and step names as given, with no turn begun", () => {
+    const reply = 'Finished "Finish". "A story about ponies and unicorns" is complete.';
+    const task = {
+      title: 'A story about ponies and unicorns',
+      craftbook: { name: 'Word Document from Content or Research', steps: [{ name: 'Finish' }] },
+    };
+    const ledger = new EvidenceLedger();
+    ledger.setSessionGiven(personGivenText({ messages: [], clockLines: [], task }));
+    ledger.add('retrieval', 'Every pony in the valley had a name.', { title: 'notes.md' });
+    expect(ledger.grounding(reply)?.problems).toEqual([]);
+
+    const untold = new EvidenceLedger();
+    untold.add('retrieval', 'Every pony in the valley had a name.', { title: 'notes.md' });
+    expect(untold.grounding(reply)?.problems.map((p) => p.missing)).toEqual([
+      ['A story about ponies and unicorns'],
+    ]);
+  });
+
   it('names the source files the conversation mentions when nothing was read yet', () => {
     const ledger = new EvidenceLedger();
     ledger.beginTurn('Reconcile memo-product.md and finance.csv into synthesis.md.');
@@ -481,6 +502,43 @@ describe('EvidenceLedger', () => {
     expect(
       ledger.hooks().checkWrite('write_file', { ...fromMemory, path: 'custis.md' })?.kind,
     ).toBe('reject');
+  });
+
+  it('writes out the numbers a file with its own source list does not define', () => {
+    const ledger = new EvidenceLedger();
+    ledger.beginTurn('');
+    ledger.labelToolResult('read_file', { path: 'data/stats.json' }, '{"delta_pp": 0.23}');
+    ledger.labelToolResult('read_file', { path: 'source/brief.md' }, 'The limit is 0.20 points.');
+    ledger.labelToolResult('fetch_url', { url: 'https://example.com/guide' }, 'A guide.');
+    // An unnumbered list: every marker is this session's number.
+    const unnumbered = {
+      path: 'readout.md',
+      content:
+        'The rate moved 0.23 points [1], past the 0.20 limit [2].\n\n## Sources\n\n- data/stats.json\n- source/brief.md\n',
+    };
+    expect(ledger.checkProseFileWrite('write_file', unnumbered)).toEqual({
+      kind: 'allow',
+      args: {
+        path: 'readout.md',
+        content:
+          'The rate moved 0.23 points (source: data/stats.json), past the 0.20 limit (source: source/brief.md).\n\n## Sources\n\n- data/stats.json\n- source/brief.md\n',
+      },
+    });
+    // The file's own [1] stands; the session's [3] is written out; an
+    // unknown [7] is left for the reader (and the gate) to see.
+    const mixed = {
+      path: 'readout.md',
+      content:
+        'The rate moved 0.23 points [1, 3]. See items[7] too.\n\n## Sources\n\n[1] data/stats.json\n',
+    };
+    expect(ledger.checkProseFileWrite('write_file', mixed)).toEqual({
+      kind: 'allow',
+      args: {
+        path: 'readout.md',
+        content:
+          'The rate moved 0.23 points [1] (source: https://example.com/guide). See items[7] too.\n\n## Sources\n\n[1] data/stats.json\n',
+      },
+    });
   });
 
   it('passes a grounded insert with its markers removed, and ignores non-document tools', () => {

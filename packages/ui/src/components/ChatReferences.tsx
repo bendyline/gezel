@@ -26,11 +26,13 @@ import { FileTypeIcon } from './FileTypeIcon.js';
 import { FittedTabsList } from './FittedTabsList.js';
 import { GezelIcon } from './GezelIcon.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
+import { PhotoThumb } from './PhotoThumb.js';
+import { GEZEL_WRITE_CANVAS } from './SquisqIntegration/write-canvas.js';
 import { StepTracker } from './StepTracker.js';
 import { taskStepStatus } from './TaskStepTracker.js';
 import type { ToolActivity } from './chat-bubbles.js';
 import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-command.js';
-import { gezelChatThemeForMode } from './chat-theme.js';
+import { gezelReportThemeForMode } from './chat-theme.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 import { useCompactLayout } from './useCompactLayout.js';
@@ -796,6 +798,7 @@ export function ChatReferences({
                   <span className="muted small">Showing</span>
                   <ReferenceTabMenu
                     variant="picker"
+                    projectId={resolvedProjectId}
                     refs={references}
                     activeKey={effectiveActive.key}
                     selected
@@ -890,6 +893,7 @@ export function ChatReferences({
                 {hasReferences &&
                   (references.length > 1 ? (
                     <ReferenceTabMenu
+                      projectId={resolvedProjectId}
                       refs={references}
                       activeKey={effectiveActive.key}
                       selected={activeTab === 'references'}
@@ -1368,7 +1372,13 @@ function TaskTabMenu({
   );
 }
 
+/** Raster formats the daemon's thumbnail cache may be able to shrink. */
+function hasPhotoThumbnail(path: string): boolean {
+  return /\.(png|jpe?g|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(path);
+}
+
 function ReferenceTabMenu({
+  projectId,
   refs,
   activeKey,
   selected,
@@ -1376,6 +1386,7 @@ function ReferenceTabMenu({
   onSelect,
   variant = 'tab',
 }: {
+  projectId: string;
   refs: Reference[];
   activeKey: string | null;
   selected: boolean;
@@ -1387,6 +1398,7 @@ function ReferenceTabMenu({
     .find((reference) => reference.key === activeKey)
     ?.path.split('/')
     .pop();
+  const showThumbs = refs.some((reference) => hasPhotoThumbnail(reference.path));
   return (
     <DropdownMenu.Root
       onOpenChange={(open) => {
@@ -1410,7 +1422,7 @@ function ReferenceTabMenu({
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
-          className="app-nav-menu chat-rail-reference-menu"
+          className={`app-nav-menu chat-rail-reference-menu${showThumbs ? ' has-thumbs' : ''}`}
           sideOffset={4}
           align="start"
           aria-label="Choose file"
@@ -1418,6 +1430,7 @@ function ReferenceTabMenu({
           {refs.map((reference) => {
             const active = reference.key === activeKey;
             const name = reference.path.split('/').pop() || reference.path;
+            const icon = <FileTypeIcon name={name} className="chat-rail-reference-menu-icon" />;
             return (
               <DropdownMenu.Item
                 key={reference.key}
@@ -1441,7 +1454,19 @@ function ReferenceTabMenu({
                     </svg>
                   )}
                 </span>
-                <FileTypeIcon name={name} className="chat-rail-reference-menu-icon" />
+                {hasPhotoThumbnail(name) ? (
+                  <PhotoThumb
+                    projectId={reference.projectId ?? projectId}
+                    path={reference.path}
+                    kind={reference.kind}
+                    width={160}
+                    alt=""
+                    className="chat-rail-reference-menu-thumb"
+                    fallback={icon}
+                  />
+                ) : (
+                  icon
+                )}
                 <span className="chat-rail-reference-menu-name">{name}</span>
               </DropdownMenu.Item>
             );
@@ -1727,6 +1752,7 @@ function ReferenceCodePreview({ path, content }: { path: string; content: string
   return (
     <div className="chat-rail-viewer-code">
       <EditorShell
+        {...GEZEL_WRITE_CANVAS}
         key={path}
         initialMarkdown={content}
         fileName={path}
@@ -1886,10 +1912,9 @@ function RenderedMarkdownPreview({
         : undefined,
     [markdown, projectId, reportPath],
   );
-  // Same theme the chat bubbles render with — defined in
-  // [chat-theme.ts](./chat-theme.ts). Gezel-tinted surface (warm/sage,
-  // not Squisq's stock cool slate-blue) so the previewer reads as part
-  // of the app chrome.
+  // The report theme from [chat-theme.ts](./chat-theme.ts): chat's palette in
+  // the app's sans. Gezel-tinted surface (warm/sage, not Squisq's stock cool
+  // slate-blue) so the previewer reads as part of the app chrome.
   const surface = effective === 'dark' ? GEZEL_DARK_SURFACE : GEZEL_LIGHT_SURFACE;
   if (!doc) return <pre className="chat-rail-viewer-raw">{markdown}</pre>;
   if (displayMode === 'slideshow') {
@@ -1906,12 +1931,12 @@ function RenderedMarkdownPreview({
     );
   }
   // Files in the rail are working documents — reports, plans, notes — rendered
-  // with the same theme as chat and the rail's own reading surface.
+  // in the report theme on the rail's own reading surface.
   return (
     <div className="chat-rail-viewer-markdown">
       <LinearDocView
         doc={doc}
-        theme={gezelChatThemeForMode(effective)}
+        theme={gezelReportThemeForMode(effective)}
         surface={surface}
         fenceRenderers={fenceRenderers}
         thinMargins={compact}

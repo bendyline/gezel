@@ -17,6 +17,7 @@ import {
   resolveOutsideInLayout,
   useProofingCapability,
 } from '../components/SquisqIntegration/index.js';
+import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 import { recordDocumentUsed } from '../components/document-quick-list.js';
 import { BINARY_FILE, NonTextFilePreview, looksBinary } from '../components/file-browser/index.js';
 import { markdownEquivalent } from '../components/markdown-baseline.js';
@@ -241,6 +242,7 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
     <section className="document-detail" data-testid="document-detail">
       <div className="editor-wrap">
         <EditorShell
+          {...GEZEL_WRITE_CANVAS}
           initialMarkdown={content}
           fileName={path}
           onChange={handleChange}

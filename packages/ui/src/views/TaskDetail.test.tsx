@@ -105,6 +105,12 @@ const NOTE: TaskNote = {
   author: { kind: 'user' },
 } as TaskNote;
 
+// A running gezel task opens on Chat; notes, the description and outputs are on Task.
+function openTaskView() {
+  const views = within(screen.getByRole('group', { name: 'Task view' }));
+  fireEvent.click(views.getByRole('button', { name: 'Task' }));
+}
+
 describe('TaskDetail', () => {
   beforeEach(() => {
     vi.mocked(api.listTaskNotes).mockResolvedValue({ notes: [NOTE] } as never);
@@ -135,6 +141,7 @@ describe('TaskDetail', () => {
     window.__GEZEL__ = { token: 'test', capabilities: OFFLINE_RUNTIME_CAPABILITIES };
     try {
       render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+      openTaskView();
       await screen.findByText('Initial findings.');
       expect(screen.getByRole('button', { name: 'Post note' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Edit note' })).toBeInTheDocument();
@@ -168,6 +175,7 @@ describe('TaskDetail', () => {
     window.addEventListener('gezel:open-file', onOpenFile);
     try {
       render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+      openTaskView();
       const card = await screen.findByRole('region', { name: 'PDF · in progress' });
       expect(api.getTaskOutputs).toHaveBeenCalledWith('pj-alpha', 42);
       fireEvent.click(within(card).getByRole('button', { name: 'Open' }));
@@ -183,6 +191,7 @@ describe('TaskDetail', () => {
 
   it('loads notes/sessions/children on mount', async () => {
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+    openTaskView();
     await waitFor(() => {
       expect(api.listTaskNotes).toHaveBeenCalledWith('pj-alpha', 42);
     });
@@ -207,6 +216,7 @@ describe('TaskDetail', () => {
     const { container } = render(
       <TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />,
     );
+    openTaskView();
 
     await waitFor(() => {
       expect(container.querySelector('.task-note-author .gezel-icon-poppetje')).not.toBeNull();
@@ -298,6 +308,7 @@ describe('TaskDetail', () => {
 
   it('Post note calls appendTaskNote with the editor draft and current step id', async () => {
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+    openTaskView();
     await waitFor(() => {
       expect(screen.getByText('Initial findings.')).toBeInTheDocument();
     });
@@ -327,6 +338,7 @@ describe('TaskDetail', () => {
     // other long-form editor in the app.
     const onChanged = vi.fn();
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={onChanged} />);
+    openTaskView();
 
     expect(screen.queryByRole('button', { name: /^Save$/ })).not.toBeInTheDocument();
 
@@ -347,25 +359,44 @@ describe('TaskDetail', () => {
   // Treated as an edit, an untouched description read "Unsaved changes".
   it('does not mark an untouched description unsaved when the editor re-serializes it', async () => {
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+    openTaskView();
     fireEvent.click(screen.getAllByTestId('editor-reserialize')[0]!);
     await new Promise((resolve) => setTimeout(resolve, 1200));
     expect(screen.queryByText('Unsaved changes')).not.toBeInTheDocument();
     expect(api.updateTask).not.toHaveBeenCalled();
   });
 
-  it('switching the task view exposes its selected button and mounts the chat pane', async () => {
+  it('opens a running gezel task on Chat, the first view, and switches to Task', async () => {
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
-    expect(screen.queryByTestId('task-chat-pane')).not.toBeInTheDocument();
-
     const views = within(screen.getByRole('group', { name: 'Task view' }));
-    const chat = views.getByRole('button', { name: /^Chat/ });
-    fireEvent.click(chat);
+    const [first, second] = views.getAllByRole('button');
+    expect(first).toHaveTextContent(/^Chat/);
+    expect(second).toHaveTextContent('Task');
+    expect(screen.getByTestId('task-chat-pane')).toBeInTheDocument();
+    expect(first).toHaveAttribute('aria-pressed', 'true');
+
+    fireEvent.click(second!);
 
     await waitFor(() => {
-      expect(screen.getByTestId('task-chat-pane')).toBeInTheDocument();
+      expect(screen.queryByTestId('task-chat-pane')).not.toBeInTheDocument();
     });
-    expect(chat).toHaveAttribute('aria-pressed', 'true');
-    expect(views.getByRole('button', { name: 'Task' })).toHaveAttribute('aria-pressed', 'false');
+    expect(second).toHaveAttribute('aria-pressed', 'true');
+    expect(first).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('opens a draft or a task assigned to the person on Task, where Chat has nothing yet', () => {
+    const draft = { ...TASK, status: 'draft' } as unknown as Task;
+    const { unmount } = render(
+      <TaskDetail task={draft} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />,
+    );
+    expect(screen.queryByTestId('task-chat-pane')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Description' })).toBeInTheDocument();
+    unmount();
+
+    const mine = { ...TASK, assignee: { kind: 'user' } } as Task;
+    render(<TaskDetail task={mine} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+    expect(screen.queryByTestId('task-chat-pane')).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Description' })).toBeInTheDocument();
   });
 
   it('a catalog-craftbook draft shows the Start task button without plan guardrails', async () => {

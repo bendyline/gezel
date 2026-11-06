@@ -5,7 +5,7 @@ import { z } from 'zod';
  *
  * The welcome asks while the first model downloads, Settings → General holds
  * the same tray, and every surface that offers work (the welcome's first
- * projects, Make something, New Task, New Project, Knowledge) puts the
+ * projects, Home's Create tab, New Task, New Project, Knowledge) puts the
  * person's areas first. Ordering only: nothing is ever hidden because of a
  * choice, and the answer never enters a prompt.
  *

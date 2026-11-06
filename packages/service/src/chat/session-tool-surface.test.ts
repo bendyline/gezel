@@ -2102,6 +2102,40 @@ describe('resolveSessionToolSurface — generalist union surface', () => {
     for (const name of teammates) expect(outcome.allowlist!.has(name)).toBe(true);
   });
 
+  it("an owner's own installs cap the union of its steps' kits rather than replacing it", async () => {
+    const toolsetsGroupOverride = [
+      'workspace-fs-read',
+      'workspace-fs-write',
+      'code-execution',
+      'web',
+      'memory',
+      'documents',
+      'artifacts',
+      'tasks',
+    ];
+    const generalist = await resolveSessionToolSurface({
+      ...base,
+      toolsetsGroupOverride,
+      activeStep: notesStep,
+      generalistSteps: [notesStep, heroStep],
+    });
+    expect(generalist.allowlist).not.toBeNull();
+    expect(generalist.allowlist!.has('write_file')).toBe(true);
+    expect(generalist.allowlist!.has('write_task_note')).toBe(true);
+    // Installed, but no step of this task needs it.
+    expect(generalist.allowlist!.has('run_nodejs_script')).toBe(false);
+    // Needed by a step, but not installed: the override stays the ceiling.
+    expect(generalist.allowlist!.has('generate_image')).toBe(false);
+
+    // One step under an override keeps the override whole, as before.
+    const single = await resolveSessionToolSurface({
+      ...base,
+      toolsetsGroupOverride,
+      activeStep: notesStep,
+    });
+    expect(single.allowlist!.has('run_nodejs_script')).toBe(true);
+  });
+
   it('a one-step generalist run is byte-identical to the stepwise surface', async () => {
     const stepwise = await resolveSessionToolSurface({ ...base, activeStep: notesStep });
     const generalist = await resolveSessionToolSurface({

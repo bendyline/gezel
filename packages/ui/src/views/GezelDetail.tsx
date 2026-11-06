@@ -51,6 +51,7 @@ import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
 import './GezelDetail.css';
+import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 
 type DetailTab = 'about' | 'appearance' | 'growth' | 'chat' | 'toolsets' | 'memories' | 'settings';
 
@@ -417,6 +418,7 @@ export function GezelDetail({
             </div>
           )}
           <EditorShell
+            {...GEZEL_WRITE_CANVAS}
             ariaLabel={`About ${selected.name}`}
             key={`${selected.id}:${aboutRev}`}
             initialMarkdown={selected.about}

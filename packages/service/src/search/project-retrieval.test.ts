@@ -17,6 +17,11 @@ import {
   type UnifiedSearchResult,
 } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
+import {
+  SHARED_LIBRARY_STARTER_DOC,
+  SHARED_LIBRARY_STARTER_EARLIER_BODIES,
+  SHARED_LIBRARY_STARTER_MD,
+} from '../fs/default-project-docs.js';
 import type { Store } from '../fs/store.js';
 import { bootstrapWorkspace } from '../workspace/template.js';
 import {
@@ -24,6 +29,7 @@ import {
   resolveRetrievalPolicy,
   resolveSessionRetrievalPolicy,
   retrieveProjectContext,
+  untouchedStarterFiles,
 } from './project-retrieval.js';
 import type { SearchService } from './search-service.js';
 import { MERGE_WEIGHTS, scoreResult } from './search-service.js';
@@ -227,8 +233,122 @@ describe('excerpt hydration never injects binary', () => {
   });
 
   it('still hydrates an ordinary text file from disk', async () => {
-    const result = await runWithStore(STORE, [imageHit('notes/outline.md')]);
-    expect(result?.hits[0]?.excerpt).toContain('workspace file content line one');
+    const result = await runWithStore(STORE, [
+      { ...imageHit('notes/outline.md'), snippet: 'workspace file content line one' },
+    ]);
+    expect(result?.hits[0]?.excerpt).toContain('workspace file content line one\nline two');
+  });
+});
+
+/**
+ * Wild-caught (2026-11-06): a story about ponies listed `---` and
+ * `<!DOCTYPE html>` as its sources. Both hits were file summaries, which the
+ * index files at a placeholder range of line 1, and hydration re-read that
+ * line from disk.
+ */
+describe('excerpt hydration keeps what the index matched', () => {
+  const HTML =
+    '<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<title>Sources evidence</title>';
+  const LIBRARY_DOC = [
+    '---',
+    'title: About this library',
+    'description: What the shared document library is.',
+    '---',
+    '# About this library',
+    '',
+    'Everything filed here is readable by every gezel you work with.',
+    '',
+    '## Filing suggestions',
+    '',
+    'Keep documents that apply everywhere at the top level.',
+  ].join('\n');
+
+  function hit(over: Partial<UnifiedSearchResult>): UnifiedSearchResult {
+    return {
+      kind: 'content',
+      id: `content:p1:${over.path}:${over.line}`,
+      title: 'hit',
+      projectId: 'p1',
+      source: 'workspace',
+      retrievalSource: 'workspace',
+      ...scoreResult('content', 0.9),
+      ...over,
+    } as UnifiedSearchResult;
+  }
+
+  async function excerptOf(content: string, result: UnifiedSearchResult) {
+    const store = { ...STORE, readProjectWorkspaceFile: async () => content } as unknown as Store;
+    const search = {
+      searchProject: async () => ({ results: [result], truncated: false }),
+    } as unknown as SearchService;
+    const found = await retrieveProjectContext({
+      store,
+      search,
+      record: RECORD,
+      gezel: GEZEL,
+      config: CONFIG,
+      userText: 'what does the library say about filing suggestions and evidence sources',
+      messageOrigin: 'direct-user',
+    });
+    return found?.hits[0]?.excerpt;
+  }
+
+  it('keeps a summary filed at line 1 instead of the doctype', async () => {
+    const excerpt = await excerptOf(
+      HTML,
+      hit({
+        path: 'powerpoint/task-7/source-evidence.html',
+        line: 1,
+        lineEnd: 1,
+        snippet: 'A page listing the evidence sources gathered for the Valencia deck.',
+      }),
+    );
+    expect(excerpt).toContain('evidence sources gathered');
+    expect(excerpt).not.toContain('DOCTYPE');
+  });
+
+  it('keeps a summary filed at line 1 instead of the frontmatter fence', async () => {
+    const excerpt = await excerptOf(
+      LIBRARY_DOC,
+      hit({
+        path: 'About this library.md',
+        line: 1,
+        lineEnd: 1,
+        snippet: 'Explains the shared library and offers filing suggestions for documents.',
+      }),
+    );
+    expect(excerpt).toContain('offers filing suggestions');
+    expect(excerpt).not.toBe('---');
+  });
+
+  it('reads a markdown chunk past the frontmatter, where the index numbered it', async () => {
+    const excerpt = await excerptOf(
+      LIBRARY_DOC,
+      hit({
+        path: 'About this library.md',
+        line: 5,
+        lineEnd: 7,
+        snippet: 'Filing suggestions Keep documents that apply everywhere at the top level.',
+      }),
+    );
+    expect(excerpt).toBe(
+      '## Filing suggestions\n\nKeep documents that apply everywhere at the top level.',
+    );
+  });
+
+  it('reads a heading symbol at its own line, which counts the frontmatter', async () => {
+    const excerpt = await excerptOf(
+      LIBRARY_DOC,
+      hit({
+        path: 'About this library.md',
+        line: 9,
+        lineEnd: 11,
+        snippet: '## Filing suggestions',
+      }),
+    );
+    expect(excerpt).toBe(
+      '## Filing suggestions\n\nKeep documents that apply everywhere at the top level.',
+    );
   });
 });
 
@@ -342,6 +462,36 @@ describe('keyword hits must be grounded in what they inject', () => {
         }),
       ],
       'Can you create a PowerPoint about France',
+    );
+    expect(result?.hits).toHaveLength(1);
+  });
+
+  it('does not ground a body on a word naming what to make', async () => {
+    const result = await runQuery(
+      [
+        ftsHit({
+          path: 'pdf/task-13/report.md',
+          title: 'report.md',
+          snippet: 'The history of beer is a story of control',
+        }),
+      ],
+      'A story about ponies and unicorns',
+    );
+    expect(result).toBeNull();
+  });
+
+  it("still finds the person's own file by the word naming it", async () => {
+    const result = await runQuery(
+      [ftsHit({ path: 'quarterly/report.md', title: 'report.md', snippet: 'Revenue grew 4%' })],
+      'Fix the typos in the report',
+    );
+    expect(result?.hits).toHaveLength(1);
+  });
+
+  it('grounds on a format word when the request names nothing else', async () => {
+    const result = await runQuery(
+      [ftsHit({ snippet: 'Collected poems from the spring reading' })],
+      'Some poems, please',
     );
     expect(result?.hits).toHaveLength(1);
   });
@@ -987,5 +1137,33 @@ describe("Gezel's own starter files are not the person's sources", () => {
   it("keeps a person's own folder's files, whatever they hold", async () => {
     const result = await runWith(await scaffoldContent('.gitignore'), { workingDir: '/repo' });
     expect(result?.hits).toHaveLength(1);
+  });
+
+  async function libraryStarterDropped(content: string): Promise<boolean> {
+    const store = { ...STORE, readDocument: async () => content } as unknown as Store;
+    const result = {
+      kind: 'document',
+      id: `document:${SHARED_LIBRARY_STARTER_DOC}`,
+      title: SHARED_LIBRARY_STARTER_DOC,
+      path: SHARED_LIBRARY_STARTER_DOC,
+      retrievalSource: 'shared',
+      ...scoreResult('document', 0.9),
+    } as UnifiedSearchResult;
+    return (await untouchedStarterFiles(store, 'p1', [result])).has(result.id);
+  }
+
+  it("drops the library's starter document, in this build's wording or an earlier one", async () => {
+    expect(await libraryStarterDropped(SHARED_LIBRARY_STARTER_MD)).toBe(true);
+    for (const body of SHARED_LIBRARY_STARTER_EARLIER_BODIES) {
+      // An earlier build's copy on disk: its own frontmatter, no blank line after it.
+      const onDisk = `---\ntitle: About this library\ndescription: What the shared document library is and how gezels use it.\n---\n${body}\n`;
+      expect(await libraryStarterDropped(onDisk)).toBe(true);
+    }
+  });
+
+  it('keeps a library starter document the person has edited', async () => {
+    expect(
+      await libraryStarterDropped(`${SHARED_LIBRARY_STARTER_MD}\nOur team writes in UK English.\n`),
+    ).toBe(false);
   });
 });

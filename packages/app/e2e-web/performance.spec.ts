@@ -14,7 +14,12 @@ test('a real task editor becomes idle and saves an edit across navigation', asyn
   test.skip(!world, 'requires the seeded world');
   const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
   await gotoHome(page);
+  // A running task opens on Chat; its description is edited on Task.
+  const taskView = page
+    .getByRole('group', { name: 'Task view' })
+    .getByRole('button', { name: 'Task', exact: true });
   await openTask(page, world!.taskRefs[0]!);
+  await taskView.click();
   const editor = page.locator('.task-description-editor [contenteditable="true"]').first();
   await expect(editor).toBeVisible();
   await page.waitForTimeout(1_000);
@@ -34,6 +39,7 @@ test('a real task editor becomes idle and saves an edit across navigation', asyn
     .poll(async () => (await client.getTaskByRef(world!.taskRefs[0]!)).description)
     .toContain('Performance regression: keep this description');
   await openTask(page, world!.taskRefs[0]!);
+  await taskView.click();
   await expect(editor).toContainText('Performance regression: keep this description');
   await cdp.detach();
 });

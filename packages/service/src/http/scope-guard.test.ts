@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  CHECK_IN_TURN_CODE,
+  CHECK_IN_TURN_HINT,
   PERSON_MEMORY_NEEDS_USER_TURN_CODE,
   PERSON_MEMORY_NEEDS_USER_TURN_HINT,
   type TaskStatusLookup,
@@ -355,6 +357,7 @@ function sessionPolicyApp(
   isProjectLinked?: (source: string, target: string) => Promise<boolean>,
   isUserDirectedTurn?: (sessionId: string) => boolean,
   taskStatus?: TaskStatusLookup,
+  isCheckInTurn?: (sessionId: string) => boolean,
 ) {
   const app = new Hono();
   app.use('*', async (c, next) => {
@@ -365,6 +368,7 @@ function sessionPolicyApp(
     ...(isProjectLinked ? { isProjectLinked } : {}),
     ...(isUserDirectedTurn ? { isUserDirectedTurn } : {}),
     ...(taskStatus ? { taskStatus } : {}),
+    ...(isCheckInTurn ? { isCheckInTurn } : {}),
   });
   app.use('/api/*', guard);
   app.use('/events/*', guard);
@@ -672,6 +676,33 @@ describe('sessionRouteGuard', () => {
     expect((await cli.request(create, jsonPost({ title: 't', trustScripts: true }))).status).toBe(
       200,
     );
+  });
+
+  it('lets a check-in turn report but not start a task', async () => {
+    const create = '/api/projects/proj-a/tasks';
+    const checkIn = sessionPolicyApp(
+      session('proj-a', true),
+      undefined,
+      undefined,
+      undefined,
+      () => true,
+    );
+    const refused = await checkIn.request(create, jsonPost({ title: 'Status report' }));
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: CHECK_IN_TURN_CODE, hint: CHECK_IN_TURN_HINT });
+    expect((await checkIn.request('/api/projects/proj-a/tasks/1')).status).toBe(200);
+    expect(
+      (await checkIn.request('/api/projects/proj-a/tasks/1/steps/draft/complete', jsonPost({})))
+        .status,
+    ).toBe(200);
+    const ordinary = sessionPolicyApp(
+      session('proj-a', true),
+      undefined,
+      undefined,
+      undefined,
+      () => false,
+    );
+    expect((await ordinary.request(create, jsonPost({ title: 't' }))).status).toBe(200);
   });
 
   // Apply is the one route that passes `userInitiated` to the workspace

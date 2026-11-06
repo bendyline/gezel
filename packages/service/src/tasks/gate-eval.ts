@@ -6,6 +6,7 @@ import {
   evaluateDeclarativeCheck,
   gateCheckLabel,
   isSharedGateCheck,
+  yamlValid,
 } from '@bendyline/gezel';
 
 export { gateCheckLabel };
@@ -668,6 +669,15 @@ async function evalCheckInner(
       if (content === null) {
         return { ok: false, detail: `${c.file} not found (needed for the source-parse check)` };
       }
+      if (/\.ya?ml$/i.test(c.file)) {
+        const v = yamlValid(content);
+        if (v.ok) return { ok: true, detail: `${c.file} parses` };
+        return {
+          ok: false,
+          detail: `${c.file} is not valid YAML: ${v.error ?? 'parse failed'} — a config tool will refuse to load it until this is fixed.`,
+          ...(v.error ? { evidence: { firstError: v.error } } : {}),
+        };
+      }
       if (/\.html?$/i.test(c.file)) {
         const v = validateScriptSyntax(extractInlineScripts(content));
         if (v.totalBytes === 0 || v.allParse) return { ok: true, detail: `${c.file} parses` };
@@ -771,6 +781,7 @@ async function evalCheckInner(
         ...(c.flags ? { flags: c.flags } : {}),
         ...(c.minCitations !== undefined ? { minCitations: c.minCitations } : {}),
         ...(c.corpus ? { corpus: c.corpus } : {}),
+        ...(c.proposed ? { proposed: true } : {}),
         ...(deps?.knownCitationPaths ? { knownPaths: deps.knownCitationPaths } : {}),
         ...(deps?.resolveKnowledge ? { resolveKnowledge: deps.resolveKnowledge } : {}),
       });

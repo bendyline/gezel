@@ -4,7 +4,7 @@ import { markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import { type KeyboardEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
-import { gezelChatTheme } from './chat-theme.js';
+import { gezelReportTheme } from './chat-theme.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 
 /** Squisq blocks unknown link schemes; `gezel-nav:` links open in place, so they may render. */
@@ -31,7 +31,7 @@ function fileFromHref(href: string): { path: string; line?: number } | null {
 
 /**
  * A report from a project's artifacts drawer, read in place: rendered with
- * the chat theme, its suggested actions live, and — given `onOpenPath` —
+ * the report theme, its suggested actions live, and — given `onOpenPath` —
  * every file it names (a `gezel-nav:` link, a relative link, or a path in
  * inline code) opening that file instead of navigating away.
  */
@@ -133,7 +133,7 @@ export function ReportDocument({
       {doc ? (
         <LinearDocView
           doc={doc}
-          theme={gezelChatTheme}
+          theme={gezelReportTheme}
           thinMargins
           imageDisplayMode="thumbnail"
           fenceRenderers={fenceRenderers}

@@ -37,12 +37,15 @@ import {
 import { looksBinaryText } from '../fs/binary-text.js';
 import {
   SHARED_LIBRARY_STARTER_DOC,
+  SHARED_LIBRARY_STARTER_EARLIER_BODIES,
   SHARED_LIBRARY_STARTER_MD,
 } from '../fs/default-project-docs.js';
 import type { Store } from '../fs/store.js';
-import { hasDerivedIndexText } from '../index-store/classify.js';
+import { classifyFile, hasDerivedIndexText } from '../index-store/classify.js';
+import { parseFrontmatter } from '../index-store/frontmatter.js';
 import {
   groundingWords,
+  isFormatWord,
   proactiveRetrievalTerms,
   textGroundsWords,
 } from '../index-store/query-terms.js';
@@ -296,9 +299,13 @@ function isGrounded(
   if (result.arm !== 'fts' || words.length === 0) return true;
   // The path and title are injected on the hit's own header line, so a
   // filename match is grounding as much as a body match is.
+  if (textGroundsWords(`${result.title} ${result.path ?? ''}`, words)) return true;
+  // In the body, a word naming what to make ("story", "report") counts only
+  // when the request names nothing else.
+  const subject = words.filter((word) => !isFormatWord(word));
   return textGroundsWords(
-    `${result.title} ${result.path ?? ''} ${result.snippet ?? ''} ${excerpt}`,
-    words,
+    `${result.snippet ?? ''} ${excerpt}`,
+    subject.length > 0 ? subject : words,
   );
 }
 
@@ -748,8 +755,16 @@ function diversify(results: readonly UnifiedSearchResult[]): UnifiedSearchResult
 const WORKSPACE_SCAFFOLD = new Set(['package.json', 'tsconfig.json', '.gitignore']);
 
 function withoutFrontmatter(text: string): string {
-  return text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '').trim();
+  return text
+    .replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n/, '')
+    .replace(/\r\n/g, '\n')
+    .trim();
 }
+
+const LIBRARY_STARTER_BODIES = new Set([
+  withoutFrontmatter(SHARED_LIBRARY_STARTER_MD),
+  ...SHARED_LIBRARY_STARTER_EARLIER_BODIES.map(withoutFrontmatter),
+]);
 
 /**
  * Results that are Gezel's own starter files, exactly as Gezel wrote them:
@@ -788,10 +803,7 @@ export async function untouchedStarterFiles(
         result.path === SHARED_LIBRARY_STARTER_DOC
       ) {
         const content = await store.readDocument(result.path);
-        if (
-          content !== null &&
-          withoutFrontmatter(content) === withoutFrontmatter(SHARED_LIBRARY_STARTER_MD)
-        ) {
+        if (content !== null && LIBRARY_STARTER_BODIES.has(withoutFrontmatter(content))) {
           ids.add(result.id);
         }
       }
@@ -812,6 +824,11 @@ export async function untouchedStarterFiles(
  * guards, because the path test cannot cover an unknown extension: refuse
  * the read up front for derived-index kinds, and discard the result after
  * the fact if it decoded as binary anyway.
+ *
+ * Even a text file's re-read is kept only when it holds what the index
+ * matched. A file's summary is filed at a placeholder range of line 1
+ * (enrich.ts), so re-reading that range gave the file's first line: a story
+ * about ponies cited `---` and `<!DOCTYPE html>` as its sources (2026-11-06).
  */
 async function hydrateExcerpt(
   store: Store,
@@ -839,11 +856,42 @@ async function hydrateExcerpt(
   }
   if (!content || looksBinaryText(content)) return fallback;
   const lines = content.split(/\r?\n/);
-  const start = Math.max(0, (result.line ?? 1) - 1);
-  const requestedEnd = result.lineEnd ? Math.max(start + 1, result.lineEnd) : start + 18;
-  return (
-    tidy(lines.slice(start, Math.min(lines.length, requestedEnd)).join('\n'), maxChars) || fallback
-  );
+  const sliceAt = (shift: number): string => {
+    const start = Math.max(0, (result.line ?? 1) - 1 + shift);
+    const end = result.lineEnd ? Math.max(start + 1, result.lineEnd + shift) : start + 18;
+    return lines.slice(start, Math.min(lines.length, end)).join('\n');
+  };
+  let slice = sliceAt(0);
+  // A markdown file's chunks are numbered from the body after its frontmatter
+  // (content-indexer.ts), its heading symbols from the whole file, and the
+  // hit does not say which it is: keep whichever reading holds more of it.
+  const frontmatter = frontmatterLineCount(result.path, content);
+  if (frontmatter > 0) {
+    const shifted = sliceAt(frontmatter);
+    if (indexedCoverage(shifted, result.snippet) > indexedCoverage(slice, result.snippet)) {
+      slice = shifted;
+    }
+  }
+  if (indexedCoverage(slice, result.snippet) < 0.5) return fallback;
+  return tidy(slice, maxChars) || fallback;
+}
+
+function frontmatterLineCount(path: string, content: string): number {
+  if (classifyFile(path, 0).kind !== 'markdown') return 0;
+  const { body } = parseFrontmatter(content);
+  return content.split(/\r?\n/).length - body.split(/\r?\n/).length;
+}
+
+function indexWords(text: string): string[] {
+  return [...new Set(text.toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) ?? [])];
+}
+
+/** The share of the indexed text's words a re-read slice carries; 1 when there is nothing to match. */
+function indexedCoverage(slice: string, indexed: string | undefined): number {
+  const wanted = indexWords(indexed ?? '');
+  if (wanted.length === 0) return 1;
+  const present = new Set(indexWords(slice));
+  return wanted.filter((word) => present.has(word)).length / wanted.length;
 }
 
 /**

@@ -45,6 +45,7 @@ import {
   pollUntilDone,
   reEngageActiveSteps,
   readCapacityDenialFromLog,
+  readContextOverflowEventsFromLog,
   readContextOverflowFromLog,
   recoveryFilePathForSniff,
   recoveryNudgeNote,
@@ -69,6 +70,7 @@ import {
   throughputScale,
   throughputScaledMaxDurationMs,
   totalWorkspaceFileCount,
+  trialContextOverflow,
   trialHardProgressTimeoutMs,
   trialMaxDurationMs,
   turnLastToolCallAgoMs,
@@ -472,7 +474,7 @@ describe('scenario terminal failure handoff', () => {
       });
       expect(verdict).toMatchObject({
         success: false,
-        failureMode: 'spawn-error',
+        failureMode: 'context-overflow',
         reason: 'context overflow: 9,999 tokens needed but only 8,192 available',
       });
     } finally {
@@ -2543,6 +2545,90 @@ describe('readContextOverflowFromLog', () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('trialContextOverflow', () => {
+  const OVERFLOW =
+    'On-device model ran out of working memory: 32,906 tokens needed but only 32,768 available.';
+  const log = [
+    'DEBUG [chat] runSend#892b8527 ENTRY userTextLen=454',
+    'ERROR [chat] error:',
+    OVERFLOW,
+    `DEBUG [chat] runSend#892b8527 EXIT throw afterMs=37547 ${OVERFLOW}`,
+    '',
+  ].join('\n');
+
+  async function withLog<T>(text: string, run: (path: string) => Promise<T>): Promise<T> {
+    const dir = await mkdtemp(join(tmpdir(), 'gezel-trial-overflow-'));
+    try {
+      const path = join(dir, 'daemon.log');
+      await writeFile(path, text);
+      return await run(path);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  function scenarioOwning(taskRefs: string[] | null) {
+    return {
+      ownTasks: async () => (taskRefs ? { projectId: 'p', taskRefs } : null),
+    } as unknown as EvalScenario;
+  }
+
+  function ctxWith(sessions: Array<{ id: string; taskRef?: string }>) {
+    return {
+      client: { listChatSessions: async () => ({ sessions }) },
+    } as unknown as EvalContext;
+  }
+
+  it('reads the session each failed turn belonged to', async () => {
+    await withLog(log, async (path) => {
+      expect(readContextOverflowEventsFromLog(path)).toEqual([
+        { sessionPrefix: '892b8527', reason: OVERFLOW },
+      ]);
+    });
+    await withLog(`${OVERFLOW}\n`, async (path) => {
+      expect(readContextOverflowEventsFromLog(path)).toBeNull();
+    });
+  });
+
+  it("ends the trial on an overflow in the task's own session", async () => {
+    await withLog(log, async (path) => {
+      const ctx = ctxWith([{ id: '892b8527-6945-44cb', taskRef: 'p/1' }]);
+      await expect(
+        trialContextOverflow(scenarioOwning(['p/1']), ctx, path, new Set(), () => {}),
+      ).resolves.toBe(OVERFLOW);
+    });
+  });
+
+  it('leaves an overflow in a side conversation to the watchdogs, once', async () => {
+    await withLog(log, async (path) => {
+      const lines: string[] = [];
+      const foreign = new Set<string>();
+      const ctx = ctxWith([{ id: '892b8527-6945-44cb' }]);
+      const scenario = scenarioOwning(['p/1']);
+      await expect(
+        trialContextOverflow(scenario, ctx, path, foreign, (l) => lines.push(l)),
+      ).resolves.toBeNull();
+      await expect(
+        trialContextOverflow(scenario, ctx, path, foreign, (l) => lines.push(l)),
+      ).resolves.toBeNull();
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toContain("session 892b8527, which is not the task's");
+    });
+  });
+
+  it('counts any overflow when the scenario names no task', async () => {
+    await withLog(log, async (path) => {
+      const ctx = ctxWith([]);
+      await expect(
+        trialContextOverflow(scenarioOwning(null), ctx, path, new Set(), () => {}),
+      ).resolves.toBe(OVERFLOW);
+      await expect(
+        trialContextOverflow({} as EvalScenario, ctx, path, new Set(), () => {}),
+      ).resolves.toBe(OVERFLOW);
+    });
   });
 });
 

@@ -38,64 +38,81 @@ const log = createLogger('anthropic-cli');
  * Anthropic API (Fable 5.1, Opus 5.5, Sonnet 5.5, Haiku 5.5). The default is
  * only the picker's "Model default" label — Gezel passes no `--effort` when
  * the user leaves it unset — so it must match Claude Code's own default.
+ * `default` resolves per plan, so it states no default of its own.
+ *
+ * The `sonnet[1m]` / `opus[1m]` variants are not listed: every model those
+ * aliases resolve to now has a 1M window natively, so they offered nothing
+ * the plain alias does not. Claude Code still accepts them, so a gezel or
+ * setting that saved one keeps working.
+ *
+ * Listed in picker order: the aliases that choose for the account first,
+ * then the families from fastest to most capable.
  */
 const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
+const ACCOUNT_GROUP = 'Chosen for your account';
+const MODELS_GROUP = 'Models';
+
 const HARDCODED_MODELS: ModelInfo[] = [
-  { id: 'default', name: 'Recommended for your account' },
+  {
+    id: 'default',
+    name: 'Recommended for your account',
+    description: "Claude Code's pick for your plan",
+    group: ACCOUNT_GROUP,
+    supportsReasoning: true,
+    reasoningEfforts: CLAUDE_EFFORTS,
+  },
   {
     id: 'best',
-    name: 'Best available — Most capable model your account can use',
+    name: 'Best available',
+    description: 'Claude Fable when your account has it, otherwise Claude Opus',
+    group: ACCOUNT_GROUP,
     supportsReasoning: true,
     reasoningEfforts: CLAUDE_EFFORTS,
     defaultReasoningEffort: 'high',
   },
   {
-    id: 'fable',
-    name: 'Claude Fable — Highest capability for demanding, long-running work',
-    supportsReasoning: true,
-    reasoningEfforts: CLAUDE_EFFORTS,
-    defaultReasoningEffort: 'high',
-    contextWindow: 1_000_000,
-  },
-  {
-    id: 'sonnet',
-    name: 'Claude Sonnet — Balanced speed and capability for daily work',
+    id: 'haiku',
+    name: 'Claude Haiku',
+    description: 'Fastest, for simple tasks',
+    group: MODELS_GROUP,
     supportsReasoning: true,
     reasoningEfforts: CLAUDE_EFFORTS,
     defaultReasoningEffort: 'medium',
   },
   {
-    id: 'sonnet[1m]',
-    name: 'Claude Sonnet with 1M context — For long sessions and large codebases',
+    id: 'sonnet',
+    name: 'Claude Sonnet',
+    description: 'Balanced speed and capability for daily work',
+    group: MODELS_GROUP,
     supportsReasoning: true,
     reasoningEfforts: CLAUDE_EFFORTS,
     defaultReasoningEffort: 'medium',
   },
   {
     id: 'opus',
-    name: 'Claude Opus — Deep reasoning for complex work',
+    name: 'Claude Opus',
+    description: 'Deep reasoning for complex work',
+    group: MODELS_GROUP,
     supportsReasoning: true,
     reasoningEfforts: CLAUDE_EFFORTS,
     defaultReasoningEffort: 'medium',
   },
   {
-    id: 'opus[1m]',
-    name: 'Claude Opus with 1M context — Deep reasoning for long sessions',
+    id: 'fable',
+    name: 'Claude Fable',
+    description: 'Highest capability for demanding, long-running work',
+    group: MODELS_GROUP,
     supportsReasoning: true,
     reasoningEfforts: CLAUDE_EFFORTS,
-    defaultReasoningEffort: 'medium',
-  },
-  {
-    id: 'haiku',
-    name: 'Claude Haiku — Fastest for simple tasks',
-    supportsReasoning: true,
-    reasoningEfforts: CLAUDE_EFFORTS,
-    defaultReasoningEffort: 'medium',
+    defaultReasoningEffort: 'high',
+    contextWindow: 1_000_000,
   },
   {
     id: 'opusplan',
-    name: 'Plan with Opus, build with Sonnet — For complex implementation work',
+    name: 'Plan with Opus, build with Sonnet',
+    description: 'For complex implementation work',
+    group: MODELS_GROUP,
     supportsReasoning: true,
     reasoningEfforts: CLAUDE_EFFORTS,
     defaultReasoningEffort: 'medium',
@@ -303,8 +320,12 @@ export class AnthropicCliProvider implements LLMProvider {
   async listModels(): Promise<ModelInfo[]> {
     const merged = new Map<string, ModelInfo>();
     for (const m of HARDCODED_MODELS) merged.set(m.id, m);
-    for (const m of this.extraModels) merged.set(m.id, m);
-    return [...merged.values()].sort((a, b) => a.id.localeCompare(b.id));
+    // An override keeps the built-in's place and heading; a new id joins
+    // the models after the built-ins.
+    for (const m of this.extraModels) {
+      merged.set(m.id, { group: merged.get(m.id)?.group ?? MODELS_GROUP, ...m });
+    }
+    return [...merged.values()];
   }
 }
 

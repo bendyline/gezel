@@ -110,6 +110,12 @@ env:
   # <iostream>. For comparison NVIDIA ships libcublas/libcudart against
   # GLIBC_2.17. Lowering this means building against older glibc headers —
   # a container or an older runner image — not changing any source.
+  #
+  # So every Linux build leg names its image (ubuntu-24.04, ubuntu-24.04-arm),
+  # never ubuntu-latest. native-v0.1.58 started on the day ubuntu-latest became
+  # Ubuntu 26.04: every x64 binary came out needing GLIBC_2.43, and its GCC 15
+  # is newer than CUDA 12.8's nvcc accepts, so the CUDA legs failed to
+  # configure. The CUDA toolkit also comes from NVIDIA's ubuntu2404 apt repo.
   LINUX_MAX_GLIBC: '2.38'
   LINUX_MAX_GLIBCXX: '3.4.32'
   # ARM64 llama-server-impl also imports GCC 14's CXXABI_1.3.15. Checking
@@ -185,7 +191,7 @@ jobs:
             kind: helper
             platform: linux-x64
             variant: ''
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: gezel-device-health
             needs_cuda: false
@@ -208,7 +214,7 @@ jobs:
             kind: helper
             platform: linux-x64
             variant: ''
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: gezel-sandbox
             needs_cuda: false
@@ -265,7 +271,7 @@ jobs:
           - engine: sd-cpp
             platform: linux-x64
             variant: ''
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: gezel-sd-server
             # Bundle libvulkan.so.1 so minimal hosts can reach CPU fallback.
@@ -309,7 +315,7 @@ jobs:
           - engine: sd-cpp
             platform: linux-x64
             variant: cuda
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: gezel-sd-server
             sd_backend: cuda
@@ -385,7 +391,7 @@ jobs:
           - engine: llama-cpp
             platform: linux-x64
             variant: cpu
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: gezel-llama-server
             needs_cuda: false
@@ -393,7 +399,7 @@ jobs:
           - engine: llama-cpp
             platform: linux-x64
             variant: vulkan
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: gezel-llama-server
             needs_cuda: false
@@ -401,7 +407,7 @@ jobs:
           - engine: llama-cpp
             platform: linux-x64
             variant: cuda
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: gezel-llama-server
             needs_cuda: true
@@ -559,7 +565,7 @@ jobs:
           - engine: llama-cpp
             platform: linux-x64
             variant: rocm
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: gezel-llama-server
             needs_cuda: false
@@ -605,7 +611,7 @@ jobs:
           - engine: ds4
             platform: linux-x64
             variant: cuda
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: gezel-ds4-server
             needs_cuda: true
@@ -647,7 +653,7 @@ jobs:
           - engine: whisper-cpp
             platform: linux-x64
             variant: ''
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: gezel-whisper-server
             needs_cuda: false
@@ -715,7 +721,7 @@ jobs:
           - engine: uv
             platform: linux-x64
             variant: ''
-            runner: ubuntu-latest
+            runner: ubuntu-24.04
             script: build.sh
             artifact: uv
             needs_cuda: false
@@ -758,10 +764,14 @@ jobs:
             needs_cuda: false
             needs_vulkan: false
     runs-on: ${{ matrix.runner }}
-    # The llama-cpp darwin-arm64 metal leg has legitimately run 98 min green,
-    # and the linux-x64 cuda leg 67. Sized at roughly 2x the worst observed so
-    # a slow-but-working compile is never the thing that trips this.
-    timeout-minutes: 180
+    # The nine-architecture CUDA legs are the slow ones: in native-v0.1.57
+    # llama-cpp ran 140 min on win32-x64 and 133 on linux-x64, and sd-cpp 126
+    # on linux-x64. sd.cpp master-1050 then added CUTLASS kernels, which took
+    # the single-architecture linux-arm64 sd leg from 24 to 30 min, so the
+    # linux-x64 one should land around 160-180. Sized at roughly 2x the worst
+    # observed so a slow-but-working compile is never the thing that trips
+    # this; GitHub's ceiling for a hosted job is 360.
+    timeout-minutes: 300
     env:
       # llama-cpp reads these to pick the cmake backend flag and emit to a
       # per-variant output directory. sd-cpp ignores them: it takes its

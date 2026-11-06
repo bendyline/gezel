@@ -535,7 +535,7 @@ export function ProjectConnectionsTab({
                 />
               </li>
             ) : (
-              <li key={b.id}>
+              <li key={b.id} className="connected-app-row">
                 <div>
                   <strong>{b.displayName || b.type}</strong>
                   <span className="muted small"> · {b.type}</span>
@@ -583,7 +583,7 @@ export function ProjectConnectionsTab({
           </p>
           <ul className="settings-list">
             {pending.map((a) => (
-              <li key={a.draftId}>
+              <li key={a.draftId} className="connected-app-row">
                 <div>
                   <strong>{a.action}</strong>
                   <span className="muted small"> · {a.connectorType}</span>
