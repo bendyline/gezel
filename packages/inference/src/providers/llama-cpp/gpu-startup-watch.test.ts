@@ -33,6 +33,22 @@ describe('GpuStartupWatch', () => {
     });
   });
 
+  it('treats a ROCm build like CUDA: satisfied by its device, explained by its init failure', () => {
+    const usingRocm =
+      '0.00.498.211 I llama_model_load_from_file_impl: using device ROCm0 (AMD Radeon AI PRO R9700) (0000:03:00.0) - 31914 MiB free';
+    expect(watch('rocm', [MODEL_LOAD, usingRocm])).toBeNull();
+    expect(
+      watch('rocm', [
+        'ggml_cuda_init: failed to initialize ROCm: no ROCm-capable device is detected',
+        MODEL_LOAD,
+      ]),
+    ).toEqual({
+      backend: 'rocm',
+      reason: 'init-failed',
+      detail: 'no ROCm-capable device is detected',
+    });
+  });
+
   it('reports a Vulkan build that found no device', () => {
     expect(watch('vulkan', ['ggml_vulkan: No devices found.', MODEL_LOAD])).toEqual({
       backend: 'vulkan',

@@ -325,6 +325,77 @@ test('Windows-on-ARM CUDA targets RTX Spark with a pinned toolkit', () => {
   assert.match(llama, /arm64-windows-cuda\.cmake/);
 });
 
+test('ROCm legs build exactly the GPU targets discovery trusts, from a pinned SDK', () => {
+  // Discovery decides from ROCM_GFX_TARGETS before a download and from the
+  // build's own record after one; a target in one list and not the others is
+  // a GPU handed to a build with no code for it.
+  const core = readFileSync(
+    fileURLToPath(new URL('../packages/core/src/native/rocm-devices.ts', import.meta.url)),
+    'utf8',
+  );
+  const block = core.match(/export const ROCM_GFX_TARGETS[^=]*=\s*Object\.freeze\(\[([^\]]*)\]/);
+  assert.ok(block, 'could not find ROCM_GFX_TARGETS in rocm-devices.ts');
+  const targets = [...block[1].matchAll(/'(gfx[0-9a-f]+)'/g)].map(([, gfx]) => gfx);
+  assert.ok(targets.length >= 1);
+
+  const legs = parseMatrix().filter((entry) => entry.variant === 'rocm');
+  assert.deepEqual(legs.map((entry) => entry.platform).sort(), ['linux-x64', 'win32-x64']);
+  for (const entry of legs) {
+    assert.equal(entry.engine, 'llama-cpp');
+    assert.equal(entry.needs_rocm, 'true', `${entry.platform} installs the ROCm SDK`);
+    assert.deepEqual(entry.rocm_gpu_targets.split(';'), targets, `${entry.platform} targets`);
+  }
+  // MSVC 14.51 (windows-latest) breaks HIP's <cmath>, as it broke nvcc.
+  assert.equal(legs.find((entry) => entry.platform === 'win32-x64').runner, 'windows-2022');
+
+  const defaults = [
+    [/'(gfx[0-9a-fgx;]+)'\s*\n\}/, 'build.ps1'],
+    [/LLAMA_ROCM_TARGETS:-([0-9a-fgx;]+)\}/, 'build.sh'],
+  ];
+  for (const [pattern, name] of defaults) {
+    const contents = [...unixWrapperPaths, ...windowsWrapperPaths].find(([path]) =>
+      path.endsWith(`llama-cpp/${name}`),
+    )[1];
+    const match = contents.match(pattern);
+    assert.ok(match, `could not find the default ROCm targets in ${name}`);
+    assert.deepEqual(match[1].split(';'), targets, `${name} default targets`);
+  }
+  const llama =
+    windowsWrapperPaths.find(([path]) => path.includes('llama-cpp/build.ps1'))?.[1] ?? '';
+  assert.match(llama, /--target ggml-hip/);
+  assert.match(llama, /trim-rocm-kpack\.mjs/);
+
+  const requirements = readFileSync(
+    fileURLToPath(new URL('../native/scripts/rocm-sdk-requirements.txt', import.meta.url)),
+    'utf8',
+  );
+  const pinned = [
+    ...requirements.matchAll(
+      /^([a-z0-9-]+)==([\w.]+)((?:\s*\\\s*\n\s*--hash=sha256:[0-9a-f]{64})+)/gm,
+    ),
+  ];
+  const devices = pinned
+    .map(([, name]) => name.match(/^rocm-sdk-device-(gfx[0-9a-f]+)$/)?.[1])
+    .filter(Boolean);
+  assert.deepEqual(devices, targets, 'one pinned device wheel per target');
+  for (const [, name, , hashes] of pinned) {
+    const count = hashes.match(/--hash=/g).length;
+    // Every wheel needs its Linux and its Windows hash; the source archive has one.
+    assert.equal(count, name === 'rocm' ? 1 : 2, `${name} is not pinned for both platforms`);
+  }
+  assert.deepEqual(
+    pinned.map(([, name]) => name).filter((name) => !name.startsWith('rocm-sdk-device-')),
+    ['rocm', 'rocm-sdk-core', 'rocm-sdk-libraries', 'rocm-sdk-devel'],
+  );
+  for (const step of ['Install ROCm SDK (Linux)', 'Install ROCm SDK (Windows)']) {
+    const start = workflow.indexOf(`      - name: ${step}`);
+    assert.notEqual(start, -1, `could not find ${step}`);
+    const body = workflow.slice(start, workflow.indexOf('      - name:', start + 10));
+    assert.match(body, /--require-hashes --no-deps/, step);
+    assert.match(body, /rocm-sdk-requirements\.txt/, step);
+  }
+});
+
 test('releases published before a key existed are not asked for it', () => {
   for (const [key, version] of Object.entries(FIRST_NATIVE_RELEASE)) {
     assert.ok(NATIVE_PAYLOAD[key], `FIRST_NATIVE_RELEASE names ${key}, which nothing ships`);
@@ -440,7 +511,7 @@ test('platformKeysForEngine reports where each engine actually ships', () => {
     'linux-arm64-cuda',
   ]);
   assert.ok(
-    platformKeysForEngine('llama-cpp').every((key) => /-(?:cpu|vulkan|cuda|metal)$/.test(key)),
+    platformKeysForEngine('llama-cpp').every((key) => /-(?:cpu|vulkan|cuda|rocm|metal)$/.test(key)),
     'llama-cpp ships only under variant-suffixed keys',
   );
   assert.deepEqual(platformKeysForEngine('not-an-engine'), []);

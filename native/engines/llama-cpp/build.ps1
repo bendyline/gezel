@@ -4,10 +4,11 @@
 # Emits: native/build/win32-{x64,arm64}[-<backend>]/gezel-llama-server.exe
 #
 # Backend defaults to CUDA (nvcc on PATH) -> Vulkan (Vulkan SDK present)
-# -> CPU. Override with $env:LLAMA_BACKEND (values: cuda, vulkan, cpu).
+# -> CPU. Override with $env:LLAMA_BACKEND (values: cuda, rocm, vulkan, cpu).
+# ROCm is never auto-selected; ask for it.
 #
-# Gezel's release matrix builds three variants on Windows (cuda, vulkan,
-# cpu) and picks the right one at runtime. For local iteration, pick
+# Gezel's release matrix builds four variants on Windows x64 (cuda, rocm,
+# vulkan, cpu) and picks the right one at runtime. For local iteration, pick
 # one; CI sets $env:LLAMA_BACKEND_TAG=1 to emit to the variant-suffixed
 # directory so multi-variant builds don't clobber each other.
 #
@@ -18,6 +19,14 @@
 #     CUDA 13.4+ with the ARM64 libraries (CUDA_PATH\lib\arm64, bin\arm64)
 #     and the VC.Tools.ARM64 component; see native/cmake/arm64-windows-cuda.cmake.
 #   - Vulkan backend: Vulkan SDK installed, VULKAN_SDK env var set.
+#   - ROCm backend (x64 only): AMD's ROCm SDK from its pip wheels,
+#     `rocm[libraries,devel]` plus one `rocm-sdk-device-<gfx>` wheel per
+#     target, expanded with `rocm-sdk init`; HIP_PATH (or ROCM_PATH) names the
+#     devel tree. build-native.yml pins the wheels. Needs Visual Studio 2022's
+#     MSVC 14.4x headers: 14.51 (VS 2026) declares clang-builtin overloads of
+#     isless & co. in <cmath> that clash with HIP's device declarations. To
+#     build against VS 2026 anyway, point LLAMA_HIP_MSVC_INCLUDE at a copy of
+#     its include directory with that block excluded under __HIP__.
 
 param()
 $ErrorActionPreference = 'Stop'
@@ -149,6 +158,9 @@ $isArm64 = $platform -eq 'win32-arm64'
 # -- 2. Resolve accelerator ----------------------------------------
 $backend = if ($env:LLAMA_BACKEND) { $env:LLAMA_BACKEND } else { 'auto' }
 $llamaCudaArch = if ($env:LLAMA_CUDA_ARCH) { $env:LLAMA_CUDA_ARCH } else { '' }
+if ($backend -eq 'rocm' -and $isArm64) {
+  throw 'LLAMA_BACKEND=rocm is x64 only: AMD publishes no ROCm SDK for Windows on ARM'
+}
 if ($isArm64) {
   # Windows-on-ARM ships CPU for every device, plus CUDA for RTX Spark
   # (NVIDIA N1X): CUDA 13.4 is the first toolkit with Windows ARM64 support,
@@ -260,8 +272,20 @@ switch ($backend) {
     }
   }
   'vulkan' { $cmakeFlags += '-DGGML_VULKAN=ON' }
+  # The server and CPU backends build here exactly as the cpu leg's do;
+  # ggml-hip.dll comes from a second configure (section 4c).
+  'rocm'   { }
   'cpu'    { }
-  default  { throw "unknown LLAMA_BACKEND=$backend (valid: cuda, vulkan, cpu)" }
+  default  { throw "unknown LLAMA_BACKEND=$backend (valid: cuda, rocm, vulkan, cpu)" }
+}
+# The GPU architectures the ROCm build carries kernels for. Release legs set
+# LLAMA_ROCM_TARGETS from build-native.yml; the default is the same list
+# (ROCM_GFX_TARGETS in packages/core/src/native/rocm-devices.ts, which
+# native-payload.test.mjs holds all three to).
+$rocmTargets = if ($env:LLAMA_ROCM_TARGETS) {
+  $env:LLAMA_ROCM_TARGETS
+} else {
+  'gfx1100;gfx1101;gfx1102;gfx1103;gfx1150;gfx1151;gfx1200;gfx1201'
 }
 Write-Host "[build] platform=$platform backend=$backend cuda_architectures=$(if ($llamaCudaArch) { $llamaCudaArch } else { 'unset' })"
 
@@ -340,6 +364,11 @@ $metadata = [ordered]@{
   platform = $platform
   backend = $backend
 }
+if ($backend -eq 'rocm') {
+  # Discovery reads this to ask whether the build has code for this machine's
+  # GPUs (packages/core/src/native/rocm-devices.ts).
+  $metadata.rocmTargets = @($rocmTargets -split ';' | Where-Object { $_ })
+}
 if ($backend -eq 'cuda') {
   if ($llamaCudaArch) {
     $metadata.cudaArchitectures = @($llamaCudaArch -split ';')
@@ -414,6 +443,138 @@ if ($splitCuda) {
   if (-not $cudaModule) { throw "ggml-cuda.dll not produced under $cudaBuildDir" }
   Copy-Item $cudaModule.FullName (Join-Path $outDir 'ggml-cuda.dll') -Force
   Write-Host "[build] bundled ggml-cuda.dll (MSVC + nvcc, loaded through GGML_BACKEND_DL)"
+}
+
+# -- 4c. ROCm: ggml-hip.dll from a second, HIP clang configure -----
+# Upstream's own recipe for its win-rocm zip: the server and the CPU backends
+# from the MSVC build above, ggml-hip.dll from ROCm's clang with
+# GGML_CPU=OFF. GGML_BACKEND_DL loads it at runtime, and it imports
+# ggml-base.dll by name, which the build above provides from the same pinned,
+# patched source.
+#
+# Unlike upstream's zip, which leaves hipBLAS and rocBLAS to an installed HIP
+# SDK, the variant is self-contained like the CUDA one: everything ggml-hip
+# loads from the SDK, the rocBLAS kernels for each target, and the
+# per-target kernel packs (see scripts/trim-rocm-kpack.mjs). The display
+# driver is the user's, as NVIDIA's is for CUDA.
+if ($backend -eq 'rocm') {
+  $rocmRoot = if ($env:HIP_PATH) { $env:HIP_PATH } elseif ($env:ROCM_PATH) { $env:ROCM_PATH } else { $null }
+  if (-not $rocmRoot -or -not (Test-Path (Join-Path $rocmRoot 'lib\llvm\bin\clang.exe'))) {
+    throw "LLAMA_BACKEND=rocm needs HIP_PATH (or ROCM_PATH) pointing at an expanded ROCm SDK devel tree (rocm-sdk path --root)"
+  }
+  $rocmRoot = (Resolve-Path $rocmRoot).Path
+  $rocmBin = Join-Path $rocmRoot 'bin'
+  $clang = Join-Path $rocmRoot 'lib\llvm\bin\clang.exe'
+  $clangxx = Join-Path $rocmRoot 'lib\llvm\bin\clang++.exe'
+  Write-Host "[build] ROCm SDK: $rocmRoot (targets $rocmTargets)"
+
+  Import-VsDevEnv
+  if ($env:LLAMA_HIP_MSVC_INCLUDE) {
+    $env:INCLUDE = "$($env:LLAMA_HIP_MSVC_INCLUDE);$($env:INCLUDE)"
+    Write-Host "[build] HIP compile uses MSVC headers from $($env:LLAMA_HIP_MSVC_INCLUDE) first"
+  }
+  if (-not (Get-Command ninja -ErrorAction SilentlyContinue)) {
+    throw 'ninja is not on PATH; the ROCm build needs Ninja (Visual Studio CMake tools, or choco install ninja)'
+  }
+  $env:HIP_PATH = $rocmRoot
+  $env:HIP_PLATFORM = 'amd'
+  $env:HIP_DEVICE_LIB_PATH = Join-Path $rocmRoot 'lib\llvm\amdgcn\bitcode'
+  $env:LLVM_PATH = Join-Path $rocmRoot 'lib\llvm'
+  $env:PATH = "$rocmBin;$($env:PATH)"
+
+  $hipBuildDir = Join-Path $src "build-$platform-rocm-backend"
+  $hipFlags = @(
+    '-G', 'Ninja',
+    '-DCMAKE_BUILD_TYPE=Release',
+    "-DCMAKE_PREFIX_PATH=$rocmRoot",
+    "-DCMAKE_C_COMPILER=$clang",
+    "-DCMAKE_CXX_COMPILER=$clangxx",
+    "-DCMAKE_HIP_COMPILER=$clang",
+    '-DCMAKE_C_FLAGS=-Wno-error=incompatible-pointer-types',
+    "-DHIP_PATH=$rocmRoot",
+    "-DAMDGPU_TARGETS=$rocmTargets",
+    '-DGGML_BACKEND_DL=ON',
+    '-DGGML_CPU=OFF',
+    '-DGGML_HIP=ON',
+    '-DGGML_NATIVE=OFF',
+    '-DGGML_OPENMP=OFF',
+    '-DLLAMA_BUILD_IS_DEV=OFF',
+    '-DLLAMA_BUILD_SERVER=OFF',
+    '-DLLAMA_BUILD_TESTS=OFF',
+    '-DLLAMA_BUILD_EXAMPLES=OFF',
+    '-DLLAMA_BUILD_TOOLS=OFF',
+    '-DLLAMA_CURL=OFF',
+    '-DLLAMA_BUILD_UI=OFF',
+    '-DLLAMA_USE_PREBUILT_UI=OFF',
+    '-DLLAMA_OPENSSL=OFF'
+  )
+  & cmake -S $src -B $hipBuildDir @hipFlags
+  if ($LASTEXITCODE -ne 0) { throw "cmake configure failed (ggml-hip)" }
+  & cmake --build $hipBuildDir --target ggml-hip -j
+  if ($LASTEXITCODE -ne 0) { throw "cmake build failed (ggml-hip)" }
+  $hipModule = Get-ChildItem -Path $hipBuildDir -Recurse -Filter 'ggml-hip.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $hipModule) { throw "ggml-hip.dll not produced under $hipBuildDir" }
+  Copy-Item $hipModule.FullName (Join-Path $outDir 'ggml-hip.dll') -Force
+  Write-Host "[build] bundled ggml-hip.dll ($([math]::Round($hipModule.Length / 1MB)) MB, loaded through GGML_BACKEND_DL)"
+
+  # Everything ggml-hip.dll loads from the SDK, found by walking import tables
+  # rather than listed by name, so a ROCm release that adds a dependency
+  # cannot ship an archive missing it. The display driver's own DLLs are not
+  # in the SDK and are never copied.
+  $dumpbin = (Get-Command dumpbin -ErrorAction SilentlyContinue).Source
+  if (-not $dumpbin) { throw 'dumpbin is not on PATH after importing the VS environment' }
+  $sdkDlls = @{}
+  Get-ChildItem -Path $rocmBin -Filter '*.dll' | ForEach-Object { $sdkDlls[$_.Name.ToLowerInvariant()] = $_.FullName }
+  $queue = [System.Collections.Generic.Queue[string]]::new()
+  $queue.Enqueue((Join-Path $outDir 'ggml-hip.dll'))
+  $bundled = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+  while ($queue.Count -gt 0) {
+    $current = $queue.Dequeue()
+    $imports = & $dumpbin /nologo /dependents $current |
+      Where-Object { $_ -match '^\s+(\S+\.dll)\s*$' } | ForEach-Object { $Matches[1] }
+    foreach ($import in $imports) {
+      $key = $import.ToLowerInvariant()
+      if (-not $sdkDlls.ContainsKey($key) -or -not $bundled.Add($key)) { continue }
+      $target = Join-Path $outDir ([IO.Path]::GetFileName($sdkDlls[$key]))
+      Copy-Item $sdkDlls[$key] $target -Force
+      Write-Host "[build] bundled ROCm runtime DLL: $([IO.Path]::GetFileName($target)) (imported by $([IO.Path]::GetFileName($current)))"
+      $queue.Enqueue($target)
+    }
+  }
+  foreach ($required in @('amdhip64_7.dll', 'hipblas.dll', 'rocblas.dll')) {
+    if (-not $bundled.Contains($required)) {
+      throw "the ROCm bundle is missing $required - ggml-hip.dll no longer imports it from $rocmBin, or the SDK layout changed"
+    }
+  }
+
+  # rocBLAS finds its kernel library at <its own folder>\rocblas\library and
+  # its kernel packs through ROCM_KPACK_PATH_PREFIX, which the launch sets
+  # (rocm-devices.ts). Only this build's targets; hipBLASLt's library is left
+  # out, and the launch turns hipBLASLt off (ROCBLAS_USE_HIPBLASLT=0).
+  $tensileSrc = Join-Path $rocmBin 'rocblas\library'
+  $tensileOut = Join-Path $outDir 'rocblas\library'
+  $kpackSrc = Join-Path $rocmRoot '.kpack'
+  $kpackOut = Join-Path $outDir 'kpack'
+  New-Item -ItemType Directory -Force -Path $tensileOut, $kpackOut | Out-Null
+  foreach ($gfx in ($rocmTargets -split ';' | Where-Object { $_ })) {
+    # Most targets keep their files flat in the library folder; newer ones
+    # (Strix, gfx1150/gfx1151) in a folder named for the architecture.
+    $files = @(Get-ChildItem -Path $tensileSrc -File | Where-Object { $_.Name -match "(?:^|[_-])$gfx(?=[._-])" })
+    $files | ForEach-Object { Copy-Item $_.FullName (Join-Path $tensileOut $_.Name) -Force }
+    $archDir = Join-Path $tensileSrc $gfx
+    if (Test-Path $archDir -PathType Container) {
+      Copy-Item $archDir (Join-Path $tensileOut $gfx) -Recurse -Force
+      $files += @(Get-ChildItem -Path $archDir -File)
+    }
+    if (-not ($files | Where-Object { $_.Name -eq "TensileLibrary_lazy_$gfx.dat" })) {
+      throw "no rocBLAS kernel library for $gfx under $tensileSrc - install the rocm-sdk-device-$gfx wheel"
+    }
+    $pack = Join-Path $kpackSrc "blas_lib_$gfx.kpack"
+    if (-not (Test-Path $pack)) { throw "no rocBLAS kernel pack for $gfx at $pack - install the rocm-sdk-device-$gfx wheel" }
+    & node (Join-Path $repoRoot 'scripts\trim-rocm-kpack.mjs') $pack (Join-Path $kpackOut "blas_lib_$gfx.kpack")
+    if ($LASTEXITCODE -ne 0) { throw "could not trim the $gfx kernel pack" }
+    Write-Host "[build] bundled rocBLAS kernels for $gfx ($($files.Count) library files)"
+  }
 }
 
 # CPU-dispatch guard, mirroring build.sh section 6b2. Both arches are

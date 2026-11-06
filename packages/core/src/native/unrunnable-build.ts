@@ -27,7 +27,7 @@
  * never fired there, and a GPU build that crashes on every start was relaunched
  * on every request while the CPU build sat in the next directory. On Windows a
  * GPU (CUDA or Vulkan) build that exits before readiness with one of the
- * statuses below is treated as unrunnable:
+ * statuses below is treated as unrunnable (ROCm counts as a GPU build too):
  *
  * - illegal / privileged instruction — the SIGILL equivalent.
  * - DLL not found, missing entry point, failed DLL init, wrong image format —
@@ -57,7 +57,11 @@
  *
  * `cuda-unsupported-device` — no kernel image for this GPU, or PTX the driver
  * cannot compile — names the build and the machine, never the work. It is
- * the only classified kind that counts.
+ * the only classified kind that counts. ggml's ROCm backend is its CUDA code
+ * compiled with HIP and prints the same messages under the name `ROCm`, so the
+ * kind covers a ROCm build with no code for this GPU as well. Discovery
+ * normally rules that out before launch (rocm-devices.ts); this is the net
+ * for a GPU the device check could not see.
  */
 
 const WINDOWS_UNRUNNABLE_STATUS: ReadonlyMap<number, string> = new Map([
@@ -76,7 +80,11 @@ const LINUX_UNRUNNABLE_SIGNAL: ReadonlyMap<string, string> = new Map([
   ['SIGABRT', 'abort'],
 ]);
 
-const GPU_LABEL: Readonly<Record<string, string>> = { cuda: 'CUDA', vulkan: 'Vulkan' };
+const GPU_LABEL: Readonly<Record<string, string>> = {
+  cuda: 'CUDA',
+  rocm: 'ROCm',
+  vulkan: 'Vulkan',
+};
 
 export interface UnrunnableBuild {
   /**
@@ -126,6 +134,14 @@ export function unrunnableBuildExit(
   if (exit.reachedReady) return null;
   const gpu = backend && Object.hasOwn(GPU_LABEL, backend) ? GPU_LABEL[backend] : undefined;
   if (exit.panicKind === 'cuda-unsupported-device') {
+    if (backend === 'rocm') {
+      return {
+        signal: 'cuda-unsupported-device',
+        reason:
+          'ROCm reported no kernel image for this GPU before the engine became ready — the ROCm build was not compiled for this GPU',
+        summary: 'The ROCm build has no code for this graphics card.',
+      };
+    }
     if (backend !== 'cuda') return null;
     return {
       signal: 'cuda-unsupported-device',

@@ -1,7 +1,8 @@
 /**
  * Whether llama-server is getting the hardware this machine has, as the
  * engine process sees it: the CUDA build discovery passed over for the
- * driver (`GEZEL_LLAMA_CUDA_BLOCKER`), a GPU build that started without its
+ * driver (`GEZEL_LLAMA_CUDA_BLOCKER`), the ROCm build it passed over for this
+ * machine's AMD GPUs (`GEZEL_LLAMA_ROCM_BLOCKER`), a GPU build that started without its
  * GPU (gpu-startup-watch.ts), and Linux's out-of-memory killer stopping the
  * engine. Each is invisible otherwise — the engine keeps answering, slower,
  * or a chat fails with a crash that reads like any other.
@@ -14,6 +15,7 @@ import type { LlamaCppBackendHealthResponse } from '@bendyline/gezel';
 import {
   missingMachineRuntime,
   readLlamaCudaBlocker,
+  readRocmBlocker,
   vcRedistributableUrl,
 } from '@bendyline/gezel/native';
 import type { GpuUnused } from './gpu-startup-watch.js';
@@ -83,7 +85,7 @@ export function noteHostOutOfMemory(
   };
 }
 
-const BACKENDS = ['cuda', 'vulkan', 'metal', 'cpu'] as const;
+const BACKENDS = ['cuda', 'rocm', 'vulkan', 'metal', 'cpu'] as const;
 
 /**
  * The backend this process's on-device llama-server runs, for catalog
@@ -107,6 +109,7 @@ export function llamaBackendHealthView(): LlamaCppBackendHealthResponse {
   const runningRaw = process.env.GEZEL_LLAMA_SERVER_BACKEND;
   const running = BACKENDS.find((backend) => backend === runningRaw);
   const cudaBlocker = readLlamaCudaBlocker();
+  const rocmBlocker = readRocmBlocker();
   // A verdict about a build the process has since moved off (a quarantine
   // fallback, a lifted quarantine) no longer describes what runs.
   const unused = gpuUnused && gpuUnused.backend === running ? gpuUnused : null;
@@ -114,6 +117,7 @@ export function llamaBackendHealthView(): LlamaCppBackendHealthResponse {
   return {
     ...(running ? { running } : {}),
     ...(cudaBlocker ? { cudaBlocker } : {}),
+    ...(rocmBlocker ? { rocmBlocker } : {}),
     ...(unused ? { gpuUnused: unused } : {}),
     ...(missingRuntime ? { missingRuntime } : {}),
     ...(outOfMemory ? { outOfMemory } : {}),

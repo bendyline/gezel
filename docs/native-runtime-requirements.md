@@ -153,6 +153,16 @@ the app, including those inside `service-bundle.tar.gz`, needs a newer macOS.
   `linux-arm64-cuda` bundle. Every DGX OS image ships R580. One exception:
   Pascal cards (GTX 10-series) get no native code in the 12.8 bundles and
   run compute_60 PTX that the driver compiles, which needs R570+.
+- **ROCm** — the HIP runtime, hipBLAS/rocBLAS and rocBLAS's kernels travel
+  in the `-rocm` bundles (x64 only, ROCm 10.0). Only the AMD *driver* must be
+  present: a current Adrenalin or PRO driver on Windows, the in-kernel
+  `amdgpu` driver on Linux, where the account also needs read-write access to
+  `/dev/kfd` (the `render` and `video` groups). The bundles carry kernels for
+  RDNA3, RDNA4 and the Radeon 780M/760M, Strix Point and Strix Halo
+  integrated GPUs (`ROCM_GFX_TARGETS` in
+  `packages/core/src/native/rocm-devices.ts`). Discovery asks the ROCm build
+  which GPUs it can drive before choosing it, and every other AMD GPU runs
+  the Vulkan build, as before.
 
 Each of those is enforced by a guard in `build-native.yml` so it cannot
 silently come back.

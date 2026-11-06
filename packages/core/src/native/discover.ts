@@ -21,7 +21,7 @@
  *   - `GEZEL_NATIVE_BIN_DIR` unset → no-op (no source of binaries to
  *     probe). System-service installers stamp this var; bare CLI runs
  *     without it just get the existing actionable error on first chat.
- *   - llama-server: needs a backend probe (CUDA / Vulkan / Metal / CPU).
+ *   - llama-server: needs a backend probe (CUDA / ROCm / Vulkan / Metal / CPU).
  *     Results are cached at `<home>/engines/llama-cpp/backend.json` —
  *     same file the supervisor writes, so the two share state.
  *   - sd-server / whisper-server / uv: variant-less, resolved directly
@@ -43,6 +43,12 @@ import { readLlamaQuarantine } from './llama-quarantine.js';
 import type { LlamaQuarantineEntry } from './llama-quarantine.js';
 import type { NvidiaCudaBlocker } from './nvidia-driver.js';
 import { resolvePlatformKey } from './platform-key.js';
+import {
+  type RocmBlocker,
+  type RocmCheck,
+  checkRocmBuild,
+  publishRocmCheck,
+} from './rocm-devices.js';
 
 export type NativeBinaryName =
   | 'llama-server'
@@ -95,6 +101,12 @@ export interface DiscoverInput {
    * driver is read.
    */
   cudaBlockerFor?: (binaryPath: string) => NvidiaCudaBlocker | null;
+  /**
+   * Test seam — what the ROCm build says about this machine's GPUs
+   * (rocm-devices.ts). Production callers leave it unset and the build is
+   * asked, once per build and driver.
+   */
+  rocmCheckFor?: (binaryPath: string) => RocmCheck;
   /** Optional logger; the service passes its own to thread service-style logs. */
   logger?: { info?: (m: string) => void; warn?: (m: string) => void };
 }
@@ -133,6 +145,8 @@ export interface DiscoverResult {
     quarantined?: LlamaBackend[];
     /** Why the CUDA build was passed over for one the driver can run. */
     cudaBlocker?: NvidiaCudaBlocker;
+    /** Why the ROCm build was passed over: no GPU here it has code for, usually. */
+    rocmBlocker?: RocmBlocker;
   };
 }
 
@@ -285,6 +299,9 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
         quarantine,
         platform,
         ...(input.cudaBlockerFor ? { cudaBlockerFor: input.cudaBlockerFor } : {}),
+        rocmCheckFor:
+          input.rocmCheckFor ??
+          ((binaryPath) => checkRocmBuild(input.home, binaryPath, { platform })),
       });
       const resolved = resolveAvailableLlamaBinary(
         probe.backend,
@@ -310,6 +327,23 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
           `[native] llama-server cuda build passed over: ${cudaBlocker.detail} (${cudaBlocker.kind})`,
         );
       }
+      // Published whether or not ROCm won: a ROCm launch needs the visible
+      // device list, and a pass-over is worth one line, not a warning — an
+      // AMD GPU outside the build's architecture list is the common case and
+      // Vulkan serves it exactly as before.
+      const rocmCheck = check.rocmCheck();
+      publishRocmCheck(rocmCheck);
+      const rocmBlocker = rocmCheck?.blocker ?? null;
+      if (rocmBlocker) {
+        result.llamaBackend.rocmBlocker = rocmBlocker;
+        log?.info?.(
+          `[native] llama-server rocm build passed over: ${rocmBlocker.detail} (${rocmBlocker.kind})`,
+        );
+      } else if (rocmCheck?.visibleDevices) {
+        log?.info?.(
+          `[native] llama-server rocm build limited to HIP devices ${rocmCheck.visibleDevices.join(',')} of ${rocmCheck.devices.map((d) => `${d.index}:${d.gfx}`).join(' ')}`,
+        );
+      }
       if (resolved) {
         process.env.GEZEL_LLAMA_SERVER_BIN = resolved.path;
         process.env.GEZEL_LLAMA_SERVER_BACKEND = resolved.backend;
@@ -332,6 +366,7 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
               ? [`${quarantined.join(', ')} quarantined after crashing on this machine`]
               : []),
             ...(cudaBlocker ? [`cuda passed over (${cudaBlocker.kind})`] : []),
+            ...(rocmBlocker ? [`rocm passed over (${rocmBlocker.kind})`] : []),
           ];
           result.llamaBackend.reason = `${probe.reason}; ${why.join('; ')}, using ${resolved.backend}`;
           if (quarantined.length > 0) {

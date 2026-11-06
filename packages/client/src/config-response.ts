@@ -88,7 +88,7 @@ export interface ConfigResponse {
    * auto-detect (CUDA → Vulkan → CPU on PC, Metal on Mac). Read by
    * the supervisor at app boot — changes take effect on next launch.
    */
-  llamaCppBackendOverride?: 'auto' | 'cuda' | 'vulkan' | 'metal' | 'cpu';
+  llamaCppBackendOverride?: 'auto' | 'cuda' | 'rocm' | 'vulkan' | 'metal' | 'cpu';
   /**
    * llama-cpp: KV-cache quantization (`--cache-type-k`/`--cache-type-v`).
    * Undefined → `q8_0` default. Lower precision frees RAM for longer

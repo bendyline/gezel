@@ -1,0 +1,58 @@
+# AMD ROCm SDK 10.0.0 (TheRock), as the llama-cpp ROCm legs of
+# .github/workflows/build-native.yml install it:
+#
+#   pip install --require-hashes --no-deps --no-build-isolation \
+#     --index-url https://stable.repo.amd.com/rocm/whl-next/ \
+#     -r native/scripts/rocm-sdk-requirements.txt
+#   rocm-sdk init
+#
+# Every file is pinned by sha256 for both platforms (linux_x86_64 and
+# win_amd64), so nothing unpinned enters a native build. `rocm` is a source
+# archive whose `rocm-sdk init` expands the devel tree; it builds with the
+# setuptools pinned in rocm-sdk-build-requirements.txt, installed first.
+#
+# One `rocm-sdk-device-<gfx>` wheel per architecture the ROCm build targets:
+# they carry the rocBLAS kernels the variant bundles. The list must equal
+# ROCM_GFX_TARGETS (packages/core/src/native/rocm-devices.ts) and the
+# workflow's rocm_gpu_targets; scripts/native-payload.test.mjs holds them
+# together.
+#
+# Bumping ROCm: change every version here, recompute each hash from the file
+# itself (AMD's index publishes none), rebuild, and re-measure against the
+# Vulkan build before shipping.
+
+rocm==10.0.0 \
+    --hash=sha256:65b5982249612a310135f5e061b9f28909e8ad718a1ddb3f1abba92298b7216b
+rocm-sdk-core==10.0.0 \
+    --hash=sha256:3bf4a72d11aa2a4ee1e90572c73630f937d38c1b7af4dda45b483b54655138a7 \
+    --hash=sha256:066195cb0f7df02e6009facb17652dd992d13fae44d87652e5ab928d5b4f0851
+rocm-sdk-libraries==10.0.0 \
+    --hash=sha256:bbe83a550cb8ceeb306abf6d57df6617857a1b19384549526db2ec81a4374e57 \
+    --hash=sha256:bfc7a1bd3b6050fb4d36d8ac2eea80d3afd70c5604a29142463d6cb890fc73bf
+rocm-sdk-devel==10.0.0 \
+    --hash=sha256:867f06bfe06fc26cfbcd5c30cc9ba88d8b4de86345c3295a3885bfd963346086 \
+    --hash=sha256:3ca92d4af9b31113ec21f826c8e5a7f1c30a702438f6e9dc98bceb0fccd95993
+rocm-sdk-device-gfx1100==10.0.0 \
+    --hash=sha256:d44af24724dd1a104a973a8dbc2eb514c1a0c155ac2cf5bf38cc9ab5846f8f29 \
+    --hash=sha256:db39cbc5aae7a67c73d76692899a6a89bbc10eafc92f856f48e9c03247a91f8e
+rocm-sdk-device-gfx1101==10.0.0 \
+    --hash=sha256:3e5c648e0b0291863536732bc3e90198903b2a4907e2806d1b41e8fb4f9d4a2d \
+    --hash=sha256:7b8edd82943a11c29c80f84c95822e36ddd794b7024878e9660170d050a29243
+rocm-sdk-device-gfx1102==10.0.0 \
+    --hash=sha256:dbfc6d85cd64c625555084714302467d8a46a98c05bba9f62f91b49e178af901 \
+    --hash=sha256:b9e0f3fa492f0a05a5c4f479b80915477911f8402956c0e2c593b593d6214531
+rocm-sdk-device-gfx1103==10.0.0 \
+    --hash=sha256:45aca48e24b79f4e3a9a17759839658417fefbb15134a7e51c3e7d5acd2e8f28 \
+    --hash=sha256:3de6ba204d78e0cb2a32cf064371c181d7a17d1ca8b25537b1a7f11eaa66fa17
+rocm-sdk-device-gfx1150==10.0.0 \
+    --hash=sha256:64aaa7e396bb89372eba17293e63a66f8fc0a3ff9bf1d86dc6d1eb8b57bd03e9 \
+    --hash=sha256:22c19fcee580102cdc2f9379edf056643843c86ac6312dcf34d8ed21964c2cc4
+rocm-sdk-device-gfx1151==10.0.0 \
+    --hash=sha256:ec705df531e523777a5cd47b2dfadb2272935927c46c122effb11fcdcedb73d0 \
+    --hash=sha256:1ab27ebfe61ea3c3fd2c5c1a0e780ae22ed9b662106ce0aefda0a30e3b11577f
+rocm-sdk-device-gfx1200==10.0.0 \
+    --hash=sha256:3b638ed38afa08cc700c8853a7f1390e0e37175cc926fc0ecb743c1d772dc26d \
+    --hash=sha256:f33226078932ee2200f5595c521895edf5d7abf3170975d8c6f72a2a3949f516
+rocm-sdk-device-gfx1201==10.0.0 \
+    --hash=sha256:81856692c18e5d6ccce486193d0f4a54b368d2e84ff5a0811b644f6f788ed4b2 \
+    --hash=sha256:c6e4c5a0da941230bed975765e644597570081c9a41654d5a052c277167f4576

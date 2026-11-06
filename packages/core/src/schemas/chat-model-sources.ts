@@ -139,7 +139,7 @@ export const ChatModelLlamaCppSourceSchema = z
      * as a broken model. Hidden from the download list, refused at install
      * and launch. Read through `llamaCppBackendExclusion`.
      */
-    excludeBackends: z.array(z.enum(['cuda', 'vulkan', 'metal', 'cpu'])).optional(),
+    excludeBackends: z.array(z.enum(['cuda', 'rocm', 'vulkan', 'metal', 'cpu'])).optional(),
     /** Plain sentence shown with an excluded backend, saying why. */
     excludeReason: z.string().min(1).optional(),
   })

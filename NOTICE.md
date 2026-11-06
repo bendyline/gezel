@@ -293,6 +293,7 @@ copies and their engine- and helper-aware manifest live in
 |---|---|---|---|
 | **llama.cpp** (`llama-server`, `libllama*`, `libmtmd*`) | tag `v0.9.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
 | **ggml** (`libggml*` — CPU, Metal and BLAS on macOS, CUDA, Vulkan backends) | bundled with llama.cpp, whisper.cpp, and stable-diffusion.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
+| **AMD ROCm runtime** (`-rocm` variants of `llama-server` only, x64: HIP runtime, Code Object Manager, rocm-kpack, hipBLAS, rocBLAS and its per-GPU kernels, rocSOLVER, hipBLASLt, origami; on Linux also ROCr, rocprofiler-register, roctracer, rocRoller, LLVM, and TheRock's private copies of libdrm, numactl, elfutils' libelf, zlib, zstd, xz's liblzma and bzip2), redistributed unmodified apart from rocBLAS's kernel packs, trimmed to rocBLAS's own kernels | ROCm SDK `10.0.0` (TheRock wheels, pinned in `native/scripts/rocm-sdk-requirements.txt`) | MIT (AMD components); Apache-2.0 WITH LLVM-exception (LLVM, Code Object Manager); libdrm MIT; numactl LGPL-2.1; libelf LGPL-3.0-or-later OR GPL-2.0-or-later; zlib; zstd BSD-3-Clause; liblzma 0BSD; bzip2 — texts ship in each `-rocm` archive's `THIRD_PARTY_LICENSES/AMD-ROCm/` | [ROCm/TheRock](https://github.com/ROCm/TheRock) |
 | **ds4 / DwarfStar** (`ds4-server` + `metal/*.metal` shaders) | commit `b3f50180` (`main-2026-11-03`) | MIT | [antirez/ds4](https://github.com/antirez/ds4) |
 | **stable-diffusion.cpp** (`sd-server`) | tag `master-1050-58bb3c1` | MIT | [leejet/stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp) |
 | **whisper.cpp** (`whisper-server`) | tag `v1.9.1` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
@@ -653,9 +654,18 @@ components are redistributed:
   the **NVIDIA CUDA Toolkit EULA** (`cudart`/`cublas` are on NVIDIA's
   redistributable list). The NVIDIA GPU **driver** itself (`libcuda.so.1` /
   `nvcuda.dll`) is *not* bundled — it must already be present on the user's
-  machine. The Metal (macOS), CPU, and Vulkan builds bundle no proprietary
-  GPU components. (The Visual C++ runtime below is installer-scoped on
-  Windows, so it accompanies every Windows variant including those.)
+  machine. The Metal (macOS), CPU, ROCm, and Vulkan builds bundle no
+  proprietary GPU components. (The Visual C++ runtime below is installer-scoped
+  on Windows, so it accompanies every Windows variant including those.)
+
+  The **ROCm variants** bundle AMD's open-source ROCm runtime instead (see the
+  native table above). On Linux that includes two LGPL libraries AMD's
+  TheRock build links privately under `librocm_sysdeps_*` names:
+  **numactl**'s `libnuma` (LGPL-2.1) and **elfutils**' `libelf`
+  (LGPL-3.0-or-later OR GPL-2.0-or-later). Both are shared libraries loaded
+  dynamically and shipped unmodified, so they can be replaced, and their
+  sources are the upstream releases TheRock builds from. The AMD GPU
+  **driver** is not bundled.
 
 - **Microsoft Visual C++ 2015-2022 Redistributable (x64 or ARM64)**
   (`vc_redist.x64.exe` or `vc_redist.arm64.exe`, matching the installer's

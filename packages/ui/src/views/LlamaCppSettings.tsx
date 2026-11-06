@@ -69,6 +69,7 @@ function triStateValue(v: boolean | null | undefined): TriState {
  *
  *   Mac:           Metal only (Mac doesn't ship CUDA/Vulkan variants).
  *   Win/Linux+CUDA: CUDA / Vulkan / CPU (probe found CUDA → either downgrade is valid).
+ *   Win/Linux+ROCm: ROCm / Vulkan / CPU (AMD driver → the same two downgrades).
  *   Win/Linux+Vulkan: Vulkan / CPU (no CUDA driver → can only downgrade to CPU).
  *   Win/Linux+CPU:  CPU only (no GPU drivers — nothing to downgrade from).
  *   Unknown probe:  show all PC options as a defensive default so the
@@ -77,22 +78,37 @@ function triStateValue(v: boolean | null | undefined): TriState {
  */
 function availableBackendOptions(
   platform: string | undefined,
-  detected: 'cuda' | 'vulkan' | 'metal' | 'cpu' | undefined,
+  detected: 'cuda' | 'rocm' | 'vulkan' | 'metal' | 'cpu' | undefined,
 ): ConcreteBackend[] {
   if (platform === 'darwin') return ['metal'];
   if (detected === 'cuda') return ['cuda', 'vulkan', 'cpu'];
+  if (detected === 'rocm') return ['rocm', 'vulkan', 'cpu'];
   if (detected === 'vulkan') return ['vulkan', 'cpu'];
   if (detected === 'cpu') return ['cpu'];
   // Unknown / supervisor didn't populate — fall through to the full
   // PC set so the user isn't stuck.
-  return ['cuda', 'vulkan', 'cpu'];
+  return ['cuda', 'rocm', 'vulkan', 'cpu'];
 }
 
 function backendOptionLabel(b: ConcreteBackend): string {
   if (b === 'cuda') return 'CUDA (Nvidia GPU)';
+  if (b === 'rocm') return 'ROCm (AMD GPU)';
   if (b === 'vulkan') return 'Vulkan (any GPU)';
   if (b === 'metal') return 'Metal (Apple GPU)';
   return 'CPU only';
+}
+
+/** Why auto-detect runs Vulkan rather than ROCm on this AMD machine, in plain words. */
+function rocmBlockerText(
+  kind: NonNullable<LlamaCppBackendHealthResponse['rocmBlocker']>['kind'],
+): string {
+  if (kind === 'no-device-access') {
+    return 'ROCm is not used: your account cannot open the AMD compute device (/dev/kfd). Add it to the "render" and "video" groups and restart to use ROCm. Vulkan runs meanwhile.';
+  }
+  if (kind === 'no-supported-gpu') {
+    return 'ROCm is not used: this graphics card is not one the ROCm engine is built for, so the Vulkan engine runs it.';
+  }
+  return 'ROCm is not used: the ROCm engine could not start on this graphics card, so the Vulkan engine runs it.';
 }
 
 /**
@@ -141,6 +157,9 @@ function needsRestart(
   // on every launch until a restart or driver update, which its own notice
   // asks for.
   if (!pinned && wouldRun === 'cuda' && backendHealth?.cudaBlocker) return false;
+  // And a ROCm build with no code for this machine's GPU: auto-detect passes
+  // it over for Vulkan on every launch, so a restart changes nothing.
+  if (!pinned && wouldRun === 'rocm' && backendHealth?.rocmBlocker) return false;
   // A quarantined backend is detected but unusable, so it is NOT what
   // would run — resolution routes around it every launch. Without this,
   // a machine whose CUDA build crashes reads as permanently
@@ -830,6 +849,15 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           downgrades you can pin if the faster path is misbehaving. Switching <em>back</em> to
           Auto-detect from a pinned override also requires a restart.
         </p>
+        {backendHealth?.rocmBlocker ? (
+          <p
+            className="muted small"
+            style={{ marginTop: '0.25rem', marginLeft: '10rem' }}
+            title={backendHealth.rocmBlocker.detail}
+          >
+            {rocmBlockerText(backendHealth.rocmBlocker.kind)}
+          </p>
+        ) : null}
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
           <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>

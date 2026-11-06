@@ -97,9 +97,9 @@ Windows and Linux.
 | -------------- | ----------------------------- | -------------------------------------------------------------------- |
 | `darwin-arm64` | metal                         | Always Metal. No fallback needed — Apple Silicon always has Metal.   |
 | `darwin-x64`   | cpu                           | CPU only. Intel Mac has no Metal path.                               |
-| `linux-x64`    | cuda, vulkan, cpu             | Probe `libcuda.so.1` → `libvulkan.so.1` → fallback CPU.              |
+| `linux-x64`    | cuda, rocm, vulkan, cpu       | Probe `libcuda.so.1` → `/dev/kfd` (AMD) → `libvulkan.so.1` → fallback CPU. |
 | `linux-arm64`  | cuda, cpu                     | Probe `libcuda.so.1` → fallback CPU. (Vulkan deferred — LunarG ships no aarch64 SDK tarball.) |
-| `win32-x64`    | cuda, vulkan, cpu             | Probe `nvml.dll` → `vulkan-1.dll` → fallback CPU.                    |
+| `win32-x64`    | cuda, rocm, vulkan, cpu       | Probe `nvml.dll` → AMD driver (`amdxc64.dll`) → `vulkan-1.dll` → fallback CPU. |
 
 Runtime selection logic lives in
 `packages/app/src/supervisor/llama-backend.ts`. The chosen
@@ -114,35 +114,68 @@ speed and non-NVIDIA users still get GPU acceleration from one build.
 
 ### AMD GPUs (Radeon, Instinct)
 
-AMD GPUs are accelerated via the **Vulkan** backend. The runtime probe
-in `packages/app/src/supervisor/llama-backend.ts` recognizes AMD
-Radeon hardware (PCI vendor ID `0x1002` on Linux, AMD Adrenalin /
-Radeon driver DLLs in `System32` on Windows) and surfaces it as a
-vendor hint so the UI can label the engine "AMD GPU" rather than the
-generic "GPU" — but the backend pick is still Vulkan, not a dedicated
-ROCm/HIP variant.
+AMD GPUs get the **ROCm** build where it has code for them and the
+**Vulkan** build everywhere else, in the same ladder as NVIDIA's: ROCm →
+Vulkan → CPU.
 
-This is intentional. Recent benchmarks (Phoronix, ROCm 7.1 vs Mesa
-RADV Vulkan on RX 7900 XTX, llama 7B Q4_0) show **Vulkan ~25% faster
-than ROCm for token generation** — ~170 tok/s vs ~140 tok/s — with
-ROCm winning only on prompt processing. For the chat workloads that
-dominate Gezel usage, Vulkan is the better default. ROCm also requires
-the AMD HIP runtime to be installed on the user's machine (~2 GB on
-Windows, separate `amdgpu-install --usecase=hiplibsdk` on Linux),
-which is a significant friction cost we'd absorb on the wrong cohort.
+**Why ROCm.** Measured on a Radeon AI PRO R9700 (RDNA4, gfx1201) at v0.9.0
+against the Vulkan build, flash attention on, ubatch 512: ROCm reads prompts
+35-45% faster on Qwen3.8-27B and 27-39% faster on Gemma 4 31B (+117% at a
+16k-token depth, where Vulkan's prefill collapses), and generates 5% slower
+on the 27B and 8-12% slower on the 31B. Whole turns favor ROCm on the large
+dense models (a cold 12k-token turn finishes ~12% sooner on the 27B; a
+cached tool step is about even). On the 4B and 9B models generation is
+11-17% slower and prefill gains are small. No runtime switch or open
+upstream patch closed the generation gap (graph options, fusion, kernel-arg
+placement, KV type, PR #24386 were all measured). The older "Vulkan ~25%
+faster" figure was about generation alone.
 
-A dedicated ROCm/HIP variant could be added later — the architecture
-is already extensible (single new entry in the build matrix, single new
-arm in `build.sh`/`build.ps1`'s backend switch, single new probe step
-in `llama-backend.ts`) — but only when there's evidence it's worth the
-build-matrix cost and the user-side install friction. Most likely
-trigger: a user with a heavy prompt-processing workload (long-context
-summarization, batch inference) where Vulkan bottlenecks them.
+**What ships.** `linux-x64-rocm` and `win32-x64-rocm`, built against AMD's
+pip-distributed ROCm 10.0 (TheRock) and self-contained like the CUDA
+variants: the HIP runtime, hipBLAS/rocBLAS and their dependencies, and
+rocBLAS's kernels for each target, so a user needs only the AMD display
+driver. The targets are `ROCM_GFX_TARGETS` in
+`packages/core/src/native/rocm-devices.ts`: RDNA3 (gfx1100-1102), the
+780M/760M iGPUs (gfx1103), Strix Point and Strix Halo (gfx1150, gfx1151),
+and RDNA4 (gfx1200, gfx1201). Each target costs ~60 MB on disk, so older
+parts (RDNA2, Vega) stay on Vulkan, which serves them well.
 
-Architectures known to work well via Vulkan: RDNA2 (RX 6000), RDNA3
-(RX 7000, gfx1100), RDNA4 (RX 9000, gfx1201), Instinct MI200/MI300
-series. Older GCN cards (Vega, Polaris) work too but with reduced
-shader-int8 perf.
+**How it is chosen.** An AMD driver alone does not mean ROCm will work: the
+build carries kernels for a fixed list of architectures, and the HIP runtime
+enumerates every AMD GPU regardless. So the backend probe's `rocm` is only a
+preference. Discovery then runs the ROCm build's `--list-devices` once per
+build and driver (`rocm-devices.ts`, cached at
+`<home>/engines/llama-cpp/rocm-devices.json`). ggml prints each GPU's
+architecture there, and the build is chosen only if one of them is in its
+`rocmTargets`. Otherwise it is passed over for Vulkan before anything
+launches, with no three-crash quarantine needed. When a supported card sits
+beside an unsupported one (every Ryzen 7000/9000 desktop has a small RDNA2
+iGPU, which ROCm reports as an ordinary GPU), the launch hides the
+unsupported one with `HIP_VISIBLE_DEVICES`.
+
+**Payload notes.**
+
+- rocBLAS loads its kernels from `rocblas/library/` beside itself, and from
+  per-architecture kernel packs that it expects at `../.kpack/`, outside the
+  variant directory. The packs ship in `kpack/` and the launch names them
+  through `ROCM_KPACK_PATH_PREFIX`.
+- AMD's packs also hold rocSOLVER's and rocSPARSE's kernels (41 MB per
+  target, already zstd-compressed). `scripts/trim-rocm-kpack.mjs` keeps
+  rocBLAS's and hipBLASLt's (~5 MB) and copies every kernel byte for byte.
+- hipBLASLt's own kernel library (~170 MB per target) is not bundled; the
+  launch sets `ROCBLAS_USE_HIPBLASLT=0`, which cost ~3.5% prompt reading on
+  the R9700.
+
+**Building it.**
+
+- Windows builds `ggml-hip.dll` in a second configure with ROCm's clang, as
+  upstream's win-rocm release does, and needs Visual Studio 2022 (MSVC
+  14.4x): VS 2026's `<cmath>` clashes with HIP's device declarations.
+  `LLAMA_HIP_MSVC_INCLUDE` points a local VS 2026 build at a patched header
+  copy instead.
+- On Linux, AMD's comgr links LLVM dynamically and hipBLASLt links
+  rocRoller, so the Linux variant is roughly twice the size of the Windows
+  one.
 
 ## Build locally
 
@@ -174,6 +207,22 @@ uses this.
 - **Vulkan backend**: Vulkan SDK. Linux apt: `libvulkan-dev
   glslang-tools`. Fedora: `vulkan-devel`. Windows: LunarG installer
   (sets `VULKAN_SDK` env var).
+- **ROCm backend** (x64 only): AMD's ROCm SDK wheels in a venv, then
+  `rocm-sdk init` and `ROCM_PATH`/`HIP_PATH=$(rocm-sdk path --root)`:
+
+  ```sh
+  python -m venv rocm-sdk
+  rocm-sdk/bin/pip install -r native/scripts/rocm-sdk-build-requirements.txt
+  rocm-sdk/bin/pip install --require-hashes --no-deps --no-build-isolation \
+    --index-url https://stable.repo.amd.com/rocm/whl-next/ \
+    -r native/scripts/rocm-sdk-requirements.txt
+  rocm-sdk/bin/rocm-sdk init
+  export ROCM_PATH="$(rocm-sdk/bin/rocm-sdk path --root)"
+  LLAMA_BACKEND=rocm ./build.sh
+  ```
+
+  `LLAMA_ROCM_TARGETS` (semicolon-separated) narrows the target list for a
+  faster local build.
 - **macOS**: nothing extra — Metal is part of the OS SDK.
 
 ### What the script does

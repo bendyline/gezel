@@ -60,12 +60,9 @@ export function enginesRoutes(ctx: EngineContext): Hono {
   app.get('/binaries/status', (c) => {
     const backendRaw =
       process.env.GEZEL_LLAMA_SERVER_BACKEND ?? process.env.GEZEL_LLAMA_DETECTED_BACKEND;
-    const llamaBackend = ['cuda', 'vulkan', 'metal', 'cpu'].find((value) => value === backendRaw) as
-      | 'cuda'
-      | 'vulkan'
-      | 'metal'
-      | 'cpu'
-      | undefined;
+    const llamaBackend = ['cuda', 'rocm', 'vulkan', 'metal', 'cpu'].find(
+      (value) => value === backendRaw,
+    ) as 'cuda' | 'rocm' | 'vulkan' | 'metal' | 'cpu' | undefined;
     const platformKey = resolvePlatformKey();
     return c.json({
       release: effectiveEngineRelease(),
@@ -91,7 +88,7 @@ export function enginesRoutes(ctx: EngineContext): Hono {
 
   /**
    * Start (or attach to) a download+verify of `engine` (optionally a GPU
-   * `?variant=cuda|vulkan|metal|cpu`) and stream progress as SSE. The
+   * `?variant=cuda|rocm|vulkan|metal|cpu`) and stream progress as SSE. The
    * manual trigger behind Settings → On-device → "Download engine". The
    * lazy on-device-chat path uses the same registry. Idempotent — a
    * second call while one is in flight attaches to the running job.
@@ -276,7 +273,7 @@ export function enginesRoutes(ctx: EngineContext): Hono {
   app.delete('/llama-cpp/quarantine/:backend', async (c) => {
     const backend = c.req.param('backend');
     if (!isLlamaBackend(backend)) {
-      return c.json({ error: 'backend must be "cuda", "vulkan", "metal", or "cpu"' }, 400);
+      return c.json({ error: 'backend must be "cuda", "rocm", "vulkan", "metal", or "cpu"' }, 400);
     }
     const override = (await ctx.store.readConfig()).llamaCppBackendOverride;
     const { restored } = liftLlamaQuarantine(ctx.home, backend, {

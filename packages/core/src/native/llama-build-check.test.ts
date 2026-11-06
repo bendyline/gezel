@@ -94,6 +94,57 @@ describe('createLlamaBuildCheck', () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it('passes a ROCm build with no code for this GPU over for Vulkan', () => {
+    const rocmPaths: Record<string, string> = {
+      rocm: '/n/linux-x64-rocm/gezel-llama-server',
+      vulkan: '/n/linux-x64-vulkan/gezel-llama-server',
+      cpu: '/n/linux-x64-cpu/gezel-llama-server',
+    };
+    const asked: string[] = [];
+    const check = createLlamaBuildCheck({
+      quarantine: [],
+      platform: 'linux',
+      rocmCheckFor: (path) => {
+        asked.push(path);
+        return {
+          blocker: { kind: 'no-supported-gpu', detail: 'gfx1030 is not built' },
+          devices: [{ index: 0, name: 'Radeon RX 6800', gfx: 'gfx1030' }],
+          visibleDevices: null,
+        };
+      },
+    });
+    const resolved = resolveAvailableLlamaBinary(
+      'rocm',
+      (backend) => rocmPaths[backend] ?? null,
+      true,
+      check.isUsable,
+    );
+    expect(resolved).toMatchObject({ backend: 'vulkan', skippedUnusable: ['rocm'] });
+    expect(asked).toEqual([rocmPaths.rocm]);
+    expect(check.rocmCheck()?.blocker?.kind).toBe('no-supported-gpu');
+    expect(check.quarantinedOf(resolved?.skippedUnusable ?? [])).toEqual([]);
+  });
+
+  it('keeps a ROCm build that found a GPU it supports, and never vetoes without a checker', () => {
+    const supported = createLlamaBuildCheck({
+      quarantine: [],
+      platform: 'win32',
+      rocmCheckFor: () => ({
+        blocker: null,
+        devices: [
+          { index: 0, name: 'AMD Radeon(TM) Graphics', gfx: 'gfx1036' },
+          { index: 1, name: 'AMD Radeon AI PRO R9700', gfx: 'gfx1201' },
+        ],
+        visibleDevices: [1],
+      }),
+    });
+    expect(supported.isUsable('rocm', 'C:/n/win32-x64-rocm/gezel-llama-server.exe')).toBe(true);
+    expect(supported.rocmCheck()?.visibleDevices).toEqual([1]);
+    const unchecked = createLlamaBuildCheck({ quarantine: [], platform: 'win32' });
+    expect(unchecked.isUsable('rocm', 'C:/n/win32-x64-rocm/gezel-llama-server.exe')).toBe(true);
+    expect(unchecked.rocmCheck()).toBeNull();
+  });
 });
 
 describe('the CUDA blocker env', () => {

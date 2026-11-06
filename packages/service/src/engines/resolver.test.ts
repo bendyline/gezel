@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import {
   EngineUnavailableError,
   impliedEngineVariant,
+  llamaDownloadVariant,
   resolveEngineToCompletion,
 } from '@bendyline/gezel-inference/internal/engines/resolver';
 import { resolvePlatformKey } from '@bendyline/gezel/native';
@@ -493,5 +494,46 @@ describe('impliedEngineVariant', () => {
       expect(impliedEngineVariant(engine, 'darwin')).toBeUndefined();
       expect(impliedEngineVariant(engine, 'linux')).toBeUndefined();
     }
+  });
+});
+
+describe('llamaDownloadVariant', () => {
+  const archives = (keys: string[], ext = 'zip') =>
+    Object.fromEntries(keys.map((key) => [`gezel-native-0.1.58-${key}.${ext}`, 'a'.repeat(64)]));
+
+  it('takes the next build down when the release has no archive for the probe', () => {
+    // A ROCm probe against a release cut before the -rocm keys existed.
+    expect(
+      llamaDownloadVariant('rocm', {
+        platform: 'win32',
+        platformKey: 'win32-x64',
+        version: '0.1.58',
+        archives: archives(['win32-x64-vulkan', 'win32-x64-cpu']),
+        rocmWorth: () => true,
+      }),
+    ).toBe('vulkan');
+  });
+
+  it('downloads ROCm only when the GPU is known to be one it supports', () => {
+    const opts = {
+      platform: 'linux' as const,
+      platformKey: 'linux-x64',
+      version: '0.1.58',
+      archives: archives(['linux-x64-rocm', 'linux-x64-vulkan', 'linux-x64-cpu'], 'tar.gz'),
+    };
+    expect(llamaDownloadVariant('rocm', { ...opts, rocmWorth: () => true })).toBe('rocm');
+    expect(llamaDownloadVariant('rocm', { ...opts, rocmWorth: () => false })).toBe('vulkan');
+  });
+
+  it('leaves CUDA, an unknown value, and macOS as they were', () => {
+    const opts = {
+      platform: 'linux' as const,
+      platformKey: 'linux-x64',
+      version: '0.1.58',
+      archives: null,
+    };
+    expect(llamaDownloadVariant('cuda', opts)).toBe('cuda');
+    expect(llamaDownloadVariant(undefined, opts)).toBeUndefined();
+    expect(llamaDownloadVariant('rocm', { ...opts, platform: 'darwin' })).toBe('metal');
   });
 });

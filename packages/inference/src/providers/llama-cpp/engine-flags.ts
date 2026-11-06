@@ -172,7 +172,7 @@ function gpuResidentThreads(hostCpuCount: number | undefined): number {
   return Math.max(1, Math.min(GPU_RESIDENT_THREADS, available));
 }
 
-const GPU_BACKENDS = new Set(['cuda', 'vulkan', 'metal']);
+const GPU_BACKENDS = new Set(['cuda', 'rocm', 'vulkan', 'metal']);
 
 /**
  * `llamaCppExtraArgs` keys that either choose a thread pool or may move
