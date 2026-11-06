@@ -663,8 +663,13 @@ components are redistributed:
   TheRock build links privately under `librocm_sysdeps_*` names:
   **numactl**'s `libnuma` (LGPL-2.1) and **elfutils**' `libelf`
   (LGPL-3.0-or-later OR GPL-2.0-or-later). Both are shared libraries loaded
-  dynamically and shipped unmodified, so they can be replaced, and their
-  sources are the upstream releases TheRock builds from. The AMD GPU
+  dynamically and shipped as AMD built them, so they can be replaced. Their
+  complete source, as AMD built them (numactl 2.0.19 and elfutils 0.195 with
+  the build scripts and patches of TheRock tag `therock-10.0`, pinned in
+  `scripts/rocm-lgpl-sources.mjs`), is published as
+  `gezel-third-party-sources-<version>.tar` on every native release that
+  carries the Linux ROCm archive, and each such archive's
+  `THIRD_PARTY_LICENSES/AMD-ROCm/README.txt` names that release. The AMD GPU
   **driver** is not bundled.
 
 - **Microsoft Visual C++ 2015-2022 Redistributable (x64 or ARM64)**

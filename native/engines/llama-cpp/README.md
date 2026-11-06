@@ -165,6 +165,11 @@ unsupported one with `HIP_VISIBLE_DEVICES`.
 - hipBLASLt's own kernel library (~170 MB per target) is not bundled; the
   launch sets `ROCBLAS_USE_HIPBLASLT=0`, which cost ~3.5% prompt reading on
   the R9700.
+- Everything AMD ships is under permissive licenses except two Linux
+  libraries, numactl's `libnuma` and elfutils' `libelf`, which are LGPL. Their
+  source, as AMD built them, is attached to each native release as
+  `gezel-third-party-sources-<version>.tar` (`scripts/rocm-lgpl-sources.mjs`;
+  see `native/rocm-licenses/README.md`). A ROCm bump moves those pins too.
 
 **Building it.**
 

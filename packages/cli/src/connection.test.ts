@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { GezelSdkError } from '@bendyline/gezel-app-sdk';
 import {
   DaemonInAnotherNamespaceError,
@@ -196,13 +196,15 @@ describe('incompatible daemon errors', () => {
 
   it('names the package the CLI was installed from', () => {
     const entry = 'node_modules/@bendyline/gezel-cli/dist/bin/gezel-main.js';
-    expect(cliUpdateCommand(`file:///usr/local/lib/${entry}`)).toBe(
+    // pathToFileURL gives the URL a drive letter on Windows, as import.meta.url has.
+    const url = (path: string) => pathToFileURL(path).href;
+    expect(cliUpdateCommand(url(`/usr/local/lib/${entry}`))).toBe(
       'npm install -g @bendyline/gezel-cli',
     );
-    expect(cliUpdateCommand(`file:///usr/local/lib/node_modules/gezel-cli/${entry}`)).toBe(
+    expect(cliUpdateCommand(url(`/usr/local/lib/node_modules/gezel-cli/${entry}`))).toBe(
       'npm install -g gezel-cli',
     );
-    expect(cliUpdateCommand(`file:///Users/a/.npm/_npx/40b59497924eb6bb/${entry}`)).toBe(
+    expect(cliUpdateCommand(url(`/Users/a/.npm/_npx/40b59497924eb6bb/${entry}`))).toBe(
       'npx gezel-cli@latest',
     );
   });

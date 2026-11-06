@@ -128,7 +128,7 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
       - name: Test native release contracts
         run: |
-          node --test scripts/assert-arm64-baseline.test.mjs scripts/native-payload.test.mjs scripts/verify-vulkan-payload.test.mjs scripts/verify-rocm-payload.test.mjs scripts/trim-rocm-kpack.test.mjs scripts/smoke-native-help.test.mjs
+          node --test scripts/assert-arm64-baseline.test.mjs scripts/native-payload.test.mjs scripts/verify-vulkan-payload.test.mjs scripts/verify-rocm-payload.test.mjs scripts/trim-rocm-kpack.test.mjs scripts/rocm-lgpl-sources.test.mjs scripts/smoke-native-help.test.mjs
           python3 -m unittest discover -s native/runtime -p 'test_*.py'
 
   mobile:
@@ -1026,6 +1026,26 @@ jobs:
           echo "HIP_PATH=$root" >> "$GITHUB_ENV"
           echo "$root/bin" >> "$GITHUB_PATH"
 
+      # The Linux ROCm runtime carries two LGPL libraries AMD builds into its
+      # SDK (numactl's libnuma, elfutils' libelf), and shipping them obliges us
+      # to offer their source from where we offer the binaries. Fetch exactly
+      # what AMD built them from, pinned in scripts/rocm-lgpl-sources.mjs; the
+      # draft release attaches it. Early, so a moved source fails in minutes.
+      - name: Fetch ROCm LGPL sources (Linux)
+        if: steps.preflight.outputs.pinned == 'true' && matrix.needs_rocm && matrix.platform == 'linux-x64'
+        shell: bash
+        run: node scripts/rocm-lgpl-sources.mjs --out "$RUNNER_TEMP/rocm-lgpl-sources"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.preflight.outputs.pinned == 'true' && matrix.needs_rocm && matrix.platform == 'linux-x64'
+        with:
+          name: third-party-sources-linux-x64-rocm
+          path: ${{ runner.temp }}/rocm-lgpl-sources
+          if-no-files-found: error
+          # Already compressed archives.
+          compression-level: 0
+          retention-days: 14
+
       - name: Install ROCm SDK (Windows)
         if: steps.preflight.outputs.pinned == 'true' && matrix.needs_rocm && matrix.platform == 'win32-x64'
         shell: pwsh
@@ -1146,8 +1166,14 @@ jobs:
           args=(--output "$output")
           [[ "$REQUIRE_CUDA_EULA" == "true" ]] && args+=(--cuda)
           # The AMD runtime the ROCm variant bundles: each library's license,
-          # read from the SDK it was copied from.
-          [[ "$REQUIRE_ROCM_LICENSES" == "true" ]] && args+=(--rocm)
+          # read from the SDK it was copied from. On a release tag, the README
+          # names the release that carries the LGPL libraries' source.
+          if [[ "$REQUIRE_ROCM_LICENSES" == "true" ]]; then
+            args+=(--rocm)
+            if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" == native-v* ]]; then
+              args+=(--native-release "$GITHUB_REF_NAME")
+            fi
+          fi
           node scripts/stage-native-artifact-licenses.mjs "${args[@]}"
 
       - name: Smoke test
@@ -2068,6 +2094,12 @@ jobs:
           path: mobile-artifacts
           pattern: mobile-sdk-*
 
+      - name: Download third-party source artifacts
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          path: source-artifacts
+          pattern: third-party-sources-*
+
       - name: List artifacts
         run: find native-artifacts -type f | sort
 
@@ -2245,6 +2277,28 @@ jobs:
             done
           done
 
+      # The Linux ROCm archive carries LGPL libraries (scripts/rocm-lgpl-sources.mjs),
+      # so the release that ships it must also offer their source. A release
+      # with that archive and no source set fails here. Kept out of SHA256SUMS,
+      # whose every gezel-native-* line pin-native-release.mjs reads as an
+      # engine; build provenance below covers it.
+      - name: Stage third-party sources
+        env:
+          VERSION: ${{ steps.pack.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f "release/gezel-native-${VERSION}-linux-x64-rocm.tar.gz" ]]; then
+            echo "No Linux ROCm archive in this release; no third-party sources owed."
+            exit 0
+          fi
+          source="source-artifacts/third-party-sources-linux-x64-rocm"
+          node scripts/rocm-lgpl-sources.mjs --verify "$source"
+          tar --sort=name \
+            --mtime="@$(git show -s --format=%ct "$GITHUB_SHA")" \
+            --owner=0 --group=0 --numeric-owner \
+            -C "$source" -cf "release/gezel-third-party-sources-${VERSION}.tar" .
+          tar -tvf "release/gezel-third-party-sources-${VERSION}.tar"
+
       # GitHub caps a single release asset at 2 GiB. Blowing it surfaces as
       # a 422 from the upload step at the very END of a ~1h build — and
       # softprops keeps uploading the rest, so the run leaves behind a draft
@@ -2322,6 +2376,7 @@ jobs:
           subject-path: |
             release/*.tar.gz
             release/*.zip
+            release/*.tar
             release/SHA256SUMS
             release/NATIVE_FILE_MANIFESTS.json
 
@@ -2399,8 +2454,14 @@ jobs:
             `THIRD_PARTY_LICENSES/` with the pin-bound native redistribution
             texts. CUDA archives also carry the CUDA Toolkit EULA supplied by
             the build image.
+
+            `gezel-third-party-sources-*.tar` holds the source code of the LGPL
+            libraries in the Linux ROCm archive (numactl's libnuma and
+            elfutils' libelf), with AMD's build scripts and patches, exactly as
+            AMD built them for its ROCm SDK.
           files: |
             release/*.tar.gz
             release/*.zip
+            release/*.tar
             release/SHA256SUMS
             release/NATIVE_FILE_MANIFESTS.json

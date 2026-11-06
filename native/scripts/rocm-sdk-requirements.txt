@@ -18,8 +18,9 @@
 # together.
 #
 # Bumping ROCm: change every version here, recompute each hash from the file
-# itself (AMD's index publishes none), rebuild, and re-measure against the
-# Vulkan build before shipping.
+# itself (AMD's index publishes none), move the TheRock tag and LGPL source
+# pins in scripts/rocm-lgpl-sources.mjs to the same release, rebuild, and
+# re-measure against the Vulkan build before shipping.
 
 rocm==10.0.0 \
     --hash=sha256:65b5982249612a310135f5e061b9f28909e8ad718a1ddb3f1abba92298b7216b

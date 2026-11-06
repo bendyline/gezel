@@ -26,3 +26,15 @@ ROCm bump that adds a library fails staging until it gets an entry there, and
 the Windows signing allowlist (`packages/app/scripts/third-party-binaries.cjs`)
 fails the same way for a new DLL, so a new dependency is reviewed before it
 ships.
+
+## LGPL source
+
+numactl and elfutils are LGPL, so shipping their binaries also obliges us to
+offer their source from where we offer the binaries. AMD's wheels carry neither
+the source nor an offer to pass along. `scripts/rocm-lgpl-sources.mjs` pins
+what AMD built them from: the release archives, by sha256, and TheRock's build
+scripts and patches, by commit. The linux-x64 ROCm leg of `build-native.yml`
+fetches them, and the draft native release attaches them as
+`gezel-third-party-sources-<version>.tar`. Staging writes where to find it into
+`THIRD_PARTY_LICENSES/AMD-ROCm/README.txt`, and fails for an LGPL- or
+GPL-licensed library that has no source pinned there.
