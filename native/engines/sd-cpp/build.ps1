@@ -233,7 +233,18 @@ if ($isArm64) {
   # C and C++ stay on clang and the declared baseline; the CUDA half of the
   # toolchain (shared with llama-cpp) points nvcc at cl.exe and the ARM64
   # import libraries. sd.cpp links its CUDA code into this one executable.
-  if ($arm64Cuda) { $toolchainArgs += '-DGEZEL_ARM64_CUDA=ON' }
+  if ($arm64Cuda) {
+    $toolchainArgs += '-DGEZEL_ARM64_CUDA=ON'
+    # Every CUDA object must use the DLL C runtime (/MD), like the clang ones.
+    # sd.cpp's top level declares CMake 3.12, so CMP0091 is OLD there and its
+    # own CUDA code (src/core/cuda, the CUTLASS kernels) gets no runtime flag;
+    # cl.exe then defaults to /MT and the link fails ("/failifmismatch:
+    # mismatch detected for 'RuntimeLibrary'", native-v0.1.59). x64 escapes
+    # by accident: with cl.exe compiling C++, Windows-MSVC.cmake's include
+    # guard bakes -MD into the shared CUDA flags. It has to be a -D, since the
+    # policy is settled on the top level's first line, before the toolchain.
+    $toolchainArgs += '-DCMAKE_POLICY_DEFAULT_CMP0091=NEW'
+  }
 }
 
 # sd.cpp's ggml-cuda chooses the flags it hands nvcc's host compiler from the
