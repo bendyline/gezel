@@ -764,10 +764,14 @@ jobs:
             needs_cuda: false
             needs_vulkan: false
     runs-on: ${{ matrix.runner }}
-    # The llama-cpp darwin-arm64 metal leg has legitimately run 98 min green,
-    # and the linux-x64 cuda leg 67. Sized at roughly 2x the worst observed so
-    # a slow-but-working compile is never the thing that trips this.
-    timeout-minutes: 180
+    # The nine-architecture CUDA legs are the slow ones: in native-v0.1.57
+    # llama-cpp ran 140 min on win32-x64 and 133 on linux-x64, and sd-cpp 126
+    # on linux-x64. sd.cpp master-1050 then added CUTLASS kernels, which took
+    # the single-architecture linux-arm64 sd leg from 24 to 30 min, so the
+    # linux-x64 one should land around 160-180. Sized at roughly 2x the worst
+    # observed so a slow-but-working compile is never the thing that trips
+    # this; GitHub's ceiling for a hosted job is 360.
+    timeout-minutes: 300
     env:
       # llama-cpp reads these to pick the cmake backend flag and emit to a
       # per-variant output directory. sd-cpp ignores them: it takes its
