@@ -301,6 +301,7 @@ describe('GitManager.sync — state machine', () => {
     await runGit(['push', '-u', 'origin', 'side', '-q'], { cwd: fix.workdir });
     await runGit(['checkout', 'main', '-q'], { cwd: fix.workdir });
     await writeFile(join(fix.workdir, 'notes.txt'), 'outside edit\n', 'utf8');
+    await configureRepo(fix.workdir, 'outside');
     await commitAll(fix.workdir, 'outside commit');
 
     // The commit shows as one to send; nothing about it makes the view of GitHub stale.
