@@ -15,6 +15,7 @@ import {
 import { buildPageApiShim } from '../../core/src/project-types/page-api-shim.js';
 import { pageComponentsSource } from '../../core/src/project-types/page-components.js';
 import { pageDemoBootstrapSource } from '../../core/src/project-types/page-demo.js';
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 
 const target = {
   id: 'library',
@@ -436,7 +437,12 @@ test('shared standalone components support drop, duplicate names, safe text, the
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('gezel-file-adder')).toHaveAttribute('data-theme', 'dark');
   await page.setViewportSize({ width: 320, height: 800 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(
+      (tolerance) => document.documentElement.scrollWidth <= innerWidth + tolerance,
+      LAYOUT_TOLERANCE_PX,
+    ),
+  ).toBe(true);
   await page.evaluate(() => Reflect.get(window, 'resetDemo')());
   expect(
     await page.evaluate(() => Reflect.get(window, 'gezel').ui.components.demo.files()),
@@ -553,9 +559,12 @@ for (const [id, targetId, count, selector] of [
       await page.getByRole('button', { name: 'Reset demo', exact: true }).click();
       await expect(page.locator(`${selector} gezel-file-card`)).toHaveCount(count);
       await page.setViewportSize({ width: 320, height: 800 });
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
-        true,
-      );
+      expect(
+        await page.evaluate(
+          (tolerance) => document.documentElement.scrollWidth <= innerWidth + tolerance,
+          LAYOUT_TOLERANCE_PX,
+        ),
+      ).toBe(true);
       expect(errors).toEqual([]);
     });
   }

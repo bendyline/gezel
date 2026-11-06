@@ -7,6 +7,7 @@ import { _electron as electron } from 'playwright';
 import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { expectNear } from './helpers/layout.js';
 import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -110,7 +111,7 @@ test('02b - the header band matches the native window-control overlay', async ()
   test.skip(geometry === null, 'window controls overlay unavailable');
   if (!geometry) return;
 
-  expect(geometry.headerHeight).toBeCloseTo(geometry.overlayHeight, 0);
+  expectNear(geometry.headerHeight, geometry.overlayHeight);
 });
 
 async function openArea(area: string): Promise<void> {

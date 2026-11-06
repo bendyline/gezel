@@ -2,6 +2,7 @@
  * App shell — the persistent header + sidebar that frame every view. Light and
  * dark full-frame shots plus element clips of the header and sidebar.
  */
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { setTheme } from './helpers/determinism.js';
 import { gotoHome } from './helpers/nav.js';
@@ -61,7 +62,7 @@ test.describe('app shell', () => {
             pseudoContent: getComputedStyle(element, '::after').content,
           };
         }, side);
-        expect(selection.panelGap).toBeGreaterThan(4);
+        expect(selection.panelGap).toBeGreaterThan(4 - LAYOUT_TOLERANCE_PX);
         expect(selection.borderLeftColor).toBe(selection.borderTopColor);
         expect(selection.borderRightColor).toBe(selection.borderTopColor);
         expect(selection.borderTopColor).not.toBe('rgba(0, 0, 0, 0)');

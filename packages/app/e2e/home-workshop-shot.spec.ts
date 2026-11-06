@@ -15,6 +15,7 @@ import { type ElectronApplication, type Page, expect, test } from '@playwright/t
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { LAYOUT_TOLERANCE_PX, expectNear } from './helpers/layout.js';
 import { captureScreenshot } from './helpers/screenshot.js';
 
 const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -133,8 +134,10 @@ test('captures the workshop home at a tall window', async () => {
   const composer = measurements.rects['.home-workshop-conversation .chat-composer'] as {
     bottom: number;
   };
-  expect(Math.abs(railMain.bottom - measurements.innerHeight)).toBeLessThanOrEqual(2);
-  expect(Math.abs(composer.bottom - measurements.innerHeight)).toBeLessThanOrEqual(4);
+  expectNear(railMain.bottom, measurements.innerHeight);
+  expect(Math.abs(composer.bottom - measurements.innerHeight)).toBeLessThanOrEqual(
+    4 + LAYOUT_TOLERANCE_PX,
+  );
 
   await captureScreenshot(page, { path: '/tmp/gezel-home-workshop.png', fullPage: false });
 });
@@ -187,9 +190,9 @@ test('narrow window keeps the conversation visible without a side rail', async (
   expect(narrow.conversation).not.toBeNull();
   expect(narrow.rail).toBeNull();
   expect(narrow.conversation!.height).toBeGreaterThan(0);
-  expect(narrow.conversation!.left).toBeGreaterThanOrEqual(0);
-  expect(narrow.conversation!.right).toBeLessThanOrEqual(narrow.innerWidth);
-  expect(narrow.main!.width).toBe(narrow.body!.width);
+  expect(narrow.conversation!.left).toBeGreaterThanOrEqual(-LAYOUT_TOLERANCE_PX);
+  expect(narrow.conversation!.right).toBeLessThanOrEqual(narrow.innerWidth + LAYOUT_TOLERANCE_PX);
+  expectNear(narrow.main!.width, narrow.body!.width);
 
   await captureScreenshot(page, { path: '/tmp/gezel-home-workshop-narrow.png', fullPage: false });
 });

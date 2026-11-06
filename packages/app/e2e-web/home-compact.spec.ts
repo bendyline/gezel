@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import type { Page } from '@playwright/test';
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 
 test.use({ daemonGroup: 'home-compact', viewport: { width: 390, height: 844 }, hasTouch: true });
@@ -15,7 +16,7 @@ async function expectDraftInsideApp(page: Page) {
         return Math.max(app.top - draft.top, draft.bottom - app.bottom);
       }),
     )
-    .toBeLessThanOrEqual(1);
+    .toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
 }
 
 test('Home keeps the draft reachable beside starters on an established install', async ({

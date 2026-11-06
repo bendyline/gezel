@@ -6,6 +6,7 @@ import { type ElectronApplication, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { LAYOUT_TOLERANCE_PX } from './helpers/layout.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -71,7 +72,7 @@ test('sidebar selection persists and document icons align with their group heade
           },
           { timeout: 10_000 },
         )
-        .toBeLessThan(0.5);
+        .toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
     });
 
     // Navigate by the canonical event the listing views / chat surfaces

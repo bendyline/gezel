@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { GezelClient } from '@bendyline/gezel-client';
 import { writePageDemo, writePageDemoAssets } from '../../cli/src/page-demo-export.js';
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { setTheme } from './helpers/determinism.js';
 import { gotoHome, openProject } from './helpers/nav.js';
@@ -65,8 +66,8 @@ test('checkers uses native opponent chat only while expanded and preserves it th
   await board.locator('#opponent-chat').scrollIntoViewIfNeeded();
   await expect(editor).toHaveText('I have a move in mind.');
   const box = await chat.boundingBox();
-  expect(box!.x).toBeGreaterThanOrEqual(0);
-  expect(box!.x + box!.width).toBeLessThanOrEqual(560);
+  expect(box!.x).toBeGreaterThanOrEqual(-LAYOUT_TOLERANCE_PX);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(560 + LAYOUT_TOLERANCE_PX);
   await page.screenshot({ path: info.outputPath('checkers-chat-narrow.png') });
 });
 

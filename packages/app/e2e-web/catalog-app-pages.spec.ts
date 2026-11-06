@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { writePageDemo, writePageDemoAssets } from '../../cli/src/page-demo-export.js';
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 
 import { catalogPages } from './helpers/catalog-apps.js';
 const gilde = process.env.GILDE_DIR;
@@ -130,7 +131,7 @@ for (const app of catalogPages()) {
     await page.setViewportSize({ width: 320, height: 900 });
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth))
-      .toBeLessThanOrEqual(1);
+      .toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
     await page.screenshot({ path: info.outputPath(`${app.id}-narrow.png`), fullPage: true });
     expect(errors).toEqual([]);
   });

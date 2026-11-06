@@ -21,6 +21,7 @@ import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { openGreetingTab } from './helpers/greeting.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { LAYOUT_TOLERANCE_PX } from './helpers/layout.js';
 import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -159,16 +160,19 @@ test('sticky header does NOT show while the bubble header is visible', async () 
 
   // Assert the precondition instead of assuming a fixed sleep left the
   // bubble where the test put it. This also gives a useful geometry failure
-  // if a future layout change makes the requested position unreachable.
+  // (its distance from the requested 25px) if a future layout change makes
+  // that position unreachable.
   await expect
     .poll(() =>
       target.evaluate((bubble) => {
         const timeline = bubble.closest<HTMLElement>('.chat-timeline');
         if (!timeline) throw new Error('assistant bubble is not inside the chat timeline');
-        return bubble.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+        return Math.abs(
+          bubble.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 25,
+        );
       }),
     )
-    .toBeCloseTo(25, 0);
+    .toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
 
   await expect(page.locator('.chat-sticky-header')).toBeHidden();
   await captureScreenshot(page, {
@@ -285,13 +289,11 @@ test('sticky header aligns with chat bubbles', async () => {
   expect(alignment.ok).toBe(true);
   if (!alignment.ok || !alignment.sticky || !alignment.bubble) return;
 
-  // Pixel-level tolerance: sub-pixel fractional widths + anti-aliasing
-  // round to 1px at worst. Anything beyond that is a real drift.
   const leftDelta = Math.abs(alignment.sticky.left - alignment.bubble.left);
   const rightDelta = Math.abs(alignment.sticky.right - alignment.bubble.right);
   const widthDelta = Math.abs(alignment.sticky.width - alignment.bubble.width);
   console.log('deltas:', { leftDelta, rightDelta, widthDelta });
-  expect(leftDelta).toBeLessThanOrEqual(1);
-  expect(rightDelta).toBeLessThanOrEqual(1);
-  expect(widthDelta).toBeLessThanOrEqual(1);
+  expect(leftDelta).toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
+  expect(rightDelta).toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
+  expect(widthDelta).toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
 });

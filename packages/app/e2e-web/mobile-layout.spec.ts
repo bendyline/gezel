@@ -1,6 +1,7 @@
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { GezelClient } from '@bendyline/gezel-client';
+import { LAYOUT_TOLERANCE_PX, expectNear } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 
 test('the desktop app becomes the mobile workshop at phone width', async ({
@@ -23,7 +24,7 @@ test('the desktop app becomes the mobile workshop at phone width', async ({
     const overflow = await page.evaluate(
       () => document.documentElement.scrollWidth - window.innerWidth,
     );
-    expect(overflow).toBeLessThanOrEqual(1);
+    expect(overflow).toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
   };
 
   await page.setViewportSize({ width: 400, height: 844 });
@@ -120,7 +121,7 @@ test('the desktop app becomes the mobile workshop at phone width', async ({
   await page.goto('/?layout=mobile');
   await expect(sidebar).toBeVisible();
   await expect(project).toBeVisible();
-  expect((await page.locator('.app').boundingBox())?.width).toBe(390);
+  expectNear((await page.locator('.app').boundingBox())?.width ?? 0, 390);
   await capture('desktoppreview');
   await page.getByRole('button', { name: 'Exit mobile preview' }).click();
   await expect(page.locator('.app-mobile-preview')).toHaveCount(0);

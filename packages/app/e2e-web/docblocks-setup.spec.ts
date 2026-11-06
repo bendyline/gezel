@@ -4,6 +4,7 @@
  * exercise the remaining setup flow, including layout and screenshot evidence.
  */
 import { planDisplayName } from '@bendyline/gezel';
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { gotoHome, openAreaView } from './helpers/nav.js';
 
@@ -87,7 +88,10 @@ test('tool requirements use readable words and show their entire description', a
   );
   await expect(description).toHaveCSS('white-space', 'normal');
   expect(
-    await description.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    await description.evaluate(
+      (element, tolerance) => element.scrollWidth <= element.clientWidth + tolerance,
+      LAYOUT_TOLERANCE_PX,
+    ),
   ).toBe(true);
   expect(
     await description.evaluate(

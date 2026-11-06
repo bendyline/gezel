@@ -3,6 +3,7 @@ import { setTheme } from '../e2e-web/helpers/determinism.js';
 import { expectHandboekArticle } from '../e2e-web/helpers/handboek.js';
 import { gotoHome, openAreaView } from '../e2e-web/helpers/nav.js';
 import { shot } from '../e2e-web/helpers/shot.js';
+import { expectNear } from '../e2e/helpers/layout.js';
 
 test('Handboek renders its article in both themes', async ({ page }) => {
   await page.goto('/');
@@ -61,7 +62,7 @@ test('project creation shows its starting points and configuration', async ({ pa
   const footer = await dialog.locator('.gz-npd-pick-footer').boundingBox();
   expect(gallery).not.toBeNull();
   expect(footer).not.toBeNull();
-  expect(Math.abs(gallery!.y + gallery!.height - footer!.y)).toBeLessThanOrEqual(1);
+  expectNear(gallery!.y + gallery!.height, footer!.y);
   await shot(page, 'create-project', {
     area: 'dialogs',
     clip: dialog,

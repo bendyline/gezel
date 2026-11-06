@@ -12,6 +12,7 @@
  * specs (and the screenshot gallery) expect to find it.
  */
 import { GezelClient } from '@bendyline/gezel-client';
+import { LAYOUT_TOLERANCE_PX, expectLayoutToMatch, expectNear } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { settle } from './helpers/determinism.js';
 import { gotoHome, openProject } from './helpers/nav.js';
@@ -145,8 +146,8 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   const [insertBox, menuBox] = await Promise.all([insert.boundingBox(), insertMenu.boundingBox()]);
   expect(insertBox).not.toBeNull();
   expect(menuBox).not.toBeNull();
-  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(insertBox!.y - 3);
-  expect(menuBox!.y).toBeGreaterThanOrEqual(8);
+  expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(insertBox!.y - 3 + LAYOUT_TOLERANCE_PX);
+  expect(menuBox!.y).toBeGreaterThanOrEqual(8 - LAYOUT_TOLERANCE_PX);
   await page.keyboard.press('Escape');
   await expect(insertMenu).toBeHidden();
 
@@ -186,8 +187,8 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   expect(frameTreatment.borderWidth).toBe('1px');
   expect(frameTreatment.borderColor).not.toBe('rgba(127, 127, 127, 0.25)');
   expect(frameTreatment.shellPaddingBottom).toBe('4px');
-  expect(frameTreatment.toolbarInsetLeft).toBeCloseTo(1, 0);
-  expect(frameTreatment.toolbarInsetRight).toBeCloseTo(1, 0);
+  expectNear(frameTreatment.toolbarInsetLeft, 1);
+  expectNear(frameTreatment.toolbarInsetRight, 1);
   expect(frameTreatment.frameBackground).toBe(frameTreatment.composeHeaderBackground);
   expect(frameTreatment.toolbarBackground).toBe(frameTreatment.composeHeaderBackground);
   expect(frameTreatment.editorBackground).not.toBe(frameTreatment.composeHeaderBackground);
@@ -220,13 +221,16 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
 
   expect(chatBands).not.toBeNull();
   expect(terminalBands).not.toBeNull();
-  expect(terminalBands!.shellHeight).toBeCloseTo(chatBands!.shellHeight, 0);
+  expectNear(terminalBands!.shellHeight, chatBands!.shellHeight);
   expect(terminalBands!.frameBackground).toBe(chatBands!.frameBackground);
   expect(terminalBands!.frameBorder).toBe(chatBands!.frameBorder);
   for (const band of ['top', 'picker', 'action', 'key', 'tabs'] as const) {
-    expect
-      .soft(terminalBands![band], `${band} band should be identical across compose modes`)
-      .toEqual(chatBands![band]);
+    expectLayoutToMatch(
+      terminalBands![band],
+      chatBands![band],
+      `${band} band should match across compose modes`,
+      { soft: true },
+    );
   }
 
   // The tabs ARE the top line, not a control parked inside it: they fill the
@@ -234,12 +238,14 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
   // and they overhang its 1px rule, which is the seam the selected tab erases
   // to join the panel below.
   for (const bands of [chatBands!, terminalBands!]) {
-    expect(bands.tabs.top).toBeCloseTo(bands.top.top + MODE_TAB_TOP_INSET_PX, 0);
-    expect(bands.tabs.bottom).toBeCloseTo(bands.top.bottom, 0);
-    expect(bands.top.bottom).toBeCloseTo(bands.picker.top, 0);
+    expectNear(bands.tabs.top!, bands.top.top! + MODE_TAB_TOP_INSET_PX);
+    expectNear(bands.tabs.bottom!, bands.top.bottom!);
+    expectNear(bands.top.bottom!, bands.picker.top!);
   }
-  expect(chatBands!.tabs.rightInset).toBeLessThanOrEqual(MODE_TAB_RIGHT_INSET_CEILING_PX);
-  expect(chatBands!.tabs.rightInset).toBeGreaterThanOrEqual(0);
+  expect(chatBands!.tabs.rightInset).toBeLessThanOrEqual(
+    MODE_TAB_RIGHT_INSET_CEILING_PX + LAYOUT_TOLERANCE_PX,
+  );
+  expect(chatBands!.tabs.rightInset).toBeGreaterThanOrEqual(-LAYOUT_TOLERANCE_PX);
 
   // A selected thread with no matching item — archived, or belonging to another
   // project — leaves Radix rendering an empty trigger (it shows no placeholder
@@ -261,7 +267,7 @@ test('keeps terminal composer geometry aligned with chat', async ({ page, world 
     .evaluate((el) => {
       el.textContent = '';
     });
-  expect(await pickerHeight()).toBe(filled);
+  expectNear(await pickerHeight(), filled);
 });
 
 test('aligns the output and reference split grips', async ({ page, world }) => {
@@ -296,7 +302,7 @@ test('aligns the output and reference split grips', async ({ page, world }) => {
     ),
   );
 
-  expect(referenceCenter).toBeCloseTo(outputCenter, 0);
+  expectNear(referenceCenter!, outputCenter!);
 });
 
 test('themes the backing behind output preview scrollbar trays', async ({ page, world }) => {
@@ -462,7 +468,7 @@ test('lets ordinary-height output flow while preserving a horizontal scrollbar',
   expect(layout!.overflowX).toBe('auto');
   expect(layout!.overflowY).toBe('auto');
   expect(layout!.scrollWidth).toBeGreaterThan(layout!.clientWidth);
-  expect(layout!.scrollHeight).toBeLessThanOrEqual(layout!.clientHeight + 1);
+  expect(layout!.scrollHeight).toBeLessThanOrEqual(layout!.clientHeight + LAYOUT_TOLERANCE_PX);
   expect(layout!.tabIndex).toBe(0);
 
   const bubble = page

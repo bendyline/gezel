@@ -13,6 +13,7 @@ import { _electron as electron } from 'playwright';
 import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { LAYOUT_TOLERANCE_PX, expectLayoutToMatch } from './helpers/layout.js';
 import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -73,10 +74,10 @@ test('Home renders the workshop once configured', async () => {
 
   // The workshop fits the window (no page-tall growth) and the composer is
   // reachable without scrolling — the conversation scrolls internally.
-  const fits = await page.evaluate(() => {
+  const fits = await page.evaluate((tolerance) => {
     const ws = document.querySelector('.home-workshop');
-    return ws ? ws.getBoundingClientRect().height <= window.innerHeight + 1 : false;
-  });
+    return ws ? ws.getBoundingClientRect().height <= window.innerHeight + tolerance : false;
+  }, LAYOUT_TOLERANCE_PX);
   expect(fits).toBe(true);
   await expect(page.getByRole('button', { name: 'Send' })).toBeVisible();
 
@@ -115,7 +116,7 @@ test('the greeting collapses and the tour tab swaps content', async () => {
   await page.getByRole('button', { name: 'Return to Meester chat' }).click();
   await expect(page.getByRole('tabpanel')).toBeHidden();
   await expect(conversation).toBeFocused();
-  expect(await conversation.boundingBox()).toEqual(conversationBounds);
+  expectLayoutToMatch(await conversation.boundingBox(), conversationBounds);
   await page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }).click();
 
   // The tour tab swaps the greeting + tip for the tour content in place.

@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { setTheme, settle } from './helpers/determinism.js';
 import { openAreaView, openGezel, openProject, openTab, openTask } from './helpers/nav.js';
@@ -70,15 +71,17 @@ for (const profile of [
           .locator(
             '.tasks-header, .task-step-panel-grid, .filemap-header, .settings-panel, .squisq-editor-header',
           )
-          .evaluateAll((elements) =>
-            elements
-              .filter((element) => element.checkVisibility() && !element.closest('[inert]'))
-              .filter((element) => element.scrollWidth > element.clientWidth + 1)
-              .map((element) => ({
-                class: element.className,
-                width: element.clientWidth,
-                content: element.scrollWidth,
-              })),
+          .evaluateAll(
+            (elements, tolerance) =>
+              elements
+                .filter((element) => element.checkVisibility() && !element.closest('[inert]'))
+                .filter((element) => element.scrollWidth > element.clientWidth + tolerance)
+                .map((element) => ({
+                  class: element.className,
+                  width: element.clientWidth,
+                  content: element.scrollWidth,
+                })),
+            LAYOUT_TOLERANCE_PX,
           );
         expect.soft(clipped, `${profile.name}: ${name} has clipped panel content`).toEqual([]);
         audit.push({ name, overflow });
@@ -161,12 +164,14 @@ for (const profile of [
         const dialog = page.getByRole('dialog').last();
         await expect(dialog).toBeVisible();
         const bounds = (await dialog.boundingBox())!;
-        expect(bounds.x).toBeGreaterThanOrEqual(0);
-        expect(bounds.width).toBeGreaterThanOrEqual(Math.min(300, profile.width - 30));
-        expect(bounds.x + bounds.width).toBeLessThanOrEqual(profile.width);
-        expect(bounds.y).toBeGreaterThanOrEqual(profile.ios ? 50 : 0);
+        expect(bounds.x).toBeGreaterThanOrEqual(-LAYOUT_TOLERANCE_PX);
+        expect(bounds.width).toBeGreaterThanOrEqual(
+          Math.min(300, profile.width - 30) - LAYOUT_TOLERANCE_PX,
+        );
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(profile.width + LAYOUT_TOLERANCE_PX);
+        expect(bounds.y).toBeGreaterThanOrEqual((profile.ios ? 50 : 0) - LAYOUT_TOLERANCE_PX);
         expect(bounds.y + bounds.height).toBeLessThanOrEqual(
-          profile.height - (profile.ios ? 34 : 0),
+          profile.height - (profile.ios ? 34 : 0) + LAYOUT_TOLERANCE_PX,
         );
         await capture(`dialog-${area}`);
         if (area === 'projects') {

@@ -20,6 +20,7 @@ import { type ElectronApplication, type Page, expect, test } from '@playwright/t
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { expectNear } from './helpers/layout.js';
 import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -259,7 +260,9 @@ test('replies thread under their trigger, not under the next check-in', async ()
   expect(structure.nameThread).toBeGreaterThan(structure.checkinThread);
   // Chromium snaps borders to physical pixels, so a declared 2px rail can
   // compute to a fractional CSS width at non-integer display scale factors.
-  expect(Number.parseFloat(structure.railWidth ?? '0')).toBeCloseTo(2, 0);
+  const railWidth = Number.parseFloat(structure.railWidth ?? '0');
+  expect(railWidth).toBeGreaterThan(0);
+  expectNear(railWidth, 2);
   // Author-run header suppression: greeting header + late straggler
   // header — the 16s follow-up merges into the greeting's run.
   expect(structure.headerCount).toBe(2);
