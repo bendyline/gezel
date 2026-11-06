@@ -66,4 +66,7 @@ set(CMAKE_ASM_FLAGS_INIT "${gezel_arch_flags} ${gezel_warn_flags}")
 if(GEZEL_ARM64_CUDA)
   include("${CMAKE_CURRENT_LIST_DIR}/arm64-windows-cuda.cmake")
   list(APPEND CMAKE_TRY_COMPILE_PLATFORM_VARIABLES GEZEL_ARM64_CUDA)
+  # Enabling CUDA switches the directory's link spelling to link.exe's, but
+  # clang++ still drives the link; this puts it back.
+  set(CMAKE_USER_MAKE_RULES_OVERRIDE_CUDA "${CMAKE_CURRENT_LIST_DIR}/arm64-windows-cuda-clang-link.cmake")
 endif()
