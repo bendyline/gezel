@@ -226,7 +226,7 @@ export const HealthResponseSchema = z.object({
    * label the on-device engine ("using Nvidia GPU…" / "using GPU…" /
    * "using CPU…") so the user sees what's actually running.
    */
-  llamaCppBackend: z.enum(['cuda', 'vulkan', 'metal', 'cpu']).optional(),
+  llamaCppBackend: z.enum(['cuda', 'rocm', 'vulkan', 'metal', 'cpu']).optional(),
   /**
    * What the hardware probe found, **independent of any user override**.
    * Same enum as `llamaCppBackend`. When the user has pinned
@@ -239,7 +239,7 @@ export const HealthResponseSchema = z.object({
    *
    * Undefined when no probe ran (non-supervisor launch).
    */
-  llamaCppDetectedBackend: z.enum(['cuda', 'vulkan', 'metal', 'cpu']).optional(),
+  llamaCppDetectedBackend: z.enum(['cuda', 'rocm', 'vulkan', 'metal', 'cpu']).optional(),
   /**
    * Best-effort guess of the host's primary GPU vendor, **independent
    * of which llama-server backend was selected**. Set when the
@@ -266,7 +266,9 @@ export const HealthResponseSchema = z.object({
    * Empty/undefined in the normal case. Entries clear themselves when the
    * offending binary is replaced (see `llama-quarantine.ts`).
    */
-  llamaCppQuarantinedBackends: z.array(z.enum(['cuda', 'vulkan', 'metal', 'cpu'])).optional(),
+  llamaCppQuarantinedBackends: z
+    .array(z.enum(['cuda', 'rocm', 'vulkan', 'metal', 'cpu']))
+    .optional(),
   /**
    * Whether a `ds4-server` binary resolved for this host — the honest answer
    * to "can DwarfStar run here", since it ships exactly one build per
@@ -589,9 +591,9 @@ export const SystemDiagnosticsSchema = z.object({
     nativePinned: z.boolean(),
     /** Engine names resolvable by this daemon. Names only — never paths. */
     installedEngines: z.array(NativeEngineNameSchema),
-    llamaCppBackend: z.enum(['cuda', 'vulkan', 'metal', 'cpu']).optional(),
-    llamaCppDetectedBackend: z.enum(['cuda', 'vulkan', 'metal', 'cpu']).optional(),
-    llamaCppBackendOverride: z.enum(['auto', 'cuda', 'vulkan', 'metal', 'cpu']).optional(),
+    llamaCppBackend: z.enum(['cuda', 'rocm', 'vulkan', 'metal', 'cpu']).optional(),
+    llamaCppDetectedBackend: z.enum(['cuda', 'rocm', 'vulkan', 'metal', 'cpu']).optional(),
+    llamaCppBackendOverride: z.enum(['auto', 'cuda', 'rocm', 'vulkan', 'metal', 'cpu']).optional(),
     /** From `gezel-llama-build.json` beside the binary. */
     llamaCppRevision: z.string().optional(),
     llamaCppBuildBackend: z.string().optional(),
@@ -833,7 +835,7 @@ export const LlamaCppContextSizingResponseSchema = z.object({
 });
 export type LlamaCppContextSizingResponse = z.infer<typeof LlamaCppContextSizingResponseSchema>;
 
-const LlamaCppBackendNameSchema = z.enum(['cuda', 'vulkan', 'metal', 'cpu']);
+const LlamaCppBackendNameSchema = z.enum(['cuda', 'rocm', 'vulkan', 'metal', 'cpu']);
 
 /**
  * `/api/engines/llama-cpp/quarantine` — llama-server builds the engine owner
@@ -895,13 +897,26 @@ export const LlamaCppBackendHealthResponseSchema = z.object({
     })
     .optional(),
   /**
+   * The ROCm build was passed over, so an AMD GPU runs the Vulkan build.
+   * Usually `no-supported-gpu`: a Radeon outside the ROCm build's architecture
+   * list, which Vulkan serves as it always did. `no-device-access` (Linux) is
+   * the one a person can fix. Informational, never a notice.
+   */
+  rocmBlocker: z
+    .object({
+      kind: z.enum(['no-supported-gpu', 'no-device-access', 'probe-failed']),
+      /** Technical explanation, for a "Technical details" disclosure. */
+      detail: z.string(),
+    })
+    .optional(),
+  /**
    * The latest start of a GPU build ran without its GPU — every token on the
    * CPU. Cleared by a start that found it.
    */
   gpuUnused: z
     .object({
-      backend: z.enum(['cuda', 'vulkan']),
-      /** `init-failed`: CUDA refused to start. `no-devices`: none usable. `not-loaded`: the GPU library never loaded. */
+      backend: z.enum(['cuda', 'rocm', 'vulkan']),
+      /** `init-failed`: CUDA or ROCm refused to start. `no-devices`: none usable. `not-loaded`: the GPU library never loaded. */
       reason: z.enum(['init-failed', 'no-devices', 'not-loaded']),
       /** The engine's own words, when it gave any. */
       detail: z.string().optional(),
@@ -1664,7 +1679,7 @@ const GezelConfigObject = z.object({
    * before the service starts). The Settings UI surfaces this with a
    * "restart required" hint.
    */
-  llamaCppBackendOverride: z.enum(['auto', 'cuda', 'vulkan', 'metal', 'cpu']).optional(),
+  llamaCppBackendOverride: z.enum(['auto', 'cuda', 'rocm', 'vulkan', 'metal', 'cpu']).optional(),
   /**
    * When the on-device engine binary (llama-server) is missing, may the
    * daemon download it on demand from the pinned native release? Default
@@ -3235,7 +3250,10 @@ const UpdateConfigRequestOverridesShape = {
   // dropped by JSON.stringify and the field can never be un-pinned.
   llamaCppBaseUrl: z.string().nullable().optional(),
   llamaCppModelPath: z.string().nullable().optional(),
-  llamaCppBackendOverride: z.enum(['auto', 'cuda', 'vulkan', 'metal', 'cpu']).nullable().optional(),
+  llamaCppBackendOverride: z
+    .enum(['auto', 'cuda', 'rocm', 'vulkan', 'metal', 'cpu'])
+    .nullable()
+    .optional(),
   llamaCppKvCacheType: z.enum(['f16', 'q8_0', 'q4_0']).nullable().optional(),
   llamaCppFlashAttn: z
     .union([z.boolean(), z.enum(['on', 'off', 'auto'])])

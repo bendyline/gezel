@@ -27,10 +27,11 @@ interface NativePlatformPin {
 }
 
 /**
- * Schema 3 also pins runtime source files (ds4's `metal/*.metal`), which an
- * engine compiles at startup and no code signature covers. Schema 2, from
- * native releases up to 0.1.55, is verified without them, as it was generated.
- * Same rule as scripts/native-file-manifest-lib.mjs.
+ * Schema 3 also pins GPU code an engine loads at runtime, which no code
+ * signature covers: ds4's `metal/*.metal`, and the ROCm build's rocBLAS
+ * kernels (`rocblas/library/`, `kpack/`). Schema 2, from native releases up to
+ * 0.1.55, is verified without them, as it was generated. Same rule as
+ * scripts/native-file-manifest-lib.mjs.
  */
 interface NativeFileManifest {
   schemaVersion: 2 | 3;
@@ -38,7 +39,7 @@ interface NativeFileManifest {
   platforms: Record<string, NativePlatformPin>;
 }
 
-const NATIVE_RUNTIME_SOURCE_EXTENSIONS = ['.metal'];
+const NATIVE_RUNTIME_SOURCE_EXTENSIONS = ['.metal', '.hsaco', '.co', '.dat', '.kpack'];
 
 const pinnedManifest = pinnedManifestJson as NativeFileManifest;
 

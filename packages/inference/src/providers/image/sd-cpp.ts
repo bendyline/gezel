@@ -419,8 +419,9 @@ export class StableDiffusionCppProvider implements ImageProvider {
       await this.supervisor.stop();
     }
 
-    // A render the caller abandons keeps running inside sd-server, which
-    // cannot interrupt one it has started, so cancelling stops the engine.
+    // A render the caller abandons keeps running inside sd-server, whose
+    // `/sdapi` endpoints cannot interrupt one they have started, so
+    // cancelling stops the engine.
     const request = new AbortController();
     const stopRender = () => {
       request.abort();

@@ -343,6 +343,25 @@ def test_verify_transaction_compat():
     print("PASS verify transaction compatibility")
 
 
+def test_shared_kv_after_round():
+    sliced = []
+
+    def slice_after_reject(states, rejected):
+        sliced.append((states, rejected))
+        return {"sliced": rejected}
+
+    # Qwen 3.5 targets: no committed view, so the verify window is sliced.
+    qwen = types.SimpleNamespace(shared_kv_states={"window": 1})
+    assert spec_decode.shared_kv_after_round(qwen, 2, slice_after_reject) == {"sliced": 2}
+    assert sliced == [({"window": 1}, 2)], sliced
+
+    # mlx-vlm 0.7.12 Gemma 4: commit emptied the window and rebuilt the view.
+    gemma = types.SimpleNamespace(shared_kv_states={}, committed_shared_kv={"committed": 1})
+    assert spec_decode.shared_kv_after_round(gemma, 2, slice_after_reject) == {"committed": 1}
+    assert len(sliced) == 1, "a committed view must not be replaced by the emptied window"
+    print("PASS shared kv after round")
+
+
 def main():
     test_eligibility()
     test_spec_mode()
@@ -350,6 +369,7 @@ def main():
     test_chunked_prefill_probe_and_install()
     test_draft_prefill_gate()
     test_verify_transaction_compat()
+    test_shared_kv_after_round()
     test_resolve_unconfigured_is_silent()
     test_resolve_kill_switch()
     test_resolve_mlx_lm_tower_refused()

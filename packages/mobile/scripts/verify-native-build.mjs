@@ -2,6 +2,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { verifyNativeBuild } from '../../../native/mobile/verify-build.mjs';
 import { verifyRuntime } from '../../capacitor/scripts/stage-native.mjs';
+import { appSpeechRuntime } from './stage-speech.mjs';
 
 export { verifyNativeBuild };
 
@@ -18,5 +19,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
     target,
   );
   await verifyRuntime(path.join(repo, 'packages/capacitor/native', target), target);
+  // cap sync reads the plugin's Package.swift / build.gradle, which link speech only when staged.
+  await appSpeechRuntime(repo, target);
   console.log(`Verified ${target} native sources and payload before sync.`);
 }

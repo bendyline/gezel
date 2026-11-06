@@ -513,7 +513,7 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
     // Forward all three so the Home tab can label what's running AND
     // the Settings dropdown can offer the full set of hardware-supported
     // choices regardless of any user pin.
-    const known = ['cuda', 'vulkan', 'metal', 'cpu'] as const;
+    const known = ['cuda', 'rocm', 'vulkan', 'metal', 'cpu'] as const;
     const knownVendors = ['amd', 'nvidia', 'intel'] as const;
     const backendRaw = process.env.GEZEL_LLAMA_SERVER_BACKEND;
     const detectedRaw = process.env.GEZEL_LLAMA_DETECTED_BACKEND;

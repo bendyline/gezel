@@ -175,11 +175,13 @@ jobs:
             for (const [command, ...args] of [
               ['python3', 'native/mobile/build-llama.py', 'android', '--abi', 'arm64-v8a', '--jobs', '2'],
               // mobile:sync:android stages the offline speech pack and fails
-              // without it; --models pulls the checksum-pinned voice pack.
-              ['python3', 'native/mobile/speech/build.py', 'android', '--ndk', process.env.ANDROID_NDK_HOME, '--fetch', '--models'],
+              // without it; the build always pulls the checksum-pinned voice pack.
+              ['python3', 'native/mobile/speech/build.py', 'android', '--ndk', process.env.ANDROID_NDK_HOME, '--fetch', '--package', process.env.GEZEL_MOBILE_SDK_VERSION],
               ['python3', 'native/mobile/stage-sdk.py', 'android', '--build', 'native/mobile/.build/android', '--output', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--version', process.env.GEZEL_MOBILE_SDK_VERSION, '--ndk', process.env.ANDROID_NDK_HOME, '--javac', `${process.env.JAVA_HOME}/bin/javac`],
               ['python3', 'native/runtime/stage-sdk.py', 'android', '--sdk', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--output', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
               ['node', 'packages/capacitor/scripts/stage-native.mjs', 'android', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
+              // The app links speech through the plugin, as any app does.
+              ['node', 'packages/capacitor/scripts/stage-native.mjs', 'speech-android', 'native/mobile/.build/speech-android/package'],
               ['pnpm', 'mobile:sync:android'],
               ['node', 'packages/mobile/scripts/stage-android-test-fixture.mjs', 'native/mobile/.build/ios-fixture.gguf'],
             ]) {
@@ -248,11 +250,14 @@ jobs:
       # deliberately build-only; pnpm mobile:test:android runs the same tests
       # on the dedicated local arm64 AVD, never a translated x86 engine.
 
-      - name: Package public Android SDK
-        run: >-
-          python3 native/runtime/release-sdk.py pack android
-          --sdk "$RUNNER_TEMP/gezel-runtime-sdk" --output "$RUNNER_TEMP/mobile-release"
-          --version "$GEZEL_MOBILE_SDK_VERSION" --commit "$GITHUB_SHA"
+      - name: Package public Android SDK and speech runtime
+        run: |
+          python3 native/runtime/release-sdk.py pack android \
+            --sdk "$RUNNER_TEMP/gezel-runtime-sdk" --output "$RUNNER_TEMP/mobile-release" \
+            --version "$GEZEL_MOBILE_SDK_VERSION" --commit "$GITHUB_SHA"
+          python3 native/runtime/release-sdk.py pack android --speech \
+            --sdk native/mobile/.build/speech-android/package --output "$RUNNER_TEMP/mobile-release" \
+            --version "$GEZEL_MOBILE_SDK_VERSION" --commit "$GITHUB_SHA"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mobile-sdk-android
@@ -331,11 +336,13 @@ jobs:
             for (const [command, ...args] of [
               ['python3', 'native/mobile/build-llama.py', 'ios', '--output', 'native/mobile/.build/ios-bridge', '--simulator-arch', process.arch === 'arm64' ? 'arm64' : 'x86_64', '--jobs', '3'],
               // mobile:sync:ios stages the offline speech pack and fails
-              // without it; --models pulls the checksum-pinned voice pack.
-              ['python3', 'native/mobile/speech/build.py', 'ios', '--fetch', '--models'],
+              // without it; the build always pulls the checksum-pinned voice pack.
+              ['python3', 'native/mobile/speech/build.py', 'ios', '--fetch', '--package', process.env.GEZEL_MOBILE_SDK_VERSION],
               ['python3', 'native/mobile/stage-sdk.py', 'ios', '--build', 'native/mobile/.build/ios-bridge', '--output', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--version', process.env.GEZEL_MOBILE_SDK_VERSION],
               ['python3', 'native/runtime/stage-sdk.py', 'ios', '--sdk', `${process.env.RUNNER_TEMP}/gezel-engine-sdk`, '--output', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
               ['node', 'packages/capacitor/scripts/stage-native.mjs', 'ios', `${process.env.RUNNER_TEMP}/gezel-runtime-sdk`],
+              // The app links speech through the plugin, as any app does.
+              ['node', 'packages/capacitor/scripts/stage-native.mjs', 'speech-ios', 'native/mobile/.build/speech-ios/package'],
               ['pnpm', 'mobile:sync:ios'],
               ['swift', 'test', '--package-path', 'packages/mobile/native/ios', '--scratch-path', path.join(process.env.RUNNER_TEMP, 'mobile-storage-tests')],
             ]) {
@@ -471,11 +478,14 @@ jobs:
             writeFileSync(path.join(process.env.RUNNER_TEMP, 'ios-archive-verification.json'), check.stdout);
           }, { command: 'iOS native CI cached device archive verification' });
           JS
-      - name: Package public iOS SDK
-        run: >-
-          python3 native/runtime/release-sdk.py pack ios
-          --sdk "$RUNNER_TEMP/gezel-runtime-sdk" --output "$RUNNER_TEMP/mobile-release"
-          --version "$GEZEL_MOBILE_SDK_VERSION" --commit "$GITHUB_SHA"
+      - name: Package public iOS SDK and speech runtime
+        run: |
+          python3 native/runtime/release-sdk.py pack ios \
+            --sdk "$RUNNER_TEMP/gezel-runtime-sdk" --output "$RUNNER_TEMP/mobile-release" \
+            --version "$GEZEL_MOBILE_SDK_VERSION" --commit "$GITHUB_SHA"
+          python3 native/runtime/release-sdk.py pack ios --speech \
+            --sdk native/mobile/.build/speech-ios/package --output "$RUNNER_TEMP/mobile-release" \
+            --version "$GEZEL_MOBILE_SDK_VERSION" --commit "$GITHUB_SHA"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: mobile-sdk-ios
@@ -567,6 +577,11 @@ jobs:
             mkdir -p "$RUNNER_TEMP/embedding-runtime-$target"
             tar -xzf "$archive" -C "$RUNNER_TEMP/embedding-runtime-$target"
             node packages/capacitor/scripts/stage-native.mjs "$target" "$RUNNER_TEMP/embedding-runtime-$target"
+            speech="$RUNNER_TEMP/embedding-native-artifacts/mobile-sdk-$target/gezel-mobile-$GEZEL_MOBILE_SDK_VERSION-speech-$target.tar.gz"
+            python3 native/runtime/release-sdk.py verify "$speech" --speech --target "$target" --version "$GEZEL_MOBILE_SDK_VERSION" --commit "$GITHUB_SHA"
+            mkdir -p "$RUNNER_TEMP/embedding-speech-$target"
+            tar -xzf "$speech" -C "$RUNNER_TEMP/embedding-speech-$target"
+            node packages/capacitor/scripts/stage-native.mjs "speech-$target" "$RUNNER_TEMP/embedding-speech-$target"
           done
       - name: Select Android consumer toolchains
         if: matrix.platform == 'android'

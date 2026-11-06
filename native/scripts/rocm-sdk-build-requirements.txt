@@ -1,0 +1,7 @@
+# What pip needs to build the `rocm` source archive pinned in
+# rocm-sdk-requirements.txt, installed first from PyPI so that install can run
+# with --no-build-isolation and fetch nothing unpinned. Its pyproject asks for
+# setuptools>=70.2.0.
+
+setuptools==80.9.0 \
+    --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922

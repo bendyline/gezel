@@ -93,7 +93,7 @@ export function detectDs4Availability(opts?: {
   /** `health.platform` — the daemon's `process.platform`. */
   serverPlatform?: string | undefined;
   /** `health.llamaCppDetectedBackend` — what the hardware probe found. */
-  detectedBackend?: 'cuda' | 'vulkan' | 'metal' | 'cpu' | undefined;
+  detectedBackend?: 'cuda' | 'rocm' | 'vulkan' | 'metal' | 'cpu' | undefined;
   /** `health.llamaCppDetectedVendor` — the probed GPU vendor. */
   gpuVendor?: 'amd' | 'nvidia' | 'intel' | undefined;
   /** Injectable for tests; defaults to the global `navigator`. */

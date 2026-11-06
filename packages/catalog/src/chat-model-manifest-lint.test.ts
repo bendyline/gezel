@@ -186,6 +186,22 @@ describe('lintChatModelManifest rules', () => {
     expect(lintChatModelManifest({ ...rest, ds4: { residentBytes: 1 } }).errors).toEqual([]);
   });
 
+  it('rejects a ds4 full-residency measurement smaller than its weights', () => {
+    const { llamaCpp: _drop, ...rest } = complete;
+    const ds4 = (workingSetBytes: number) => ({
+      ...rest,
+      ds4: {
+        residentBytes: 1,
+        residentWeightBytes: 40,
+        fullResidencyMemory: { workingSetBytes },
+      },
+    });
+    expect(lintChatModelManifest(ds4(39)).errors.map((f) => f.rule)).toContain(
+      'ds4-full-residency-below-weights',
+    );
+    expect(lintChatModelManifest(ds4(45)).errors).toEqual([]);
+  });
+
   it('small model without rescue behaviors warns; large model does not', () => {
     const small = { ...complete, behaviors: ['turn.preamble-folding'] };
     expect(lintChatModelManifest(small).warnings.map((f) => f.rule)).toContain(

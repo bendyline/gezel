@@ -14,12 +14,15 @@ const SUPPORTED_SCHEMA_VERSIONS = new Set([2, 3]);
 const SIGNATURE_EXPECTATIONS = new Set(['bendyline', 'vendor-hash-only', 'hash-only']);
 
 /**
- * Source an engine compiles and runs at startup, which no code signature
- * covers: ds4-server builds its Metal kernels from `metal/*.metal` beside the
- * binary. Pinned by extension (the files ship 0644) and always `hash-only`.
- * Keep this tight for the same reason as the data list below.
+ * GPU code an engine loads at runtime, which no code signature covers:
+ * ds4-server builds its Metal kernels from `metal/*.metal` beside the binary,
+ * and the ROCm llama-server's rocBLAS loads its kernels from
+ * `rocblas/library/` (`.dat` libraries, `.hsaco`/`.co` code objects) and
+ * `kpack/*.kpack`. Pinned by extension (the files ship 0644) and always
+ * `hash-only`. Keep this tight for the same reason as the data list below;
+ * the same list lives in packages/inference/src/engines/electron-native-reuse.ts.
  */
-const NATIVE_RUNTIME_SOURCE_EXTENSIONS = ['.metal'];
+const NATIVE_RUNTIME_SOURCE_EXTENSIONS = ['.metal', '.hsaco', '.co', '.dat', '.kpack'];
 
 /**
  * Sidecar data that travels with the binaries — engine build metadata and

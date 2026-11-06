@@ -3,12 +3,20 @@
  * Add redistribution texts to one native build artifact before it is uploaded.
  * CUDA artifacts prefer the EULA installed with the exact toolkit used by that
  * matrix leg, then fall back to a checked-in copy for that supported CUDA minor.
+ * ROCm artifacts get the license of every AMD library they carry, from the
+ * SDK the library was copied from or, where AMD ships none, from
+ * native/rocm-licenses/.
  */
 import { existsSync } from 'node:fs';
-import { cp, mkdir, readFile, readdir } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { verifyNativeNoticeInventory } from './check-notice.mjs';
+import {
+  ROCM_LGPL_SOURCES,
+  THEROCK_SOURCE,
+  thirdPartySourcesAssetName,
+} from './rocm-lgpl-sources.mjs';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(scriptDir, '..');
@@ -22,13 +30,162 @@ const supportedCudaEulas = new Map(
 function parseArgs(argv) {
   let output;
   let requireCudaEula = false;
+  let rocm = false;
+  let nativeRelease;
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === '--output') output = argv[++index];
     else if (argv[index] === '--cuda') requireCudaEula = true;
+    else if (argv[index] === '--rocm') rocm = true;
+    else if (argv[index] === '--native-release') nativeRelease = argv[++index];
     else throw new Error(`unknown argument: ${argv[index]}`);
   }
-  if (!output) throw new Error('usage: stage-native-artifact-licenses.mjs --output <dir> [--cuda]');
-  return { output: resolve(output), requireCudaEula };
+  if (!output) {
+    throw new Error(
+      'usage: stage-native-artifact-licenses.mjs --output <dir> [--cuda] [--rocm] [--native-release <tag>]',
+    );
+  }
+  if (nativeRelease !== undefined && !/^native-v\d+\.\d+\.\d+$/.test(nativeRelease)) {
+    throw new Error(`--native-release must be a native-vX.Y.Z tag, not ${nativeRelease}`);
+  }
+  return { output: resolve(output), requireCudaEula, rocm, nativeRelease };
+}
+
+/**
+ * Every AMD library a ROCm payload can carry and where its license text
+ * comes from: `sdk` names a folder of the ROCm SDK's `share/doc/`, `files` a
+ * text in native/rocm-licenses/. The rocBLAS kernels the payload also carries
+ * (rocblas/library, kpack/) are rocBLAS's and covered by its entry. A library
+ * that matches ROCM_VENDOR_LIBRARY and no entry fails the build: a new
+ * dependency gets its license reviewed before it ships.
+ */
+export const ROCM_VENDOR_LIBRARY =
+  /^(?:lib)?(?:amdhip64|amd_comgr|rocm_kpack|hipblas|rocblas|rocsolver|origami|roctx64|hsa-runtime64|rocprofiler-register|rocroller|rocm_sysdeps_|LLVM|clang-cpp)/i;
+
+export const ROCM_LICENSES = [
+  { component: 'hip', match: /^(?:lib)?amdhip64/i, files: ['LICENSE-hip-clr.md'] },
+  { component: 'amd_comgr', match: /^(?:lib)?amd_comgr/i, sdk: 'amd_comgr' },
+  { component: 'rocm-kpack', match: /^(?:lib)?rocm_kpack/i, files: ['LICENSE-rocm-kpack.txt'] },
+  { component: 'hipblaslt', match: /^(?:lib)?hipblaslt/i, sdk: 'hipblaslt' },
+  { component: 'hipblas', match: /^(?:lib)?hipblas(?!lt)/i, sdk: 'hipblas' },
+  { component: 'rocblas', match: /^(?:lib)?rocblas/i, sdk: 'rocblas' },
+  { component: 'rocsolver', match: /^(?:lib)?rocsolver/i, sdk: 'rocsolver' },
+  { component: 'origami', match: /^(?:lib)?origami/i, sdk: 'origami' },
+  { component: 'roctracer', match: /^(?:lib)?roctx64/i, sdk: 'roctracer' },
+  { component: 'rocr', match: /^libhsa-runtime64/, sdk: 'rocr' },
+  {
+    component: 'rocprofiler-register',
+    match: /^librocprofiler-register/,
+    sdk: 'rocprofiler-register',
+  },
+  { component: 'rocroller', match: /^librocroller/, files: ['LICENSE-rocroller.md'] },
+  { component: 'llvm', match: /^lib(?:LLVM|clang-cpp)/, files: ['LICENSE-llvm.txt'] },
+  { component: 'libdrm', match: /^librocm_sysdeps_drm/, files: ['LICENSE-libdrm-MIT.txt'] },
+  { component: 'numactl', match: /^librocm_sysdeps_numa/, files: ['LICENSE-numactl-LGPL-2.1.txt'] },
+  {
+    component: 'elfutils',
+    match: /^librocm_sysdeps_elf/,
+    files: [
+      'LICENSE-elfutils-LGPL-3.0.txt',
+      'LICENSE-elfutils-GPL-3.0.txt',
+      'LICENSE-elfutils-GPL-2.0.txt',
+    ],
+  },
+  { component: 'zlib', match: /^librocm_sysdeps_z\./, files: ['LICENSE-zlib.txt'] },
+  { component: 'zstd', match: /^librocm_sysdeps_zstd/, files: ['LICENSE-zstd-BSD-3-Clause.txt'] },
+  { component: 'xz', match: /^librocm_sysdeps_liblzma/, files: ['LICENSE-xz-liblzma-0BSD.txt'] },
+  { component: 'bzip2', match: /^librocm_sysdeps_bz2/, files: ['LICENSE-bzip2.txt'] },
+];
+
+/**
+ * Where the source of the payload's LGPL libraries is offered, for the
+ * README beside their license texts. `nativeRelease` is the native-v* tag the
+ * archive is published under, unknown on builds that publish nothing.
+ */
+export function rocmSourceOffer(libraries, nativeRelease) {
+  const sources = ROCM_LGPL_SOURCES.filter((source) =>
+    libraries.some((library) => library.startsWith(source.library)),
+  );
+  if (sources.length === 0) return [];
+  const version = nativeRelease?.replace(/^native-v/, '') ?? '<version>';
+  const where = nativeRelease
+    ? `https://github.com/bendyline/gezel/releases/tag/${nativeRelease}`
+    : 'the native-v<version> release at https://github.com/bendyline/gezel/releases that carries this archive';
+  return [
+    'Source code for the LGPL libraries above, as AMD built them:',
+    '',
+    ...sources.map(
+      (source) => `${source.library}: ${source.component} ${source.version} (${source.license})`,
+    ),
+    '',
+    `It is published with this archive, as ${thirdPartySourcesAssetName(version)}`,
+    `on ${where},`,
+    `together with AMD's build scripts and patches (TheRock, tag ${THEROCK_SOURCE.tag}).`,
+    'Upstream:',
+    ...sources.map((source) => `  ${source.upstream}`),
+    `  ${THEROCK_SOURCE.repository}/tree/${THEROCK_SOURCE.tag}`,
+    '',
+  ];
+}
+
+async function stageRocmLicenses(output, legalRoot, nativeRelease) {
+  const sdkRoot = process.env.ROCM_PATH || process.env.HIP_PATH;
+  if (!sdkRoot)
+    throw new Error('--rocm needs ROCM_PATH or HIP_PATH naming the ROCm SDK the payload came from');
+  const libraries = (await readdir(output, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && ROCM_VENDOR_LIBRARY.test(entry.name))
+    .map((entry) => entry.name);
+  if (libraries.length === 0) throw new Error(`--rocm: no AMD libraries in ${output}`);
+  const target = join(legalRoot, 'AMD-ROCm');
+  await mkdir(target, { recursive: true });
+  const index = [];
+  const staged = new Set();
+  for (const library of libraries.sort()) {
+    const entry = ROCM_LICENSES.find((candidate) => candidate.match.test(library));
+    if (!entry)
+      throw new Error(
+        `${library} is an AMD library with no reviewed license entry (ROCM_LICENSES)`,
+      );
+    if (
+      entry.files?.some((name) => /GPL/.test(name)) &&
+      !ROCM_LGPL_SOURCES.some((source) => library.startsWith(source.library))
+    ) {
+      throw new Error(
+        `${library} is LGPL/GPL-licensed and has no source pinned in scripts/rocm-lgpl-sources.mjs`,
+      );
+    }
+    index.push(`${library}: ${entry.component}`);
+    if (staged.has(entry.component)) continue;
+    staged.add(entry.component);
+    if (entry.sdk) {
+      const docDir = join(sdkRoot, 'share', 'doc', entry.sdk);
+      const texts = existsSync(docDir)
+        ? (await readdir(docDir)).filter((name) => /^licen[cs]e/i.test(name))
+        : [];
+      if (texts.length === 0)
+        throw new Error(`the ROCm SDK has no license text for ${entry.component} under ${docDir}`);
+      for (const name of texts)
+        await cp(join(docDir, name), join(target, `${entry.component}-${name}`));
+    } else {
+      for (const name of entry.files) {
+        await cp(join(repoRoot, 'native', 'rocm-licenses', name), join(target, name));
+      }
+    }
+  }
+  await writeFile(
+    join(target, 'README.txt'),
+    [
+      'AMD ROCm runtime libraries in this payload and the license each is under:',
+      '',
+      ...index,
+      '',
+      "The rocBLAS kernels under rocblas/library and kpack/ are rocBLAS's.",
+      '',
+      ...rocmSourceOffer(libraries, nativeRelease),
+    ].join('\n'),
+  );
+  console.log(
+    `[native-licenses] ROCm: ${staged.size} licenses for ${libraries.length} libraries -> ${target}`,
+  );
 }
 
 async function findCudaEula() {
@@ -115,10 +272,13 @@ async function main() {
     await cp(eula, target);
     console.log(`[native-licenses] CUDA EULA: ${eula} -> ${target}`);
   }
+  if (args.rocm) await stageRocmLicenses(args.output, legalRoot, args.nativeRelease);
   console.log(`[native-licenses] staged legal texts in ${legalRoot}`);
 }
 
-main().catch((error) => {
-  console.error(`\u2717 failed to stage native legal texts: ${error.message}`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(`\u2717 failed to stage native legal texts: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

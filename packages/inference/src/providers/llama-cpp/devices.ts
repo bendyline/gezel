@@ -20,7 +20,7 @@ import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
-import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
+import { rocmLaunchEnv, windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { gezelHome } from '@bendyline/gezel/paths';
 import { totalMemoryBytes } from '../../system/host-memory.js';
 
@@ -252,6 +252,9 @@ export async function probeLlamaDevices(opts: {
       env: {
         ...process.env,
         PATH: inheritedPath ? `${binDir}${delimiter}${inheritedPath}` : binDir,
+        // A ROCm build lists only the GPUs its launch will see, so the VRAM
+        // the planner reads is the VRAM the engine gets.
+        ...rocmLaunchEnv(home, binaryPath),
       },
       // This is an awaited probe, not an independent process. Hide its
       // Windows console without detaching it from the daemon.

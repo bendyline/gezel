@@ -17,6 +17,8 @@ import zipfile
 VERSION = r'(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[A-Za-z0-9.-]+)?'
 COMMON = {'sdk-manifest.json', 'engine-manifest.json', 'PUBLIC-DISTRIBUTION.md', 'LICENSE-gezel.txt'}
 MAX_BYTES = 2 * 1024 ** 3
+SPEECH = Path(__file__).resolve().parents[1] / 'mobile/speech'
+SPEECH_NOTICE = r'(?:LICENSE|NOTICE)-[A-Za-z0-9_.-]+\.txt'
 
 
 def digest(path):
@@ -103,23 +105,28 @@ def verify_zip(data, sources=False, classes=False):
         return seen
 
 
-def verify_sdk(root, target, version):
-    manifest = json.loads((root / 'sdk-manifest.json').read_text())
-    if (manifest.get('schemaVersion'), manifest.get('scope'), manifest.get('target'),
-            manifest.get('packageVersion'), manifest.get('gezelABIVersion')) != (
-            1, 'provider-model-runtime', target, version, 1):
-        raise ValueError('SDK identity/version mismatch')
+def inventory(root, manifest, allowed):
     files = {}
     for file in sorted(root.rglob('*')):
         if file.is_symlink():
             raise ValueError('SDK symlinks are not distributable')
         if file.is_file():
             name = file.relative_to(root).as_posix()
-            if not allowed_file(name, target, version):
+            if not allowed(name):
                 raise ValueError(f'Unexpected public SDK file: {name}')
             files[name] = digest(file)
     if {name: sha for name, sha in files.items() if name != 'sdk-manifest.json'} != manifest.get('files'):
         raise ValueError('SDK inventory/hash mismatch')
+    return files
+
+
+def verify_sdk(root, target, version):
+    manifest = json.loads((root / 'sdk-manifest.json').read_text())
+    if (manifest.get('schemaVersion'), manifest.get('scope'), manifest.get('target'),
+            manifest.get('packageVersion'), manifest.get('gezelABIVersion')) != (
+            1, 'provider-model-runtime', target, version, 1):
+        raise ValueError('SDK identity/version mismatch')
+    files = inventory(root, manifest, lambda name: allowed_file(name, target, version))
     required = set(COMMON)
     notices = json.loads((root / 'THIRD_PARTY_LICENSES/manifest.json').read_text())
     upstream = json.loads((root / 'engine-manifest.json').read_text()).get('upstream', {})
@@ -163,8 +170,87 @@ def verify_sdk(root, target, version):
     return files
 
 
-def verify(archive, target, version, commit):
+def speech_abi():
+    return int(next(line.split()[-1] for line in (SPEECH / 'gezel_speech.h').read_text().splitlines()
+                    if line.startswith('#define GEZEL_SPEECH_ABI ')))
+
+
+def allowed_speech_file(name, target, version):
+    """What build.py --package lays out: the library, its notices, and nothing else."""
+    safe_name(name)
+    if name == 'sdk-manifest.json' or re.fullmatch(SPEECH_NOTICE, name):
+        return True
+    if target == 'ios':
+        return bool(re.fullmatch(
+            r'GezelSpeech\.xcframework/(Info\.plist|ios-[a-z0-9_-]+/GezelSpeech\.framework/'
+            r'(GezelSpeech|Info\.plist|Headers/gezel_speech\.h|Modules/module\.modulemap))', name))
+    pinned = re.escape(version)
+    return bool(re.fullmatch(
+        rf'maven/com/bendyline/gezel/gezel-speech/{pinned}/gezel-speech-{pinned}\.(aar|pom)(\.sha256)?', name))
+
+
+def verify_speech_aar(data, notices):
+    """The JNI binding is compiled into libGezelSpeech; the Java side is plugin source."""
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        seen, total = set(), 0
+        for member in archive.infolist():
+            name = member.filename
+            safe_name(name)
+            if member.is_dir() or name in seen or stat.S_ISLNK(member.external_attr >> 16):
+                raise ValueError(f'Unsafe ZIP entry: {name}')
+            seen.add(name)
+            total += member.file_size
+            if total > MAX_BYTES:
+                raise ValueError('SDK ZIP exceeds size limit')
+            if not (name in {'classes.jar', 'R.txt', 'AndroidManifest.xml'}
+                    or re.fullmatch(r'jni/arm64-v8a/lib(GezelSpeech|onnxruntime)\.so', name)
+                    or re.fullmatch('META-INF/' + SPEECH_NOTICE, name)):
+                raise ValueError(f'Unexpected speech AAR content: {name}')
+        required = {'classes.jar', 'AndroidManifest.xml', 'jni/arm64-v8a/libGezelSpeech.so',
+                    'jni/arm64-v8a/libonnxruntime.so'} | {f'META-INF/{name}' for name in notices}
+        if not required <= seen:
+            raise ValueError(f'Incomplete speech AAR: {sorted(required - seen)}')
+        if zipfile.ZipFile(io.BytesIO(archive.read('classes.jar'))).namelist():
+            raise ValueError('The speech AAR must not carry classes')
+
+
+def verify_speech(root, target, version):
+    manifest = json.loads((root / 'sdk-manifest.json').read_text())
+    if (manifest.get('scope'), manifest.get('target'), manifest.get('packageVersion'),
+            manifest.get('speechABIVersion')) != ('speech-runtime', target, version, speech_abi()):
+        raise ValueError('Speech runtime identity/version mismatch')
+    files = inventory(root, manifest, lambda name: allowed_speech_file(name, target, version))
+    notices = {'LICENSE-whisper.txt'} | {file.name for file in (SPEECH / 'licenses').glob('*.txt')}
+    required = {'sdk-manifest.json'} | notices
+    if target == 'ios':
+        required.add('GezelSpeech.xcframework/Info.plist')
+        libraries = plistlib.loads((root / 'GezelSpeech.xcframework/Info.plist').read_bytes())['AvailableLibraries']
+        variants = set()
+        for library in libraries:
+            variants.add(library.get('SupportedPlatformVariant', 'device'))
+            required.add(f'GezelSpeech.xcframework/{library["LibraryIdentifier"]}/{library["LibraryPath"]}/GezelSpeech')
+        if not {'device', 'simulator'} <= variants:
+            raise ValueError('iOS speech runtime requires device and simulator slices')
+    else:
+        base = f'maven/com/bendyline/gezel/gezel-speech/{version}/gezel-speech-{version}'
+        required |= {base + '.aar', base + '.pom'}
+        if base + '.aar' in files:
+            verify_speech_aar((root / (base + '.aar')).read_bytes(), notices)
+    if not required <= files.keys():
+        raise ValueError(f'Incomplete speech runtime: {sorted(required - files.keys())}')
+    return files
+
+
+KINDS = {
+    'sdk': ('gezel-mobile-{version}-{target}.tar.gz', allowed_file, verify_sdk),
+    # Named under gezel-mobile-<version>- so pin-native-release.mjs reads it as a mobile archive.
+    'speech': ('gezel-mobile-{version}-speech-{target}.tar.gz', allowed_speech_file, verify_speech),
+}
+
+
+def verify(archive, target, version, commit, kind='sdk'):
     identity(version, commit)
+    _, allowed, verify_tree = KINDS[kind]
     with tempfile.TemporaryDirectory(prefix='gezel-sdk-verify-') as directory:
         root = Path(directory)
         seen, total = set(), 0
@@ -175,7 +261,7 @@ def verify(archive, target, version, commit):
                 if not member.isfile() or member.name in seen or total > MAX_BYTES:
                     raise ValueError('Unsafe SDK archive entry or oversized archive')
                 seen.add(member.name)
-                if member.name != 'release-manifest.json' and not allowed_file(member.name, target, version):
+                if member.name != 'release-manifest.json' and not allowed(member.name, target, version):
                     raise ValueError(f'Unexpected public SDK file: {member.name}')
                 file = root / member.name
                 file.parent.mkdir(parents=True, exist_ok=True)
@@ -185,17 +271,18 @@ def verify(archive, target, version, commit):
         release = json.loads(release_file.read_text())
         release_file.unlink()
         if release != {'schemaVersion': 1, 'target': target, 'version': version, 'sourceCommit': commit,
-                       'librarySigning': 'unsigned', 'files': verify_sdk(root, target, version)}:
+                       'librarySigning': 'unsigned', 'files': verify_tree(root, target, version)}:
             raise ValueError('Release provenance/inventory mismatch')
 
 
-def pack(sdk, output, target, version, commit):
+def pack(sdk, output, target, version, commit, kind='sdk'):
     identity(version, commit)
-    files = verify_sdk(sdk, target, version)
+    name, _, verify_tree = KINDS[kind]
+    files = verify_tree(sdk, target, version)
     metadata = {'schemaVersion': 1, 'target': target, 'version': version, 'sourceCommit': commit,
                 'librarySigning': 'unsigned', 'files': files}
     output.mkdir(parents=True, exist_ok=True)
-    archive = output / f'gezel-mobile-{version}-{target}.tar.gz'
+    archive = output / name.format(version=version, target=target)
     if archive.exists():
         raise ValueError('Release archives are immutable; choose a new output directory')
     with tempfile.TemporaryDirectory(prefix='.gezel-release-', dir=output) as directory:
@@ -213,7 +300,7 @@ def pack(sdk, output, target, version, commit):
             info.size = len(data)
             info.mode = 0o644
             bundle.addfile(info, io.BytesIO(data))
-        verify(temporary, target, version, commit)
+        verify(temporary, target, version, commit, kind)
         temporary.rename(archive)
     archive.with_name(archive.name + '.sha256').write_text(f'{digest(archive)}  {archive.name}\n')
     return archive
@@ -233,11 +320,13 @@ if __name__ == '__main__':
     for command in (packing, checking):
         command.add_argument('--version', required=True)
         command.add_argument('--commit', required=True)
+        command.add_argument('--speech', action='store_true', help='The speech runtime build.py --package lays out')
     args = parser.parse_args()
+    kind = 'speech' if getattr(args, 'speech', False) else 'sdk'
     if args.command == 'version':
         print(f'version={ci_version(os.environ)}')
     elif args.command == 'pack':
-        print(pack(args.sdk, args.output, args.target, args.version, args.commit))
+        print(pack(args.sdk, args.output, args.target, args.version, args.commit, kind))
     else:
-        verify(args.archive, args.target, args.version, args.commit)
-        print(f'Verified public {args.target} SDK {args.version}')
+        verify(args.archive, args.target, args.version, args.commit, kind)
+        print(f'Verified public {args.target} {"speech runtime" if kind == "speech" else "SDK"} {args.version}')

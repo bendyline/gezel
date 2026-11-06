@@ -207,6 +207,7 @@ function LlamaCppEnginePill({ health }: { health: HealthResponse }) {
 
 function humanBackend(b: NonNullable<HealthResponse['llamaCppBackend']>): string {
   if (b === 'cuda') return 'CUDA';
+  if (b === 'rocm') return 'ROCm';
   if (b === 'vulkan') return 'Vulkan';
   if (b === 'metal') return 'Metal';
   return 'CPU';

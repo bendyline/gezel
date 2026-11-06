@@ -20,10 +20,13 @@ import {
 } from '@bendyline/gezel-client/node';
 import {
   LLAMA_ENGINE_VERSION,
+  type LlamaBackend,
+  checkRocmBuild,
   createLlamaBuildCheck,
   cudaArchiveCarries,
   detectLlamaBackend,
   publishLlamaCudaBlocker,
+  publishRocmCheck,
   readLlamaQuarantine,
   resolveAvailableLlamaBinary,
 } from '@bendyline/gezel/native';
@@ -1474,8 +1477,14 @@ async function connectOrStartPrepared(opts: ConnectOptions): Promise<SupervisedS
     // relaunching a build already known to crash on this machine.
     const quarantine = readLlamaQuarantine(opts.home);
     // The same check also passes over a Linux CUDA build the NVIDIA driver
-    // cannot run (nvidia-driver.ts), which would otherwise start on the CPU.
-    const check = createLlamaBuildCheck({ quarantine, platform: process.platform });
+    // cannot run (nvidia-driver.ts), which would otherwise start on the CPU,
+    // and a ROCm build with no code for this machine's AMD GPUs
+    // (rocm-devices.ts), which asks the build once per build and driver.
+    const check = createLlamaBuildCheck({
+      quarantine,
+      platform: process.platform,
+      rocmCheckFor: (binaryPath) => checkRocmBuild(opts.home, binaryPath),
+    });
     const checkoutLlamaCompatibility = new Map<
       string,
       ReturnType<typeof verifyLlamaBinaryAgainstCheckoutPin>
@@ -1514,6 +1523,13 @@ async function connectOrStartPrepared(opts: ConnectOptions): Promise<SupervisedS
     if (cudaBlocker) {
       opts.logger?.warn?.(
         `[supervisor] llama-server cuda build passed over: ${cudaBlocker.detail} (${cudaBlocker.kind})`,
+      );
+    }
+    const rocmCheck = check.rocmCheck();
+    publishRocmCheck(rocmCheck);
+    if (rocmCheck?.blocker) {
+      opts.logger?.info?.(
+        `[supervisor] llama-server rocm build passed over: ${rocmCheck.blocker.detail} (${rocmCheck.blocker.kind})`,
       );
     }
     if (resolved) {
@@ -2909,14 +2925,19 @@ async function startEmbeddedRaw(
  * failure mode (file missing, JSON malformed, field absent or wrong
  * type) — return `undefined` and let the auto-detect take over.
  */
-async function readBackendOverride(
-  home: string,
-): Promise<'auto' | 'cuda' | 'vulkan' | 'metal' | 'cpu' | undefined> {
+async function readBackendOverride(home: string): Promise<'auto' | LlamaBackend | undefined> {
   try {
     const raw = await readFile(join(home, 'config.json'), 'utf8');
     const parsed = JSON.parse(raw) as { llamaCppBackendOverride?: unknown };
     const v = parsed.llamaCppBackendOverride;
-    if (v === 'auto' || v === 'cuda' || v === 'vulkan' || v === 'metal' || v === 'cpu') {
+    if (
+      v === 'auto' ||
+      v === 'cuda' ||
+      v === 'rocm' ||
+      v === 'vulkan' ||
+      v === 'metal' ||
+      v === 'cpu'
+    ) {
       return v;
     }
   } catch {

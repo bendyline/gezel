@@ -13,12 +13,14 @@ import {
   LLAMA_QUARANTINE_STRIKES,
   clearLlamaStartupStrikes,
   recordLlamaStartupCrash,
+  rocmLaunchEnv,
   unrunnableBuildExit,
 } from '@bendyline/gezel/native';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import { mmprojBudgetBytes, nativeVisionEnabledFor } from '../../chat/vision-capability.js';
 import { effectiveEngineRelease, isEnginePinned } from '../../engines/native-manifest.js';
 import { engineInstallPhase } from '../../engines/registry.js';
+import { llamaDownloadVariant } from '../../engines/resolver.js';
 import { availableCpuCount, containerCpuLimit } from '../../system/host-memory.js';
 import {
   localDeviceSettingsLabel,
@@ -113,7 +115,7 @@ export function ensureLlamaEngineStatus(
   const backend =
     override && override !== 'auto'
       ? override
-      : process.env.GEZEL_LLAMA_DETECTED_BACKEND || undefined;
+      : llamaDownloadVariant(process.env.GEZEL_LLAMA_DETECTED_BACKEND || undefined);
   const { snapshot } = registry.ensure('llama-server', backend);
   if (snapshot.error) {
     return { detail: `On-device engine couldn't be downloaded: ${snapshot.error}`, failed: true };
@@ -1728,6 +1730,9 @@ export async function buildLlamaCppProvider(opts: {
           // Equivalent to `--api-key`, but out of `argv` so it does not show
           // up in `ps` on a shared machine.
           LLAMA_API_KEY: engineApiKey(),
+          // A ROCm build's kernel packs, rocBLAS routing, and the AMD GPUs it
+          // has no code for kept out of sight (rocm-devices.ts).
+          ...rocmLaunchEnv(home, binary, llamaBuildMetadata?.backend ?? binaryBackend),
         },
         baseUrl: `http://127.0.0.1:${port}`,
       };

@@ -46,6 +46,14 @@
  *     whisper-server links ggml statically there: llama-server's ggml*.dll
  *     share the folder under the same names from a different ggml. The key
  *     first ships in the release named in FIRST_NATIVE_RELEASE below.
+ *   - `-rocm` keys are x64 only (`linux-x64-rocm`, `win32-x64-rocm`): AMD
+ *     publishes no ROCm SDK for ARM. Each carries llama-server's ROCm build
+ *     with the AMD runtime it loads (HIP, rocBLAS and friends, the per-GPU
+ *     rocBLAS kernels for ROCM_GFX_TARGETS in core's rocm-devices.ts), so the
+ *     archive runs without a ROCm install, the way the `-cuda` keys run
+ *     without a CUDA toolkit. Discovery asks that build which GPUs it can
+ *     drive before choosing it; anything else stays on `-vulkan`. The keys
+ *     first ship in the release named in FIRST_NATIVE_RELEASE below.
  *   - `gezel-device-health` is Windows + Linux only (macOS uses IOKit in-process)
  *   - `gezel-service-host` is Windows only (macOS/Linux use launchd/systemd)
  *   - `gezel-sandbox` is Linux only (macOS has Seatbelt, Windows the MXC
@@ -98,6 +106,7 @@ export const NATIVE_PAYLOAD = Object.freeze({
   'win32-x64-cpu': ['gezel-llama-server'],
   'win32-x64-vulkan': ['gezel-llama-server'],
   'win32-x64-cuda': ['gezel-llama-server'],
+  'win32-x64-rocm': ['gezel-llama-server'],
   'win32-arm64': [
     'gezel-device-health',
     'gezel-service-host',
@@ -126,6 +135,7 @@ export const NATIVE_PAYLOAD = Object.freeze({
   'linux-x64-cpu': ['gezel-llama-server'],
   'linux-x64-vulkan': ['gezel-llama-server'],
   'linux-x64-cuda': ['gezel-llama-server', 'gezel-ds4-server', 'gezel-sd-server'],
+  'linux-x64-rocm': ['gezel-llama-server'],
   'linux-arm64': [
     'gezel-device-health',
     'gezel-sandbox',
@@ -182,6 +192,8 @@ export function allPlatformKeys() {
  */
 export const FIRST_NATIVE_RELEASE = Object.freeze({
   'win32-arm64-cuda': '0.1.52',
+  'linux-x64-rocm': '0.1.58',
+  'win32-x64-rocm': '0.1.58',
 });
 
 /**
@@ -248,7 +260,7 @@ export function platformKeysForEngine(engineId) {
 /**
  * Every key belonging to one platform — the bare key (single-variant
  * engines like sd-cpp / whisper-cpp / uv) plus each suffixed key
- * (multi-variant engines, currently only llama-cpp).
+ * (multi-variant engines, currently only llama-cpp: cpu, vulkan, cuda, rocm, metal).
  *
  * Consumers fetch all of them so Settings → Advanced → Engine backend can
  * flip between variants without a re-fetch. An unsupported platform

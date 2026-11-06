@@ -969,6 +969,23 @@ export interface Ds4ContextPlan {
    * re-derived client-side.
    */
   fullyResident?: boolean;
+  /**
+   * True when {@link projectedResidentBytes} comes from the catalog's measured
+   * footprint for the launch mode (`fullResidencyMemory` / `streamingMemory`),
+   * so it is the working set itself rather than a conservative reservation.
+   */
+  memoryMeasured?: boolean;
+  /**
+   * Streamed launches with a measured footprint: the expert cache the launcher
+   * would choose on this device. `safe: false` means even the entry's minimum
+   * cache does not fit beside its fixed footprint in this device's budget.
+   */
+  expertCache?: {
+    cacheBytes: number;
+    requestedBytes: number;
+    clamped: boolean;
+    safe: boolean;
+  };
 }
 
 /**

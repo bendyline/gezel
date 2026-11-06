@@ -580,9 +580,14 @@ anything publishes, and `publish-package.mjs` sets
 `GEZEL_REQUIRE_CURRENT_NATIVE=1` for the publish itself. If the gate fails, cut a
 native release, pin it with `scripts/pin-native-release.mjs`, and dispatch again.
 
-The offline speech runtime is optional and is not in the native release, so a
-tarball built this way carries the speech API and dictionaries, and `status()`
-reports speech unavailable. See the package README's "Offline speech".
+The offline speech runtime ships the same way: since the release after
+native-v0.1.57, each native release also carries
+`gezel-mobile-<version>-speech-{ios,android}.tar.gz`, and `prepack` stages them
+as `native/speech-{ios,android}`. Offline speech is what apps such as DocBlocks
+take this package for, so the release gate refuses to publish without both
+runtimes, or with one from another release. An ordinary pack against a pin
+that predates them only warns, and its `status()` reports speech unavailable.
+See the package README's "Offline speech".
 
 Bootstrap it like any other package, at the `0.1.0` in its manifest. It depends
 on `packages/core` and `packages/app-sdk` through `workspace:*`, so publish from

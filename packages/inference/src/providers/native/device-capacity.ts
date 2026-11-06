@@ -238,6 +238,18 @@ export function staticCapacityCeilings(
   };
 }
 
+/** The RAM ceiling the device ledger admits one launch under, for sizing a launch to fit it. */
+export async function deviceModelBudgetBytes(config: {
+  localEngineMemoryGb?: number | null | undefined;
+}): Promise<number> {
+  const ram = totalMemoryBytes();
+  return staticCapacityCeilings(
+    await measuredCapacityBudget(),
+    ram,
+    configuredEngineMemoryBytes(config),
+  ).budgetBytes;
+}
+
 export async function sampleDeviceCapacity(home?: string): Promise<DeviceCapacitySample> {
   const budget = await measuredCapacityBudget();
   const ram = totalMemoryBytes();

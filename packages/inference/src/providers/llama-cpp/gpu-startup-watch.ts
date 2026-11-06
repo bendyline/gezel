@@ -7,8 +7,8 @@
  * word. A CUDA backend that loads but cannot initialize prints one error line
  * and registers no devices. Either way the engine starts, answers, and runs
  * every token on the CPU — at a fraction of the speed the person's hardware
- * and Settings promise — while gezel reports the CUDA or Vulkan build it
- * launched.
+ * and Settings promise — while gezel reports the CUDA, ROCm or Vulkan build
+ * it launched.
  *
  * llama.cpp names every GPU it will use while loading a model
  * (`using device CUDA0 (NVIDIA GB10) …`), integrated GPUs included. A GPU
@@ -17,7 +17,7 @@
  */
 
 export type GpuUnusedReason =
-  /** The CUDA runtime loaded and refused to start: `failed to initialize CUDA`. */
+  /** The CUDA or ROCm runtime loaded and refused to start: `failed to initialize CUDA`. */
   | 'init-failed'
   /** The backend loaded and found no device it could use. */
   | 'no-devices'
@@ -25,14 +25,15 @@ export type GpuUnusedReason =
   | 'not-loaded';
 
 export interface GpuUnused {
-  backend: 'cuda' | 'vulkan';
+  backend: 'cuda' | 'rocm' | 'vulkan';
   reason: GpuUnusedReason;
   /** The engine's own words, when it gave any. */
   detail?: string;
 }
 
 const USING_GPU = /\busing device (?:CUDA|Vulkan|ROCm|SYCL|MTL)\d+\b/;
-const CUDA_INIT_FAILED = /ggml_cuda_init: failed to initialize CUDA:\s*(.+?)\s*$/;
+/** ggml's ROCm backend is its CUDA code under HIP, and names itself `ROCm` here. */
+const CUDA_INIT_FAILED = /ggml_cuda_init: failed to initialize (?:CUDA|ROCm):\s*(.+?)\s*$/;
 const VULKAN_NO_DEVICES = /ggml_vulkan: No devices found/;
 /**
  * Lines llama.cpp prints at the same verbosity as `using device`, while
@@ -60,8 +61,10 @@ export class GpuStartupWatch {
   /** At readiness: what kept the GPU out, or null when it is in use or this is no GPU build. */
   verdict(): GpuUnused | null {
     const backend = this.backend;
-    if ((backend !== 'cuda' && backend !== 'vulkan') || this.usingGpu) return null;
-    if (backend === 'cuda' && this.initFailure) {
+    if ((backend !== 'cuda' && backend !== 'rocm' && backend !== 'vulkan') || this.usingGpu) {
+      return null;
+    }
+    if ((backend === 'cuda' || backend === 'rocm') && this.initFailure) {
       return { backend, reason: 'init-failed', detail: this.initFailure };
     }
     if (backend === 'vulkan' && this.noDevices) return { backend, reason: 'no-devices' };

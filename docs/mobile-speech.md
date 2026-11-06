@@ -58,8 +58,12 @@ pnpm ios
 For this checkout on macOS, the installed Android NDK is
 `$HOME/Library/Android/sdk/ndk/28.2.13676358`. Subsequent speech builds omit
 `--fetch`; cached inputs are checked against `native/mobile/speech/pins.json`.
-Sync verifies the native sources and built payload, then stages models, voices,
-and license notices. Missing or stale speech builds fail sync rather than
+Each speech build also stages its runtime into `@bendyline/gezel-capacitor`
+(`native/speech-<platform>`): the app links whisper.cpp and ONNX Runtime
+through that package, exactly as DocBlocks and other embedding apps do, and
+bundles only the models. Sync verifies the native sources, the built payload,
+and the staged runtime, then stages models, voices, and license notices.
+Missing or stale speech builds fail sync rather than
 producing an app with nonfunctional speech controls. Android packages ARM64 only;
 the iOS framework contains device ARM64 and simulator ARM64 slices.
 

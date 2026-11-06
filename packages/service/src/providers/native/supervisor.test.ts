@@ -93,6 +93,19 @@ describe('NativeEngineSupervisor', () => {
     expect(classifyNativeEnginePanic('CUDA error: unspecified launch failure')?.kind).toBe(
       'cuda-error',
     );
+    // ggml's ROCm backend is its CUDA code under HIP, printing the same
+    // errors under its own name; rocBLAS names a missing architecture itself.
+    for (const line of [
+      'ROCm error: invalid device function',
+      'ROCm error: no kernel image is available for execution on the device',
+      'rocBLAS error: Cannot read C:\\n\\rocblas\\library\\TensileLibrary_lazy_gfx1036.dat: No such file or directory for GPU arch : gfx1036',
+    ]) {
+      expect(classifyNativeEnginePanic(line)?.kind).toBe('cuda-unsupported-device');
+    }
+    expect(classifyNativeEnginePanic('ROCm error: out of memory')?.kind).toBe('cuda-out-of-memory');
+    expect(classifyNativeEnginePanic('ROCm error: unspecified launch failure')?.kind).toBe(
+      'cuda-error',
+    );
   });
 
   it('rewrites every packaged ASAR launch path to its real unpacked location', () => {

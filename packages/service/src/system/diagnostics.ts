@@ -51,7 +51,7 @@ const ENGINE_ENV_VAR: Record<NativeEngineName, string> = {
 const LOCAL_ENGINE_PROVIDERS = ['llama-cpp', 'mlx', 'ds4'] as const;
 
 const MAX_INSTALLED_MODELS = 40;
-const BACKENDS = ['cuda', 'vulkan', 'metal', 'cpu'] as const;
+const BACKENDS = ['cuda', 'rocm', 'vulkan', 'metal', 'cpu'] as const;
 type LlamaBackend = (typeof BACKENDS)[number];
 
 function asBackend(value: string | undefined): LlamaBackend | undefined {

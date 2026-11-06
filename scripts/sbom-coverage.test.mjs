@@ -535,7 +535,7 @@ test('npm components carry the tarball digest pnpm-lock.yaml pins', async () => 
   assert.equal(property(component, 'gezel:platforms'), undefined, 'not platform-specific');
   assert.equal(
     property(windows, 'gezel:platforms'),
-    'win32-x64,win32-x64-cpu,win32-x64-vulkan,win32-x64-cuda',
+    'win32-x64,win32-x64-cpu,win32-x64-vulkan,win32-x64-cuda,win32-x64-rocm',
   );
 });
 

@@ -109,3 +109,20 @@ test('warns instead of failing when only the license inventory changed', async (
     /Restage/,
   );
 });
+
+test('the staging ABI, both plugin bindings, and the speech header agree', async () => {
+  const repo = path.resolve(import.meta.dirname, '../../..');
+  const read = (name) => readFile(path.join(repo, name), 'utf8');
+  const header = /#define GEZEL_SPEECH_ABI (\d+)/.exec(
+    await read('native/mobile/speech/gezel_speech.h'),
+  );
+  const java = /int ABI = (\d+);/.exec(
+    await read(
+      'packages/capacitor/android/src/main/java/com/bendyline/gezel/speech/SpeechRuntime.java',
+    ),
+  );
+  const swift = /gezel_speech_abi\(\) == (\d+)/.exec(
+    await read('packages/capacitor/ios/Sources/GezelCapacitor/GezelOfflineSpeechPlugin.swift'),
+  );
+  for (const found of [header, java, swift]) assert.equal(Number(found?.[1]), SPEECH_ABI);
+});

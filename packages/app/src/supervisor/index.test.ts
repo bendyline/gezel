@@ -156,10 +156,10 @@ vi.mock('@bendyline/gezel/native', () => ({
   readLlamaQuarantine: () => ctx.llamaQuarantine,
   isBinaryQuarantined: (
     entries: Array<{ backend: string }>,
-    backend: 'cuda' | 'vulkan' | 'metal' | 'cpu',
+    backend: 'cuda' | 'rocm' | 'vulkan' | 'metal' | 'cpu',
   ) => entries.some((e) => e.backend === backend),
-  // The NVIDIA driver check is core's to test; here the build check is the
-  // quarantine alone.
+  // The NVIDIA driver and ROCm device checks are core's to test; here the
+  // build check is the quarantine alone.
   createLlamaBuildCheck: ({ quarantine }: { quarantine: Array<{ backend: string }> }) => {
     const quarantined = new Set<string>();
     return {
@@ -169,23 +169,27 @@ vi.mock('@bendyline/gezel/native', () => ({
         return false;
       },
       cudaBlocker: () => null,
+      rocmCheck: () => null,
       quarantinedOf: (skipped: string[]) => skipped.filter((b) => quarantined.has(b)),
     };
   },
   publishLlamaCudaBlocker: () => {},
+  checkRocmBuild: () => ({ blocker: null, devices: [], visibleDevices: null }),
+  publishRocmCheck: () => {},
   // Which -cuda archives carry which CUDA engine builds is core's to test.
   cudaArchiveCarries: (name: string, platform: string, arch: string) =>
     (name === 'sd-server' &&
       (platform === 'linux' || (platform === 'win32' && arch === 'arm64'))) ||
     (name === 'whisper-server' && platform === 'win32' && arch === 'arm64'),
   resolveAvailableLlamaBinary: (
-    preferredBackend: 'cuda' | 'vulkan' | 'metal' | 'cpu',
-    resolveBinary: (backend: 'cuda' | 'vulkan' | 'metal' | 'cpu') => string | null,
+    preferredBackend: 'cuda' | 'rocm' | 'vulkan' | 'metal' | 'cpu',
+    resolveBinary: (backend: 'cuda' | 'rocm' | 'vulkan' | 'metal' | 'cpu') => string | null,
     allowFallbacks: boolean,
-    isUsable?: (backend: 'cuda' | 'vulkan' | 'metal' | 'cpu', path: string) => boolean,
+    isUsable?: (backend: 'cuda' | 'rocm' | 'vulkan' | 'metal' | 'cpu', path: string) => boolean,
   ) => {
     const fallbackOrder = {
       cuda: ['cuda', 'vulkan', 'cpu'],
+      rocm: ['rocm', 'vulkan', 'cpu'],
       vulkan: ['vulkan', 'cpu'],
       metal: ['metal', 'cpu'],
       cpu: ['cpu'],

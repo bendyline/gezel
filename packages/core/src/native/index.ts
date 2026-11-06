@@ -68,6 +68,31 @@ export {
   vcRedistributableUrl,
   windowsPathDirs,
 } from './missing-dll.js';
+export type {
+  RocmBlocker,
+  RocmBlockerKind,
+  RocmCheck,
+  RocmDevice,
+  RocmProbeIo,
+} from './rocm-devices.js';
+export {
+  LLAMA_ROCM_BLOCKER_ENV,
+  ROCM_GFX_TARGETS,
+  ROCM_KPACK_DIR,
+  checkRocmBuild,
+  gfxFromTargetVersion,
+  linuxKfdGfxTargets,
+  parseRocmDeviceLog,
+  publishRocmCheck,
+  readRocmBlocker,
+  rocmBuildTargets,
+  rocmCheckFromDevices,
+  rocmDeviceCachePath,
+  rocmEngineEnv,
+  rocmKpackFiles,
+  rocmLaunchEnv,
+  rocmWorthDownloading,
+} from './rocm-devices.js';
 export type { LlamaBuildCheck } from './llama-build-check.js';
 export {
   LLAMA_CUDA_BLOCKER_ENV,
