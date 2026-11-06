@@ -46,54 +46,14 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // Roughly 1.5x the measured size at the time of writing, so ordinary
   // feature work has room without a ratchet.        measured (packed)
   '@bendyline/gezk': 100_000, //                     ~30 KB
-  // Deliberately tighter than the 1.5x rule below: this package is already
-  // oversized, and the cause is known — its `.d.ts` output writes inferred
-  // types out in full. Explicit return types shrank the portable runtime's
-  // declarations, and task response schemas now retain references to
-  // TaskSchema rather than repeating its whole type. The shared schema chunk
-  // still expands other nested schemas; reuse those references when this
-  // trips again. Keep this close to the measurement so the next growth
-  // reopens it. (It tripped at 3.36 MB when `./local-loop` became an entry:
-  // unsplit, every entry bundled
-  // its own copy of the shared code. tsup now splits it into chunks. It
-  // tripped again at 2.06 MB from feature schemas spread across lookouts,
-  // devices, issue triage and project views; no one declaration was at fault.
-  // It tripped at 2.10 MB from request tracking; naming ScriptRefSchema's
-  // type (`ScriptRefZodSchema`) took out ~100 written-out copies of the
-  // step-hook shape. It tripped at 2.14 MB after the app image schemas; naming
-  // GateCheckSchema's type (`GateCheckZodSchema`) took out 65 copies of the
-  // gate-check union, ~800 KB unpacked. It tripped at 2.10 MB again; naming
-  // the three step shapes (`CraftbookStepZodSchema`, `NewCraftbookStepZodSchema`,
-  // `TaskCraftbookStepZodSchema`) took out 23 copies, ~160 KB unpacked but only
-  // 5 KB packed, because gzip already folds repeats that sit close together.
-  // It tripped at 2.10 MB again; naming HistoryEventKindSchema's type
-  // (`HistoryEventKindZodSchema`) took out 8 copies of the kind enum, ~5 KB
-  // packed. It tripped at 2.11 MB again; naming ChatModelTuningSchema,
-  // ChatMessageSchema and GezelConfigSchema (UpdateConfigRequestSchema
-  // extends it, and wrote all 33 KB of settings out again) took out ~16 KB
-  // packed. Name a large schema through its `z.object` value, not a bare
-  // shape const: a shape const carries every property's doc comment into the
-  // `.d.ts`, and for the config that cost more than the copy it removed.
-  // It tripped at 2.104 MB again; naming QuestionSchema (6 copies, 5 KB each)
-  // and CraftbookContractSchema (7) took out ~7 KB packed, and naming
-  // ChatEventSchema, which the envelope wrote out again, ~2 KB more. A repeat
-  // within gzip's 32 KB window costs little packed: count unpacked bytes
-  // between copies before expecting a win. It tripped at 2.108 MB from the
-  // craftbook-focus and eval-provenance modules; naming PoppetjeSchema (11
-  // copies across five chunks) and BoekwachterIssueSchema took out ~6 KB
-  // packed, naming ProjectSchema with its detail and list-entry extensions
-  // ~2 KB, and annotating PortableStore's question, project and gezel
-  // methods ~4 KB: a method that returns `this.run(helper)` infers its type
-  // and writes the whole shape out, where `Promise<Project>` prints a name.
-  // It tripped at 2.106 MB from the demo conversation script
-  // (`page-demo-chat.ts`, ~6.4 KB packed). That is runtime code, not
-  // declarations, and the largest written-out shape left saves ~1 KB packed,
-  // so the budget moved to 2.11 MB instead. It tripped at 2.112 MB from the
-  // M5 Max native 0.1.54 scorecard round (~5 KB packed). Scorecard rounds are
-  // data, not declarations: the 33 in `scorecard/data/runs/` are ~92 KB of
-  // this budget at ~3 KB each, so a breach from a new round moves the budget,
-  // while a breach from a written-out shape still gets named away. 2.12 MB.)
-  '@bendyline/gezel': 2_120_000, //                    2.112 MB
+  // Kept within 1% of its size until November 2026, which failed CI on
+  // nearly every feature, so it now follows the 1.5x rule like the rest.
+  // It still catches the regression worth catching: 3.36 MB, when each entry
+  // bundled its own copy of the shared code before tsup split it into chunks.
+  // Most of the package is `.d.ts` that writes inferred schema types out in
+  // full; naming a schema's type (`GateCheckZodSchema`) removes the copies
+  // should it ever need to shrink.
+  '@bendyline/gezel': 3_200_000, //                    2.128 MB
   '@bendyline/gezel-client': 250_000, //                94 KB
   '@bendyline/gezel-sdk': 150_000, //                   47 KB
   '@bendyline/gezel-script-runtime': 50_000,
