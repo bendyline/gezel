@@ -2104,11 +2104,17 @@ jobs:
           path: mobile-artifacts
           pattern: mobile-sdk-*
 
+      # download-artifact gives each pattern match its own folder, except a
+      # lone match, which it unpacks straight into `path` (native-v0.1.60 found
+      # its sources one level up from where "Stage third-party sources" looks).
+      # Name the folder and merge, so the layout never depends on the count.
+      # A pattern, not `name:`, because a run without the ROCm leg has none.
       - name: Download third-party source artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          path: source-artifacts
-          pattern: third-party-sources-*
+          path: source-artifacts/third-party-sources-linux-x64-rocm
+          pattern: third-party-sources-linux-x64-rocm
+          merge-multiple: true
 
       - name: List artifacts
         run: find native-artifacts -type f | sort

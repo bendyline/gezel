@@ -82,7 +82,12 @@ test('the Linux ROCm leg fetches the source and the draft release attaches it', 
     workflow.includes('node scripts/rocm-lgpl-sources.mjs --out "$RUNNER_TEMP/rocm-lgpl-sources"'),
   );
   assert.ok(workflow.includes('name: third-party-sources-linux-x64-rocm'));
-  assert.ok(workflow.includes('pattern: third-party-sources-*'));
+  assert.match(
+    workflow,
+    /path: source-artifacts\/third-party-sources-linux-x64-rocm\n\s+pattern: third-party-sources-linux-x64-rocm\n\s+merge-multiple: true\n/,
+    'a lone pattern match unpacks into `path` itself, so the folder must be named there',
+  );
+  assert.ok(workflow.includes('source="source-artifacts/third-party-sources-linux-x64-rocm"'));
   assert.ok(workflow.includes('node scripts/rocm-lgpl-sources.mjs --verify "$source"'));
   assert.ok(workflow.includes(`release/${thirdPartySourcesAssetName('${VERSION}')}`));
   assert.ok(workflow.includes('--native-release "$GITHUB_REF_NAME"'));
