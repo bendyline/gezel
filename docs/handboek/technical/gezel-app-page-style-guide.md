@@ -11,7 +11,7 @@ subcategory:
 
 # Gezel app page style guide
 
-An app page should feel like part of Gezel: readable, warm, and focused on the person's work. This guide applies to the HTML/CSS/JavaScript pages declared by a project type's `pages` block. Start with [Building AI Apps inside Gezel](building-ai-apps-inside-gezel.md) for the composition and [Using the Gezel page APIs](gezel-page-apis.md) for behavior.
+An app page should feel like part of Gezel: readable, warm, and focused on the person's work. This guide applies to the HTML/CSS/JavaScript pages declared by a project type's `pages` block. Start with [Building AI Apps inside Gezel](building-ai-apps-inside-gezel.md) for the composition and [Using the Gezel page APIs](gezel-page-apis.md) for behavior. The [app UX guide](gezel-app-ux-guide.md) says how an app is organized: Home and noun tabs, actions as keys that open dialogs, and actions on the records themselves.
 
 ## What the host supplies today
 
@@ -41,8 +41,10 @@ description of useful work the person can do together. A file-only app can pass
 
 In a standalone demo the same slot holds the [sample conversation](gezel-page-apis.md#the-sample-conversation), drawn to match Gezel's chat: replies in the heading serif, the visitor's messages in an accent-tinted bubble, each tool the companion uses as a quiet step row with a check, and suggestions as bare keys under the conversation (one scrolling row on narrow screens). It lives in the component's shadow root, so restyle it only through the `--gezel-component-*` properties below. Keep its copy in the role's voice: short, specific, American English, no emojis.
 
-Use `actionForm` for small, declared edits and `collectionFilter` for search over
-rendered records. These components supply controls and state handling, while the
+Use `actionForm` for declared edits: `presentation: 'dialog'` for an action key
+that opens a modal, `'inline'` for a settings panel. Use `tabs` for a workspace's
+Home, noun, and Settings panels, and `collectionFilter` for search over long
+lists of rendered records. These components supply controls and state handling, while the
 app owns field labels, domain data, allowed actions, and refresh behavior. Avoid
 duplicating the host's composer or building a separate persistence store. See
 [workspace components](gezel-page-apis.md#building-a-full-page-workspace).

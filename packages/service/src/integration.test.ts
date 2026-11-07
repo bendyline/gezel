@@ -129,6 +129,10 @@ describe('health', () => {
     expect(res.headers.get('content-security-policy')).toContain(
       "script-src 'self' 'wasm-unsafe-eval'",
     );
+    // Chromium does not count blob: as 'self'. Without it every squisq data
+    // card (CSV/XLSX grid) fails to fetch its media provider's blob: URL and
+    // shows "data view unavailable — Failed to fetch".
+    expect(res.headers.get('content-security-policy')).toContain("connect-src 'self' blob:");
   });
 });
 

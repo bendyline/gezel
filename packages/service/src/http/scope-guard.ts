@@ -626,6 +626,11 @@ async function isSessionRouteAllowed(
   // fallback — spelled as a `projects/` path or as `?project=` — become a
   // side door into project documents/artifacts.
   if (path === '/api/documents' || path.startsWith('/api/documents/')) {
+    // Opening a desktop window and reading host paths are the file panel's
+    // shell actions, like a project's `reveal`; no MCP tool calls them.
+    if (path === '/api/documents/reveal' || path === '/api/documents/location') {
+      return sessionDeny('file-manager actions require a first-party client');
+    }
     if (
       path === '/api/documents/read' &&
       ((c.req.query('path') ?? '').replaceAll('\\', '/').startsWith('projects/') ||

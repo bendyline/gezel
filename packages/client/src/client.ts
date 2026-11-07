@@ -5623,7 +5623,13 @@ export class GezelClient {
     /** `hidden` also surfaces the reserved `shadow/` cache. */
     opts?: { stats?: boolean; hidden?: boolean },
   ): Promise<{
-    files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
+    files: Array<{
+      name: string;
+      path: string;
+      isDirectory: boolean;
+      mtimeMs?: number;
+      size?: number;
+    }>;
     /** Present on recursive listings: true when the walker's entry cap dropped files. */
     truncated?: boolean;
   }> {
@@ -5998,7 +6004,13 @@ export class GezelClient {
     /** `hidden` also surfaces `node_modules` and friends — listed, not walked into. */
     opts?: { stats?: boolean; hidden?: boolean },
   ): Promise<{
-    files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
+    files: Array<{
+      name: string;
+      path: string;
+      isDirectory: boolean;
+      mtimeMs?: number;
+      size?: number;
+    }>;
     /** Present on recursive listings: true when the walker's entry cap dropped files. */
     truncated?: boolean;
   }> {
@@ -7354,7 +7366,13 @@ export class GezelClient {
     /** `hidden` also surfaces dotfiles and vendor dirs — listed, not walked into. */
     opts?: { stats?: boolean; hidden?: boolean },
   ): Promise<{
-    files: Array<{ name: string; path: string; isDirectory: boolean; mtimeMs?: number }>;
+    files: Array<{
+      name: string;
+      path: string;
+      isDirectory: boolean;
+      mtimeMs?: number;
+      size?: number;
+    }>;
     /** Present on recursive listings: true when the walker's entry cap dropped files. */
     truncated?: boolean;
   }> {
@@ -7370,6 +7388,12 @@ export class GezelClient {
   /** Open the shared documents library in the OS file manager. */
   revealDocuments(): Promise<{ ok: true; path: string }> {
     return this.request('POST', '/api/documents/reveal');
+  }
+
+  /** The absolute host path of one library file. */
+  resolveDocumentFileLocation(filePath: string): Promise<ReferenceFileLocationResponse> {
+    const params = new URLSearchParams({ path: filePath });
+    return this.request('GET', `/api/documents/location?${params.toString()}`);
   }
 
   readDocument(

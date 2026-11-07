@@ -14,7 +14,9 @@ For requests to build a custom app, dashboard, project experience, crew, or
 craftbook-backed workflow, start with [Building Gezel apps](docs/building-gezel-apps.md).
 Read its public [authoring guide](docs/handboek/technical/building-ai-apps-inside-gezel.md),
 [page API guide](docs/handboek/technical/gezel-page-apis.md), and
-[page style guide](docs/handboek/technical/gezel-app-page-style-guide.md) before implementing.
+[page style guide](docs/handboek/technical/gezel-app-page-style-guide.md) before implementing,
+and organize the page by the [app UX guide](docs/handboek/technical/gezel-app-ux-guide.md):
+Home and noun tabs, actions as keys that open dialogs, and row actions.
 
 A Gezel app is composed by a project type; its page, roles, craftbooks, scripts,
 and project defaults are optional parts chosen for the user flow. Public catalog

@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { expect, test } from '@playwright/test';
 import { writePageDemo, writePageDemoAssets } from '../../cli/src/page-demo-export.js';
 import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
-
+import { exerciseAppActions } from './helpers/app-actions.js';
 import { catalogPages } from './helpers/catalog-apps.js';
 const gilde = process.env.GILDE_DIR;
 for (const app of catalogPages()) {
@@ -60,42 +60,19 @@ for (const app of catalogPages()) {
       await expect(page.getByRole('button', { name: 'Show conversation' })).toBeVisible();
       await page.getByRole('button', { name: 'Show conversation' }).click();
     }
-    const forms = page.locator('gezel-action-form');
-    for (let i = 0; i < (await forms.count()); i++) {
-      const form = forms.nth(i);
-      await form.locator('summary').click();
-      const controls = form.locator('input, select, textarea');
-      for (let j = 0; j < (await controls.count()); j++) {
-        const control = controls.nth(j);
-        if (!(await control.isVisible())) continue;
-        const tag = await control.evaluate((e) => e.tagName);
-        const type = await control.getAttribute('type');
-        const name = await control.getAttribute('name');
-        if (tag === 'SELECT') {
-          await expect(control.locator('option')).not.toHaveCount(0);
-          const value = await control.locator('option').last().getAttribute('value');
-          await control.selectOption(value!);
-        } else {
-          await control.fill(
-            type === 'number'
-              ? '7'
-              : type === 'date'
-                ? '2026-11-20'
-                : type === 'url'
-                  ? 'https://example.com/job'
-                  : name === 'donor'
-                    ? 'Mara'
-                    : name === 'colors'
-                      ? '#27352D, #557A5B, #FAF7F2'
-                      : 'A useful test note',
-          );
-        }
-      }
-      // An action form's one button submits it, whatever the app labels it.
-      await form.getByRole('button').click();
-      await expect(form.getByRole('status')).toHaveText('Saved.');
-      await form.locator('summary').click();
-    }
+    await exerciseAppActions(page, ({ type, name }) =>
+      type === 'number'
+        ? '7'
+        : type === 'date'
+          ? '2026-11-20'
+          : type === 'url'
+            ? 'https://example.com/job'
+            : name === 'donor'
+              ? 'Mara'
+              : name === 'colors'
+                ? '#27352D, #557A5B, #FAF7F2'
+                : 'A useful test note',
+    );
     const searches = page.locator('gezel-collection-filter input');
     for (let i = 0; i < (await searches.count()); i++) {
       if (!(await searches.nth(i).isVisible())) continue;
@@ -107,14 +84,15 @@ for (const app of catalogPages()) {
       await expect(page.locator('#scene-section')).toBeVisible();
       await page.getByRole('button', { name: 'End scene', exact: true }).click();
       await expect(page.locator('#scene-section')).toBeHidden();
-      await page.getByRole('tab', { name: 'Review & phrasebook' }).click();
+      await page.getByRole('tab', { name: 'Phrasebook' }).click();
       await expect(page.locator('#phrasebook li')).toHaveCount(3);
+      await page.getByRole('tab', { name: 'Home' }).click();
       await page.getByRole('button', { name: 'Show the answer' }).click();
       await page.getByRole('button', { name: 'Got it', exact: true }).click();
       await expect(page.locator('#due')).toHaveText('1');
-      await page.getByRole('tab', { name: 'Your progress' }).click();
+      await page.getByRole('tab', { name: 'Progress' }).click();
       await expect(page.locator('#practice-summary')).toContainText('phrases collected');
-      await page.getByRole('tab', { name: 'Practice', exact: true }).click();
+      await page.getByRole('tab', { name: 'Home' }).click();
     }
     if (app.id === 'image-feed' || app.id === 'social-feed') {
       const cards = page.locator('[data-post]');

@@ -371,22 +371,72 @@ export interface GezelActionFormOptions {
   /** A declared page tool; ordinary validation and write policy still apply. */
   tool: string;
   fields: GezelActionField[];
+  /**
+   * `dialog` draws a key that opens the form in a modal; `inline` is an always-open
+   * form for a settings panel; `disclosure` (the default) is an expandable card.
+   * Fixed when the form is created. Hosts before component version 2 draw a disclosure.
+   */
+  presentation?: 'disclosure' | 'dialog' | 'inline';
+  /** Dialog only: the key's label when it should differ from the dialog title. */
+  buttonLabel?: string;
+  /** Dialog only: draw the key as the view's one filled primary action. */
+  primary?: boolean;
+  /** Dialog only: false hides the key, for a dialog the page opens with `open()` from its own row controls. */
+  trigger?: boolean;
   submitLabel?: string;
   successMessage?: string;
+  /** Disclosure only: start expanded. */
   open?: boolean;
   clearOnSave?: boolean;
   /** Map form fields into the tool's declared input, for example one card into a cards array. */
   mapInput?: (values: Record<string, string | number>) => Record<string, unknown>;
   onSaved?: (result: GezelPageToolResult) => void | Promise<void>;
 }
+export interface GezelActionFormHandle extends GezelPageComponent<GezelActionFormOptions> {
+  /**
+   * Open the dialog (or expand the disclosure) and focus its first field. Passing
+   * values first resets every field to its default, then fills the named ones, so a
+   * row's Edit control can open the form for that record. Version 2.
+   */
+  open?(values?: Record<string, string | number>): void;
+  /** Close the dialog or collapse the disclosure. Ignored while a save is pending. Version 2. */
+  close?(): void;
+  /** Reset every field to its default and then fill the named ones; a settings panel shows current values this way. Version 2. */
+  reset?(values?: Record<string, string | number>): void;
+}
+export interface GezelTab {
+  id: string;
+  label: string;
+  /** The page-owned element this tab shows; the component hides the others. */
+  panel: string | HTMLElement;
+  /** A short count beside the label, such as open items. Empty and 0 are not drawn. */
+  badge?: string | number;
+}
+export interface GezelTabsOptions {
+  tabs: GezelTab[];
+  /** Accessible name of the tab row. */
+  label?: string;
+  /** The first tab when neither this nor a remembered choice applies. */
+  selected?: string;
+  /** False stops recording the choice in the page URL's `#tab=` fragment. */
+  remember?: boolean;
+  onChange?: (id: string) => void;
+}
+export interface GezelTabsHandle extends GezelPageComponent<GezelTabsOptions> {
+  select(id: string): void;
+  selected(): string | null;
+}
 export interface GezelCollectionFilterOptions {
   container: string | HTMLElement;
   selector: string;
   label?: string;
   placeholder?: string;
+  /** Hide the search box while the collection has fewer items than this and nothing is typed. Version 2. */
+  minItems?: number;
 }
 export interface GezelPageComponents {
-  version: 1;
+  /** 2 adds dialog and inline action forms and `tabs`. */
+  version: 1 | 2;
   /** Searches rendered items, retaining their controls and refreshing after data updates. */
   collectionFilter(
     target: string | HTMLElement,
@@ -398,10 +448,9 @@ export interface GezelPageComponents {
     options?: GezelAppLayoutOptions,
   ): GezelPageComponent<GezelAppLayoutOptions>;
   /** Accessible, validated form invoking one declared action, with busy/error/success states. */
-  actionForm(
-    target: string | HTMLElement,
-    options: GezelActionFormOptions,
-  ): GezelPageComponent<GezelActionFormOptions>;
+  actionForm(target: string | HTMLElement, options: GezelActionFormOptions): GezelActionFormHandle;
+  /** Underline tabs over page-owned panels: keyboard support, badges, and a remembered choice. Version 2. */
+  tabs?(target: string | HTMLElement, options: GezelTabsOptions): GezelTabsHandle;
   /** Native, project-bound chat. No transcript or send API is exposed to page scripts. */
   chat(
     target: string | HTMLElement,

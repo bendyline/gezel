@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileBrowserPane } from './FileBrowserPane.js';
@@ -199,5 +200,74 @@ describe('FileBrowserPane viewer notice', () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('FileBrowserPane Copy file path', () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => 1024);
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  const setStatus = vi.fn();
+
+  function Pane({ paneSource }: { paneSource: FileBrowserSource }) {
+    return (
+      <FileBrowserPane
+        source={paneSource}
+        entries={[entry, { name: 'drafts', path: 'drafts', isDirectory: true }]}
+        onSelect={() => {}}
+        viewMode="tree-alpha"
+        modes={['tree-alpha']}
+        onViewModeChange={() => {}}
+        showHidden={false}
+        onShowHiddenChange={() => {}}
+        emptyMessage="No files"
+        mutations={{ ...mutations, setStatus }}
+        actionsForEntry={() => [{ label: 'Pin to Documents list', onSelect: () => {} }]}
+        viewer={null}
+      />
+    );
+  }
+
+  it('copies the absolute path after the host actions, for files only', async () => {
+    const user = userEvent.setup();
+    const locate = vi.fn(async (path: string) => `C:\\Docs\\${path}`);
+    render(<Pane paneSource={{ ...source, locate }} />);
+
+    await user.click(screen.getByRole('button', { name: 'Actions for notes.md' }));
+    const items = await screen.findAllByRole('menuitem');
+    expect(items.map((item) => item.textContent)).toEqual([
+      'Pin to Documents list',
+      'Copy file path',
+    ]);
+    await user.click(screen.getByRole('menuitem', { name: 'Copy file path' }));
+
+    expect(locate).toHaveBeenCalledWith('notes.md');
+    expect(await navigator.clipboard.readText()).toBe('C:\\Docs\\notes.md');
+    expect(setStatus).toHaveBeenCalledWith('Copied the path of notes.md.');
+
+    await user.click(screen.getByRole('button', { name: 'Actions for drafts' }));
+    expect((await screen.findAllByRole('menuitem')).map((item) => item.textContent)).toEqual([
+      'Pin to Documents list',
+    ]);
+  });
+
+  it('is absent where the source cannot locate files', async () => {
+    const user = userEvent.setup();
+    render(<Pane paneSource={source} />);
+    await user.click(screen.getByRole('button', { name: 'Actions for notes.md' }));
+    expect(screen.queryByRole('menuitem', { name: 'Copy file path' })).toBeNull();
   });
 });

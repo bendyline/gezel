@@ -928,7 +928,15 @@ of chrome before the text box. The one exception is the project compose
 frame (`threadBarOwnRow`): its chat mode shares every band with the terminal,
 whose folder picker is a row of its own, and flipping modes must not move
 the frame, so the picker keeps its row there. The label reads "To", not
-"TO:", and the recipient is a `PersonLabel`. A narrow composer (under 480px) moves its thread
+"TO:", and the recipient is a `PersonLabel`. The To line and the strips above
+it (task, image, review, error) share the editor's left and right edges.
+Every desktop chat wears the same compose frame: an accent-tinted border, a
+warm band for recipient, thread and toolbar above the lighter draft, and the
+timeline's 0.75rem gutter on both sides. That holds for Home, a gezel's chat,
+and the task, craftbook and page chats (one rule in `shared-content.css`);
+project chat draws the same frame around its chat and terminal modes. Insets
+are never one-sided. The Office pane's document chat, about 320px wide, runs
+edge to edge like a compact composer. A narrow composer (under 480px) moves its thread
 bar into the editor toolbar
 beside the attach keys, as an icon-only picker plus the context meter. New
 thread and New draft are rows in that picker, which lists them at every width,

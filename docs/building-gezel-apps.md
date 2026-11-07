@@ -32,6 +32,7 @@ include only the parts the experience needs.
 | Build an app, including roles, craftbooks, scripts, data, and project defaults | [Building AI Apps inside Gezel](handboek/technical/building-ai-apps-inside-gezel.md) |
 | Build its browser interface and connect it to project files and tools | [Using the Gezel page APIs](handboek/technical/gezel-page-apis.md) |
 | Understand injected CSS, fonts, theme, layout, and accessible controls | [Gezel app page style guide](handboek/technical/gezel-app-page-style-guide.md) |
+| Organize the app: Home and noun tabs, Settings, dialog actions, row actions | [Gezel app UX guide](handboek/technical/gezel-app-ux-guide.md) |
 | Look up exact page methods, permissions, modes, limits, and error codes | [Output Pane API reference](output-pane-api.md), [TypeScript declarations](../packages/sdk/src/page.ts) |
 | Look up composition, adoption, upgrades, and `.gezapp` formats | [Project-type specification](project-types.md) |
 | Write a deterministic action or gate | [Script SDK guide](handboek/technical/writing-scripts-with-gezel-sdk.md) |

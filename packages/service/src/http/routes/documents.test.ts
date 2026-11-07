@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
@@ -130,17 +130,18 @@ describe('GET /api/documents — listing', () => {
     expect(paths).toContain('top-level.md');
   });
 
-  it('reports mtimes and the truncation flag when the browser asks for stats', async () => {
+  it('reports mtimes, sizes and the truncation flag when the browser asks for stats', async () => {
     await api('PUT', '/api/documents/write', { path: 'stats/a.md', content: 'a' });
 
     const res = await api('GET', '/api/documents?recursive=1&stats=1');
     expect(res.status).toBe(200);
     const data = (await res.json()) as {
-      files: Array<{ path: string; isDirectory: boolean; mtimeMs?: number }>;
+      files: Array<{ path: string; isDirectory: boolean; mtimeMs?: number; size?: number }>;
       truncated: boolean;
     };
     const file = data.files.find((f) => f.path === 'stats/a.md');
     expect(typeof file?.mtimeMs).toBe('number');
+    expect(file?.size).toBe(1);
     expect(data.truncated).toBe(false);
     // Directories never carry stats — the walker only lstats files.
     expect(data.files.find((f) => f.path === 'stats')?.mtimeMs).toBeUndefined();
@@ -287,6 +288,27 @@ describe('DELETE /api/documents/delete', () => {
   it('returns 400 when /delete is called without ?path=', async () => {
     const res = await api('DELETE', '/api/documents/delete');
     expect(res.status).toBe(400);
+  });
+});
+
+describe('GET /api/documents/location', () => {
+  it('answers the absolute host path of a library file, never of a folder or outside it', async () => {
+    await api('PUT', '/api/documents/write', {
+      path: 'located/pg catalog 2.csv',
+      content: 'a,b\n',
+    });
+
+    const res = await api(
+      'GET',
+      `/api/documents/location?path=${encodeURIComponent('located/pg catalog 2.csv')}`,
+    );
+    expect(res.status).toBe(200);
+    const { path } = (await res.json()) as { path: string };
+    expect(path).toBe(await realpath(join(home, 'documents', 'located', 'pg catalog 2.csv')));
+
+    expect((await api('GET', '/api/documents/location?path=located')).status).toBe(404);
+    expect((await api('GET', '/api/documents/location?path=located/missing.md')).status).toBe(404);
+    expect((await api('GET', '/api/documents/location?path=..%2Fconfig.json')).status).toBe(400);
   });
 });
 

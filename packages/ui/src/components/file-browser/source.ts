@@ -35,6 +35,8 @@ export interface FileBrowserSource {
   rename?(fromPath: string, toPath: string): Promise<void>;
   /** Open the underlying directory in the OS file manager. */
   reveal?(): Promise<void>;
+  /** The absolute host path of one file, for "Copy file path". */
+  locate?(path: string): Promise<string>;
   /**
    * Custom event dispatched after a mutation so other surfaces (the sidebar's
    * documents tree) can refresh. Sources without listeners omit it.
@@ -70,6 +72,7 @@ export function documentsFileSource(): FileBrowserSource {
           reveal: async () => {
             await api.revealDocuments();
           },
+          locate: async (path: string) => (await api.resolveDocumentFileLocation(path)).path,
         }
       : {}),
     changeEventPrefix: 'gezel:document',
@@ -123,6 +126,13 @@ export function projectFileSource(
           reveal: async () => {
             await api.revealProject(projectId, kind);
           },
+          locate: async (path: string) =>
+            (
+              await api.resolveReferenceFileLocation(projectId, {
+                kind: workspace ? 'workspace' : 'artifact',
+                path,
+              })
+            ).path,
         }
       : {}),
   };

@@ -12,6 +12,7 @@ import { formatAbsoluteTime } from '../../relative-time.js';
 import { FileFlatList } from '../FileFlatList.js';
 import { type FileEntry, FileTree, type FileTreeAction } from '../FileTree.js';
 import { FileHiddenKey, FileRevealKey, FileViewModeKeys } from '../FileViewModeKeys.js';
+import { openInFileManagerLabel } from '../file-manager-label.js';
 import {
   type FileViewMode,
   compareFilesByMtimeDesc,
@@ -281,6 +282,31 @@ export function FileBrowserPane({
     : [];
 
   const listLabel = source.title.toLowerCase();
+  const revealLabel = openInFileManagerLabel(window.__GEZEL__?.platform);
+
+  // Actions every panel offers, after the host's own for that row.
+  const { setStatus } = mutations;
+  const locate = source.locate;
+  const withPanelActions = (host?: (entry: FileEntry) => readonly FileTreeAction[]) => {
+    if (!locate) return host;
+    return (entry: FileEntry): readonly FileTreeAction[] => {
+      const own = host?.(entry) ?? [];
+      if (entry.isDirectory) return own;
+      const copyPath: FileTreeAction = {
+        label: 'Copy file path',
+        onSelect: async () => {
+          try {
+            await navigator.clipboard.writeText(await locate(entry.path));
+            setStatus(`Copied the path of ${entry.name}.`);
+          } catch (err) {
+            setStatus(`copy path failed: ${(err as Error).message}`);
+          }
+        },
+      };
+      return [...own, copyPath];
+    };
+  };
+  const rowActions = withPanelActions(actionsForEntry);
 
   return (
     <div
@@ -387,7 +413,9 @@ export function FileBrowserPane({
             <div className="file-tree-toolbar">
               <FileViewModeKeys value={viewMode} modes={modes} onChange={onViewModeChange} />
               <FileHiddenKey kind={source.kind} value={showHidden} onChange={onShowHiddenChange} />
-              {source.reveal && <FileRevealKey onReveal={() => void source.reveal?.()} />}
+              {source.reveal && (
+                <FileRevealKey label={revealLabel} onReveal={() => void source.reveal?.()} />
+              )}
             </div>
           </div>
           {mutations.status && <output className="file-tree-status">{mutations.status}</output>}
@@ -400,7 +428,7 @@ export function FileBrowserPane({
                 onSelect={(entry) => selectEntry(entry, customList.onSelect ?? onSelect)}
                 trailingForEntry={customList.trailingForEntry}
                 detailForEntry={customList.detailForEntry}
-                actionsForEntry={customList.actionsForEntry ?? actionsForEntry}
+                actionsForEntry={withPanelActions(customList.actionsForEntry ?? actionsForEntry)}
                 emptyMessage={customList.emptyMessage}
               />
             ) : treeMode ? (
@@ -420,7 +448,7 @@ export function FileBrowserPane({
                   onDelete={mutations.remove}
                   onMove={source.kind === 'documents' ? mutations.move : undefined}
                   trailingForEntry={trailingForEntry}
-                  actionsForEntry={actionsForEntry}
+                  actionsForEntry={rowActions}
                 />
               )
             ) : (
@@ -446,14 +474,14 @@ export function FileBrowserPane({
                     </>
                   ) : null;
                 }}
-                actionsForEntry={actionsForEntry}
+                actionsForEntry={rowActions}
                 emptyMessage={`No ${listLabel} files yet.`}
               />
             )}
             {!customList && truncated && (
               <p className="muted" style={{ padding: '0.5rem', fontSize: '0.8rem' }}>
                 This folder has more files than can be shown — the listing is incomplete.
-                {source.reveal ? ' Use "Open in file manager" above to browse everything.' : ''}
+                {source.reveal ? ` Use "${revealLabel}" above to browse everything.` : ''}
               </p>
             )}
           </div>

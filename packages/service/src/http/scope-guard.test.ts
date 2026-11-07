@@ -754,6 +754,11 @@ describe('sessionRouteGuard', () => {
     expect(
       (await app.request('/api/documents/read?path=artifacts%2Fsecret.md&project=proj-a')).status,
     ).toBe(403);
+    expect((await app.request('/api/documents/reveal', jsonPost({}))).status).toBe(403);
+    expect((await app.request('/api/documents/location?path=a.md')).status).toBe(403);
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    expect((await ui.request('/api/documents/reveal', jsonPost({}))).status).toBe(200);
+    expect((await ui.request('/api/documents/location?path=a.md')).status).toBe(200);
   });
 
   it('binds project-local craftbook selectors while preserving shared templates', async () => {

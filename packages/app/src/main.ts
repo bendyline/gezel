@@ -566,7 +566,8 @@ function rememberPreviewDocument(candidate: string, allowExternalServices: boole
  * 'unsafe-inline' (React inline styles); images allow only
  * self/data:/blob:. Remote passive resources are deliberately
  * excluded: images and media can still disclose user state through URLs even
- * when they cannot execute. connect-src is 'self' (the API is same-origin).
+ * when they cannot execute. connect-src is 'self' (the API is same-origin)
+ * plus blob: (in-memory bytes, which Chromium does not count as 'self').
  *
  * `frame-src 'self'` lets the renderer embed the same-origin sandboxed
  * preview iframes (the output pane's live HTML preview, chat references).
@@ -588,7 +589,10 @@ const GEZEL_CSP = [
   "font-src 'self' data:",
   "media-src 'self' blob: data:",
   "worker-src 'self' blob:",
-  "connect-src 'self'",
+  // blob: is in-memory bytes the page already holds, never the network.
+  // Chromium does not count it as 'self', and the squisq data card fetches
+  // the blob: URL its media provider resolves.
+  "connect-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'none'",
   "frame-src 'self'",
