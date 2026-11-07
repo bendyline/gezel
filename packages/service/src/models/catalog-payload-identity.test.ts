@@ -96,6 +96,50 @@ describe('describeCatalogPayload', () => {
     expect(described?.files.find((file) => file.name === 'draft.gguf')?.optional).toBeUndefined();
   });
 
+  it('counts a backend-limited drafter only on the backends that fetch it', () => {
+    const entry = manifest({
+      llamaCpp: {
+        huggingfaceRepo: 'owner/model',
+        filename: 'weights.gguf',
+        sha256: SHA_A,
+        approxSizeBytes: 10,
+        quantization: 'Q4_K_M',
+        draftModel: { filename: 'draft.gguf', sha256: SHA_C, sizeBytes: 30, backends: ['cuda'] },
+      },
+    });
+    const names = (backend: string | undefined) =>
+      describeCatalogPayload(entry, 'llama-cpp', backend)?.files.map((file) => file.name);
+    expect(names('cuda')).toEqual(['weights.gguf', 'draft.gguf']);
+    expect(names('vulkan')).toEqual(['weights.gguf']);
+    expect(names('metal')).toEqual(['weights.gguf']);
+  });
+
+  // Adding a drafter to a catalog entry must not offer a Vulkan machine an
+  // update for a file it will never download.
+  it('keeps the fingerprint of an install on a backend the drafter skips', () => {
+    const source = {
+      huggingfaceRepo: 'owner/model',
+      filename: 'weights.gguf',
+      sha256: SHA_A,
+      approxSizeBytes: 10,
+      quantization: 'Q4_K_M',
+    };
+    const before = describeCatalogPayload(manifest({ llamaCpp: source }), 'llama-cpp', 'vulkan');
+    const after = describeCatalogPayload(
+      manifest({
+        llamaCpp: {
+          ...source,
+          draftModel: { filename: 'draft.gguf', sha256: SHA_C, sizeBytes: 30, backends: ['cuda'] },
+        },
+      }),
+      'llama-cpp',
+      'vulkan',
+    );
+    expect(before && catalogPayloadFingerprint(before)).toBe(
+      after && catalogPayloadFingerprint(after),
+    );
+  });
+
   it('treats a ds4 vision encoder as a required part of the payload', () => {
     const described = describeCatalogPayload(
       manifest({

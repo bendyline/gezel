@@ -2,36 +2,93 @@
  * Speculative-decoding draft resolution, extracted from the chat/manager
  * launcher so it can be unit-tested in isolation.
  *
- * A model manifest names its `draft-simple` draft by CATALOG id
- * (`spec.draftModelId`) so it stays portable across installs — a user's GGUF
- * path differs from any hardcoded one. But engine-flags passes
- * `--spec-draft-model` verbatim and a `draft-simple` spec with no draft model
- * is a FATAL llama-server launch, so the id must be resolved to the installed
- * GGUF path (or the spec disabled) BEFORE the argv is built. This module owns
- * exactly that decision:
+ * A catalog entry can ask for a separate draft GGUF two ways: a `draftModel`
+ * sidecar installed beside the weights, or a `spec.draftModelId` naming another
+ * catalog model. engine-flags passes `--spec-draft-model` verbatim, and a draft
+ * algorithm with no draft model is a FATAL llama-server launch, so this has to
+ * be settled BEFORE the argv is built. This module owns that decision, and
+ * applies the catalog's per-backend overlay first so everything downstream of
+ * it reads one spec:
  *
  *   - global `config.llamaCppDraftModelPath` set → operator's own path wins,
  *     nothing to resolve.
- *   - manifest draft resolves to an installed path → rewrite `draftModelId`
+ *   - sidecar installed → use it.
+ *   - manifest draft id resolves to an installed path → rewrite `draftModelId`
  *     to that path.
- *   - manifest-driven spec whose draft isn't installed → STRIP the spec so
- *     the launch falls back to plain decoding instead of crashing. The
- *     +decode win is opportunistic on the draft being present, never a hard
- *     dependency.
- *   - operator explicitly forced `config.llamaCppSpecType=draft-simple` but
- *     no draft path resolves → leave it and warn; the operator owns it.
+ *   - manifest-driven spec with no draft on disk → fall back so the launch
+ *     decodes the way it would without the drafter instead of crashing. A live
+ *     Gilde update reaches this: the new manifest takes effect at once, and the
+ *     drafter arrives only when the person updates the model. The +decode win
+ *     is opportunistic on the draft being present, never a hard dependency.
+ *   - operator explicitly forced a draft `config.llamaCppSpecType` but no draft
+ *     path resolves → leave it and warn; the operator owns it.
  */
+import { llamaCppSpecForBackend, llamaCppSpecNeedsDraftModel } from '@bendyline/gezel';
 import type { PerModelLlamaCppEngineConfig } from './engine-flags.js';
 
 export interface SpecDraftResolveInput {
   /** The catalog manifest's `tuning.engine.llamaCpp` block, if any. */
   perModel: PerModelLlamaCppEngineConfig | undefined;
+  /** The llama-server build's backend, for the manifest's `spec.byBackend`. */
+  backend?: string | undefined;
   /** Global `config.llamaCppSpecType`, if the operator set one. */
   configSpecType?: string | undefined;
   /** Global `config.llamaCppDraftModelPath`, if the operator set one. */
   configDraftModelPath?: string | undefined;
+  /** The catalog `draftModel` sidecar on disk beside the weights, if any. */
+  installedDraftModelPath?: string | undefined;
   /** Resolve a catalog draft id → installed GGUF path (null if not installed). */
   resolveDraftPath: (id: string) => Promise<string | null>;
+}
+
+/**
+ * Whether the sidecar beside the weights is what this launch loads. A separate
+ * MTP assistant loads whenever MTP runs. A DFlash drafter sits beside a target
+ * that may have its own head, or on a backend its catalog entry did not turn it
+ * on for; handing it to MTP through `--spec-draft-model` would load the wrong
+ * file. `perBackend` is the manifest carrying a `spec.byBackend` table.
+ */
+export function llamaCppSidecarLoads(input: {
+  specType: string | undefined;
+  targetHasMtp: boolean;
+  perBackend: boolean;
+}): boolean {
+  const { specType, targetHasMtp, perBackend } = input;
+  if (llamaCppSpecNeedsDraftModel(specType)) return true;
+  if (specType && specType !== 'draft-mtp') return false;
+  return !targetHasMtp && !perBackend;
+}
+
+/**
+ * Engine and drafter pairs that took an engine down, so a later launch in this
+ * daemon goes without instead of failing the same way first. Keyed by both,
+ * because a drafter that one engine build cannot load may suit the next.
+ */
+export const brokenDrafters = new Set<string>();
+
+/** The parts of a KV plan a drafter must not change. */
+export interface DrafterKvPlan {
+  kvCacheType: string;
+  ctxCapTokens?: number | undefined;
+}
+
+/**
+ * Whether a drafter would cost the session something it runs out of. The
+ * target window and KV precision outlast a faster decode: a drafter that
+ * makes the plan cap the target, drop to a coarser KV cache, or stop fitting
+ * at all is left out. Adaptive growth above the target and slots pay for it,
+ * as they do for every resident cost.
+ */
+export function drafterCostsContext(
+  withDrafter: DrafterKvPlan,
+  withoutDrafter: DrafterKvPlan,
+  fitsWithDrafter: boolean,
+): boolean {
+  return (
+    !fitsWithDrafter ||
+    withDrafter.kvCacheType !== withoutDrafter.kvCacheType ||
+    withDrafter.ctxCapTokens !== withoutDrafter.ctxCapTokens
+  );
 }
 
 export interface SpecDraftResolution {
@@ -41,49 +98,76 @@ export interface SpecDraftResolution {
   log: { level: 'info' | 'warn'; message: string } | null;
 }
 
+/** The base spec with no overlay, or `perModel` with no spec at all. */
+function withoutOverlay(
+  perModel: PerModelLlamaCppEngineConfig,
+): PerModelLlamaCppEngineConfig | undefined {
+  const base = llamaCppSpecForBackend(perModel.spec, undefined);
+  return base ? { ...perModel, spec: base } : perModel;
+}
+
+function withoutSpec(perModel: PerModelLlamaCppEngineConfig): PerModelLlamaCppEngineConfig {
+  const { spec: _spec, ...rest } = perModel;
+  return rest;
+}
+
 export async function resolveSpecDraft(input: SpecDraftResolveInput): Promise<SpecDraftResolution> {
-  const { perModel, configSpecType, configDraftModelPath, resolveDraftPath } = input;
-  const effectiveSpecType = configSpecType ?? perModel?.spec?.type;
-  // Only the manifest-draftModelId path needs resolving. An explicit global
-  // draft path, a non-draft-simple spec, or no draft id → nothing to do.
+  const { perModel, backend, configSpecType, configDraftModelPath } = input;
+  const { installedDraftModelPath, resolveDraftPath } = input;
+  if (!perModel?.spec) return { perModel, log: null };
+
+  const overlay = backend ? perModel.spec.byBackend?.[backend] : undefined;
+  // A person who forced another algorithm has not asked for this overlay's
+  // tuning: MTP must not inherit a sampling mode chosen for a drafter.
+  const overlayStands = !configSpecType || !overlay?.type || overlay.type === configSpecType;
+  const spec = llamaCppSpecForBackend(perModel.spec, overlayStands ? backend : undefined);
+  const applied = perModel.spec.byBackend ? { ...perModel, spec } : perModel;
+
+  const effectiveSpecType = configSpecType ?? spec?.type;
   if (
-    effectiveSpecType !== 'draft-simple' ||
-    !perModel?.spec?.draftModelId ||
-    configDraftModelPath
+    !llamaCppSpecNeedsDraftModel(effectiveSpecType) ||
+    configDraftModelPath ||
+    installedDraftModelPath
   ) {
-    return { perModel, log: null };
+    return { perModel: applied, log: null };
   }
-  const draftId = perModel.spec.draftModelId;
-  const draftPath = await resolveDraftPath(draftId).catch(() => null);
-  if (draftPath) {
+
+  const draftId = spec?.draftModelId;
+  const draftPath = draftId ? await resolveDraftPath(draftId).catch(() => null) : null;
+  if (draftPath && spec) {
     return {
-      perModel: { ...perModel, spec: { ...perModel.spec, draftModelId: draftPath } },
+      perModel: { ...applied, spec: { ...spec, draftModelId: draftPath } },
       log: {
         level: 'info',
         message: `[llama-cpp] speculative decoding: draft "${draftId}" → ${draftPath}`,
       },
     };
   }
-  if (!configSpecType) {
-    // Manifest-driven spec, draft absent → strip so we don't fatal-launch a
-    // draft-simple with no draft model.
-    const { spec: _spec, ...rest } = perModel;
+
+  const name = draftId ? `"${draftId}"` : 'sidecar';
+  if (configSpecType) {
+    // Operator forced the spec type via global config but gave no resolvable
+    // draft — leave it and let llama-server surface the error rather than
+    // silently overriding an explicit request.
     return {
-      perModel: rest,
+      perModel: applied,
       log: {
-        level: 'info',
-        message: `[llama-cpp] speculative decoding (manifest draft "${draftId}") skipped: draft model not installed; running without it.`,
+        level: 'warn',
+        message: `[llama-cpp] config.llamaCppSpecType=${configSpecType} but draft ${name} is not installed and no llamaCppDraftModelPath is set; the launch may fail.`,
       },
     };
   }
-  // Operator forced the spec type via global config but gave no resolvable
-  // draft — leave it and let llama-server surface the error rather than
-  // silently overriding an explicit request.
+
+  // Manifest-driven spec, draft absent → the overlay's base if that decodes
+  // without one, else no spec at all.
+  const base = overlay ? withoutOverlay(perModel) : undefined;
+  const fallback =
+    base && !llamaCppSpecNeedsDraftModel(base.spec?.type) ? base : withoutSpec(perModel);
   return {
-    perModel,
+    perModel: fallback,
     log: {
-      level: 'warn',
-      message: `[llama-cpp] config.llamaCppSpecType=draft-simple but draft "${draftId}" is not installed and no llamaCppDraftModelPath is set; the launch may fail.`,
+      level: 'info',
+      message: `[llama-cpp] speculative decoding (manifest draft ${name}) skipped: draft model not installed; running without it.`,
     },
   };
 }

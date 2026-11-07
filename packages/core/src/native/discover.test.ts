@@ -173,6 +173,34 @@ describe('discoverNativeBinaries — short-circuits', () => {
     expect(result.llamaBackend).toBeUndefined();
   });
 
+  it('publishes the backend a pre-set llama-server records beside itself', () => {
+    const bin = stageBinary(nativeBinDir, 'custom', 'llama-server', 'linux');
+    writeFileSync(
+      join(dirname(bin), 'gezel-llama-build.json'),
+      JSON.stringify({ engine: 'llama-cpp', backend: 'cuda' }),
+    );
+    process.env.GEZEL_LLAMA_SERVER_BIN = bin;
+
+    discover({ home, platform: 'linux', arch: 'x64' });
+
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('cuda');
+  });
+
+  it('keeps a backend the supervisor set, and stays silent about an unlabeled build', () => {
+    const bin = stageBinary(nativeBinDir, 'custom', 'llama-server', 'linux');
+    process.env.GEZEL_LLAMA_SERVER_BIN = bin;
+    discover({ home, platform: 'linux', arch: 'x64' });
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBeUndefined();
+
+    writeFileSync(
+      join(dirname(bin), 'gezel-llama-build.json'),
+      JSON.stringify({ engine: 'llama-cpp', backend: 'cuda' }),
+    );
+    process.env.GEZEL_LLAMA_SERVER_BACKEND = 'vulkan';
+    discover({ home, platform: 'linux', arch: 'x64' });
+    expect(process.env.GEZEL_LLAMA_SERVER_BACKEND).toBe('vulkan');
+  });
+
   it('still publishes detected backend + vendor even when no binary is bundled', () => {
     // Linux NVIDIA host, but no native-bin dir mounted — happens in
     // bare CLI launches (the CLI doesn't stamp GEZEL_NATIVE_BIN_DIR).

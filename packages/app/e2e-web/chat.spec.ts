@@ -4,7 +4,7 @@
  * order-independent anchor for the timeline, composer, and bubble shots. The
  * interactive send flow is covered by the write-flow spec.
  */
-import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
+import { LAYOUT_TOLERANCE_PX, expectNear } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { settle } from './helpers/determinism.js';
 import { gotoMeesterChat } from './helpers/nav.js';
@@ -103,12 +103,15 @@ test.describe('chat surface', () => {
       element.append(composeHeaderProbe);
       const recipientRect = recipient.getBoundingClientRect();
       const sessionRect = session.getBoundingClientRect();
+      const editorRect = editor.getBoundingClientRect();
       const result = {
         background: style.backgroundColor,
         borderWidth: style.borderTopWidth,
         radius: Number.parseFloat(style.borderTopLeftRadius),
         insetLeft: rect.left - railRect.left,
         insetRight: railRect.right - rect.right,
+        recipientInsetLeft: recipientRect.left - editorRect.left,
+        recipientInsetRight: editorRect.right - recipientRect.right,
         recipientInside:
           recipientRect.left >= rect.left - tolerance &&
           recipientRect.right <= rect.right + tolerance,
@@ -130,6 +133,11 @@ test.describe('chat surface', () => {
     expect(frame.radius).toBeGreaterThan(0);
     expect(frame.insetLeft).toBeGreaterThan(1);
     expect(frame.insetRight).toBeGreaterThan(1);
+    // One gutter: the frame sits as far from the navigation rail as from the
+    // window edge, and the To band shares the editor's edges on both sides.
+    expectNear(frame.insetRight, frame.insetLeft, 'composer frame insets');
+    expectNear(frame.recipientInsetLeft, 0, 'To band left edge');
+    expectNear(frame.recipientInsetRight, 0, 'To band right edge');
     expect(frame.recipientInside).toBe(true);
     expect(frame.sessionInside).toBe(true);
     expect(frame.sessionBackground).toBe(frame.chatPaperBackground);

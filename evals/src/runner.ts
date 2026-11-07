@@ -1215,10 +1215,17 @@ export async function runTrial(
       // gate doesn't depend on the draft being installed under its catalog id.
       ...(process.env.GEZEL_EVAL_SPEC_DRAFT_PATH
         ? {
-            llamaCppSpecType: 'draft-simple' as const,
+            llamaCppSpecType: evalLlamaSpecType ?? ('draft-simple' as const),
             llamaCppDraftModelPath: process.env.GEZEL_EVAL_SPEC_DRAFT_PATH,
             llamaCppSpecDraftNMax: 4,
           }
+        : {}),
+      ...(process.env.GEZEL_EVAL_SPEC_DRAFT_N_MAX
+        ? { llamaCppSpecDraftNMax: Number(process.env.GEZEL_EVAL_SPEC_DRAFT_N_MAX) }
+        : {}),
+      ...(process.env.GEZEL_EVAL_SPEC_DRAFT_SAMPLING === 'greedy' ||
+      process.env.GEZEL_EVAL_SPEC_DRAFT_SAMPLING === 'probabilistic'
+        ? { llamaCppSpecDraftSampling: process.env.GEZEL_EVAL_SPEC_DRAFT_SAMPLING }
         : {}),
       // KV-cache precision lever. Same shape as the spec-draft probe above:
       // an explicit A/B knob for `--cache-type-k/v` so a run can pin f16 vs

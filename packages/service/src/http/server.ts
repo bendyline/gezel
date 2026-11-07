@@ -278,7 +278,10 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
           "font-src 'self' data:",
           "media-src 'self' blob: data:",
           "worker-src 'self' blob:",
-          "connect-src 'self'",
+          // blob: is in-memory bytes the page already holds, never the
+          // network. Chromium does not count it as 'self', and the squisq
+          // data card fetches the blob: URL its media provider resolves.
+          "connect-src 'self' blob:",
           "object-src 'none'",
           "base-uri 'none'",
           "frame-src 'self'",

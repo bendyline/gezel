@@ -18,8 +18,8 @@ describe('project artifact document containers', () => {
   it('lists and writes inside only the active Markdown companion', async () => {
     const listProjectArtifacts = vi.fn().mockResolvedValue({
       files: [
-        { path: 'reports/brief_files/hero.png', isDirectory: false },
-        { path: 'reports/other_files/leak.png', isDirectory: false },
+        { path: 'reports/brief_files/hero.png', isDirectory: false, size: 512 },
+        { path: 'reports/other_files/leak.png', isDirectory: false, size: 64 },
       ],
     });
     const writeProjectArtifactBinary = vi.fn().mockResolvedValue({ ok: true });
@@ -31,9 +31,11 @@ describe('project artifact document containers', () => {
     });
 
     await expect(container.listFiles()).resolves.toEqual([
-      { path: 'hero.png', mimeType: 'image/png', size: 0 },
+      { path: 'hero.png', mimeType: 'image/png', size: 512 },
     ]);
-    expect(listProjectArtifacts).toHaveBeenCalledWith('p1', 'reports/brief_files', true);
+    expect(listProjectArtifacts).toHaveBeenCalledWith('p1', 'reports/brief_files', true, {
+      stats: true,
+    });
 
     const bytes = new Uint8Array([1, 2]);
     await container.writeFile('brief_files/photo.png', bytes, 'image/png');

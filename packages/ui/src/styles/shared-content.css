@@ -1334,13 +1334,16 @@
   text-overflow: ellipsis;
 }
 
-/* Same self-contained compose surface project chat and Home already use:
-   a warm header band grouping recipient + thread picker + toolbar above the
-   lighter draft, inside one rounded frame. The horizontal inset matches the
-   timeline's content gutter so the frame lines up with the bubbles above it.
-   Per-gezel chat has no terminal surface, so its "To:" line carries no mode
-   tabs — the compose-surface switch is project chat only. */
-.gezel-chat-tab .chat-composer {
+/* The compose frame every desktop chat shares with project chat (which draws
+   its own in terminal.css): a warm header band grouping recipient + thread
+   picker + toolbar above the lighter draft, inside one rounded frame. The
+   inset is the timeline's 0.75rem content gutter on both sides, so the frame
+   lines up with the bubbles above it. Home, per-gezel chat, and the task,
+   craftbook and page chats all wear it; a task chat without it read as a loose
+   text box. The Office pane's document chat is too narrow for a gutter and
+   runs edge to edge, like a compact composer. */
+:is(.home-workshop-conversation, .gezel-chat-tab, .task-detail-chat:not(.document-chat-body))
+  .chat-composer {
   --compose-frame-bg: var(--chat-compose-header-bg);
   --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
   --compose-toolbar-bg: var(--chat-compose-header-bg);
@@ -1357,13 +1360,15 @@
 
 /* "To: {GezelName}" pill above the editor — small, muted, left-aligned.
    Makes the active recipient explicit so users aren't guessing whose
-   inbox the next Send drops into. */
+   inbox the next Send drops into. It and the strips above it (task, image,
+   review, error) share the editor's edges on both sides: a one-sided inset
+   left them 8px from the frame on the left and 4px on the right. */
 .chat-composer-to {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 0.4rem;
-  margin: 0 0 0.25rem 0.25rem;
+  margin: 0 0 0.25rem;
   padding: 0.15rem var(--chat-composer-action-inset) 0.15rem 0.55rem;
   font-size: var(--text-2xs);
   background: var(--surface-2, rgba(0, 0, 0, 0.04));
@@ -1422,7 +1427,7 @@
   align-items: stretch;
   gap: 0.35rem;
   min-inline-size: 0;
-  margin: 0 0 0.25rem 0.25rem;
+  margin: 0 0 0.25rem;
   padding: 0.3rem 0.4rem 0.3rem 0.5rem;
   color: var(--text);
   background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
@@ -1514,7 +1519,7 @@
   flex-direction: column;
   gap: 0.25rem;
   min-inline-size: 0;
-  margin: 0 0 0.25rem 0.25rem;
+  margin: 0 0 0.25rem;
   padding: 0.3rem 0.4rem 0.3rem 0.5rem;
   color: var(--text);
   background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));

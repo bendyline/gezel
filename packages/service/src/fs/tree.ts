@@ -110,12 +110,13 @@ export async function walkDirDetailed(
       const rel = item.prefix ? `${item.prefix}/${e.name}` : e.name;
       const entry: ProjectFileEntry = { name: e.name, path: rel, isDirectory: e.isDirectory() };
       // Opt-in per-file stat — the "what got written last night" reads
-      // need mtimes; bounded by maxEntries so the extra lstat cost stays
-      // capped.
+      // need mtimes, the editor's attachment and data-card strips need
+      // sizes; bounded by maxEntries so the extra lstat cost stays capped.
       if (opts.withStats && !entry.isDirectory) {
         try {
           const stat = await lstat(join(item.dir, e.name));
           entry.mtimeMs = stat.mtimeMs;
+          entry.size = stat.size;
         } catch {
           /* stat is best-effort */
         }

@@ -82,7 +82,7 @@ describe('walkDirDetailed', () => {
     expect(entries.map((e) => e.path).sort()).toEqual(['one.txt', 'sub', 'sub/two.txt']);
   });
 
-  it('withStats puts mtimeMs on files and never on directories', async () => {
+  it('withStats puts mtimeMs and size on files and never on directories', async () => {
     await Promise.all([seed('one.txt'), seed('sub/two.txt')]);
 
     const { entries } = await walkDirDetailed(root, { withStats: true });
@@ -90,15 +90,17 @@ describe('walkDirDetailed', () => {
 
     expect(byPath.get('one.txt')?.mtimeMs).toBeTypeOf('number');
     expect(byPath.get('sub/two.txt')?.mtimeMs).toBeTypeOf('number');
+    expect(byPath.get('one.txt')?.size).toBe('<!doctype html>'.length);
     expect(byPath.get('sub')?.mtimeMs).toBeUndefined();
+    expect(byPath.get('sub')?.size).toBeUndefined();
   });
 
-  it('omits mtimeMs entirely without withStats', async () => {
+  it('omits mtimeMs and size entirely without withStats', async () => {
     await seed('one.txt');
 
     const { entries } = await walkDirDetailed(root);
 
-    expect(entries.every((e) => e.mtimeMs === undefined)).toBe(true);
+    expect(entries.every((e) => e.mtimeMs === undefined && e.size === undefined)).toBe(true);
   });
 
   it('skipRootDirs prunes a root subtree during the walk, only at depth 0', async () => {

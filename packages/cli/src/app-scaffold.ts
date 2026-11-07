@@ -142,6 +142,7 @@ Authoring references:
 - [Building Gezel apps](https://github.com/bendyline/gezel/blob/main/docs/building-gezel-apps.md)
 - [Page APIs](https://github.com/bendyline/gezel/blob/main/docs/output-pane-api.md)
 - [Page style guide](https://github.com/bendyline/gezel/blob/main/docs/handboek/technical/gezel-app-page-style-guide.md)
+- [App UX guide](https://github.com/bendyline/gezel/blob/main/docs/handboek/technical/gezel-app-ux-guide.md)
 `,
     ],
     [

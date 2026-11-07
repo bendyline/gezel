@@ -611,11 +611,13 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
   );
 
   const saveDraftSampling = useCallback(
-    async (value: DraftSampling) => {
+    async (value: DraftSampling | 'auto') => {
       showSavingState('saving');
       try {
         const next = await api.updateConfig({
-          llamaCppSpecDraftSampling: value === 'greedy' ? null : value,
+          // Auto (null) leaves it to the model's catalog entry, and to the
+          // engine's greedy default when the entry is silent.
+          llamaCppSpecDraftSampling: value === 'auto' ? null : value,
         });
         if (!mounted.current) return;
         onConfigChanged(next);
@@ -916,7 +918,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
             onChange={(e) => void saveSpecType(e.target.value as SpecType | 'auto')}
             style={{ flex: 1, maxWidth: '20rem' }}
           >
-            <option value="auto">Auto — MTP when the model supports it (recommended)</option>
+            <option value="auto">Auto — the model's own setting (recommended)</option>
             <option value="none">Off</option>
             <option value="ngram-mod">N-gram lookup (no draft model)</option>
             <option value="draft-mtp">Model MTP head (force when compatible)</option>
@@ -924,9 +926,10 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
           Drafts several tokens per step and verifies them against the target model. <em>Auto</em>{' '}
-          enables MTP only when the installed weights confirm a compatible prediction head;
-          otherwise speculative decoding stays off. <em>N-gram</em> needs no extra model and helps
-          most on repetitive or structured output. Takes effect the next time the engine starts.
+          uses a separate draft model where this model has one tested on your graphics hardware, MTP
+          when the installed weights confirm a compatible prediction head, and otherwise stays off.{' '}
+          <em>N-gram</em> needs no extra model and helps most on repetitive or structured output.
+          Takes effect the next time the engine starts.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
@@ -940,11 +943,12 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           <select
             id="llama-cpp-spec-draft-sampling"
             aria-describedby="llama-cpp-spec-draft-sampling-hint"
-            value={config?.llamaCppSpecDraftSampling ?? 'greedy'}
-            onChange={(e) => void saveDraftSampling(e.target.value as DraftSampling)}
+            value={config?.llamaCppSpecDraftSampling ?? 'auto'}
+            onChange={(e) => void saveDraftSampling(e.target.value as DraftSampling | 'auto')}
             style={{ flex: 1, maxWidth: '20rem' }}
           >
-            <option value="greedy">Greedy (default)</option>
+            <option value="auto">Auto — the model's own setting (recommended)</option>
+            <option value="greedy">Greedy</option>
             <option value="probabilistic">Probabilistic (experimental)</option>
           </select>
         </div>
@@ -953,9 +957,9 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           className="muted small"
           style={{ marginTop: '0.25rem', marginLeft: '10rem' }}
         >
-          Used with compatible model prediction heads or separate draft models. Probabilistic mode
-          can improve speed depending on the model and task; greedy remains the default. Takes
-          effect the next time the engine starts.
+          Used with compatible model prediction heads or separate draft models. <em>Auto</em> uses
+          the model's own setting, and greedy when it has none. Probabilistic mode can improve speed
+          depending on the model and task. Takes effect the next time the engine starts.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>

@@ -271,16 +271,13 @@ describe('buildLlamaCppEngineArgs — speculative decoding', () => {
     expect(argValue(args, '--spec-draft-sampling')).toBe('probabilistic');
   });
 
-  it.each(['none', 'ngram-mod', 'draft-eagle3', 'draft-dflash'])(
-    'does not apply draft sampling to %s',
-    (type) => {
-      const args = buildLlamaCppEngineArgs({
-        config: { llamaCppSpecType: type, llamaCppSpecDraftSampling: 'probabilistic' },
-        ggufHasMtp: true,
-      });
-      expect(has(args, '--spec-draft-sampling')).toBe(false);
-    },
-  );
+  it.each(['none', 'ngram-mod', 'draft-eagle3'])('does not apply draft sampling to %s', (type) => {
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppSpecType: type, llamaCppSpecDraftSampling: 'probabilistic' },
+      ggufHasMtp: true,
+    });
+    expect(has(args, '--spec-draft-sampling')).toBe(false);
+  });
 
   it('does not emit draft sampling when the MTP capability gate rejects the mode', () => {
     const args = buildLlamaCppEngineArgs({
@@ -363,6 +360,34 @@ describe('buildLlamaCppEngineArgs — speculative decoding', () => {
     });
     expect(argValue(args, '--spec-type')).toBe('draft-dflash');
     expect(argValue(args, '--spec-draft-model')).toBe('/models/laguna/dflash.gguf');
+  });
+
+  it('passes the manifest draft sampling to a DFlash launch', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: {},
+      perModel: { spec: { type: 'draft-dflash', nMax: 4, sampling: 'probabilistic' } },
+      installedDraftModelPath: '/models/dflash.gguf',
+    });
+    expect(argValue(args, '--spec-draft-sampling')).toBe('probabilistic');
+    expect(argValue(args, '--spec-draft-n-max')).toBe('4');
+  });
+
+  it('lets the person override the manifest draft sampling', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: { llamaCppSpecDraftSampling: 'greedy' },
+      perModel: { spec: { type: 'draft-dflash', sampling: 'probabilistic' } },
+      installedDraftModelPath: '/models/dflash.gguf',
+    });
+    expect(argValue(args, '--spec-draft-sampling')).toBe('greedy');
+  });
+
+  it('leaves the engine default alone when nobody chose a draft sampling', () => {
+    const args = buildLlamaCppEngineArgs({
+      config: {},
+      perModel: { spec: { type: 'draft-dflash' } },
+      installedDraftModelPath: '/models/dflash.gguf',
+    });
+    expect(has(args, '--spec-draft-sampling')).toBe(false);
   });
 
   it('enables MTP by default when the GGUF confirms an MTP head', () => {

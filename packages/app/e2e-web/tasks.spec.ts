@@ -2,6 +2,7 @@
  * Tasks — the cross-project task list and a task's detail view (step tracker +
  * step panel). Uses the seeded tasks.
  */
+import { expectNear } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { gotoHome, openAreaView, openTask } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
@@ -43,6 +44,35 @@ test.describe('tasks', () => {
       selector: '[data-testid=task-step-panel]',
       description: 'Task step panel — the active phase detail',
     });
+  });
+
+  test('task chat wears the shared compose frame', async ({ page, world }) => {
+    test.skip(!world, 'requires the seeded world');
+    await gotoHome(page);
+    await openTask(page, world!.taskRefs[0]!);
+    const detail = page.getByTestId('task-detail');
+    await detail.getByRole('button', { name: /^Chat/ }).click();
+
+    // Without the frame Home and crew chat wear, the task's composer read as
+    // a loose text box under the timeline.
+    const composer = detail.getByTestId('chat-composer');
+    await expect(composer).toBeVisible();
+    const frame = await composer.evaluate((element) => {
+      const style = getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      const host = element.closest('.task-detail-chat')?.getBoundingClientRect();
+      if (!host) throw new Error('task chat host did not render');
+      return {
+        borderStyle: style.borderTopStyle,
+        radius: Number.parseFloat(style.borderTopLeftRadius),
+        insetLeft: rect.left - host.left,
+        insetRight: host.right - rect.right,
+      };
+    });
+    expect(frame.borderStyle).toBe('solid');
+    expect(frame.radius).toBeGreaterThan(0);
+    expect(frame.insetLeft).toBeGreaterThan(1);
+    expectNear(frame.insetRight, frame.insetLeft, 'task composer frame insets');
   });
 
   test('new-task dialog: craftbook gallery → create and start', async ({ page, world }) => {
