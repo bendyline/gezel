@@ -48,6 +48,51 @@ export async function verifySpeech(root, target) {
   return verifyFiles(root, manifest);
 }
 
+const plistString = (xml, key) =>
+  new RegExp(`<key>${key}</key>\\s*<string>([^<]*)</string>`).exec(xml)?.[1] ?? '';
+
+/**
+ * What an app store or a consuming Gradle build checks beyond the inventory,
+ * for a speech runtime about to be published: the iOS framework's bundle
+ * versions and privacy manifest, and the gezel-llama dependency that brings
+ * libc++_shared.so on Android. native-v0.1.61 shipped without all three, and
+ * App Store Connect refuses an app embedding a framework without versions.
+ */
+export async function verifySpeechDistribution(root, target) {
+  const manifest = await verifySpeech(root, target);
+  const names = Object.keys(manifest.files);
+  if (target === 'ios') {
+    const frameworks = names
+      .filter((name) =>
+        /^GezelSpeech\.xcframework\/[^/]+\/GezelSpeech\.framework\/GezelSpeech$/.test(name),
+      )
+      .map((name) => path.posix.dirname(name));
+    if (frameworks.length === 0)
+      throw new Error('The iOS speech runtime has no GezelSpeech.framework');
+    for (const framework of frameworks) {
+      const info = await readFile(path.join(root, framework, 'Info.plist'), 'utf8');
+      for (const key of ['CFBundleShortVersionString', 'CFBundleVersion', 'MinimumOSVersion']) {
+        if (!/^\d+\.\d+(\.\d+)?$/.test(plistString(info, key)))
+          throw new Error(
+            `${framework}/Info.plist has no ${key}, so App Store Connect would refuse it`,
+          );
+      }
+      if (!names.includes(`${framework}/PrivacyInfo.xcprivacy`))
+        throw new Error(`${framework} has no PrivacyInfo.xcprivacy`);
+    }
+  } else {
+    const version = manifest.packageVersion;
+    const pom = names.find((name) => name.endsWith(`/gezel-speech-${version}.pom`));
+    const xml = pom ? await readFile(path.join(root, pom), 'utf8') : '';
+    const escaped = version.replace(/[.]/g, '\\.');
+    if (
+      !new RegExp(`<artifactId>gezel-llama</artifactId>\\s*<version>${escaped}</version>`).test(xml)
+    )
+      throw new Error(`The gezel-speech ${version} POM does not depend on gezel-llama ${version}`);
+  }
+  return manifest;
+}
+
 async function verifyFiles(root, manifest) {
   const realRoot = await realpath(root);
   for (const [name, sha] of Object.entries(manifest.files)) {

@@ -228,6 +228,15 @@ test('Electron release configuration pins the audited packaging contracts', asyn
   // release must also check the artifact itself.
   assert.match(workflow, /node scripts\/verify-deb-compression\.mjs/);
 
+  // GitHub refuses release assets of 2 GiB or more. Every build job checks its
+  // own installers before the slow verification steps, and the release job
+  // checks the full set before attesting or uploading anything.
+  const jobs = workflowJobs(workflow);
+  for (const job of ['build-windows', 'build-macos', 'build-linux', 'release']) {
+    assert.match(jobs[job], /node scripts\/check-release-asset-sizes\.mjs /, job);
+  }
+  assert.match(jobs.release, /check-release-asset-sizes\.mjs release-assets\/\*/);
+
   // Distributed package metadata shares this wording; README copy can evolve independently.
   const productTagline = 'Your team of AI craftsmen';
   const productDescription =

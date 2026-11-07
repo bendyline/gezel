@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import plistlib
 import re
 from pathlib import Path, PurePosixPath
 import shutil
@@ -15,6 +16,8 @@ import zipfile
 HERE = Path(__file__).resolve().parent
 CACHE = HERE.parent / '.build/speech-deps'
 PINS = json.loads((HERE / 'pins.json').read_text())
+DISTRIBUTION_GUIDE = HERE.parent.parent / 'runtime/PUBLIC-DISTRIBUTION.md'
+IOS_MINIMUM = '16.4'
 
 def digest(path):
     value = hashlib.sha256()
@@ -58,7 +61,7 @@ def extract(archive, destination):
         target = destination / name
         target.parent.mkdir(parents=True, exist_ok=True)
         return target
-    if archive.suffix == '.zip':
+    if archive.suffix in ('.zip', '.aar'):
         with zipfile.ZipFile(archive) as packed:
             for member in packed.infolist():
                 if member.is_dir(): continue
@@ -128,7 +131,7 @@ def main():
             build = output / sdk
             onnx_lib = staging / 'onnx-ios/onnxruntime.xcframework' / slice_name / 'onnxruntime.framework/onnxruntime'
             run(['cmake', '-S', HERE, '-B', build, *common, '-DCMAKE_SYSTEM_NAME=iOS',
-                 '-DCMAKE_OSX_SYSROOT=' + sdk, '-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=16.4',
+                 '-DCMAKE_OSX_SYSROOT=' + sdk, '-DCMAKE_OSX_ARCHITECTURES=arm64', '-DCMAKE_OSX_DEPLOYMENT_TARGET=' + IOS_MINIMUM,
                  '-DGEZEL_ONNX_LIBRARY=' + str(onnx_lib)])
             run(['cmake', '--build', build, '--target', 'GezelSpeech', '--parallel', '4'])
             framework = build / 'GezelSpeech.framework'
@@ -136,6 +139,7 @@ def main():
             shutil.copy2(HERE / 'gezel_speech.h', headers)
             modules = framework / 'Modules'; modules.mkdir(exist_ok=True)
             (modules / 'module.modulemap').write_text('framework module GezelSpeech { umbrella header "gezel_speech.h" export * }\n')
+            describe_framework(framework, sdk, args.package)
             frameworks.extend(['-framework', framework])
         run(['xcodebuild', '-create-xcframework', *frameworks, '-output', payload / 'GezelSpeech.xcframework'])
     shutil.copy2(whisper / 'LICENSE', payload / 'LICENSE-whisper.txt')
@@ -152,7 +156,7 @@ def main():
         target = models / 'kokoro' / file
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(path, target)
-    manifest = {'pins': PINS, 'bridge': {str(file.relative_to(HERE)): digest(file) for file in HERE.rglob('*') if file.suffix in ['.h', '.cpp', '.txt', '.py', '.json']},
+    manifest = {'pins': PINS, 'bridge': {str(file.relative_to(HERE)): digest(file) for file in HERE.rglob('*') if file.suffix in ['.h', '.cpp', '.txt', '.py', '.json', '.xcprivacy']},
                 'files': {str(file.relative_to(payload)): digest(file) for file in payload.rglob('*') if file.is_file()}}
     (payload / 'speech-build.json').write_text(json.dumps(manifest, indent=2) + '\n')
     if args.package:
@@ -160,6 +164,33 @@ def main():
 
 ABI = int(next(line.split()[-1] for line in (HERE / 'gezel_speech.h').read_text().splitlines()
                if line.startswith('#define GEZEL_SPEECH_ABI ')))
+
+def bundle_version(package):
+    """CFBundleShortVersionString allows three integers at most, so a prerelease keeps its release part."""
+    return re.match(r'\d+\.\d+\.\d+', package or '0.0.0').group(0)
+
+def describe_framework(framework, sdk, package):
+    """Fill in what CMake leaves out of the framework bundle.
+
+    CMake writes empty CFBundleShortVersionString / CFBundleVersion and no
+    MinimumOSVersion, and App Store Connect refuses an app embedding such a
+    framework (ITMS-90056, ITMS-90360). native-v0.1.61 shipped that way.
+    """
+    info = framework / 'Info.plist'
+    plist = plistlib.loads(info.read_bytes())
+    plist.pop('CFBundleIconFile', None)
+    version = bundle_version(package)
+    plist.update({
+        'CFBundleName': 'GezelSpeech',
+        'CFBundleShortVersionString': version,
+        'CFBundleVersion': version,
+        'MinimumOSVersion': IOS_MINIMUM,
+        'CFBundleSupportedPlatforms': ['iPhoneSimulator' if sdk == 'iphonesimulator' else 'iPhoneOS'],
+    })
+    info.write_bytes(plistlib.dumps(plist))
+    # ONNX Runtime and whisper.cpp read model files' metadata (stat/fstat), a
+    # required-reason API. The manifest sits at the root of the framework.
+    shutil.copy2(HERE / 'PrivacyInfo.xcprivacy', framework / 'PrivacyInfo.xcprivacy')
 
 def archive(output, files):
     """Stable ZIP metadata, as in ../stage-sdk.py: no host timestamps or modes."""
@@ -177,6 +208,7 @@ def package(platform, payload, output, version):
     output.mkdir(parents=True)
     licenses = sorted(file.name for file in payload.glob('*.txt'))
     for name in licenses: shutil.copy2(payload / name, output / name)
+    shutil.copy2(DISTRIBUTION_GUIDE, output / DISTRIBUTION_GUIDE.name)
     if platform == 'android':
         group = 'com/bendyline/gezel/gezel-speech/' + version
         maven = output / 'maven' / group
@@ -202,6 +234,9 @@ def package(platform, payload, output, version):
   <packaging>aar</packaging><name>Gezel offline speech runtime</name>
   <description>Whisper and Kokoro on ONNX Runtime. Loads libc++_shared.so from gezel-llama of the same release.</description>
   <licenses><license><name>MIT</name><url>https://opensource.org/license/mit</url></license></licenses>
+  <dependencies>
+    <dependency><groupId>com.bendyline.gezel</groupId><artifactId>gezel-llama</artifactId><version>{version}</version><type>aar</type><scope>runtime</scope></dependency>
+  </dependencies>
 </project>
 ''')
         for artifact in (aar, pom): artifact.with_suffix(artifact.suffix + '.sha256').write_text(digest(artifact) + '\n')

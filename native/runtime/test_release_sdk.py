@@ -89,6 +89,15 @@ def android_sdk(root):
     return sdk
 
 
+# What CMake writes for a FRAMEWORK target on iOS, before build.py fills it in.
+CMAKE_FRAMEWORK_INFO = {
+    'CFBundleDevelopmentRegion': 'English', 'CFBundleExecutable': 'GezelSpeech', 'CFBundleIconFile': '',
+    'CFBundleIdentifier': 'com.bendyline.gezel.speech', 'CFBundleInfoDictionaryVersion': '6.0',
+    'CFBundleName': '', 'CFBundlePackageType': 'FMWK', 'CFBundleShortVersionString': '',
+    'CFBundleSignature': '????', 'CFBundleVersion': '', 'CSResourcesFileMapped': True,
+}
+
+
 def speech_runtime(root, target):
     """A speech payload as build.py leaves it, laid out by build.py's own package()."""
     payload = root / 'payload'
@@ -102,8 +111,12 @@ def speech_runtime(root, target):
             if variant.endswith('simulator'):
                 library['SupportedPlatformVariant'] = 'simulator'
             libraries.append(library)
-            for name in ('GezelSpeech', 'Info.plist', 'Headers/gezel_speech.h', 'Modules/module.modulemap'):
-                write(payload, f'GezelSpeech.xcframework/{variant}/GezelSpeech.framework/{name}', 'fixture')
+            framework = payload / f'GezelSpeech.xcframework/{variant}/GezelSpeech.framework'
+            for name in ('GezelSpeech', 'Headers/gezel_speech.h', 'Modules/module.modulemap'):
+                write(framework, name, 'fixture')
+            write(framework, 'Info.plist', plistlib.dumps(CMAKE_FRAMEWORK_INFO))
+            speech.describe_framework(framework, 'iphonesimulator' if variant.endswith('simulator') else 'iphoneos',
+                                      VERSION)
         write(payload, 'GezelSpeech.xcframework/Info.plist', plistlib.dumps({'AvailableLibraries': libraries}))
     else:
         for name in ('libGezelSpeech.so', 'libonnxruntime.so'):
@@ -260,6 +273,55 @@ class PublicSdkTests(unittest.TestCase):
             respeech(runtime)
             with self.assertRaisesRegex(ValueError, 'Incomplete speech runtime'):
                 release.verify_speech(runtime, 'ios', VERSION)
+
+    def test_speech_framework_carries_store_ready_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = speech_runtime(Path(directory), 'ios')
+            for variant, platform in (('ios-arm64', 'iPhoneOS'), ('ios-arm64-simulator', 'iPhoneSimulator')):
+                framework = runtime / f'GezelSpeech.xcframework/{variant}/GezelSpeech.framework'
+                info = plistlib.loads((framework / 'Info.plist').read_bytes())
+                self.assertEqual((VERSION, VERSION, speech.IOS_MINIMUM, [platform], 'GezelSpeech'),
+                                 (info['CFBundleShortVersionString'], info['CFBundleVersion'],
+                                  info['MinimumOSVersion'], info['CFBundleSupportedPlatforms'], info['CFBundleName']))
+                self.assertNotIn('CFBundleIconFile', info)
+                privacy = plistlib.loads((framework / 'PrivacyInfo.xcprivacy').read_bytes())
+                self.assertFalse(privacy['NSPrivacyTracking'])
+            self.assertTrue((runtime / 'PUBLIC-DISTRIBUTION.md').is_file())
+        self.assertEqual('0.0.0', speech.bundle_version('0.0.0-ci.123.1'))
+        self.assertEqual('1.2.3', speech.bundle_version('1.2.3'))
+
+    def test_speech_framework_as_cmake_left_it_fails(self):
+        # native-v0.1.61 shipped exactly this: empty versions, no MinimumOSVersion.
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = speech_runtime(Path(directory), 'ios')
+            info = runtime / 'GezelSpeech.xcframework/ios-arm64/GezelSpeech.framework/Info.plist'
+            info.write_bytes(plistlib.dumps(CMAKE_FRAMEWORK_INFO))
+            respeech(runtime)
+            with self.assertRaisesRegex(ValueError, 'CFBundleShortVersionString.*MinimumOSVersion'):
+                release.verify_speech(runtime, 'ios', VERSION)
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = speech_runtime(Path(directory), 'ios')
+            (runtime / 'GezelSpeech.xcframework/ios-arm64-simulator/GezelSpeech.framework/PrivacyInfo.xcprivacy').unlink()
+            respeech(runtime)
+            with self.assertRaisesRegex(ValueError, 'PrivacyInfo'):
+                release.verify_speech(runtime, 'ios', VERSION)
+
+    def test_speech_pom_must_bring_gezel_llama_and_the_guide_must_ship(self):
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = speech_runtime(Path(directory), 'android')
+            base = f'maven/com/bendyline/gezel/gezel-speech/{VERSION}/gezel-speech-{VERSION}'
+            pom = runtime / (base + '.pom')
+            release.verify_speech_pom(pom.read_bytes(), VERSION)
+            with self.assertRaisesRegex(ValueError, 'gezel-llama:0.1.98'):
+                release.verify_speech_pom(pom.read_bytes(), '0.1.98')
+            pom.write_bytes(pom.read_bytes().replace(b'gezel-llama', b'gezel-other'))
+            respeech(runtime)
+            with self.assertRaisesRegex(ValueError, 'gezel-llama'):
+                release.verify_speech(runtime, 'android', VERSION)
+            (runtime / 'PUBLIC-DISTRIBUTION.md').unlink()
+            respeech(runtime)
+            with self.assertRaisesRegex(ValueError, 'PUBLIC-DISTRIBUTION'):
+                release.verify_speech(runtime, 'android', VERSION)
 
     def test_speech_runtime_never_carries_models_or_classes(self):
         for name in ('GezelSpeech.xcframework/ios-arm64/GezelSpeech.framework/model.int8.onnx',

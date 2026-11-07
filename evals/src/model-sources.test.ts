@@ -88,7 +88,9 @@ describe('chatModelDs4RuntimeHints', () => {
   it('reads Qwen resident-weight runtime hints from the resolved catalog', () => {
     expect(chatModelDs4RuntimeHints('qwen3.8-flash-next-q2')).toEqual({
       residentWeightBytes: 44807246316,
-      ssdStreamingSupported: false,
+      // The catalog streams this model's experts from SSD on Metal only.
+      ssdStreamingSupported: process.platform === 'darwin',
+      streamingMeasured: true,
       prefillChunk: 1024,
     });
   });

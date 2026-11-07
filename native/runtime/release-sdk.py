@@ -12,6 +12,7 @@ import shutil
 import stat
 import tarfile
 import tempfile
+from xml.etree import ElementTree
 import zipfile
 
 VERSION = r'(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-[A-Za-z0-9.-]+)?'
@@ -178,12 +179,13 @@ def speech_abi():
 def allowed_speech_file(name, target, version):
     """What build.py --package lays out: the library, its notices, and nothing else."""
     safe_name(name)
-    if name == 'sdk-manifest.json' or re.fullmatch(SPEECH_NOTICE, name):
+    if name in ('sdk-manifest.json', 'PUBLIC-DISTRIBUTION.md') or re.fullmatch(SPEECH_NOTICE, name):
         return True
     if target == 'ios':
         return bool(re.fullmatch(
             r'GezelSpeech\.xcframework/(Info\.plist|ios-[a-z0-9_-]+/GezelSpeech\.framework/'
-            r'(GezelSpeech|Info\.plist|Headers/gezel_speech\.h|Modules/module\.modulemap))', name))
+            r'(GezelSpeech|Info\.plist|PrivacyInfo\.xcprivacy|Headers/gezel_speech\.h|Modules/module\.modulemap))',
+            name))
     pinned = re.escape(version)
     return bool(re.fullmatch(
         rf'maven/com/bendyline/gezel/gezel-speech/{pinned}/gezel-speech-{pinned}\.(aar|pom)(\.sha256)?', name))
@@ -214,6 +216,38 @@ def verify_speech_aar(data, notices):
             raise ValueError('The speech AAR must not carry classes')
 
 
+def verify_speech_framework(framework, variant, version):
+    """What App Store Connect checks in an embedded framework, plus its privacy manifest."""
+    info = plistlib.loads((framework / 'Info.plist').read_bytes())
+    release = re.match(r'\d+\.\d+\.\d+', version).group(0)
+    platform = 'iPhoneSimulator' if variant == 'simulator' else 'iPhoneOS'
+    expected = {'CFBundleIdentifier': 'com.bendyline.gezel.speech', 'CFBundleExecutable': 'GezelSpeech',
+                'CFBundlePackageType': 'FMWK', 'CFBundleShortVersionString': release, 'CFBundleVersion': release,
+                'CFBundleSupportedPlatforms': [platform]}
+    wrong = sorted(key for key, value in expected.items() if info.get(key) != value)
+    if not re.fullmatch(r'\d+\.\d+(\.\d+)?', str(info.get('MinimumOSVersion', ''))):
+        wrong.append('MinimumOSVersion')
+    if wrong:
+        raise ValueError(f'GezelSpeech.framework ({variant}) Info.plist has missing or wrong {", ".join(wrong)}')
+    privacy = plistlib.loads((framework / 'PrivacyInfo.xcprivacy').read_bytes())
+    declared = {entry.get('NSPrivacyAccessedAPIType') for entry in privacy.get('NSPrivacyAccessedAPITypes', [])}
+    if privacy.get('NSPrivacyTracking') is not False or 'NSPrivacyAccessedAPICategoryFileTimestamp' not in declared:
+        raise ValueError(f'GezelSpeech.framework ({variant}) privacy manifest does not declare its file metadata use')
+
+
+def verify_speech_pom(data, version):
+    """libGezelSpeech loads libc++_shared.so, which only the gezel-llama AAR carries."""
+    if b'<!DOCTYPE' in data or b'<!ENTITY' in data:
+        raise ValueError('The gezel-speech POM must not declare a DTD or entities')
+    namespace = {'m': 'http://maven.apache.org/POM/4.0.0'}
+    project = ElementTree.fromstring(data)
+    for dependency in project.findall('m:dependencies/m:dependency', namespace):
+        if [dependency.findtext(f'm:{field}', namespaces=namespace)
+                for field in ('groupId', 'artifactId', 'version')] == ['com.bendyline.gezel', 'gezel-llama', version]:
+            return
+    raise ValueError(f'The gezel-speech POM must depend on com.bendyline.gezel:gezel-llama:{version}')
+
+
 def verify_speech(root, target, version):
     manifest = json.loads((root / 'sdk-manifest.json').read_text())
     if (manifest.get('scope'), manifest.get('target'), manifest.get('packageVersion'),
@@ -221,15 +255,16 @@ def verify_speech(root, target, version):
         raise ValueError('Speech runtime identity/version mismatch')
     files = inventory(root, manifest, lambda name: allowed_speech_file(name, target, version))
     notices = {'LICENSE-whisper.txt'} | {file.name for file in (SPEECH / 'licenses').glob('*.txt')}
-    required = {'sdk-manifest.json'} | notices
+    required = {'sdk-manifest.json', 'PUBLIC-DISTRIBUTION.md'} | notices
     if target == 'ios':
         required.add('GezelSpeech.xcframework/Info.plist')
         libraries = plistlib.loads((root / 'GezelSpeech.xcframework/Info.plist').read_bytes())['AvailableLibraries']
-        variants = set()
+        variants = {}
         for library in libraries:
-            variants.add(library.get('SupportedPlatformVariant', 'device'))
-            required.add(f'GezelSpeech.xcframework/{library["LibraryIdentifier"]}/{library["LibraryPath"]}/GezelSpeech')
-        if not {'device', 'simulator'} <= variants:
+            framework = f'GezelSpeech.xcframework/{library["LibraryIdentifier"]}/{library["LibraryPath"]}'
+            variants[library.get('SupportedPlatformVariant', 'device')] = framework
+            required |= {f'{framework}/{name}' for name in ('GezelSpeech', 'Info.plist', 'PrivacyInfo.xcprivacy')}
+        if not {'device', 'simulator'} <= variants.keys():
             raise ValueError('iOS speech runtime requires device and simulator slices')
     else:
         base = f'maven/com/bendyline/gezel/gezel-speech/{version}/gezel-speech-{version}'
@@ -238,6 +273,11 @@ def verify_speech(root, target, version):
             verify_speech_aar((root / (base + '.aar')).read_bytes(), notices)
     if not required <= files.keys():
         raise ValueError(f'Incomplete speech runtime: {sorted(required - files.keys())}')
+    if target == 'ios':
+        for variant, framework in variants.items():
+            verify_speech_framework(root / framework, variant, version)
+    else:
+        verify_speech_pom((root / (base + '.pom')).read_bytes(), version)
     return files
 
 

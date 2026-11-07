@@ -6,7 +6,10 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import * as tar from 'tar';
-import { SPEECH_ABI } from '../packages/capacitor/scripts/stage-native.mjs';
+import {
+  SPEECH_ABI,
+  verifySpeechDistribution,
+} from '../packages/capacitor/scripts/stage-native.mjs';
 import {
   archiveHash,
   needsPinnedPayload,
@@ -18,8 +21,37 @@ const repo = dirname(dirname(fileURLToPath(import.meta.url)));
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const SOURCE = 'native/runtime/stage-sdk.py';
 
+const FRAMEWORK = 'GezelSpeech.xcframework/ios-arm64/GezelSpeech.framework';
+const plist = (entries) =>
+  `<plist version="1.0"><dict>${Object.entries(entries)
+    .map(([key, value]) => `<key>${key}</key><string>${value}</string>`)
+    .join('')}</dict></plist>`;
+
+/** A speech runtime as build.py --package lays it out; `as0161` is what native-v0.1.61 shipped. */
+function speechFiles(target, { as0161 = false } = {}) {
+  const files = { 'LICENSE-whisper.txt': 'notice' };
+  if (target === 'ios') {
+    files[`${FRAMEWORK}/GezelSpeech`] = 'library';
+    files[`${FRAMEWORK}/Info.plist`] = as0161
+      ? plist({ CFBundleShortVersionString: '', CFBundleVersion: '' })
+      : plist({
+          CFBundleShortVersionString: '1.2.3',
+          CFBundleVersion: '1.2.3',
+          MinimumOSVersion: '16.4',
+        });
+    if (!as0161) files[`${FRAMEWORK}/PrivacyInfo.xcprivacy`] = plist({});
+  } else {
+    const dependency = as0161
+      ? ''
+      : '<dependency><groupId>com.bendyline.gezel</groupId><artifactId>gezel-llama</artifactId><version>1.2.3</version></dependency>';
+    files['maven/com/bendyline/gezel/gezel-speech/1.2.3/gezel-speech-1.2.3.pom'] =
+      `<project><dependencies>${dependency}</dependencies></project>`;
+  }
+  return files;
+}
+
 /** A repo with a pin, and a fake release whose archives hold the given source hash. */
-async function fixture(t, { sourceHash, tamper, speech = true } = {}) {
+async function fixture(t, { sourceHash, tamper, speech = true, as0161 = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'gezel-stage-native-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const packed = join(root, 'packed');
@@ -52,8 +84,11 @@ async function fixture(t, { sourceHash, tamper, speech = true } = {}) {
     sums += `${sha256(archive)}  ${name}\n`;
     if (!speech) continue;
     const runtime = join(packed, `speech-${target}`);
-    await mkdir(runtime, { recursive: true });
-    await writeFile(join(runtime, 'LICENSE-whisper.txt'), 'notice');
+    const files = speechFiles(target, { as0161 });
+    for (const [name, content] of Object.entries(files)) {
+      await mkdir(dirname(join(runtime, name)), { recursive: true });
+      await writeFile(join(runtime, name), content);
+    }
     await writeFile(
       join(runtime, 'sdk-manifest.json'),
       JSON.stringify({
@@ -61,13 +96,13 @@ async function fixture(t, { sourceHash, tamper, speech = true } = {}) {
         target,
         speechABIVersion: SPEECH_ABI,
         packageVersion: '1.2.3',
-        files: { 'LICENSE-whisper.txt': sha256('notice') },
+        files: Object.fromEntries(Object.entries(files).map(([name, c]) => [name, sha256(c)])),
       }),
     );
     const speechName = `gezel-mobile-1.2.3-speech-${target}.tar.gz`;
     await tar.c({ gzip: true, cwd: runtime, file: join(packed, speechName) }, [
       'sdk-manifest.json',
-      'LICENSE-whisper.txt',
+      ...Object.keys(files),
     ]);
     const speechArchive = await readFile(join(packed, speechName));
     assets.set(speechName, speechArchive);
@@ -176,6 +211,20 @@ test('a release without speech packs without it, and can never be published', as
   await assert.rejects(
     stagePinnedMobileSdks(input(f, { requireCurrent: true })),
     /native-v1\.2\.3 has no speech-ios runtime\. Cut a native release/,
+  );
+});
+
+test('a speech runtime shaped like native-v0.1.61 stages, but can never be published', async (t) => {
+  const f = await fixture(t, { as0161: true });
+  const { staged } = await stagePinnedMobileSdks(input(f));
+  assert.deepEqual(staged, ['ios', 'speech-ios', 'android', 'speech-android']);
+  await assert.rejects(
+    stagePinnedMobileSdks(input(f, { requireCurrent: true })),
+    /Info\.plist has no CFBundleShortVersionString.*native-v1\.2\.3's speech runtime cannot ship/,
+  );
+  await assert.rejects(
+    verifySpeechDistribution(join(f.root, 'packages/capacitor/native/speech-android'), 'android'),
+    /POM does not depend on gezel-llama 1\.2\.3/,
   );
 });
 

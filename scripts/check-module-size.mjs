@@ -28,8 +28,8 @@ export const GRANDFATHERED = new Map([
   // Moved from service/providers/llama-cpp/provider.ts (7_166) into the loop
   // the phone shares; re-measured at the move, so the ratchet only tightened.
   ['packages/core/src/local-loop/llama-cpp-session.ts', 6_444],
-  ['packages/ui/src/views/SettingsView.tsx', 4_505],
   ['packages/service/src/tasks/manager.ts', 4_429],
+  ['packages/ui/src/views/SettingsView.tsx', 4_127],
   ['packages/ui/src/views/ProjectsView.tsx', 4_114],
   ['packages/ui/src/components/ChatTimelineView.tsx', 4_102],
   ['packages/ui/src/components/chat-bubbles.tsx', 3_802],

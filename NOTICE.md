@@ -433,7 +433,7 @@ under `licenses/native/` and is checked at packaging time by
 | **llama.cpp** (`libgezel-llama`, compiled into the app) | same pin as the desktop engine | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
 | **ggml** | bundled with llama.cpp/whisper.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
 | **whisper.cpp** (`libGezelSpeech`, speech-to-text) | commit `f049fff9` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
-| **ONNX Runtime** (`libonnxruntime.so`, `onnxruntime.xcframework`) | `1.28.1` | MIT | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime), built by [csukuangfj/onnxruntime-libs](https://github.com/csukuangfj/onnxruntime-libs) |
+| **ONNX Runtime** (`libonnxruntime.so`, `onnxruntime.xcframework`) | `1.28.0` | MIT | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime), Microsoft's own Android AAR (Maven Central) and iOS pod archive |
 | **Capacitor** (app shell, Android and iOS runtimes) | `8.5.2` | MIT | [ionic-team/capacitor](https://github.com/ionic-team/capacitor) |
 
 Apple Foundation Models and Android ML Kit are operating-system APIs the app

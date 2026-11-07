@@ -80,7 +80,7 @@ test.describe('Security & compliance — first run', () => {
     await expect(welcome).toHaveAttribute('data-welcome-state', 'connect', { timeout: 20000 });
     await welcome.getByRole('button', { name: "Change what I'm allowed to do" }).click();
 
-    const heading = page.getByRole('heading', { name: /Security & compliance/i });
+    const heading = page.getByRole('heading', { name: 'Security level' });
     await expect(heading).toBeVisible({ timeout: 10000 });
 
     // All three level pills are present. Anchor the match — "Lockdown"

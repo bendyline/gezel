@@ -460,11 +460,14 @@ test('releases published before a binary existed are not asked for it', () => {
     assert.ok(binariesInRelease(key, version).includes(binary), `${version} ships ${entry}`);
     assert.ok(!expectedBinaries(key, before).includes(file), `${key} in ${before}`);
     assert.ok(expectedBinaries(key).includes(file), 'a new build always carries it');
+    // Gated per key: other keys that already carry the binary are not asked to drop it.
+    for (const other of allPlatformKeys()) {
+      if (other === key || FIRST_NATIVE_RELEASE_BINARY[`${other}/${binary}`]) continue;
+      if (NATIVE_PAYLOAD[other]?.includes(binary)) {
+        assert.ok(binariesInRelease(other, before).includes(binary), `${other} in ${before}`);
+      }
+    }
   }
-  // Gated per key: the CUDA whisper-server is new to win32-arm64-cuda, but the
-  // bare keys have shipped a whisper-server all along.
-  assert.ok(binariesInRelease('win32-arm64', '0.1.52').includes('gezel-whisper-server'));
-  assert.ok(!binariesInRelease('win32-arm64-cuda', '0.1.52').includes('gezel-whisper-server'));
   assert.equal(expectedBinaries('no-such-key', '0.1.52'), null);
 
   // The packaging jobs stage the pinned release, so their check must ask only

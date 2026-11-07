@@ -45,7 +45,7 @@
  *     installed, and discovery its sd-server and whisper-server with it.
  *     whisper-server links ggml statically there: llama-server's ggml*.dll
  *     share the folder under the same names from a different ggml. The key
- *     first ships in the release named in FIRST_NATIVE_RELEASE below.
+ *     first shipped in native-v0.1.52, its whisper-server in 0.1.53.
  *   - `-rocm` keys are x64 only (`linux-x64-rocm`, `win32-x64-rocm`): AMD
  *     publishes no ROCm SDK for ARM. Each carries llama-server's ROCm build
  *     with the AMD runtime it loads (HIP, rocBLAS and friends, the per-GPU
@@ -53,11 +53,11 @@
  *     archive runs without a ROCm install, the way the `-cuda` keys run
  *     without a CUDA toolkit. Discovery asks that build which GPUs it can
  *     drive before choosing it; anything else stays on `-vulkan`. The keys
- *     first ship in the release named in FIRST_NATIVE_RELEASE below.
+ *     first shipped in native-v0.1.61.
  *   - `gezel-device-health` is Windows + Linux only (macOS uses IOKit in-process)
  *   - `gezel-service-host` is Windows only (macOS/Linux use launchd/systemd)
  *   - `gezel-sandbox` is Linux only (macOS has Seatbelt, Windows the MXC
- *     container); it ships from the release named in FIRST_NATIVE_RELEASE_BINARY
+ *     container); it ships from native-v0.1.57
  *   - no `duckdb` — the DuckDB CLI is vendored unmodified from the DuckDB
  *     Foundation's own signed + notarized release, so it is a bundled runtime
  *     beside node and pnpm (`packages/app/scripts/fetch-duckdb.mjs`, pinned in
@@ -188,13 +188,9 @@ export function allPlatformKeys() {
  * and so does the SBOM test against the pinned file manifest. Without this,
  * adding a key fails every desktop release until another native release is cut
  * and pinned. Once the pinned release reaches the version here, the entry is
- * inert and can be deleted.
+ * inert and can be deleted. Empty while the pin carries every key.
  */
-export const FIRST_NATIVE_RELEASE = Object.freeze({
-  'win32-arm64-cuda': '0.1.52',
-  'linux-x64-rocm': '0.1.58',
-  'win32-x64-rocm': '0.1.58',
-});
+export const FIRST_NATIVE_RELEASE = Object.freeze({});
 
 /**
  * The same, one level down: binaries added to a key that older releases
@@ -202,16 +198,11 @@ export const FIRST_NATIVE_RELEASE = Object.freeze({
  * from the pinned one, must not claim a binary that release lacks.
  *
  * Keyed `<platform key>/<binary>`, because a binary can join one key long
- * after it shipped in others: the CUDA whisper-server is new in
- * `win32-arm64-cuda` while every bare key has carried a whisper-server for
- * many releases.
+ * after it shipped in others: the CUDA whisper-server joined
+ * `win32-arm64-cuda` in 0.1.53 while every bare key had carried a
+ * whisper-server for many releases. Same deletion rule as above.
  */
-export const FIRST_NATIVE_RELEASE_BINARY = Object.freeze({
-  'win32-arm64/vec0.dll': '0.1.53',
-  'win32-arm64-cuda/gezel-whisper-server': '0.1.53',
-  'linux-x64/gezel-sandbox': '0.1.57',
-  'linux-arm64/gezel-sandbox': '0.1.57',
-});
+export const FIRST_NATIVE_RELEASE_BINARY = Object.freeze({});
 
 function parseNativeVersion(version) {
   const match = /^(?:native-v|v)?(\d+)\.(\d+)\.(\d+)$/.exec(`${version}`.trim());

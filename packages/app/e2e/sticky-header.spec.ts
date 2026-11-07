@@ -42,7 +42,10 @@ async function openMeesterChat() {
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
   const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
   await expect(conversation).not.toHaveAttribute('inert');
-  await expect(conversation).toBeFocused();
+  // The strip invites writing, so returning puts the caret in the composer.
+  await expect(
+    conversation.locator('[data-testid="chat-composer"] [contenteditable="true"]'),
+  ).toBeFocused();
   await expect(page.getByTestId('chat-composer')).toBeVisible({ timeout: 20_000 });
 }
 
@@ -146,8 +149,11 @@ test('sticky header does NOT show while the bubble header is visible', async () 
   // Waiting for the pin toggle proves React has processed the scroll and
   // prevents a pending row-growth effect from snapping the timeline back
   // to the bottom after the test has measured it.
+  // Following means the last message is in view, and the empty response
+  // runway below it does not count, so scroll past the runway as well.
   await timeline.evaluate((el) => {
-    el.scrollBy({ top: -100, behavior: 'instant' as ScrollBehavior });
+    const runway = el.querySelector<HTMLElement>('.timeline-response-runway')?.offsetHeight ?? 0;
+    el.scrollBy({ top: -(runway + 100), behavior: 'instant' as ScrollBehavior });
   });
   await expect(page.getByRole('button', { name: 'Jump to newest and follow' })).toBeVisible();
 
