@@ -108,7 +108,7 @@ export async function portableTurnRoute(
   const server = target ? await host.remotes.server(target.remoteId) : null;
   if (!target || !server)
     throw new ProductError(
-      'The device this conversation ran on is no longer connected. Connect it again in Settings → Artificial Intelligence, or start a conversation with another model.',
+      'The device this conversation ran on is no longer connected. Connect it again in Settings → Artificial intelligence, or start a conversation with another model.',
       409,
     );
   // A turn trusts a recent answer less than a listing does: a phone that
@@ -137,7 +137,7 @@ export async function portableTurnRoute(
   const fallback = await pickLocalProvider(host);
   if (!fallback)
     throw new ProductError(
-      `${server.displayName} isn't reachable right now, and this device has no model of its own ready. Join its network again, or set up a model on this device in Settings → Artificial Intelligence.`,
+      `${server.displayName} isn't reachable right now, and this device has no model of its own ready. Join its network again, or set up a model on this device in Settings → Artificial intelligence.`,
       409,
     );
   return {

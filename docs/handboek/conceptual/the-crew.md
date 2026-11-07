@@ -34,7 +34,7 @@ A **crew lead** is a gezel you put in charge of one project. They triage what co
 
 Two helpers arrive with every workshop and mostly work in the background:
 
-- **The Librarian** reads the files in your projects while the computer is idle and during the Night Shift. They write short summaries, review code, keep track of issues worth fixing, and write weekly digests. Settings → Your Team chooses which gezel wears the hat.
+- **The Librarian** reads the files in your projects while the computer is idle and during the Night Shift. They write short summaries, review code, keep track of issues worth fixing, and write weekly digests. Settings → Your team chooses which gezel wears the hat.
 - **The Scribe** handles the small writing jobs: drafting a gezel's description, rewriting a passage, summarizing a long thread. "Transform with…" in a document is the Scribe at work.
 
 ## Growing the crew

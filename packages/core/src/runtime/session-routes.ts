@@ -255,10 +255,10 @@ export async function handlePortableSessionRoute(
       if (inventory && !inventory.models.some((item) => item.id === model))
         throw new ProductError(
           gezel?.parsed.frontmatter.model
-            ? `The model assigned to ${gezel.name} is not installed. Import it in Settings → Artificial Intelligence, or change this gezel's model.`
+            ? `The model assigned to ${gezel.name} is not installed. Import it in Settings → Artificial intelligence, or change this gezel's model.`
             : inventory.models.length === 0
-              ? 'No chat model is installed on this device. Download or import one in Settings → Artificial Intelligence, then send your message again.'
-              : 'Choose an available chat model in Settings → Artificial Intelligence, then send your message again.',
+              ? 'No chat model is installed on this device. Download or import one in Settings → Artificial intelligence, then send your message again.'
+              : 'Choose an available chat model in Settings → Artificial intelligence, then send your message again.',
           409,
         );
       return json(await host.store.createSession({ ...input, providerName, model }));

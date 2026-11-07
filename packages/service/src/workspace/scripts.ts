@@ -457,7 +457,7 @@ async function resolveBinPath(workspaceDir: string, bin: string): Promise<string
 // ── helpers ────────────────────────────────────────────────────────────────
 
 const PACKAGE_SCRIPTS_DISABLED =
-  'Gezels may not run package scripts or installed package binaries here ("Run package scripts" is off in Settings → Security & Compliance). They run outside the script sandbox, with the network. Do not retry; tell the person which command you need run.';
+  'Gezels may not run package scripts or installed package binaries here ("Run package scripts" is off in Settings → Security & compliance). They run outside the script sandbox, with the network. Do not retry; tell the person which command you need run.';
 
 async function packageScriptsAllowed(store: Store): Promise<boolean> {
   return resolveSecurityPolicy(await store.readConfig()).allowPackageScriptExecution;

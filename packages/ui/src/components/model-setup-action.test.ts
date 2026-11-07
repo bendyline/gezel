@@ -28,6 +28,16 @@ describe('modelSetupAction', () => {
     ).toEqual({ kind: 'settings', section: 'mlx' });
   });
 
+  it('opens the Artificial intelligence page however the error capitalizes it', () => {
+    for (const section of ['Artificial Intelligence', 'Artificial intelligence']) {
+      expect(
+        modelSetupAction(
+          `The model "qwen" isn't available. Choose a model in Settings → ${section}.`,
+        )?.target,
+      ).toEqual({ kind: 'settings', section: 'defaults' });
+    }
+  });
+
   it('offers nothing for unrelated errors', () => {
     expect(modelSetupAction('The request timed out.')).toBeNull();
   });

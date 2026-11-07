@@ -335,10 +335,22 @@
   border-color: color-mix(in srgb, var(--tone) 60%, var(--tone-edge));
   background: color-mix(in srgb, var(--tone) 5%, transparent);
 }
+/* An empty section is one quiet line, heading and note side by side, with
+   no outline: two empty boxes stood between the person and the first thing
+   that had work in it, repeating counts the section keys already show. */
 .activity-section.is-empty {
-  padding-block: 0.7rem;
-  border-color: color-mix(in srgb, var(--text) 9%, transparent);
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  padding-block: 0.35rem;
+  border-color: transparent;
   background: transparent;
+}
+.activity-panel .activity-section.is-empty h3 {
+  margin: 0;
+  font-size: var(--text-md);
+  color: var(--text-muted);
 }
 /* Working and Next are one zone: when both are lit (or both empty) they
    join into a single card with a hairline between them. */
@@ -400,6 +412,12 @@
 .activity-work .btn {
   font-size: var(--text-sm);
   margin-right: 0.4rem;
+}
+/* The per-row way in reads as a quiet link: as an outlined button it
+   repeated down the list and out-shouted the work it opens. */
+.activity-work .gz-link-button {
+  font-size: var(--text-sm);
+  margin-right: 0.75rem;
 }
 .activity-question .pending-question {
   margin: 0;

@@ -322,7 +322,7 @@ async function bestEffortHistory(
         : {
             kind: 'gezel.created' as const,
             gezelId: gezel.id,
-            summary: `Created "${gezel.name}"`,
+            summary: `Created ${gezel.name}`,
             details: { name: gezel.name, templateId: gezel.templateId },
           },
     ),

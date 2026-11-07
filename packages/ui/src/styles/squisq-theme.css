@@ -98,27 +98,60 @@
 
   --squisq-focus-ring: var(--accent);
 
+  /* Chrome type. Unbound, squisq falls back to the system stack, so every
+     toolbar and status bar rendered in Segoe UI beside Hanken Grotesk. */
+  --squisq-ux-font: var(--font-ui);
+
   /* Monaco's canvas while it is being prepared. Left as squisq's defaults
      would flash a white slab on the parchment before the editor mounts. */
   --squisq-editor-background: var(--panel);
   --squisq-editor-foreground: var(--text);
 }
 
-/* Recolor the Squisq editor's bottom status bar to match the gezel
-   header/title-bar green instead of the app-surface tone the chrome palette
-   would otherwise give it. This one is a deliberate departure from the
-   bridge above: the status bar is chrome gezel owns visually, the way the
-   title bar is. */
+/* The status bar is a quiet footer in the editor's own paper. It once wore
+   the titlebar green, which made word counts the heaviest marks on any page
+   with an editor, and two stacked editors drew two green bands. The titlebar
+   is the one place that green belongs. */
 .squisq-editor-shell .squisq-status-bar,
 .squisq-editor-shell[data-theme="dark"] .squisq-status-bar,
 .squisq-editor-shell[data-theme="light"] .squisq-status-bar {
-  background: var(--titlebar, #5c6a4a);
-  color: var(--titlebar-ink, #f3ede0);
-  border-top-color: rgba(0, 0, 0, 0.25);
+  background: var(--surface);
+  color: var(--text-muted);
+  border-top-color: var(--border);
+  font-size: var(--text-xs);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-status-ok,
 .squisq-editor-shell .squisq-status-ok {
-  color: var(--titlebar-ink, #f3ede0);
+  color: var(--text-muted);
+}
+
+/* Compact editors: a short field (a task's description, a note, a step's
+   prompt) keeps the full toolbar but shows it at rest only as faint marks,
+   and drops the word counts; the footer keeps its right slot (autosave
+   state). Nothing changes size on focus, so the page never jumps. */
+/* Important only to outrank the sage toolbar wash in shared-content.css,
+   which is itself important to outrank squisq's base. */
+.gz-compact-editor .squisq-editor-shell[data-theme] .squisq-toolbar,
+.gz-compact-editor .squisq-toolbar {
+  background: transparent !important;
+  border-bottom: 1px solid var(--border);
+}
+.gz-compact-editor:not(:focus-within) .squisq-toolbar-actions,
+.gz-compact-editor:not(:focus-within) .squisq-toolbar-view-tabs {
+  opacity: 0.45;
+  transition: opacity 0.12s ease-out;
+}
+.gz-compact-editor .squisq-status-item {
+  display: none;
+}
+/* What is left (autosave's "Saving…" / "Saved") sits on the paper with no
+   band, in a footer that always holds one line, so the editor does not jump
+   when the status appears and clears. A short field with nothing to report
+   turns the footer off (`showStatusBar={false}`). */
+.gz-compact-editor .squisq-editor-shell .squisq-status-bar {
+  min-height: 1.5rem;
+  background: transparent;
+  border-top-color: transparent;
 }
 
 /* The outline pane echoes the DOCUMENT theme's primary color by design —

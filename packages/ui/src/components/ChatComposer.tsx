@@ -14,6 +14,8 @@ import {
   displayName,
   isTaskOrCraftbookSession,
   parseTaskRef,
+  plainRoleTitle,
+  planDisplayName,
   rewritePromptDraftFileRefs,
 } from '@bendyline/gezel';
 import { streamChatEvents } from '@bendyline/gezel-client';
@@ -46,6 +48,7 @@ import { ComposerReviewStrip, ComposerSparkleMenu } from './ComposerSparkleMenu.
 import { ComposerTaskBar } from './ComposerTaskBar.js';
 import { GezelIcon } from './GezelIcon.js';
 import { createGezelMediaProvider } from './GezelMediaProvider.js';
+import { PersonLabel } from './PersonLabel.js';
 import { createPromptDraftMediaProvider } from './PromptDraftMediaProvider.js';
 import { GEZEL_WRITE_CANVAS } from './SquisqIntegration/write-canvas.js';
 import type { ToolActivity } from './chat-bubbles.js';
@@ -58,6 +61,7 @@ import {
   resolveOpenChatTarget,
 } from './chat-open-command.js';
 import { publishOptimisticUserMessage } from './chat-optimistic-events.js';
+import { taskLaunchPlaceholder } from './chat-placeholder.js';
 import { promptDraftSlotKey, readActiveDraftId, readDraftText } from './composer-drafts.js';
 import {
   COMPOSER_PREFILL_EVENT,
@@ -198,13 +202,19 @@ export interface ChatComposerProps {
   /** Every key this item's threads may carry: its path, and its pane's surface. */
   subjectKeys?: readonly string[];
   /**
-   * Optional content rendered between the "To:" line and the editor —
-   * SessionSwitcher slots in here so the session picker reads as part
-   * of the composer instead of floating above it. A narrow composer moves
-   * it into the editor toolbar instead, inside `ComposerToolbarContext`,
-   * so the conversation keeps that row.
+   * The conversation picker (SessionSwitcher). It rides the To line, so who
+   * and which conversation read as one line of context; a narrow composer
+   * moves it into the editor toolbar instead, inside
+   * `ComposerToolbarContext`.
    */
   belowAddressLine?: ReactNode;
+  /**
+   * Keep the picker on a row of its own under the To line. The project
+   * compose frame sets it: chat there shares its bands with the terminal,
+   * whose folder picker is a row of its own, and flipping modes must not
+   * move the frame.
+   */
+  threadBarOwnRow?: boolean;
   /**
    * Optional trailing content for the "To:" line, rendered after the
    * recipient picker and expand control. Project chat puts the chat/terminal
@@ -394,6 +404,7 @@ export function ChatComposer({
   taskRef,
   stepId,
   belowAddressLine,
+  threadBarOwnRow = false,
   addressLineTrailing,
   expanded: expandedProp,
   onExpandedChange,
@@ -636,6 +647,19 @@ export function ChatComposer({
     planText: intentPreviewText,
   });
   const [taskDialogOpen, setTaskDialogOpen] = useState(false);
+  // A task the person picked turns the box into its brief, so the hint says
+  // so. A suggestion exists only while there is text, which hides any hint.
+  // Named as the strip names it, but without waiting for the catalog art.
+  const pickedTask =
+    taskLaunch.attached && taskLaunch.attached.origin !== 'suggested' ? taskLaunch.attached : null;
+  const editorPlaceholder = pickedTask
+    ? taskLaunchPlaceholder(
+        planDisplayName({
+          id: pickedTask.craftbookId,
+          name: pickedTask.craftbookName ?? pickedTask.craftbookId,
+        }),
+      )
+    : placeholder;
   // The image strip, for a direct image gezel's own thread. A task thread's
   // prompt is its brief, so the strip has nothing to set there.
   const imageSettings = useComposerImageSettings({
@@ -1874,20 +1898,21 @@ export function ChatComposer({
       {promptAssistEnabled && <ComposerReviewStrip assist={promptAssist} />}
       {showAddress && (
         <div className="chat-composer-to">
-          <span className="chat-composer-to-label muted">To:</span>
-          <GezelIcon
-            svg={gezelIcon ?? null}
-            poppetje={gezelPoppetje}
-            iconOverride={gezelIconOverride}
+          <span className="chat-composer-to-label muted">To</span>
+          <PersonLabel
+            className="chat-composer-to-person"
             name={primaryRecipientName}
-            size={18}
+            roleTitle={!roleBasedNameOnlyMode && gezelRole ? plainRoleTitle(gezelRole) : null}
+            face={
+              <GezelIcon
+                svg={gezelIcon ?? null}
+                poppetje={gezelPoppetje}
+                iconOverride={gezelIconOverride}
+                name={primaryRecipientName}
+                size={18}
+              />
+            }
           />
-          <span className="chat-composer-to-text">
-            <span className="chat-composer-to-name">{primaryRecipientName}</span>
-            {!roleBasedNameOnlyMode && gezelRole && (
-              <span className="chat-composer-to-role">{gezelRole}</span>
-            )}
-          </span>
           {additionalRecipients.map((recipient) => {
             const rendered = displayName(
               { name: recipient.name, roleBasedName: recipient.roleBasedName },
@@ -1939,6 +1964,12 @@ export function ChatComposer({
                 @{m.label}
               </span>
             ))}
+          {/* Who and which conversation are one line of context: as a second
+              row, the thread picker made four layers of chrome before the
+              text box. It wraps to its own line only when the row is full. */}
+          {!threadBarInToolbar && !threadBarOwnRow && belowAddressLine && (
+            <div className="chat-composer-to-thread">{belowAddressLine}</div>
+          )}
           {recipientGezels && onPrimaryRecipientChange && recipientGezels.length > 0 && (
             <ChatRecipientPicker
               gezels={recipientGezels}
@@ -1972,7 +2003,7 @@ export function ChatComposer({
           {addressLineTrailing}
         </div>
       )}
-      {!threadBarInToolbar && belowAddressLine}
+      {!threadBarInToolbar && (threadBarOwnRow || !showAddress) && belowAddressLine}
       <div className="chat-editor-wrap">
         {openCommandQuery !== null && (
           <div className="chat-open-command-menu" role="menu" aria-label="Open targets">
@@ -2012,8 +2043,9 @@ export function ChatComposer({
           // Squisq installs its placeholder on mount. Refresh it when the
           // recipient changes or the draft is reset, but never remount just
           // for new hint text: late crew metadata can change that hint during
-          // input, before Squisq has reported the edit to draftRef.
-          key={`${editorRevision}:${gezelId}`}
+          // input, before Squisq has reported the edit to draftRef. Picking or
+          // removing a task happens in the dialog or the strip, not mid-typing.
+          key={`${editorRevision}:${gezelId}:${pickedTask?.craftbookId ?? ''}`}
           initialMarkdown={draftRef.current}
           // Chat is a single-surface compose flow. Squisq's host mode keeps
           // it in Write and removes the document-oriented view tabs while
@@ -2021,7 +2053,7 @@ export function ChatComposer({
           hostMode="chat"
           mediaProvider={attachmentsEnabled ? mediaProvider : null}
           mentionProvider={mentionProvider}
-          {...(placeholder ? { placeholder } : {})}
+          {...(editorPlaceholder ? { placeholder: editorPlaceholder } : {})}
           imageDisplayMode="thumbnail"
           onChange={handleDraftChange}
           // Chat follows the conventional split: Enter submits, while

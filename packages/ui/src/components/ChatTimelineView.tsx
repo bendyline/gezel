@@ -549,6 +549,14 @@ export function ChatTimelineView({
   >(new Map());
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const responseRunwayRef = useRef<HTMLDivElement | null>(null);
+  // The conversation's own height, without the empty working runway below it.
+  // "At the bottom" means the last message is in view; measured against the
+  // runway's end instead, a short conversation opened scrolled past its first
+  // message, which sat sliced under the thread strip.
+  const conversationHeight = useCallback(
+    (el: HTMLElement) => el.scrollHeight - (responseRunwayRef.current?.offsetHeight ?? 0),
+    [],
+  );
   const scrollbarIdleTimerRef = useRef<number | null>(null);
   /**
    * "Pinned to bottom" mode: when true, any new row auto-scrolls the
@@ -2485,8 +2493,10 @@ export function ChatTimelineView({
         return;
       }
     }
-    el.scrollTo({ top: el.scrollHeight, behavior: 'instant' as ScrollBehavior });
-  }, [rows, pinnedToBottom, messages]);
+    // A conversation that fits reads from its top; the runway stays below it.
+    const fits = conversationHeight(el) <= el.clientHeight;
+    el.scrollTo({ top: fits ? 0 : el.scrollHeight, behavior: 'instant' as ScrollBehavior });
+  }, [rows, pinnedToBottom, messages, conversationHeight]);
 
   /**
    * Live item subscribers render independently of this component. Follow
@@ -3038,7 +3048,8 @@ export function ChatTimelineView({
       scrollRef.current?.classList.remove('chat-timeline-scrolling');
       scrollbarIdleTimerRef.current = null;
     }, SCROLLBAR_IDLE_MS);
-    const distFromBottom = scrollHeight - (scrollTop + clientHeight);
+    const distFromBottom =
+      Math.min(scrollHeight, conversationHeight(el)) - (scrollTop + clientHeight);
     const nearBottom = distFromBottom <= SCROLL_NEAR_BOTTOM_PX;
     pinnedToBottomRef.current = nearBottom;
     // Only flip state when it actually changes — otherwise every
@@ -3087,7 +3098,7 @@ export function ChatTimelineView({
         }
       })();
     }
-  }, [hasMore, loading, oldestAt, loadTimeline, scheduleStickyRecompute]);
+  }, [hasMore, loading, oldestAt, loadTimeline, scheduleStickyRecompute, conversationHeight]);
 
   // Explicit toggle from the floating pin button. When the user turns
   // pinning back on, snap to the bottom right away — otherwise they'd

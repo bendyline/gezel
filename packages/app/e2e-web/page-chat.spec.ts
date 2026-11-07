@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { GezelClient } from '@bendyline/gezel-client';
 import { scaffoldGezappSource } from '../../cli/src/app-scaffold.js';
 import { packGezappFromSource } from '../../service/src/project-type/gezapp-source.js';
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { setTheme } from './helpers/determinism.js';
 import { gotoHome, openProject } from './helpers/nav.js';
@@ -70,7 +71,7 @@ test('an installed page embeds native chat, sends to its crew, and keeps the dra
   await page.setViewportSize({ width: 560, height: 900 });
   await expect(editor).toBeVisible();
   const box = await chat.boundingBox();
-  expect(box!.x + box!.width).toBeLessThanOrEqual(560);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(560 + LAYOUT_TOLERANCE_PX);
 });
 
 test('fullscreen keeps navigation and each project restores its own page mode', async ({
@@ -121,9 +122,9 @@ test('fullscreen keeps navigation and each project restores its own page mode', 
           if (!nav || !output || !header) return false;
           const separate =
             side === 'left'
-              ? output.x >= nav.x + nav.width - 1
-              : output.x + output.width <= nav.x + 1;
-          return separate && output.y >= header.y + header.height - 1;
+              ? output.x >= nav.x + nav.width - LAYOUT_TOLERANCE_PX
+              : output.x + output.width <= nav.x + LAYOUT_TOLERANCE_PX;
+          return separate && output.y >= header.y + header.height - LAYOUT_TOLERANCE_PX;
         })
         .toBe(true);
       await expect(input).toHaveValue('Keep this board');

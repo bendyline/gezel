@@ -1,5 +1,5 @@
 import type { CatalogGroundTone } from '@bendyline/gezel';
-import { type ReactNode, useMemo, useState } from 'react';
+import { type CSSProperties, type ReactNode, useMemo, useState } from 'react';
 import { safeSvgImageUrl } from '../safe-svg-image.js';
 import { useCatalogArtworkUrl } from './catalog-artwork-url.js';
 
@@ -23,6 +23,24 @@ import { useCatalogArtworkUrl } from './catalog-artwork-url.js';
  * shows through them, while an older opaque mark simply covers it. It sits on
  * the image itself, so the caller's size, radius and clipping still apply.
  */
+/**
+ * Props for the mark that holds a catalog card's artwork. Most catalog items
+ * carry a painted logo on their category's ground; one without art still sits
+ * in that grid, so its glyph goes on the same ground (`data-painted`) instead
+ * of a pale tile, and the grid reads as one family rather than illustrations
+ * beside line icons.
+ */
+export function catalogMarkProps(
+  ground: CatalogGroundTone | undefined,
+  hasArtwork: boolean,
+): { 'data-painted'?: ''; style?: CSSProperties } {
+  if (hasArtwork) return {};
+  return {
+    'data-painted': '',
+    style: { '--mark-ground': `var(--gezel-ground-${ground ?? 'terracotta'})` } as CSSProperties,
+  };
+}
+
 export function CatalogArtwork({
   iconSvg,
   logoUrl,

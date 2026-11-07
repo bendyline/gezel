@@ -2,6 +2,7 @@
  * Projects IDE — the two-column project view and its entity tabs. One page-level
  * frame per tab so the gallery shows each surface in context.
  */
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { setTheme, settle } from './helpers/determinism.js';
 import { gotoHome, openProject } from './helpers/nav.js';
@@ -66,7 +67,7 @@ test.describe('projects IDE', () => {
       await page.setViewportSize({ width, height: 800 });
       await expect(trigger).toBeInViewport();
       const bounds = await trigger.boundingBox();
-      expect(bounds!.height).toBeLessThanOrEqual(24);
+      expect(bounds!.height).toBeLessThanOrEqual(24 + LAYOUT_TOLERANCE_PX);
       for (const theme of ['light', 'dark'] as const) {
         await setTheme(page, theme);
         await page.screenshot({

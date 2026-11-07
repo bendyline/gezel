@@ -1,6 +1,7 @@
 import type { CopilotAvailability, SystemToolsetInstallEvent } from '@bendyline/gezel';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { SettingsSection } from './SettingsSection.js';
 import { refreshCopilotAvailability } from './useCopilotAvailability.js';
 
 const COPILOT_TOOLSET_ID = '@github/copilot-sdk';
@@ -122,12 +123,10 @@ export function CopilotInstallCard({
   };
 
   return (
-    <section className="provider-card">
-      <h3>Copilot runtime</h3>
-
+    <SettingsSection id="settings-copilot-runtime" title="Copilot runtime">
       {state.kind === 'installing' ? (
         <>
-          <p className="muted small" style={{ marginTop: 0 }}>
+          <p className="gz-setting-hint">
             Downloading the GitHub Copilot SDK and CLI. You can leave this page — the download keeps
             going.
           </p>
@@ -153,7 +152,7 @@ export function CopilotInstallCard({
       ) : (
         <IdleBody availability={availability} state={state} onInstall={() => void start()} />
       )}
-    </section>
+    </SettingsSection>
   );
 }
 
@@ -169,18 +168,14 @@ function IdleBody({
   const failed = state.kind === 'failed' ? state : null;
 
   if (!availability) {
-    return (
-      <p className="muted small" style={{ marginTop: 0 }}>
-        Checking what's installed…
-      </p>
-    );
+    return <p className="gz-setting-hint">Checking what's installed…</p>;
   }
 
   // The user brought their own CLI. Say so plainly and offer nothing to
   // download — this is a finished state, not a degraded one.
   if (availability.source === 'path' || availability.source === 'env') {
     return (
-      <p className="muted small" style={{ marginTop: 0 }}>
+      <p className="gz-setting-hint">
         Using the Copilot CLI already installed on this device
         {availability.cliPath ? (
           <>
@@ -199,7 +194,7 @@ function IdleBody({
   // installs the Copilot CLI themselves gets full Copilot support.
   if (availability.canInstall === false) {
     return (
-      <p className="muted small" style={{ marginTop: 0 }}>
+      <p className="gz-setting-hint">
         This version of Gezel can't download the GitHub Copilot SDK. Install the Copilot CLI
         yourself (<code>npm i -g @github/copilot</code>) and Gezel will use it.
       </p>
@@ -209,7 +204,7 @@ function IdleBody({
   if (availability.managed === 'damaged') {
     return (
       <>
-        <p className="error small" style={{ marginTop: 0 }}>
+        <p className="error small">
           GitHub Copilot SDK {availability.installedVersion} is installed but its files are damaged
           {availability.damagedReason ? <> — {availability.damagedReason}</> : null}. Repairing
           downloads a fresh copy and replaces the broken install.
@@ -226,7 +221,7 @@ function IdleBody({
 
   if (availability.managed === 'current') {
     return (
-      <p className="muted small" style={{ marginTop: 0 }}>
+      <p className="gz-setting-hint">
         Installed — GitHub Copilot SDK {availability.installedVersion}.
       </p>
     );
@@ -235,7 +230,7 @@ function IdleBody({
   if (availability.managed === 'outdated') {
     return (
       <>
-        <p className="muted small" style={{ marginTop: 0 }}>
+        <p className="gz-setting-hint">
           Installed — GitHub Copilot SDK {availability.installedVersion}. This version of Gezel
           ships with {availability.pinnedVersion}.
         </p>
@@ -251,7 +246,7 @@ function IdleBody({
 
   return (
     <>
-      <p className="muted small" style={{ marginTop: 0 }}>
+      <p className="gz-setting-hint">
         GitHub Copilot runs through GitHub's own CLI, which isn't part of Gezel. Install it here and
         Copilot becomes available as a provider — no restart needed.
       </p>
@@ -266,11 +261,7 @@ function IdleBody({
 }
 
 function InstallError({ error }: { error: string }) {
-  return (
-    <p className="error small" style={{ marginTop: 0 }}>
-      Install failed — {error}
-    </p>
-  );
+  return <p className="error small">Install failed — {error}</p>;
 }
 
 function InstallProgress({

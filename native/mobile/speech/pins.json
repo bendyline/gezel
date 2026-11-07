@@ -5,14 +5,14 @@
     "file": "whisper.tar.gz"
   },
   "onnx-android": {
-    "url": "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.28.1/onnxruntime-android-1.28.1.zip",
-    "sha256": "1d2660a12107fb998e1a2e3b8600de4319d012c1c306aaf4965fb96291277d0a",
-    "file": "onnx-android.zip"
+    "url": "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.28.0/onnxruntime-android-1.28.0.aar",
+    "sha256": "f351a0638696f54b35184290dbc001d66daae17281ad0b548d2c70347d53b8a9",
+    "file": "onnxruntime-android-1.28.0.aar"
   },
   "onnx-ios": {
-    "url": "https://github.com/csukuangfj/onnxruntime-libs/releases/download/v1.28.1/onnxruntime-ios-static-xcframework-1.28.1.xcframework.zip",
-    "sha256": "992d8a0cc6014cccc3a7815c36bbff5e5a06833ea2c4d47dd43ef071f639cf9d",
-    "file": "onnx-ios.zip"
+    "url": "https://download.onnxruntime.ai/pod-archive-onnxruntime-c-1.28.0.zip",
+    "sha256": "b503cf5949ab718a1dff17d1643237ecc0fecf50ad86264572dcafddb140a327",
+    "file": "pod-archive-onnxruntime-c-1.28.0.zip"
   },
   "kokoro-model": {
     "url": "https://huggingface.co/csukuangfj/kokoro-int8-multi-lang-v1_0/resolve/57adb37fc0e8d4bd430cfc1b8f8c2294945b9af2/",

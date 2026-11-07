@@ -1,5 +1,6 @@
 import type { DragEvent, KeyboardEvent, ReactNode, PointerEvent as ReactPointerEvent } from 'react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { PersonLabel } from './PersonLabel.js';
 
 export type StepStatus = 'done' | 'active' | 'pending';
 
@@ -440,12 +441,12 @@ export function StepTracker<T extends StepTrackerStep>({
                 <span className="bench-step-assignee">
                   {meta.assigneeControl ??
                     (meta.assigneeName && (
-                      <>
-                        <span className="bench-step-assignee-name">{meta.assigneeName}</span>
-                        {meta.assigneeRole && (
-                          <span className="bench-step-assignee-role">{meta.assigneeRole}</span>
-                        )}
-                      </>
+                      <PersonLabel
+                        variant="stacked"
+                        name={meta.assigneeName}
+                        roleTitle={meta.assigneeRole}
+                        className="bench-step-assignee-label"
+                      />
                     ))}
                 </span>
                 <span className="bench-step-stage step-stop-stage" {...connectors(idx)}>

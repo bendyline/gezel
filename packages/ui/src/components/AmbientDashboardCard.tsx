@@ -5,6 +5,7 @@ import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { AmbientDashboardThemeSelect } from './AmbientDashboardThemeSelect.js';
+import { SettingCheck, SettingsSection } from './SettingsSection.js';
 
 /**
  * Settings → "Ambient display": the opt-in toggle for the meester's
@@ -230,53 +231,39 @@ export function AmbientDashboardCard() {
     error ?? (latestGenerationFailed ? `Dashboard generation failed: ${status?.lastError}` : null);
 
   return (
-    <section style={{ marginBottom: '2rem' }}>
-      <h3>Ambient display</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        When on, your meester composes a dashboard of what moved across your projects — roughly once
-        an hour while the workshop changes — and renders it as an image made to be shown as a
-        wallpaper or lock screen. Images land in the ambient folder; the newest one is always
-        available as latest.png.
-      </p>
-      <label className="debug-toggle">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => void saveEnabled(e.target.checked)}
-        />
-        <span>Generate an ambient dashboard</span>
-      </label>
+    <SettingsSection
+      id="settings-ambient-display"
+      title="Ambient display"
+      hint="When on, your meester composes a dashboard of what moved across your projects — roughly once an hour while the workshop changes — and renders it as an image made to be shown as a wallpaper or lock screen. Images land in the ambient folder; the newest one is always available as latest.png."
+    >
+      <SettingCheck
+        label="Generate an ambient dashboard"
+        checked={enabled}
+        onChange={(checked) => void saveEnabled(checked)}
+      />
+      {enabled && status?.themeId && status.themes && (
+        <div className="gz-setting">
+          <span id="ambient-dashboard-theme-label" className="gz-setting-label">
+            Dashboard theme
+          </span>
+          <AmbientDashboardThemeSelect
+            value={status.themeId}
+            themes={status.themes}
+            disabled={themeSaving || status.running}
+            labelledBy="ambient-dashboard-theme-label"
+            onValueChange={(value) => void saveTheme(value)}
+          />
+          <p className="gz-setting-hint">
+            {themeSaving
+              ? 'Saving theme…'
+              : `${selectedTheme?.description ?? 'Squisq dashboard theme.'} Applies to the next generated image.`}
+          </p>
+        </div>
+      )}
       {enabled && (
-        <div
-          className="new-row"
-          style={{
-            marginTop: '0.75rem',
-            alignItems: 'flex-start',
-            flexDirection: 'column',
-            gap: '0.5rem',
-          }}
-        >
-          {status?.themeId && status.themes && (
-            <div style={{ width: 'min(320px, 100%)', marginBottom: '0.25rem' }}>
-              <span id="ambient-dashboard-theme-label" className="small">
-                Dashboard theme
-              </span>
-              <AmbientDashboardThemeSelect
-                value={status.themeId}
-                themes={status.themes}
-                disabled={themeSaving || status.running}
-                labelledBy="ambient-dashboard-theme-label"
-                onValueChange={(value) => void saveTheme(value)}
-              />
-              <p className="muted small" style={{ margin: '0.25rem 0 0' }}>
-                {themeSaving
-                  ? 'Saving theme…'
-                  : `${selectedTheme?.description ?? 'Squisq dashboard theme.'} Applies to the next generated image.`}
-              </p>
-            </div>
-          )}
-          <span
-            className="muted small"
+        <div className="gz-setting">
+          <p
+            className="gz-setting-hint"
             title={status?.lastGeneratedAt ? formatAbsoluteTime(status.lastGeneratedAt) : undefined}
           >
             {status?.running
@@ -284,57 +271,52 @@ export function AmbientDashboardCard() {
               : status?.lastGeneratedAt
                 ? `Last generated ${formatRelativeTime(status.lastGeneratedAt)}`
                 : 'Nothing generated yet. The first image may wait for the browser runtime download to finish.'}
-          </span>
+          </p>
           <button type="button" onClick={() => void generateNow()} disabled={status?.running}>
             Generate now
           </button>
           {previewUrl && (
             <img
+              className="ambient-dashboard-preview"
               src={previewUrl}
               alt="Latest ambient dashboard"
-              style={{
-                maxWidth: 'min(420px, 100%)',
-                border: '1px solid var(--border, #8883)',
-                borderRadius: '4px',
-              }}
             />
           )}
         </div>
       )}
-      <div style={{ marginTop: '1rem' }}>
-        <label className="debug-toggle">
-          <input
-            type="checkbox"
-            checked={wallpaperOn}
-            disabled={wallpaperUnavailable !== null}
-            onChange={(e) => void toggleWallpaper(e.target.checked)}
-          />
-          <span>Keep my desktop wallpaper set to the latest dashboard</span>
-        </label>
-        <p className="muted small" style={{ marginTop: '0.25rem' }}>
-          {wallpaperUnavailable ??
-            (capability?.canRestore
-              ? 'Turning this on changes your wallpaper right away; turning it off restores the previous one.'
-              : 'Turning this on changes your wallpaper right away. On this desktop the previous wallpaper cannot be restored automatically.')}
-        </p>
-      </div>
+      <SettingCheck
+        label="Keep my desktop wallpaper set to the latest dashboard"
+        hint={
+          wallpaperUnavailable ??
+          (capability?.canRestore
+            ? 'Turning this on changes your wallpaper right away; turning it off restores the previous one.'
+            : 'Turning this on changes your wallpaper right away. On this desktop the previous wallpaper cannot be restored automatically.')
+        }
+        checked={wallpaperOn}
+        disabled={wallpaperUnavailable !== null}
+        onChange={(checked) => void toggleWallpaper(checked)}
+      />
       {ambient && (
-        <div className="new-row" style={{ marginTop: '0.5rem', gap: '0.5rem' }}>
+        <div className="gz-setting-row">
           <button type="button" onClick={() => void ambient.openFolder()}>
             Open ambient folder
           </button>
-          {bridgeStatus?.folder && <span className="muted small">{bridgeStatus.folder}</span>}
+          {bridgeStatus?.folder && <code>{bridgeStatus.folder}</code>}
         </div>
       )}
-      <details style={{ marginTop: '0.75rem' }}>
-        <summary className="muted small">{instructions.title}</summary>
-        <ul className="muted small" style={{ marginTop: '0.5rem' }}>
+      <details className="ambient-dashboard-instructions">
+        <summary>{instructions.title}</summary>
+        <ul>
           {instructions.lines.map((line) => (
             <li key={line}>{line}</li>
           ))}
         </ul>
       </details>
-      {visibleError && <p className="error small">{visibleError}</p>}
-    </section>
+      {visibleError && (
+        <p className="error small" role="alert">
+          {visibleError}
+        </p>
+      )}
+    </SettingsSection>
   );
 }

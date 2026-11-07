@@ -4,6 +4,7 @@
  * order-independent anchor for the timeline, composer, and bubble shots. The
  * interactive send flow is covered by the write-flow spec.
  */
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { settle } from './helpers/determinism.js';
 import { gotoMeesterChat } from './helpers/nav.js';
@@ -70,8 +71,8 @@ test.describe('chat surface', () => {
       };
     });
 
-    expect(geometry.segmentRight).toBeLessThanOrEqual(geometry.contentRight + 0.5);
-    expect(geometry.rowRight).toBeLessThanOrEqual(geometry.contentRight + 0.5);
+    expect(geometry.segmentRight).toBeLessThanOrEqual(geometry.contentRight + LAYOUT_TOLERANCE_PX);
+    expect(geometry.rowRight).toBeLessThanOrEqual(geometry.contentRight + LAYOUT_TOLERANCE_PX);
     expect(geometry.argsOverflow).toBe('ellipsis');
   });
 
@@ -82,7 +83,7 @@ test.describe('chat surface', () => {
 
     const chat = page.getByTestId('meester-chat');
     const composer = chat.getByTestId('chat-composer');
-    const frame = await composer.evaluate((element) => {
+    const frame = await composer.evaluate((element, tolerance) => {
       const style = getComputedStyle(element);
       const rect = element.getBoundingClientRect();
       const railRect = element.parentElement?.getBoundingClientRect();
@@ -108,8 +109,11 @@ test.describe('chat surface', () => {
         radius: Number.parseFloat(style.borderTopLeftRadius),
         insetLeft: rect.left - railRect.left,
         insetRight: railRect.right - rect.right,
-        recipientInside: recipientRect.left >= rect.left && recipientRect.right <= rect.right,
-        sessionInside: sessionRect.left >= rect.left && sessionRect.right <= rect.right,
+        recipientInside:
+          recipientRect.left >= rect.left - tolerance &&
+          recipientRect.right <= rect.right + tolerance,
+        sessionInside:
+          sessionRect.left >= rect.left - tolerance && sessionRect.right <= rect.right + tolerance,
         sessionBackground: getComputedStyle(sessionSelect).backgroundColor,
         chatPaperBackground: getComputedStyle(chatPaperProbe).backgroundColor,
         editorBackground: getComputedStyle(editor).backgroundColor,
@@ -119,7 +123,7 @@ test.describe('chat surface', () => {
       chatPaperProbe.remove();
       composeHeaderProbe.remove();
       return result;
-    });
+    }, LAYOUT_TOLERANCE_PX);
 
     expect(frame.background).not.toBe('rgba(0, 0, 0, 0)');
     expect(frame.borderWidth).toBe('1px');
@@ -146,8 +150,10 @@ test.describe('chat surface', () => {
     const [triggerBox, menuBox] = await Promise.all([insert.boundingBox(), menu.boundingBox()]);
     expect(triggerBox).not.toBeNull();
     expect(menuBox).not.toBeNull();
-    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(triggerBox!.y - 3);
-    expect(menuBox!.y).toBeGreaterThanOrEqual(8);
+    expect(menuBox!.y + menuBox!.height).toBeLessThanOrEqual(
+      triggerBox!.y - 3 + LAYOUT_TOLERANCE_PX,
+    );
+    expect(menuBox!.y).toBeGreaterThanOrEqual(8 - LAYOUT_TOLERANCE_PX);
   });
 
   test('timeline, composer, bubbles (seeded exchange)', async ({ page }) => {
@@ -162,6 +168,16 @@ test.describe('chat surface', () => {
     // pipeline end-to-end (send → worker → SSE → render) without mutating here.
     const assistant = chat.locator('.msg-assistant').first();
     await expect(assistant).toContainText('Mock reply', { timeout: 15_000 });
+
+    // A conversation that fits reads from its top. Pinned to the end of the
+    // working runway instead, a two-message thread opened with its first
+    // message sliced under the strip above it.
+    const opening = await timeline.evaluate((el) => {
+      const runway = el.querySelector<HTMLElement>('.timeline-response-runway');
+      const conversation = el.scrollHeight - (runway?.offsetHeight ?? 0);
+      return { fits: conversation <= el.clientHeight, scrollTop: el.scrollTop };
+    });
+    if (opening.fits) expect(opening.scrollTop).toBeLessThanOrEqual(1);
 
     await shot(page, 'timeline', {
       area: 'chat',

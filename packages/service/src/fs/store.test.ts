@@ -1865,7 +1865,8 @@ describe('store history hooks', () => {
     await wired.createGezel({ name: 'Logged', role: 'Tester' });
     const events = await history.listEvents({ kinds: ['gezel.created'] });
     expect(events).toHaveLength(1);
-    expect(events[0]?.summary).toMatch(/Logged/);
+    // The one way to write a name and role (docs/ux.md): no quotes, no parentheses.
+    expect(events[0]?.summary).toBe('Created Logged · Tester');
   });
 
   it('logs project.created when HistoryManager is wired', async () => {

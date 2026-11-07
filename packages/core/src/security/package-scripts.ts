@@ -57,7 +57,7 @@ export function packageScriptsEdit(
 /** The model-facing refusal for a gated edit. */
 export function packageScriptsEditRefusal(path: string, edit: PackageScriptsEdit): string {
   const setting =
-    'Gezels may not add or change package scripts here ("Edit package scripts" is off in Settings → Security & Compliance).';
+    'Gezels may not add or change package scripts here ("Edit package scripts" is off in Settings → Security & compliance).';
   if (edit.kind === 'unreadable') {
     return `${setting} This write would leave ${path} unreadable, which removes its scripts. Keep ${path} valid JSON with its "scripts" unchanged.`;
   }

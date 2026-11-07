@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 /**
- * Security & Compliance UX driver — exercises the new centralized
+ * Security & compliance UX driver — exercises the new centralized
  * security policy surfaces:
  *   1. First run: the welcome asks no posture question, so its one
  *      "Change what I'm allowed to do" link must reach the level presets
  *      on a fresh, unconfigured install.
- *   2. The Settings → Security & Compliance panel (level slider +
+ *   2. The Settings → Security & compliance panel (level slider +
  *      per-capability toggles, with the level snapping to "Custom").
  *
  * Captures screenshots for visual review at each step.
@@ -27,7 +27,7 @@ async function shot(page: Page, name: string): Promise<void> {
   await captureScreenshot(page, { path: join(screenshotDir, name), fullPage: true });
 }
 
-test.describe('Security & Compliance — first run', () => {
+test.describe('Security & compliance — first run', () => {
   let home: string;
   let app: ElectronApplication;
   let page: Page;
@@ -80,7 +80,7 @@ test.describe('Security & Compliance — first run', () => {
     await expect(welcome).toHaveAttribute('data-welcome-state', 'connect', { timeout: 20000 });
     await welcome.getByRole('button', { name: "Change what I'm allowed to do" }).click();
 
-    const heading = page.getByRole('heading', { name: /Security & Compliance/i });
+    const heading = page.getByRole('heading', { name: 'Security level' });
     await expect(heading).toBeVisible({ timeout: 10000 });
 
     // All three level pills are present. Anchor the match — "Lockdown"
@@ -99,7 +99,7 @@ test.describe('Security & Compliance — first run', () => {
   });
 });
 
-test.describe('Security & Compliance — settings panel', () => {
+test.describe('Security & compliance — settings panel', () => {
   let home: string;
   let app: ElectronApplication;
   let page: Page;
@@ -130,12 +130,12 @@ test.describe('Security & Compliance — settings panel', () => {
     await page.getByTestId('sidebar-area-settings').click();
     await page.waitForTimeout(800);
 
-    // Click the "Security & Compliance" nav item in the settings sidebar.
-    await page.getByRole('button', { name: 'Security & Compliance' }).click();
+    // Click the "Security & compliance" nav item in the settings sidebar.
+    await page.getByRole('button', { name: 'Security & compliance' }).click();
     await page.waitForTimeout(600);
 
-    // Panel heading + the three level pills + the five capability toggles.
-    await expect(page.getByRole('heading', { name: /Security & Compliance/i })).toBeVisible({
+    // Section heading + the three level pills + the capability toggles.
+    await expect(page.getByRole('heading', { name: 'Security level' })).toBeVisible({
       timeout: 10000,
     });
     for (const label of ['Super Lockdown', 'Lockdown', 'Unrestricted']) {
@@ -152,11 +152,7 @@ test.describe('Security & Compliance — settings panel', () => {
     await shot(page, 'sec-04-settings-lockdown.png');
 
     // Toggle "Edit files" off-preset from Lockdown (edits on) → Custom.
-    // Target the checkbox inside its label (plain getByText matches both
-    // the label and its inner <strong> under strict mode).
-    const editFiles = page
-      .locator('label.debug-toggle', { hasText: 'Edit files' })
-      .getByRole('checkbox');
+    const editFiles = page.getByRole('checkbox', { name: 'Edit files' });
     await editFiles.click();
     await page.waitForTimeout(600);
     await expect(page.getByRole('radio', { name: /^Custom/ })).toBeVisible({ timeout: 5000 });

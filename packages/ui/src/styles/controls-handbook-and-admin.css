@@ -36,10 +36,14 @@
   --squisq-jsonform-radius: var(--radius-md) !important;
 }
 
+/* Positioned so a fieldset tray's `.sr-only` legend stays inside its scroll
+   container: unanchored, that absolute legend escaped the Settings panel and
+   grew the whole document, which scrolled the window and shifted the rail. */
 .gz-tray,
 .provider-switch,
 .gz-type-picker,
 .gezel-json-editor .squisq-jf-segmented {
+  position: relative;
   display: inline-flex;
   flex-wrap: wrap;
   align-items: stretch;

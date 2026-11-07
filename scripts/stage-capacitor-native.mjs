@@ -40,7 +40,7 @@ import {
   stageSpeech,
   verifyProducerSources,
   verifyRuntime,
-  verifySpeech,
+  verifySpeechDistribution,
 } from '../packages/capacitor/scripts/stage-native.mjs';
 
 const RELEASE_BASE = 'https://github.com/bendyline/gezel/releases/download';
@@ -205,7 +205,13 @@ export async function stagePinnedMobileSdks({
           `${error.message}: native-v${release} predates that change. Cut a native release and pin it with scripts/pin-native-release.mjs before publishing @bendyline/gezel-capacitor.`,
         );
       });
-      await verifySpeech(join(nativeRoot, `speech-${target}`), target);
+      await verifySpeechDistribution(join(nativeRoot, `speech-${target}`), target).catch(
+        (error) => {
+          throw new Error(
+            `${error.message}. native-v${release}'s speech runtime cannot ship; cut a native release whose speech runtime passes and pin it with scripts/pin-native-release.mjs before publishing @bendyline/gezel-capacitor.`,
+          );
+        },
+      );
     }
     log(`stage-capacitor-native: native-v${release} matches its sources`);
   }

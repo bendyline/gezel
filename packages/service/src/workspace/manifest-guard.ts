@@ -42,5 +42,5 @@ export async function restoreGatedManifestEdits(
     restored.push(name);
   }
   if (restored.length === 0) return null;
-  return `[gezel] Put back ${restored.join(', ')}: the script added or changed package scripts, and "Edit package scripts" is off in Settings → Security & Compliance. Leave package scripts as they are.`;
+  return `[gezel] Put back ${restored.join(', ')}: the script added or changed package scripts, and "Edit package scripts" is off in Settings → Security & compliance. Leave package scripts as they are.`;
 }

@@ -12,7 +12,7 @@ export interface PairedRemote {
   remoteId: string;
   /** Base URL A reaches the server at, e.g. `https://192.168.1.50:6229`. */
   baseUrl: string;
-  /** Human label shown in A's model picker / Remote Servers panel. */
+  /** Human label shown in A's model picker / Remote servers panel. */
   displayName: string;
   /** Per-device bearer token the server issued A (scope `remote-inference`). */
   token: string;

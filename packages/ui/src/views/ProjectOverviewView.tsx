@@ -14,6 +14,7 @@ import { PhotoAlbumsSection } from '../components/PhotoAlbums.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
 import { workspaceIndexLabel } from '../components/WorkspaceIndexPane.js';
 import { useDebugMode } from '../components/useDebugMode.js';
+import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { RailSection } from './home/RailSection.js';
 
 /**
@@ -275,14 +276,19 @@ export function ProjectOverviewView({
       {recent.length > 0 && (
         <RailSection label="Recent activity" testId="overview-activity">
           <ul className="project-overview-activity">
-            {recent.map((e) => (
-              <li key={e.id}>
-                <span className="muted small">
-                  {(e.entryType === 'event' ? e.at : e.lastActivityAt).slice(0, 10)}
-                </span>{' '}
-                {e.entryType === 'event' ? e.summary : `Chat: ${e.title}`}
-              </li>
-            ))}
+            {recent.map((e) => {
+              const at = e.entryType === 'event' ? e.at : e.lastActivityAt;
+              // Relative like every other recent-activity list, local on
+              // hover; the ISO prefix showed tomorrow's UTC date at night.
+              return (
+                <li key={e.id}>
+                  <span className="muted small" title={formatAbsoluteTime(at)}>
+                    {formatRelativeTime(at)}
+                  </span>{' '}
+                  {e.entryType === 'event' ? e.summary : `Chat: ${e.title}`}
+                </li>
+              );
+            })}
           </ul>
         </RailSection>
       )}

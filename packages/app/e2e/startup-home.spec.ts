@@ -7,6 +7,7 @@ import { expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { expectLayoutToMatch } from './helpers/layout.js';
 
 test('local Home matches the live chrome and preserves reading across service navigation', async () => {
   test.setTimeout(120_000);
@@ -189,9 +190,9 @@ test('local Home matches the live chrome and preserves reading across service na
       'aria-selected',
       'true',
     );
-    expect(await chrome()).toEqual(startupChrome);
-    expect(await pillMetrics()).toEqual(startupPill);
-    expect(await readerMetrics(liveReader)).toEqual(startupReader);
+    expectLayoutToMatch(await chrome(), startupChrome);
+    expectLayoutToMatch(await pillMetrics(), startupPill);
+    expectLayoutToMatch(await readerMetrics(liveReader), startupReader);
     await page.screenshot({ path: join(screenshots, 'startup-home-live.png') });
     await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
     await expect(

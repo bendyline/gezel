@@ -216,6 +216,67 @@ describe('GreetingBand', () => {
     expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
   });
 
+  it('rolls the sheet up from the rail at its foot, which a rolled-up sheet hides', () => {
+    const onToggleCollapse = vi.fn();
+    const { rerender } = renderBand({ onToggleCollapse });
+    fireEvent.click(screen.getByRole('button', { name: 'Roll up the greeting' }));
+    expect(onToggleCollapse).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <GreetingBand
+        chips={[]}
+        meesterName="Wren"
+        meesterPoppetje={null}
+        meesterIcon={null}
+        meesterIconOverride={false}
+        collapsed
+        onToggleCollapse={onToggleCollapse}
+        tab="greeting"
+        onTabChange={() => {}}
+      />,
+    );
+    expect(screen.queryByRole('button', { name: 'Roll up the greeting' })).toBeNull();
+  });
+
+  describe('pulling the rail', () => {
+    function pull(lift: number, end: 'pointerUp' | 'pointerCancel' = 'pointerUp') {
+      const onToggleCollapse = vi.fn();
+      renderBand({ onToggleCollapse });
+      const sheet = document.querySelector<HTMLElement>('.home-workshop-intro-sheet');
+      if (!sheet) throw new Error('no sheet');
+      sheet.getBoundingClientRect = () => ({ height: 400 }) as DOMRect;
+      const rail = screen.getByRole('button', { name: 'Roll up the greeting' });
+      fireEvent.pointerDown(rail, { button: 0, pointerId: 1, clientY: 500 });
+      fireEvent.pointerMove(rail, { pointerId: 1, clientY: 500 - lift / 2 });
+      const midway = sheet.style.height;
+      const dragging = sheet.hasAttribute('data-dragging');
+      fireEvent.pointerMove(rail, { pointerId: 1, clientY: 500 - lift });
+      fireEvent[end](rail, { pointerId: 1, clientY: 500 - lift });
+      fireEvent.click(rail);
+      return { onToggleCollapse, sheet, midway, dragging };
+    }
+
+    it('follows the pointer, then rolls up when let go past a quarter of the sheet', () => {
+      const { onToggleCollapse, sheet, midway, dragging } = pull(120);
+      expect(midway).toBe('340px');
+      expect(dragging).toBe(true);
+      expect(onToggleCollapse).toHaveBeenCalledTimes(1);
+      expect(sheet.style.height).toBe('');
+      expect(sheet.hasAttribute('data-dragging')).toBe(false);
+    });
+
+    it('drops back open when let go short of it, without the click rolling it up', () => {
+      const { onToggleCollapse, sheet } = pull(80);
+      expect(onToggleCollapse).not.toHaveBeenCalled();
+      expect(sheet.style.height).toBe('');
+    });
+
+    it('drops back open when the pointer is taken away', () => {
+      const { onToggleCollapse } = pull(200, 'pointerCancel');
+      expect(onToggleCollapse).not.toHaveBeenCalled();
+    });
+  });
+
   it('shows the Handboek article with read and watch choices in the tour', () => {
     renderBand({ tab: 'tour' });
     expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
@@ -262,12 +323,12 @@ describe('GreetingBand', () => {
     poppetjes.show = true;
     try {
       const { unmount } = renderBand();
-      expect(screen.getByText('- Meester')).toBeInTheDocument();
+      expect(screen.getByText('Meester')).toBeInTheDocument();
       expect(document.querySelector('.home-workshop-greeting-cols-fill')).toBeNull();
       unmount();
 
       renderBand({ tab: 'tour' });
-      expect(screen.queryByText('- Meester')).not.toBeInTheDocument();
+      expect(screen.queryByText('Meester')).not.toBeInTheDocument();
       expect(document.querySelector('.home-workshop-greeting-cols-fill')).not.toBeNull();
     } finally {
       poppetjes.show = false;

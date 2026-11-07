@@ -133,7 +133,7 @@ export function ChatNarrateButton({
         onLongPause: (hadTranscript) => {
           if (!hadTranscript) {
             onError(
-              `No speech detected${activeMicrophoneLabel ? ` from ${activeMicrophoneLabel}` : ''}. Choose the microphone in Settings → Device Integration if this isn't the expected input.`,
+              `No speech detected${activeMicrophoneLabel ? ` from ${activeMicrophoneLabel}` : ''}. Choose the microphone in Settings → Device integration if this isn't the expected input.`,
             );
           }
           void stop();
@@ -253,7 +253,7 @@ function humanizeNarrationError(caught: unknown): string {
     return 'Microphone access was not granted. Allow it in your system settings, then try again.';
   }
   if (error.name === 'OverconstrainedError' || /constraint|selected microphone/i.test(message)) {
-    return 'The selected microphone is unavailable. Choose another in Settings → Device Integration.';
+    return 'The selected microphone is unavailable. Choose another in Settings → Device integration.';
   }
   if (error.name === 'NotFoundError' || /requested device not found|no microphone/i.test(message)) {
     return 'No microphone is available.';

@@ -26,12 +26,13 @@
      values. Long-form/editorial surfaces (chat, Home intro) keep 1rem+
      of their own; these tokens size the dense UI chrome. See
      docs/ux.md → Typography. */
-  --text-2xs: 0.72rem; /* micro labels, badges, uppercase eyebrows */
-  --text-xs: 0.8rem; /* helper & caption text */
+  --text-2xs: 0.72rem; /* micro labels, badges */
+  --text-xs: 0.8rem; /* helper & caption text, section labels */
   --text-sm: 0.85rem; /* dense controls, secondary body copy */
   --text-md: 0.9rem; /* default UI body */
   --text-lg: 1rem; /* emphasized body, dialog/panel sub-headings */
   --text-xl: 1.1rem; /* panel & dialog section headings */
+  --text-title: 1.35rem; /* an open entity's title: a task, a craftbook */
 
   /* Gezel foundation palette.
      These are the small set of authored colors for app chrome. Component
@@ -110,6 +111,12 @@
      elevation. */
   --surface: var(--gezel-paper-inset);
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 6px 18px rgba(0, 0, 0, 0.06);
+  /* Elevation for what floats over the page: a menu or popover, then a
+     dialog. Warm and light by day; black at night, where a warm wash would
+     read as a glow. Before these, each surface carried its own black shadow
+     tuned for dark mode, up to 0.55 alpha on parchment. */
+  --shadow-popover: 0 6px 18px rgb(60 45 30 / 0.16), 0 1px 2px rgb(60 45 30 / 0.08);
+  --shadow-dialog: 0 18px 44px rgb(60 45 30 / 0.24), 0 2px 6px rgb(60 45 30 / 0.1);
   /* Sandboxed previews make their scrollbar track transparent, so the iframe
      backing becomes the visible tray. Keep it white for ordinary light web
      pages and swap to the app canvas in dark mode. */
@@ -291,25 +298,41 @@
     --gezel-ground-terracotta: #88593b;
     --gezel-ground-rose: #946b67;
     --gezel-ground-plum: #614d5d;
-    --gezel-paper-canvas: #141517;
-    --gezel-paper-workshop: #1f1c18;
-    --gezel-paper-panel: #1c1d20;
+    /* Walnut, not slate: the night paper keeps the wood hue of the day paper
+       (red highest, blue lowest) and steps canvas, workshop, panel, inset and
+       the key faces built on it far enough apart to read. The two dark blocks
+       must stay identical. */
+    --gezel-paper-canvas: #191512;
+    --gezel-paper-workshop: #201b17;
+    --gezel-paper-panel: #221d19;
     --gezel-paper-reading: var(--gezel-paper-panel);
     --gezel-paper-control: var(--gezel-paper-canvas);
-    --gezel-paper-control-deep: #1f2124;
-    --gezel-paper-inset: #1f2124;
-    --gezel-ink: #f0f0f0;
-    --gezel-ink-muted: #a1a1a1;
+    --gezel-paper-control-deep: var(--gezel-paper-inset);
+    --gezel-paper-inset: #29231e;
+    /* Text is the titlebar labels' cream, never a neutral white. Home's warm
+       inks resolve from this ramp too, so Home and the rail share one ink. */
+    --gezel-ink: var(--gezel-cream-ink);
+    --gezel-ink-muted: #ada396;
+    --gezel-ink-warm: var(--gezel-ink);
+    --gezel-ink-warm-muted: #c9bca9;
+    --gezel-ink-warm-quiet: #9c9083;
+    /* The structural accent lifts at night: rings, dots and squisq's active
+       tab labels are drawn in it, and its fills carry dark ink. Fills that
+       carry cream use the deep `--action-bg` below. */
     --gezel-terra: #c0875d;
     --gezel-terra-hover: #d5a07a;
     --gezel-terra-raised: #b07a50;
     --accent-text: #d5a07a;
     --accent-text-hover: #e0b897;
-    --action-bg: var(--gezel-terra);
-    --action-ink: var(--accent-selection-ink);
+    /* Filled actions are the day's deep terracotta (its `--accent-text`) with
+       the day's cream ink, so the primary key stays the densest object rather
+       than turning into the palest one. */
+    --action-bg: #8c4428;
     --chat-handoff-bg: rgba(176, 114, 76, 0.08);
     --chat-handoff-border: rgba(176, 114, 76, 0.45);
     --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-popover: 0 10px 28px rgb(0 0 0 / 0.45);
+    --shadow-dialog: 0 20px 50px rgb(0 0 0 / 0.5);
     --sidebar-seam-shadow: rgba(0, 0, 0, 0.16);
     --sidebar-pane-shadow: rgba(0, 0, 0, 0.24);
     --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
@@ -338,26 +361,38 @@
     --logo-active-fill: var(--titlebar-ink);
     --scrollbar-thumb: rgba(224, 184, 151, 0.28);
     --scrollbar-thumb-hover: rgba(224, 184, 151, 0.5);
-    --scrollbar-track: rgba(255, 255, 255, 0.04);
+    --scrollbar-track: rgba(243, 237, 224, 0.04);
     --preview-frame-bg: var(--gezel-paper-canvas);
-    --tray-bg: #131416;
+    /* Trays sink below the canvas and key faces rise above the inset, both
+       derived from the ramp so they keep its hue. */
+    --tray-bg: color-mix(in srgb, black 16%, var(--gezel-paper-canvas));
     --tray-border: rgba(0, 0, 0, 0.55);
-    --tray-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
-    --key-bg: linear-gradient(to bottom, #2b2d31, #222428);
-    --key-bg-hover: linear-gradient(to bottom, #323438, #26282c);
-    --key-border: rgba(255, 255, 255, 0.08);
-    --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 3px
+    --tray-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(243, 237, 224, 0.03);
+    --key-bg: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--gezel-ink) 6%, var(--gezel-paper-inset)),
+      color-mix(in srgb, var(--gezel-ink) 2.5%, var(--gezel-paper-inset))
+    );
+    --key-bg-hover: linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--gezel-ink) 9%, var(--gezel-paper-inset)),
+      color-mix(in srgb, var(--gezel-ink) 4.5%, var(--gezel-paper-inset))
+    );
+    --key-border: rgba(243, 237, 224, 0.08);
+    --key-shadow: inset 0 1px 0 rgba(243, 237, 224, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 3px
       rgba(0, 0, 0, 0.25);
+    /* The latch is the day's pressed face exactly; `--key-pressed-ink`
+       keeps its `:root` cream. */
+    --key-pressed-bg: linear-gradient(to bottom, #78381f, var(--action-bg));
     --key-pressed-border: rgba(30, 15, 5, 0.7);
-    --key-pressed-ink: #231207;
     --key-pressed-shadow: inset 0 1px 2px rgba(30, 15, 5, 0.38);
     --select-bg: var(--gezel-paper-panel);
     --select-bg-hover: var(--gezel-paper-inset);
     --select-ink: var(--gezel-ink);
-    --select-border: rgba(255, 255, 255, 0.18);
+    --select-border: rgba(243, 237, 224, 0.18);
     --select-border-hover: var(--gezel-terra);
     --select-focus: var(--gezel-terra);
-    --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f0f0f0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+    --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f3ede0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
   }
 }
 
@@ -381,25 +416,29 @@
   --gezel-ground-terracotta: #88593b;
   --gezel-ground-rose: #946b67;
   --gezel-ground-plum: #614d5d;
-  --gezel-paper-canvas: #141517;
-  --gezel-paper-workshop: #1f1c18;
-  --gezel-paper-panel: #1c1d20;
+  --gezel-paper-canvas: #191512;
+  --gezel-paper-workshop: #201b17;
+  --gezel-paper-panel: #221d19;
   --gezel-paper-reading: var(--gezel-paper-panel);
   --gezel-paper-control: var(--gezel-paper-canvas);
-  --gezel-paper-control-deep: #1f2124;
-  --gezel-paper-inset: #1f2124;
-  --gezel-ink: #f0f0f0;
-  --gezel-ink-muted: #a1a1a1;
+  --gezel-paper-control-deep: var(--gezel-paper-inset);
+  --gezel-paper-inset: #29231e;
+  --gezel-ink: var(--gezel-cream-ink);
+  --gezel-ink-muted: #ada396;
+  --gezel-ink-warm: var(--gezel-ink);
+  --gezel-ink-warm-muted: #c9bca9;
+  --gezel-ink-warm-quiet: #9c9083;
   --gezel-terra: #c0875d;
   --gezel-terra-hover: #d5a07a;
   --gezel-terra-raised: #b07a50;
   --accent-text: #d5a07a;
   --accent-text-hover: #e0b897;
-  --action-bg: var(--gezel-terra);
-  --action-ink: var(--accent-selection-ink);
+  --action-bg: #8c4428;
   --chat-handoff-bg: rgba(176, 114, 76, 0.08);
   --chat-handoff-border: rgba(176, 114, 76, 0.45);
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-popover: 0 10px 28px rgb(0 0 0 / 0.45);
+  --shadow-dialog: 0 20px 50px rgb(0 0 0 / 0.5);
   --sidebar-seam-shadow: rgba(0, 0, 0, 0.16);
   --sidebar-pane-shadow: rgba(0, 0, 0, 0.24);
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
@@ -426,26 +465,34 @@
   --logo-active-fill: var(--titlebar-ink);
   --scrollbar-thumb: rgba(224, 184, 151, 0.28);
   --scrollbar-thumb-hover: rgba(224, 184, 151, 0.5);
-  --scrollbar-track: rgba(255, 255, 255, 0.04);
+  --scrollbar-track: rgba(243, 237, 224, 0.04);
   --preview-frame-bg: var(--gezel-paper-canvas);
-  --tray-bg: #131416;
+  --tray-bg: color-mix(in srgb, black 16%, var(--gezel-paper-canvas));
   --tray-border: rgba(0, 0, 0, 0.55);
-  --tray-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
-  --key-bg: linear-gradient(to bottom, #2b2d31, #222428);
-  --key-bg-hover: linear-gradient(to bottom, #323438, #26282c);
-  --key-border: rgba(255, 255, 255, 0.08);
-  --key-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 3px
+  --tray-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.5), inset 0 -1px 0 rgba(243, 237, 224, 0.03);
+  --key-bg: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--gezel-ink) 6%, var(--gezel-paper-inset)),
+    color-mix(in srgb, var(--gezel-ink) 2.5%, var(--gezel-paper-inset))
+  );
+  --key-bg-hover: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--gezel-ink) 9%, var(--gezel-paper-inset)),
+    color-mix(in srgb, var(--gezel-ink) 4.5%, var(--gezel-paper-inset))
+  );
+  --key-border: rgba(243, 237, 224, 0.08);
+  --key-shadow: inset 0 1px 0 rgba(243, 237, 224, 0.06), 0 1px 2px rgba(0, 0, 0, 0.5), 0 2px 3px
     rgba(0, 0, 0, 0.25);
+  --key-pressed-bg: linear-gradient(to bottom, #78381f, var(--action-bg));
   --key-pressed-border: rgba(30, 15, 5, 0.7);
-  --key-pressed-ink: #231207;
   --key-pressed-shadow: inset 0 1px 2px rgba(30, 15, 5, 0.38);
   --select-bg: var(--gezel-paper-panel);
   --select-bg-hover: var(--gezel-paper-inset);
   --select-ink: var(--gezel-ink);
-  --select-border: rgba(255, 255, 255, 0.18);
+  --select-border: rgba(243, 237, 224, 0.18);
   --select-border-hover: var(--gezel-terra);
   --select-focus: var(--gezel-terra);
-  --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f0f0f0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  --select-chevron: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><path d='m3.5 5.5 4.5 4 4.5-4' fill='none' stroke='%23f3ede0' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/></svg>");
 }
 
 * {

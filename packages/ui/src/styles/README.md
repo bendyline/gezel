@@ -36,7 +36,7 @@ an example of restoring the old winner explicitly.
 | `file-browser.css` | List panes, shared file browser, workspace/index panes, document surfaces, and file previews |
 | `../components/file-browser/FileBrowserPane.css` | **On demand:** Phone list/detail navigation in the shared file browser |
 | `shared-content.css` | Document export, shared content utilities, core chat bubbles/composer chrome, and Squisq integration |
-| `gezels.css` | Shared gezel icons, identity badges, and cross-surface form utilities |
+| `gezels.css` | Shared gezel icons, person labels (`PersonLabel`), identity badges, and cross-surface form utilities |
 | `../views/GezellenView.css` | **On demand:** Gezellen roster/detail split and compact navigation (owned by `GezellenView`) |
 | `../views/GezelDetail.css` | **On demand:** Gezel appearance and accessory customization (owned by `GezelDetail`) |
 | `settings-and-status.css` | **Surface:** Settings navigation/panels, machine policy, and project status/index controls |

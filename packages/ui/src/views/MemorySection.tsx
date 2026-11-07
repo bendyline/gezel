@@ -1,5 +1,11 @@
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { Suspense, lazy } from 'react';
+import {
+  SettingCheck,
+  SettingField,
+  SettingsSection,
+  settingHintId,
+} from '../components/SettingsSection.js';
 import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 
 const loadRelevanceModelModule = () => import('../components/RelevanceModelCard.js');
@@ -34,25 +40,26 @@ export function MemorySection({
   const minUserTurns = config?.summarization?.minUserTurns ?? 2;
   const idleHours = config?.summarization?.idleHours ?? 24;
   return (
-    <section style={{ marginTop: '2rem' }}>
-      <h3>Project knowledge &amp; memory</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Ground relevant turns in indexed project files, artifacts, memories, and shared documents.
-        Finished threads can also be distilled into project memory for future work.
-      </p>
-
-      <div style={{ marginBottom: '1.25rem' }}>
-        <strong>Indexed context per turn</strong>
-        <p className="muted small" style={{ margin: '0.25rem 0 0' }}>
-          Higher settings provide more direct evidence. Lower settings preserve context space on
-          memory-constrained models. The gezel can still call <code>search</code> when this is Off.
-        </p>
+    <SettingsSection
+      id="settings-project-knowledge"
+      title="Project knowledge & memory"
+      hint="Ground relevant turns in indexed project files, artifacts, memories, and shared documents. Finished threads can also be distilled into project memory for future work."
+    >
+      <SettingField
+        label="Indexed context per turn"
+        hint={
+          <>
+            Higher settings provide more direct evidence. Lower settings preserve context space on
+            memory-constrained models. The gezel can still call <code>search</code> when this is
+            Off.
+          </>
+        }
+      >
         <div
           className="gz-tray"
           role="radiogroup"
           onKeyDown={onRadioKeyDown}
           aria-label="Indexed context per turn"
-          style={{ marginTop: '0.5rem' }}
         >
           {(['off', 'lean', 'balanced', 'deep'] as const).map((mode) => (
             <button
@@ -69,13 +76,20 @@ export function MemorySection({
             </button>
           ))}
         </div>
-        <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted small">Optional token cap</label>
+      </SettingField>
+
+      <SettingField
+        label="Optional token cap"
+        controlId="settings-retrieval-token-cap"
+        hint="Leave it empty to use the mode's own budget."
+      >
+        <div className="gz-setting-inline">
           <input
+            id="settings-retrieval-token-cap"
             type="number"
             min={0}
             max={16000}
-            aria-label="Optional token cap"
+            aria-describedby={settingHintId('settings-retrieval-token-cap')}
             value={retrievalBudget ?? ''}
             placeholder="Mode default"
             onChange={(e) => {
@@ -86,77 +100,65 @@ export function MemorySection({
               const v = Number.parseInt(e.target.value, 10);
               if (Number.isFinite(v) && v >= 0) void onRetrievalChange({ maxTokens: v });
             }}
-            style={{ width: '8rem' }}
             disabled={retrievalMode === 'off'}
           />
+          <span>tokens</span>
         </div>
-      </div>
+      </SettingField>
 
       <Suspense fallback={null}>
         <RelevanceModelCard />
       </Suspense>
 
-      <div style={{ marginBottom: '1.25rem' }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <input
-            type="checkbox"
-            checked={config?.taskReferences?.enabled !== false}
-            onChange={(e) => void onTaskReferencesChange(e.target.checked)}
-          />
-          <strong>Look up references when a task starts.</strong>
-        </label>
-        <p className="muted small" style={{ margin: '0.25rem 0 0 1.5rem' }}>
-          A task started from a request searches your knowledge catalogs and shared documents for
-          its subject once, and gives every step what it found.
-        </p>
-      </div>
+      <SettingCheck
+        label="Look up references when a task starts"
+        hint="A task started from a request searches your knowledge catalogs and shared documents for its subject once, and gives every step what it found."
+        checked={config?.taskReferences?.enabled !== false}
+        onChange={(checked) => void onTaskReferencesChange(checked)}
+      />
 
-      <div>
-        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <input
-            type="checkbox"
-            checked={summarizeEnabled}
-            onChange={(e) => void onSummarizationChange({ enabled: e.target.checked })}
-          />
-          <strong>Summarize threads into project memory.</strong>
-        </label>
-        <p className="muted small" style={{ margin: '0.25rem 0 0 1.5rem' }}>
-          Runs when a thread is archived, and on an hourly sweep for any thread that's been idle
-          past the threshold. Short threads are skipped.
-        </p>
-        <div className="new-row" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
-          <label className="muted small">Idle after (hours)</label>
-          <input
-            type="number"
-            min={1}
-            max={720}
-            aria-label="Idle after (hours)"
-            value={idleHours}
-            onChange={(e) => {
-              const v = Number.parseFloat(e.target.value);
-              if (Number.isFinite(v) && v > 0) void onSummarizationChange({ idleHours: v });
-            }}
-            style={{ width: '5rem' }}
-            disabled={!summarizeEnabled}
-          />
-          <label className="muted small" style={{ marginLeft: '1rem' }}>
-            Min user turns
+      <SettingCheck
+        label="Summarize threads into project memory"
+        hint="Runs when a thread is archived, and on an hourly sweep for any thread that's been idle past the threshold. Short threads are skipped."
+        checked={summarizeEnabled}
+        onChange={(checked) => void onSummarizationChange({ enabled: checked })}
+      />
+      <SettingField label="When to summarize">
+        <div className="gz-setting-row">
+          <label className="gz-setting-inline">
+            <span>Idle after</span>
+            <input
+              type="number"
+              min={1}
+              max={720}
+              aria-label="Idle after (hours)"
+              value={idleHours}
+              onChange={(e) => {
+                const v = Number.parseFloat(e.target.value);
+                if (Number.isFinite(v) && v > 0) void onSummarizationChange({ idleHours: v });
+              }}
+              disabled={!summarizeEnabled}
+            />
+            <span>hours</span>
           </label>
-          <input
-            type="number"
-            min={1}
-            max={50}
-            aria-label="Min user turns"
-            value={minUserTurns}
-            onChange={(e) => {
-              const v = Number.parseInt(e.target.value, 10);
-              if (Number.isFinite(v) && v > 0) void onSummarizationChange({ minUserTurns: v });
-            }}
-            style={{ width: '5rem' }}
-            disabled={!summarizeEnabled}
-          />
+          <label className="gz-setting-inline">
+            <span>with at least</span>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              aria-label="Min user turns"
+              value={minUserTurns}
+              onChange={(e) => {
+                const v = Number.parseInt(e.target.value, 10);
+                if (Number.isFinite(v) && v > 0) void onSummarizationChange({ minUserTurns: v });
+              }}
+              disabled={!summarizeEnabled}
+            />
+            <span>of your messages</span>
+          </label>
         </div>
-      </div>
-    </section>
+      </SettingField>
+    </SettingsSection>
   );
 }

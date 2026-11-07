@@ -4,9 +4,11 @@ import {
   handoffHeadline,
   handoffKindLabel,
   parseTaskHandoffNote,
+  plainRoleTitle,
 } from '@bendyline/gezel';
 import { GezelIcon } from './GezelIcon.js';
-import { RoleSuffix, StreamingStatusLine, useElapsedSeconds } from './chat-bubbles.js';
+import { PersonLabel } from './PersonLabel.js';
+import { StreamingStatusLine, roleGlyph, useElapsedSeconds } from './chat-bubbles.js';
 import type { LiveSlot } from './chat-live-slot.js';
 import {
   countSegmentTools,
@@ -92,6 +94,8 @@ export function ChatStickyHeader({
         roleBasedNameOnlyMode,
       )
     : 'Gezel';
+  // With names hidden the name already says the role, as in the bubble below.
+  const assistantRole = roleBasedNameOnlyMode ? undefined : assistantGezel?.role;
   // A task dispatch seed rides the user role but is the machinery talking —
   // the bubble labels it System, and the sticky header has to agree or the
   // attribution flips as the user scrolls. A seed the card parser recognises
@@ -106,25 +110,29 @@ export function ChatStickyHeader({
       <div className="chat-sticky-header-user" title={userMsg.content}>
         <span className="chat-sticky-header-author">
           {handoffNote
-            ? handoffKindLabel(handoffNote).toUpperCase()
+            ? handoffKindLabel(handoffNote)
             : userMsg.origin === 'system'
-              ? 'SYSTEM'
-              : 'YOU'}
+              ? 'System'
+              : 'You'}
         </span>
         <span className="chat-sticky-header-preview">{userPreview}</span>
       </div>
       <div className="chat-sticky-header-assistant" key={assistantGezelId}>
-        <GezelIcon
-          svg={assistantGezel?.icon ?? null}
-          poppetje={assistantGezel?.poppetje}
-          iconOverride={assistantGezel?.iconOverride}
+        <PersonLabel
           name={assistantName}
-          size={18}
+          roleTitle={assistantRole && plainRoleTitle(assistantRole)}
+          badge={roleGlyph(assistantRole)}
+          face={
+            <GezelIcon
+              svg={assistantGezel?.icon ?? null}
+              poppetje={assistantGezel?.poppetje}
+              iconOverride={assistantGezel?.iconOverride}
+              name={assistantName}
+              size={18}
+            />
+          }
+          className="chat-sticky-header-person msg-author"
         />
-        <span className="chat-sticky-header-author">{assistantName}</span>
-        {!roleBasedNameOnlyMode && assistantGezel?.role && (
-          <RoleSuffix role={assistantGezel.role} />
-        )}
         {isLive && slotForLive && (
           <StreamingStatusLine
             failed={Boolean(slotForLive.error)}

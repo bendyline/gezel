@@ -271,7 +271,7 @@ export class RemoteGezelProvider implements LLMProvider {
       // host, or a pin that never matched this machine.
       if (code === 'model_not_loaded') {
         throw new ModelNotLoadedRemotelyError(
-          `${this.opts.label} doesn't have the model "${modelNameFromBrokerId(bLocal)}" ready to run. Choose a model that is installed on it in Settings → Artificial Intelligence, or download this one there.`,
+          `${this.opts.label} doesn't have the model "${modelNameFromBrokerId(bLocal)}" ready to run. Choose a model that is installed on it in Settings → Artificial intelligence, or download this one there.`,
           this.opts.remoteId,
           bLocal,
         );

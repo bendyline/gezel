@@ -477,6 +477,12 @@ jobs:
           AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
 
+      # GitHub refuses a release asset of 2 GiB or more, and only the release
+      # job's upload would find out. The installers carry every engine key.
+      - name: Check installer fits a GitHub release (Windows)
+        shell: pwsh
+        run: node scripts/check-release-asset-sizes.mjs (Get-ChildItem 'packages/app/dist/installers/*.exe').FullName
+
       # `electronFuses` in electron-builder.yml is only intent; the wire in
       # the signed binary is what ships.
       - name: Verify Electron fuses (Windows)
@@ -1196,6 +1202,9 @@ jobs:
       - name: Stamp the macOS floor into the update feed
         run: node scripts/stamp-mac-update-floor.mjs packages/app/dist/installers/latest-mac.yml
 
+      - name: Check installers fit a GitHub release (macOS)
+        run: node scripts/check-release-asset-sizes.mjs packages/app/dist/installers/*.pkg packages/app/dist/installers/*.zip
+
       - name: Verify macOS signing and notarization
         run: |
           set -euo pipefail
@@ -1608,6 +1617,11 @@ jobs:
       - name: Package Linux installer
         run: pnpm --filter @bendyline/gezel-app exec electron-builder --linux deb:${{ matrix.arch }} rpm:${{ matrix.arch }} --publish never
 
+      # The amd64 .deb is the largest asset Gezel publishes; with native-v0.1.61's
+      # ROCm key it sits within ~120 MiB of GitHub's 2 GiB asset limit.
+      - name: Check installers fit a GitHub release (Linux)
+        run: node scripts/check-release-asset-sizes.mjs packages/app/dist/installers/*.deb packages/app/dist/installers/*.rpm
+
       - name: Verify Electron fuses (Linux)
         run: |
           set -euo pipefail
@@ -1797,6 +1811,11 @@ jobs:
             | sed 's|^\./||' | sort | xargs sha256sum > SHA256SUMS
           sha256sum -c SHA256SUMS
           cat SHA256SUMS
+
+      # Last chance before anything is attested or uploaded: a release that
+      # fails halfway through its uploads leaves a draft missing installers.
+      - name: Check every asset fits a GitHub release
+        run: node scripts/check-release-asset-sizes.mjs release-assets/*
 
       # SLSA build-provenance over every published asset — installers plus
       # SHA256SUMS, latest.yml, the blockmap and the SBOM. latest.yml in

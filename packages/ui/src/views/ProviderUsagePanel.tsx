@@ -1,9 +1,21 @@
 import type { ProviderUsage, QuotaBucket } from '@bendyline/gezel-client';
 
-export function ProviderUsagePanel({ label, data }: { label: string; data: ProviderUsage }) {
+/**
+ * Quota buckets and turn counts for one cloud provider. Placed in a settings
+ * section that already names it, it drops its own eyebrow (`showTitle`).
+ */
+export function ProviderUsagePanel({
+  label,
+  data,
+  showTitle = true,
+}: {
+  label: string;
+  data: ProviderUsage;
+  showTitle?: boolean;
+}) {
   return (
     <div className="provider-usage-panel">
-      <h4 className="provider-usage-heading">{label}</h4>
+      {showTitle && <h4 className="provider-usage-heading">{label}</h4>}
       <div className="usage-grid">
         {data.quotaBuckets.map((b) => (
           <QuotaBucketCard key={b.name} bucket={b} />

@@ -144,7 +144,28 @@ type GroupId = 'projects' | 'documents' | 'gezels';
 
 const WIDTH_KEY = 'gezel:nav:sidebar-width';
 const COLLAPSED_KEY = 'gezel:nav:sidebar-collapsed';
+const STAY_OPEN_KEY = 'gezel:nav:sidebar-stay-open';
 const GROUPS_KEY = 'gezel:nav:groups';
+
+/**
+ * Areas that bring their own list beside their content. There the rail
+ * folds to its icons on its own, so one navigation column shows at a time:
+ * with both open, the content sat between two lists, about 520px of a
+ * 1440px window. Expanding the rail by hand there pins it open (remembered);
+ * collapsing it there hands it back to this rule.
+ */
+const LIST_AREAS: ReadonlySet<RecentTabArea> = new Set([
+  'gezels',
+  'documents',
+  'tasks',
+  'craftbooks',
+  'scripts',
+  'history',
+  'settings',
+  'handboek',
+  'knowledge',
+  'benchmarks',
+]);
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 420;
@@ -209,6 +230,14 @@ function readStoredCollapsed(): boolean {
   }
 }
 
+function readStoredStayOpen(): boolean {
+  try {
+    return window.localStorage.getItem(STAY_OPEN_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 function readStoredGroups(): Record<GroupId, boolean> {
   try {
     const raw = window.localStorage.getItem(GROUPS_KEY);
@@ -267,7 +296,9 @@ export function Sidebar({
   const [groups, setGroups] = useState<Record<GroupId, boolean>>(() => readStoredGroups());
   const [width, setWidth] = useState<number>(() => readStoredWidth());
   const [storedCollapsed, setCollapsed] = useState<boolean>(() => readStoredCollapsed());
-  const collapsed = !compact && storedCollapsed;
+  const [stayOpen, setStayOpen] = useState<boolean>(() => readStoredStayOpen());
+  const inListArea = selection?.kind === 'area' && LIST_AREAS.has(selection.area);
+  const collapsed = !compact && (storedCollapsed || (inListArea && !stayOpen));
   const roleBasedNameOnly = useRoleBasedNameOnlyMode();
   const showAdvancedFeatures = useShowAdvancedFeatures();
   const debugMode = useDebugMode();
@@ -581,6 +612,28 @@ export function Sidebar({
       /* private mode / quota */
     }
   }, []);
+  const commitStayOpen = useCallback((v: boolean) => {
+    setStayOpen(v);
+    try {
+      window.localStorage.setItem(STAY_OPEN_KEY, v ? '1' : '0');
+    } catch {
+      /* private mode / quota */
+    }
+  }, []);
+  // Every way of folding or opening the rail goes through here. In a list
+  // area the person's choice is the stay-open pin, so leaving the area
+  // restores the rail they had; elsewhere it is the ordinary collapsed state.
+  const setRailCollapsed = useCallback(
+    (v: boolean) => {
+      if (!inListArea) {
+        commitCollapsed(v);
+        return;
+      }
+      commitStayOpen(!v);
+      if (!v && storedCollapsed) commitCollapsed(false);
+    },
+    [inListArea, storedCollapsed, commitCollapsed, commitStayOpen],
+  );
   const commitGroups = useCallback((next: Record<GroupId, boolean>) => {
     setGroups(next);
     try {
@@ -595,13 +648,13 @@ export function Sidebar({
       // Toggling a group while collapsed first expands the rail so the
       // freshly-opened list is actually visible.
       if (collapsed) {
-        commitCollapsed(false);
+        setRailCollapsed(false);
         commitGroups({ ...groups, [id]: true });
         return;
       }
       commitGroups({ ...groups, [id]: !groups[id] });
     },
-    [collapsed, groups, commitCollapsed, commitGroups],
+    [collapsed, groups, setRailCollapsed, commitGroups],
   );
 
   // Opening a gezel's chat (Say hello on a crew card, a search hit) opens the
@@ -631,9 +684,9 @@ export function Sidebar({
         // a left rail, while leftward motion grows a right rail.
         const next = startWidth + (ev.clientX - startX) * widthDirection;
         if (next < MIN_WIDTH - COLLAPSE_SNAP) {
-          commitCollapsed(true);
+          setRailCollapsed(true);
         } else {
-          commitCollapsed(false);
+          setRailCollapsed(false);
           commitWidth(next);
         }
       };
@@ -647,7 +700,7 @@ export function Sidebar({
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
     },
-    [collapsed, width, commitWidth, commitCollapsed],
+    [collapsed, width, commitWidth, setRailCollapsed],
   );
 
   const onGripKeyDown = useCallback(
@@ -661,22 +714,22 @@ export function Sidebar({
         if (collapsed && delta < 0) return;
         const next = (collapsed ? MIN_WIDTH : width) + delta;
         if (next < MIN_WIDTH - COLLAPSE_SNAP) {
-          commitCollapsed(true);
+          setRailCollapsed(true);
           return;
         }
-        commitCollapsed(false);
+        setRailCollapsed(false);
         commitWidth(next);
       } else if (e.key === 'Home') {
         e.preventDefault();
-        commitCollapsed(false);
+        setRailCollapsed(false);
         commitWidth(MAX_WIDTH);
       } else if (e.key === 'End') {
         e.preventDefault();
-        commitCollapsed(false);
+        setRailCollapsed(false);
         commitWidth(MIN_WIDTH);
       }
     },
-    [collapsed, width, commitWidth, commitCollapsed],
+    [collapsed, width, commitWidth, setRailCollapsed],
   );
 
   // ── Add affordances → reuse existing create flows in the views ──
@@ -1308,7 +1361,7 @@ export function Sidebar({
             <button
               type="button"
               className="app-sidebar-collapse-toggle"
-              onClick={() => commitCollapsed(!collapsed)}
+              onClick={() => setRailCollapsed(!collapsed)}
               title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               aria-pressed={collapsed}

@@ -13,7 +13,7 @@ import type { GezelClient } from '@bendyline/gezel-client';
 import type { Command } from 'commander';
 import { CliError } from './connection.js';
 
-/** The names Settings → Security & Compliance shows for each level. */
+/** The names Settings → Security & compliance shows for each level. */
 export const SECURITY_LEVEL_LABELS: Record<SecurityLevel, string> = {
   'super-lockdown': 'Super Lockdown',
   lockdown: 'Lockdown',

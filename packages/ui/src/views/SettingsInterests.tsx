@@ -1,4 +1,5 @@
 import { InterestPicker } from '../components/InterestPicker.js';
+import { SettingsSection } from '../components/SettingsSection.js';
 import { useInterests } from '../components/useInterests.js';
 
 /**
@@ -10,12 +11,12 @@ import { useInterests } from '../components/useInterests.js';
 export function SettingsInterests() {
   const interests = useInterests();
   return (
-    <section className="settings-interests" style={{ marginBottom: '2rem' }}>
-      <h3>What you use gezel for</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Pick any. What you pick comes first when gezel suggests work; everything else stays a click
-        away.
-      </p>
+    <SettingsSection
+      id="settings-interests"
+      className="settings-interests"
+      title="What you use gezel for"
+      hint="Pick any. What you pick comes first when gezel suggests work; everything else stays a click away."
+    >
       {interests.loaded && (
         <InterestPicker
           label="What you use gezel for"
@@ -24,6 +25,6 @@ export function SettingsInterests() {
           withHints
         />
       )}
-    </section>
+    </SettingsSection>
   );
 }

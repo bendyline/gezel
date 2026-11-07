@@ -62,7 +62,7 @@ export function notReadyError(message: string, code: NotReadyCode): Error {
  */
 export function noModelYetMessage(engineLabel: string, active: ActiveInstallLike | null): string {
   if (!active) {
-    return `${engineLabel}: no model is installed yet. Download one from Settings → Artificial Intelligence, then try again.`;
+    return `${engineLabel}: no model is installed yet. Download one from Settings → Artificial intelligence, then try again.`;
   }
   if (active.phase !== 'downloading') {
     const verb = active.phase === 'verifying' ? 'being verified' : 'being prepared';

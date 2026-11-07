@@ -281,13 +281,13 @@ describe('ChatTimelineView — jumping to a failed turn', () => {
     });
     expect(banner).toHaveTextContent(/isn't available on this device/);
     expect(banner).toHaveTextContent('qwen3.6-27b-q8');
-    expect(banner).toHaveTextContent(/Settings → Artificial Intelligence/);
+    expect(banner).toHaveTextContent(/Settings → Artificial intelligence/);
     expect(banner).not.toHaveTextContent(/model_not_loaded|HTTP 404/);
   });
 
   it('tells a turn that could not start once, with the fix and no bug report', async () => {
     const error =
-      'Local model: no model is installed yet. Download one from Settings → Artificial Intelligence, then try again.';
+      'Local model: no model is installed yet. Download one from Settings → Artificial intelligence, then try again.';
     const failed = {
       sessionLastTurnError: error,
       sessionLastTurnErrorDetail: { code: 'model-not-ready' },

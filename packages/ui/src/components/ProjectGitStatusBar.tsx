@@ -812,6 +812,20 @@ export function ProjectGitStatusBar({
                   : `AI indexing ${overallProgress}% complete`
                 : 'Workspace index is ready';
   const indexTriggerLabel = `Indexing status: ${indexHeadline}`;
+  // A state that asks for attention says so beside its dot; a lone red dot
+  // in the corner read as an unexplained error. Ready stays a quiet dot.
+  const indexChipLabel =
+    indexStatus === null || indexDotState === 'fresh'
+      ? null
+      : indexState === 'never'
+        ? 'Not indexed'
+        : indexDotState === 'indexing'
+          ? 'Scanning'
+          : indexDotState === 'disabled'
+            ? 'Indexing off'
+            : indexDotState === 'scan'
+              ? 'AI indexing'
+              : 'Out of date';
   const indexUpdateDisabled =
     indexStatus === null ||
     indexState === 'disabled' ||
@@ -1012,6 +1026,11 @@ export function ProjectGitStatusBar({
                 />
               </svg>
               <span className="project-index-dot" aria-hidden />
+              {indexChipLabel && (
+                <span className="project-index-chip-label" aria-hidden>
+                  {indexChipLabel}
+                </span>
+              )}
             </button>
           </Popover.Trigger>
           <Popover.Content

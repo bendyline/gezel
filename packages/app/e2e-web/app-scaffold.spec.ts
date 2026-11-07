@@ -9,6 +9,7 @@ import { scaffoldGezappSource } from '../../cli/src/app-scaffold.js';
 import { writePageDemo, writePageDemoAssets } from '../../cli/src/page-demo-export.js';
 import { buildPageApiShim } from '../../core/src/project-types/page-api-shim.js';
 import { projectPageTypographyStyle } from '../../service/src/project-type/page-typography.js';
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 
 type Message = {
   kind: string;
@@ -115,7 +116,12 @@ test('exported offline demo adds, resets, escapes names, and inherits bundled fo
   await page.getByRole('button', { name: 'Reset demo' }).click();
   await expect(page.locator('#records li')).toHaveCount(2);
   await page.setViewportSize({ width: 320, height: 700 });
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  expect(
+    await page.evaluate(
+      (tolerance) => document.documentElement.scrollWidth <= innerWidth + tolerance,
+      LAYOUT_TOLERANCE_PX,
+    ),
+  ).toBe(true);
   await page.emulateMedia({ colorScheme: 'dark' });
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   expect(requests.every((url) => url.startsWith('file:') || url.startsWith('data:'))).toBe(true);

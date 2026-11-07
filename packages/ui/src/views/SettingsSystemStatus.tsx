@@ -3,6 +3,7 @@ import { type CSSProperties, useCallback, useEffect, useRef, useState } from 're
 import { api } from '../api.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
+import { SettingCheck } from '../components/SettingsSection.js';
 import { type SystemNotice, serviceNotice, updateNotice } from '../system-notices.js';
 import { useUpdateState } from '../update-state.js';
 
@@ -43,10 +44,10 @@ export function AutostartToggle() {
     void refresh();
   }, [refresh]);
 
-  if (state.kind === 'loading') return <p className="muted small">Checking autostart…</p>;
+  if (state.kind === 'loading') return <p className="gz-setting-hint">Checking autostart…</p>;
   if (state.kind === 'unsupported') {
     return (
-      <p className="muted small">
+      <p className="gz-setting-hint">
         Background autostart is managed from the gezel desktop app — open this page there to keep
         the service running at login.
       </p>
@@ -66,23 +67,16 @@ export function AutostartToggle() {
   };
 
   return (
-    <div className="autostart-toggle" style={{ marginTop: '0.75rem' }}>
-      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <input
-          type="checkbox"
-          checked={state.installed}
-          disabled={state.busy}
-          onChange={() => void toggle()}
-        />
-        <span>
-          <strong>Run gezel service in the background at login.</strong>{' '}
-          <span className="muted small">
-            (Installs as a {autostartLabel()} so Gezel starts even when the app window isn't open.)
-          </span>
-        </span>
-      </label>
+    <div className="autostart-toggle gz-setting-stack">
+      <SettingCheck
+        label="Run the Gezel service in the background at login"
+        hint={`Installs as a ${autostartLabel()} so Gezel starts even when the app window isn't open.`}
+        checked={state.installed}
+        disabled={state.busy}
+        onChange={() => void toggle()}
+      />
       {state.error && (
-        <p className="error small" style={{ marginTop: '0.5rem' }}>
+        <p className="error small" role="alert">
           {state.error}
         </p>
       )}
@@ -315,17 +309,13 @@ export function BackgroundServiceStatus() {
   });
 
   if (!notice) {
-    return (
-      <p className="muted small" style={{ marginTop: '0.75rem' }}>
-        The background service is running normally.
-      </p>
-    );
+    return <p className="gz-setting-hint">The background service is running normally.</p>;
   }
 
   return (
-    <div style={{ marginTop: '0.75rem' }}>
+    <div className="gz-setting">
       <SystemNoticeNote notice={notice} />
-      <p className="muted small" style={{ marginTop: '0.5rem' }}>
+      <p className="gz-setting-hint">
         Service logs are under <code>~/.gezel/logs/</code>.{' '}
         <button
           type="button"
@@ -358,13 +348,7 @@ export function UpdateStatus() {
   const [installing, setInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
 
-  if (notice) {
-    return (
-      <div style={{ marginTop: '0.75rem' }}>
-        <SystemNoticeNote notice={notice} />
-      </div>
-    );
-  }
+  if (notice) return <SystemNoticeNote notice={notice} />;
 
   if (state?.kind === 'checking') {
     return (

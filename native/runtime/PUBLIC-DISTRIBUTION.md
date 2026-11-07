@@ -23,7 +23,19 @@ dependencies from Google's Maven repository and Maven Central. This includes
 the `android-mlkit` adapter, not Gemini Nano weights or a repackaged Google SDK.
 The published native engine currently targets arm64-v8a.
 
-These packages exclude Gezel's web app, Capacitor, speech packs, test models,
+`gezel-mobile-<version>-speech-ios.tar.gz` and `-speech-android.tar.gz` hold the
+offline speech runtime: whisper.cpp for speech to text and Kokoro on ONNX
+Runtime for text to speech, behind one C API. On iOS it is a dynamic
+`GezelSpeech.xcframework` (device and simulator) whose framework carries its
+own `PrivacyInfo.xcprivacy`; embed and sign it with the app. On Android it is
+a folder Maven repository with `com.bendyline.gezel:gezel-speech:<version>`,
+whose POM requires `gezel-llama` of the same version for the shared C++ runtime,
+so add both archives' `maven/` folders as repositories. ONNX Runtime is
+Microsoft's own build (the Maven Central AAR and the iOS pod archive), linked in
+unchanged. `@bendyline/gezel-capacitor` stages these runtimes beside the SDKs.
+The speech models are not included: the app supplies or downloads them.
+
+These packages exclude Gezel's web app, Capacitor, speech models, test models,
 APKs, AABs and Xcode app archives. They contain a file inventory, source commit,
 engine provenance and license notices. Native release `SHA256SUMS` and build
 attestations cover them alongside the desktop archives. Verify those against
@@ -55,15 +67,18 @@ or repackaging another listed SDK requires revisiting the release policy.
 Both Swift targets include `PrivacyInfo.xcprivacy`. The runtime declares local
 model-file metadata and elapsed-time measurement (including the linked llama
 engine). Model storage declares metadata for sandbox/user-selected files and
-free-space checks before imports/downloads. No tracking or collected data is
-declared by these iOS libraries. The embedding app remains responsible for its
+free-space checks before imports/downloads. `GezelSpeech.framework` declares
+model-file metadata, which whisper.cpp and ONNX Runtime read when they open a
+model. No tracking or collected data is declared by these iOS libraries. The embedding app remains responsible for its
 own behavior, other SDKs, privacy labels and final archive validation. See
 [required-reason API declarations](https://developer.apple.com/documentation/bundleresources/describing-use-of-required-reason-api)
 and [approved reasons](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitypereasons).
 
 ## License and provider terms
 
-Gezel, llama.cpp and ggml use MIT licenses, whose notices are included. MIT
+Gezel, llama.cpp, ggml, whisper.cpp and ONNX Runtime use MIT licenses, whose
+notices are included; the speech runtimes also carry ONNX Runtime's third-party
+notices. MIT
 permits public redistribution and use within proprietary apps while preserving
 its notices. `THIRD_PARTY_LICENSES/` preserves the shared, commit-bound llama.cpp
 notice inventory, including JSON, Unicode and optimized math dependencies.

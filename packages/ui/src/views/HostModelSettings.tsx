@@ -3,6 +3,7 @@ import { api } from '../api.js';
 import { requestBackupRestore } from '../components/BackupRestoreDialog.js';
 import { UserMemoriesEditor } from '../components/MemoriesTree.js';
 import { NotificationsSetting } from '../components/NotificationsSetting.js';
+import { SettingCheck, SettingField, SettingsSection } from '../components/SettingsSection.js';
 import { SocialModeToggle } from '../components/SocialModeToggle.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import {
@@ -55,7 +56,7 @@ export function HostModelSettings() {
     }
   };
   const sections = [
-    { id: 'models', label: 'Artificial Intelligence' },
+    { id: 'models', label: 'Artificial intelligence' },
     { id: 'general', label: 'General' },
     ...(runtimeCapabilities().memories ? [{ id: 'aboutYou', label: 'About you' }] : []),
     ...(runtimeCapabilities().audio ? [{ id: 'audio', label: 'Audio' }] : []),
@@ -92,52 +93,55 @@ export function HostModelSettings() {
         ) : section === 'about' ? (
           <HostAbout />
         ) : section === 'backups' ? (
-          <section>
-            <h3>Keep a copy of your work</h3>
-            <p>
-              Back up your projects, crew members, conversations, and documents to a file. You can
-              review a backup before restoring it.
-            </p>
-            <button type="button" onClick={() => requestBackupRestore({ tab: 'backup' })}>
-              Back up content…
-            </button>{' '}
-            <button type="button" onClick={() => requestBackupRestore({ tab: 'restore' })}>
-              Restore from a backup…
-            </button>
-          </section>
+          <SettingsSection
+            id="settings-backups"
+            title="Keep a copy of your work"
+            hint="Back up your projects, crew members, conversations, and documents to a file. You can review a backup before restoring it."
+          >
+            <div className="gz-setting-row">
+              <button type="button" onClick={() => requestBackupRestore({ tab: 'backup' })}>
+                Back up content…
+              </button>
+              <button type="button" onClick={() => requestBackupRestore({ tab: 'restore' })}>
+                Restore from a backup…
+              </button>
+            </div>
+          </SettingsSection>
         ) : (
           <>
             <SettingsInterests />
-            <section>
-              <h3>Appearance</h3>
-              <ThemePicker />
-            </section>
-            <section className="settings-sidebar-side">
-              <h3>Sidebar position</h3>
-              <SidebarSidePicker />
-            </section>
-            <section>
-              <h3>Social mode</h3>
+            <SettingsSection id="settings-appearance" title="Appearance">
+              <SettingField label="Theme" hint="Light or dark mode, or follow the OS.">
+                <ThemePicker />
+              </SettingField>
+              <SettingField
+                label="Sidebar position"
+                className="settings-sidebar-side"
+                hint="Which side the navigation rail (projects, crew, documents…) sits on."
+              >
+                <SidebarSidePicker />
+              </SettingField>
+            </SettingsSection>
+            <SettingsSection
+              id="settings-names-character"
+              title="Names and character"
+              hint="How crew members look and talk to you."
+            >
               <SocialModeToggle />
-            </section>
-            <section>
-              <h3>Notifications</h3>
+            </SettingsSection>
+            <SettingsSection id="settings-notifications" title="Notifications">
               <NotificationsSetting />
-            </section>
-            <section>
-              <h3>Advanced</h3>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={advanced}
-                  disabled={saving}
-                  onChange={(event) => void saveAdvanced(event.target.checked)}
-                />{' '}
-                Show advanced features
-              </label>
-              <p className="muted small">Show Scripts and other advanced tools in the sidebar.</p>
+            </SettingsSection>
+            <SettingsSection id="settings-advanced" title="Advanced">
+              <SettingCheck
+                label="Show advanced features"
+                hint="Show Scripts and other advanced tools in the sidebar."
+                checked={advanced}
+                disabled={saving}
+                onChange={(checked) => void saveAdvanced(checked)}
+              />
               {error && <p role="alert">{error}</p>}
-            </section>
+            </SettingsSection>
           </>
         )}
       </div>
@@ -156,13 +160,12 @@ function HostAbout() {
   }, []);
   return (
     <>
-      <section>
-        <h3>About</h3>
+      <SettingsSection id="settings-about" title="About">
         <dl className="settings-facts">
           <dt>Version</dt>
           <dd>{version === null ? '…' : version === '0.0.0' ? 'development build' : version}</dd>
         </dl>
-      </section>
+      </SettingsSection>
       <SettingsLegalSection />
     </>
   );

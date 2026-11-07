@@ -7,6 +7,7 @@ import { _electron as electron } from 'playwright';
 import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { LAYOUT_TOLERANCE_PX, expectNear } from './helpers/layout.js';
 import { captureScreenshot } from './helpers/screenshot.js';
 
 /**
@@ -125,9 +126,9 @@ test('checkers: create from gallery, move on the board, the reaction summons the
   );
   const widths = cellSizes.map(({ width }) => width);
   const heights = cellSizes.map(({ height }) => height);
-  expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(0.5);
-  expect(Math.max(...heights) - Math.min(...heights)).toBeLessThan(0.5);
-  expect(Math.abs(widths[0]! - heights[0]!)).toBeLessThan(0.5);
+  expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
+  expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
+  expectNear(widths[0]!, heights[0]!);
 
   // New games offer the standard capture rule or a house-rule variant
   // where an ordinary move remains legal even when a capture is available.

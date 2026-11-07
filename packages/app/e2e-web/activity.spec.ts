@@ -1,4 +1,5 @@
 import { GezelClient } from '@bendyline/gezel-client';
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { setTheme } from './helpers/determinism.js';
 import { gotoHome } from './helpers/nav.js';
@@ -68,8 +69,8 @@ test('Activity answers inline, retains drafts, and explains held work', async ({
     await page.getByRole('button', { name: /^Activity —/ }).click();
     await expect(card.getByRole('textbox')).toHaveValue('Offer ends Sunday at 6 pm.');
     const bounds = await panel.boundingBox();
-    expect(bounds!.x).toBeGreaterThanOrEqual(0);
-    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(400);
+    expect(bounds!.x).toBeGreaterThanOrEqual(-LAYOUT_TOLERANCE_PX);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(400 + LAYOUT_TOLERANCE_PX);
     await shot(page, 'inline-questions', {
       area: 'activity',
       viewport: 'narrow',

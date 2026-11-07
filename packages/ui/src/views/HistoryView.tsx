@@ -371,7 +371,7 @@ export function HistoryView({
             onChange={(e) => setQ(e.target.value)}
             style={{ flex: 1 }}
           />
-          <button type="button" onClick={() => void refresh()}>
+          <button type="button" className="secondary" onClick={() => void refresh()}>
             Refresh
           </button>
         </div>

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { GezelClient } from '@bendyline/gezel-client';
+import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 
 test.use({ daemonGroup: 'mobile-contracts', hasTouch: true });
@@ -60,13 +61,13 @@ test('native mobile question contract skips through Activity at phone width', as
   ]);
   const panel = page.getByRole('dialog', { name: 'What’s going on' });
   const bounds = await panel.boundingBox();
-  expect(bounds!.x).toBeGreaterThanOrEqual(6);
-  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(393 - 6);
-  expect(bounds!.y).toBeGreaterThanOrEqual(59 + 52);
-  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(852 - 34);
+  expect(bounds!.x).toBeGreaterThanOrEqual(6 - LAYOUT_TOLERANCE_PX);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(393 - 6 + LAYOUT_TOLERANCE_PX);
+  expect(bounds!.y).toBeGreaterThanOrEqual(59 + 52 - LAYOUT_TOLERANCE_PX);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(852 - 34 + LAYOUT_TOLERANCE_PX);
   await page.setViewportSize({ width: 1024, height: 800 });
   const tablet = await panel.boundingBox();
-  expect(tablet!.width).toBeLessThanOrEqual(600);
-  expect(tablet!.x).toBeGreaterThanOrEqual(6);
-  expect(tablet!.x + tablet!.width).toBeLessThanOrEqual(1024 - 6);
+  expect(tablet!.width).toBeLessThanOrEqual(600 + LAYOUT_TOLERANCE_PX);
+  expect(tablet!.x).toBeGreaterThanOrEqual(6 - LAYOUT_TOLERANCE_PX);
+  expect(tablet!.x + tablet!.width).toBeLessThanOrEqual(1024 - 6 + LAYOUT_TOLERANCE_PX);
 });

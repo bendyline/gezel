@@ -8,7 +8,7 @@
  *   server's instance, an SRV naming its port, a TXT carrying its identity
  *   fingerprint and display name, and an A record per LAN address. It
  *   announces on start and says goodbye (TTL 0) on stop.
- * - The **browser** runs only while someone has Settings → Remote Servers
+ * - The **browser** runs only while someone has Settings → Remote servers
  *   open. It sends one-shot "legacy unicast" queries from an ephemeral port
  *   (RFC 6762 §6.7), so responders answer it directly by unicast: it never
  *   has to bind 5353 beside the OS's own responder, and a stateful firewall

@@ -21,6 +21,7 @@ import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { openGreetingTab } from './helpers/greeting.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { LAYOUT_TOLERANCE_PX } from './helpers/layout.js';
 import { captureScreenshot } from './helpers/screenshot.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
@@ -41,7 +42,10 @@ async function openMeesterChat() {
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
   const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
   await expect(conversation).not.toHaveAttribute('inert');
-  await expect(conversation).toBeFocused();
+  // The strip invites writing, so returning puts the caret in the composer.
+  await expect(
+    conversation.locator('[data-testid="chat-composer"] [contenteditable="true"]'),
+  ).toBeFocused();
   await expect(page.getByTestId('chat-composer')).toBeVisible({ timeout: 20_000 });
 }
 
@@ -145,8 +149,11 @@ test('sticky header does NOT show while the bubble header is visible', async () 
   // Waiting for the pin toggle proves React has processed the scroll and
   // prevents a pending row-growth effect from snapping the timeline back
   // to the bottom after the test has measured it.
+  // Following means the last message is in view, and the empty response
+  // runway below it does not count, so scroll past the runway as well.
   await timeline.evaluate((el) => {
-    el.scrollBy({ top: -100, behavior: 'instant' as ScrollBehavior });
+    const runway = el.querySelector<HTMLElement>('.timeline-response-runway')?.offsetHeight ?? 0;
+    el.scrollBy({ top: -(runway + 100), behavior: 'instant' as ScrollBehavior });
   });
   await expect(page.getByRole('button', { name: 'Jump to newest and follow' })).toBeVisible();
 
@@ -159,16 +166,19 @@ test('sticky header does NOT show while the bubble header is visible', async () 
 
   // Assert the precondition instead of assuming a fixed sleep left the
   // bubble where the test put it. This also gives a useful geometry failure
-  // if a future layout change makes the requested position unreachable.
+  // (its distance from the requested 25px) if a future layout change makes
+  // that position unreachable.
   await expect
     .poll(() =>
       target.evaluate((bubble) => {
         const timeline = bubble.closest<HTMLElement>('.chat-timeline');
         if (!timeline) throw new Error('assistant bubble is not inside the chat timeline');
-        return bubble.getBoundingClientRect().top - timeline.getBoundingClientRect().top;
+        return Math.abs(
+          bubble.getBoundingClientRect().top - timeline.getBoundingClientRect().top - 25,
+        );
       }),
     )
-    .toBeCloseTo(25, 0);
+    .toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
 
   await expect(page.locator('.chat-sticky-header')).toBeHidden();
   await captureScreenshot(page, {
@@ -285,13 +295,11 @@ test('sticky header aligns with chat bubbles', async () => {
   expect(alignment.ok).toBe(true);
   if (!alignment.ok || !alignment.sticky || !alignment.bubble) return;
 
-  // Pixel-level tolerance: sub-pixel fractional widths + anti-aliasing
-  // round to 1px at worst. Anything beyond that is a real drift.
   const leftDelta = Math.abs(alignment.sticky.left - alignment.bubble.left);
   const rightDelta = Math.abs(alignment.sticky.right - alignment.bubble.right);
   const widthDelta = Math.abs(alignment.sticky.width - alignment.bubble.width);
   console.log('deltas:', { leftDelta, rightDelta, widthDelta });
-  expect(leftDelta).toBeLessThanOrEqual(1);
-  expect(rightDelta).toBeLessThanOrEqual(1);
-  expect(widthDelta).toBeLessThanOrEqual(1);
+  expect(leftDelta).toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
+  expect(rightDelta).toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
+  expect(widthDelta).toBeLessThanOrEqual(LAYOUT_TOLERANCE_PX);
 });

@@ -764,6 +764,7 @@ function ProjectChatBody({
                   onExpandedChange={setComposerExpanded}
                   draftId={draftId || undefined}
                   onDraftIdChange={(next) => setDraftId(next ?? '')}
+                  threadBarOwnRow
                   belowAddressLine={
                     <SessionSwitcher
                       gezelId={selectedGezel.id}

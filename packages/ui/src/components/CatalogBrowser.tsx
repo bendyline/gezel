@@ -253,7 +253,7 @@ export function CatalogBrowser({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
-        <button type="button" onClick={() => void refresh()}>
+        <button type="button" className="secondary" onClick={() => void refresh()}>
           Refresh
         </button>
       </div>

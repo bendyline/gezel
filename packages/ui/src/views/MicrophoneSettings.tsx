@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { SettingField, SettingsSection, settingHintId } from '../components/SettingsSection.js';
 import {
   type MicrophoneInput,
   listMicrophoneInputs,
@@ -85,16 +86,21 @@ export function MicrophoneSettings() {
     microphones.length === 0 || microphones.every((input) => !input.label);
 
   return (
-    <section style={{ marginTop: '2rem' }}>
-      <h3>Microphone</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Choose the input used by the Narrate button in chat.
-      </p>
-      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-        <label className="provider-row">
-          <span>Input</span>
+    <SettingsSection
+      id="settings-microphone"
+      title="Microphone"
+      hint="Choose the input used by the Narrate button in chat."
+    >
+      <SettingField
+        label="Input"
+        controlId="settings-microphone-input"
+        hint="Choose System default to follow your operating system's input selection."
+      >
+        <div className="gz-setting-row">
           <select
+            id="settings-microphone-input"
             aria-label="Microphone input"
+            aria-describedby={settingHintId('settings-microphone-input')}
             value={effectiveDeviceId(microphones, deviceId, deviceLabel)}
             disabled={saving}
             onChange={(event) => void onSetMicrophone(event.target.value)}
@@ -113,16 +119,21 @@ export function MicrophoneSettings() {
                 </option>
               )}
           </select>
-        </label>
-        <button type="button" onClick={() => void refreshMicrophones(needsIdentification)}>
-          {needsIdentification ? 'Identify microphones' : 'Refresh'}
-        </button>
-      </div>
-      <p className="muted small">
-        Choose System default to follow your operating system's input selection.
-      </p>
-      {error && <p className="error">{error}</p>}
-    </section>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void refreshMicrophones(needsIdentification)}
+          >
+            {needsIdentification ? 'Identify microphones' : 'Refresh'}
+          </button>
+        </div>
+      </SettingField>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
+    </SettingsSection>
   );
 }
 

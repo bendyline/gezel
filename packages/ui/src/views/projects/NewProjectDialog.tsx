@@ -15,7 +15,7 @@ import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { api } from '../../api.js';
 import { openAddFolder } from '../../components/AddFolderSheet.js';
-import { CatalogArtwork } from '../../components/CatalogArtwork.js';
+import { CatalogArtwork, catalogMarkProps } from '../../components/CatalogArtwork.js';
 import { GallerySearch } from '../../components/GallerySearch.js';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
@@ -84,7 +84,11 @@ function TypeCard({
       onClick={onSelect}
       style={{ '--card-i': Math.min(index, 11) } as React.CSSProperties}
     >
-      <span className="gz-npd-card-mark" aria-hidden="true">
+      <span
+        className="gz-npd-card-mark"
+        aria-hidden="true"
+        {...catalogMarkProps(ground, Boolean(iconSvg || logoUrl))}
+      >
         <CatalogArtwork
           {...(iconSvg ? { iconSvg } : {})}
           {...(logoUrl ? { logoUrl } : {})}

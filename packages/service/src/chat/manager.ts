@@ -13271,7 +13271,7 @@ export class ChatManager extends LocalEngineRuntime {
     // Local engines (ollama / llama-cpp / mlx / ds4) are always permitted.
     if (!isLocalProvider(name) && !resolveSecurityPolicy(config).allowExternalChat) {
       throw new Error(
-        `Security policy: external chat providers are disabled (provider "${name}" blocked). Switch to a local model, or raise the security level in Settings → Security & Compliance.`,
+        `Security policy: external chat providers are disabled (provider "${name}" blocked). Switch to a local model, or raise the security level in Settings → Security & compliance.`,
       );
     }
     const [githubToken, openaiApiKey, openaiOrganization, anthropicApiKey] = await Promise.all([

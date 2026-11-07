@@ -8,6 +8,7 @@ import {
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { SettingField, settingHintId } from './SettingsSection.js';
 import { TuningPanel } from './TuningPanel.js';
 
 interface InstallModelTuningEditorProps {
@@ -93,7 +94,7 @@ export function InstallModelTuningEditor({
   );
 
   return (
-    <div className="install-model-tuning-editor" style={{ marginTop: '0.75rem' }}>
+    <div className="install-model-tuning-editor gz-setting-stack">
       {availableProfiles.length > 0 && (
         <PresetPicker
           modelId={modelId}
@@ -104,13 +105,13 @@ export function InstallModelTuningEditor({
           onChange={onSaveProfile}
         />
       )}
-      <details style={{ marginTop: '0.5rem' }}>
-        <summary className="muted small" style={{ cursor: 'pointer' }}>
+      <details className="gz-setting-more">
+        <summary>
           {hasCustomOverride
             ? `Custom fine-tuning for ${modelId} (active)`
             : `Custom fine-tuning for ${modelId}`}
         </summary>
-        <div style={{ marginTop: '0.5rem' }}>
+        <div>
           <TuningPanel
             provider={provider}
             {...(override ? { override } : {})}
@@ -200,22 +201,18 @@ function PresetPicker({
     return null;
   }, [profileId, resolvedProfileId]);
 
+  const controlId = `install-preset-${modelId}`;
   return (
-    <div className="install-preset-picker" style={{ marginTop: '0.25rem' }}>
-      <label
-        htmlFor={`install-preset-${modelId}`}
-        className="small"
-        style={{ display: 'block', marginBottom: '0.25rem' }}
-      >
-        <strong>Preset</strong>{' '}
-        <span className="muted">
-          — applies to every gezel using {modelId}. Individual crew members can override below in
-          their detail pane.
-        </span>
-      </label>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+    <SettingField
+      label="Preset"
+      controlId={controlId}
+      className="install-preset-picker"
+      hint={`Applies to every gezel using ${modelId}. Individual crew members can override it in their detail pane.${hint ? ` ${hint}` : ''}`}
+    >
+      <div className="gz-setting-row">
         <select
-          id={`install-preset-${modelId}`}
+          id={controlId}
+          aria-describedby={settingHintId(controlId)}
           value={profileId ?? ''}
           onChange={(e) => void handleChange(e.target.value)}
           disabled={saving}
@@ -231,23 +228,18 @@ function PresetPicker({
         </select>
         {customized && (
           <span
-            className="small muted"
+            className="gz-setting-hint"
             title="Custom fine-tuning values are active — they override individual fields from the preset."
           >
             · Custom fine-tuning active
           </span>
         )}
       </div>
-      {hint && (
-        <div className="small muted" style={{ marginTop: '0.25rem' }}>
-          {hint}
-        </div>
-      )}
       {error && (
-        <div className="small error" style={{ marginTop: '0.25rem' }}>
+        <p className="error small" role="alert">
           {error}
-        </div>
+        </p>
       )}
-    </div>
+    </SettingField>
   );
 }

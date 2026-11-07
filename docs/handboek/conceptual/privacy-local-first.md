@@ -24,9 +24,9 @@ Gezel also uses the internet for a few ordinary jobs:
 - **Downloads you start.** Models you choose to install (usually from Hugging Face), the on-device engines that run them (from gezel's own releases on GitHub, checked against pinned fingerprints), and knowledge catalogs you add.
 - **Tools it sets up.** On first start gezel installs its browser-automation tools, fetching Playwright from npm and a Chromium browser through Playwright's own installer. Other tools you or a gezel install also come from npm.
 - **Updates.** The desktop app checks gezel's GitHub releases for new versions; you can turn automatic checks off. Live catalog updates, if you switch them on, check npm about once a day.
-- **Web search, when you allow it.** Gezels can search and fetch web pages only once outside services are turned on in **Settings → Security & Compliance**. What a gezel searches for then goes to that search service: Wikipedia by default, or Brave if you add a Brave Search key.
+- **Web search, when you allow it.** Gezels can search and fetch web pages only once outside services are turned on in **Settings → Security & compliance**. What a gezel searches for then goes to that search service: Wikipedia by default, or Brave if you add a Brave Search key.
 
-Apart from web searches, none of these carry your conversations or files. The strictest level in **Settings → Security & Compliance** also turns off update checks. [What leaves this computer](../technical/what-leaves-this-computer.md) sets out every kind of traffic against each security level.
+Apart from web searches, none of these carry your conversations or files. The strictest level in **Settings → Security & compliance** also turns off update checks. [What leaves this computer](../technical/what-leaves-this-computer.md) sets out every kind of traffic against each security level.
 
 ## Credentials
 

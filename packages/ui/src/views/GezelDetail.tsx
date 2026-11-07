@@ -354,9 +354,6 @@ export function GezelDetail({
         <Tabs.Root value={activeDetailTab} onValueChange={(v) => setDetailTab(v as DetailTab)}>
           <Tabs.List>
             <Tabs.Trigger value="chat">Chat</Tabs.Trigger>
-            {activeDetailTab === 'chat' && (
-              <span ref={setProjectPickerSlot} className="gezel-chat-project-slot" />
-            )}
             <Tabs.Trigger value="about">About</Tabs.Trigger>
             <Tabs.Trigger value="appearance">Appearance</Tabs.Trigger>
             {growthVisible && (
@@ -378,6 +375,11 @@ export function GezelDetail({
               <Tabs.Trigger value="memories">Memories</Tabs.Trigger>
             )}
             {settingsVisible && <Tabs.Trigger value="settings">Settings</Tabs.Trigger>}
+            {/* The chat's project picker closes the row: between Chat and About
+                it read as one more, broken, tab. */}
+            {activeDetailTab === 'chat' && (
+              <span ref={setProjectPickerSlot} className="gezel-chat-project-slot" />
+            )}
           </Tabs.List>
         </Tabs.Root>
       </div>

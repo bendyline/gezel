@@ -125,6 +125,16 @@
   background: var(--danger);
 }
 
+/* Night's danger red is a light fill: cream falls to about 3:1 on it. */
+[data-theme="dark"] .camera-card-on {
+  color: var(--accent-selection-ink);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .camera-card-on {
+    color: var(--accent-selection-ink);
+  }
+}
+
 .camera-card-on::before {
   content: "";
   width: 6px;

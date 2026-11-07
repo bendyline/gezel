@@ -11,9 +11,9 @@ import { type MediaFitState, mediaFitState } from './media-model-fit.js';
 import '../styles/home-view.css';
 
 /**
- * The "on-device media" section of Settings → Artificial Intelligence (it
+ * The "on-device media" section of Settings → Artificial intelligence (it
  * was on first-run setup until first run shrank to the one chat-model
- * download): ONE quiet, desaturated link that opens the size-aware plan
+ * download): ONE quiet link, in the settings link color, that opens the size-aware plan
  * dialog for the recommended media sidecars (image / image reading /
  * speech-to-text / text-to-speech) that fit this device. The
  * dialog is the only start path: it defaults to the modest media set, leaves
@@ -507,7 +507,7 @@ export function RecommendedMediaDownloads() {
     <section className="setup-section home-media-section">
       {anyPending && (
         <>
-          <button type="button" className="gz-link-button home-media-plan-link" onClick={openPlan}>
+          <button type="button" className="gz-link-button" onClick={openPlan}>
             Download the optional media models (image + speech)
             {defaultPlanBytes > 0 ? ` · ${fmtSize(defaultPlanBytes)}` : ''}
           </button>

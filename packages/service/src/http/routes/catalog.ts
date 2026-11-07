@@ -183,7 +183,7 @@ async function installCatalogToolset(
       ok: false,
       status: 403,
       error:
-        'Security policy: external services are disabled, so external toolsets cannot be downloaded or registered. Raise the security level in Settings → Security & Compliance.',
+        'Security policy: external services are disabled, so external toolsets cannot be downloaded or registered. Raise the security level in Settings → Security & compliance.',
     };
   }
 
@@ -399,7 +399,7 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
       return c.json(
         {
           error:
-            'Security policy: external services are disabled, so custom MCP servers cannot be registered. Raise the security level in Settings → Security & Compliance.',
+            'Security policy: external services are disabled, so custom MCP servers cannot be registered. Raise the security level in Settings → Security & compliance.',
         },
         403,
       );
@@ -521,7 +521,7 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
     await ctx.history.log({
       kind: 'gezel.created',
       gezelId: created.id,
-      summary: `Created "${created.name}" from template ${id}@${detail.manifest.version}`,
+      summary: `Created ${created.name} from template ${id}@${detail.manifest.version}`,
       details: {
         templateId: id,
         templateVersion: detail.manifest.version,
@@ -580,7 +580,7 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
       return c.json(
         {
           error:
-            'Security policy: external services are disabled, so this MCP toolset cannot be installed. Raise the security level in Settings → Security & Compliance.',
+            'Security policy: external services are disabled, so this MCP toolset cannot be installed. Raise the security level in Settings → Security & compliance.',
         },
         403,
       );

@@ -149,6 +149,15 @@ export function pickChatPlaceholder(args: Args): string {
 }
 
 /**
+ * The composer's hint while a task the person picked is attached. Send starts
+ * the task with the draft as its brief, so the box is for anything the plan's
+ * settings did not already say.
+ */
+export function taskLaunchPlaceholder(taskName: string): string {
+  return `Enter any further instructions here for your ${taskName}. Click the ↑ icon to start.`;
+}
+
+/**
  * Placeholders are sentences, and several templates open with the gezel's
  * name — which can be a lowercase fallback like "your meester". Capitalize
  * each sentence's first character so it never starts lowercase, wherever the

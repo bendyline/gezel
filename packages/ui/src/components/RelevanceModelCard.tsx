@@ -2,6 +2,7 @@ import type { RelevanceModelStatusResponse } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
+import { SettingCheck, SettingField } from './SettingsSection.js';
 
 /**
  * Settings → Project knowledge: the relevance check. A small on-device model
@@ -57,67 +58,62 @@ export function RelevanceModelCard() {
   const selected = models.find((model) => model.id === status?.modelId);
   const overridden = status?.source === 'env';
 
+  const lifecycle = status ? statusLine(status) : undefined;
   return (
-    <div style={{ marginBottom: '1.25rem' }}>
-      <strong>Relevance check</strong>
-      <p className="muted small" style={{ margin: '0.25rem 0 0' }}>
-        Before indexed material reaches a gezel, a small model on this device reads each passage
-        beside the question and sets aside what is off-topic. It never makes a conversation wait:
-        while it loads, material is chosen the usual way.
-      </p>
-      <label className="debug-toggle" style={{ marginTop: '0.5rem' }}>
-        <input
-          type="checkbox"
-          checked={status?.enabled === true}
-          disabled={!status || saving || overridden}
-          onChange={(e) => void save({ enabled: e.target.checked })}
-        />
-        <span>Check that indexed context is on topic before using it</span>
-      </label>
-      {models.length > 0 && (
-        <>
-          <div
-            className="gz-tray gz-tray--described"
-            role="radiogroup"
-            onKeyDown={onRadioKeyDown}
-            aria-label="Relevance model"
-            style={{ marginTop: '0.5rem' }}
-          >
-            {models.map((model) => {
-              const active = model.id === status?.modelId;
-              return (
-                <button
-                  key={model.id}
-                  type="button"
-                  // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
-                  role="radio"
-                  aria-checked={active}
-                  tabIndex={active || (!selected && model === models[0]) ? 0 : -1}
-                  className={`gz-key gz-key--stacked${active ? ' gz-key-active' : ''}`}
-                  disabled={saving || overridden}
-                  onClick={() => void save({ modelId: model.id })}
-                >
-                  <span className="gz-key-label">{model.displayName}</span>
-                  <span className="gz-key-hint">about {megabytes(model.approxBytes)} MB</span>
-                </button>
-              );
-            })}
+    <div className="gz-setting-stack">
+      <SettingCheck
+        label="Check that indexed context is on topic before using it"
+        hint="Before indexed material reaches a gezel, a small model on this device reads each passage beside the question and sets aside what is off-topic. It never makes a conversation wait: while it loads, material is chosen the usual way."
+        checked={status?.enabled === true}
+        disabled={!status || saving || overridden}
+        onChange={(checked) => void save({ enabled: checked })}
+      />
+      {models.length > 0 ? (
+        <SettingField label="Relevance model" hint={lifecycle}>
+          <div>
+            <div
+              className={`gz-tray${selected ? ' gz-tray--described' : ''}`}
+              role="radiogroup"
+              onKeyDown={onRadioKeyDown}
+              aria-label="Relevance model"
+            >
+              {models.map((model) => {
+                const active = model.id === status?.modelId;
+                return (
+                  <button
+                    key={model.id}
+                    type="button"
+                    // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+                    role="radio"
+                    aria-checked={active}
+                    tabIndex={active || (!selected && model === models[0]) ? 0 : -1}
+                    className={`gz-key gz-key--stacked${active ? ' gz-key-active' : ''}`}
+                    disabled={saving || overridden}
+                    onClick={() => void save({ modelId: model.id })}
+                  >
+                    <span className="gz-key-label">{model.displayName}</span>
+                    <span className="gz-key-hint">about {megabytes(model.approxBytes)} MB</span>
+                  </button>
+                );
+              })}
+            </div>
+            {selected && (
+              <p className="gz-tray-description">
+                <strong>{selected.displayName}</strong> — {selected.description}
+                {!selected.calibrated &&
+                  ' Until it has been tuned, it only puts the closest matches first; it does not hide anything.'}
+              </p>
+            )}
           </div>
-          {selected && (
-            <p className="gz-tray-description muted small">
-              <strong>{selected.displayName}</strong> — {selected.description}
-              {!selected.calibrated &&
-                ' Until it has been tuned, it only puts the closest matches first; it does not hide anything.'}
-            </p>
-          )}
-        </>
+        </SettingField>
+      ) : (
+        lifecycle && <p className="gz-setting-hint">{lifecycle}</p>
       )}
-      {status && (
-        <p className="muted small" style={{ margin: '0.5rem 0 0' }}>
-          {statusLine(status)}
+      {(error ?? status?.error) && (
+        <p className="error small" role="alert">
+          {error ?? status?.error}
         </p>
       )}
-      {(error ?? status?.error) && <p className="error small">{error ?? status?.error}</p>}
     </div>
   );
 }

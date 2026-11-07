@@ -77,7 +77,7 @@ export function packageCommandsOffNote(
   const consequence = attempted
     ? 'No completion attempt was consumed.'
     : 'The step was not started.';
-  return `# Step needs package scripts — task paused\n\nStep "${step.name}" (\`${step.id}\`) proves its work by running ${list}, but "${PACKAGE_SCRIPTS_SETTING_LABEL}" is off in Settings → Security & Compliance, so no gezel can run it. ${consequence}\n\nTo continue, turn on "${PACKAGE_SCRIPTS_SETTING_LABEL}", then set the task active again. Package scripts run outside the script sandbox, as your account, with network access, which is why the stricter security levels keep them off.`;
+  return `# Step needs package scripts — task paused\n\nStep "${step.name}" (\`${step.id}\`) proves its work by running ${list}, but "${PACKAGE_SCRIPTS_SETTING_LABEL}" is off in Settings → Security & compliance, so no gezel can run it. ${consequence}\n\nTo continue, turn on "${PACKAGE_SCRIPTS_SETTING_LABEL}", then set the task active again. Package scripts run outside the script sandbox, as your account, with network access, which is why the stricter security levels keep them off.`;
 }
 
 /** One line for the needs-help notice. */

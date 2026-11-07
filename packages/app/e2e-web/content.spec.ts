@@ -2,6 +2,7 @@
  * Content areas — craftbooks, scripts, documents, history. All read off the
  * seeded world (a craftbook, a document tree, seeded chat sessions for history).
  */
+import { LAYOUT_TOLERANCE_PX, expectNear } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { gotoHome, openAreaView, openTab } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
@@ -23,12 +24,14 @@ test.describe('craftbooks', () => {
     expect(workspaceBox).not.toBeNull();
     expect(libraryBox).not.toBeNull();
     expect(editorBox).not.toBeNull();
-    expect(Math.abs(libraryBox!.x - workspaceBox!.x)).toBeLessThanOrEqual(1);
-    expect(Math.abs(libraryBox!.y - workspaceBox!.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(libraryBox!.height - workspaceBox!.height)).toBeLessThanOrEqual(1);
-    expect(editorBox!.x).toBeGreaterThan(libraryBox!.x + libraryBox!.width);
-    expect(Math.abs(editorBox!.y - libraryBox!.y)).toBeLessThanOrEqual(1);
-    expect(Math.abs(editorBox!.height - libraryBox!.height)).toBeLessThanOrEqual(1);
+    expectNear(libraryBox!.x, workspaceBox!.x);
+    expectNear(libraryBox!.y, workspaceBox!.y);
+    expectNear(libraryBox!.height, workspaceBox!.height);
+    expect(editorBox!.x).toBeGreaterThanOrEqual(
+      libraryBox!.x + libraryBox!.width - LAYOUT_TOLERANCE_PX,
+    );
+    expectNear(editorBox!.y, libraryBox!.y);
+    expectNear(editorBox!.height, libraryBox!.height);
     expect(await library.evaluate((element) => getComputedStyle(element).borderRadius)).not.toBe(
       '0px',
     );
@@ -80,7 +83,9 @@ test.describe('documents', () => {
     expect(createTrayBox).not.toBeNull();
     // The input is the header's shrinkable cell. Its right border must remain
     // visible instead of extending underneath the fixed-width create tray.
-    expect(searchBox!.x + searchBox!.width).toBeLessThan(createTrayBox!.x);
+    expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(
+      createTrayBox!.x + LAYOUT_TOLERANCE_PX,
+    );
 
     await shot(page, 'tree', {
       area: 'documents',

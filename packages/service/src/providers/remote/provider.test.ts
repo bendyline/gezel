@@ -345,7 +345,7 @@ describe('RemoteGezelProvider', () => {
     expect(error.message).toContain('This Linux device');
     // The model half only — engine namespaces are our plumbing, not theirs.
     expect(error.message).toContain('"qwen3.6-27b-q8"');
-    expect(error.message).toMatch(/Settings → Artificial Intelligence/);
+    expect(error.message).toMatch(/Settings → Artificial intelligence/);
     expect(error.message).not.toMatch(/404|model_not_loaded|admit/);
   });
 

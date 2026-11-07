@@ -4,6 +4,7 @@ import {
   type TaskCraftbookStep,
   type TaskStatus,
   displayName,
+  plainRoleTitle,
 } from '@bendyline/gezel';
 import { Poppetje } from '../poppetje/index.js';
 import { type StepMeta, type StepStatus, StepTracker } from './StepTracker.js';
@@ -119,7 +120,7 @@ export function TaskStepTracker({
       name = gezel ? displayName(gezel, roleBasedNameOnlyMode) : undefined;
       // In boring mode the name IS the role — a role subtitle under it would
       // just say the same thing twice.
-      role = roleBasedNameOnlyMode ? undefined : gezel?.role;
+      role = roleBasedNameOnlyMode || !gezel?.role ? undefined : plainRoleTitle(gezel.role);
     }
 
     // The active step reads as "<role> · with the task"; others just show role.
@@ -183,7 +184,7 @@ export function TaskStepTracker({
       onAddStep={onAddStep}
       busy={busy}
       ariaLabel="Task steps"
-      addLabel="add a step"
+      addLabel="Add step"
       {...(terminal
         ? {
             terminal: {

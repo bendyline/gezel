@@ -29,7 +29,7 @@ describe('phone Settings', () => {
     render(<HostModelSettings />);
     const picker = screen.getByTestId('mock-select') as HTMLSelectElement;
     expect([...picker.options].map((option) => option.textContent)).toEqual([
-      'Artificial Intelligence',
+      'Artificial intelligence',
       'General',
       'About you',
       'Backup and restore',
@@ -45,8 +45,6 @@ describe('phone Settings', () => {
   it('marks the sidebar position so a compact layout can hide it', () => {
     render(<HostModelSettings />);
     fireEvent.change(screen.getByTestId('mock-select'), { target: { value: 'general' } });
-    expect(screen.getByText('Sidebar position').closest('section')?.className).toBe(
-      'settings-sidebar-side',
-    );
+    expect(screen.getByText('Sidebar position').closest('.settings-sidebar-side')).not.toBeNull();
   });
 });

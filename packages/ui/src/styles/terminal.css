@@ -2,7 +2,7 @@
 
 .terminal-group {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .terminal-group-output {
@@ -16,7 +16,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   color: var(--color-muted, #999);
   margin-bottom: 0.25rem;
 }
@@ -25,15 +25,15 @@
   background: var(--color-surface-2, #2a2a2a);
   color: var(--color-fg-strong, #ddd);
   padding: 0.05rem 0.4rem;
-  border-radius: 0.25rem;
-  font-size: 0.7rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 .terminal-exit-pill {
   padding: 0.05rem 0.4rem;
-  border-radius: 0.25rem;
-  font-size: 0.7rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
 }
 
 .terminal-exit-ok {
@@ -50,12 +50,12 @@
   background: rgba(180, 140, 60, 0.18);
   color: rgba(230, 200, 130, 1);
   padding: 0.05rem 0.4rem;
-  border-radius: 0.25rem;
-  font-size: 0.7rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
 }
 
 .terminal-duration {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   color: var(--color-muted, #999);
 }
 
@@ -65,8 +65,8 @@
   background: rgba(108, 204, 255, 0.16);
   color: rgba(180, 220, 255, 1);
   padding: 0.05rem 0.4rem;
-  border-radius: 0.25rem;
-  font-size: 0.7rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
   animation: terminal-running-pulse 1.5s ease-in-out infinite;
 }
 
@@ -85,8 +85,8 @@
   color: rgba(240, 160, 160, 1);
   border: 0;
   padding: 0.1rem 0.5rem;
-  border-radius: 0.25rem;
-  font-size: 0.72rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
   cursor: pointer;
   margin-left: auto;
 }
@@ -109,7 +109,7 @@
   padding: 0.4rem 0.55rem;
   background: rgba(108, 204, 255, 0.06);
   border: 1px solid rgba(108, 204, 255, 0.28);
-  border-radius: 0.35rem;
+  border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
   gap: 0.3rem;
@@ -117,7 +117,7 @@
 
 .terminal-input-prompt-line {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   color: var(--color-muted, #aaa);
   white-space: pre-wrap;
 }
@@ -134,9 +134,9 @@
   border: 1px solid var(--color-border, #333);
   color: var(--color-fg, #ddd);
   padding: 0.25rem 0.5rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   min-width: 8rem;
 }
 
@@ -146,8 +146,8 @@
   color: rgba(180, 220, 255, 1);
   border: 0;
   padding: 0.2rem 0.7rem;
-  border-radius: 0.25rem;
-  font-size: 0.76rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
@@ -157,7 +157,7 @@
 }
 
 .terminal-input-hint {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   color: var(--color-muted, #888);
   font-style: italic;
 }
@@ -188,14 +188,14 @@
 
 .terminal-resolved-hint {
   margin-top: 0.25rem;
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   color: var(--color-muted, #999);
   font-style: italic;
 }
 
 .terminal-output-viewport {
   margin: 0;
-  border-radius: 0.4rem;
+  border-radius: var(--radius-md);
   box-sizing: border-box;
   max-width: 100%;
   min-width: 0;
@@ -220,7 +220,7 @@
   padding: 0.5rem 0.75rem;
   background: var(--color-surface-2, #1c1c1c);
   font-family: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   line-height: 1.35;
   tab-size: 4;
   /* Terminal layout is spatial: tables, progress meters, and TUI-like
@@ -528,9 +528,9 @@
   background: rgba(200, 80, 80, 0.16);
   color: rgba(240, 160, 160, 1);
   padding: 0.3rem 0.6rem;
-  border-radius: 0.3rem;
+  border-radius: var(--radius-sm);
   margin-bottom: 0.4rem;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
 }
 
 /* A quiet one-pixel frame owns the complete compose surface for both modes
@@ -738,7 +738,8 @@
  * theme already stripped that here, but dark never did, so after dark the two
  * modes disagreed — chat's flush panel against a black `#111` card floating
  * inside the same frame. Strip it in both themes and let only the fill vary.
- * The fills are squisq's own editor colours, kept in step with the matching
+ * The fills are the ones squisq's editor shows (`--surface` at night, through
+ * `--squisq-surface-sunken`), kept in step with the matching
  * `editor.background` in terminal-monaco-setup.ts. */
 .project-chat-compose-main .terminal-composer-input-wrap {
   /* Border-box, so this lands the frame bottom exactly where chat's does.
@@ -751,7 +752,7 @@
   border: 0;
   border-radius: 0;
   padding: 0.4rem 0 0.4rem 0.1rem;
-  background: #111827;
+  background: var(--surface);
 }
 
 /* Specificity, not source order: the standalone light-theme rule for this
@@ -939,7 +940,7 @@
   gap: 0.4rem;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--color-border, #333);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-lg);
   background: var(--color-surface, #1a1a1a);
 }
 
@@ -971,11 +972,11 @@
   height: 24px;
   padding: 0 0.5rem;
   border: 1px solid transparent;
-  border-radius: 5px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--text-muted, #999);
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 .terminal-toolbar-btn:hover,
@@ -1042,7 +1043,7 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   color: var(--color-muted, #999);
 }
 
@@ -1053,7 +1054,7 @@
 
 .terminal-composer-input-wrap {
   border: 1px solid var(--color-border, #333);
-  border-radius: 0.3rem;
+  border-radius: var(--radius-sm);
   background: var(--color-surface-2, #111);
   padding: 0.6rem 0.7rem;
   display: flex;
@@ -1086,7 +1087,7 @@
   border: 0;
   outline: none;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   line-height: 1.55;
   padding: 0;
   /* Tall to match the chat composer's editor minHeight (120px in
@@ -1121,7 +1122,7 @@
 .terminal-editor-placeholder {
   color: var(--color-muted, #777);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   line-height: 21px;
   transform: translateY(1px);
   white-space: nowrap;
@@ -1140,7 +1141,7 @@
 }
 
 .terminal-composer-hint {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   color: var(--color-muted, #777);
 }
 
@@ -1153,12 +1154,12 @@
   align-items: center;
   gap: 0.4rem;
   padding: 0.25rem 0.4rem;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
 }
 
 .folder-tree-label {
   color: var(--color-muted, #999);
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -1172,12 +1173,12 @@
   gap: 0.4rem;
   padding: 0.2rem 0.5rem;
   border: 1px solid var(--color-border, #333);
-  border-radius: 0.3rem;
+  border-radius: var(--radius-sm);
   background: var(--color-surface, #1a1a1a);
   color: var(--color-fg, #ddd);
   cursor: pointer;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
 }
 
 .folder-tree-trigger:hover {
@@ -1206,7 +1207,7 @@
    * rule across the parchment where chat has a soft one. */
   border-bottom: 1px solid var(--compose-band-rule);
   background: rgba(255, 255, 255, 0.02);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
 }
 
 .project-chat-compose-main .folder-tree-label {
@@ -1222,7 +1223,7 @@
    * specificity means the former's 0.9rem wins over the latter's 0.8rem,
    * so the live chat dropdown is 0.9rem / 0.3rem 0.55rem / lh 1.3 /
    * radius 2px — mirror those exactly here. */
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   line-height: 1.3;
   padding: 0.3rem 0.55rem;
   border-radius: 2px;
@@ -1236,13 +1237,13 @@
   min-width: 16rem;
   max-width: min(28rem, calc(100vw - 2rem));
   border: 1px solid var(--color-border, #333);
-  border-radius: 0.5rem;
+  border-radius: var(--radius-lg);
   background: var(--color-surface, #1a1a1a);
   max-height: 14rem;
   overflow-y: auto;
   padding: 0.3rem;
   z-index: 100;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-popover);
 }
 
 .folder-tree-node {
@@ -1250,7 +1251,7 @@
   align-items: center;
   gap: 0.3rem;
   padding: 0.15rem 0.4rem;
-  border-radius: 0.25rem;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--color-fg, #ddd);
   background: transparent;
@@ -1258,7 +1259,7 @@
   width: 100%;
   text-align: left;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
 }
 
 .folder-tree-node:hover {

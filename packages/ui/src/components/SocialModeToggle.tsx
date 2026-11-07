@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { api } from '../api.js';
+import { SettingCheck } from './SettingsSection.js';
 import { useSocialMode } from './useSocialMode.js';
 
 /**
@@ -21,21 +22,21 @@ export function SocialModeToggle({ describe = true }: { describe?: boolean }) {
   };
   return (
     <>
-      {describe && (
-        <p className="muted" style={{ marginTop: 0 }}>
-          Crew members show their own character in how they talk, their growth is on display, and
-          opening a chat shows what is waiting for you.
+      <SettingCheck
+        label="Social mode"
+        hint={
+          describe
+            ? 'Crew members show their own character in how they talk, their growth is on display, and opening a chat shows what is waiting for you.'
+            : undefined
+        }
+        checked={social}
+        onChange={(checked) => void save(checked)}
+      />
+      {error && (
+        <p className="error" role="alert">
+          {error}
         </p>
       )}
-      <label className="debug-toggle" style={{ marginTop: 0 }}>
-        <input
-          type="checkbox"
-          checked={social}
-          onChange={(event) => void save(event.target.checked)}
-        />
-        <span>Social mode</span>
-      </label>
-      {error && <p className="error">{error}</p>}
     </>
   );
 }

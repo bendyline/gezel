@@ -60,7 +60,7 @@ export function remotesRoutes(
   opts: { lanBrowser?: LanBrowser | null } = {},
 ): Hono {
   const app = new Hono();
-  // Opens a socket only while the Remote Servers panel polls (or a paired
+  // Opens a socket only while the Remote servers panel polls (or a paired
   // server needs finding), and closes it a minute after the last use.
   const lanBrowser =
     opts.lanBrowser !== undefined
@@ -72,7 +72,7 @@ export function remotesRoutes(
           : null;
 
   // Status is what this daemon last saw. `?check=1` brings it up to date
-  // first — the Remote Servers panel asks while it is open; the tracker
+  // first — the Remote servers panel asks while it is open; the tracker
   // throttles the probes, so polling it costs at most one per server per
   // REMOTE_OFFLINE_RECHECK_MS.
   app.get('/', async (c) => {

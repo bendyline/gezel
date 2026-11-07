@@ -9,6 +9,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { SettingField, SettingsSection } from '../components/SettingsSection.js';
 import { openInFileManagerLabel } from '../components/file-manager-label.js';
 
 const SCOPES: { id: FolderScope; label: string; help: string }[] = [
@@ -198,13 +199,7 @@ export function FoldersSettings() {
     }
   }, []);
 
-  if (!status) {
-    return (
-      <section className="settings-section" aria-busy="true">
-        <h2>Folders</h2>
-      </section>
-    );
-  }
+  if (!status) return <SettingsSection id="settings-folders" title="Folders" />;
 
   const moveInProgress =
     activeJob?.status === 'queued' || activeJob?.status === 'running' || status.activeJob;
@@ -221,43 +216,49 @@ export function FoldersSettings() {
   }
 
   return (
-    <section className="settings-section">
-      <h2>Folders</h2>
-      <p className="muted small">
-        Move parts of your gezel data to a folder of your choosing — for example a OneDrive, iCloud
-        Drive, or Dropbox folder so it syncs across machines and gets backed up. Before any move
-        that copies files, a snapshot of the source is written to <code>{status.backups.path}</code>{' '}
-        so the move can be undone by hand if something goes wrong.
-      </p>
+    <>
+      <SettingsSection
+        id="settings-folders"
+        title="Folders"
+        hint={
+          <>
+            Move parts of your gezel data to a folder of your choosing — for example a OneDrive,
+            iCloud Drive, or Dropbox folder so it syncs across machines and gets backed up. Before
+            any move that copies files, a snapshot of the source is written to{' '}
+            <code>{status.backups.path}</code> so the move can be undone by hand if something goes
+            wrong.
+          </>
+        }
+      >
+        {error && (
+          <p className="error small" role="alert">
+            {error}{' '}
+            <button type="button" className="gz-link-button" onClick={() => setError(null)}>
+              dismiss
+            </button>
+          </p>
+        )}
 
-      {error && (
-        <p className="error small" role="alert">
-          {error}{' '}
-          <button type="button" className="gz-link-button" onClick={() => setError(null)}>
-            dismiss
-          </button>
-        </p>
-      )}
+        {activeJob && <MoveProgress job={activeJob} onRestart={onRestart} />}
 
-      {activeJob && <MoveProgress job={activeJob} onRestart={onRestart} />}
-
-      <div className="folders-rows">
-        {SCOPES.map((scope) => (
-          <ScopeRow
-            key={scope.id}
-            label={scope.label}
-            help={scope.help}
-            currentPath={displayedCurrent[scope.id]}
-            externalized={displayedExternalized[scope.id]}
-            restartRequired={restartPending?.scope === scope.id}
-            disabled={moveInProgress || restartPending !== null}
-            onPick={() => onPick(scope.id, scope.label)}
-            onReset={() => onReset(scope.id)}
-            onOpen={() => onOpen(displayedCurrent[scope.id])}
-            openLabel={openLabel}
-          />
-        ))}
-      </div>
+        <div className="folders-rows gz-setting-stack">
+          {SCOPES.map((scope) => (
+            <ScopeRow
+              key={scope.id}
+              label={scope.label}
+              help={scope.help}
+              currentPath={displayedCurrent[scope.id]}
+              externalized={displayedExternalized[scope.id]}
+              restartRequired={restartPending?.scope === scope.id}
+              disabled={moveInProgress || restartPending !== null}
+              onPick={() => onPick(scope.id, scope.label)}
+              onReset={() => onReset(scope.id)}
+              onOpen={() => onOpen(displayedCurrent[scope.id])}
+              openLabel={openLabel}
+            />
+          ))}
+        </div>
+      </SettingsSection>
 
       {status.backups.count > 0 && (
         <SnapshotList backups={status.backups} onOpen={onOpen} openLabel={openLabel} />
@@ -322,7 +323,7 @@ export function FoldersSettings() {
         onConfirm={onConfirmMove}
         onCancel={() => setPending(null)}
       />
-    </section>
+    </>
   );
 }
 
@@ -350,17 +351,13 @@ function ScopeRow({
   openLabel: string;
 }) {
   return (
-    <div className="folders-row" style={{ marginTop: 24 }}>
-      <div className="folders-row-head">
-        <strong>{label}</strong>
-      </div>
-      <p className="muted small">{help}</p>
-      <div className="muted small">
+    <SettingField label={label} hint={help} className="folders-row">
+      <p className="gz-setting-hint">
         {externalized ? 'External' : 'Default location'}
         {restartRequired ? ' — restart required' : ''}
-      </div>
+      </p>
       <code className="folders-row-path">{currentPath}</code>
-      <div className="folders-row-actions" style={{ marginTop: 16 }}>
+      <div className="folders-row-actions">
         <button type="button" className="primary" onClick={onPick} disabled={disabled}>
           Move to other folder…
         </button>
@@ -375,7 +372,7 @@ function ScopeRow({
           </button>
         )}
       </div>
-    </div>
+    </SettingField>
   );
 }
 
@@ -389,13 +386,12 @@ function SnapshotList({
   openLabel: string;
 }) {
   return (
-    <div className="folders-snapshots" style={{ marginTop: 24 }}>
-      <h3>Move snapshots</h3>
-      <p className="muted small">
-        Copies of the source taken before each move, newest first. The last 10 are kept; older ones
-        are removed automatically. Nothing here is used by gezel — they exist so you can restore a
-        move by hand.
-      </p>
+    <SettingsSection
+      id="settings-folder-snapshots"
+      className="folders-snapshots"
+      title="Move snapshots"
+      hint="Copies of the source taken before each move, newest first. The last 10 are kept; older ones are removed automatically. Nothing here is used by gezel — they exist so you can restore a move by hand."
+    >
       <ul className="folders-snapshot-list">
         {backups.snapshots.map((snapshot) => (
           <li key={snapshot.id} className="folders-snapshot">
@@ -413,10 +409,10 @@ function SnapshotList({
           </li>
         ))}
       </ul>
-      <p className="muted small">
+      <p className="gz-setting-hint">
         {formatBytes(backups.totalBytes)} total in <code>{backups.path}</code>
       </p>
-    </div>
+    </SettingsSection>
   );
 }
 

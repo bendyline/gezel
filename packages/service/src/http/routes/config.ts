@@ -214,7 +214,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
       return c.json(
         {
           error: 'remote-serving-managed-by-machine',
-          hint: "This machine's LAN serving is controlled by the machine service — manage it in Settings → Remote Servers.",
+          hint: "This machine's LAN serving is controlled by the machine service — manage it in Settings → Remote servers.",
         },
         409,
       );
@@ -609,7 +609,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
     await ctx.history.log({
       kind: 'gezel.created',
       gezelId: created.id,
-      summary: `Created Meester "${created.name}"`,
+      summary: `Created ${created.name} · Meester`,
       details: { name: created.name, role: 'Meester', source: 'meester.new' },
     });
     if (previous.meesterGezelId !== created.id) {
@@ -655,7 +655,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
     await ctx.history.log({
       kind: 'gezel.created',
       gezelId: created.id,
-      summary: `Created Scribe "${created.name}"`,
+      summary: `Created ${created.name} · Scribe`,
       details: { name: created.name, role: 'Scribe', source: 'klerk.new' },
     });
     if (previous.klerkGezelId !== created.id) {
@@ -742,7 +742,7 @@ export function configRoutes(ctx: ServiceContext): Hono {
     await ctx.history.log({
       kind: 'gezel.created',
       gezelId: created.id,
-      summary: `Created Inspector "${created.name}"`,
+      summary: `Created ${created.name} · Inspector`,
       details: { name: created.name, role: 'Inspector', source: 'keurmeester.new' },
     });
     if (previous.keurmeesterGezelId !== created.id) {

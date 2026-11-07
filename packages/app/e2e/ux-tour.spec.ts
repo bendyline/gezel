@@ -129,13 +129,16 @@ test('03 - sidebar groups expand and list entities', async () => {
 test('04 - new-gezel dialog creates a gezel; its detail tab opens', async () => {
   test.setTimeout(60_000);
   await page.locator('[aria-label="New gezel"]').click();
-  const dialog = page.getByRole('dialog', { name: 'New Gezel', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'New gezel', exact: true });
   await expect(dialog).toBeVisible();
   await shot('05-new-gezel-dialog.png');
 
   await dialog.locator('input').first().fill('Tessa');
   await dialog.locator('button:has-text("Create")').click();
   await expect(dialog).toBeHidden();
+  // Crew brings its own list, so the rail sits folded there; open it.
+  const expand = page.getByRole('button', { name: 'Expand sidebar', exact: true });
+  if (await expand.isVisible()) await expand.click();
   await expect(page.locator('[data-testid="app-sidebar"]')).toContainText('Tessa', {
     timeout: 15_000,
   });

@@ -2,6 +2,7 @@ import type { GildeUpdateCheckResult, GildeUpdateStatusResponse } from '@bendyli
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
+import { SettingCheck, SettingsSection } from './SettingsSection.js';
 
 /**
  * Settings → About → "Catalog content": the opt-in toggle for live gilde
@@ -108,33 +109,19 @@ export function GildeUpdatesCard() {
   const checkDisabled = status?.mode === 'overridden' || status?.updateInProgress === true;
 
   return (
-    <section style={{ marginBottom: '2rem' }}>
-      <h3>Catalog content</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Craftbooks, model recommendations, and role templates ship with the app and can also update
-        between releases. When on, Gezel checks about once a day for newer content, verifies it, and
-        applies it. Nothing about you or this install is sent. Turning it off returns to the content
-        that shipped with the app.
-      </p>
-      <label className="debug-toggle">
-        <input
-          type="checkbox"
-          checked={enabled}
-          onChange={(e) => void saveEnabled(e.target.checked)}
-        />
-        <span>Keep catalog content up to date automatically</span>
-      </label>
-      <div
-        className="new-row"
-        style={{
-          marginTop: '0.75rem',
-          alignItems: 'flex-start',
-          flexDirection: 'column',
-          gap: '0.5rem',
-        }}
-      >
-        <span
-          className="muted small"
+    <SettingsSection
+      id="settings-catalog-content"
+      title="Catalog content"
+      hint="Craftbooks, model recommendations, and role templates ship with the app and can also update between releases. When on, Gezel checks about once a day for newer content, verifies it, and applies it. Nothing about you or this install is sent. Turning it off returns to the content that shipped with the app."
+    >
+      <SettingCheck
+        label="Keep catalog content up to date automatically"
+        checked={enabled}
+        onChange={(checked) => void saveEnabled(checked)}
+      />
+      <div className="gz-setting">
+        <p
+          className="gz-setting-hint"
           title={status?.lastCheck ? formatAbsoluteTime(status.lastCheck.at) : undefined}
         >
           {status ? contentSourceLabel(status) : null}
@@ -143,14 +130,18 @@ export function GildeUpdatesCard() {
             : status?.lastCheck
               ? ` · ${lastCheckLabel(status.lastCheck)}`
               : ''}
-        </span>
+        </p>
         {enabled && (
           <button type="button" onClick={() => void checkNow()} disabled={checkDisabled}>
             Check now
           </button>
         )}
       </div>
-      {saveError && <p className="error small">{saveError}</p>}
-    </section>
+      {saveError && (
+        <p className="error small" role="alert">
+          {saveError}
+        </p>
+      )}
+    </SettingsSection>
   );
 }

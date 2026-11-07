@@ -753,6 +753,18 @@ describe('ChatComposer attached task', () => {
     expect(screen.getByRole('button', { name: 'Change the attached task' })).toBeVisible();
   }, 15_000);
 
+  it('turns the empty-box hint into the attached task brief, and back when it is removed', async () => {
+    await openDraftWithTask();
+    await waitFor(() =>
+      expect(screen.getByTestId('editor-placeholder').textContent).toBe(
+        'Enter any further instructions here for your Slide deck. Click the ↑ icon to start.',
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the attached task' }));
+    await waitFor(() => expect(screen.getByTestId('editor-placeholder').textContent).toBe(''));
+  }, 15_000);
+
   it('can start the attached task with no words, creating the thread first', async () => {
     vi.mocked(api.launchTaskFromChatSession).mockResolvedValue({
       task: { ref: 'default/8', num: 8, projectId: 'default', title: 'Deck' },
@@ -959,7 +971,7 @@ describe('ChatComposer lossless draft submission', () => {
         }}
       />,
     );
-    expect(screen.queryByText('To:')).not.toBeInTheDocument();
+    expect(screen.queryByText('To')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Narrate prompt' })).not.toBeInTheDocument();
     expect(screen.queryByTestId('chat-composer-expand')).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Message'), {
@@ -1026,7 +1038,7 @@ describe('ChatComposer lossless draft submission', () => {
 
   it('shows the model setup explanation and opens setup without losing the unsent draft', async () => {
     const explanation =
-      'No chat model is installed on this device. Download or import one in Settings → Artificial Intelligence, then send your message again.';
+      'No chat model is installed on this device. Download or import one in Settings → Artificial intelligence, then send your message again.';
     vi.mocked(api.createChatSession).mockRejectedValueOnce(
       new GezelApiError('Gezel API error 409 on POST /api/sessions', 409, { error: explanation }),
     );

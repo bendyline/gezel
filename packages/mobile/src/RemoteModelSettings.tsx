@@ -24,7 +24,7 @@ function formatCode(value: string): string {
 /**
  * Another device's models: a computer running Gezel on the same network. A
  * phone only connects; it never shares its own models. Connecting takes the
- * code the computer shows under Settings → Remote Servers → Add a device, and
+ * code the computer shows under Settings → Remote servers → Add a device, and
  * is remembered. A conversation on a computer's model runs on this phone's own
  * model while the computer can't be reached, and says so.
  */
@@ -184,7 +184,7 @@ export function RemoteModelSettings({
         >
           <label htmlFor={codeId}>Code shown on {connecting.name}</label>
           <p className="muted small">
-            On {connecting.name}, open Settings → Remote Servers and choose Add a device.
+            On {connecting.name}, open Settings → Remote servers and choose Add a device.
           </p>
           <input
             id={codeId}
@@ -233,7 +233,7 @@ export function RemoteModelSettings({
           ))}
           {canLook && nearby.length === 0 && servers.length === 0 && (
             <p className="muted small">
-              No computers found yet. On one, turn on Settings → Remote Servers → Share this
+              No computers found yet. On one, turn on Settings → Remote servers → Share this
               device's models.
             </p>
           )}

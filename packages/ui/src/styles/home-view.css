@@ -54,6 +54,7 @@
   /* The intro's tab row and the sheet's hem: the shade's rails, a step
      off the paper so the open tab and the sheet below read as one cloth. */
   --home-rail: var(--home-surf2);
+  --home-sheet-rail-h: 20px;
   --home-amber: color-mix(in srgb, var(--gezel-terra-bright) 7%, transparent);
   --home-amber-bd: color-mix(in srgb, var(--gezel-terra-bright) 30%, transparent);
   /* Provenance mono — JetBrains isn't bundled; system mono is fine at 11px. */
@@ -79,46 +80,43 @@
   overflow: hidden;
 }
 
+/* Dusk is the global walnut ramp: the paper and ink formulas above resolve
+   against foundation's dark primitives, so Home and the rail share one
+   temperature. Only what cannot follow the day's formulas changes here:
+   lines lift with cream and terracotta, cards take the inset step instead of
+   white, the rails sink below the paper, and the deep terracotta text (under
+   3:1 at night) takes the accent text. Keep both blocks identical. */
 [data-theme="dark"] .home-workshop {
-  --paper: var(--home-workshop-paper);
-  --paper-2: #2a2620;
-  --paper-3: #3a342b;
-  --ink: #f0e8d5;
-  --ink-2: #c8baa0;
-  --ink-3: #8b7e6b;
-  --rule: #4a4234;
-  --home-card: #28241e;
-  --home-surf2: #201d18;
-  --home-border: #3a342b;
-  --home-hair: #4a4234;
-  --home-user: #322d25;
+  --paper-3: color-mix(in srgb, var(--gezel-ink) 8%, var(--gezel-paper-inset));
+  --rule: color-mix(in srgb, var(--gezel-terra) 30%, var(--gezel-paper-inset));
+  --terra-deep: var(--accent-text);
+  --home-card: var(--gezel-paper-inset);
   --home-rail: color-mix(in srgb, var(--home-workshop-paper) 70%, black);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .home-workshop {
-    --paper: var(--home-workshop-paper);
-    --paper-2: #2a2620;
-    --paper-3: #3a342b;
-    --ink: #f0e8d5;
-    --ink-2: #c8baa0;
-    --ink-3: #8b7e6b;
-    --rule: #4a4234;
-    --home-card: #28241e;
-    --home-surf2: #201d18;
-    --home-border: #3a342b;
-    --home-hair: #4a4234;
-    --home-user: #322d25;
+    --paper-3: color-mix(in srgb, var(--gezel-ink) 8%, var(--gezel-paper-inset));
+    --rule: color-mix(in srgb, var(--gezel-terra) 30%, var(--gezel-paper-inset));
+    --terra-deep: var(--accent-text);
+    --home-card: var(--gezel-paper-inset);
     --home-rail: color-mix(in srgb, var(--home-workshop-paper) 70%, black);
   }
 }
 
 /* — Shared bits — */
+/* A section label: sentence case, small and muted. Letter-spaced capitals
+   are kept for the one dateline that opens Home; on every label they
+   whispered at the same volume and none of them marked a section. */
 .home-workshop-eyebrow {
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+  font-weight: 600;
+}
+.home-workshop-dateline {
+  font-size: var(--text-2xs);
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: var(--ink-3);
   font-weight: 500;
 }
 /* A single symmetric chevron keeps the intro's toggle compact. */
@@ -171,18 +169,17 @@
   background: var(--home-rail);
   border-bottom: 1px solid var(--home-hair);
 }
-/* The conversation keeps its full layout behind the rolling intro sheet.
-   The hem is the shade's bottom rail: it rides up with the sheet when it
-   rolls, so the edge reads as cloth with weight, not a box being clipped. */
+/* The conversation keeps its full layout behind the rolling intro sheet. */
 .home-workshop-intro-sheet {
   grid-area: 2 / 1;
   align-self: start;
   z-index: 2;
+  display: flex;
+  flex-direction: column;
   height: 90%;
   min-height: 0;
   overflow: hidden;
   background: var(--paper);
-  border-bottom: 3px solid var(--home-rail);
   box-shadow: 0 1px 0 var(--home-hair), 0 16px 24px -8px var(--titlebar-pane-shadow);
   visibility: visible;
   transition: height 160ms ease-out, visibility 0s;
@@ -193,6 +190,16 @@
   pointer-events: none;
   transition: height 160ms ease-out, visibility 0s 160ms;
 }
+/* Pulled by its rail, the sheet follows the pointer exactly. */
+.home-workshop-intro-sheet[data-dragging] {
+  transition: none;
+}
+/* The strip under the open sheet is a plain invitation in the paper, laid
+   over the conversation: "Write to Florian". A click rolls the sheet up and
+   puts the caret in the composer. It used to be a gray shade over the
+   composer itself, whose placeholder it sliced through the letters, so the
+   front door read as disabled and broken. The sheet keeps its 90%, the
+   height the startup screen draws too, so the handover never jumps. */
 .home-workshop-chat-shade {
   grid-area: 2 / 1;
   z-index: 1;
@@ -200,25 +207,86 @@
   height: 10%;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   padding: 0;
   border: 0;
   border-radius: 0;
-  background: var(--titlebar-pane-shadow);
+  background: var(--paper);
   box-shadow: none;
-  cursor: pointer;
+  color: var(--ink-3);
+  cursor: text;
 }
 .home-workshop-chat-shade:hover,
 .home-workshop-chat-shade:active {
-  background: var(--titlebar-pane-shadow);
+  background: var(--paper);
   box-shadow: none;
+  color: var(--ink);
+}
+.home-workshop-chat-shade-label {
+  font-size: var(--text-md);
 }
 .home-workshop-chat-shade:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+.home-workshop-intro-sheet > .home-workshop-greeting-cols {
+  flex: 1 1 0;
+}
+/* The shade's bottom rail, and the whole bar is the key that rolls it up,
+   by a click or by pulling it up. It keeps its height while the sheet
+   shrinks above it, so the edge reads as cloth with weight, not a box being
+   clipped. The pull in its middle lifts on hover to say which way it goes. */
+.home-workshop-sheet-rail {
+  flex: 0 0 var(--home-sheet-rail-h);
+  display: block;
+  position: relative;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--home-hair);
+  border-radius: 0;
+  background: var(--home-rail);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--paper) 60%, transparent);
+  cursor: grab;
+  touch-action: none;
+  transition: background 0.12s;
+}
+.home-workshop-intro-sheet[data-dragging] .home-workshop-sheet-rail {
+  cursor: grabbing;
+}
+.home-workshop-sheet-rail::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 40px;
+  height: 4px;
+  border-radius: 1px;
+  background: var(--ink-3);
+  opacity: 0.55;
+  transform: translate(-50%, -50%);
+  transition: transform 0.12s, opacity 0.12s;
+}
+.home-workshop-sheet-rail:hover {
+  background: color-mix(in srgb, var(--home-rail) 90%, var(--ink));
+}
+.home-workshop-sheet-rail:hover::before {
+  opacity: 0.9;
+  transform: translate(-50%, calc(-50% - 2px));
+}
+.home-workshop-sheet-rail:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -3px;
 }
 @media (prefers-reduced-motion: reduce) {
   .home-workshop-intro-sheet,
   .home-workshop-greeting-collapsed .home-workshop-intro-sheet {
+    transition: none;
+  }
+  .home-workshop-sheet-rail::before {
     transition: none;
   }
 }
@@ -423,16 +491,36 @@
   border-top: 1px solid #8b7752;
   border-bottom: 1px solid #6a5838;
 }
+/* A stacked PersonLabel, centered on the figure's axis. The startup screen
+   loads this sheet but not gezels.css, so the caption sets its own column
+   and role ink rather than leaning on the shared recipe. A long name wraps
+   under the figure instead of trailing off. */
 .home-workshop-figure-label {
-  font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 500;
+  --person-label-name-size: var(--text-sm);
+  --person-label-role-size: var(--text-xs);
+  display: flex;
+  justify-content: center;
+  align-self: stretch;
   margin-top: 8px;
+  font-family: var(--font-display);
   color: var(--ink);
+  text-align: center;
 }
-.home-workshop-figure-label em {
+.home-workshop-figure-label .person-label-text {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  line-height: 1.25;
+}
+.home-workshop-figure-label .person-label-name {
+  font-size: var(--person-label-name-size);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.home-workshop-figure-label .person-label-role {
+  font-size: var(--person-label-role-size);
   color: var(--ink-3);
-  font-weight: 400;
 }
 /* Connected tabs (docs/ux.md): each tab stands on the header's bottom seam,
    reaching 1px past it, and the open one takes the sheet's fill with no
@@ -481,14 +569,11 @@
   color: var(--ink);
   background: color-mix(in srgb, var(--paper) 55%, transparent);
 }
-/* The 2px accent on the top edge follows the rounded corners: the border
-   draws one pixel of it and the inset shadow the other. */
+/* No accent stripe on the top edge: the join to the sheet carries selection. */
 .home-workshop-tabs .home-workshop-tab[data-state="active"] {
   color: var(--ink);
   background: var(--paper);
   border-color: var(--home-hair);
-  border-top-color: var(--accent);
-  box-shadow: inset 0 1px 0 var(--accent);
 }
 .home-workshop-tabs .home-workshop-tab:focus-visible {
   outline: 2px solid var(--accent);
@@ -1041,9 +1126,7 @@
 .add-folder-eyebrow {
   margin-top: 0.5rem;
   color: var(--text-muted);
-  font-size: var(--text-2xs);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: var(--text-xs);
 }
 .add-folder-night {
   margin: 0;

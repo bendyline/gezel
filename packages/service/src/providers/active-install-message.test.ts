@@ -61,7 +61,7 @@ describe('noModelYetMessage', () => {
 
   it('points at Settings only when nothing is actually running', () => {
     const message = noModelYetMessage('Local model', null);
-    expect(message).toContain('Settings → Artificial Intelligence');
+    expect(message).toContain('Settings → Artificial intelligence');
     expect(message).not.toContain('hang tight');
   });
 });

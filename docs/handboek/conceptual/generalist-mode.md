@@ -15,7 +15,7 @@ A task in gezel is a recipe — a craftbook — walked one step at a time, with 
 
 ## When it is on
 
-Settings → Artificial Intelligence → **Run in generalist mode** has three keys:
+Settings → Artificial intelligence → **Run in generalist mode** has three keys:
 
 - **Automatic** (the default): on for hosted frontier models — Claude, ChatGPT and Codex, GitHub Copilot — and off for models running on this device.
 - **On**: every task runs in generalist mode, whatever the model. Useful for trying a capable local model on a whole task.

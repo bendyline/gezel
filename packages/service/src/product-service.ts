@@ -619,7 +619,7 @@ export async function startProductService(
   // embedded profile offers no remote connectivity, so it has no identity.
   const deviceIdentity = await loadOrCreateDeviceIdentity(home, secrets);
   const remotes = await createRemotesRegistry({ home });
-  // One browser for the Remote Servers panel and for following a paired
+  // One browser for the Remote servers panel and for following a paired
   // server to a new address; it opens a socket only while one of them asks.
   const lanBrowser = lanDiscoveryEnabled() ? createLanBrowser() : null;
   const remoteReachability = createRemoteReachability({ registry: remotes, browser: lanBrowser });

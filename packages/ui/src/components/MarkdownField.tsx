@@ -91,7 +91,7 @@ export function MarkdownField({
   useEffect(() => () => commitRef.current(), []);
 
   return (
-    <div className="markdown-field" onBlur={handleBlur}>
+    <div className="markdown-field gz-compact-editor" onBlur={handleBlur}>
       <EditorShell
         {...GEZEL_WRITE_CANVAS}
         ariaLabel={accessibleName ?? placeholder ?? 'Markdown'}

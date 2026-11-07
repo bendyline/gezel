@@ -2458,13 +2458,16 @@ jobs:
             runtime/llama AARs, POMs and licenses; Google ML Kit stays a declared
             dependency resolved by the consumer, with its own usage terms.
             `gezel-mobile-*-speech-{ios,android}.tar.gz` contain the offline speech
-            runtime (whisper.cpp and ONNX Runtime) that @bendyline/gezel-capacitor
-            stages beside them: a dynamic XCFramework, and a folder Maven repository
-            with the gezel-speech AAR. Speech models are downloaded by the app.
+            runtime (whisper.cpp and Microsoft's ONNX Runtime) that
+            @bendyline/gezel-capacitor stages beside them: a dynamic XCFramework with
+            its privacy manifest, and a folder Maven repository with the gezel-speech
+            AAR, whose POM requires gezel-llama of the same version. Speech models are
+            downloaded by the app.
             Mobile SDKs are unsigned libraries, covered by SHA256SUMS and build
             provenance. Each consuming app uses its own app signing identity.
             No app archives, provisioning profiles, private keys, or model weights
-            are included. See PUBLIC-DISTRIBUTION.md inside each mobile SDK.
+            are included. See PUBLIC-DISTRIBUTION.md inside each mobile SDK and
+            speech runtime.
 
             Each desktop archive contains the engine binaries for one platform plus
             `THIRD_PARTY_LICENSES/` with the pin-bound native redistribution

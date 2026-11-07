@@ -42,7 +42,7 @@ export function HomeIntroDate({ now = new Date() }: { now?: Date }) {
     hour12: false,
   });
   return (
-    <div className="home-workshop-eyebrow">
+    <div className="home-workshop-eyebrow home-workshop-dateline">
       {weekday} {part} · {time}
     </div>
   );
