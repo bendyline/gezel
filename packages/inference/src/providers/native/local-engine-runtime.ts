@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { createLogger, ds4SsdStreamingSupported } from '@bendyline/gezel';
-import { type GezelConfig, estimateLlamaCppResidentBytes } from '@bendyline/gezel';
+import {
+  type GezelConfig,
+  estimateLlamaCppResidentBytes,
+  llamaCppDraftResidentBytes,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { MlxRuntimeStatusBus } from '../../python/mlx-runtime-status-bus.js';
 import { resolveCatalogLlamaCppEngineConfig } from '../catalog-model-config.js';
@@ -12,6 +16,7 @@ import {
   resolveDs4VisionLaunch,
 } from '../ds4/build-provider.js';
 import { type Ds4MemorySource, ds4VisionResidentBytes } from '../ds4/residency.js';
+import { currentLlamaCppBackend } from '../llama-cpp/backend-health.js';
 import { buildLlamaCppProvider, ensureLlamaEngineStatus } from '../llama-cpp/build-provider.js';
 import { readGgufSummaryAsync } from '../llama-cpp/gguf-metadata-async.js';
 import { type GgufSummary, effectiveLazyTensorBytes } from '../llama-cpp/gguf-metadata.js';
@@ -26,6 +31,12 @@ import {
   estimateKvReserveBytes,
   estimateWindowedKvLinearization,
 } from '../llama-cpp/offload-planner.js';
+import {
+  type DrafterKvPlan,
+  drafterCostsContext,
+  llamaCppSidecarLoads,
+  resolveSpecDraft,
+} from '../llama-cpp/spec-draft.js';
 import { buildMlxProvider, resolveMlxEffectiveNumCtx } from '../mlx/build-provider.js';
 import { readMlxModelGeometry } from '../mlx/model-geometry.js';
 import { type LLMProvider, ModelNotInstalledError, type ProviderName } from '../types.js';
@@ -1604,9 +1615,38 @@ export class LocalEngineRuntime {
         )
       : 0;
     const residentWeightFileBytes = Math.max(0, installed.approxSizeBytes - lazyTensorBytes);
-    const residentWeightsBytes = estimateLlamaCppResidentBytes(residentWeightFileBytes, {
-      mmprojBytes: visionBudgetBytes,
+    const { perModel: previewEngineConfig } = await resolveSpecDraft({
+      perModel: manifestEngineConfig,
+      backend: currentLlamaCppBackend(),
+      configSpecType: config.llamaCppSpecType,
+      configDraftModelPath: config.llamaCppDraftModelPath,
+      installedDraftModelPath: installed.draftModelPath,
+      resolveDraftPath: async (id) => (await this.llamaCppModels?.resolveModelPath(id)) ?? null,
     });
+    const previewSpecType = config.llamaCppSpecType ?? previewEngineConfig?.spec?.type;
+    const draftBudgetBytes =
+      llamaCppSidecarLoads({
+        specType: previewSpecType,
+        targetHasMtp: (summary?.nextnPredictLayers ?? 0) > 0,
+        perBackend: !!manifestEngineConfig?.spec?.byBackend,
+      }) && installed.draftModelPath
+        ? (installed.draftModelSizeBytes ?? 0)
+        : 0;
+    const catalogDetail =
+      draftBudgetBytes > 0 ? await this.catalog.get('chat-model', modelId).catch(() => null) : null;
+    const draftResidentBytes = llamaCppDraftResidentBytes(
+      catalogDetail?.manifest.kind === 'chat-model'
+        ? catalogDetail.manifest.llamaCpp?.draftModel
+        : undefined,
+      installed.draftModelPath,
+    );
+    const residentBytesWith = (draftBytes: number) =>
+      estimateLlamaCppResidentBytes(residentWeightFileBytes, {
+        mmprojBytes: visionBudgetBytes,
+        draftBytes,
+        draftResidentBytes,
+      });
+    let residentWeightsBytes = residentBytesWith(draftBudgetBytes);
     const exactPerSlotKvF16 = summary
       ? estimateExactPerSlotKvBytesF16(
           {
@@ -1766,6 +1806,8 @@ export class LocalEngineRuntime {
       slots: number;
       kvCacheType: LlamaCppKvCacheType;
       plannedFieldsOk: boolean;
+      draftFits: boolean;
+      kvPlan: DrafterKvPlan;
     } => {
       const requirement = resolveLlamaCppContextRequirement({
         modelContextWindow: installed.contextWindow,
@@ -1896,6 +1938,7 @@ export class LocalEngineRuntime {
         maxSlots: defaultLocalEngineSlots(fastBudgetBytes),
       });
       kv = kvPlan.kvCacheType;
+      const draftFits = planFitsAt(kv, kvPlan.ctxCapTokens ?? grantedCtx, 1);
       // Mirror the launch: the f16-by-context-cap trade shrinks the granted
       // window here too, so the settings preview shows what will really run.
       if (kvPlan.ctxCapTokens !== undefined && kvPlan.ctxCapTokens < grantedCtx) {
@@ -1906,7 +1949,7 @@ export class LocalEngineRuntime {
         ceiling: passCeiling(kv, grantedCtx),
         tierDefault: defaultLocalEngineSlots(fastBudgetBytes),
       });
-      if ((config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type) === 'draft-mtp') slots = 1;
+      if (previewSpecType === 'draft-mtp') slots = 1;
 
       try {
         if (!summary) throw new Error('GGUF header unreadable');
@@ -1991,7 +2034,14 @@ export class LocalEngineRuntime {
             // SWA model without a readable layout, over budget on full
             // math: the launch path leaves such a launch untouched — preview
             // the requested window.
-            return { grantedCtx, slots, kvCacheType: kv, plannedFieldsOk: false };
+            return {
+              grantedCtx,
+              slots,
+              kvCacheType: kv,
+              plannedFieldsOk: false,
+              draftFits,
+              kvPlan,
+            };
           }
         }
         if (!admission.minimumSatisfied) {
@@ -2037,10 +2087,21 @@ export class LocalEngineRuntime {
           `[llama-cpp] could not inspect ${modelId} while previewing admission: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-      return { grantedCtx, slots, kvCacheType: kv, plannedFieldsOk: true };
+      return { grantedCtx, slots, kvCacheType: kv, plannedFieldsOk: true, draftFits, kvPlan };
     };
 
-    const plan = llamaPlanPass(explicitContextWindow, contextFloor);
+    let plan = llamaPlanPass(explicitContextWindow, contextFloor);
+    // The launch leaves out a catalog drafter that would cap the target window
+    // or cost its KV precision; the preview has to land on the same plan.
+    if (draftBudgetBytes > 0 && !config.llamaCppSpecType && !config.llamaCppDraftModelPath) {
+      residentWeightsBytes = residentBytesWith(0);
+      const withoutDrafter = llamaPlanPass(explicitContextWindow, contextFloor);
+      if (drafterCostsContext(plan.kvPlan, withoutDrafter.kvPlan, plan.draftFits)) {
+        plan = withoutDrafter;
+      } else {
+        residentWeightsBytes = residentBytesWith(draftBudgetBytes);
+      }
+    }
     let autoContextWindow: number | undefined;
     if (overrideActive) {
       try {

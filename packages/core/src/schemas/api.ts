@@ -1822,9 +1822,11 @@ const GezelConfigObject = z.object({
    * Speculative-decoding mode (`--spec-type`). These algorithms verify
    * drafted tokens against the target distribution and are designed to be
    * lossless, but experimental model/backend pairs must still be A/B tested.
-   * `ngram-mod`/`ngram-simple` need no draft model; `draft-mtp`/
-   * `draft-eagle3` use a model prediction head; `draft-simple` needs a
-   * separate `llamaCppDraftModelPath`. Unset auto-selects `draft-mtp` only for a confirmed MTP head; otherwise it stays off.
+   * `ngram-mod`/`ngram-simple` need no draft model; `draft-mtp` uses a
+   * model prediction head; `draft-simple`, `draft-dflash` and `draft-eagle3`
+   * need a separate draft model, from the catalog or
+   * `llamaCppDraftModelPath`. Unset follows the model's catalog entry for this
+   * backend, then `draft-mtp` for a confirmed MTP head; otherwise it stays off.
    */
   llamaCppSpecType: z
     .enum([
@@ -1841,9 +1843,8 @@ const GezelConfigObject = z.object({
     ])
     .optional(),
   /**
-   * Absolute path to a draft-model GGUF for `--spec-type draft-simple`
-   * (`--spec-draft-model`). Only used when `llamaCppSpecType` is
-   * `draft-simple`. Default unset.
+   * Absolute path to a draft-model GGUF (`--spec-draft-model`), used by any
+   * `draft-*` `llamaCppSpecType`. Default unset.
    */
   llamaCppDraftModelPath: z.string().optional(),
   /**
@@ -1853,9 +1854,10 @@ const GezelConfigObject = z.object({
   llamaCppSpecDraftNMax: z.number().int().positive().optional(),
   /**
    * Draft-token selection (`--spec-draft-sampling`) for compatible MTP
-   * heads and simple draft models. Probabilistic mode is an opt-in
-   * experiment; speed varies by model and workload. Unset retains the
-   * upstream greedy default. Requires llama.cpp v0.6.0 or later.
+   * heads and for simple and DFlash2 draft models. Probabilistic mode is an
+   * opt-in experiment; speed varies by model and workload. Unset follows the
+   * model's catalog entry, then the upstream greedy default. Requires
+   * llama.cpp v0.6.0 or later.
    */
   llamaCppSpecDraftSampling: z.enum(['greedy', 'probabilistic']).optional(),
   /**

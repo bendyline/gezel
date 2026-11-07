@@ -34,9 +34,14 @@
 
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { link, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
-import { createLogger, llamaCppBackendExclusion, llamaCppBackendLabel } from '@bendyline/gezel';
+import {
+  createLogger,
+  llamaCppBackendExclusion,
+  llamaCppBackendLabel,
+  llamaCppDraftModelApplies,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   type ModelBundleSource,
@@ -114,6 +119,8 @@ export interface InstalledLlamaCppModel {
    * `--spec-draft-model <path>` for the selected draft algorithm.
    */
   draftModelPath?: string;
+  /** On-disk size of {@link draftModelPath}, for the memory plan. */
+  draftModelSizeBytes?: number;
   /** From the GGUF metadata — useful for the supervisor's `-c` flag (Phase 3). */
   contextWindow?: number;
   /** Quantization tag (Q4_K_M / Q8_0 / …) lifted from the catalog source block. */
@@ -620,6 +627,7 @@ export class LlamaCppModelManager {
       modelDir,
       manifest: detail.manifest,
       installedVersion,
+      llamaCppBackend: this.resolveBackend(),
       installed: {
         ...(parsed.huggingfaceRepo ? { huggingfaceRepo: parsed.huggingfaceRepo } : {}),
         ...(parsed.payloadFingerprint ? { payloadFingerprint: parsed.payloadFingerprint } : {}),
@@ -825,7 +833,7 @@ export class LlamaCppModelManager {
     await mkdir(itemDir, { recursive: true });
     await assertModelStorePathSafe(this.modelsRoot, itemDir);
 
-    const plan = planDownloads(src, includeMmproj);
+    const plan = planDownloads(src, includeMmproj, this.resolveBackend());
     if (plan.length === 0) {
       yield {
         type: 'error',
@@ -848,6 +856,7 @@ export class LlamaCppModelManager {
     // the start, keep their digests, and are left untouched by the publish
     // rename below.
     const reusable = await this.planReusableFiles(itemDir, plan);
+    await this.adoptSiblingDraftModels(catalogId, itemDir, plan, reusable);
     let bytesCompleted = 0;
     for (const entry of plan) {
       const sha = reusable.get(entry.destFilename);
@@ -1077,7 +1086,7 @@ export class LlamaCppModelManager {
     // that only edits metadata can be recognized as such without re-reading a
     // byte. Skipped for a skipSha install: those bytes are knowingly not the
     // ones the catalog describes.
-    const catalogPayload = describeCatalogPayload(manifest, this.engine);
+    const catalogPayload = describeCatalogPayload(manifest, this.engine, this.resolveBackend());
     const payloadFingerprint =
       catalogPayload && !skipSha ? catalogPayloadFingerprint(catalogPayload) : undefined;
     // Recorded next to the catalog's tag, never instead of it: the catalog
@@ -1167,6 +1176,53 @@ export class LlamaCppModelManager {
     return reusable;
   }
 
+  /**
+   * A drafter is trained against a model, not a quant, so every quant of that
+   * model pins the same file. Link a copy another installed quant verified
+   * rather than downloading a gigabyte again. A hard link keeps each model's
+   * directory complete on its own: deleting one quant leaves the other's
+   * drafter in place. A volume that cannot link just downloads.
+   */
+  private async adoptSiblingDraftModels(
+    catalogId: string,
+    itemDir: string,
+    plan: DownloadPlanEntry[],
+    reusable: Map<string, string>,
+  ): Promise<void> {
+    const drafters = plan.filter(
+      (entry) => entry.role === 'draft-model' && !reusable.has(entry.destFilename),
+    );
+    if (drafters.length === 0) return;
+    const siblings = await readdir(this.modelsRoot).catch(() => [] as string[]);
+    for (const entry of drafters) {
+      for (const sibling of siblings) {
+        if (sibling === catalogId) continue;
+        const siblingDir = join(this.modelsRoot, sibling);
+        const recorded = await readFile(join(siblingDir, 'manifest.json'), 'utf8')
+          .then((raw) => (JSON.parse(raw) as Partial<InstalledManifest>).fileSha256)
+          .catch(() => undefined);
+        if (recorded?.[entry.destFilename]?.toLowerCase() !== entry.sha256.toLowerCase()) continue;
+        const source = join(siblingDir, entry.destFilename);
+        const size = await stat(source)
+          .then((info) => (info.isFile() ? info.size : -1))
+          .catch(() => -1);
+        if (size !== entry.sizeBytes) continue;
+        const dest = join(itemDir, entry.destFilename);
+        try {
+          await rm(dest, { force: true });
+          await link(source, dest);
+        } catch {
+          continue;
+        }
+        reusable.set(entry.destFilename, entry.sha256.toLowerCase());
+        log.info(
+          `[models] [${this.engine}] "${catalogId}": linked ${entry.destFilename} from "${sibling}"`,
+        );
+        break;
+      }
+    }
+  }
+
   /** Warn once per model directory per process, then stay quiet. */
   private warnSkip(id: string, reason: string): void {
     if (this.skipWarned.has(id)) return;
@@ -1229,6 +1285,11 @@ export class LlamaCppModelManager {
           .then((s) => s.size)
           .catch(() => 0)
       : 0;
+    const draftModelSizeBytes = parsed.draftModelFilename
+      ? await stat(join(root, id, parsed.draftModelFilename))
+          .then((s) => s.size)
+          .catch(() => 0)
+      : 0;
     // Absent on every copy installed before the field existed, and on those
     // the catalog tag is the only thing the table has to show.
     const ggufQuantization =
@@ -1260,7 +1321,10 @@ export class LlamaCppModelManager {
           }
         : {}),
       ...(parsed.draftModelFilename
-        ? { draftModelPath: join(root, id, parsed.draftModelFilename) }
+        ? {
+            draftModelPath: join(root, id, parsed.draftModelFilename),
+            ...(draftModelSizeBytes > 0 ? { draftModelSizeBytes } : {}),
+          }
         : {}),
       ...(parsed.contextWindow ? { contextWindow: parsed.contextWindow } : {}),
       ...(parsed.quantization ? { quantization: parsed.quantization } : {}),
@@ -1309,6 +1373,7 @@ function planDownloads(
       filename: string;
       sha256: string;
       sizeBytes: number;
+      backends?: string[];
     };
   },
   /**
@@ -1328,6 +1393,8 @@ function planDownloads(
    * `visionEncoder` is part of that model's install and is always fetched.
    */
   includeMmproj = true,
+  /** Decides a drafter limited to some llama-server backends. */
+  backend?: string,
 ): DownloadPlanEntry[] {
   const out: DownloadPlanEntry[] = [];
   if (src.shards && src.shards.length > 0) {
@@ -1374,10 +1441,10 @@ function planDownloads(
     });
   }
   // Draft companions are part of the model's selected decoding path, not
-  // an optional modality. Download them whenever the catalog ships one so
-  // an explicitly selected `draft-mtp`/other draft mode can work immediately
-  // after install without a second download.
-  if (src.draftModel) {
+  // an optional modality. Download them whenever the catalog ships one for
+  // this backend, so an explicitly selected `draft-mtp`/other draft mode can
+  // work immediately after install without a second download.
+  if (src.draftModel && llamaCppDraftModelApplies(src.draftModel, backend)) {
     out.push({
       ...(src.draftModel.huggingfaceRepo
         ? { huggingfaceRepo: src.draftModel.huggingfaceRepo }

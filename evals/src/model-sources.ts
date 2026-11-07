@@ -50,6 +50,8 @@ export interface ChatModelInstallIdentity {
   huggingfaceRepo?: string;
   weightsFilename?: string;
   draftFilename?: string;
+  /** The llama-server backends that fetch that drafter, when it is limited to some. */
+  draftBackends?: string[];
   visionEncoderFilename?: string;
 }
 
@@ -65,7 +67,7 @@ interface EngineBlock {
   streamingMemory?: unknown;
   prefillChunk?: number;
   maxLaunchCtx?: number;
-  draftModel?: { filename?: string };
+  draftModel?: { filename?: string; backends?: string[] };
   visionEncoder?: { filename?: string };
 }
 
@@ -161,6 +163,7 @@ export function chatModelInstallIdentity(
     ...(block.huggingfaceRepo ? { huggingfaceRepo: block.huggingfaceRepo } : {}),
     ...(block.filename ? { weightsFilename: block.filename } : {}),
     ...(block.draftModel?.filename ? { draftFilename: block.draftModel.filename } : {}),
+    ...(block.draftModel?.backends ? { draftBackends: block.draftModel.backends } : {}),
     ...(block.visionEncoder?.filename
       ? { visionEncoderFilename: block.visionEncoder.filename }
       : {}),

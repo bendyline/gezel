@@ -34,7 +34,12 @@
 import { createHash } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import type { ChatModelManifest, GezmodelEngine } from '@bendyline/gezel';
+import {
+  type ChatModelManifest,
+  type GezmodelEngine,
+  llamaCppDraftModelApplies,
+} from '@bendyline/gezel';
+import { currentLlamaCppBackend } from '../providers/llama-cpp/backend-health.js';
 
 /** One file the catalog expects to land in the model directory. */
 export interface CatalogPayloadFile {
@@ -128,6 +133,7 @@ export function catalogPayloadFingerprint(payload: CatalogPayload): string {
 export function describeCatalogPayload(
   manifest: ChatModelManifest,
   engine: GezmodelEngine,
+  llamaCppBackend: string | undefined = currentLlamaCppBackend(),
 ): CatalogPayload | null {
   if (engine === 'mlx') {
     const src = manifest.mlx;
@@ -171,10 +177,14 @@ export function describeCatalogPayload(
       sizeBytes: src.approxSizeBytes,
     });
   }
-  // Draft companions exist on both engine sources and are fetched
-  // unconditionally by `buildDownloadPlan`, so read them off the already
-  // engine-selected `src` rather than re-narrowing to one engine.
-  if (src.draftModel) {
+  // Draft companions exist on both engine sources, so read them off the
+  // already engine-selected `src`. A llama.cpp drafter limited to some backends
+  // is no part of this install elsewhere: counting it would offer every other
+  // machine an update for a file it never downloads.
+  const draftApplies =
+    engine !== 'llama-cpp' ||
+    llamaCppDraftModelApplies(manifest.llamaCpp?.draftModel, llamaCppBackend);
+  if (src.draftModel && draftApplies) {
     files.push({
       name: basename(src.draftModel.filename),
       sha256: src.draftModel.sha256,

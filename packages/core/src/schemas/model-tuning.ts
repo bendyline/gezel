@@ -220,6 +220,39 @@ export const PromptTagsSchema = z
   .describe('Per-turn reasoning toggle tags.');
 export type PromptTags = z.infer<typeof PromptTagsSchema>;
 
+const LlamaCppSpecTypeSchema = z.enum([
+  'none',
+  'draft-mtp',
+  'draft-eagle3',
+  'draft-dflash',
+  'draft-simple',
+  'ngram-mod',
+  'ngram-simple',
+  'ngram-map-k',
+  'ngram-map-k4v',
+  'ngram-cache',
+]);
+
+const LlamaCppSpecNMaxSchema = z
+  .number()
+  .int()
+  .positive()
+  .optional()
+  .describe('`--spec-draft-n-max`: tokens drafted per step.');
+
+const LlamaCppSpecSamplingSchema = z
+  .enum(['greedy', 'probabilistic'])
+  .optional()
+  .describe(
+    '`--spec-draft-sampling`. Honored by MTP, simple and DFlash2 drafts; a DFlash 1 drafter ignores it.',
+  );
+
+const LlamaCppSpecBackendOverlaySchema = z.object({
+  type: LlamaCppSpecTypeSchema.optional(),
+  nMax: LlamaCppSpecNMaxSchema,
+  sampling: LlamaCppSpecSamplingSchema,
+});
+
 /**
  * Per-model llama.cpp ENGINE-launch defaults — flags applied once at
  * model load (`llama-server` argv), NOT per request. Distinct from the
@@ -299,21 +332,9 @@ export const LlamaCppEngineConfigSchema = z
     batchSize: z.number().int().positive().optional().describe('`--batch-size` override.'),
     spec: z
       .object({
-        type: z
-          .enum([
-            'none',
-            'draft-mtp',
-            'draft-eagle3',
-            'draft-dflash',
-            'draft-simple',
-            'ngram-mod',
-            'ngram-simple',
-            'ngram-map-k',
-            'ngram-map-k4v',
-            'ngram-cache',
-          ])
-          .optional()
-          .describe('`--spec-type` speculative-decoding mode for this model.'),
+        type: LlamaCppSpecTypeSchema.optional().describe(
+          '`--spec-type` speculative-decoding mode for this model.',
+        ),
         mtp: z
           .boolean()
           .optional()
@@ -324,12 +345,20 @@ export const LlamaCppEngineConfigSchema = z
           .string()
           .optional()
           .describe('Catalog id / path of the draft model for `draft-simple`.'),
-        nMax: z
-          .number()
-          .int()
-          .positive()
+        nMax: LlamaCppSpecNMaxSchema,
+        sampling: LlamaCppSpecSamplingSchema,
+        byBackend: z
+          .object({
+            cuda: LlamaCppSpecBackendOverlaySchema.optional(),
+            rocm: LlamaCppSpecBackendOverlaySchema.optional(),
+            vulkan: LlamaCppSpecBackendOverlaySchema.optional(),
+            metal: LlamaCppSpecBackendOverlaySchema.optional(),
+            cpu: LlamaCppSpecBackendOverlaySchema.optional(),
+          })
           .optional()
-          .describe('`--spec-draft-n-max`: tokens drafted per step.'),
+          .describe(
+            'Overlays for the llama-server backends this speculation was measured on. Other backends, and any build that predates this field, keep the block above. Read through `llamaCppSpecForBackend`.',
+          ),
       })
       .optional()
       .describe('Speculative-decoding config for this model.'),
