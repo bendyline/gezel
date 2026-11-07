@@ -9,7 +9,12 @@ import type {
   TaskStatus,
   UpdateTaskStepRequest,
 } from '@bendyline/gezel';
-import { planGuardrails, summarizePlanDocument, taskEffectiveStatus } from '@bendyline/gezel';
+import {
+  plainRoleTitle,
+  planGuardrails,
+  summarizePlanDocument,
+  taskEffectiveStatus,
+} from '@bendyline/gezel';
 import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -17,6 +22,7 @@ import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { DeliverableCard } from '../components/DeliverableCard.js';
 import { GezelIcon } from '../components/GezelIcon.js';
+import { PersonLabel } from '../components/PersonLabel.js';
 import { PromptDialog } from '../components/PromptDialog.js';
 import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
@@ -614,11 +620,10 @@ export function TaskDetail({
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
-                <Select.Item value="__user">→ You</Select.Item>
+                <Select.Item value="__user">You</Select.Item>
                 {gezels.map((g) => (
                   <Select.Item key={g.id} value={g.id}>
-                    → {g.name}
-                    {g.role ? ` (${g.role})` : ''}
+                    <PersonLabel name={g.name} roleTitle={g.role && plainRoleTitle(g.role)} />
                   </Select.Item>
                 ))}
               </Select.Content>
@@ -721,7 +726,7 @@ export function TaskDetail({
             <div className="task-description-header">
               <h4>Description</h4>
             </div>
-            <div className="task-description-editor">
+            <div className="task-description-editor gz-compact-editor">
               <EditorShell
                 {...GEZEL_WRITE_CANVAS}
                 ariaLabel="Task description"
@@ -778,20 +783,23 @@ export function TaskDetail({
                 note appears immediately below it — reverse-chronological
                 from the user's vantage point, no scrolling required. */}
             <div className="task-notes-composer">
-              <EditorShell
-                {...GEZEL_WRITE_CANVAS}
-                ariaLabel="Task note"
-                key={`composer-${composerKey}`}
-                initialMarkdown=""
-                placeholder="Write a note — paste markdown, drag in media, or just start typing."
-                onChange={(source) => {
-                  composerDraft.current = source;
-                }}
-                colorScheme={editorTheme}
-                showPlayTab={false}
-                height="160px"
-                fullWidth
-              />
+              <div className="task-notes-editor gz-compact-editor">
+                <EditorShell
+                  {...GEZEL_WRITE_CANVAS}
+                  ariaLabel="Task note"
+                  key={`composer-${composerKey}`}
+                  initialMarkdown=""
+                  placeholder="Write a note — paste markdown, drag in media, or just start typing."
+                  onChange={(source) => {
+                    composerDraft.current = source;
+                  }}
+                  colorScheme={editorTheme}
+                  showPlayTab={false}
+                  showStatusBar={false}
+                  height="160px"
+                  fullWidth
+                />
+              </div>
               <div className="task-notes-composer-actions">
                 <button type="button" onClick={() => void postNote()}>
                   Post note

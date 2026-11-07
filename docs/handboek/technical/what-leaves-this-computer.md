@@ -13,7 +13,7 @@ subcategory:
 
 Gezel has no Bendyline account and no Bendyline server between you and your work. Your projects, chats and files stay on this machine unless something on this page sends them somewhere. Below is every kind of traffic Gezel can make, what it carries, and which of the three security levels allows it.
 
-You choose the level in **Settings → Security & Compliance**, or with `gezel security level set <level>` on the command line. A new install starts at `lockdown`.
+You choose the level in **Settings → Security & compliance**, or with `gezel security level set <level>` on the command line. A new install starts at `lockdown`.
 
 ## The table
 
@@ -30,7 +30,7 @@ You choose the level in **Settings → Security & Compliance**, or with `gezel s
 | Downloads you start: models, on-device engines, knowledge catalogs | Requests for those files, from Hugging Face and Gezel's GitHub releases | Allowed | Allowed | Allowed |
 | First-start tool setup | Downloads of the browser-automation tools from npm and Playwright | Allowed | Allowed | Allowed |
 
-The levels are presets. **Settings → Security & Compliance** can turn individual switches on or off; a combination that matches no preset is shown as **Custom**.
+The levels are presets. **Settings → Security & compliance** can turn individual switches on or off; a combination that matches no preset is shown as **Custom**.
 
 ## What the rows mean
 

@@ -4,7 +4,7 @@
  * server's `/v1/identity` and `/v1/apps/pair/*` the same way, so a desktop and
  * a phone pairing with one server run the identical protocol.
  *
- * The server shows an 8-digit code (Settings → Remote Servers → Add a
+ * The server shows an 8-digit code (Settings → Remote servers → Add a
  * device). The client runs SPAKE2 with it over a TLS channel pinned to the
  * certificate the server's `/v1/identity` presented and its identity key
  * signed. Both device
@@ -123,7 +123,7 @@ export interface PairedServer {
 export class PairingCodeClosedError extends Error {
   constructor() {
     super(
-      "That device isn't showing a connect code. On it, open Settings → Remote Servers and choose Add a device.",
+      "That device isn't showing a connect code. On it, open Settings → Remote servers and choose Add a device.",
     );
     this.name = 'PairingCodeClosedError';
   }

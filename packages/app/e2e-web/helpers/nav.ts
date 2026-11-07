@@ -30,7 +30,10 @@ export async function gotoMeesterChat(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
   const conversation = page.getByRole('region', { name: 'Meester chat', exact: true });
   await expect(conversation).not.toHaveAttribute('inert');
-  await expect(conversation).toBeFocused();
+  // The key sits over the composer, so returning puts the caret there.
+  await expect(
+    conversation.locator('[data-testid="chat-composer"] [contenteditable="true"]'),
+  ).toBeFocused();
 }
 
 /** Click a sidebar area link (tasks | craftbooks | scripts | history | settings). */

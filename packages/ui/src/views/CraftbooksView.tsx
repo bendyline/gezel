@@ -14,7 +14,7 @@ interface Selection {
 const SOURCE_GROUPS: Array<{ source: Source; label: string; hint: string }> = [
   { source: 'local', label: 'My craftbooks', hint: 'editable' },
   { source: 'project', label: 'Project', hint: 'read-only' },
-  { source: 'bundled', label: 'Gilde catalog', hint: 'read-only — copy to edit' },
+  { source: 'bundled', label: 'Gilde catalog', hint: 'read-only' },
 ];
 
 export function CraftbooksView() {

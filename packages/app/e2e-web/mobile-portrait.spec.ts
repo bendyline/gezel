@@ -155,7 +155,7 @@ for (const profile of [
       await expect(page.getByTestId('document-detail')).toBeVisible();
       await capture('document-detail');
       for (const [area, trigger] of [
-        ['gezels', '+ New Gezel'],
+        ['gezels', '+ New gezel'],
         ['projects', '+ New Project'],
         ['tasks', '+ New task'],
       ]) {
@@ -235,8 +235,8 @@ test('small portrait create and edit workflows', async ({ page, daemon, world })
   await page.goto('/');
   await expect(page.getByTestId('app-sidebar')).toBeVisible();
   await openAreaView(page, 'gezels');
-  await page.getByRole('button', { name: '+ New Gezel', exact: true }).click();
-  const newGezel = page.getByRole('dialog', { name: 'New Gezel', exact: true });
+  await page.getByRole('button', { name: '+ New gezel', exact: true }).click();
+  const newGezel = page.getByRole('dialog', { name: 'New gezel', exact: true });
   await newGezel.getByRole('textbox', { name: 'Name', exact: true }).fill('Portrait companion');
   await newGezel.getByRole('textbox', { name: 'Role', exact: true }).fill('Editor');
   await newGezel.getByRole('button', { name: 'Create', exact: true }).click();

@@ -23,7 +23,7 @@ const SECTIONS = [
   {
     id: 'team',
     name: 'team',
-    desc: 'Settings — Your Team (meester / klerk / boekwachter pickers)',
+    desc: 'Settings — Your team (meester / klerk / boekwachter pickers)',
   },
   {
     id: 'folders',
@@ -33,12 +33,12 @@ const SECTIONS = [
   {
     id: 'defaults',
     name: 'ai-defaults',
-    desc: 'Settings — Artificial Intelligence (default provider + model)',
+    desc: 'Settings — Artificial intelligence (default provider + model)',
   },
   { id: 'anthropic', name: 'provider-anthropic', desc: 'Settings — Anthropic Claude provider' },
   { id: 'openai', name: 'provider-openai', desc: 'Settings — OpenAI provider' },
   { id: 'ollama', name: 'provider-ollama', desc: 'Settings — Ollama provider / model manager' },
-  { id: 'securityCompliance', name: 'security', desc: 'Settings — Security & Compliance levels' },
+  { id: 'securityCompliance', name: 'security', desc: 'Settings — Security & compliance levels' },
   { id: 'about', name: 'about', desc: 'Settings — About / diagnostics' },
 ];
 
@@ -65,6 +65,15 @@ test.describe('settings', () => {
         // The section wrapper exists before its lazy provider panel mounts.
         await expect(panel.getByRole('heading').first()).toBeVisible();
         await settle(page);
+        // The panel scrolls, never the window: an unanchored absolute child
+        // once grew the document and shoved the navigation rail sideways.
+        expect(
+          await page.evaluate(() => {
+            const root = document.scrollingElement ?? document.documentElement;
+            return root.scrollHeight - root.clientHeight;
+          }),
+          `${s.id} scrolls the window`,
+        ).toBeLessThanOrEqual(1);
         await shot(page, s.name, {
           area: 'settings',
           clip: panel,

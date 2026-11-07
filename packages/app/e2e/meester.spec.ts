@@ -74,9 +74,9 @@ test('first-run auto-provisions a Meester gezel', async () => {
 test('Settings shows the meester with the dropdown pre-selected', async () => {
   await page.locator('[data-testid="sidebar-area-settings"]').click();
   await page.waitForTimeout(500);
-  // The meester picker lives in the "Your Team" section — Settings
+  // The meester picker lives in the "Your team" section — Settings
   // opens on "General" by default, so click into the team section.
-  await page.locator('.settings-nav button:has-text("Your Team")').click();
+  await page.locator('.settings-nav button:has-text("Your team")').click();
   await page.waitForTimeout(400);
   await captureScreenshot(page, {
     path: join(screenshotDir, 'meester-02-settings.png'),
@@ -87,11 +87,9 @@ test('Settings shows the meester with the dropdown pre-selected', async () => {
   expect(body).toContain('Meester');
   expect(body).toContain('concierge');
 
-  // The Radix trigger inside .meester-picker shows the currently-selected
-  // gezel's name — expect it to reflect the auto-provisioned Meester.
-  // (The Scribe section reuses the same .meester-picker class; the Meester
-  // section comes first in the DOM, so .first() targets it.)
-  const meesterTrigger = page.locator('.meester-picker .gz-select-trigger').first();
+  // The Meester picker's Radix trigger shows the currently-selected gezel's
+  // name — expect it to reflect the auto-provisioned Meester.
+  const meesterTrigger = page.locator('#settings-role-meester');
   const triggerText = (await meesterTrigger.textContent()) ?? '';
   expect(triggerText.toLowerCase()).toContain('meester');
 });

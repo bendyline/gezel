@@ -82,7 +82,7 @@ export interface EngineContext {
     stop(): Promise<void>;
   };
   remoteServing: RemoteServingController;
-  /** Connect codes for the LAN listener above (Settings → Remote Servers → Add a device). */
+  /** Connect codes for the LAN listener above (Settings → Remote servers → Add a device). */
   pairingCodes: PairingCodes;
   remoteTenantLimits: TenantLimiter;
   tlsCertSha256?: string;

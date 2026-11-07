@@ -123,7 +123,9 @@ describe('StreamingBubble outside debug mode', () => {
       },
     ]);
 
-    expect(screen.getByText(/didn't finish\. Details has the full response\./)).toBeInTheDocument();
+    expect(
+      screen.getByText(/didn't finish\. The steps have the full response\./),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/invalid-artifact-reference/)).not.toBeInTheDocument();
   });
 

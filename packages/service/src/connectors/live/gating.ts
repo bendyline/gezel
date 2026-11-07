@@ -56,7 +56,7 @@ export function liveGate(input: LiveGateInput): LiveGate {
     return {
       run: false,
       state: 'held',
-      reason: 'AI engagement is off (Settings → Artificial Intelligence).',
+      reason: 'AI engagement is off (Settings → Artificial intelligence).',
     };
   }
   if (input.network && !input.allowConnectorData) {

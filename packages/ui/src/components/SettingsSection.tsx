@@ -51,16 +51,19 @@ export function SettingField({
   label,
   controlId,
   hint,
+  className,
   children,
 }: {
   label: ReactNode;
   controlId?: string;
   hint?: ReactNode;
+  className?: string;
   children: ReactNode;
 }) {
+  const fieldClassName = ['gz-setting', className].filter(Boolean).join(' ');
   if (controlId) {
     return (
-      <div className="gz-setting">
+      <div className={fieldClassName}>
         <label className="gz-setting-label" htmlFor={controlId}>
           {label}
         </label>
@@ -74,7 +77,7 @@ export function SettingField({
     );
   }
   return (
-    <fieldset className="gz-setting">
+    <fieldset className={fieldClassName}>
       <legend className="gz-setting-label">{label}</legend>
       {children}
       {hint && <p className="gz-setting-hint">{hint}</p>}
@@ -87,18 +90,24 @@ export function settingHintId(controlId: string): string {
   return `${controlId}-hint`;
 }
 
-/** An on/off setting: the checkbox leads, the hint aligns under the label. */
+/**
+ * An on/off setting: the checkbox leads, the hint aligns under the label.
+ * `aside` is a small illustration at the row's end (the poppetje beside
+ * "Show gezel names and poppetjes"); it is decoration, never part of the name.
+ */
 export function SettingCheck({
   label,
   hint,
   checked,
   disabled,
+  aside,
   onChange,
 }: {
   label: ReactNode;
   hint?: ReactNode;
   checked: boolean;
   disabled?: boolean;
+  aside?: ReactNode;
   onChange: (checked: boolean) => void;
 }) {
   const id = useId();
@@ -120,6 +129,11 @@ export function SettingCheck({
         <p id={hintId} className="gz-setting-hint">
           {hint}
         </p>
+      )}
+      {aside && (
+        <div className="gz-setting-aside" aria-hidden="true">
+          {aside}
+        </div>
       )}
     </div>
   );

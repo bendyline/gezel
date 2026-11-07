@@ -119,6 +119,10 @@ async function openArea(area: string): Promise<void> {
 }
 
 async function expandGroup(id: string): Promise<void> {
+  // An area with its own list folds the rail to icons; open it as a person
+  // would, which pins it open there.
+  const expand = page.getByRole('button', { name: 'Expand sidebar', exact: true });
+  if (await expand.isVisible()) await expand.click();
   // The caret button toggles the inline list; the sibling `sidebar-group-${id}`
   // button navigates to the area instead (and carries no aria-expanded).
   const toggle = page.locator(`[data-testid="sidebar-group-toggle-${id}"]`);
@@ -151,7 +155,7 @@ test('05 - can create a gezel via the sidebar "+"', async () => {
   // The Gezels group "+" opens the Gezels view and pops the create dialog.
   await page.locator('[aria-label="New gezel"]').click();
   await page.waitForTimeout(300);
-  const dialog = page.getByRole('dialog', { name: 'New Gezel', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'New gezel', exact: true });
   await expect(dialog).toBeVisible();
   // Clear the pre-filled random name and type ours.
   await dialog.locator('input').first().fill('TestBot');

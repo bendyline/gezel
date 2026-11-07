@@ -24,7 +24,9 @@ export function modelSetupAction(error: string): ModelSetupAction | null {
   if (error.startsWith('Local model:')) {
     return { label: 'Choose a model', target: { kind: 'settings', section: 'llamaCpp' } };
   }
-  if (error.includes('Settings → Artificial Intelligence')) {
+  // Case-blind: the section is now "Artificial intelligence", and daemons
+  // and engines may still word it the older way.
+  if (/Settings → Artificial intelligence/i.test(error)) {
     return { label: 'Choose a model', target: { kind: 'settings', section: 'defaults' } };
   }
   return null;

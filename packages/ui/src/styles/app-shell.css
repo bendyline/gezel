@@ -12,7 +12,7 @@
   border: 1px solid var(--border);
   border-left: 3px solid var(--warning);
   border-radius: var(--radius-md);
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
   line-height: 1.45;
   /* People paste the explanation and its technical details into a report. */
   -webkit-user-select: text;
@@ -26,7 +26,7 @@
 
 .settings-notice details {
   margin-top: 0.15rem;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
 }
 
 .settings-notice summary {
@@ -98,7 +98,7 @@
   border-left: 3px solid var(--warning);
   border-radius: var(--radius-md);
   box-shadow: var(--surface-shadow);
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
   line-height: 1.4;
 }
 
@@ -169,7 +169,7 @@
   padding: 0.4rem 0.75rem;
   color: #fff;
   background: var(--accent);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-ui);
   font-weight: 600;
   text-decoration: none;
@@ -186,7 +186,7 @@
 
 .app-fallback-banner details {
   margin-top: 0.15rem;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
 }
 
 .app-fallback-banner summary {
@@ -331,7 +331,7 @@
 
 .app-header h1 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   letter-spacing: 0.02em;
 }
 
@@ -563,7 +563,7 @@
   height: var(--titlebar-control-h);
   border-radius: var(--radius-md);
   padding: 0 52px 0 30px; /* room for the magnifier glyph and the keycap */
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
   /* At rest the well is a slot routed into the bench: darker sage, cream
      ink, an inset shadow for depth and a hairline lip below. It is the
      widest thing on the bar, so it must not also be the brightest while
@@ -635,7 +635,7 @@
   box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.28);
   color: color-mix(in srgb, var(--titlebar-ink) 86%, transparent);
   font-family: inherit;
-  font-size: 0.66rem;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1;
@@ -679,7 +679,7 @@
 .search-palette-empty {
   padding: 12px 14px;
   color: var(--muted, #6b7280);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 /* Trailing note while the content fan-out is still running behind the
@@ -725,7 +725,7 @@
   gap: 0;
   background: var(--panel, var(--bg, #fff));
   border: 1px solid var(--border, #4443);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
 }
 
@@ -747,7 +747,7 @@
   padding: 6px 10px;
   font-size: var(--text-sm, 0.9rem);
   border: 1px solid var(--border, #4443);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
 }
@@ -762,7 +762,7 @@
   background: transparent;
   color: inherit;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   padding: 4px 6px;
 }
 
@@ -778,7 +778,7 @@
 
 .search-results-group-title {
   margin: 12px 0 4px;
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -801,7 +801,7 @@
   width: 100%;
   padding: 6px 8px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: inherit;
   text-align: left;
@@ -903,7 +903,7 @@
 
 .search-palette-group-header {
   padding: 6px 10px 2px;
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -922,7 +922,7 @@
   background: transparent;
   color: var(--muted, #6b7280);
   font-family: inherit;
-  font-size: 0.74rem;
+  font-size: var(--text-xs);
 }
 
 button.search-palette-group-more {
@@ -943,7 +943,7 @@ button.search-palette-group-more:hover {
   text-align: left;
   padding: 6px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: transparent;
   cursor: pointer;
   color: inherit;
@@ -955,14 +955,14 @@ button.search-palette-group-more:hover {
 }
 
 .search-option-title {
-  font-size: 0.86rem;
+  font-size: var(--text-sm);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .search-option-subtitle {
-  font-size: 0.74rem;
+  font-size: var(--text-xs);
   color: var(--muted, #6b7280);
   white-space: nowrap;
   overflow: hidden;
@@ -970,7 +970,7 @@ button.search-palette-group-more:hover {
 }
 
 .search-option-snippet {
-  font-size: 0.74rem;
+  font-size: var(--text-xs);
   color: var(--muted, #6b7280);
   white-space: nowrap;
   overflow: hidden;
@@ -979,21 +979,26 @@ button.search-palette-group-more:hover {
 }
 
 /* Brand mark in the status header — routes to the Meester home. */
+/* It stands the bar's one height like every other control, and its hover
+   and active faces go darker like the keys': a lighter face is what pulled
+   the cream mark below contrast and made the brand 2px taller than the bar. */
 .app-header-brand {
   align-self: center;
   display: inline-flex;
   align-items: center;
-  padding: 4px 8px;
+  height: var(--titlebar-control-h);
+  padding: 0 8px;
   background: transparent;
   border: none;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
+  font: inherit;
   cursor: pointer;
 }
 .app-header-brand:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--titlebar-key-pressed-bg);
 }
 .app-header-brand.active {
-  background: rgba(255, 255, 255, 0.16);
+  background: var(--titlebar-well-bg);
 }
 
 /* Pending-questions toggle, parked just right of the brand. */
@@ -1019,7 +1024,7 @@ button.search-palette-group-more:hover {
   color: inherit;
   cursor: pointer;
   font-family: inherit;
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   white-space: nowrap;
 }
 
@@ -1085,7 +1090,7 @@ button.search-palette-group-more:hover {
 .quota-popover-reset {
   display: block;
   margin-top: 0.08rem;
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   opacity: 0.68;
 }
 
@@ -1124,7 +1129,7 @@ button.search-palette-group-more:hover {
   gap: 0.35rem;
   padding-inline: 0.6rem;
   color: var(--titlebar-ink);
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   font-family: inherit;
   cursor: pointer;
   max-width: 26rem;
@@ -1251,12 +1256,12 @@ button.search-palette-group-more:hover {
   min-width: 18rem;
   max-width: 26rem;
   padding: 0.75rem 0.9rem;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   border: 1px solid rgba(243, 237, 224, 0.25);
-  background: #1a1a1a;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  background: var(--panel);
+  box-shadow: var(--shadow-popover);
   color: var(--titlebar-ink);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   /* The fixed-position variant gets a measured max-height from the hook; this
      is the fallback for the absolute anchor. Either way the slab is its own
      scroll container with `contain`, so a wheel gesture over an open popover
@@ -1293,21 +1298,21 @@ button.search-palette-group-more:hover {
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .engine-pill-popover,
   :root:not([data-theme="light"]) .quota-popover {
-    background: #1a1a1a;
+    background: var(--panel);
     color: var(--titlebar-ink);
     border-color: rgba(243, 237, 224, 0.25);
   }
 }
 .engine-pill-popover-header,
 .quota-popover-header {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   opacity: 0.7;
   margin-bottom: 0.5rem;
 }
 .engine-pill-popover-footnote {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   margin-top: 0.6rem;
   padding-top: 0.5rem;
   border-top: 1px solid rgba(243, 237, 224, 0.12);
@@ -1335,7 +1340,7 @@ button.search-palette-group-more:hover {
   white-space: nowrap;
 }
 .claude-cli-pool-ago {
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   font-variant-numeric: tabular-nums;
 }
 .engine-pill-stats,
@@ -1349,7 +1354,7 @@ button.search-palette-group-more:hover {
 }
 .engine-pill-stats dt,
 .quota-popover-stats dt {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   opacity: 0.6;
@@ -1433,7 +1438,7 @@ button.search-palette-group-more:hover {
   align-items: baseline;
   justify-content: space-between;
   gap: 0.75rem;
-  font-size: 0.68rem;
+  font-size: var(--text-2xs);
 }
 .machine-memory-reservation-heading > :first-child {
   color: var(--text);
@@ -1609,7 +1614,7 @@ button.machine-memory-unload-button {
   flex-wrap: wrap;
   gap: 0.25rem 0.65rem;
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: var(--text-2xs);
   line-height: 1.25;
 }
 .machine-memory-legend > span {
@@ -1647,7 +1652,7 @@ button.machine-memory-unload-button {
   color: var(--text-muted);
 }
 .machine-memory-note {
-  font-size: 0.66rem;
+  font-size: var(--text-2xs);
   line-height: 1.3;
 }
 .machine-memory-device {
@@ -1675,7 +1680,7 @@ button.machine-memory-unload-button {
 .engine-pill-retention-mode .gz-key {
   position: relative;
   padding: 0.25rem 0.5rem;
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
 }
 
 .engine-pill-retention-radio {
@@ -1703,12 +1708,12 @@ button.machine-memory-unload-button {
 }
 .engine-pill-retention-note {
   color: var(--text-muted);
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   line-height: 1.35;
 }
 .engine-pill-health-mode .gz-key {
   padding: 0.25rem 0.55rem;
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
 }
 .engine-pill-health-mode {
   min-inline-size: 0;
@@ -1716,7 +1721,7 @@ button.machine-memory-unload-button {
 }
 .engine-pill-health-policy-note,
 .engine-pill-health-policy-error {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   line-height: 1.35;
 }
 .engine-pill-health-policy-note {
@@ -1739,7 +1744,7 @@ button.machine-memory-unload-button {
   min-width: 0;
   flex-direction: column;
   gap: 0.12rem;
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   line-height: 1.35;
 }
 .engine-pill-emergency-copy span {
@@ -1753,7 +1758,7 @@ button.machine-memory-unload-button {
 .engine-pill-emergency-error {
   display: block;
   margin-top: 0.35rem;
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   line-height: 1.35;
 }
 .engine-pill-emergency-notice {
@@ -1789,7 +1794,7 @@ button.machine-memory-unload-button {
   gap: 0.3rem;
   padding-inline: 0.55rem;
   color: var(--titlebar-ink);
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   cursor: pointer;
 }
 /* The compact header's face for this button (glyph + one total); the desktop
@@ -1822,7 +1827,7 @@ button.machine-memory-unload-button {
   max-width: 7.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   font-weight: 600;
   line-height: 1;
 }
@@ -1846,7 +1851,7 @@ button.machine-memory-unload-button {
   padding-left: 0.4rem;
 }
 .queue-meter-chip-label {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   opacity: 0.75;
@@ -1871,7 +1876,7 @@ button.machine-memory-unload-button {
    per size, and the two spans rounded differently. Identical metrics make
    the centering exact. */
 .queue-meter-chip-counts {
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   line-height: 1;
   font-variant-numeric: tabular-nums;
   font-weight: 500;
@@ -1920,12 +1925,12 @@ button.machine-memory-unload-button {
   overscroll-behavior: contain;
   background: var(--surface, #1f2124);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-popover);
   z-index: 10;
   padding: 0.75rem;
   color: var(--text, #e8e8e8);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .queue-meter-panel-header {
@@ -1939,7 +1944,7 @@ button.machine-memory-unload-button {
   background: transparent;
   border: none;
   color: inherit;
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   line-height: 1;
   cursor: pointer;
   padding: 0 0.25rem;
@@ -2037,7 +2042,7 @@ button.machine-memory-unload-button {
   gap: 0.4rem;
   align-items: center;
   min-height: 1.55rem;
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
   border-radius: var(--radius-sm);
   margin-inline: -0.2rem;
   padding-inline: 0.2rem;
@@ -2130,13 +2135,13 @@ button.machine-memory-unload-button {
 }
 
 .queue-meter-panel-phase {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   font-style: italic;
 }
 
 .queue-meter-panel-time {
   font-variant-numeric: tabular-nums;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
 }
 
 .queue-meter-panel-active-status {
@@ -2173,7 +2178,7 @@ button.machine-memory-unload-button {
   color: var(--text-muted);
   cursor: pointer;
   padding: 0 0.25rem;
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   line-height: 1;
   border-radius: 3px;
 }
@@ -2323,7 +2328,7 @@ button.machine-memory-unload-button {
   background: transparent;
   color: inherit;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 4px 10px;
   font: inherit;
   font-size: 13px;
@@ -2358,7 +2363,7 @@ button.machine-memory-unload-button {
   background: transparent;
   color: inherit;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 1rem;
   line-height: 1;
   cursor: pointer;
@@ -2440,7 +2445,7 @@ button.machine-memory-unload-button {
 }
 .document-drop-overlay i {
   color: var(--accent-text);
-  font-size: 1.35rem;
+  font-size: var(--text-title);
 }
 @media (prefers-reduced-motion: reduce) {
   .document-drop-zone {
@@ -2450,7 +2455,7 @@ button.machine-memory-unload-button {
 .documents-detail .placeholder {
   color: var(--text-muted);
   padding: 1rem;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
 /* Base single-document surface. A standalone document tab mounts this
    directly inside `.app-main`, so fill the host pane's height — flex
@@ -2570,10 +2575,10 @@ button.machine-memory-unload-button {
 .app-nav-menu {
   background: var(--panel-bg, var(--bg));
   border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 0.25rem;
   min-width: 10rem;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.32);
+  box-shadow: var(--shadow-popover);
   z-index: 50;
   /* Radix flips the panel to the other side when it doesn't fit below,
      but a list taller than either side still runs past the window edge —
@@ -2590,7 +2595,7 @@ button.machine-memory-unload-button {
   align-items: center;
   gap: 0.55rem;
   padding: 0.4rem 0.7rem;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font: inherit;
   color: inherit;
@@ -2648,7 +2653,7 @@ button.machine-memory-unload-button {
   color: #fff;
   border-radius: var(--radius-sm);
   padding: 0 0.45rem;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   line-height: 1.4;
   min-width: 1.1rem;
   text-align: center;
@@ -2706,7 +2711,7 @@ button.machine-memory-unload-button {
   color: inherit;
   border: none;
   border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.12));
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-dialog);
   padding: 0.75rem 1.25rem 1rem;
   z-index: 41;
   animation: app-questions-slide-in 140ms ease-out;
@@ -2983,7 +2988,7 @@ button.machine-memory-unload-button {
   padding: 0.15rem 0.2rem;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 .project-row-thinking:hover {
@@ -3034,7 +3039,7 @@ button.machine-memory-unload-button {
   background: rgba(200, 120, 60, 1);
 }
 .project-row-intervene-glyph {
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   font-weight: 700;
   line-height: 1;
 }
@@ -3059,7 +3064,7 @@ button.machine-memory-unload-button {
   filter: brightness(1.08);
 }
 .project-row-poisoned-glyph {
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   font-weight: 700;
   line-height: 1;
 }
@@ -3290,6 +3295,14 @@ button.machine-memory-unload-button {
   opacity: 0.62;
   transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
 }
+/* With a mouse the row's menu waits for the row: a ⋮ on every row of a list
+   repeats down the column and out-draws the names. A touch screen has no
+   hover to reveal it, so it keeps the faint resting key. */
+@media (hover: hover) and (pointer: fine) {
+  .gezel-actions-trigger--row {
+    opacity: 0;
+  }
+}
 .gezel-row-shell:hover .gezel-actions-trigger--row,
 .gezel-row-shell.active .gezel-actions-trigger--row,
 .app-sidebar-gezel-row:hover .gezel-actions-trigger--row,
@@ -3412,7 +3425,7 @@ button.machine-memory-unload-button {
 .app-sidebar-tree {
   padding-left: 0.4rem;
   margin-left: -27px;
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
 }
 
 .app-sidebar-tree .tree-row > .tree-toggle,
@@ -3437,7 +3450,7 @@ button.machine-memory-unload-button {
   border-radius: var(--radius-md);
   color: var(--text-muted);
   font: inherit;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   text-align: left;
   cursor: pointer;
 }
@@ -3806,7 +3819,7 @@ body.app-resizing webview {
   border: none;
   background: transparent;
   color: inherit;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
 }
 
@@ -3859,7 +3872,7 @@ body.app-resizing webview {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   padding-inline: 0.6rem;
   color: var(--titlebar-ink, #f3ede0);
   white-space: nowrap;

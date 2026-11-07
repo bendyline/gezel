@@ -50,14 +50,14 @@
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .tasks-filters button.primary {
   background: var(--action-bg);
   color: var(--action-ink);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0.35rem 0.9rem;
   cursor: pointer;
 }
@@ -147,7 +147,7 @@
 .tasks-list {
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   user-select: none;
 }
@@ -173,7 +173,7 @@
   border-bottom: 1px solid var(--border);
   color: var(--text);
   text-align: left;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -214,11 +214,11 @@
 }
 
 .task-status {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 0.1rem 0.4rem;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   background: rgba(255, 255, 255, 0.08);
   color: var(--muted);
   text-align: center;
@@ -324,10 +324,11 @@
   color: #fbeae6;
 }
 
+/* An id under each title is a quiet second line, not code: in monospace it
+   made every list read like a terminal. */
 .task-ref {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.75rem;
-  color: var(--muted);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 
 .task-title {
@@ -379,47 +380,38 @@
 }
 
 .task-row-child {
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   color: var(--muted);
 }
 
+/* Kind badges join the status-badge family (`.gz-status-pill`): a quiet
+   capsule at the badge size, sentence case, neutral unless the kind is the
+   "yours, editable" one. The old purple, cyan and amber tints carried
+   near-white ink that vanished on parchment, and three badge shapes sat
+   side by side in the craftbook header. */
 .task-badge {
-  font-size: 0.65rem;
+  display: inline-block;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  color: var(--text-muted);
+}
+.task-badge::first-letter {
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.1rem 0.4rem;
-  border-radius: 8px;
-  background: rgba(150, 120, 255, 0.18);
-  color: #dccfff;
-}
-.task-badge-template {
-  background: rgba(150, 120, 255, 0.22);
-  color: #dccfff;
-}
-.task-badge-cron {
-  background: rgba(80, 180, 200, 0.22);
-  color: #c0ebf3;
-}
-.task-badge-coordinator {
-  background: rgba(255, 180, 80, 0.2);
-  color: #ffe2b6;
-}
-.task-badge-instance {
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--muted);
 }
 .task-badge-local {
-  background: var(--success-bg);
-  color: var(--success-text);
-}
-.task-badge-bundled,
-.task-badge-project {
-  background: var(--surface-3, #555);
-  color: #fff;
+  color: var(--sage-ink);
+  border-color: color-mix(in srgb, var(--gezel-sage) 70%, transparent);
+  background: color-mix(in srgb, var(--gezel-sage) 20%, transparent);
 }
 
 .task-child-count {
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   color: var(--muted);
 }
 
@@ -454,7 +446,7 @@
   gap: 0.5rem;
   align-items: center;
   margin-top: 0.5rem;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   color: var(--muted);
 }
 
@@ -462,13 +454,13 @@
   display: flex;
   gap: 0.5rem;
   align-items: center;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   margin-top: 0.5rem;
 }
 
 .task-assignee {
   margin-left: auto;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   color: var(--muted);
 }
 
@@ -608,7 +600,7 @@
 
 .task-detail-chat-empty {
   padding: 1rem;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
 
 .task-detail-header {
@@ -630,6 +622,13 @@
   min-width: 0;
 }
 
+/* An entity's title, the same size here as on a craftbook; left to the
+   browser's <h3> it was 18.72px, a size from no scale. */
+.task-detail-header h3 {
+  margin: 0.15rem 0 0.75rem;
+  font-size: var(--text-title, 1.35rem);
+}
+
 /* The plan body is rendered as <pre> to preserve any intentional indent
    from the gezel — but a long single-line plan paragraph would otherwise
    stretch past the right edge of the detail pane. Wrap on whitespace while
@@ -640,7 +639,7 @@
   overflow-wrap: anywhere;
   margin: 0;
   font-family: inherit;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   line-height: 1.45;
 }
 
@@ -707,12 +706,12 @@
 .task-detail-ref {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   color: var(--muted);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
 }
 
 .task-detail-project {
   margin-left: 0.5rem;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   color: var(--muted);
 }
 
@@ -733,14 +732,14 @@
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .task-detail-actions .primary {
   background: var(--action-bg);
   color: var(--action-ink);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0.35rem 0.9rem;
   cursor: pointer;
 }
@@ -768,10 +767,12 @@
   margin: 0;
 }
 
+/* Description and Notes are siblings and read as one rhythm: a heading, then
+   one framed editor, on a shared left edge. A card around Description alone
+   put its heading and editor 12px inside Notes'. */
 .task-description-section {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
 }
 
 .task-description-header {
@@ -791,9 +792,10 @@
   gap: 0.5rem;
 }
 
-.task-description-editor {
+.task-description-editor,
+.task-notes-editor {
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -1040,22 +1042,15 @@
   z-index: 2;
 }
 
-.bench-step-assignee-name {
-  font-size: var(--text-sm);
+.bench-step-assignee-label {
+  --person-label-name-size: var(--text-sm);
+  --person-label-role-size: var(--text-xs);
   color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
 }
 
-.bench-step-assignee-role {
-  font-size: var(--text-2xs);
-  color: var(--text-muted);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
+.bench-step-assignee-label .person-label-text {
+  align-items: center;
+  line-height: 1.15;
 }
 
 /* Specificity keeps the global select face from overpowering the route. */
@@ -1103,29 +1098,8 @@
   overflow: hidden;
 }
 
-.task-assignee-option {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-  max-width: 100%;
-  vertical-align: middle;
-}
-
-.task-assignee-option-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.task-assignee-avatar {
-  display: inline-flex;
-  flex: 0 0 20px;
-  width: 20px;
-  height: 20px;
-}
-
-.task-assignee-avatar .gezel-icon {
+/* Each row is a PersonLabel; the face takes the chip's small corners. */
+.task-assignee-option .gezel-icon {
   border-radius: var(--radius-sm);
 }
 
@@ -1282,7 +1256,7 @@ button.bench-step-foot:disabled {
   position: relative;
   container: task-step-panel / inline-size;
   z-index: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 0.9rem 1rem;
   margin-bottom: 0.75rem;
 }
@@ -1391,7 +1365,7 @@ button.bench-step-foot:disabled {
   gap: 1rem;
   padding: 0.9rem 1rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--panel, var(--surface));
   position: relative;
   z-index: 0;
@@ -1425,12 +1399,21 @@ button.bench-step-foot:disabled {
   padding-left: 0.75rem;
   padding-right: 0.75rem;
 }
+/* The thumb shows only while the bench is in hand (hovered, focused, or
+   being panned). Always on, it read as a progress bar over the route. */
 .bench-scrollbar {
   position: relative;
   height: 6px;
   margin: 0 0.75rem 0.15rem;
   border-radius: 999px;
-  background: rgba(127, 127, 127, 0.14);
+  background: color-mix(in srgb, var(--text-muted) 14%, transparent);
+  opacity: 0;
+  transition: opacity 0.16s ease-out;
+}
+.bench-scroll:hover > .bench-scrollbar,
+.bench-scroll:focus-within > .bench-scrollbar,
+.bench-scroll:has(.bench-viewport.is-panning) > .bench-scrollbar {
+  opacity: 1;
 }
 .bench-scrollbar-thumb {
   position: absolute;
@@ -1616,14 +1599,17 @@ button.bench-step-foot:disabled {
   margin: 0;
 }
 
+/* A status badge, so the shared capsule recipe (see `.task-badge`). */
 .step-status-pill {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  display: inline-block;
+  white-space: nowrap;
+  vertical-align: middle;
+  font-size: var(--text-2xs);
+  font-weight: 500;
   padding: 0.1rem 0.5rem;
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   border: 1px solid var(--border);
-  color: var(--muted);
+  color: var(--text-muted);
   background: transparent;
 }
 
@@ -1634,9 +1620,9 @@ button.bench-step-foot:disabled {
 }
 
 .step-status-pill.status-active {
-  background: var(--success-bg, rgba(39, 174, 96, 0.12));
-  color: var(--success-text, #27ae60);
-  border-color: var(--success, #27ae60);
+  color: var(--sage-ink);
+  border-color: color-mix(in srgb, var(--gezel-sage) 70%, transparent);
+  background: color-mix(in srgb, var(--gezel-sage) 20%, transparent);
 }
 
 .task-step-panel-actions {
@@ -1673,16 +1659,16 @@ button.bench-step-foot:disabled {
 }
 
 .task-step-field-label {
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   color: var(--muted);
 }
 
 .task-step-field textarea {
   font: inherit;
-  font-size: 0.88rem;
+  font-size: var(--text-md);
   padding: 0.45rem 0.55rem;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
   resize: vertical;
@@ -1700,7 +1686,7 @@ button.bench-step-foot:disabled {
    toolbar + surface live inside. */
 .markdown-field {
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   overflow: hidden;
 }
@@ -1734,7 +1720,7 @@ button.bench-step-foot:disabled {
 }
 
 .step-script-name {
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .step-script-configure {
@@ -1761,7 +1747,7 @@ button.bench-step-foot:disabled {
 .task-note-card {
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 0.6rem 0.8rem;
 }
 
@@ -1795,7 +1781,7 @@ button.bench-step-foot:disabled {
   background: transparent;
   border: none;
   color: var(--muted);
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   cursor: pointer;
   padding: 0 0.3rem;
 }
@@ -1851,13 +1837,6 @@ button.bench-step-foot:disabled {
   margin-top: 0.4rem;
 }
 
-.task-notes-composer {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.4rem;
-}
-
 .task-notes-composer-actions {
   display: flex;
   justify-content: flex-end;
@@ -1875,7 +1854,7 @@ button.bench-step-foot:disabled {
   grid-template-columns: 120px 1fr auto;
   gap: 0.5rem;
   padding: 0.3rem 0;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   border-bottom: 1px solid var(--border);
 }
 
@@ -1899,7 +1878,7 @@ button.bench-step-foot:disabled {
 .task-new-form fieldset > legend {
   padding: 0 0 0.25rem 0;
   color: var(--muted);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .task-new-form input,
@@ -1909,7 +1888,7 @@ button.bench-step-foot:disabled {
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
 }
 
 .task-form-actions {
@@ -1922,7 +1901,7 @@ button.bench-step-foot:disabled {
   background: var(--action-bg);
   color: var(--action-ink);
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0.4rem 1rem;
   cursor: pointer;
 }
@@ -1940,8 +1919,8 @@ button.bench-step-foot:disabled {
 .pending-question-context-status.status-draft {
   display: inline-block;
   padding: 0.05rem 0.4rem;
-  border-radius: 0.4rem;
-  font-size: 0.72rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-2xs);
   letter-spacing: 0.02em;
   text-transform: uppercase;
   background: color-mix(in srgb, var(--terra, #c9722e) 18%, transparent);
@@ -1956,7 +1935,7 @@ button.bench-step-foot:disabled {
   background: var(--action-bg);
   color: var(--action-ink);
   border: none;
-  border-radius: 0.4rem;
+  border-radius: var(--radius-md);
   padding: 0.3rem 0.7rem;
   cursor: pointer;
 }
@@ -2001,7 +1980,7 @@ button.linklike {
   flex: 1;
   padding: 0.3rem 0.45rem;
   border: 1px solid var(--ink-5, #d8d2c6);
-  border-radius: 0.35rem;
+  border-radius: var(--radius-md);
   background: var(--surface, #fff);
   color: inherit;
   font: inherit;

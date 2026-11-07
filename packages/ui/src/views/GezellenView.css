@@ -56,7 +56,7 @@
   width: 100%;
   padding: 0.4rem 0.5rem;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: inherit;
   text-align: left;
@@ -88,7 +88,7 @@
 .gezel-row-role {
   overflow: hidden;
   color: var(--text-muted);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }

@@ -115,7 +115,10 @@ test('the greeting collapses and the tour tab swaps content', async () => {
     .toBeCloseTo(0.9, 2);
   await page.getByRole('button', { name: 'Return to Meester chat' }).click();
   await expect(page.getByRole('tabpanel')).toBeHidden();
-  await expect(conversation).toBeFocused();
+  // The strip invites writing, so returning puts the caret in the composer.
+  await expect(
+    conversation.locator('[data-testid="chat-composer"] [contenteditable="true"]'),
+  ).toBeFocused();
   expectLayoutToMatch(await conversation.boundingBox(), conversationBounds);
   await page.getByRole('tab', { name: /^Good (morning|afternoon|evening)$/ }).click();
 
@@ -166,7 +169,7 @@ test('renders the workshop in dark (dusk) mode', async () => {
     const el = document.querySelector('.home-workshop');
     return el ? getComputedStyle(el).getPropertyValue('--paper').trim() : '';
   });
-  expect(paper).toBe('#1f1c18');
+  expect(paper).toBe('#201b17');
 
   await captureScreenshot(page, {
     path: join(screenshotDir, 'home-02-workshop-dark.png'),

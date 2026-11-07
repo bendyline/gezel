@@ -236,7 +236,7 @@ export function GezellenView({
       <aside className="side gezels-side" hidden={compact && showCompactDetail}>
         <div className="area-toolbar">
           <button type="button" className="area-toolbar-btn" onClick={() => setShowCreate(true)}>
-            + New Gezel
+            + New gezel
           </button>
         </div>
         <ul className="gezel-list">
@@ -385,7 +385,7 @@ function NewGezelDialog({
         <Dialog.Overlay />
         <Dialog.Content className="new-gezel-dialog">
           <Dialog.Title asChild>
-            <h3 style={{ margin: 0 }}>New Gezel</h3>
+            <h3 style={{ margin: 0 }}>New gezel</h3>
           </Dialog.Title>
           <Tabs.Root value={tab} onValueChange={(v) => setTab(v as NewGezelTab)}>
             <Tabs.List>

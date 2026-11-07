@@ -67,7 +67,9 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   content.id = 'startup-reading';
   content.setAttribute('role', 'tabpanel');
   content.tabIndex = 0;
-  sheet.append(content);
+  const rail = element('div', 'home-workshop-sheet-rail');
+  rail.setAttribute('aria-hidden', 'true');
+  sheet.append(content, rail);
   band.append(top, sheet);
   const loading = element('div', 'startup-loading');
   loading.setAttribute('role', 'status');

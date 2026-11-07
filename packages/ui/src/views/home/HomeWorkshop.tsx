@@ -124,11 +124,19 @@ export function HomeWorkshop({
     });
   }, []);
   const conversationRef = useRef<HTMLElement>(null);
-  const returnToChat = () => {
+  const returnToChat = (target: 'conversation' | 'composer' = 'conversation') => {
     userToggledCollapse.current = true;
     setCollapsed(true);
     void api.updateConfig({ homeGreetingCollapsed: true }).catch(() => {});
-    window.requestAnimationFrame(() => conversationRef.current?.focus({ preventScroll: true }));
+    window.requestAnimationFrame(() => {
+      const editor =
+        target === 'composer'
+          ? conversationRef.current?.querySelector<HTMLElement>(
+              '[data-testid="chat-composer"] [contenteditable="true"]',
+            )
+          : null;
+      (editor ?? conversationRef.current)?.focus({ preventScroll: true });
+    });
   };
   // Once the person is talking, or the meester's introduction fills the empty
   // conversation, the greeting steps aside for this visit: at full height it
@@ -605,8 +613,12 @@ export function HomeWorkshop({
             className="home-workshop-chat-shade"
             aria-label="Return to Meester chat"
             title="Return to Meester chat"
-            onClick={returnToChat}
-          />
+            onClick={() => returnToChat('composer')}
+          >
+            <span className="home-workshop-chat-shade-label" aria-hidden="true">
+              {meesterName ? `Write to ${meesterName}` : 'Write to your meester'}
+            </span>
+          </button>
         )}
       </div>
     </div>

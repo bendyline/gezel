@@ -50,7 +50,7 @@
 }
 
 .settings-nav {
-  /* Wide enough that the longest tab label ("Artificial Intelligence") sits
+  /* Wide enough that the longest tab label ("Artificial intelligence") sits
      on one line rather than wrapping. This also absorbs the old outer inset,
      keeping the panel content aligned while the nav scrollbar reaches its
      full vertical extent. */
@@ -109,10 +109,10 @@
   padding: 0.45rem 0.7rem;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   color: var(--fg);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   font-family: inherit;
 }
 
@@ -167,7 +167,7 @@
 /* Child nav items sit slightly smaller so the hierarchy reads
    without needing a heavy indent. */
 .settings-nav-item-child {
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 /* Collapsible group header — a disclosure chevron beside the label. The
@@ -285,13 +285,6 @@
   line-height: 1.3;
 }
 
-/* A step above the panel headings around it, and after them: both are one
-   class and an element, so order decides. */
-.engagement-mode-panel h3 {
-  margin-top: 0;
-  margin-bottom: 0.35rem;
-  font-size: 1.15rem;
-}
 .settings-panel h4 {
   font-size: var(--text-lg);
   line-height: 1.3;
@@ -514,51 +507,172 @@ legend.gz-setting-label {
   margin: 0;
 }
 
+/* A setting whose control sits inside its sentence ("Keep sent drafts for
+   [90] days", "[x] I'm within [20] % of my overall quota"): words, a
+   checkbox and small number inputs share one wrapping line. */
+.gz-setting-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+label.gz-setting-inline {
+  cursor: pointer;
+}
+
+.gz-setting-inline > input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+}
+
+.gz-setting-inline > input[type="number"] {
+  flex: 0 0 auto;
+  width: 5rem;
+}
+
+/* The row's small illustration sits at its end, beside label and hint. */
+.gz-setting-check:has(> .gz-setting-aside) {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.gz-setting-check > .gz-setting-aside {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+}
+
+/* A control keeps its own width; only layout wrappers fill the field or the
+   section body. Without this a tray or a lone key stretched into a slab. */
+:is(.gz-setting, .gz-settings-section-body)
+  > :is(.gz-tray, .provider-switch, .gz-type-picker, button) {
+  align-self: flex-start;
+}
+
+/* The example figure beside "Show gezel names and poppetjes". */
+.settings-poppetje-example {
+  width: 40px;
+  height: 40px;
+}
+
+/* Settings → Device integration → Ambient display. */
+.ambient-dashboard-preview {
+  max-width: min(420px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.ambient-dashboard-instructions {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.ambient-dashboard-instructions summary {
+  cursor: pointer;
+}
+
+.ambient-dashboard-instructions ul {
+  margin: 0.5rem 0 0;
+}
+
+/* A checkbox-card grid is one field, so it shares the field's measure. */
+.gz-settings-section-body > .gz-check-cards {
+  max-width: 48rem;
+}
+
+/* App Settings caps loose prose at 640px (`.settings-panel p`). Inside a
+   section the recipe's own measure applies, so a hint, its field and a tray
+   readout share one right edge. */
+.settings-panel .gz-settings-section p {
+  max-width: 48rem;
+}
+
+/* A described tray's readout stays glued to its tray: the stem that joins
+   them is sized for the tray's own 0.5rem margin, so a wrapper holds the
+   pair and no flex gap or paragraph margin may come between. Blank lines in
+   shared readout copy (security-levels.ts) are paragraph breaks. */
+.gz-settings-section .gz-tray-description {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+/* Several settings held in one wrapper (a conditional block, a test hook)
+   keep the section body's rhythm. */
+.gz-setting-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  min-width: 0;
+}
+
+.gz-setting-stack > * {
+  margin-block: 0;
+}
+
+.gz-setting-stack > :is(.gz-tray, .provider-switch, button) {
+  align-self: flex-start;
+}
+
+/* Numbered setup steps ("Go to … and create a key", "Paste it below"). */
+.gz-setting-steps {
+  max-width: 48rem;
+  padding-left: 1.25rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+
+/* Rarely needed settings fold under one disclosure at the end of a section;
+   opened, its settings keep the body's rhythm under the summary. */
+.gz-setting-more > summary {
+  width: fit-content;
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.gz-setting-more[open] > summary {
+  margin-bottom: 1.25rem;
+}
+
+/* A box a person acts on as a unit inside a section (the consent step before
+   the Inspector is switched on, a new-gezel form): one panel, sized to its
+   content, never around a group of settings. */
+.gz-setting-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-width: 36rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.gz-setting-panel > p {
+  margin: 0;
+}
+
+.gz-setting-panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 @container (max-width: 520px) {
   .gz-settings-section-body {
     --gz-settings-indent: 0;
-  }
-}
-
-/* Default permission for the CLI providers (Codex, Claude): a described tray
-   in the row's value column. The label sits on the tray's first line, and
-   the readout beneath the tray explains only the latched mode, so the
-   paragraph-that-lists-every-mode is gone. */
-.cli-permission-row {
-  align-items: flex-start;
-}
-
-.cli-permission-label {
-  min-width: 7rem;
-  padding-top: 0.45rem;
-}
-
-.cli-permission-field {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  max-width: 42rem;
-}
-
-.cli-permission-field .gz-tray--described {
-  flex-wrap: wrap;
-}
-
-.cli-permission-description {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-  line-height: 1.5;
-}
-
-@media (max-width: 760px) {
-  .cli-permission-row {
-    flex-direction: column;
-    gap: 0.45rem;
-  }
-
-  .cli-permission-label {
-    padding-top: 0;
   }
 }
 
@@ -1410,7 +1524,7 @@ legend.gz-setting-label {
   gap: 0.35rem;
   padding: 0.1rem 0.45rem;
   border: 1px dashed var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: rgba(79, 125, 255, 0.05);
 }
 
@@ -1456,7 +1570,7 @@ legend.gz-setting-label {
   padding: 0.75rem 1rem;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 .ff-about-row {
@@ -1522,7 +1636,7 @@ legend.gz-setting-label {
   font-size: 0.875em;
   padding: 0.5rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--panel);
   color: inherit;
   resize: vertical;
@@ -1573,7 +1687,7 @@ legend.gz-setting-label {
   padding: 0.75rem 0.85rem;
   background: var(--panel);
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
 }
 
 /* One setting row in an engine card: a label and its control(s) on a line.
@@ -1609,12 +1723,16 @@ legend.gz-setting-label {
    a wall of red. Same shape as .settings-notice with --danger in place
    of --warning. */
 .provider-connection-state {
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   font-weight: 600;
 }
 
 .provider-connection-state[data-tone="danger"] {
   color: var(--danger-text);
+}
+
+.provider-connection-state[data-tone="success"] {
+  color: var(--success-text);
 }
 
 .provider-connection-callout {
@@ -1627,7 +1745,7 @@ legend.gz-setting-label {
   border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
   border-left: 3px solid var(--danger);
   border-radius: var(--radius-md);
-  font-size: 0.88rem;
+  font-size: var(--text-md);
   line-height: 1.55;
 }
 
@@ -1663,37 +1781,13 @@ legend.gz-setting-label {
   margin: 0;
 }
 
-.meester-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  /* Cap the picker so the gezel card, dropdown, and new-gezel form align with
-     the prose measure instead of stretching across a wide window. */
-  max-width: 640px;
-}
-
-.meester-current {
-  display: flex;
-  gap: 0.6rem;
-  align-items: center;
-  padding: 0.5rem 0.75rem;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-bottom: 0.5rem;
-}
-
-.meester-current-name {
-  font-weight: 500;
-}
-
 .chat-resume-banner {
   padding: 0.5rem 0.75rem;
   margin: 0.25rem 0;
   background: rgba(230, 126, 34, 0.15);
   border: 1px solid rgba(230, 126, 34, 0.5);
-  border-radius: 6px;
-  font-size: 0.85rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
   color: var(--text);
 }
 
@@ -1704,7 +1798,7 @@ legend.gz-setting-label {
   background: rgba(100, 200, 150, 0.15);
   border: 1px solid rgba(100, 200, 150, 0.4);
   border-radius: var(--radius-sm);
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   color: var(--text);
   cursor: help;
 }
@@ -1714,8 +1808,8 @@ legend.gz-setting-label {
   margin: 0.25rem 0;
   background: rgba(240, 200, 50, 0.15);
   border: 1px solid rgba(240, 200, 50, 0.5);
-  border-radius: 6px;
-  font-size: 0.85rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
   color: var(--text);
 }
 
@@ -1723,8 +1817,8 @@ legend.gz-setting-label {
   padding: 0.5rem 0.75rem;
   background: rgba(176, 114, 76, 0.12);
   border: 1px solid rgba(176, 114, 76, 0.3);
-  border-radius: 6px;
-  font-size: 0.85rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
   color: var(--text);
   margin-bottom: 0.5rem;
   animation: gezel-icon-pulse 1.8s ease-in-out infinite;
@@ -1744,7 +1838,7 @@ legend.gz-setting-label {
   gap: 0.75rem;
   padding: 0.35rem 0.75rem;
   border-top: 1px solid var(--border);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   container-name: project-status-bar;
   container-type: inline-size;
 }
@@ -1766,11 +1860,11 @@ legend.gz-setting-label {
   gap: 0.35rem;
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0.2rem 0.55rem;
   color: var(--text);
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   cursor: pointer;
 }
 
@@ -1806,8 +1900,8 @@ legend.gz-setting-label {
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 6px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-popover);
   padding: 0.25rem 0;
 }
 
@@ -1831,7 +1925,7 @@ legend.gz-setting-label {
   text-align: left;
   cursor: pointer;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .project-git-branch-item:hover {
@@ -1861,7 +1955,7 @@ legend.gz-setting-label {
 
 .project-git-new-branch-form input {
   flex: 1;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
 }
 
 .project-git-branch-loading {
@@ -1880,7 +1974,7 @@ legend.gz-setting-label {
   padding: 0.2rem 0.6rem;
   color: var(--muted);
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
@@ -1903,10 +1997,10 @@ legend.gz-setting-label {
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0.2rem 0.7rem;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
   cursor: pointer;
 }
 
@@ -1937,7 +2031,7 @@ legend.gz-setting-label {
   gap: 0.3rem;
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0.2rem 0.4rem;
   font: inherit;
   color: var(--text);
@@ -1960,6 +2054,12 @@ legend.gz-setting-label {
   border-radius: 50%;
   background: var(--muted);
   display: inline-block;
+}
+
+.project-index-chip-label {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 /* green — index fresh and the AI scan has caught up. */
@@ -2317,8 +2417,8 @@ legend.gz-setting-label {
 .project-status-select.gz-select-trigger {
   flex: 0 0 auto;
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   background: transparent;
   white-space: nowrap;
 }
@@ -2352,8 +2452,8 @@ legend.gz-setting-label {
 .project-writes-select.gz-select-trigger {
   flex: 0 0 auto;
   padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  font-size: 0.85rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
   background: transparent;
   white-space: nowrap;
 }
@@ -2523,10 +2623,10 @@ legend.gz-setting-label {
   gap: 0.3rem;
   background: rgba(127, 127, 127, 0.1);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0.15rem 0.55rem;
   font: inherit;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   color: var(--text-muted, var(--text));
   cursor: pointer;
 }
@@ -2561,9 +2661,9 @@ legend.gz-setting-label {
   right: 0.75rem;
   margin-bottom: 0.5rem;
   padding: 0.35rem 0.65rem;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  box-shadow: var(--shadow-popover);
   z-index: 60;
 }
 
@@ -2582,7 +2682,7 @@ legend.gz-setting-label {
   align-items: center;
   gap: 0.4rem;
   margin-top: 0.5rem;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 /* Settings → Accounts (ADR 0029): the add-person and password forms keep the

@@ -186,17 +186,17 @@ describe('GezellenView', () => {
     });
   });
 
-  it('+ New Gezel opens a dialog and submitting calls createGezel', async () => {
+  it('+ New gezel opens a dialog and submitting calls createGezel', async () => {
     render(<GezellenView />);
     await waitFor(() => {
       expect(screen.getByText('Maya')).toBeInTheDocument();
     });
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /\+ New Gezel/ }));
+    await user.click(screen.getByRole('button', { name: /\+ New gezel/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 3, name: /New Gezel/ })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 3, name: /New gezel/ })).toBeInTheDocument();
     });
 
     // Fill the role field via its placeholder; the label-then-querySelector
@@ -223,21 +223,21 @@ describe('GezellenView', () => {
     await screen.findByText('Maya');
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /\+ New Gezel/ }));
+    await user.click(screen.getByRole('button', { name: /\+ New gezel/ }));
     await user.click(screen.getByRole('button', { name: 'Pick a random name' }));
 
     expect(screen.getByPlaceholderText('e.g. Ada')).toHaveValue('Robin');
     expect(screen.getByRole('combobox')).toHaveValue('non-binary');
   });
 
-  it('the From template tab inside the New Gezel dialog shows the catalog browser', async () => {
+  it('the From template tab inside the New gezel dialog shows the catalog browser', async () => {
     render(<GezellenView />);
     await waitFor(() => {
       expect(screen.getByText('Maya')).toBeInTheDocument();
     });
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /\+ New Gezel/ }));
+    await user.click(screen.getByRole('button', { name: /\+ New gezel/ }));
     await user.click(screen.getByRole('tab', { name: /From template/ }));
 
     await waitFor(() => {

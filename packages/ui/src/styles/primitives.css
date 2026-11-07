@@ -62,12 +62,12 @@
   transform: translate(-50%, -50%);
   background: var(--surface, var(--panel));
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 1rem 1.25rem 0.9rem 1.25rem;
   min-width: 26rem;
   max-width: 90vw;
   max-height: 85vh;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-dialog);
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
@@ -116,7 +116,7 @@
 
 .gz-dialog-error {
   color: var(--danger-text, #d06a6a);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   margin: 0;
 }
 
@@ -237,7 +237,7 @@
   background: var(--bg, #141414);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   font-size: 0.95rem;
   font-family: inherit;
 }
@@ -267,9 +267,9 @@
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
 
 .gz-dialog-actions .primary {
@@ -360,6 +360,62 @@
   background: var(--danger-bg);
 }
 
+/* ── Text fields ── */
+
+/* One face for every text field, matched to the select trigger below so a
+   form's inputs and selects read as one set. Zero specificity: a surface
+   that styles its own fields still wins. Without it, a field outside those
+   surfaces fell back to the browser's white box with a dark inset border,
+   and the craftbook step form showed three field styles side by side. */
+:where(
+    input:not([type]),
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="text"],
+    input[type="url"],
+    textarea
+  ) {
+  padding: 0.3rem 0.55rem;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+  line-height: 1.3;
+}
+:where(
+    input:not([type]),
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="text"],
+    input[type="url"],
+    textarea
+  )::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+/* Disabled reads as muted ink on the same face, not a third gray surface. */
+:where(
+    input:not([type]),
+    input[type="email"],
+    input[type="number"],
+    input[type="password"],
+    input[type="search"],
+    input[type="tel"],
+    input[type="text"],
+    input[type="url"],
+    textarea
+  ):disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
 /* ── Select ── */
 
 .gz-select-trigger {
@@ -370,8 +426,8 @@
   background: var(--bg, #141414);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 2px;
-  font-size: 0.9rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
   font-family: inherit;
   cursor: pointer;
   line-height: 1.3;
@@ -421,7 +477,7 @@
   background: var(--surface, var(--panel));
   border: 1px solid var(--border);
   border-radius: 2px;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--shadow-popover);
   z-index: 1100;
   overflow: hidden;
   min-width: var(--radix-select-trigger-width);
@@ -452,7 +508,7 @@
 .gz-select-item {
   padding: 0.35rem 0.6rem;
   border-radius: 2px;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   color: var(--text);
   cursor: pointer;
   outline: none;

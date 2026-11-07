@@ -1,3 +1,4 @@
+import { SettingsSection } from '../components/SettingsSection.js';
 import { openHandboekArticleActions, runNavActions } from '../components/nav-actions.js';
 import { supportsArea } from '../runtime-capabilities.js';
 
@@ -21,12 +22,12 @@ export const LEGAL_LINKS: ReadonlyArray<{ label: string; href: string }> = [
 /** Settings → About → Legal and privacy. */
 export function SettingsLegalSection() {
   return (
-    <section className="settings-legal" style={{ marginBottom: '2rem' }}>
-      <h3>Legal and privacy</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Gezel is free, open-source software. It also includes parts made by other people, each under
-        its own license.
-      </p>
+    <SettingsSection
+      id="settings-legal"
+      className="settings-legal"
+      title="Legal and privacy"
+      hint="Gezel is free, open-source software. It also includes parts made by other people, each under its own license."
+    >
       <ul className="settings-legal-links">
         {/* The phone carries no Handboek, so it shows only the texts. */}
         {supportsArea('handboek') && (
@@ -49,7 +50,7 @@ export function SettingsLegalSection() {
           </li>
         ))}
       </ul>
-      <p className="muted small">The license, notices, and agreement open on GitHub.</p>
-    </section>
+      <p className="gz-setting-hint">The license, notices, and agreement open on GitHub.</p>
+    </SettingsSection>
   );
 }

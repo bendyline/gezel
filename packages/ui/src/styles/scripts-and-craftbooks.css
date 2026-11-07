@@ -68,7 +68,7 @@
 .script-editor-rail-toggle {
   background: none;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   padding: 4px 8px;
 }
@@ -219,7 +219,7 @@
   flex-direction: column;
   gap: 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 10px;
 }
 
@@ -237,7 +237,7 @@
 .script-editor-capfix {
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 10px 12px;
   margin-bottom: 12px;
 }
@@ -251,7 +251,7 @@
   overflow: auto;
   font-size: 12px;
   background: var(--bg);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 8px;
 }
 
@@ -369,7 +369,7 @@
   gap: 4px;
   text-align: left;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 10px;
   background: var(--panel);
   /* The base button rule is white-on-accent; a panel-filled card has to
@@ -435,7 +435,7 @@
   gap: 4px;
   text-align: left;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 10px;
   background: var(--panel);
   cursor: pointer;
@@ -454,7 +454,7 @@
 }
 
 .new-craftbook-field-label {
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
@@ -465,7 +465,7 @@
   max-height: 14rem;
   overflow-y: auto;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
 }
 
 .new-craftbook-picker-row {
@@ -539,10 +539,14 @@
   border-radius: var(--radius-md);
   background: var(--surface);
 }
+/* Search and the New key share one row, the way Tasks pairs its filters
+   with + New task; a full-width terracotta slab was the loudest thing in
+   the library. */
 .craftbooks-toolbar {
   display: flex;
   flex: 0 0 auto;
-  flex-direction: column;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 0.5rem;
   padding: 0.7rem;
   border-bottom: 1px solid var(--border);
@@ -550,6 +554,7 @@
 }
 .craftbooks-search-field {
   display: block;
+  flex: 1 1 9rem;
   min-width: 0;
 }
 .craftbook-search {
@@ -563,9 +568,10 @@
   font-size: var(--text-md);
 }
 .craftbooks-toolbar button {
-  width: 100%;
+  flex: 0 0 auto;
+  white-space: nowrap;
   border-radius: var(--radius-md);
-  font-size: var(--text-md);
+  font-size: var(--text-sm);
 }
 .craftbooks-list {
   flex: 1 1 auto;
@@ -592,14 +598,16 @@
 .craftbook-group + .craftbook-group {
   margin-top: 10px;
 }
+/* Sentence case, like every label below the sidebar's group headers: in
+   capitals the catalog hint wrapped and left one word on its own line. */
 .craftbook-group-header {
   padding: 4px 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--text-muted);
 }
 .craftbook-group-hint {
   font-weight: 400;
-  opacity: 0.7;
 }
 .craftbook-tab,
 .craftbook-editor {
@@ -626,10 +634,28 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+/* An editable title reads as the title it is, the same size and face as a
+   read-only book's heading; the field shows itself on hover and focus. */
+.craftbook-editor-title h3,
 .craftbook-name-input {
-  font-size: 1.1rem;
-  font-weight: 600;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-title, 1.35rem);
+  font-weight: 700;
+}
+.craftbook-name-input {
   min-width: 220px;
+  padding: 0.1rem 0.35rem;
+  margin-inline-start: calc(-0.35rem - 1px);
+  background: transparent;
+  border-color: transparent;
+}
+.craftbook-name-input:hover {
+  border-color: var(--border);
+}
+.craftbook-name-input:focus {
+  background: var(--bg);
+  border-color: var(--accent);
 }
 /* The selected step's caption is the tab for the settings page below, just
    like it is in Task detail. Pull the page through the bench's bottom padding
@@ -700,7 +726,7 @@
 .step-gate-rejection {
   border: 1px solid var(--border);
   border-left: 3px solid var(--danger, #b3402e);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 10px 12px;
   margin: 10px 0;
 }
@@ -753,7 +779,7 @@
   text-align: left;
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
@@ -793,7 +819,7 @@
   flex-direction: column;
   gap: 8px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 10px;
   background: var(--panel);
 }
@@ -808,7 +834,7 @@
   flex-direction: column;
   gap: 6px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 8px 10px;
   background: var(--bg);
 }
@@ -863,7 +889,7 @@
   background: transparent;
   color: var(--accent-text);
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 6px 10px;
   font-size: 13px;
 }

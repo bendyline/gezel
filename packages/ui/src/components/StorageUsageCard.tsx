@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { requestBackupRestore } from './BackupRestoreDialog.js';
+import { SettingsSection } from './SettingsSection.js';
 import { requestStorageCleanup } from './StorageCleanupDialog.js';
 import { formatBytes } from './model-memory-copy.js';
 
@@ -53,18 +54,25 @@ export function StorageUsageCard() {
   const externalPaths = summary ? summary.categories.flatMap((c) => c.external) : [];
 
   return (
-    <section style={{ marginBottom: '2rem' }}>
-      <h3>Storage on this device</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Everything Gezel keeps lives in <code>{summary?.home ?? '~/.gezel'}</code>. Uninstalling
-        Gezel does not remove it, so clear out what you no longer need before you uninstall.
-      </p>
-
-      {error && <p className="error">{error}</p>}
+    <SettingsSection
+      id="settings-storage"
+      title="Storage on this device"
+      hint={
+        <>
+          Everything Gezel keeps lives in <code>{summary?.home ?? '~/.gezel'}</code>. Uninstalling
+          Gezel does not remove it, so clear out what you no longer need before you uninstall.
+        </>
+      }
+    >
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
 
       {summary && (
-        <>
-          <dl>
+        <div className="gz-setting">
+          <dl className="settings-facts">
             <dt>Downloads Gezel can fetch again</dt>
             <dd>{formatBytes(summary.redownloadableBytes)}</dd>
             <dt>Your crew, projects, and documents</dt>
@@ -119,7 +127,7 @@ export function StorageUsageCard() {
               )}
             </div>
           )}
-        </>
+        </div>
       )}
 
       <div className="storage-actions">
@@ -134,7 +142,7 @@ export function StorageUsageCard() {
         </button>
       </div>
 
-      <p className="muted small" style={{ marginTop: '0.75rem' }}>
+      <p className="gz-setting-hint">
         <button
           type="button"
           className="link-button"
@@ -149,7 +157,7 @@ export function StorageUsageCard() {
           </span>
         )}
       </p>
-    </section>
+    </SettingsSection>
   );
 }
 

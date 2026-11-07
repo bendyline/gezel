@@ -1,6 +1,6 @@
 /**
  * Connect codes for remote serving, the server half: the 8-digit code this
- * device shows under Settings → Remote Servers → Add a device, and the
+ * device shows under Settings → Remote servers → Add a device, and the
  * SPAKE2 runs (core's `remote/spake2.ts`, shared with every client) that let
  * a client prove it typed that code.
  *

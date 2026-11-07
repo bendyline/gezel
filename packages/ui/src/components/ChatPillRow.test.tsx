@@ -393,8 +393,9 @@ describe('ChatPillRow', () => {
     expect(pill).toHaveTextContent('Ship the game');
     expect(pill.querySelector('.chat-pill-participants')).toHaveTextContent('Esra');
     expect(pill.querySelector('.chat-pill-message-preview')).toHaveTextContent('No chat yet');
-    // The task's id is debug-mode text.
-    expect(pill.querySelector('.chat-pill-thread-updated-at')).toHaveTextContent('Not started yet');
+    // Without a chat the status stands alone: "No chat yet" above already
+    // says nothing has started, and the task's id is debug-mode text.
+    expect(pill.querySelector('.chat-pill-thread-updated-at')).toBeNull();
     expect(pill.querySelector('.chat-pill-thread-status')).toHaveTextContent('Active');
     await user.click(pill);
     expect(onFocusTask).toHaveBeenCalledWith(expect.objectContaining({ ref: 'p1/4' }));

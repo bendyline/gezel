@@ -41,7 +41,7 @@ export function humanizeChatError(raw: string): string {
   const unavailableModel = missingModelFromError(raw);
   if (unavailableModel !== undefined) {
     const named = unavailableModel ? `"${unavailableModel}" ` : '';
-    return `The model ${named}isn't available on this device — it may never have finished downloading. Pick a model that is installed, or download this one, in Settings → Artificial Intelligence.`;
+    return `The model ${named}isn't available on this device — it may never have finished downloading. Pick a model that is installed, or download this one, in Settings → Artificial intelligence.`;
   }
   if (/Timeout\s+after\s+\d+ms\s+waiting\s+for\s+session\.idle/i.test(raw)) {
     return (

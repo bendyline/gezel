@@ -35,6 +35,7 @@ import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-comma
 import { gezelReportThemeForMode } from './chat-theme.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
+import { GEZEL_DARK_SURFACE, GEZEL_LIGHT_SURFACE } from './transform/surfaces.js';
 import { useCompactLayout } from './useCompactLayout.js';
 import { useDebugMode } from './useDebugMode.js';
 import { useTaskEvents, useTaskResult } from './useTaskResult.js';
@@ -1851,29 +1852,6 @@ function ReferenceMachineFile({
     </div>
   );
 }
-
-// Gezel-tinted surface schemes for the artifact previewer. Squisq's
-// stock `DARK_SURFACE` is `#1a202c` (a cool slate-blue) which fights
-// the rest of the app's warm/sage palette — the previewer reads as
-// "from a different product" against the gezel chrome. These two
-// surfaces match the app's `--bg` / `--panel` neutrals (a hair of
-// green undertone in dark mode, the warm cream in light mode) so the
-// artifact panel sits naturally inside the references rail.
-const GEZEL_DARK_SURFACE = {
-  id: 'gezel-dark',
-  background: '#1c1f1c',
-  backgroundLight: '#252925',
-  text: '#f0ede4',
-  textMuted: '#9da195',
-} as const;
-
-const GEZEL_LIGHT_SURFACE = {
-  id: 'gezel-light',
-  background: '#f3eddf',
-  backgroundLight: '#eae5d6',
-  text: '#1c1c1c',
-  textMuted: '#666666',
-} as const;
 
 function RenderedMarkdownPreview({
   markdown,

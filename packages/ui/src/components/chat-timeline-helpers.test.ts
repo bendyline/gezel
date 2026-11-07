@@ -9,7 +9,7 @@ import {
 
 describe('a turn waiting on its first download', () => {
   const nothingInstalled =
-    'Local model: no model is installed yet. Download one from Settings → Artificial Intelligence, then try again.';
+    'Local model: no model is installed yet. Download one from Settings → Artificial intelligence, then try again.';
   const downloading =
     'Local model: your model is 42% downloaded — hang tight. Send this again once it finishes and it will go through.';
 

@@ -278,7 +278,7 @@ describe('TaskDetail', () => {
 
     const selects = screen.getAllByTestId('mock-select');
     const assigneeSelect = selects.find(
-      (el) => within(el).queryByText(/→ You/) !== null,
+      (el) => within(el).queryByRole('option', { name: 'You' }) !== null,
     ) as HTMLSelectElement;
     fireEvent.change(assigneeSelect, { target: { value: '__user' } });
 
@@ -303,7 +303,7 @@ describe('TaskDetail', () => {
 
     expect(screen.getByText('Noor')).toBeInTheDocument();
     expect(screen.getByText('· system-run')).toBeInTheDocument();
-    expect(screen.queryByText('→ You')).not.toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'You' })).not.toBeInTheDocument();
   });
 
   it('Post note calls appendTaskNote with the editor draft and current step id', async () => {

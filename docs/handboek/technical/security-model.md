@@ -65,7 +65,7 @@ wrapped in several independent layers:
 
 - **Its own small world.** The script gets a fresh scratch area, and its writes are confined to that area and the project workspace — not your disk. Node's permission model checks the file boundary as one layer of the sandbox.
 - **No calling for backup.** The script can't launch other programs, spawn workers, or load native extensions. Where the operating system can enforce it (next point), a script also can't quietly open its own connection to the internet — when a gezel needs the web, it goes through gezel's named tools (search, fetch, the browser), which are policy-checked and show up in History. In most configurations, whatever a gezel does, it does alone, inside the fence of the project workspace.
-- **The operating system holds the outer wall where it can.** Untrusted code that must run without network access starts only when Gezel can apply a supported OS boundary — macOS Seatbelt, the Windows sandbox (Microsoft's process container, on recent Windows 11), or a probed systemd boundary for compatible Linux jobs. Otherwise Gezel refuses to start it. On macOS and Windows that wall surrounds every script run, and on Windows it also holds the script to the same folders as the file limits above. Settings → Security & Compliance shows whether the Windows sandbox is active on your PC, says why when it isn't, and has a switch to turn it off. One narrow compatibility path exists for byte-verified first-party scripts shipped in Gezel's standard library or catalog: where a job cannot use the OS boundary, those trusted bytes may run with the remaining filesystem limits, subprocess/worker/addon denial, environment scrubbing, and JavaScript network-denial layers. Edited, user-authored, and model-authored scripts do not receive that exception.
+- **The operating system holds the outer wall where it can.** Untrusted code that must run without network access starts only when Gezel can apply a supported OS boundary — macOS Seatbelt, the Windows sandbox (Microsoft's process container, on recent Windows 11), or a probed systemd boundary for compatible Linux jobs. Otherwise Gezel refuses to start it. On macOS and Windows that wall surrounds every script run, and on Windows it also holds the script to the same folders as the file limits above. Settings → Security & compliance shows whether the Windows sandbox is active on your PC, says why when it isn't, and has a switch to turn it off. One narrow compatibility path exists for byte-verified first-party scripts shipped in Gezel's standard library or catalog: where a job cannot use the OS boundary, those trusted bytes may run with the remaining filesystem limits, subprocess/worker/addon denial, environment scrubbing, and JavaScript network-denial layers. Edited, user-authored, and model-authored scripts do not receive that exception.
 - **Scripts a gezel writes follow your network setting where there is no wall.** On Windows when the Windows sandbox is off or not available, and on Linux without the systemd boundary, `run_nodejs_script` and `derive_file` are withheld unless your security level already lets gezels use external services (as Free does). When it does, these scripts run with the other layers but with ordinary network access. That access is direct: it skips the checks the named web tools apply, its requests do not appear in History, and it can reach addresses on your own machine and local network. On macOS, on Windows with the sandbox active, and on Linux with the boundary, they always run without network access.
 - **A time and memory leash.** Every run has a deadline and can be capped on memory, so a runaway script gets stopped instead of dragging your machine down.
 
@@ -74,7 +74,7 @@ promise that hostile code can never escape.
 
 Some tools deliberately run with more authority. **Package scripts and
 installed package binaries** (`run_package_script` and `run_npx`) are off
-unless Settings → Security & Compliance has **Run package scripts** on, which
+unless Settings → Security & compliance has **Run package scripts** on, which
 Unrestricted does and Lockdown does not. When it is on, and after showing the
 exact command and receiving your approval, they run as your operating-system
 account. They may start other programs, use the network, and read or change
@@ -102,7 +102,7 @@ a tripwire against a model's bad habits, not a sandbox: it reads the call's
 text and is easy to get around on purpose. Each refusal appears in History.
 Third-party MCP servers are also not inside the
 standalone-script sandbox; because they are unconfined local or remote code,
-Gezel enables them only under the corresponding Security & Compliance setting.
+Gezel enables them only under the corresponding Security & compliance setting.
 
 ### Mutations need consent
 

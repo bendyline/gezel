@@ -54,7 +54,7 @@ export async function createSearchProvider(
     return {
       name: config.webSearch?.provider ?? 'wikipedia',
       unavailableReason:
-        'External services are disabled by the security policy. Raise the security level in Settings → Security & Compliance to enable web search.',
+        'External services are disabled by the security policy. Raise the security level in Settings → Security & compliance to enable web search.',
       // eslint-disable-next-line @typescript-eslint/require-await
       async search() {
         throw new Error('web search disabled by security policy');

@@ -3178,7 +3178,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             return {
               exitCode: 1,
               stderrTail:
-                'Security policy: script execution is disabled, so this execution gate cannot run. Raise the security level in Settings → Security & Compliance, or replace the nodeRuns check.',
+                'Security policy: script execution is disabled, so this execution gate cannot run. Raise the security level in Settings → Security & compliance, or replace the nodeRuns check.',
               timedOut: false,
               denied: true,
             };

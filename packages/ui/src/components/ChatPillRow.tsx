@@ -565,15 +565,21 @@ function TaskPillButton({
         <span className="chat-pill-message-preview">{message}</span>
       </span>
       <span className="chat-pill-thread-line chat-pill-thread-update">
-        <span
-          className="chat-pill-thread-updated-at"
-          title={latestThread ? formatAbsoluteTime(latestThread.lastActivityAt) : undefined}
-        >
-          {updated ? `Updated ${updated}` : debugMode ? task.ref : 'Not started yet'}
-        </span>
-        <span className="chat-pill-separator" aria-hidden="true">
-          ·
-        </span>
+        {/* Without a chat the line above already says "No chat yet"; a "Not
+            started yet" here only argued with the task's own status. */}
+        {(updated || debugMode) && (
+          <>
+            <span
+              className="chat-pill-thread-updated-at"
+              title={latestThread ? formatAbsoluteTime(latestThread.lastActivityAt) : undefined}
+            >
+              {updated ? `Updated ${updated}` : task.ref}
+            </span>
+            <span className="chat-pill-separator" aria-hidden="true">
+              ·
+            </span>
+          </>
+        )}
         <span className="chat-pill-thread-status">
           {latestThread ? (
             <span className="chat-pill-dot" aria-hidden="true" />

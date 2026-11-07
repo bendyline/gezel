@@ -30,6 +30,12 @@ import {
 import { NotificationsSetting } from '../components/NotificationsSetting.js';
 import { RecommendedMediaDownloads } from '../components/RecommendedMediaDownloads.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
+import {
+  SettingCheck,
+  SettingField,
+  SettingsSection,
+  settingHintId,
+} from '../components/SettingsSection.js';
 import { SocialModeToggle } from '../components/SocialModeToggle.js';
 import { StartAtLoginToggle } from '../components/StartAtLoginToggle.js';
 import { shortModelName } from '../components/model-display-name.js';
@@ -62,7 +68,6 @@ import {
   UpdateStatus,
   formatStartedAt,
 } from './SettingsSystemStatus.js';
-import { TimeoutRow } from './TimeoutRow.js';
 import { CLAUDE_PERMISSION_CHOICES, CODEX_PERMISSION_CHOICES } from './cli-permission-choices.js';
 import { detectDs4Availability } from './ds4-availability.js';
 import { localEngineSettingsLabel } from './local-engine-label.js';
@@ -305,7 +310,7 @@ function preloadSettingsSection(section: SectionId): void {
 // small vertical rail on the left so it reads as nested); `groupHeader` marks
 // the item that labels and expand/collapses that group.
 type SettingsGroup = 'ai' | 'workloads';
-type SettingsSection = {
+type SettingsNavEntry = {
   id: SectionId;
   label: string;
   group?: SettingsGroup;
@@ -341,16 +346,16 @@ const EXTERNAL_CHAT_SECTIONS: ReadonlySet<SectionId> = new Set<SectionId>([
   'anthropicCli',
 ]);
 
-function buildSections(platform: string | undefined): SettingsSection[] {
+function buildSections(platform: string | undefined): SettingsNavEntry[] {
   return [
     { id: 'general', label: 'General' },
-    { id: 'deviceIntegration', label: 'Device Integration' },
-    { id: 'team', label: 'Your Team' },
-    { id: 'aboutYou', label: 'About You' },
+    { id: 'deviceIntegration', label: 'Device integration' },
+    { id: 'team', label: 'Your team' },
+    { id: 'aboutYou', label: 'About you' },
     { id: 'folders', label: 'Folders' },
-    { id: 'securityCompliance', label: 'Security & Compliance' },
+    { id: 'securityCompliance', label: 'Security & compliance' },
     { id: 'accounts', label: 'Accounts' },
-    { id: 'defaults', label: 'Artificial Intelligence', groupHeader: 'ai' },
+    { id: 'defaults', label: 'Artificial intelligence', groupHeader: 'ai' },
     { id: 'mlx', label: localEngineSettingsLabel('mlx', platform), group: 'ai' },
     {
       id: 'llamaCpp',
@@ -374,8 +379,8 @@ function buildSections(platform: string | undefined): SettingsSection[] {
     { id: 'benchmarks', label: 'Benchmarks' },
     { id: 'channels', label: 'Channels' },
     { id: 'connectedApps', label: 'Integrations' },
-    { id: 'remoteServers', label: 'Remote Servers' },
-    { id: 'toolsets', label: 'Shared Toolsets' },
+    { id: 'remoteServers', label: 'Remote servers' },
+    { id: 'toolsets', label: 'Shared toolsets' },
     { id: 'about', label: 'About' },
   ];
 }
@@ -403,18 +408,6 @@ function DaemonSettingsView() {
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
   const boringMode = config?.roleBasedNameOnlyMode === true;
-  const [newMeesterOpen, setNewMeesterOpen] = useState(false);
-  const [newMeesterName, setNewMeesterName] = useState('');
-  const [newMeesterBusy, setNewMeesterBusy] = useState(false);
-  const [newKlerkOpen, setNewKlerkOpen] = useState(false);
-  const [newKlerkName, setNewKlerkName] = useState('');
-  const [newKlerkBusy, setNewKlerkBusy] = useState(false);
-  const [newBoekwachterOpen, setNewBoekwachterOpen] = useState(false);
-  const [newBoekwachterName, setNewBoekwachterName] = useState('');
-  const [newBoekwachterBusy, setNewBoekwachterBusy] = useState(false);
-  const [newKeurmeesterOpen, setNewKeurmeesterOpen] = useState(false);
-  const [newKeurmeesterName, setNewKeurmeesterName] = useState('');
-  const [newKeurmeesterBusy, setNewKeurmeesterBusy] = useState(false);
   // Enabling supervision sends conversation excerpts to a cloud provider,
   // so the toggle goes through an explicit consent step (see the
   // Keurmeester section) instead of saving on click.
@@ -1421,6 +1414,7 @@ function DaemonSettingsView() {
   const nightShiftModelOverride = config?.nightShift?.modelOverride;
   const nightShiftProvider: ProviderName = nightShiftModelOverride?.provider ?? provider;
   const hasGithubToken = config?.hasGithubToken ?? false;
+  const copilotSignedInViaCli = !hasGithubToken && copilotProbe.kind === 'ok' && !!copilotLogin;
   const hasOpenaiKey = config?.hasOpenaiApiKey ?? false;
   const hasAnthropicKey = config?.hasAnthropicApiKey ?? false;
   const copilotUsage = usage?.providers.copilot;
@@ -1480,7 +1474,7 @@ function DaemonSettingsView() {
     provider === 'apple-foundation-models' ||
     config?.appleFoundationModelsStatus?.installed === true;
 
-  // Models on paired servers (Settings → Remote Servers). Offered once a
+  // Models on paired servers (Settings → Remote servers). Offered once a
   // server shares at least one, and kept on offer while one is chosen. Read
   // outside this tab only when a paired server is in use, for the nav subline.
   const remoteServers = useRemoteServers(
@@ -1531,7 +1525,7 @@ function DaemonSettingsView() {
     SECURITY_LEVEL_PRESETS.find((p) => p.id === externalChatPolicy.level)?.label ??
     'your current security level';
   const blockedProviderTitle = (name: ProviderName) =>
-    `${providerLabel(name, uiPlatform)} sends chat off this device, which ${securityLevelLabel} does not allow. Change the level in Security & Compliance to use it.`;
+    `${providerLabel(name, uiPlatform)} sends chat off this device, which ${securityLevelLabel} does not allow. Change the level in Security & compliance to use it.`;
   /**
    * Blocked *and* on offer — the pill stays, greyed, so the state is legible.
    * The daemon doesn't hold paired-server turns to the external-chat switch,
@@ -1540,7 +1534,7 @@ function DaemonSettingsView() {
   const providerBlocked = (name: ProviderName) =>
     externalChatBlocked && !isLocalProvider(name) && name !== 'remote';
 
-  // Subline under the "Artificial Intelligence" nav header: which engine and
+  // Subline under the "Artificial intelligence" nav header: which engine and
   // model a new chat gets by default. Answering that used to mean opening the
   // tab and reading two controls.
   //
@@ -1694,7 +1688,7 @@ function DaemonSettingsView() {
       // A posture with external chat off can't run these at all, so their
       // setup tabs are dead ends — sign-in flows and CLI permission modes for
       // a provider the daemon refuses to construct. The greyed pill on the
-      // Artificial Intelligence tab carries the explanation.
+      // Artificial intelligence tab carries the explanation.
       if (EXTERNAL_CHAT_SECTIONS.has(s.id) && externalChatBlocked) return false;
       // Channels is in the work-in-progress bucket alongside connectors —
       // hidden until the user opts in under About.
@@ -1713,7 +1707,7 @@ function DaemonSettingsView() {
 
   // Landing on a hidden tab is reachable two ways: the posture drops to Super
   // Lockdown while one is open, or a deep link (`peekPendingSettingsSection`)
-  // points at one. Send those to the Artificial Intelligence tab, where the
+  // points at one. Send those to the Artificial intelligence tab, where the
   // greyed pill explains why the provider is gone. Deliberately narrower than
   // "any section missing from `sections`" — config loads async, and a blanket
   // rule would bounce every deep link before its gate had an answer.
@@ -1825,409 +1819,307 @@ function DaemonSettingsView() {
         <Suspense fallback={null}>
           {section === 'general' && (
             <>
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>System Health</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  What's running under the hood — the local daemon, your Node runtime, the OS, and
-                  the system browser toolset used for web actions.
-                </p>
+              <SettingsSection
+                id="settings-system-health"
+                title="System health"
+                hint="What's running under the hood — the local daemon, your Node runtime, the OS, and the system browser toolset used for web actions."
+              >
                 <HealthStrip />
-              </section>
+              </SettingsSection>
               <SettingsInterests />
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Appearance</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Light or dark mode, or follow the OS.
-                </p>
-                <ThemePicker />
-              </section>
-              <section className="settings-sidebar-side" style={{ marginBottom: '2rem' }}>
-                <h3>Sidebar position</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Which side the navigation rail (projects, crew, documents…) sits on.
-                </p>
-                <SidebarSidePicker />
-              </section>
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Gezel names and poppetjes</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Poppetjes are the little character figures shown beside each gezel — like your
-                  meester's here. Turn this off and every gezel shows a role-based name (e.g.{' '}
-                  <code>visual-designer</code> instead of "Mira") with a plain letter avatar; the
-                  role-based name also flows into system prompts and chat handoffs, so the model
-                  addresses itself by role.
-                </p>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                  <label className="debug-toggle" style={{ marginTop: 0 }}>
-                    <input
-                      type="checkbox"
-                      checked={
-                        config?.roleBasedNameOnlyMode !== true && config?.showPoppetjes !== false
-                      }
-                      onChange={(e) => void saveShowNamesAndPoppetjes(e.target.checked)}
-                    />
-                    <span>Show gezel names and poppetjes</span>
-                  </label>
-                  {(() => {
+              <SettingsSection id="settings-appearance" title="Appearance">
+                <SettingField label="Theme" hint="Light or dark mode, or follow the OS.">
+                  <ThemePicker />
+                </SettingField>
+                <SettingField
+                  label="Sidebar position"
+                  className="settings-sidebar-side"
+                  hint="Which side the navigation rail (projects, crew, documents…) sits on."
+                >
+                  <SidebarSidePicker />
+                </SettingField>
+              </SettingsSection>
+              <SettingsSection
+                id="settings-names-character"
+                title="Names and character"
+                hint="How crew members look and talk to you."
+              >
+                <SettingCheck
+                  label="Show gezel names and poppetjes"
+                  hint={
+                    <>
+                      Poppetjes are the little character figures shown beside each gezel. Turn this
+                      off and every gezel shows a role-based name (e.g. <code>visual-designer</code>{' '}
+                      instead of "Mira") with a plain letter avatar; the role-based name also flows
+                      into system prompts and chat handoffs, so the model addresses itself by role.
+                    </>
+                  }
+                  checked={
+                    config?.roleBasedNameOnlyMode !== true && config?.showPoppetjes !== false
+                  }
+                  onChange={(checked) => void saveShowNamesAndPoppetjes(checked)}
+                  aside={(() => {
                     const meester = gezels.find((g) => g.id === config?.meesterGezelId);
+                    // `.gezel-icon` clips the figure to a small box — a bare
+                    // <Poppetje> paints its full body because the SVG is
+                    // overflow:visible.
                     return meester?.poppetje ? (
-                      // Wrap in `.gezel-icon` so the figure is clipped to a small
-                      // box — a bare <Poppetje> paints its full body because the
-                      // SVG is overflow:visible.
-                      <div
-                        className="gezel-icon"
-                        style={{ width: 40, height: 40 }}
-                        title={`example poppetje — ${meester.name}`}
-                      >
+                      <div className="gezel-icon settings-poppetje-example">
                         <div className="gezel-icon-poppetje">
                           <Poppetje poppetje={meester.poppetje} variant="headshot" size={40} />
                         </div>
                       </div>
                     ) : null;
                   })()}
-                </div>
-              </section>
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Social mode</h3>
-                <SocialModeToggle />
-              </section>
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Notifications</h3>
-                <NotificationsSetting />
-              </section>
-              <section style={{ marginTop: '2rem' }}>
-                <h3>Documents</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Spelling and grammar checking as you write in the document editors. It runs
-                  entirely on this machine — nothing is sent anywhere, and nothing is written into
-                  the document.
-                </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={config?.inlineSpellChecking !== false}
-                    onChange={(e) =>
-                      void saveInlineProofing({ inlineSpellChecking: e.target.checked })
-                    }
-                  />
-                  <span>Show inline spell checking</span>
-                </label>
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginTop: '0.4rem',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={config?.inlineGrammarChecking !== false}
-                    onChange={(e) =>
-                      void saveInlineProofing({ inlineGrammarChecking: e.target.checked })
-                    }
-                  />
-                  <span>Show inline grammar checking</span>
-                </label>
-                <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
-                  (Grammar checking is currently only available for English)
-                </p>
-              </section>
-              <section style={{ marginTop: '2rem' }}>
-                <h3>Prompt drafts</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  A message you start writing is saved to the project as you type, so you can leave
-                  it and come back days later. Unsent drafts are kept until you delete them. A draft
-                  you have already sent is kept for a while so you can reopen or reuse it.
-                </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <span>Keep sent drafts for</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={3650}
-                    value={config?.promptDrafts?.keepSentDays ?? 90}
-                    onChange={(e) => {
-                      const days = Number.parseInt(e.target.value, 10);
-                      if (Number.isFinite(days) && days >= 0) {
-                        void savePromptDraftRetention(days);
-                      }
-                    }}
-                    style={{ width: '5rem' }}
-                  />
-                  <span>days (0 keeps them forever)</span>
-                </label>
-                <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                  Clearing out an old sent draft also removes the files it attached, so an image in
-                  a message that old will stop showing in the transcript.
-                </p>
-              </section>
-              <section style={{ marginTop: '2rem' }}>
-                <h3>Night Shift</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  During a nightly window, Gezel runs deferred batch work — content indexing and a
-                  daily Meester review of every active project (with suggestions waiting for you in
-                  the morning). Interactive and scheduled work always takes priority.
-                </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={config?.nightShift?.enabled !== false}
-                    onChange={(e) => void saveNightShift({ enabled: e.target.checked })}
-                  />
-                  <span>Enable Night Shift</span>
-                </label>
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginTop: '0.6rem',
-                    flexWrap: 'wrap',
-                  }}
-                >
-                  <span className="muted" style={{ fontSize: '0.9rem' }}>
-                    Window
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={23}
-                    value={config?.nightShift?.window?.startHour ?? 22}
-                    onChange={(e) =>
-                      void saveNightShift({
-                        window: {
-                          startHour: clampHour(e.target.value, 22),
-                          endHour: config?.nightShift?.window?.endHour ?? 6,
-                        },
-                      })
-                    }
-                    style={{ width: '4rem' }}
-                    aria-label="Night Shift start hour"
-                  />
-                  <span className="muted" style={{ fontSize: '0.9rem' }}>
-                    to
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={23}
-                    value={config?.nightShift?.window?.endHour ?? 6}
-                    onChange={(e) =>
-                      void saveNightShift({
-                        window: {
-                          startHour: config?.nightShift?.window?.startHour ?? 22,
-                          endHour: clampHour(e.target.value, 6),
-                        },
-                      })
-                    }
-                    style={{ width: '4rem' }}
-                    aria-label="Night Shift end hour"
-                  />
-                  <span className="muted" style={{ fontSize: '0.8rem' }}>
-                    (local 24-hour; wraps past midnight)
-                  </span>
-                </div>
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginTop: '0.6rem',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={config?.nightShift?.keepAwakeWhileRunning === true}
-                    onChange={(e) =>
-                      void saveNightShift({ keepAwakeWhileRunning: e.target.checked })
-                    }
-                  />
-                  <span>Keep this machine awake while night-shift work is running</span>
-                </label>
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginTop: '0.4rem',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={config?.nightShift?.pauseOnBattery !== false}
-                    onChange={(e) => void saveNightShift({ pauseOnBattery: e.target.checked })}
-                  />
-                  <span>Pause night work while this computer runs on battery</span>
-                </label>
-                <StartAtLoginToggle
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginTop: '0.4rem',
-                  }}
                 />
+                <SocialModeToggle />
+              </SettingsSection>
+              <SettingsSection id="settings-notifications" title="Notifications">
+                <NotificationsSetting />
+              </SettingsSection>
+              <SettingsSection
+                id="settings-documents"
+                title="Documents"
+                hint="Spelling and grammar checking as you write in the document editors. It runs entirely on this machine — nothing is sent anywhere, and nothing is written into the document."
+              >
+                <SettingCheck
+                  label="Show inline spell checking"
+                  checked={config?.inlineSpellChecking !== false}
+                  onChange={(checked) => void saveInlineProofing({ inlineSpellChecking: checked })}
+                />
+                <SettingCheck
+                  label="Show inline grammar checking"
+                  hint="Grammar checking is available for English only."
+                  checked={config?.inlineGrammarChecking !== false}
+                  onChange={(checked) =>
+                    void saveInlineProofing({ inlineGrammarChecking: checked })
+                  }
+                />
+              </SettingsSection>
+              <SettingsSection
+                id="settings-prompt-drafts"
+                title="Prompt drafts"
+                hint="A message you start writing is saved to the project as you type, so you can leave it and come back days later. Unsent drafts are kept until you delete them."
+              >
+                <SettingField
+                  label="Keep sent drafts for"
+                  controlId="settings-sent-draft-days"
+                  hint="Enter 0 to keep them forever. Clearing out an old sent draft also removes the files it attached, so an image in a message that old stops showing in the transcript."
+                >
+                  <div className="gz-setting-inline">
+                    <input
+                      id="settings-sent-draft-days"
+                      type="number"
+                      min={0}
+                      max={3650}
+                      aria-describedby={settingHintId('settings-sent-draft-days')}
+                      value={config?.promptDrafts?.keepSentDays ?? 90}
+                      onChange={(e) => {
+                        const days = Number.parseInt(e.target.value, 10);
+                        if (Number.isFinite(days) && days >= 0) {
+                          void savePromptDraftRetention(days);
+                        }
+                      }}
+                    />
+                    <span>days</span>
+                  </div>
+                </SettingField>
+              </SettingsSection>
+              <SettingsSection
+                id="settings-night-shift"
+                title="Night Shift"
+                hint="During a nightly window, Gezel runs deferred batch work — content indexing and a daily Meester review of every active project, with suggestions waiting for you in the morning. Interactive and scheduled work always takes priority."
+              >
+                <SettingCheck
+                  label="Enable Night Shift"
+                  checked={config?.nightShift?.enabled !== false}
+                  onChange={(checked) => void saveNightShift({ enabled: checked })}
+                />
+                <SettingField
+                  label="Window"
+                  hint="Local 24-hour time. The window can wrap past midnight."
+                >
+                  <div className="gz-setting-inline">
+                    <span>From</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={config?.nightShift?.window?.startHour ?? 22}
+                      onChange={(e) =>
+                        void saveNightShift({
+                          window: {
+                            startHour: clampHour(e.target.value, 22),
+                            endHour: config?.nightShift?.window?.endHour ?? 6,
+                          },
+                        })
+                      }
+                      aria-label="Night Shift start hour"
+                    />
+                    <span>to</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={23}
+                      value={config?.nightShift?.window?.endHour ?? 6}
+                      onChange={(e) =>
+                        void saveNightShift({
+                          window: {
+                            startHour: config?.nightShift?.window?.startHour ?? 22,
+                            endHour: clampHour(e.target.value, 6),
+                          },
+                        })
+                      }
+                      aria-label="Night Shift end hour"
+                    />
+                  </div>
+                </SettingField>
+                <SettingCheck
+                  label="Keep this machine awake while night-shift work is running"
+                  checked={config?.nightShift?.keepAwakeWhileRunning === true}
+                  onChange={(checked) => void saveNightShift({ keepAwakeWhileRunning: checked })}
+                />
+                <SettingCheck
+                  label="Pause night work while this computer runs on battery"
+                  checked={config?.nightShift?.pauseOnBattery !== false}
+                  onChange={(checked) => void saveNightShift({ pauseOnBattery: checked })}
+                />
+                <StartAtLoginToggle />
                 {isDarwin && (
-                  <p className="muted" style={{ fontSize: '0.8rem', marginTop: '0.6rem' }}>
+                  <p className="gz-setting-hint">
                     macOS lets only administrators schedule a wake, so Gezel can't wake a sleeping
                     Mac for the night shift. It works through the night while the Mac stays awake
                     and plugged in.
                   </p>
                 )}
-              </section>
-              <section style={{ marginTop: '2rem' }}>
-                <h3>Night shift cloud quota reserve</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  For Claude, Codex, and Copilot subscriptions, run the night shift unless:
-                </p>
-                <label
-                  style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}
+              </SettingsSection>
+              <SettingsSection
+                id="settings-night-shift-quota"
+                title="Night Shift cloud quota"
+                hint="For Claude, Codex, and Copilot subscriptions. Crew members on local models are never held."
+              >
+                <SettingField
+                  label="Hold night work when"
+                  hint="The daily reserve scales with the time left: 10% a day with 4 days until reset keeps the last 40% for you. Work already running finishes; held work resumes when your quota frees up."
                 >
-                  <input
-                    type="checkbox"
-                    checked={config?.nightShift?.quotaReserve?.overall?.enabled !== false}
-                    onChange={(e) =>
-                      void saveNightShiftQuotaReserve('overall', { enabled: e.target.checked })
-                    }
-                    aria-label="Stop night work near my overall quota"
-                  />
-                  <span>I’m within</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={config?.nightShift?.quotaReserve?.overall?.percent ?? 20}
-                    onChange={(e) =>
-                      void saveNightShiftQuotaReserve('overall', {
-                        percent: clampPercent(e.target.value, 20),
-                      })
-                    }
-                    style={{ width: '2.5rem' }}
-                    disabled={config?.nightShift?.quotaReserve?.overall?.enabled === false}
-                    aria-label="Overall quota floor percent"
-                  />
-                  <span>% of my overall quota</span>
-                </label>
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    flexWrap: 'wrap',
-                    marginTop: '0.4rem',
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={config?.nightShift?.quotaReserve?.perDay?.enabled === true}
-                    onChange={(e) =>
-                      void saveNightShiftQuotaReserve('perDay', { enabled: e.target.checked })
-                    }
-                    aria-label="Reserve a share of my quota per day until reset"
-                  />
-                  <span>I have less than</span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={config?.nightShift?.quotaReserve?.perDay?.percent ?? 10}
-                    onChange={(e) =>
-                      void saveNightShiftQuotaReserve('perDay', {
-                        percent: clampPercent(e.target.value, 10),
-                      })
-                    }
-                    style={{ width: '2.5rem' }}
-                    disabled={config?.nightShift?.quotaReserve?.perDay?.enabled !== true}
-                    aria-label="Daily quota reserve percent"
-                  />
-                  <span>% of my quota per day left before it resets</span>
-                </label>
-                <p className="muted small" style={{ margin: '0.35rem 0 0 1.5rem' }}>
-                  The daily reserve scales with the time left: 10% a day with 4 days until reset
-                  keeps the last 40% for you. Work already running finishes; held work resumes when
-                  your quota frees up. Crew members on local models are never held.
-                </p>
-              </section>
-              <section style={{ marginTop: '2rem' }}>
-                <h3>Gezel templates</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Restore every gezel created from a template back to the <code>about.md</code>{' '}
-                  their template ships, discarding any edits you’ve made to their instructions.
-                  Bespoke crew members (written from scratch) are left untouched.
-                </p>
-                <button type="button" className="subtle" onClick={() => void resetTemplatesNow()}>
-                  Reset to defaults
-                </button>
-              </section>
+                  <label className="gz-setting-inline">
+                    <input
+                      type="checkbox"
+                      checked={config?.nightShift?.quotaReserve?.overall?.enabled !== false}
+                      onChange={(e) =>
+                        void saveNightShiftQuotaReserve('overall', { enabled: e.target.checked })
+                      }
+                      aria-label="Stop night work near my overall quota"
+                    />
+                    <span>I’m within</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={config?.nightShift?.quotaReserve?.overall?.percent ?? 20}
+                      onChange={(e) =>
+                        void saveNightShiftQuotaReserve('overall', {
+                          percent: clampPercent(e.target.value, 20),
+                        })
+                      }
+                      disabled={config?.nightShift?.quotaReserve?.overall?.enabled === false}
+                      aria-label="Overall quota floor percent"
+                    />
+                    <span>% of my overall quota</span>
+                  </label>
+                  <label className="gz-setting-inline">
+                    <input
+                      type="checkbox"
+                      checked={config?.nightShift?.quotaReserve?.perDay?.enabled === true}
+                      onChange={(e) =>
+                        void saveNightShiftQuotaReserve('perDay', { enabled: e.target.checked })
+                      }
+                      aria-label="Reserve a share of my quota per day until reset"
+                    />
+                    <span>I have less than</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={config?.nightShift?.quotaReserve?.perDay?.percent ?? 10}
+                      onChange={(e) =>
+                        void saveNightShiftQuotaReserve('perDay', {
+                          percent: clampPercent(e.target.value, 10),
+                        })
+                      }
+                      disabled={config?.nightShift?.quotaReserve?.perDay?.enabled !== true}
+                      aria-label="Daily quota reserve percent"
+                    />
+                    <span>% of my quota per day left before it resets</span>
+                  </label>
+                </SettingField>
+              </SettingsSection>
+              <SettingsSection
+                id="settings-gezel-templates"
+                title="Gezel templates"
+                hint={
+                  <>
+                    Restore every gezel created from a template back to the <code>about.md</code>{' '}
+                    their template ships, discarding any edits you’ve made to their instructions.
+                    Crew members written from scratch are left untouched.
+                  </>
+                }
+                actions={
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void resetTemplatesNow()}
+                  >
+                    Reset to defaults
+                  </button>
+                }
+              />
             </>
           )}
 
           {section === 'deviceIntegration' && (
             <>
-              <section>
-                <h3>System tray</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Keep a Gezel icon in the {isDarwin ? 'menu bar' : 'system tray'} for at-a-glance
-                  status, notifications, and a quick engagement-mode toggle. When on
-                  {isDarwin
-                    ? ''
-                    : ', closing the window keeps Gezel running in the tray (quit from the tray menu)'}
-                  .
-                </p>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={config?.showSystemTray !== false}
-                    onChange={(e) => void saveShowSystemTray(e.target.checked)}
-                  />
-                  <span>Show the tray icon</span>
-                </label>
+              <SettingsSection
+                id="settings-system-tray"
+                title={isDarwin ? 'Menu bar' : 'System tray'}
+                hint={`Keep a Gezel icon in the ${isDarwin ? 'menu bar' : 'system tray'} for at-a-glance status, notifications, and a quick engagement-mode toggle.`}
+              >
+                <SettingCheck
+                  label="Show the tray icon"
+                  hint={
+                    isDarwin
+                      ? undefined
+                      : 'While it shows, closing the window keeps Gezel running in the tray; quit from the tray menu.'
+                  }
+                  checked={config?.showSystemTray !== false}
+                  onChange={(checked) => void saveShowSystemTray(checked)}
+                />
                 {/* Close-to-tray opt-out. Only relevant when the tray is on, and
                   only on Windows/Linux — macOS keeps the app alive on close
                   regardless, so the toggle would be a no-op there. */}
                 {config?.showSystemTray !== false && !isDarwin && (
-                  <label
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      marginTop: '0.5rem',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={config?.quitOnClose === true}
-                      onChange={(e) => void saveQuitOnClose(e.target.checked)}
-                    />
-                    <span>Remove the tray icon on close</span>
-                  </label>
+                  <SettingCheck
+                    label="Remove the tray icon on close"
+                    checked={config?.quitOnClose === true}
+                    onChange={(checked) => void saveQuitOnClose(checked)}
+                  />
                 )}
-              </section>
+              </SettingsSection>
               {/* Mac-only: by convention macOS keeps the app running after the
                 window closes. This opt-in makes the red X quit Gezel entirely,
                 matching Windows. Off by default; independent of the tray. */}
               {isDarwin && (
-                <section style={{ marginTop: '2rem' }}>
-                  <h3>Close button</h3>
-                  <p className="muted" style={{ marginTop: 0 }}>
-                    By default macOS keeps Gezel running when you close the window. Turn this on to
-                    quit Gezel entirely when you click the red close button.
-                  </p>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={config?.quitOnClose === true}
-                      onChange={(e) => void saveQuitOnClose(e.target.checked)}
-                    />
-                    <span>Quit Gezel when the window is closed.</span>
-                  </label>
-                </section>
+                <SettingsSection id="settings-close-button" title="Close button">
+                  <SettingCheck
+                    label="Quit Gezel when the window is closed"
+                    hint="By default macOS keeps Gezel running when you close the window. Turn this on to quit Gezel entirely when you click the red close button."
+                    checked={config?.quitOnClose === true}
+                    onChange={(checked) => void saveQuitOnClose(checked)}
+                  />
+                </SettingsSection>
               )}
               <MicrophoneSettings />
-              <div style={{ marginTop: '2rem' }}>
-                <AmbientDashboardCard />
-              </div>
+              <AmbientDashboardCard />
             </>
           )}
 
@@ -2240,385 +2132,120 @@ function DaemonSettingsView() {
                 onTempoChange={saveWorkshopTempo}
               />
 
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Meester</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  The Meester is your team concierge — they help you start new projects, answer
-                  questions, and check in on projects to keep them moving. Change which gezel wears
-                  the hat here; their prompt is untouched when you do.
-                </p>
-                <div className="meester-picker">
-                  {config?.meesterGezelId &&
-                    (() => {
-                      const current = gezels.find((g) => g.id === config.meesterGezelId);
-                      if (!current) return null;
-                      return (
-                        <div className="meester-current">
-                          <GezelIcon
-                            svg={current.icon ?? null}
-                            poppetje={current.poppetje}
-                            iconOverride={current.iconOverride}
-                            name={displayName(current, boringMode)}
-                            size={40}
-                          />
-                          <div>
-                            <div className="meester-current-name">
-                              {displayName(current, boringMode)}
-                            </div>
-                            {current.role && <div className="muted small">{current.role}</div>}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
-                    Change meester to:
-                  </label>
-                  <Select.Root
-                    value={config?.meesterGezelId ?? ''}
-                    onValueChange={(v) => {
-                      if (v === '__new') {
-                        setNewMeesterOpen(true);
-                        setNewMeesterName('');
-                        return;
-                      }
-                      void setMeester(v);
-                    }}
-                  >
-                    <Select.Trigger>
-                      <Select.Value placeholder="Select meester…" />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {gezels.map((g) => (
-                        <Select.Item key={g.id} value={g.id}>
-                          {assignmentLabel(g, boringMode)}
-                        </Select.Item>
-                      ))}
-                      <Select.Item value="__new">✨ New Meester gezel…</Select.Item>
-                    </Select.Content>
-                  </Select.Root>
-
-                  {newMeesterOpen && (
-                    <form
-                      className="meester-new-form"
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        setNewMeesterBusy(true);
-                        try {
-                          await createNewMeester(newMeesterName);
-                          setNewMeesterOpen(false);
-                          setNewMeesterName('');
-                        } finally {
-                          setNewMeesterBusy(false);
-                        }
-                      }}
-                    >
-                      <input
-                        placeholder="Name (leave blank for a random pick)"
-                        value={newMeesterName}
-                        onChange={(e) => setNewMeesterName(e.target.value)}
-                        disabled={newMeesterBusy}
-                      />
-                      <div className="meester-new-form-actions">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNewMeesterOpen(false);
-                            setNewMeesterName('');
-                          }}
-                          disabled={newMeesterBusy}
-                        >
-                          Cancel
-                        </button>
-                        <button type="submit" className="primary" disabled={newMeesterBusy}>
-                          {newMeesterBusy ? 'Creating…' : 'Create Meester'}
-                        </button>
-                      </div>
-                      <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                        A brand-new gezel will be spun up with the curated Meester prompt and set as
-                        your active guide. You can rename or tune them later in the Crew tab.
-                      </p>
-                    </form>
-                  )}
+              <SettingsSection
+                id="settings-crew-roles"
+                title="Crew roles"
+                hint="Which gezel holds each standing job. Changing who holds one leaves their own instructions as they are."
+              >
+                <RoleAssignmentField
+                  controlId="settings-role-meester"
+                  label="Meester"
+                  hint="Your team concierge: they help you start new projects, answer questions, and check in on projects to keep them moving."
+                  value={config?.meesterGezelId}
+                  gezels={gezels}
+                  roleBasedNameOnly={boringMode}
+                  placeholder="Select meester…"
+                  newItemLabel="New Meester gezel…"
+                  createLabel="Create Meester"
+                  createHint="A brand-new gezel is spun up with the curated Meester prompt and set as your active guide. You can rename or tune them later in the Crew tab."
+                  onAssign={setMeester}
+                  onCreate={createNewMeester}
+                />
+                <RoleAssignmentField
+                  controlId="settings-role-scribe"
+                  label="Scribe"
+                  hint="Handles your workshop's utility text work (about.md drafts, rewrites, end-of-thread summaries, memory consolidation), so you can route grunt tasks to a different model than your conversational crew members."
+                  value={config?.klerkGezelId}
+                  gezels={gezels}
+                  roleBasedNameOnly={boringMode}
+                  placeholder="Select Scribe…"
+                  newItemLabel="New Scribe gezel…"
+                  createLabel="Create Scribe"
+                  createHint="A fresh gezel is spun up with the curated Scribe prompt and set as your active Scribe. Tune their model in the Crew tab to point utility work at Sonnet, a local model, or whatever fits."
+                  onAssign={setKlerk}
+                  onCreate={createNewKlerk}
+                />
+                <div data-testid="boekwachter-settings">
+                  <RoleAssignmentField
+                    controlId="settings-role-librarian"
+                    label="Librarian"
+                    hint="Your workshop's index-keeper. A project with a Librarian on its assigned crew gets background AI summaries, file reviews, folder rollups, and weekly digests. Remove the role from a project to keep fast structural search without those AI passes. Indexing stays local by default; a local provider and model selected on this gezel can tune the work."
+                    value={config?.boekwachterGezelId}
+                    gezels={gezels}
+                    roleBasedNameOnly={boringMode}
+                    placeholder="Select Librarian…"
+                    newItemLabel="New Librarian gezel…"
+                    createLabel="Create Librarian"
+                    createHint="The new gezel uses the canonical gilde Librarian personality. Projects assigned to the current Librarian transfer to the new one."
+                    onAssign={setBoekwachter}
+                    onCreate={createNewBoekwachter}
+                  />
                 </div>
-              </section>
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Scribe</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  The Scribe handles your workshop&apos;s utility text work (about.md drafts,
-                  rewrites, end-of-thread summaries, memory consolidation) so you can route grunt
-                  tasks to a different model than your conversational crew members.
-                </p>
-                <div className="meester-picker">
-                  {config?.klerkGezelId &&
-                    (() => {
-                      const current = gezels.find((g) => g.id === config.klerkGezelId);
-                      if (!current) return null;
-                      return (
-                        <div className="meester-current">
-                          <GezelIcon
-                            svg={current.icon ?? null}
-                            poppetje={current.poppetje}
-                            iconOverride={current.iconOverride}
-                            name={displayName(current, boringMode)}
-                            size={40}
-                          />
-                          <div>
-                            <div className="meester-current-name">
-                              {displayName(current, boringMode)}
-                            </div>
-                            {current.role && <div className="muted small">{current.role}</div>}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
-                    Change Scribe to:
-                  </label>
-                  <Select.Root
-                    value={config?.klerkGezelId ?? ''}
-                    onValueChange={(v) => {
-                      if (v === '__new') {
-                        setNewKlerkOpen(true);
-                        setNewKlerkName('');
-                        return;
-                      }
-                      void setKlerk(v);
-                    }}
-                  >
-                    <Select.Trigger>
-                      <Select.Value placeholder="Select Scribe…" />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {gezels.map((g) => (
-                        <Select.Item key={g.id} value={g.id}>
-                          {assignmentLabel(g, boringMode)}
-                        </Select.Item>
-                      ))}
-                      <Select.Item value="__new">✨ New Scribe gezel…</Select.Item>
-                    </Select.Content>
-                  </Select.Root>
-
-                  {newKlerkOpen && (
-                    <form
-                      className="meester-new-form"
-                      onSubmit={async (e) => {
-                        e.preventDefault();
-                        setNewKlerkBusy(true);
-                        try {
-                          await createNewKlerk(newKlerkName);
-                          setNewKlerkOpen(false);
-                          setNewKlerkName('');
-                        } finally {
-                          setNewKlerkBusy(false);
-                        }
-                      }}
-                    >
-                      <input
-                        placeholder="Name (leave blank for a random pick)"
-                        value={newKlerkName}
-                        onChange={(e) => setNewKlerkName(e.target.value)}
-                        disabled={newKlerkBusy}
-                      />
-                      <div className="meester-new-form-actions">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNewKlerkOpen(false);
-                            setNewKlerkName('');
-                          }}
-                          disabled={newKlerkBusy}
-                        >
-                          Cancel
-                        </button>
-                        <button type="submit" className="primary" disabled={newKlerkBusy}>
-                          {newKlerkBusy ? 'Creating…' : 'Create Scribe'}
-                        </button>
-                      </div>
-                      <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                        A fresh gezel will be spun up with the curated Scribe prompt and set as your
-                        active Scribe. Tune their model in the Crew tab to point utility work at
-                        Sonnet, a local model, or whatever fits.
-                      </p>
-                    </form>
-                  )}
-                </div>
-              </section>
-
-              <section style={{ marginBottom: '2rem' }} data-testid="boekwachter-settings">
-                <h3>Librarian</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  The Librarian is your workshop&apos;s index-keeper. A project with a Librarian on
-                  its assigned crew gets background AI summaries, file reviews, folder rollups, and
-                  weekly digests. Remove the role from a project to keep fast structural search
-                  without those AI passes. Indexing stays local by default; a local provider and
-                  model selected on this gezel can tune the work.
-                </p>
-                <div className="meester-picker">
-                  {config?.boekwachterGezelId &&
-                    (() => {
-                      const current = gezels.find(
-                        (gezel) => gezel.id === config.boekwachterGezelId,
-                      );
-                      if (!current) return null;
-                      return (
-                        <div className="meester-current">
-                          <GezelIcon
-                            svg={current.icon ?? null}
-                            poppetje={current.poppetje}
-                            iconOverride={current.iconOverride}
-                            name={displayName(current, boringMode)}
-                            size={40}
-                          />
-                          <div>
-                            <div className="meester-current-name">
-                              {displayName(current, boringMode)}
-                            </div>
-                            {current.role && <div className="muted small">{current.role}</div>}
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  <label className="muted small" style={{ marginTop: '0.5rem', display: 'block' }}>
-                    Change Librarian to:
-                  </label>
-                  <Select.Root
-                    value={config?.boekwachterGezelId ?? ''}
-                    onValueChange={(value) => {
-                      if (value === '__new') {
-                        setNewBoekwachterOpen(true);
-                        setNewBoekwachterName('');
-                        return;
-                      }
-                      void setBoekwachter(value);
-                    }}
-                  >
-                    <Select.Trigger>
-                      <Select.Value placeholder="Select Librarian…" />
-                    </Select.Trigger>
-                    <Select.Content>
-                      {gezels.map((gezel) => (
-                        <Select.Item key={gezel.id} value={gezel.id}>
-                          {assignmentLabel(gezel, boringMode)}
-                        </Select.Item>
-                      ))}
-                      <Select.Item value="__new">New Librarian gezel…</Select.Item>
-                    </Select.Content>
-                  </Select.Root>
-
-                  {newBoekwachterOpen && (
-                    <form
-                      className="meester-new-form"
-                      onSubmit={async (event) => {
-                        event.preventDefault();
-                        setNewBoekwachterBusy(true);
-                        try {
-                          await createNewBoekwachter(newBoekwachterName);
-                          setNewBoekwachterOpen(false);
-                          setNewBoekwachterName('');
-                        } finally {
-                          setNewBoekwachterBusy(false);
-                        }
-                      }}
-                    >
-                      <input
-                        placeholder="Name (leave blank for a random pick)"
-                        value={newBoekwachterName}
-                        onChange={(event) => setNewBoekwachterName(event.target.value)}
-                        disabled={newBoekwachterBusy}
-                      />
-                      <div className="meester-new-form-actions">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setNewBoekwachterOpen(false);
-                            setNewBoekwachterName('');
-                          }}
-                          disabled={newBoekwachterBusy}
-                        >
-                          Cancel
-                        </button>
-                        <button type="submit" className="primary" disabled={newBoekwachterBusy}>
-                          {newBoekwachterBusy ? 'Creating…' : 'Create Librarian'}
-                        </button>
-                      </div>
-                      <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                        The new gezel uses the canonical gilde Librarian personality. Projects
-                        assigned to the current Librarian transfer to the new one.
-                      </p>
-                    </form>
-                  )}
-                </div>
-              </section>
+              </SettingsSection>
 
               {config?.showAdvancedFeatures && (
-                <section style={{ marginBottom: '2rem' }} data-testid="keurmeester-settings">
-                  <h3>Inspector</h3>
-                  <p className="muted" style={{ marginTop: 0 }}>
-                    The Inspector checks the guild&apos;s work. When a small on-device model gets
-                    stuck — spinning on the same step, going silent, failing the same check over and
-                    over — a frontier model is consulted to diagnose the problem and step in: a
-                    well-aimed nudge, a rewritten task step, or (at most twice per task) doing the
-                    failing step itself and handing the work back.
-                  </p>
-                  {config?.keurmeester?.enabled !== true && !keurmeesterConsentOpen && (
-                    <button type="button" onClick={() => setKeurmeesterConsentOpen(true)}>
-                      Turn on supervision…
-                    </button>
-                  )}
-                  {config?.keurmeester?.enabled !== true && keurmeesterConsentOpen && (
-                    <div className="meester-new-form" data-testid="keurmeester-consent">
-                      <p style={{ marginTop: 0 }}>
-                        When a local model gets stuck, excerpts of the conversation and task will be
-                        sent to{' '}
-                        <strong>
-                          {config?.keurmeester?.providerName ?? 'the cloud provider you pick'}
-                        </strong>{' '}
-                        for diagnosis. If you chose a local model for privacy, that trade-off is
-                        yours to make — nothing is sent until you turn this on.
-                      </p>
-                      <div className="meester-new-form-actions">
-                        <button type="button" onClick={() => setKeurmeesterConsentOpen(false)}>
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          className="primary"
-                          onClick={() => {
-                            setKeurmeesterConsentOpen(false);
-                            void saveKeurmeesterConfig({ enabled: true });
-                          }}
-                        >
-                          I understand — enable
-                        </button>
+                <SettingsSection
+                  id="settings-inspector"
+                  title="Inspector"
+                  hint="The Inspector checks the guild's work. When a small on-device model gets stuck — spinning on the same step, going silent, failing the same check over and over — a frontier model is consulted to diagnose the problem and step in: a well-aimed nudge, a rewritten task step, or (at most twice per task) doing the failing step itself and handing the work back."
+                >
+                  <div className="gz-setting-stack" data-testid="keurmeester-settings">
+                    {config?.keurmeester?.enabled !== true && !keurmeesterConsentOpen && (
+                      <button type="button" onClick={() => setKeurmeesterConsentOpen(true)}>
+                        Turn on supervision…
+                      </button>
+                    )}
+                    {config?.keurmeester?.enabled !== true && keurmeesterConsentOpen && (
+                      <div className="gz-setting-panel" data-testid="keurmeester-consent">
+                        <p>
+                          When a local model gets stuck, excerpts of the conversation and task will
+                          be sent to{' '}
+                          <strong>
+                            {config?.keurmeester?.providerName ?? 'the cloud provider you pick'}
+                          </strong>{' '}
+                          for diagnosis. If you chose a local model for privacy, that trade-off is
+                          yours to make — nothing is sent until you turn this on.
+                        </p>
+                        <div className="gz-setting-panel-actions">
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => setKeurmeesterConsentOpen(false)}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="button"
+                            className="primary"
+                            onClick={() => {
+                              setKeurmeesterConsentOpen(false);
+                              void saveKeurmeesterConfig({ enabled: true });
+                            }}
+                          >
+                            I understand — enable
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  )}
-                  {config?.keurmeester?.enabled === true && (
-                    <>
-                      <label
-                        style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-                        className="small"
-                      >
-                        <input
-                          type="checkbox"
+                    )}
+                    {config?.keurmeester?.enabled === true && (
+                      <>
+                        <SettingCheck
+                          label="Supervise local models"
+                          hint="Conversation and task excerpts go to the provider below when a local model gets stuck."
                           checked
                           onChange={() => void saveKeurmeesterConfig({ enabled: false })}
                         />
-                        Supervision is on — conversation/task excerpts go to the provider below when
-                        a local model gets stuck.
-                      </label>
-                      <div style={{ display: 'flex', gap: '0.75rem', margin: '0.75rem 0' }}>
-                        <div>
-                          <label className="muted small" style={{ display: 'block' }}>
-                            Consult provider
-                          </label>
+                        <SettingField
+                          label="Consult provider"
+                          controlId="settings-inspector-provider"
+                        >
                           <Select.Root
                             value={config?.keurmeester?.providerName ?? ''}
                             onValueChange={(v) =>
                               void saveKeurmeesterConfig({ providerName: v, model: undefined })
                             }
                           >
-                            <Select.Trigger>
+                            <Select.Trigger id="settings-inspector-provider">
                               <Select.Value placeholder="Pick a cloud provider…" />
                             </Select.Trigger>
                             <Select.Content>
@@ -2641,147 +2268,47 @@ function DaemonSettingsView() {
                               <Select.Item value="codex-cli">Codex CLI</Select.Item>
                             </Select.Content>
                           </Select.Root>
-                        </div>
+                        </SettingField>
                         {config?.keurmeester?.providerName && (
-                          <div>
-                            <label className="muted small" style={{ display: 'block' }}>
-                              Consult model
-                            </label>
+                          <SettingField label="Consult model">
                             <ModelPicker
                               provider={config.keurmeester.providerName as ProviderName}
                               value={config?.keurmeester?.model}
                               onChange={(m) => void saveKeurmeesterConfig({ model: m })}
                               placeholder="Provider default"
                             />
-                          </div>
+                          </SettingField>
                         )}
-                      </div>
-                      <label
-                        style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}
-                        className="small"
-                      >
-                        <input
-                          type="checkbox"
+                        <SettingCheck
+                          label="Allow bounded takeover"
+                          hint="The Inspector may perform a repeatedly failing step itself — at most once per step and twice per task — then hand the work back."
                           checked={config?.keurmeester?.allowTakeover !== false}
-                          onChange={(e) =>
-                            void saveKeurmeesterConfig({ allowTakeover: e.target.checked })
+                          onChange={(checked) =>
+                            void saveKeurmeesterConfig({ allowTakeover: checked })
                           }
                         />
-                        Allow bounded takeover (the Inspector may perform a repeatedly-failing step
-                        itself — at most once per step, twice per task — then hand back)
-                      </label>
-                      <div className="meester-picker" style={{ marginTop: '0.75rem' }}>
-                        {config?.keurmeesterGezelId &&
-                          (() => {
-                            const current = gezels.find((g) => g.id === config.keurmeesterGezelId);
-                            if (!current) return null;
-                            return (
-                              <div className="meester-current">
-                                <GezelIcon
-                                  svg={current.icon ?? null}
-                                  poppetje={current.poppetje}
-                                  iconOverride={current.iconOverride}
-                                  name={displayName(current, boringMode)}
-                                  size={40}
-                                />
-                                <div>
-                                  <div className="meester-current-name">
-                                    {displayName(current, boringMode)}
-                                  </div>
-                                  {current.role && (
-                                    <div className="muted small">{current.role}</div>
-                                  )}
-                                </div>
-                              </div>
-                            );
-                          })()}
-                        {!config?.keurmeesterGezelId && (
-                          <p className="muted small" style={{ margin: 0 }}>
-                            No Inspector gezel yet — one is created automatically on the first
-                            intervention, or designate/create one now:
-                          </p>
-                        )}
-                        <label
-                          className="muted small"
-                          style={{ marginTop: '0.5rem', display: 'block' }}
-                        >
-                          Change Inspector to:
-                        </label>
-                        <Select.Root
-                          value={config?.keurmeesterGezelId ?? ''}
-                          onValueChange={(v) => {
-                            if (v === '__new') {
-                              setNewKeurmeesterOpen(true);
-                              setNewKeurmeesterName('');
-                              return;
-                            }
-                            void setKeurmeester(v);
-                          }}
-                        >
-                          <Select.Trigger>
-                            <Select.Value placeholder="Select Inspector…" />
-                          </Select.Trigger>
-                          <Select.Content>
-                            {gezels.map((g) => (
-                              <Select.Item key={g.id} value={g.id}>
-                                {assignmentLabel(g, boringMode)}
-                              </Select.Item>
-                            ))}
-                            <Select.Item value="__new">✨ New Inspector gezel…</Select.Item>
-                          </Select.Content>
-                        </Select.Root>
-
-                        {newKeurmeesterOpen && (
-                          <form
-                            className="meester-new-form"
-                            onSubmit={async (e) => {
-                              e.preventDefault();
-                              setNewKeurmeesterBusy(true);
-                              try {
-                                await createNewKeurmeester(newKeurmeesterName);
-                                setNewKeurmeesterOpen(false);
-                                setNewKeurmeesterName('');
-                              } finally {
-                                setNewKeurmeesterBusy(false);
-                              }
-                            }}
-                          >
-                            <input
-                              placeholder="Name (leave blank for a random pick)"
-                              value={newKeurmeesterName}
-                              onChange={(e) => setNewKeurmeesterName(e.target.value)}
-                              disabled={newKeurmeesterBusy}
-                            />
-                            <div className="meester-new-form-actions">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setNewKeurmeesterOpen(false);
-                                  setNewKeurmeesterName('');
-                                }}
-                                disabled={newKeurmeesterBusy}
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="submit"
-                                className="primary"
-                                disabled={newKeurmeesterBusy}
-                              >
-                                {newKeurmeesterBusy ? 'Creating…' : 'Create Inspector'}
-                              </button>
-                            </div>
-                            <p className="muted small" style={{ margin: '0.35rem 0 0 0' }}>
-                              A fresh gezel is spun up with the curated Inspector prompt and set as
-                              your active Inspector. Their interventions appear in chat and in the
-                              History tab.
-                            </p>
-                          </form>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </section>
+                        <RoleAssignmentField
+                          controlId="settings-role-inspector"
+                          label="Inspector"
+                          hint={
+                            config?.keurmeesterGezelId
+                              ? 'Their interventions appear in chat and in the History tab.'
+                              : 'No Inspector gezel yet. One is created automatically on the first intervention, or choose or create one now.'
+                          }
+                          value={config?.keurmeesterGezelId}
+                          gezels={gezels}
+                          roleBasedNameOnly={boringMode}
+                          placeholder="Select Inspector…"
+                          newItemLabel="New Inspector gezel…"
+                          createLabel="Create Inspector"
+                          createHint="A fresh gezel is spun up with the curated Inspector prompt and set as your active Inspector. Their interventions appear in chat and in the History tab."
+                          onAssign={setKeurmeester}
+                          onCreate={createNewKeurmeester}
+                        />
+                      </>
+                    )}
+                  </div>
+                </SettingsSection>
               )}
             </>
           )}
@@ -2791,12 +2318,11 @@ function DaemonSettingsView() {
 
           {section === 'defaults' && (
             <>
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Default provider</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Which AI chat provider handles chat and one-shot generations. Individual crew
-                  members can override this in their detail pane.
-                </p>
+              <SettingsSection
+                id="settings-default-provider"
+                title="Default provider"
+                hint="Which AI chat provider handles chat and one-shot generations. Individual crew members can override this in their detail pane."
+              >
                 <div className="provider-switch" data-testid="default-provider-switch">
                   <button
                     type="button"
@@ -2915,7 +2441,7 @@ function DaemonSettingsView() {
                 </div>
 
                 {externalChatBlocked && (
-                  <p className="muted small" style={{ marginTop: '0.6rem' }}>
+                  <p className="gz-setting-hint">
                     {providerBlocked(provider) ? (
                       <>
                         <strong>{providerLabel(provider, uiPlatform)}</strong> is your default
@@ -2924,7 +2450,7 @@ function DaemonSettingsView() {
                       </>
                     ) : (
                       <>
-                        Cloud and CLI providers are greyed out because {securityLevelLabel} keeps
+                        Cloud and CLI providers are grayed out because {securityLevelLabel} keeps
                         every chat on this device.{' '}
                       </>
                     )}
@@ -2933,79 +2459,58 @@ function DaemonSettingsView() {
                       type="button"
                       className="gz-link-button"
                       onClick={() => setSection('securityCompliance')}
-                      style={{ padding: 0 }}
                     >
-                      Security &amp; Compliance
+                      Security &amp; compliance
                     </button>{' '}
                     to use them.
                   </p>
                 )}
 
                 {provider === 'copilot' && !externalChatBlocked && (
-                  <div
-                    className="new-row"
-                    style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                  >
-                    <label className="muted" style={{ fontSize: '0.9rem' }}>
-                      Default model
-                    </label>
-                    <ModelPicker
-                      provider="copilot"
-                      value={config?.defaultModel?.copilot}
-                      onChange={(v) => void saveDefaultModel('copilot', v)}
-                    />
-                    <EffortPicker
-                      provider="copilot"
-                      model={config?.defaultModel?.copilot}
-                      value={config?.defaultReasoningEffort?.copilot}
-                      onChange={(v) => void saveDefaultEffort('copilot', v)}
-                    />
-                  </div>
+                  <SettingField label="Default model">
+                    <div className="gz-setting-row">
+                      <ModelPicker
+                        provider="copilot"
+                        value={config?.defaultModel?.copilot}
+                        onChange={(v) => void saveDefaultModel('copilot', v)}
+                      />
+                      <EffortPicker
+                        provider="copilot"
+                        model={config?.defaultModel?.copilot}
+                        value={config?.defaultReasoningEffort?.copilot}
+                        onChange={(v) => void saveDefaultEffort('copilot', v)}
+                      />
+                    </div>
+                  </SettingField>
                 )}
 
                 {provider === 'codex-cli' && !externalChatBlocked && (
                   <>
                     {codexCliProbe.kind === 'ok' && (
-                      <>
-                        <div
-                          className="new-row"
-                          style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                        >
-                          <label className="muted" style={{ fontSize: '0.9rem' }}>
-                            Default model
-                          </label>
-                          <ModelPicker
-                            provider="codex-cli"
-                            value={config?.defaultModel?.['codex-cli']}
-                            onChange={(v) => void saveDefaultModel('codex-cli', v)}
-                          />
-                        </div>
-                        {codexCliReasoningSupported !== false && (
-                          <div
-                            className="new-row"
-                            style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                          >
-                            <label className="muted" style={{ fontSize: '0.9rem' }}>
-                              Reasoning effort
-                            </label>
-                            <EffortTray
-                              provider="codex-cli"
-                              model={config?.defaultModel?.['codex-cli']}
-                              defaultModel="gpt-6.1-sol"
-                              value={config?.codexCli?.defaultReasoningEffort ?? ''}
-                              onChange={(value) =>
-                                void saveCodexCli({
-                                  defaultReasoningEffort: value as
-                                    | CodexCliReasoningEffort
-                                    | undefined,
-                                })
-                              }
-                            />
-                          </div>
-                        )}
-                      </>
+                      <SettingField label="Default model">
+                        <ModelPicker
+                          provider="codex-cli"
+                          value={config?.defaultModel?.['codex-cli']}
+                          onChange={(v) => void saveDefaultModel('codex-cli', v)}
+                        />
+                      </SettingField>
                     )}
-                    <p className="muted small" style={{ marginTop: '0.75rem' }}>
+                    {codexCliProbe.kind === 'ok' && codexCliReasoningSupported !== false && (
+                      <SettingField label="Reasoning effort">
+                        <EffortTray
+                          provider="codex-cli"
+                          model={config?.defaultModel?.['codex-cli']}
+                          defaultModel="gpt-6.1-sol"
+                          value={config?.codexCli?.defaultReasoningEffort ?? ''}
+                          onChange={(value) =>
+                            void saveCodexCli({
+                              defaultReasoningEffort: value as CodexCliReasoningEffort | undefined,
+                            })
+                          }
+                        />
+                      </SettingField>
+                    )}
+                    <p className="gz-setting-hint">
                       {codexCliProbe.kind === 'fail'
                         ? 'The Codex CLI is not connected yet. Set it up in the '
                         : codexCliProbe.kind === 'ok'
@@ -3015,7 +2520,6 @@ function DaemonSettingsView() {
                         type="button"
                         className="gz-link-button"
                         onClick={() => setSection('codexCli')}
-                        style={{ padding: 0 }}
                       >
                         OpenAI Codex CLI
                       </button>{' '}
@@ -3027,40 +2531,26 @@ function DaemonSettingsView() {
                 {provider === 'anthropic-cli' && !externalChatBlocked && (
                   <>
                     {anthropicCliProbe.kind === 'ok' && (
-                      <>
-                        <div
-                          className="new-row"
-                          style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                        >
-                          <label className="muted" style={{ fontSize: '0.9rem' }}>
-                            Default model
-                          </label>
-                          <ModelPicker
-                            provider="anthropic-cli"
-                            value={config?.defaultModel?.['anthropic-cli']}
-                            onChange={(v) => void saveDefaultModel('anthropic-cli', v)}
-                            placeholder="Gezel default (Claude Sonnet)"
-                          />
-                        </div>
-                        {anthropicCliReasoningSupported === true && (
-                          <div
-                            className="new-row"
-                            style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                          >
-                            <label className="muted" style={{ fontSize: '0.9rem' }}>
-                              Reasoning effort
-                            </label>
-                            <EffortPicker
-                              provider="anthropic-cli"
-                              model={config?.defaultModel?.['anthropic-cli']}
-                              value={config?.defaultReasoningEffort?.['anthropic-cli']}
-                              onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
-                            />
-                          </div>
-                        )}
-                      </>
+                      <SettingField label="Default model">
+                        <ModelPicker
+                          provider="anthropic-cli"
+                          value={config?.defaultModel?.['anthropic-cli']}
+                          onChange={(v) => void saveDefaultModel('anthropic-cli', v)}
+                          placeholder="Gezel default (Claude Sonnet)"
+                        />
+                      </SettingField>
                     )}
-                    <p className="muted small" style={{ marginTop: '0.75rem' }}>
+                    {anthropicCliProbe.kind === 'ok' && anthropicCliReasoningSupported === true && (
+                      <SettingField label="Reasoning effort">
+                        <EffortPicker
+                          provider="anthropic-cli"
+                          model={config?.defaultModel?.['anthropic-cli']}
+                          value={config?.defaultReasoningEffort?.['anthropic-cli']}
+                          onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
+                        />
+                      </SettingField>
+                    )}
+                    <p className="gz-setting-hint">
                       {anthropicCliProbe.kind === 'fail'
                         ? 'The Claude CLI is not connected yet. Set it up in the '
                         : anthropicCliProbe.kind === 'ok'
@@ -3070,7 +2560,6 @@ function DaemonSettingsView() {
                         type="button"
                         className="gz-link-button"
                         onClick={() => setSection('anthropicCli')}
-                        style={{ padding: 0 }}
                       >
                         Anthropic Claude CLI
                       </button>{' '}
@@ -3081,20 +2570,14 @@ function DaemonSettingsView() {
 
                 {provider === 'ollama' && (
                   <>
-                    <div
-                      className="new-row"
-                      style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                    >
-                      <label className="muted" style={{ fontSize: '0.9rem' }}>
-                        Default model
-                      </label>
+                    <SettingField label="Default model">
                       <ModelPicker
                         provider="ollama"
                         value={config?.defaultModel?.ollama}
                         onChange={(v) => void saveDefaultModel('ollama', v)}
                         placeholder="First local model"
                       />
-                    </div>
+                    </SettingField>
                     {isOllamaReasoningModel(config?.defaultModel?.ollama ?? '') && (
                       <OllamaReasoningToggle
                         value={config?.ollamaThink}
@@ -3110,143 +2593,114 @@ function DaemonSettingsView() {
                 {provider === 'apple-foundation-models' && <AppleFoundationModelsStatus />}
 
                 {provider === 'remote' && (
-                  <>
-                    <div
-                      className="new-row"
-                      style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                    >
-                      <label className="muted" style={{ fontSize: '0.9rem' }}>
-                        Default model
-                      </label>
-                      <ModelPicker
-                        provider="remote"
-                        value={config?.defaultModel?.remote}
-                        // Clearing it would leave nothing that names a server.
-                        onChange={(v) => {
-                          if (v) void saveDefaultModel('remote', v);
-                        }}
-                        placeholder="Choose a model"
-                      />
-                    </div>
-                    <p className="muted small" style={{ marginTop: '0.75rem' }}>
-                      Only the model runs on the other device; your files and chats stay here. While
-                      it can't be reached, a model installed on this computer answers instead.
-                      Connect or forget devices in the{' '}
-                      <button
-                        type="button"
-                        className="gz-link-button"
-                        onClick={() => setSection('remoteServers')}
-                        style={{ padding: 0 }}
-                      >
-                        Remote Servers
-                      </button>{' '}
-                      tab.
-                    </p>
-                  </>
+                  <SettingField
+                    label="Default model"
+                    hint={
+                      <>
+                        Only the model runs on the other device; your files and chats stay here.
+                        While it can't be reached, a model installed on this computer answers
+                        instead. Connect or forget devices in the{' '}
+                        <button
+                          type="button"
+                          className="gz-link-button"
+                          onClick={() => setSection('remoteServers')}
+                        >
+                          Remote servers
+                        </button>{' '}
+                        tab.
+                      </>
+                    }
+                  >
+                    <ModelPicker
+                      provider="remote"
+                      value={config?.defaultModel?.remote}
+                      // Clearing it would leave nothing that names a server.
+                      onChange={(v) => {
+                        if (v) void saveDefaultModel('remote', v);
+                      }}
+                      placeholder="Choose a model"
+                    />
+                  </SettingField>
                 )}
 
                 {(provider === 'llama-cpp' || provider === 'mlx') && (
-                  <div
-                    className="new-row"
-                    style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
+                  <SettingField
+                    label="Default model"
+                    hint={
+                      <>
+                        Download models and tune advanced settings in the{' '}
+                        <button
+                          type="button"
+                          className="gz-link-button"
+                          onClick={() => setSection(provider === 'mlx' ? 'mlx' : 'llamaCpp')}
+                        >
+                          {provider === 'mlx' ? mlxTabLabel : llamaCppTabLabel}
+                        </button>{' '}
+                        tab.
+                      </>
+                    }
                   >
-                    <label className="muted" style={{ fontSize: '0.9rem' }}>
-                      Default model
-                    </label>
                     <ModelPicker
                       provider={provider}
                       value={config?.defaultModel?.[provider]}
                       onChange={(v) => void saveDefaultModel(provider, v)}
                       placeholder="First local model"
                     />
-                  </div>
-                )}
-
-                {(provider === 'llama-cpp' || provider === 'mlx') && (
-                  <p className="muted small" style={{ marginTop: '0.75rem' }}>
-                    Download models and tune advanced settings in the{' '}
-                    <button
-                      type="button"
-                      className="gz-link-button"
-                      onClick={() => setSection(provider === 'mlx' ? 'mlx' : 'llamaCpp')}
-                      style={{ padding: 0 }}
-                    >
-                      {provider === 'mlx' ? mlxTabLabel : llamaCppTabLabel}
-                    </button>{' '}
-                    tab.
-                  </p>
+                  </SettingField>
                 )}
 
                 {provider === 'ds4' && (
-                  <>
-                    <div
-                      className="new-row"
-                      style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                    >
-                      <label className="muted" style={{ fontSize: '0.9rem' }}>
-                        Default model
-                      </label>
-                      <ModelPicker
-                        provider="ds4"
-                        value={config?.defaultModel?.ds4}
-                        onChange={(v) => void saveDefaultModel('ds4', v)}
-                        placeholder="First local model"
-                      />
-                    </div>
-                    <p className="muted small" style={{ marginTop: '0.75rem' }}>
-                      Download DwarfStar models and tune SSD streaming in the{' '}
-                      <button
-                        type="button"
-                        className="gz-link-button"
-                        onClick={() => setSection('ds4')}
-                        style={{ padding: 0 }}
-                      >
-                        {ds4TabLabel}
-                      </button>{' '}
-                      tab.
-                    </p>
-                  </>
+                  <SettingField
+                    label="Default model"
+                    hint={
+                      <>
+                        Download DwarfStar models and tune SSD streaming in the{' '}
+                        <button
+                          type="button"
+                          className="gz-link-button"
+                          onClick={() => setSection('ds4')}
+                        >
+                          {ds4TabLabel}
+                        </button>{' '}
+                        tab.
+                      </>
+                    }
+                  >
+                    <ModelPicker
+                      provider="ds4"
+                      value={config?.defaultModel?.ds4}
+                      onChange={(v) => void saveDefaultModel('ds4', v)}
+                      placeholder="First local model"
+                    />
+                  </SettingField>
                 )}
                 <DefaultModelAdvancedTuning
                   config={config}
                   provider={provider}
                   onConfigUpdated={setConfig}
                 />
+              </SettingsSection>
 
-                <div
-                  style={{
-                    marginTop: '1.5rem',
-                    paddingTop: '1.25rem',
-                    borderTop: '1px solid var(--border)',
+              <SettingsSection
+                id="settings-night-shift-model"
+                title="Night Shift model"
+                hint="Night Shift uses the default provider and model unless you choose a separate, hands-off model here — a larger but slower model can think more carefully overnight. Individual gezel overrides still take priority."
+              >
+                <SettingCheck
+                  label="Use a specific model by default during Night Shift"
+                  checked={nightShiftModelOverride?.enabled === true}
+                  onChange={(enabled) => {
+                    const inheritedModel =
+                      nightShiftModelOverride?.model ?? config?.defaultModel?.[nightShiftProvider];
+                    void saveNightShiftModelOverride({
+                      enabled,
+                      ...(enabled && inheritedModel ? { model: inheritedModel } : {}),
+                    });
                   }}
-                >
-                  <h4 style={{ margin: '0 0 0.35rem' }}>Night Shift model</h4>
-                  <p className="muted" style={{ margin: '0 0 0.75rem' }}>
-                    Night Shift inherits the default provider and model unless you choose a
-                    separate, hands-off model here. For example, you might want to use a larger (but
-                    slower) model during the night shift for more careful thinking overnight.
-                    Individual gezel overrides still take priority.
-                  </p>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={nightShiftModelOverride?.enabled === true}
-                      onChange={(e) => {
-                        const enabled = e.target.checked;
-                        const inheritedModel =
-                          nightShiftModelOverride?.model ??
-                          config?.defaultModel?.[nightShiftProvider];
-                        void saveNightShiftModelOverride({
-                          enabled,
-                          ...(enabled && inheritedModel ? { model: inheritedModel } : {}),
-                        });
-                      }}
-                    />
-                    <span>Use a specific model by default during Night Shift</span>
-                  </label>
-
-                  {nightShiftModelOverride?.enabled === true && (
-                    <div style={{ marginTop: '0.8rem' }}>
+                />
+                {nightShiftModelOverride?.enabled === true && (
+                  <>
+                    <SettingField label="Provider">
                       <div
                         className="gz-tray"
                         role="radiogroup"
@@ -3294,35 +2748,28 @@ function DaemonSettingsView() {
                           </button>
                         ))}
                       </div>
-                      <div
-                        className="new-row"
-                        style={{ marginTop: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}
-                      >
-                        <label className="muted" style={{ fontSize: '0.9rem' }}>
-                          Night Shift model
-                        </label>
-                        <ModelPicker
-                          provider={nightShiftProvider}
-                          value={nightShiftModelOverride.model}
-                          onChange={(model) => void saveNightShiftModelOverride({ model })}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </section>
+                    </SettingField>
+                    <SettingField label="Model">
+                      <ModelPicker
+                        provider={nightShiftProvider}
+                        value={nightShiftModelOverride.model}
+                        onChange={(model) => void saveNightShiftModelOverride({ model })}
+                      />
+                    </SettingField>
+                  </>
+                )}
+              </SettingsSection>
 
               {/* The optional media models (images, image reading, speech) used to
                   sit on first-run setup. First run now asks only for the chat
                   model, so the recommended set that fits this device lives here. */}
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Media models</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Optional models that let crew members make images, read them, and speak and listen
-                  — the ones that fit this device.
-                </p>
+              <SettingsSection
+                id="settings-media-models"
+                title="Media models"
+                hint="Optional models that let crew members make images, read them, and speak and listen — the ones that fit this device."
+              >
                 <RecommendedMediaDownloads />
-              </section>
+              </SettingsSection>
 
               <GeneralistModeSection
                 value={config?.generalistMode}
@@ -3334,14 +2781,11 @@ function DaemonSettingsView() {
                 }}
               />
 
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Tool filtering</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Give each gezel only the tools their role actually needs. A smaller toolbox keeps
-                  them focused and makes every reply faster and cheaper — it matters most with small
-                  on-device models. Known roles (Meester, Crew Lead, Reviewer, Copywriter, Designer,
-                  Planner) start with a sensible set; each gezel's own Toolsets tab can override it.
-                </p>
+              <SettingsSection
+                id="settings-tool-filtering"
+                title="Tool filtering"
+                hint="Give each gezel only the tools their role actually needs. A smaller toolbox keeps them focused and makes every reply faster and cheaper — it matters most with small on-device models. Known roles (Meester, Crew Lead, Reviewer, Copywriter, Designer, Planner) start with a sensible set; each gezel's own Toolsets tab can override it."
+              >
                 <div className="provider-switch">
                   <button
                     type="button"
@@ -3377,7 +2821,7 @@ function DaemonSettingsView() {
                     Never
                   </button>
                 </div>
-              </section>
+              </SettingsSection>
 
               <MemorySection
                 config={config}
@@ -3398,13 +2842,11 @@ function DaemonSettingsView() {
                 onInstalled={() => void runCopilotProbe()}
               />
 
-              <section className="provider-card">
-                <h3>GitHub Copilot</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  A Copilot-enabled GitHub account is required. Gezel supports two sign-in modes —
-                  the Copilot CLI is the simpler default.
-                </p>
-
+              <SettingsSection
+                id="settings-copilot"
+                title="GitHub Copilot"
+                hint="A Copilot-enabled GitHub account is required. Gezel supports two sign-in modes — the Copilot CLI is the simpler default."
+              >
                 {/* Connection status ─ reflects the most recent probe. */}
                 <CopilotConnectionStatus
                   probe={copilotProbe}
@@ -3415,44 +2857,33 @@ function DaemonSettingsView() {
                 {/* Option 1 — CLI. Collapses to a single "Signed in as …" line
                   when we know the account; expands to full install/login
                   instructions when not signed in or when the user asks. */}
-                <div
-                  style={{
-                    marginTop: '1.25rem',
-                    paddingTop: '1rem',
-                    borderTop: '1px solid var(--border)',
-                  }}
-                >
-                  {!hasGithubToken && copilotProbe.kind === 'ok' && copilotLogin ? (
-                    <div className="new-row" style={{ alignItems: 'center', gap: '0.5rem' }}>
-                      <h4 style={{ margin: 0 }}>
-                        Signed in as <code>{copilotLogin}</code>
-                        <span className="home-copilot-recommended" style={{ marginLeft: '0.5rem' }}>
-                          active
-                        </span>
-                      </h4>
+                <div className="gz-setting">
+                  <div className="gz-setting-row">
+                    <span className="gz-setting-label">
+                      {copilotSignedInViaCli ? (
+                        <>
+                          Signed in as <code>{copilotLogin}</code>
+                        </>
+                      ) : (
+                        'Sign in with the Copilot CLI'
+                      )}
+                    </span>
+                    {!hasGithubToken && copilotProbe.kind === 'ok' && (
+                      <span className="home-copilot-recommended">active</span>
+                    )}
+                    {copilotSignedInViaCli && (
                       <button
                         type="button"
                         className="gz-link-button"
                         onClick={() => setShowCliHelp((s) => !s)}
-                        style={{ marginLeft: 'auto' }}
                       >
                         {showCliHelp ? 'Hide' : 'Login instructions'}
                       </button>
-                    </div>
-                  ) : (
-                    <h4 style={{ margin: 0 }}>
-                      Sign in with the Copilot CLI
-                      {!hasGithubToken && copilotProbe.kind === 'ok' && (
-                        <span className="home-copilot-recommended" style={{ marginLeft: '0.5rem' }}>
-                          active
-                        </span>
-                      )}
-                    </h4>
-                  )}
-                  {(showCliHelp ||
-                    !(copilotProbe.kind === 'ok' && copilotLogin && !hasGithubToken)) && (
+                    )}
+                  </div>
+                  {(showCliHelp || !copilotSignedInViaCli) && (
                     <>
-                      <p className="muted small">
+                      <p className="gz-setting-hint">
                         Gezel bundles the Node runtime. The Copilot CLI can be installed into your
                         Gezel home, or Gezel can use a compatible CLI you already have. Click below
                         to sign in through GitHub; the credential lands in <code>~/.copilot</code>{' '}
@@ -3465,297 +2896,295 @@ function DaemonSettingsView() {
                     </>
                   )}
                 </div>
-              </section>
+              </SettingsSection>
 
-              {/* Alternative sign-in method — its own squircle so it reads as
-                a clearly separate option rather than a sub-section of the
-                primary CLI card. */}
-              <section className="provider-card">
-                <h3 style={{ margin: 0 }}>
-                  Alternative sign-in: GitHub token
-                  {hasGithubToken && copilotProbe.kind === 'ok' && copilotLogin && (
-                    <span
-                      className="muted small"
-                      style={{ marginLeft: '0.5rem', fontWeight: 'normal' }}
-                    >
-                      (signed in as <code>{copilotLogin}</code>)
-                    </span>
-                  )}
-                  {hasGithubToken && copilotProbe.kind === 'ok' && (
-                    <span className="home-copilot-recommended" style={{ marginLeft: '0.5rem' }}>
-                      active
-                    </span>
-                  )}
-                  {!hasGithubToken && !showPatForm && (
-                    <button
-                      type="button"
-                      className="gz-link-button"
-                      onClick={() => setShowPatForm(true)}
-                      style={{ marginLeft: '0.5rem' }}
-                    >
-                      Show
-                    </button>
-                  )}
-                </h3>
-                {(hasGithubToken || showPatForm) && (
+              <SettingsSection
+                id="settings-copilot-token"
+                title="Alternative sign-in: GitHub token"
+                hint={
                   <>
-                    <p className="muted small">
-                      Use a classic{' '}
-                      <a
-                        href="https://github.com/settings/tokens"
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{ color: 'var(--accent-text)' }}
-                      >
-                        GitHub personal access token
-                      </a>{' '}
-                      with the <code>copilot</code> scope.
-                    </p>
-                    {hasGithubToken && (
-                      <p>
-                        <code>&lt;Stored GitHub token&gt;</code>{' '}
-                        <button
-                          type="button"
-                          onClick={clearGitHubToken}
-                          style={{ marginLeft: '0.5rem' }}
-                        >
-                          Clear
-                        </button>
-                      </p>
+                    Use a classic{' '}
+                    <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer">
+                      GitHub personal access token
+                    </a>{' '}
+                    with the <code>copilot</code> scope.
+                    {hasGithubToken && copilotProbe.kind === 'ok' && copilotLogin && (
+                      <>
+                        {' '}
+                        Signed in as <code>{copilotLogin}</code>.
+                      </>
                     )}
-                    <div className="new-row">
+                  </>
+                }
+                actions={
+                  hasGithubToken && copilotProbe.kind === 'ok' ? (
+                    <span className="home-copilot-recommended">active</span>
+                  ) : undefined
+                }
+              >
+                {hasGithubToken || showPatForm ? (
+                  <SettingField
+                    label="GitHub token"
+                    controlId="settings-github-token"
+                    hint={
+                      hasGithubToken ? (
+                        <>
+                          <code>&lt;Stored GitHub token&gt;</code>{' '}
+                          <button
+                            type="button"
+                            className="gz-link-button"
+                            onClick={clearGitHubToken}
+                          >
+                            Clear
+                          </button>
+                        </>
+                      ) : undefined
+                    }
+                  >
+                    <div className="gz-setting-row">
                       <input
+                        id="settings-github-token"
                         type="password"
                         placeholder={
                           hasGithubToken ? 'Replace GitHub token…' : 'Paste GitHub token…'
                         }
                         value={tokenDraft}
                         onChange={(e) => setTokenDraft(e.target.value)}
-                        style={{ flex: 1 }}
                       />
                       <button type="button" onClick={saveGitHubToken} disabled={!tokenDraft.trim()}>
                         Save
                       </button>
                     </div>
-                  </>
+                  </SettingField>
+                ) : (
+                  <button type="button" className="secondary" onClick={() => setShowPatForm(true)}>
+                    Use a GitHub token instead…
+                  </button>
                 )}
-              </section>
+              </SettingsSection>
 
-              <section className="provider-card">
-                <h3>Sandbox Copilot actions</h3>
-                <p className="muted small" style={{ marginTop: 0 }}>
-                  When on, new Copilot threads deny the CLI&rsquo;s built-in tools (
-                  <code>bash</code>, <code>web_fetch</code>, <code>view</code>, file ops,{' '}
-                  <code>grep</code>) and force the model to work through gezel&rsquo;s MCP tools
-                  instead. Gives you an audit trail for every action and consistent behavior across
-                  providers. Per-gezel override lives on each gezel&rsquo;s Settings tab.
-                </p>
-                <label
-                  className="muted"
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.5rem',
-                    marginTop: '0.5rem',
-                    fontSize: '0.9rem',
+              <SettingsSection
+                id="settings-copilot-turns"
+                title="Copilot turns"
+                hint="What Copilot may use during a turn, and how long a turn may run."
+              >
+                <SettingCheck
+                  label="Sandbox Copilot to gezel tools only"
+                  hint={
+                    <>
+                      New Copilot threads deny the CLI&rsquo;s built-in tools (<code>bash</code>,{' '}
+                      <code>web_fetch</code>, <code>view</code>, file ops, <code>grep</code>) and
+                      work through gezel&rsquo;s tools instead, which gives you an audit trail for
+                      every action and the same behavior across providers. Each gezel&rsquo;s
+                      Settings tab can override this.
+                    </>
+                  }
+                  checked={config?.sandboxCopilot === true}
+                  onChange={(checked) => {
+                    void api.updateConfig({ sandboxCopilot: checked }).then(setConfig);
                   }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={config?.sandboxCopilot === true}
-                    onChange={(e) => {
-                      void api.updateConfig({ sandboxCopilot: e.target.checked }).then(setConfig);
-                    }}
-                  />
-                  <span>Sandbox Copilot to gezel tools only</span>
-                </label>
-              </section>
-
-              <section className="provider-card">
-                <h3>Timeouts</h3>
-                <p className="muted small" style={{ marginTop: 0 }}>
-                  Copilot turns are capped at a hard wall-clock ceiling — if the ceiling fires
-                  before the model signals <code>session.idle</code>, the turn ends with a
-                  &ldquo;Turn stopped before finishing&rdquo; banner. Bump this if tool-heavy crew
-                  members (long shell or Playwright chains) legitimately need longer. Leave blank to
-                  use the default (10 minutes).
-                </p>
-                <TimeoutRow
-                  label="Hard turn timeout"
-                  unit="minutes"
-                  help="Total wall-clock cap from when the turn acquires its queue slot to when the model finishes. Default 10m. Raise for tool-heavy crew members that run long chains without streaming reply text between calls."
-                  value={copilotTurnTimeoutDraft}
-                  onChange={setCopilotTurnTimeoutDraft}
-                  configValue={config?.copilotTurnTimeoutMin}
-                  onSave={() => void saveCopilotTurnTimeout()}
                 />
-              </section>
+                <SettingField
+                  label="Hard turn timeout"
+                  controlId="settings-copilot-turn-timeout"
+                  hint={
+                    <>
+                      The total wall-clock cap from when a turn gets its queue slot to when the
+                      model finishes. If it fires before the model signals <code>session.idle</code>
+                      , the turn ends with a &ldquo;Turn stopped before finishing&rdquo; banner.
+                      Raise it for crew members that run long shell or Playwright chains. Leave it
+                      empty for the default, 10 minutes.
+                    </>
+                  }
+                >
+                  <div className="gz-setting-inline">
+                    <input
+                      id="settings-copilot-turn-timeout"
+                      type="number"
+                      min={1}
+                      placeholder="default"
+                      aria-label="Hard turn timeout (minutes)"
+                      aria-describedby={settingHintId('settings-copilot-turn-timeout')}
+                      value={copilotTurnTimeoutDraft}
+                      onChange={(event) => setCopilotTurnTimeoutDraft(event.target.value)}
+                    />
+                    <span>minutes</span>
+                    <button
+                      type="button"
+                      onClick={() => void saveCopilotTurnTimeout()}
+                      disabled={
+                        copilotTurnTimeoutDraft.trim() ===
+                        (config?.copilotTurnTimeoutMin ? String(config.copilotTurnTimeoutMin) : '')
+                      }
+                    >
+                      Save
+                    </button>
+                  </div>
+                </SettingField>
+              </SettingsSection>
 
               {copilotUsage && (
-                <section style={{ marginTop: '1.5rem' }}>
-                  <ProviderUsagePanel label="GitHub Copilot" data={copilotUsage} />
-                </section>
+                <SettingsSection id="settings-copilot-usage" title="Usage">
+                  <ProviderUsagePanel
+                    label="GitHub Copilot"
+                    data={copilotUsage}
+                    showTitle={false}
+                  />
+                </SettingsSection>
               )}
             </>
           )}
 
           {section === 'openai' && (
             <>
-              <section className="provider-card">
-                <h3>OpenAI</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Uses an OpenAI API key. Billing and usage run through your OpenAI account,
-                  independent of GitHub Copilot.
-                </p>
-                <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
+              <SettingsSection
+                id="settings-openai"
+                title="OpenAI"
+                hint="Uses an OpenAI API key. Billing and usage run through your OpenAI account, independent of GitHub Copilot."
+              >
+                <ol className="gz-setting-steps">
                   <li>
                     Go to{' '}
-                    <a
-                      href="https://platform.openai.com/api-keys"
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{ color: 'var(--accent-text)' }}
-                    >
+                    <a href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">
                       platform.openai.com/api-keys
                     </a>{' '}
                     and create a secret key with access to the models you want to use.
                   </li>
                   <li>Paste it below. Organization ID is optional.</li>
                 </ol>
-                {hasOpenaiKey && (
-                  <p>
-                    Current key:{' '}
-                    <code>
-                      {'•'.repeat(8)}…{(config?.openaiApiKey ?? '').slice(-4)}
-                    </code>
-                    {config?.openaiOrganization && (
+                <SettingField
+                  label="API key"
+                  controlId="settings-openai-key"
+                  hint={
+                    hasOpenaiKey ? (
                       <>
-                        {' '}
-                        · org <code>{config.openaiOrganization}</code>
+                        Current key:{' '}
+                        <code>
+                          {'•'.repeat(8)}…{(config?.openaiApiKey ?? '').slice(-4)}
+                        </code>
+                        {config?.openaiOrganization && (
+                          <>
+                            {' '}
+                            · org <code>{config.openaiOrganization}</code>
+                          </>
+                        )}{' '}
+                        <button type="button" className="gz-link-button" onClick={clearOpenaiKey}>
+                          Clear
+                        </button>
                       </>
-                    )}{' '}
-                    <button type="button" onClick={clearOpenaiKey} style={{ marginLeft: '0.5rem' }}>
-                      Clear
+                    ) : undefined
+                  }
+                >
+                  <div className="gz-setting-row">
+                    <input
+                      id="settings-openai-key"
+                      type="password"
+                      placeholder={hasOpenaiKey ? 'Replace key…' : 'Paste OpenAI API key (sk-…)'}
+                      aria-label="OpenAI API key"
+                      value={openaiKeyDraft}
+                      onChange={(e) => setOpenaiKeyDraft(e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Organization (optional)"
+                      aria-label="Organization (optional)"
+                      value={openaiOrgDraft}
+                      onChange={(e) => setOpenaiOrgDraft(e.target.value)}
+                    />
+                    <button type="button" onClick={saveOpenaiKey} disabled={!openaiKeyDraft.trim()}>
+                      Save
                     </button>
-                  </p>
-                )}
-                <div className="new-row">
-                  <input
-                    type="password"
-                    placeholder={hasOpenaiKey ? 'Replace key…' : 'Paste OpenAI API key (sk-…)'}
-                    aria-label="OpenAI API key"
-                    value={openaiKeyDraft}
-                    onChange={(e) => setOpenaiKeyDraft(e.target.value)}
-                    style={{ flex: 1 }}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Organization (optional)"
-                    aria-label="Organization (optional)"
-                    value={openaiOrgDraft}
-                    onChange={(e) => setOpenaiOrgDraft(e.target.value)}
-                    style={{ width: 200 }}
-                  />
-                  <button type="button" onClick={saveOpenaiKey} disabled={!openaiKeyDraft.trim()}>
-                    Save
-                  </button>
-                </div>
-                {hasOpenaiKey && (
-                  <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-                    <label className="muted" style={{ fontSize: '0.9rem' }}>
-                      Default model
-                    </label>
-                    <ModelPicker
-                      provider="openai"
-                      value={config?.defaultModel?.openai}
-                      onChange={(v) => void saveDefaultModel('openai', v)}
-                    />
-                    <EffortPicker
-                      provider="openai"
-                      model={config?.defaultModel?.openai}
-                      value={config?.defaultReasoningEffort?.openai}
-                      onChange={(v) => void saveDefaultEffort('openai', v)}
-                    />
                   </div>
+                </SettingField>
+                {hasOpenaiKey && (
+                  <SettingField label="Default model">
+                    <div className="gz-setting-row">
+                      <ModelPicker
+                        provider="openai"
+                        value={config?.defaultModel?.openai}
+                        onChange={(v) => void saveDefaultModel('openai', v)}
+                      />
+                      <EffortPicker
+                        provider="openai"
+                        model={config?.defaultModel?.openai}
+                        value={config?.defaultReasoningEffort?.openai}
+                        onChange={(v) => void saveDefaultEffort('openai', v)}
+                      />
+                    </div>
+                  </SettingField>
                 )}
-              </section>
+              </SettingsSection>
               {openaiUsage && (
-                <section style={{ marginTop: '1.5rem' }}>
-                  <ProviderUsagePanel label="OpenAI" data={openaiUsage} />
-                </section>
+                <SettingsSection id="settings-openai-usage" title="Usage">
+                  <ProviderUsagePanel label="OpenAI" data={openaiUsage} showTitle={false} />
+                </SettingsSection>
               )}
             </>
           )}
 
           {section === 'codexCli' && (
-            <section className="provider-card">
-              <h3>OpenAI Codex CLI (command line interface)</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Drives a locally-installed{' '}
-                <a
-                  href="https://github.com/openai/codex"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: 'var(--accent-text)' }}
-                >
-                  Codex CLI
-                </a>{' '}
-                once per chat turn.
-              </p>
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Connection
-                </label>
-                {codexCliProbe.kind === 'ok' && (
-                  <span style={{ color: 'var(--success-text)', fontSize: '0.9rem' }}>
-                    ✓ Codex CLI ready ({codexCliProbe.modelCount} models)
-                  </span>
-                )}
-                {codexCliProbe.kind === 'fail' && (
-                  <span className="provider-connection-state" data-tone="danger">
-                    Not connected
-                  </span>
-                )}
-                {(codexCliProbe.kind === 'idle' || codexCliProbe.kind === 'probing') && (
-                  <span className="muted" style={{ fontSize: '0.9rem' }}>
-                    Testing…
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => void runCodexCliProbe()}
-                  disabled={codexCliProbe.kind === 'probing'}
-                  style={{ marginLeft: '0.75rem' }}
-                >
-                  {codexCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
-                </button>
-              </div>
-
-              {codexCliProbe.kind === 'fail' && (
-                <div className="provider-connection-callout">
-                  <p>{codexCliProbe.error}</p>
-                  <ol>
-                    <li>
-                      Install the Codex CLI globally and run <code>codex login</code> (or export an{' '}
-                      <code>OPENAI_API_KEY</code>) so the CLI app is ready to use.
-                    </li>
-                    <li>
-                      or, optionally pin an explicit binary path under Advanced — gezel uses{' '}
-                      <code>$PATH</code> by default.
-                    </li>
-                    <li>
-                      Click Test connection. Once Codex is connected, you can pick a default model
-                      and reasoning effort here.
-                    </li>
-                  </ol>
+            <SettingsSection
+              id="settings-codex-cli"
+              title="OpenAI Codex CLI (command line interface)"
+              hint={
+                <>
+                  Drives a locally-installed{' '}
+                  <a href="https://github.com/openai/codex" target="_blank" rel="noreferrer">
+                    Codex CLI
+                  </a>{' '}
+                  once per chat turn.
+                </>
+              }
+            >
+              <SettingField label="Connection">
+                <div className="gz-setting-row">
+                  {codexCliProbe.kind === 'ok' && (
+                    <span className="provider-connection-state" data-tone="success">
+                      ✓ Codex CLI ready ({codexCliProbe.modelCount} models)
+                    </span>
+                  )}
+                  {codexCliProbe.kind === 'fail' && (
+                    <span className="provider-connection-state" data-tone="danger">
+                      Not connected
+                    </span>
+                  )}
+                  {(codexCliProbe.kind === 'idle' || codexCliProbe.kind === 'probing') && (
+                    <span className="gz-setting-hint">Testing…</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void runCodexCliProbe()}
+                    disabled={codexCliProbe.kind === 'probing'}
+                  >
+                    {codexCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
+                  </button>
                 </div>
-              )}
+                {codexCliProbe.kind === 'fail' && (
+                  <div className="provider-connection-callout">
+                    <p>{codexCliProbe.error}</p>
+                    <ol>
+                      <li>
+                        Install the Codex CLI globally and run <code>codex login</code> (or export
+                        an <code>OPENAI_API_KEY</code>) so the CLI app is ready to use.
+                      </li>
+                      <li>
+                        or, optionally pin an explicit binary path under Advanced — gezel uses{' '}
+                        <code>$PATH</code> by default.
+                      </li>
+                      <li>
+                        Click Test connection. Once Codex is connected, you can pick a default model
+                        and reasoning effort here.
+                      </li>
+                    </ol>
+                  </div>
+                )}
+              </SettingField>
 
-              <div className="new-row cli-permission-row" style={{ marginTop: '0.75rem' }}>
-                <label className="muted cli-permission-label" style={{ fontSize: '0.9rem' }}>
-                  Default permission
-                </label>
-                <div className="cli-permission-field">
+              <SettingField
+                label="Default permission"
+                hint="Gezel’s narrow destructive-command guard stays on in every mode. Projects and individual crew members can override this default."
+              >
+                <div>
                   <div
                     className="gz-tray gz-tray--described"
                     role="radiogroup"
@@ -3780,115 +3209,89 @@ function DaemonSettingsView() {
                       );
                     })}
                   </div>
-                  <p className="gz-tray-description cli-permission-description">
+                  <p className="gz-tray-description">
                     <strong>{codexPermissionChoice.label}</strong> —{' '}
                     {codexPermissionChoice.description}
                   </p>
                 </div>
-              </div>
-              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
-                Gezel’s narrow destructive-command guard stays on in every mode. Projects and
-                individual crew members can override this default.
-              </p>
+              </SettingField>
 
               {codexCliProbe.kind === 'ok' && (
-                <>
-                  <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                    <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                      Default model
-                    </label>
-                    <ModelPicker
-                      provider="codex-cli"
-                      value={config?.defaultModel?.['codex-cli']}
-                      onChange={(v) => void saveDefaultModel('codex-cli', v)}
-                    />
-                  </div>
-
-                  {codexCliReasoningSupported !== false && (
-                    <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                      <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                        Reasoning effort
-                      </label>
-                      <EffortTray
-                        provider="codex-cli"
-                        model={config?.defaultModel?.['codex-cli']}
-                        defaultModel="gpt-6.1-sol"
-                        value={config?.codexCli?.defaultReasoningEffort ?? ''}
-                        onChange={(value) =>
-                          void saveCodexCli({
-                            defaultReasoningEffort: value as CodexCliReasoningEffort | undefined,
-                          })
-                        }
-                      />
-                    </div>
-                  )}
-                </>
+                <SettingField label="Default model">
+                  <ModelPicker
+                    provider="codex-cli"
+                    value={config?.defaultModel?.['codex-cli']}
+                    onChange={(v) => void saveDefaultModel('codex-cli', v)}
+                  />
+                </SettingField>
               )}
 
-              <details style={{ marginTop: '1rem' }}>
-                <summary style={{ cursor: 'pointer' }}>
-                  <strong>Advanced</strong>
-                </summary>
-
-                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                    Binary path
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="(auto — found on PATH)"
-                    aria-label="Codex CLI binary path"
-                    value={codexCliBinaryDraft}
-                    onChange={(e) => setCodexCliBinaryDraft(e.target.value)}
-                    style={{ flex: 1 }}
+              {codexCliProbe.kind === 'ok' && codexCliReasoningSupported !== false && (
+                <SettingField label="Reasoning effort">
+                  <EffortTray
+                    provider="codex-cli"
+                    model={config?.defaultModel?.['codex-cli']}
+                    defaultModel="gpt-6.1-sol"
+                    value={config?.codexCli?.defaultReasoningEffort ?? ''}
+                    onChange={(value) =>
+                      void saveCodexCli({
+                        defaultReasoningEffort: value as CodexCliReasoningEffort | undefined,
+                      })
+                    }
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const trimmed = codexCliBinaryDraft.trim();
-                      void saveCodexCli({ binaryPath: trimmed || undefined });
-                    }}
-                  >
-                    Save
-                  </button>
-                </div>
+                </SettingField>
+              )}
 
-                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                    Gezel tools
-                  </label>
-                  <label className="muted" style={{ fontSize: '0.9rem' }}>
-                    <input
-                      type="checkbox"
+              <details className="gz-setting-more">
+                <summary>Advanced</summary>
+                <div className="gz-setting-stack">
+                  <SettingField label="Binary path" controlId="settings-codex-binary">
+                    <div className="gz-setting-row">
+                      <input
+                        id="settings-codex-binary"
+                        type="text"
+                        placeholder="(auto — found on PATH)"
+                        aria-label="Codex CLI binary path"
+                        value={codexCliBinaryDraft}
+                        onChange={(e) => setCodexCliBinaryDraft(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const trimmed = codexCliBinaryDraft.trim();
+                          void saveCodexCli({ binaryPath: trimmed || undefined });
+                        }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </SettingField>
+                  <SettingField label="Gezel tools">
+                    <SettingCheck
+                      label="Add Gezel tools like search, memories, tasks, and team coordination to Codex"
+                      hint="Disable to run Codex with only its built-in tools."
                       checked={config?.codexCli?.manageRuntimeFiles !== false}
-                      onChange={(e) => void saveCodexCli({ manageRuntimeFiles: e.target.checked })}
-                      style={{ marginRight: '0.5rem' }}
+                      onChange={(checked) => void saveCodexCli({ manageRuntimeFiles: checked })}
                     />
-                    Add Gezel tools like search, memories, tasks, and team coordination to Codex
-                  </label>
+                  </SettingField>
                 </div>
-                <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                  Disable to run Codex with only its built-in tools.
-                </p>
               </details>
-            </section>
+            </SettingsSection>
           )}
 
           {section === 'anthropic' && (
-            <section className="provider-card">
-              <h3>Anthropic Claude</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Uses an Anthropic API key. Billing and usage run through your Anthropic console,
-                independent of GitHub Copilot or OpenAI.
-              </p>
-              <ol className="muted" style={{ lineHeight: 1.7, paddingLeft: '1.25rem' }}>
+            <SettingsSection
+              id="settings-anthropic"
+              title="Anthropic Claude"
+              hint="Uses an Anthropic API key. Billing and usage run through your Anthropic console, independent of GitHub Copilot or OpenAI."
+            >
+              <ol className="gz-setting-steps">
                 <li>
                   Go to{' '}
                   <a
                     href="https://platform.claude.com/settings/keys"
                     target="_blank"
                     rel="noreferrer"
-                    style={{ color: 'var(--accent-text)' }}
                   >
                     platform.claude.com/settings/keys
                   </a>{' '}
@@ -3896,134 +3299,133 @@ function DaemonSettingsView() {
                 </li>
                 <li>Paste it below.</li>
               </ol>
-              {hasAnthropicKey && (
-                <p>
-                  Current key:{' '}
-                  <code>
-                    {'•'.repeat(8)}…{(config?.anthropicApiKey ?? '').slice(-4)}
-                  </code>{' '}
+              <SettingField
+                label="API key"
+                controlId="settings-anthropic-key"
+                hint={
+                  hasAnthropicKey ? (
+                    <>
+                      Current key:{' '}
+                      <code>
+                        {'•'.repeat(8)}…{(config?.anthropicApiKey ?? '').slice(-4)}
+                      </code>{' '}
+                      <button type="button" className="gz-link-button" onClick={clearAnthropicKey}>
+                        Clear
+                      </button>
+                    </>
+                  ) : undefined
+                }
+              >
+                <div className="gz-setting-row">
+                  <input
+                    id="settings-anthropic-key"
+                    type="password"
+                    placeholder={
+                      hasAnthropicKey ? 'Replace key…' : 'Paste Anthropic API key (sk-ant-…)'
+                    }
+                    aria-label="Anthropic API key"
+                    value={anthropicKeyDraft}
+                    onChange={(e) => setAnthropicKeyDraft(e.target.value)}
+                  />
                   <button
                     type="button"
-                    onClick={clearAnthropicKey}
-                    style={{ marginLeft: '0.5rem' }}
+                    onClick={saveAnthropicKey}
+                    disabled={!anthropicKeyDraft.trim()}
                   >
-                    Clear
+                    Save
                   </button>
-                </p>
-              )}
-              <div className="new-row">
-                <input
-                  type="password"
-                  placeholder={
-                    hasAnthropicKey ? 'Replace key…' : 'Paste Anthropic API key (sk-ant-…)'
-                  }
-                  aria-label="Anthropic API key"
-                  value={anthropicKeyDraft}
-                  onChange={(e) => setAnthropicKeyDraft(e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                <button
-                  type="button"
-                  onClick={saveAnthropicKey}
-                  disabled={!anthropicKeyDraft.trim()}
-                >
-                  Save
-                </button>
-              </div>
-              {hasAnthropicKey && (
-                <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-                  <label className="muted" style={{ fontSize: '0.9rem' }}>
-                    Default model
-                  </label>
-                  <ModelPicker
-                    provider="anthropic"
-                    value={config?.defaultModel?.anthropic}
-                    onChange={(v) => void saveDefaultModel('anthropic', v)}
-                  />
-                  <EffortPicker
-                    provider="anthropic"
-                    model={config?.defaultModel?.anthropic}
-                    value={config?.defaultReasoningEffort?.anthropic}
-                    onChange={(v) => void saveDefaultEffort('anthropic', v)}
-                  />
                 </div>
+              </SettingField>
+              {hasAnthropicKey && (
+                <SettingField
+                  label="Default model"
+                  hint="Each reply re-sends the conversation so far; Gezel marks it for Anthropic's caching, so follow-up turns cost a fraction of the first."
+                >
+                  <div className="gz-setting-row">
+                    <ModelPicker
+                      provider="anthropic"
+                      value={config?.defaultModel?.anthropic}
+                      onChange={(v) => void saveDefaultModel('anthropic', v)}
+                    />
+                    <EffortPicker
+                      provider="anthropic"
+                      model={config?.defaultModel?.anthropic}
+                      value={config?.defaultReasoningEffort?.anthropic}
+                      onChange={(v) => void saveDefaultEffort('anthropic', v)}
+                    />
+                  </div>
+                </SettingField>
               )}
-              <p className="muted" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
-                Each reply re-sends the conversation so far; Gezel marks it for Anthropic's caching,
-                so follow-up turns cost a fraction of the first.
-              </p>
-            </section>
+            </SettingsSection>
           )}
 
           {section === 'anthropicCli' && (
-            <section className="provider-card">
-              <h3>Anthropic Claude CLI (command line interface)</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Drives a locally-installed{' '}
-                <a
-                  href="https://docs.claude.com/en/docs/claude-code/overview"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: 'var(--accent-text)' }}
-                >
-                  Claude Code CLI
-                </a>{' '}
-                once per chat turn.
-              </p>
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                  Connection
-                </label>
-                {anthropicCliProbe.kind === 'ok' && (
-                  <span style={{ color: 'var(--success-text)', fontSize: '0.9rem' }}>
-                    ✓ Claude CLI ready ({anthropicCliProbe.modelCount} models)
-                  </span>
-                )}
-                {anthropicCliProbe.kind === 'fail' && (
-                  <span className="provider-connection-state" data-tone="danger">
-                    Not connected
-                  </span>
-                )}
-                {(anthropicCliProbe.kind === 'idle' || anthropicCliProbe.kind === 'probing') && (
-                  <span className="muted" style={{ fontSize: '0.9rem' }}>
-                    Testing…
-                  </span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => void runAnthropicCliProbe()}
-                  disabled={anthropicCliProbe.kind === 'probing'}
-                  style={{ marginLeft: '0.75rem' }}
-                >
-                  {anthropicCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
-                </button>
-              </div>
-
-              {anthropicCliProbe.kind === 'fail' && (
-                <div className="provider-connection-callout">
-                  <p>{anthropicCliProbe.error}</p>
-                  <ol>
-                    <li>
-                      Install Claude Code and run <code>claude /status</code> in a terminal to
-                      confirm it is signed in, so the CLI app is ready to use.
-                    </li>
-                    <li>
-                      or, optionally pin an explicit binary path under Advanced — gezel uses{' '}
-                      <code>$PATH</code> by default.
-                    </li>
-                    <li>
-                      Click Test connection. Once Claude is connected, you can pick a default model
-                      here.
-                    </li>
-                  </ol>
+            <SettingsSection
+              id="settings-anthropic-cli"
+              title="Anthropic Claude CLI (command line interface)"
+              hint={
+                <>
+                  Drives a locally-installed{' '}
+                  <a
+                    href="https://docs.claude.com/en/docs/claude-code/overview"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Claude Code CLI
+                  </a>{' '}
+                  once per chat turn.
+                </>
+              }
+            >
+              <SettingField label="Connection">
+                <div className="gz-setting-row">
+                  {anthropicCliProbe.kind === 'ok' && (
+                    <span className="provider-connection-state" data-tone="success">
+                      ✓ Claude CLI ready ({anthropicCliProbe.modelCount} models)
+                    </span>
+                  )}
+                  {anthropicCliProbe.kind === 'fail' && (
+                    <span className="provider-connection-state" data-tone="danger">
+                      Not connected
+                    </span>
+                  )}
+                  {(anthropicCliProbe.kind === 'idle' || anthropicCliProbe.kind === 'probing') && (
+                    <span className="gz-setting-hint">Testing…</span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => void runAnthropicCliProbe()}
+                    disabled={anthropicCliProbe.kind === 'probing'}
+                  >
+                    {anthropicCliProbe.kind === 'probing' ? 'Testing…' : 'Test connection'}
+                  </button>
                 </div>
-              )}
+                {anthropicCliProbe.kind === 'fail' && (
+                  <div className="provider-connection-callout">
+                    <p>{anthropicCliProbe.error}</p>
+                    <ol>
+                      <li>
+                        Install Claude Code and run <code>claude /status</code> in a terminal to
+                        confirm it is signed in, so the CLI app is ready to use.
+                      </li>
+                      <li>
+                        or, optionally pin an explicit binary path under Advanced — gezel uses{' '}
+                        <code>$PATH</code> by default.
+                      </li>
+                      <li>
+                        Click Test connection. Once Claude is connected, you can pick a default
+                        model here.
+                      </li>
+                    </ol>
+                  </div>
+                )}
+              </SettingField>
 
-              <div className="new-row cli-permission-row" style={{ marginTop: '0.75rem' }}>
-                <span className="muted cli-permission-label" style={{ fontSize: '0.9rem' }}>
-                  Default permission
-                </span>
-                <div className="cli-permission-field">
+              <SettingField
+                label="Default permission"
+                hint="Projects and individual crew members can override this default."
+              >
+                <div>
                   <div
                     className="gz-tray gz-tray--described"
                     role="radiogroup"
@@ -4050,184 +3452,145 @@ function DaemonSettingsView() {
                       );
                     })}
                   </div>
-                  <p className="gz-tray-description cli-permission-description">
+                  <p className="gz-tray-description">
                     <strong>{claudePermissionChoice.label}</strong> —{' '}
                     {claudePermissionChoice.description}
                   </p>
                 </div>
-              </div>
-              <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.5rem' }}>
-                Projects and individual crew members can override this default.
-              </p>
+              </SettingField>
 
               {anthropicCliProbe.kind === 'ok' && (
-                <>
-                  <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                    <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                      Default model
-                    </label>
-                    <ModelPicker
-                      provider="anthropic-cli"
-                      value={config?.defaultModel?.['anthropic-cli']}
-                      onChange={(v) => void saveDefaultModel('anthropic-cli', v)}
-                      placeholder="Gezel default (Claude Sonnet)"
-                    />
-                  </div>
-
-                  {anthropicCliReasoningSupported === true && (
-                    <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                      <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                        Reasoning effort
-                      </label>
-                      <EffortPicker
-                        provider="anthropic-cli"
-                        model={config?.defaultModel?.['anthropic-cli']}
-                        value={config?.defaultReasoningEffort?.['anthropic-cli']}
-                        onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
-                      />
-                    </div>
-                  )}
-                </>
+                <SettingField label="Default model">
+                  <ModelPicker
+                    provider="anthropic-cli"
+                    value={config?.defaultModel?.['anthropic-cli']}
+                    onChange={(v) => void saveDefaultModel('anthropic-cli', v)}
+                    placeholder="Gezel default (Claude Sonnet)"
+                  />
+                </SettingField>
               )}
 
-              <details style={{ marginTop: '1rem' }}>
-                <summary style={{ cursor: 'pointer' }}>
-                  <strong>Advanced</strong>
-                </summary>
-
-                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                    Binary path
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="(auto — found on PATH)"
-                    aria-label="Claude CLI binary path"
-                    value={anthropicCliBinaryDraft}
-                    onChange={(e) => setAnthropicCliBinaryDraft(e.target.value)}
-                    style={{ flex: 1 }}
+              {anthropicCliProbe.kind === 'ok' && anthropicCliReasoningSupported === true && (
+                <SettingField label="Reasoning effort">
+                  <EffortPicker
+                    provider="anthropic-cli"
+                    model={config?.defaultModel?.['anthropic-cli']}
+                    value={config?.defaultReasoningEffort?.['anthropic-cli']}
+                    onChange={(value) => void saveDefaultEffort('anthropic-cli', value)}
                   />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const trimmed = anthropicCliBinaryDraft.trim();
-                      void saveAnthropicCli({ binaryPath: trimmed || undefined });
-                    }}
-                  >
-                    Save
-                  </button>
-                </div>
+                </SettingField>
+              )}
 
-                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                    Gezel tools
-                  </label>
-                  <label className="muted" style={{ fontSize: '0.9rem' }}>
-                    <input
-                      type="checkbox"
+              <details className="gz-setting-more">
+                <summary>Advanced</summary>
+                <div className="gz-setting-stack">
+                  <SettingField label="Binary path" controlId="settings-claude-binary">
+                    <div className="gz-setting-row">
+                      <input
+                        id="settings-claude-binary"
+                        type="text"
+                        placeholder="(auto — found on PATH)"
+                        aria-label="Claude CLI binary path"
+                        value={anthropicCliBinaryDraft}
+                        onChange={(e) => setAnthropicCliBinaryDraft(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const trimmed = anthropicCliBinaryDraft.trim();
+                          void saveAnthropicCli({ binaryPath: trimmed || undefined });
+                        }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </SettingField>
+                  <SettingField label="Gezel tools">
+                    <SettingCheck
+                      label="Add Gezel tools like search, memories, tasks, and team coordination to Claude"
+                      hint="Disable to run Claude with only its built-in tools."
                       checked={config?.anthropicCli?.manageRuntimeFiles !== false}
-                      onChange={(e) =>
-                        void saveAnthropicCli({ manageRuntimeFiles: e.target.checked })
-                      }
-                      style={{ marginRight: '0.5rem' }}
+                      onChange={(checked) => void saveAnthropicCli({ manageRuntimeFiles: checked })}
                     />
-                    Add Gezel tools like search, memories, tasks, and team coordination to Claude
-                  </label>
+                  </SettingField>
+                  <SettingField
+                    label="Pool size"
+                    controlId="settings-claude-pool-size"
+                    hint="Each ready process stays with one chat thread, so later turns skip the start-up wait. More processes mean faster replies when several crew members work at once, and more memory (about 100–200 MB each). When the pool is full, the idle process that was used longest ago is closed."
+                  >
+                    <div className="gz-setting-inline">
+                      <input
+                        id="settings-claude-pool-size"
+                        type="number"
+                        min={1}
+                        max={32}
+                        aria-describedby={settingHintId('settings-claude-pool-size')}
+                        value={config?.anthropicCli?.poolSize ?? 4}
+                        onChange={(e) => {
+                          const n = Number.parseInt(e.target.value, 10);
+                          if (Number.isFinite(n) && n >= 1 && n <= 32) {
+                            void saveAnthropicCli({ poolSize: n });
+                          }
+                        }}
+                      />
+                      <span>Claude processes kept ready</span>
+                    </div>
+                  </SettingField>
+                  <SettingField
+                    label="Concurrency"
+                    controlId="settings-claude-concurrency"
+                    hint="How many gezel turns can run through Claude at once. Defaults to the pool size. Lower it to keep some ready processes in reserve. Setting it higher still works, but extra processes are started temporarily."
+                  >
+                    <div className="gz-setting-inline">
+                      <input
+                        id="settings-claude-concurrency"
+                        type="number"
+                        min={1}
+                        max={32}
+                        aria-describedby={settingHintId('settings-claude-concurrency')}
+                        value={
+                          config?.providerConcurrency?.['anthropic-cli'] ??
+                          config?.anthropicCli?.poolSize ??
+                          4
+                        }
+                        onChange={(e) => {
+                          const n = Number.parseInt(e.target.value, 10);
+                          if (Number.isFinite(n) && n >= 1 && n <= 32) {
+                            void saveAnthropicCliConcurrency(n);
+                          }
+                        }}
+                      />
+                      <span>turns running at the same time</span>
+                    </div>
+                  </SettingField>
+                  <SettingField
+                    label="Idle timeout"
+                    controlId="settings-claude-idle-timeout"
+                    hint="Close a ready process after this long without a turn. The timer restarts on every turn."
+                  >
+                    <div className="gz-setting-inline">
+                      <input
+                        id="settings-claude-idle-timeout"
+                        type="number"
+                        min={60}
+                        max={3600}
+                        step={60}
+                        aria-label="Idle timeout (seconds)"
+                        aria-describedby={settingHintId('settings-claude-idle-timeout')}
+                        value={config?.anthropicCli?.workerIdleSec ?? 600}
+                        onChange={(e) => {
+                          const n = Number.parseInt(e.target.value, 10);
+                          if (Number.isFinite(n) && n >= 60 && n <= 3600) {
+                            void saveAnthropicCli({ workerIdleSec: n });
+                          }
+                        }}
+                      />
+                      <span>seconds</span>
+                    </div>
+                  </SettingField>
                 </div>
-                <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                  Disable to run Claude with only its built-in tools.
-                </p>
-
-                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                    Pool size
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={32}
-                    aria-label="Pool size"
-                    value={config?.anthropicCli?.poolSize ?? 4}
-                    onChange={(e) => {
-                      const n = Number.parseInt(e.target.value, 10);
-                      if (Number.isFinite(n) && n >= 1 && n <= 32) {
-                        void saveAnthropicCli({ poolSize: n });
-                      }
-                    }}
-                    style={{ width: '2.5rem' }}
-                  />
-                  <span className="muted" style={{ fontSize: '0.85rem' }}>
-                    Claude processes kept ready
-                  </span>
-                </div>
-                <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                  Each ready process stays with one chat thread, so later turns skip the start-up
-                  wait. More processes mean faster replies when several crew members work at once,
-                  and more memory (about 100–200 MB each). When the pool is full, the idle process
-                  that was used longest ago is closed.
-                </p>
-
-                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                    Concurrency
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={32}
-                    aria-label="Concurrency"
-                    value={
-                      config?.providerConcurrency?.['anthropic-cli'] ??
-                      config?.anthropicCli?.poolSize ??
-                      4
-                    }
-                    onChange={(e) => {
-                      const n = Number.parseInt(e.target.value, 10);
-                      if (Number.isFinite(n) && n >= 1 && n <= 32) {
-                        void saveAnthropicCliConcurrency(n);
-                      }
-                    }}
-                    style={{ width: '2.5rem' }}
-                  />
-                  <span className="muted" style={{ fontSize: '0.85rem' }}>
-                    turns running at the same time
-                  </span>
-                </div>
-                <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                  How many gezel turns can run through Claude at once. Defaults to the pool size.
-                  Lower it to keep some ready processes in reserve. Setting it higher still works,
-                  but extra processes are started temporarily.
-                </p>
-
-                <div className="new-row" style={{ alignItems: 'center', marginTop: '0.75rem' }}>
-                  <label className="muted" style={{ fontSize: '0.9rem', minWidth: '7rem' }}>
-                    Idle timeout
-                  </label>
-                  <input
-                    type="number"
-                    min={60}
-                    max={3600}
-                    step={60}
-                    aria-label="Idle timeout (seconds)"
-                    value={config?.anthropicCli?.workerIdleSec ?? 600}
-                    onChange={(e) => {
-                      const n = Number.parseInt(e.target.value, 10);
-                      if (Number.isFinite(n) && n >= 60 && n <= 3600) {
-                        void saveAnthropicCli({ workerIdleSec: n });
-                      }
-                    }}
-                    style={{ width: '2.5rem' }}
-                  />
-                  <span className="muted" style={{ fontSize: '0.85rem' }}>
-                    seconds
-                  </span>
-                </div>
-                <p className="muted" style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                  Close a ready process after this long without a turn. The timer restarts on every
-                  turn.
-                </p>
               </details>
-            </section>
+            </SettingsSection>
           )}
 
           {section === 'ollama' && (
@@ -4293,92 +3656,103 @@ function DaemonSettingsView() {
           )}
 
           {section === 'webSearch' && (
-            <section className="provider-card">
-              <h3>Web search</h3>
-              <p className="muted" style={{ marginTop: 0 }}>
-                Powers the web search tools that crew members use to discover content on the
-                internet. Picks one search backend; configure a key only for the providers you
-                choose.
-              </p>
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem' }}>
-                  Provider
-                </label>
-                <select
-                  value={visibleWebSearchProviderSetting(
-                    config?.webSearch?.provider,
-                    INCLUDE_TESTING_WEB_SEARCH_PROVIDER,
-                  )}
-                  onChange={(e) =>
-                    void saveWebSearchProvider(e.target.value as WebSearchProviderSetting)
+            <>
+              <SettingsSection
+                id="settings-web-search"
+                title="Web search"
+                hint="Powers the web search tools that crew members use to discover content on the internet. Pick one search backend; configure a key only for the providers you choose."
+              >
+                <SettingField label="Provider" controlId="settings-web-search-provider">
+                  <select
+                    id="settings-web-search-provider"
+                    value={visibleWebSearchProviderSetting(
+                      config?.webSearch?.provider,
+                      INCLUDE_TESTING_WEB_SEARCH_PROVIDER,
+                    )}
+                    onChange={(e) =>
+                      void saveWebSearchProvider(e.target.value as WebSearchProviderSetting)
+                    }
+                  >
+                    {WEB_SEARCH_PROVIDER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </SettingField>
+                <SettingField
+                  label="Fallback"
+                  controlId="settings-web-search-fallback"
+                  hint="Used when the primary is unavailable or errors."
+                >
+                  <select
+                    id="settings-web-search-fallback"
+                    aria-describedby={settingHintId('settings-web-search-fallback')}
+                    value={config?.webSearch?.fallbackProvider ?? 'unset'}
+                    onChange={(e) =>
+                      void saveWebSearchFallback(e.target.value as 'brave' | 'wikipedia' | 'unset')
+                    }
+                  >
+                    <option value="unset">None</option>
+                    <option value="wikipedia">Wikipedia</option>
+                    <option value="brave">Brave Search</option>
+                  </select>
+                </SettingField>
+              </SettingsSection>
+              <SettingsSection
+                id="settings-brave-search"
+                title="Brave Search"
+                hint={
+                  <>
+                    Free tier: 2,000 queries a month, one query a second. Get a key at{' '}
+                    <a
+                      href="https://api.search.brave.com/app/keys"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      api.search.brave.com/app/keys
+                    </a>
+                    .
+                  </>
+                }
+              >
+                <SettingField
+                  label="API key"
+                  controlId="settings-brave-key"
+                  hint={
+                    config?.hasBraveSearchApiKey ? (
+                      <>
+                        Current key:{' '}
+                        <code>
+                          {'•'.repeat(8)}…{(config?.braveSearchApiKey ?? '').slice(-4)}
+                        </code>{' '}
+                        <button type="button" className="gz-link-button" onClick={clearBraveKey}>
+                          Clear
+                        </button>
+                      </>
+                    ) : undefined
                   }
                 >
-                  {WEB_SEARCH_PROVIDER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="new-row" style={{ alignItems: 'center', marginTop: '0.5rem' }}>
-                <label className="muted" style={{ fontSize: '0.9rem' }}>
-                  Fallback
-                </label>
-                <select
-                  value={config?.webSearch?.fallbackProvider ?? 'unset'}
-                  onChange={(e) =>
-                    void saveWebSearchFallback(e.target.value as 'brave' | 'wikipedia' | 'unset')
-                  }
-                >
-                  <option value="unset">None</option>
-                  <option value="wikipedia">Wikipedia</option>
-                  <option value="brave">Brave Search</option>
-                </select>
-                <span className="muted" style={{ fontSize: '0.85rem' }}>
-                  Used when the primary is unavailable or errors.
-                </span>
-              </div>
-
-              <h4 style={{ marginTop: '1.5rem', marginBottom: '0.25rem' }}>Brave Search</h4>
-              <p className="muted" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
-                Free tier: 2000 queries/month, 1 query/second. Get a key at{' '}
-                <a
-                  href="https://api.search.brave.com/app/keys"
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: 'var(--accent-text)' }}
-                >
-                  api.search.brave.com/app/keys
-                </a>
-                .
-              </p>
-              {config?.hasBraveSearchApiKey && (
-                <p>
-                  Current key:{' '}
-                  <code>
-                    {'•'.repeat(8)}…{(config?.braveSearchApiKey ?? '').slice(-4)}
-                  </code>
-                  <button type="button" onClick={clearBraveKey} style={{ marginLeft: '0.5rem' }}>
-                    Clear
-                  </button>
-                </p>
-              )}
-              <div className="new-row">
-                <input
-                  type="password"
-                  placeholder={
-                    config?.hasBraveSearchApiKey ? 'Replace key…' : 'Paste Brave Search API key…'
-                  }
-                  aria-label="Brave Search API key"
-                  value={braveKeyDraft}
-                  onChange={(e) => setBraveKeyDraft(e.target.value)}
-                  style={{ flex: 1 }}
-                />
-                <button type="button" onClick={saveBraveKey} disabled={!braveKeyDraft.trim()}>
-                  Save
-                </button>
-              </div>
-            </section>
+                  <div className="gz-setting-row">
+                    <input
+                      id="settings-brave-key"
+                      type="password"
+                      placeholder={
+                        config?.hasBraveSearchApiKey
+                          ? 'Replace key…'
+                          : 'Paste Brave Search API key…'
+                      }
+                      aria-label="Brave Search API key"
+                      value={braveKeyDraft}
+                      onChange={(e) => setBraveKeyDraft(e.target.value)}
+                    />
+                    <button type="button" onClick={saveBraveKey} disabled={!braveKeyDraft.trim()}>
+                      Save
+                    </button>
+                  </div>
+                </SettingField>
+              </SettingsSection>
+            </>
           )}
 
           {section === 'channels' && config?.showWorkInProgressFeatures === true && (
@@ -4392,14 +3766,13 @@ function DaemonSettingsView() {
           {section === 'knowledge' && <KnowledgeCatalogsCard />}
 
           {section === 'toolsets' && (
-            <section>
-              <h3>Shared Toolsets</h3>
-              <ToolsetsEditor
-                scope={{ kind: 'shared' }}
-                subject="every gezel"
-                hint="Toolsets here are available to every gezel in addition to their own."
-              />
-            </section>
+            <SettingsSection
+              id="settings-shared-toolsets"
+              title="Shared toolsets"
+              hint="Toolsets here are available to every gezel in addition to their own."
+            >
+              <ToolsetsEditor scope={{ kind: 'shared' }} subject="every gezel" />
+            </SettingsSection>
           )}
 
           {section === 'securityCompliance' && (
@@ -4408,8 +3781,7 @@ function DaemonSettingsView() {
 
           {section === 'about' && (
             <>
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>About</h3>
+              <SettingsSection id="settings-about" title="About">
                 {health && (
                   <dl className="settings-facts">
                     <dt>Version</dt>
@@ -4421,7 +3793,7 @@ function DaemonSettingsView() {
                 <LocalEngineStatus />
                 <AutostartToggle />
                 <BackgroundServiceStatus />
-                <p className="muted small" style={{ marginTop: '0.75rem' }}>
+                <p className="gz-setting-hint">
                   Something not working right?{' '}
                   <ReportErrorLink
                     className="gz-link-button"
@@ -4429,97 +3801,68 @@ function DaemonSettingsView() {
                     report={{ surface: 'settings-about', message: '' }}
                   />
                 </p>
-              </section>
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Updates</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Gezel checks public GitHub release metadata when the desktop app launches. No
-                  personal data is sent. Turn this off to stop automatic checks; you can still
-                  choose “Check for updates” from the tray menu.
-                </p>
-                <label className="debug-toggle">
-                  <input
-                    type="checkbox"
-                    checked={config?.autoUpdateChecks !== false}
-                    onChange={(e) => void saveAutoUpdateChecks(e.target.checked)}
-                  />
-                  <span>Check for updates automatically when Gezel starts</span>
-                </label>
+              </SettingsSection>
+              <SettingsSection
+                id="settings-updates"
+                title="Updates"
+                hint="Gezel checks public GitHub release metadata when the desktop app launches. No personal data is sent. Turn this off to stop automatic checks; you can still choose “Check for updates” from the tray menu."
+              >
+                <SettingCheck
+                  label="Check for updates automatically when Gezel starts"
+                  checked={config?.autoUpdateChecks !== false}
+                  onChange={(checked) => void saveAutoUpdateChecks(checked)}
+                />
                 <UpdateStatus />
-              </section>
+              </SettingsSection>
               <GildeUpdatesCard />
               <StorageUsageCard />
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Advanced</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Reveals advanced, power-user surfaces — currently the “Scripts” area in the
-                  sidebar.
-                </p>
-                <label className="debug-toggle">
-                  <input
-                    type="checkbox"
-                    checked={config?.showAdvancedFeatures === true}
-                    onChange={(e) => void saveShowAdvancedFeatures(e.target.checked)}
-                  />
-                  <span>Show advanced features</span>
-                </label>
-                <label className="debug-toggle" style={{ display: 'flex', marginTop: '0.6rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={config?.showWorkInProgressFeatures === true}
-                    onChange={(e) => void saveShowWorkInProgressFeatures(e.target.checked)}
-                  />
-                  <span>Show preview features</span>
-                </label>
-                <p className="muted small">
-                  Preview features are usable but still changing shape. The current preview is
-                  Connectors and the project types and craftbooks that use them.
-                </p>
-              </section>
-              {isDarwin && window.__GEZEL__?.uninstall && (
-                <section className="settings-uninstall-section" style={{ marginBottom: '2rem' }}>
-                  <h3>Uninstall</h3>
-                  <p className="muted" style={{ marginTop: 0 }}>
-                    Remove Gezel and its machine-wide background service. You can keep downloaded
-                    models and your work for a later reinstall, or choose exactly which data to
-                    delete.
-                  </p>
-                  <button type="button" className="danger" onClick={requestMacUninstall}>
-                    Uninstall Gezel…
-                  </button>
-                </section>
-              )}
-              <section style={{ marginBottom: '2rem' }}>
-                <h3>Debug mode</h3>
-                <p className="muted" style={{ marginTop: 0 }}>
-                  Shows the working parts everywhere: each step and the thinking in chat, task ids,
-                  model names, and every project&apos;s developer tabs. Also turns on verbose
-                  diagnostics — tool-call internals, bridge startup traces, chat send/response
-                  bodies, and ambient-scheduler cadence reasoning — and enables additional tools.
-                </p>
-                <label className="debug-toggle">
-                  <input
-                    type="checkbox"
-                    checked={config?.debugMode === true}
-                    onChange={(e) => void saveDebugMode(e.target.checked)}
-                  />
-                  <span>Debug mode</span>
-                </label>
-                <label className="debug-toggle" style={{ display: 'flex', marginTop: '0.6rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={config?.resetTemplatesOnStartup === true}
-                    onChange={(e) => void saveResetTemplatesOnStartup(e.target.checked)}
-                  />
-                  <span>On startup, reset all gezel templates back to defaults</span>
-                </label>
-                <div style={{ marginTop: '0.6rem' }}>
-                  <button type="button" className="subtle" onClick={() => void openLogsFolder()}>
-                    Open logs folder
-                  </button>
-                </div>
-              </section>
+              <SettingsSection id="settings-advanced" title="Advanced">
+                <SettingCheck
+                  label="Show advanced features"
+                  hint="Reveals advanced, power-user surfaces — currently the Scripts area in the sidebar."
+                  checked={config?.showAdvancedFeatures === true}
+                  onChange={(checked) => void saveShowAdvancedFeatures(checked)}
+                />
+                <SettingCheck
+                  label="Show preview features"
+                  hint="Preview features are usable but still changing shape. The current preview is Connectors and the project types and craftbooks that use them."
+                  checked={config?.showWorkInProgressFeatures === true}
+                  onChange={(checked) => void saveShowWorkInProgressFeatures(checked)}
+                />
+              </SettingsSection>
+              <SettingsSection
+                id="settings-debug-mode"
+                title="Debug mode"
+                hint="Shows the working parts everywhere: each step and the thinking in chat, task ids, model names, and every project's developer tabs. Also turns on verbose diagnostics — tool-call internals, bridge startup traces, chat send/response bodies, and ambient-scheduler cadence reasoning — and enables additional tools."
+              >
+                <SettingCheck
+                  label="Debug mode"
+                  checked={config?.debugMode === true}
+                  onChange={(checked) => void saveDebugMode(checked)}
+                />
+                <SettingCheck
+                  label="On startup, reset all gezel templates back to defaults"
+                  checked={config?.resetTemplatesOnStartup === true}
+                  onChange={(checked) => void saveResetTemplatesOnStartup(checked)}
+                />
+                <button type="button" className="secondary" onClick={() => void openLogsFolder()}>
+                  Open logs folder
+                </button>
+              </SettingsSection>
               <SettingsLegalSection />
+              {/* Removing the app is the lifecycle action, so it comes last. */}
+              {isDarwin && window.__GEZEL__?.uninstall && (
+                <SettingsSection
+                  id="settings-uninstall"
+                  title="Uninstall"
+                  hint="Remove Gezel and its machine-wide background service. You can keep downloaded models and your work for a later reinstall, or choose exactly which data to delete."
+                  actions={
+                    <button type="button" className="danger" onClick={requestMacUninstall}>
+                      Uninstall Gezel…
+                    </button>
+                  }
+                />
+              )}
             </>
           )}
 
@@ -4529,6 +3872,107 @@ function DaemonSettingsView() {
         {error && <p className="error">{error}</p>}
       </div>
     </div>
+  );
+}
+
+/**
+ * One standing crew role (Meester, Scribe, Librarian, Inspector): a label,
+ * the gezel who holds it, and a hint. The picker itself names the holder, so
+ * there is no card above it repeating the same gezel. Its last item opens a
+ * small form that creates a fresh gezel for the role.
+ */
+function RoleAssignmentField({
+  controlId,
+  label,
+  hint,
+  value,
+  gezels,
+  roleBasedNameOnly,
+  placeholder,
+  newItemLabel,
+  createLabel,
+  createHint,
+  onAssign,
+  onCreate,
+}: {
+  controlId: string;
+  label: string;
+  hint: string;
+  value: string | undefined;
+  gezels: GezelSummary[];
+  roleBasedNameOnly: boolean;
+  placeholder: string;
+  newItemLabel: string;
+  createLabel: string;
+  createHint: string;
+  onAssign: (id: string) => Promise<void>;
+  onCreate: (name: string) => Promise<void>;
+}) {
+  const [creating, setCreating] = useState(false);
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const close = () => {
+    setCreating(false);
+    setName('');
+  };
+  return (
+    <SettingField label={label} controlId={controlId} hint={hint}>
+      <Select.Root
+        value={value ?? ''}
+        onValueChange={(next) => {
+          if (next === '__new') {
+            setCreating(true);
+            setName('');
+            return;
+          }
+          void onAssign(next);
+        }}
+      >
+        <Select.Trigger id={controlId} aria-describedby={settingHintId(controlId)}>
+          <Select.Value placeholder={placeholder} />
+        </Select.Trigger>
+        <Select.Content>
+          {gezels.map((gezel) => (
+            <Select.Item key={gezel.id} value={gezel.id}>
+              {assignmentLabel(gezel, roleBasedNameOnly)}
+            </Select.Item>
+          ))}
+          <Select.Item value="__new">{newItemLabel}</Select.Item>
+        </Select.Content>
+      </Select.Root>
+      {creating && (
+        <form
+          className="gz-setting-panel"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            setBusy(true);
+            try {
+              await onCreate(name);
+              close();
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <input
+            aria-label={`Name for the new ${label}`}
+            placeholder="Name (leave blank for a random pick)"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            disabled={busy}
+          />
+          <p className="gz-setting-hint">{createHint}</p>
+          <div className="gz-setting-panel-actions">
+            <button type="button" className="secondary" onClick={close} disabled={busy}>
+              Cancel
+            </button>
+            <button type="submit" className="primary" disabled={busy}>
+              {busy ? 'Creating…' : createLabel}
+            </button>
+          </div>
+        </form>
+      )}
+    </SettingField>
   );
 }
 
@@ -4619,20 +4063,13 @@ function OllamaReasoningToggle({
 }) {
   const mode: 'auto' | 'on' | 'off' = value === true ? 'on' : value === false ? 'off' : 'auto';
   return (
-    <div style={{ marginTop: '0.75rem' }}>
-      <div style={{ fontSize: '0.9rem', marginBottom: '0.3rem' }}>
-        <strong>Reasoning mode</strong>{' '}
-        <span className="muted small">— this model supports a thinking phase</span>
-      </div>
-      <p className="muted small" style={{ margin: '0 0 0.4rem 0' }}>
-        Reasoning models spend their output budget on internal chain-of-thought before streaming any
-        reply. If the budget runs out first, the chat bubble is empty. Auto uses Gezel's
-        family-aware default (off for reasoning models); Always on captures thinking as visible
-        deltas; Always off skips reasoning for faster direct answers.
-      </p>
-      <div style={{ display: 'flex', gap: '1.2rem', flexWrap: 'wrap' }}>
+    <SettingField
+      label="Reasoning mode"
+      hint="This model supports a thinking phase, and spends its output budget on it before streaming any reply; if the budget runs out first, the chat bubble is empty. Auto uses Gezel's family-aware default (off for reasoning models), Always on shows the thinking, and Always off skips it for faster direct answers."
+    >
+      <div className="gz-setting-row">
         {(['auto', 'on', 'off'] as const).map((m) => (
-          <label key={m} style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+          <label key={m} className="gz-setting-option">
             <input
               type="radio"
               name="ollama-think"
@@ -4646,7 +4083,7 @@ function OllamaReasoningToggle({
           </label>
         ))}
       </div>
-    </div>
+    </SettingField>
   );
 }
 
@@ -4667,27 +4104,24 @@ function CopilotConnectionStatus({
 }) {
   const label = mode === 'pat' ? 'via GitHub token' : 'via Copilot CLI';
   return (
-    <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center', gap: '0.5rem' }}>
-      {probe.kind === 'probing' && <span className="muted small">checking connection…</span>}
-      {probe.kind === 'ok' && (
-        <span className="small" style={{ color: 'var(--accent-text)' }}>
-          ● Connected {label}
-        </span>
-      )}
-      {probe.kind === 'fail' && (
-        <span className="error small" title={probe.error}>
-          ● Not connected — {probe.error}
-        </span>
-      )}
-      {probe.kind === 'idle' && <span className="muted small">not yet checked</span>}
-      <button
-        type="button"
-        onClick={onRetest}
-        disabled={probe.kind === 'probing'}
-        style={{ marginLeft: 'auto' }}
-      >
-        Test connection
-      </button>
-    </div>
+    <SettingField label="Connection">
+      <div className="gz-setting-row">
+        {probe.kind === 'probing' && <span className="gz-setting-hint">Checking connection…</span>}
+        {probe.kind === 'ok' && (
+          <span className="provider-connection-state" data-tone="success">
+            ● Connected {label}
+          </span>
+        )}
+        {probe.kind === 'fail' && (
+          <span className="provider-connection-state" data-tone="danger" title={probe.error}>
+            ● Not connected — {probe.error}
+          </span>
+        )}
+        {probe.kind === 'idle' && <span className="gz-setting-hint">Not checked yet</span>}
+        <button type="button" onClick={onRetest} disabled={probe.kind === 'probing'}>
+          Test connection
+        </button>
+      </div>
+    </SettingField>
   );
 }

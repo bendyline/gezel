@@ -6,7 +6,7 @@
   justify-content: center;
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   flex-shrink: 0;
   padding: 0;
@@ -68,6 +68,84 @@
   }
 }
 
+/* ---------- Person label: a crew member and their role ---------- */
+
+/* `PersonLabel` (docs/ux.md, "Names and roles"). A name keeps its own case
+   and the current ink; the role is muted. Inline never wraps, and the role
+   gives way to an ellipsis before the name does. */
+.person-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  vertical-align: middle;
+}
+
+.person-label-face {
+  display: inline-flex;
+  flex: none;
+}
+
+.person-label-name,
+.person-label-role {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.person-label-sep,
+.person-label-role {
+  color: var(--text-muted);
+}
+
+.person-label--inline {
+  column-gap: 0.3em;
+  white-space: nowrap;
+}
+
+.person-label--inline .person-label-face {
+  margin-inline-end: 0.15em;
+}
+
+.person-label--inline .person-label-name {
+  flex: 0 1 auto;
+}
+
+.person-label--inline .person-label-sep {
+  flex: none;
+}
+
+.person-label--inline .person-label-role {
+  flex: 0 100 auto;
+}
+
+.person-label--stacked {
+  column-gap: 0.5rem;
+}
+
+.person-label-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.person-label-name-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  min-width: 0;
+}
+
+.person-label--stacked .person-label-name {
+  font-size: var(--person-label-name-size, var(--text-md));
+}
+
+.person-label--stacked .person-label-role {
+  font-size: var(--person-label-role-size, var(--text-sm));
+}
+
 /* Read-only provenance annotation for grandfathered machine-wide entities.
    This is a status badge, not a control, so the capsule exception applies. */
 .machine-shared-badge {
@@ -109,7 +187,7 @@
   color: var(--accent-text);
   border: none;
   padding: 0.3rem 0.4rem;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   cursor: pointer;
   text-decoration: underline;
 }
@@ -123,7 +201,7 @@
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0.2rem 0.5rem;
   font-size: 0.95rem;
   cursor: pointer;
@@ -150,13 +228,13 @@
   background: #c0392b;
   color: white;
   font-weight: 700;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   margin-left: 0.3rem;
   cursor: help;
 }
 
 .small {
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
 }
 
 .model-picker-other {
@@ -166,22 +244,22 @@
 }
 
 .model-picker-other input {
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   padding: 0.2rem 0.45rem;
   background: var(--panel);
   color: inherit;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   width: 140px;
 }
 
 .provider-model-input {
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   padding: 0.2rem 0.45rem;
   background: var(--panel);
   color: inherit;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   width: 140px;
 }
 

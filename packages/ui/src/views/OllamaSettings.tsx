@@ -272,7 +272,7 @@ export function OllamaSettings({ config, onConfigChanged }: Props) {
         </div>
       </div>
 
-      {/* Reasoning-mode toggle moved to the Artificial Intelligence tab
+      {/* Reasoning-mode toggle moved to the Artificial intelligence tab
          alongside the Default model selector — it only applies to
          reasoning-family models and the context makes more sense
          there. See `SettingsView`. */}

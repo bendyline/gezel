@@ -127,7 +127,7 @@ import { buildTimeline } from './timeline.js';
 const log = createLogger('http');
 
 const SCRIPT_EXECUTION_DISABLED =
-  'Security policy: script execution is disabled. Raise the security level in Settings → Security & Compliance to run scripts.';
+  'Security policy: script execution is disabled. Raise the security level in Settings → Security & compliance to run scripts.';
 
 /**
  * Translate the two class-of errors workspace mutations can throw into
@@ -1576,7 +1576,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
           ok: false,
           log: '',
           error:
-            'Security policy: script execution is disabled. Raise the security level in Settings → Security & Compliance to run Playwright scripts.',
+            'Security policy: script execution is disabled. Raise the security level in Settings → Security & compliance to run Playwright scripts.',
         },
         403,
       );
@@ -1587,7 +1587,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
           ok: false,
           log: '',
           error:
-            'Security policy: external services are disabled, and a Playwright script reaches the open web. Raise the security level in Settings → Security & Compliance to run Playwright scripts.',
+            'Security policy: external services are disabled, and a Playwright script reaches the open web. Raise the security level in Settings → Security & compliance to run Playwright scripts.',
         },
         403,
       );

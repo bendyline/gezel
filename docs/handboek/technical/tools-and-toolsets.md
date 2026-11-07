@@ -50,7 +50,7 @@ that project's MCP bridges, so the new set applies on the next turn.
 
 Project-file discovery is project consent, not a way around the install-wide
 security posture: unconfined third-party MCP servers remain available only when
-non-builtin toolsets are enabled by **Settings → Security & Compliance**. VS
+non-builtin toolsets are enabled by **Settings → Security & compliance**. VS
 Code `${input:…}` prompt variables are not imported because they need an
 interactive value; use an environment variable or literal value instead.
 

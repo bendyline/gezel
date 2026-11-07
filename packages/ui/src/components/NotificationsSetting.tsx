@@ -2,6 +2,7 @@ import { DEFAULT_NOTIFICATION_DAILY_CAP } from '@bendyline/gezel';
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
+import { SettingField } from './SettingsSection.js';
 
 const CAPS = [0, 1, 3, 5, 10] as const;
 
@@ -39,35 +40,38 @@ export function NotificationsSetting() {
   };
   return (
     <>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Only when something happened: a question for you, finished work, a level-up, the night’s
-        review, or a reminder a project worked out from its own progress. Several at once arrive as
-        one.
-      </p>
-      <div
-        className="gz-tray"
-        role="radiogroup"
-        onKeyDown={onRadioKeyDown}
-        aria-label="Notifications a day at most"
+      <SettingField
+        label="A day, at most"
+        hint="Only when something happened: a question for you, finished work, a level-up, the night’s review, or a reminder a project worked out from its own progress. Several at once arrive as one."
       >
-        {CAPS.map((value) => (
-          <button
-            key={value}
-            type="button"
-            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
-            role="radio"
-            aria-checked={cap === value}
-            tabIndex={cap === value ? 0 : -1}
-            disabled={cap === null}
-            className={`gz-key${cap === value ? ' gz-key-active' : ''}`}
-            onClick={() => void save(value)}
-          >
-            {value === 0 ? 'Off' : value}
-          </button>
-        ))}
-      </div>
-      <p className="muted small">A day, at most.</p>
-      {error && <p className="error">{error}</p>}
+        <div
+          className="gz-tray"
+          role="radiogroup"
+          onKeyDown={onRadioKeyDown}
+          aria-label="Notifications a day at most"
+        >
+          {CAPS.map((value) => (
+            <button
+              key={value}
+              type="button"
+              // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native radio cannot carry the keys-in-trays treatment.
+              role="radio"
+              aria-checked={cap === value}
+              tabIndex={cap === value ? 0 : -1}
+              disabled={cap === null}
+              className={`gz-key${cap === value ? ' gz-key-active' : ''}`}
+              onClick={() => void save(value)}
+            >
+              {value === 0 ? 'Off' : value}
+            </button>
+          ))}
+        </div>
+      </SettingField>
+      {error && (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      )}
     </>
   );
 }

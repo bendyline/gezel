@@ -84,7 +84,7 @@ const CATEGORY_GLYPH: Record<CraftbookCategory, ProjectGlyphId> = {
   research: 'globe',
   business: 'briefcase',
   personal: 'house',
-  practice: 'sprout',
+  practice: 'people',
   other: 'dots',
 };
 
@@ -109,7 +109,7 @@ export function taskLensesFor(books: BookItem[]): TaskLens[] {
         id: `role:${starterMeta.id}`,
         label: starterMeta.label,
         tagline: starterMeta.description,
-        glyph: 'sprout',
+        glyph: 'folder',
         bookIds,
         family: 'universal',
       });

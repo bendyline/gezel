@@ -1862,7 +1862,7 @@ export class Store {
     await this.history?.log({
       kind: 'gezel.created',
       gezelId: detail.id,
-      summary: `Created "${detail.name}"${detail.role ? ` (${detail.role})` : ''}`,
+      summary: `Created ${detail.name}${detail.role ? ` · ${detail.role}` : ''}`,
       details: {
         name: detail.name,
         role: detail.role,
@@ -2703,7 +2703,7 @@ export class Store {
     await this.history?.log({
       kind: 'gezel.created',
       gezelId: encodedId,
-      summary: `Created project gezel "${detail.name}"${detail.role ? ` (${detail.role})` : ''}`,
+      summary: `Created project gezel ${detail.name}${detail.role ? ` · ${detail.role}` : ''}`,
       details: { projectId, localId, canonical: input.canonical === true },
     });
     return detail;

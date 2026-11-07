@@ -169,6 +169,16 @@ test.describe('chat surface', () => {
     const assistant = chat.locator('.msg-assistant').first();
     await expect(assistant).toContainText('Mock reply', { timeout: 15_000 });
 
+    // A conversation that fits reads from its top. Pinned to the end of the
+    // working runway instead, a two-message thread opened with its first
+    // message sliced under the strip above it.
+    const opening = await timeline.evaluate((el) => {
+      const runway = el.querySelector<HTMLElement>('.timeline-response-runway');
+      const conversation = el.scrollHeight - (runway?.offsetHeight ?? 0);
+      return { fits: conversation <= el.clientHeight, scrollTop: el.scrollTop };
+    });
+    if (opening.fits) expect(opening.scrollTop).toBeLessThanOrEqual(1);
+
     await shot(page, 'timeline', {
       area: 'chat',
       clip: timeline,

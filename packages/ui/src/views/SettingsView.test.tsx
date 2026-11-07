@@ -166,7 +166,7 @@ describe('SettingsView', () => {
     expect(await screen.findByTestId('settings-section-about')).toBeTruthy();
   });
 
-  it('hosts microphone settings under Device Integration', async () => {
+  it('hosts microphone settings under Device integration', async () => {
     render(<SettingsView />);
     fireEvent.click(await screen.findByTestId('settings-nav-deviceIntegration'));
 
@@ -309,9 +309,7 @@ describe('SettingsView', () => {
     const grammar = await screen.findByRole('checkbox', { name: 'Show inline grammar checking' });
     expect(spelling).toBeChecked();
     expect(grammar).toBeChecked();
-    expect(
-      screen.getByText('(Grammar checking is currently only available for English)'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Grammar checking is available for English only.')).toBeInTheDocument();
 
     fireEvent.click(grammar);
 
@@ -606,7 +604,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial intelligence/ }));
 
     const expected = ['This Mac (Apple MLX)', 'This Mac (llama)', 'This Mac (DwarfStar - DS4)'];
     const defaultTray = within(await screen.findByTestId('default-provider-switch'));
@@ -619,7 +617,7 @@ describe('SettingsView', () => {
     }
   });
 
-  it('names the default engine and model under the Artificial Intelligence header', async () => {
+  it('names the default engine and model under the Artificial intelligence header', async () => {
     window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mlx',
@@ -671,7 +669,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial intelligence/ }));
 
     const picker = await screen.findByTestId('model-picker-llama-cpp');
     expect(picker).toBeInTheDocument();
@@ -887,7 +885,7 @@ describe('SettingsView', () => {
       },
     } as never);
     const inherited = render(<SettingsView />);
-    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial intelligence/ }));
     const checkbox = await screen.findByRole('checkbox', {
       name: 'Use a specific model by default during Night Shift',
     });
@@ -916,7 +914,7 @@ describe('SettingsView', () => {
       },
     } as never);
     render(<SettingsView />);
-    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial intelligence/ }));
 
     expect(
       await screen.findByRole('checkbox', {
@@ -929,7 +927,7 @@ describe('SettingsView', () => {
 
   /** The default-provider pill row, scoped so Night Shift's row can't match. */
   async function defaultProviderSwitch() {
-    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial intelligence/ }));
     return within(await screen.findByTestId('default-provider-switch'));
   }
 
@@ -967,7 +965,7 @@ describe('SettingsView', () => {
   });
 
   // Connecting to a server promised its models in the picker, and the
-  // Artificial Intelligence tab had no way to choose one.
+  // Artificial intelligence tab had no way to choose one.
   it('offers a paired server as the default provider and starts it on a model', async () => {
     vi.mocked(api.listRemoteServerModels).mockResolvedValue({
       servers: [
@@ -1190,15 +1188,16 @@ describe('SettingsView', () => {
     expect(await pills.findByRole('button', { name: 'GitHub Copilot' })).toBeInTheDocument();
   });
 
-  it('uses the compact settings text size for the Copilot sandbox checkbox', async () => {
+  // Sizes come from the settings-page recipe, not inline styles.
+  it('draws the Copilot sandbox switch as a settings-page checkbox', async () => {
     render(<SettingsView />);
     fireEvent.click(await screen.findByTestId('settings-nav-copilot'));
 
     const checkbox = await screen.findByRole('checkbox', {
       name: 'Sandbox Copilot to gezel tools only',
     });
-    expect(checkbox.closest('label')).toHaveClass('muted');
-    expect(checkbox.closest('label')).toHaveStyle({ fontSize: '0.9rem' });
+    expect(checkbox.closest('.gz-setting-check')).not.toBeNull();
+    expect(checkbox.closest('label')).toBeNull();
   });
 
   it('describes Copilot PAT authentication as a GitHub token with Copilot scope', async () => {
@@ -1448,7 +1447,7 @@ describe('SettingsView', () => {
 });
 
 describe('generalist mode switch', () => {
-  it('shows the three keys under Artificial Intelligence with Automatic latched by default', async () => {
+  it('shows the three keys under Artificial intelligence with Automatic latched by default', async () => {
     window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
     vi.mocked(api.getConfig).mockResolvedValue({
       provider: 'mlx',
@@ -1456,7 +1455,7 @@ describe('generalist mode switch', () => {
       hasGithubToken: true,
     } as never);
     render(<SettingsView />);
-    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial intelligence/ }));
     const tray = within(await screen.findByRole('radiogroup', { name: 'Run in generalist mode' }));
     expect(tray.getByRole('radio', { name: 'Automatic' })).toHaveAttribute('aria-checked', 'true');
     expect(tray.getByRole('radio', { name: 'On' })).toHaveAttribute('aria-checked', 'false');
@@ -1478,7 +1477,7 @@ describe('generalist mode switch', () => {
       hasGithubToken: true,
     } as never);
     render(<SettingsView />);
-    fireEvent.click(await screen.findByRole('button', { name: /^Artificial Intelligence/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^Artificial intelligence/ }));
     const tray = within(await screen.findByRole('radiogroup', { name: 'Run in generalist mode' }));
     expect(tray.getByRole('radio', { name: 'Off' })).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(tray.getByRole('radio', { name: 'On' }));

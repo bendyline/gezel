@@ -4,7 +4,13 @@ import type {
   Poppetje as PoppetjeStruct,
   Question,
 } from '@bendyline/gezel';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
 import * as Tabs from '../../primitives/Tabs.js';
 import { HomeHeadline, HomeIntroDate } from './HomeIntroHeading.js';
@@ -19,6 +25,12 @@ import { type HomeChip, type HomeNavView, greetingForHour } from './utils.js';
 
 /** Which panel the greeting band's tab strip is showing. */
 export type HomeGreetingTab = 'greeting' | 'night' | 'make' | 'tour';
+
+/** Movement under this is a press on the rail, not a drag. */
+const RAIL_DRAG_SLOP_PX = 4;
+/** Let go after lifting the rail this share of the sheet, and it rolls up. */
+const RAIL_ROLL_UP_SHARE = 0.25;
+const RAIL_ROLL_UP_MIN_PX = 48;
 
 /** Symmetric SVG chevron for the greeting's collapse / expand toggle.
  *  The Unicode arrowhead glyphs (⌃ ⌄) render asymmetrically and off-center
@@ -172,6 +184,57 @@ export function GreetingBand({
   const notePress = (value: HomeGreetingTab) => {
     pressed.current = { value, open: !collapsed && activeTab === value };
   };
+  // The rail can be pulled up by hand. The sheet follows the pointer with its
+  // transition off, set directly on the element so a drag does not re-render
+  // the panel. Letting go clears the height: past the threshold the sheet
+  // rolls the rest of the way up, short of it the same transition drops it
+  // back. A drag swallows the click that follows it.
+  const sheetRef = useRef<HTMLDivElement>(null);
+  const railDrag = useRef<{
+    pointerId: number;
+    startY: number;
+    height: number;
+    moved: boolean;
+  } | null>(null);
+  const skipRailClick = useRef(false);
+  const startRailDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    skipRailClick.current = false;
+    const sheet = sheetRef.current;
+    if (event.button !== 0 || collapsed || !sheet) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    railDrag.current = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      height: sheet.getBoundingClientRect().height,
+      moved: false,
+    };
+  };
+  const moveRailDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const drag = railDrag.current;
+    const sheet = sheetRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !sheet) return;
+    const lift = drag.startY - event.clientY;
+    if (!drag.moved && Math.abs(lift) < RAIL_DRAG_SLOP_PX) return;
+    drag.moved = true;
+    sheet.dataset.dragging = '';
+    sheet.style.height = `${drag.height - Math.min(Math.max(lift, 0), drag.height)}px`;
+  };
+  const endRailDrag = (event: ReactPointerEvent<HTMLButtonElement>, letGo: boolean) => {
+    const drag = railDrag.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    railDrag.current = null;
+    if (!drag.moved) return;
+    skipRailClick.current = true;
+    const sheet = sheetRef.current;
+    if (sheet) {
+      sheet.style.height = '';
+      delete sheet.dataset.dragging;
+    }
+    const lift = drag.startY - event.clientY;
+    if (letGo && lift >= Math.max(RAIL_ROLL_UP_MIN_PX, drag.height * RAIL_ROLL_UP_SHARE)) {
+      onToggleCollapse();
+    }
+  };
 
   return (
     <Tabs.Root
@@ -226,6 +289,7 @@ export function GreetingBand({
       </div>
 
       <div
+        ref={sheetRef}
         className="home-workshop-intro-sheet"
         aria-hidden={collapsed}
         inert={collapsed}
@@ -317,6 +381,25 @@ export function GreetingBand({
             )}
           </>
         )}
+        {/* The shade's bottom rail: it stays at the sheet's foot, so it rides
+            up with the sheet as it rolls. Click it, or pull it up. */}
+        <button
+          type="button"
+          className="home-workshop-sheet-rail"
+          onPointerDown={startRailDrag}
+          onPointerMove={moveRailDrag}
+          onPointerUp={(event) => endRailDrag(event, true)}
+          onPointerCancel={(event) => endRailDrag(event, false)}
+          onClick={() => {
+            if (skipRailClick.current) {
+              skipRailClick.current = false;
+              return;
+            }
+            onToggleCollapse();
+          }}
+          title="Roll up"
+          aria-label="Roll up the greeting"
+        />
       </div>
     </Tabs.Root>
   );

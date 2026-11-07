@@ -107,7 +107,7 @@ export interface ResolvedSecurityPolicy extends SecurityCapabilities {
 
 /**
  * Preset → capability mapping. Keep in lockstep with the table in the
- * Security & Compliance plan / panel copy.
+ * Security & compliance plan / panel copy.
  *
  * - `super-lockdown`: the user's work stays on the machine. Local models only,
  *   no services, no scripts, no updater/background/renderer egress, no model git, and no

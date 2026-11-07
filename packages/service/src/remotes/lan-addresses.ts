@@ -1,6 +1,6 @@
 /**
  * The addresses another device on the network can use to reach this one.
- * Shown in Settings → Remote Servers ("other devices connect at …") and
+ * Shown in Settings → Remote servers ("other devices connect at …") and
  * advertised as A records by the LAN discovery responder.
  *
  * IPv4 only: pairing accepts an IP literal, and a bracketed IPv6 origin is

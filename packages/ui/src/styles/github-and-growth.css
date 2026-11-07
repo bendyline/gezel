@@ -26,7 +26,7 @@
   border: 1px solid var(--warning);
   border-radius: var(--radius-md);
   margin-bottom: 0.5rem;
-  font-size: 0.88rem;
+  font-size: var(--text-md);
 }
 
 .gh-banner-nudge {
@@ -38,7 +38,7 @@
   border: 1px solid var(--success);
   border-radius: var(--radius-md);
   margin-bottom: 0.5rem;
-  font-size: 0.88rem;
+  font-size: var(--text-md);
 }
 
 .gh-banner-nudge .gh-banner-dismiss {
@@ -47,7 +47,7 @@
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .gh-clone-state {
@@ -66,7 +66,7 @@
   border-radius: var(--radius-sm);
   background: var(--accent);
   color: #fff;
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   line-height: 1.4;
   font-variant-numeric: tabular-nums;
 }
@@ -104,7 +104,7 @@
   color: var(--text-muted);
   cursor: pointer;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
 }
 
 .gh-changes-discard-all:hover:not(:disabled) {
@@ -152,7 +152,7 @@
   text-align: left;
   cursor: pointer;
   font: inherit;
-  font-size: 0.84rem;
+  font-size: var(--text-sm);
 }
 
 .gh-change-kind {
@@ -162,8 +162,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 4px;
-  font-size: 0.68rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-2xs);
   font-weight: 700;
 }
 
@@ -203,7 +203,7 @@
 .gh-change-dir {
   margin-left: 0.4rem;
   color: var(--text-muted);
-  font-size: 0.74rem;
+  font-size: var(--text-xs);
 }
 
 .gh-change-counts {
@@ -233,7 +233,7 @@
   color: var(--text-muted);
   cursor: pointer;
   opacity: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .gh-changes-list li:hover .gh-change-discard,
@@ -269,7 +269,7 @@
   min-height: 3.2em;
   max-height: 9em;
   font: inherit;
-  font-size: 0.84rem;
+  font-size: var(--text-sm);
   padding: 0.4rem 1.9rem 0.4rem 0.5rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -294,7 +294,7 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 0.9rem;
+  font-size: var(--text-md);
   opacity: 0.7;
 }
 
@@ -357,7 +357,7 @@
 }
 
 .gh-changes-empty-title {
-  font-size: 1.1rem;
+  font-size: var(--text-xl);
   font-weight: 600;
   color: var(--success-text);
 }
@@ -365,7 +365,7 @@
 /* The diff renderer itself. */
 .git-diff {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   line-height: 1.45;
 }
 
@@ -376,7 +376,7 @@
 .git-diff-note {
   padding: 0.4rem 0.7rem;
   font-family: var(--font-ui, inherit);
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
 }
@@ -433,7 +433,7 @@
   padding: 0.25rem 0.7rem;
   text-align: center;
   color: var(--diff-sep);
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   background: var(--diff-surface);
   user-select: none;
 }
@@ -454,7 +454,7 @@
   color: var(--text);
   cursor: pointer;
   font: inherit;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   padding: 0.15rem 0.6rem;
 }
 
@@ -480,7 +480,7 @@
 
 .gh-conflicts-header p {
   margin: 0;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .gh-conflicts-body {
@@ -510,7 +510,7 @@
   text-align: left;
   cursor: pointer;
   font: inherit;
-  font-size: 0.84rem;
+  font-size: var(--text-sm);
 }
 
 .gh-conflicts-rail-item.is-selected {
@@ -569,7 +569,7 @@
   border: 1px solid var(--diff-border);
   border-radius: var(--radius-sm);
   padding: 0.5rem;
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -591,7 +591,7 @@
   color: var(--accent-text);
   cursor: pointer;
   font: inherit;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   padding: 0.4rem 0.9rem;
 }
 
@@ -607,7 +607,7 @@
   width: 100%;
   min-height: 14rem;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 0.76rem;
+  font-size: var(--text-xs);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--bg);
@@ -677,7 +677,7 @@
   text-align: left;
   cursor: pointer;
   font: inherit;
-  font-size: 0.84rem;
+  font-size: var(--text-sm);
 }
 
 .gh-timeline-item.is-selected {
@@ -697,7 +697,7 @@
   color: var(--accent-text);
   cursor: pointer;
   font: inherit;
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
 }
 
 .gh-timeline-detail {
@@ -845,7 +845,7 @@
   flex: 0 0 auto;
   padding: 0.05rem 0.4rem;
   border-radius: var(--radius-sm);
-  font-size: 0.68rem;
+  font-size: var(--text-2xs);
   border: 1px solid var(--border);
   color: var(--text-muted);
   background: var(--surface);
@@ -930,7 +930,7 @@
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text-muted);
-  font-size: 0.68rem;
+  font-size: var(--text-2xs);
   font-weight: 600;
   line-height: 1.4;
   white-space: nowrap;
@@ -971,7 +971,7 @@
 
 .growth-panel h5 {
   margin: 0 0 0.4rem;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
@@ -985,9 +985,9 @@
   gap: 0.75rem;
   padding: 0.5rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .growth-header {
@@ -1037,7 +1037,7 @@
   align-items: center;
   padding: 0.6rem 0.4rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   cursor: help;
 }
@@ -1048,39 +1048,39 @@
 }
 
 .growth-counter-label {
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   color: var(--text-muted);
 }
 
 .growth-empty {
   max-width: 480px;
   color: var(--text-muted);
-  font-size: 0.9rem;
+  font-size: var(--text-md);
 }
 
 .growth-trait-ghost {
   margin-top: 0.5rem;
   padding: 0.6rem 0.9rem;
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   text-align: center;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   opacity: 0.7;
 }
 
 .growth-drift-warning {
   margin: 0;
   padding: 0.5rem 0.75rem;
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--warning-bg);
   color: var(--warning-text);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   max-width: 560px;
 }
 
 .growth-trait {
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 0.45rem 0.7rem;
   margin-bottom: 0.45rem;
   background: var(--surface);
@@ -1101,7 +1101,7 @@
   border-left: 3px solid var(--accent);
   background: var(--bg);
   border-radius: 0 6px 6px 0;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
 }
 
 .growth-trait-evidence footer {
@@ -1120,7 +1120,7 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   color: var(--text-muted);
 }
 
@@ -1139,7 +1139,7 @@
 
 .growth-levelup {
   border: 1px solid var(--accent);
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   padding: 0.9rem 1rem;
   background: var(--surface);
 }
@@ -1164,7 +1164,7 @@
   gap: 0.45rem;
   padding: 0.7rem 0.8rem;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   background: var(--bg);
 }
 
@@ -1181,7 +1181,7 @@
   padding: 0.02rem 0.45rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  font-size: 0.68rem;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);

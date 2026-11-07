@@ -83,6 +83,11 @@
   padding-inline: 10px;
 }
 
+/* A finger needs more rail to take hold of than a pointer does. */
+.app.app-compact .home-workshop {
+  --home-sheet-rail-h: 28px;
+}
+
 /* A collapsed band's chips wrap below the tabs, so they carry the bottom
    inset the tab row gives up to stand on the seam. */
 .app.app-compact .home-workshop-collapsed-chips {

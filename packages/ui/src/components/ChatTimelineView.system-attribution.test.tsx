@@ -45,7 +45,7 @@ function renderSticky(userMsg: TimelineMessage, gezels?: Map<string, GezelSummar
 /**
  * The sticky context header is the second surface that names a message's
  * author, so it has to reach the same verdict as the bubble — otherwise
- * scrolling a task thread flips the attribution from System back to YOU.
+ * scrolling a task thread flips the attribution from System back to You.
  */
 describe('ChatStickyHeader author attribution', () => {
   it('names the machinery when the pinned message is a dispatch seed', () => {
@@ -55,15 +55,15 @@ describe('ChatStickyHeader author attribution', () => {
         content: 'The previous step has been completed and handed step `oversight` to you.',
       }),
     );
-    expect(screen.getByText('SYSTEM')).toBeInTheDocument();
-    expect(screen.queryByText('YOU')).toBeNull();
+    expect(screen.getByText('System')).toBeInTheDocument();
+    expect(screen.queryByText('You')).toBeNull();
   });
 
   /**
    * A dispatch seed the card parser recognises gets the same condensed line
    * the bubble shows. The old header pinned the raw paragraph, which the
    * one-line clamp cut mid-word ("Follow the step instructions already in
-   * your prompt — m…") under a SYSTEM tag.
+   * your prompt — m…") under a System tag.
    */
   it('condenses a recognised hand-off to its one sentence', () => {
     renderSticky(
@@ -75,14 +75,14 @@ describe('ChatStickyHeader author attribution', () => {
       new Map([['g1', { id: 'g1', name: 'Koray' } as GezelSummary]]),
     );
 
-    expect(screen.getByText('HAND-OFF')).toBeInTheDocument();
+    expect(screen.getByText('Hand-off')).toBeInTheDocument();
     expect(screen.getByText('Liesel passed the review step to Koray.')).toBeInTheDocument();
-    expect(screen.queryByText('YOU')).toBeNull();
+    expect(screen.queryByText('You')).toBeNull();
   });
 
   it('still names the user for a message they actually typed', () => {
     renderSticky(message({ content: 'ship it' }));
-    expect(screen.getByText('YOU')).toBeInTheDocument();
-    expect(screen.queryByText('SYSTEM')).toBeNull();
+    expect(screen.getByText('You')).toBeInTheDocument();
+    expect(screen.queryByText('System')).toBeNull();
   });
 });

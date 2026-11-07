@@ -11,9 +11,12 @@ import {
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { SettingCheck, SettingsSection } from '../components/SettingsSection.js';
 import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 // Shared with the first-run picker so the posture copy never drifts.
 import { SECURITY_LEVEL_PRESETS as LEVELS } from '../security-levels.js';
+
+const SAVED_STATUS = 'Saved. Open chats restart on their next message.';
 
 /** The capability toggles, in display order. */
 const TOGGLES: ReadonlyArray<{
@@ -58,6 +61,11 @@ const TOGGLES: ReadonlyArray<{
   },
 ];
 
+/**
+ * Settings → Security & compliance: the security level as a described tray,
+ * then each capability it sets. The `engagement-mode-<level>` class lets the
+ * spectrum's ends recolor their latch (sealed green, open amber).
+ */
 export function SecurityComplianceSettings({
   config,
   onConfigChanged,
@@ -81,14 +89,14 @@ export function SecurityComplianceSettings({
 
   const persist = useCallback(
     async (next: ConfigResponse['securityPolicy']) => {
-      setStatus('saving…');
+      setStatus('Saving…');
       try {
         const res = await api.updateConfig({ securityPolicy: next });
         onConfigChanged(res);
         window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-        setStatus('saved — open chats restart on their next message.');
+        setStatus(SAVED_STATUS);
       } catch (err) {
-        setStatus(`save failed: ${(err as Error).message}`);
+        setStatus(`Could not save: ${(err as Error).message}`);
       }
     },
     [onConfigChanged],
@@ -109,107 +117,91 @@ export function SecurityComplianceSettings({
     [caps, persist],
   );
 
+  const preset = LEVELS.find((l) => l.id === level);
+
   return (
-    <section className={`engagement-mode-panel engagement-mode-${level}`}>
-      <h3>Security &amp; Compliance</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        One control over what crew members are allowed to do — edits, cloud providers, the open web,
-        and script execution. Slide toward lockdown to make Gezel safe to try; loosen it as you
-        build trust. Locked-down work still flows into the artifacts sandbox, so reviews,
-        prototypes, and documents keep working.
-      </p>
-      <p className="muted small" style={{ marginTop: '-0.35rem' }}>
-        Changing the posture restarts open chat sessions so crew members pick up the new rules on
-        their next message. A gezel that is answering right now finishes that answer first.
-      </p>
-
-      <div
-        className="engagement-mode-switch gz-tray gz-tray--described"
-        role="radiogroup"
-        onKeyDown={onRadioKeyDown}
-        aria-label="Security posture"
+    <>
+      <SettingsSection
+        id="settings-security-level"
+        className={`engagement-mode-${level}`}
+        title="Security level"
+        hint="One control over what crew members may do: edit files, use cloud providers, reach the open web, and run scripts. Lock it down to try Gezel safely, and loosen it as you build trust."
       >
-        {LEVELS.map((l) => (
-          <button
-            key={l.id}
-            type="button"
-            // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
-            role="radio"
-            aria-checked={level === l.id}
-            tabIndex={level === l.id || (level === 'custom' && l === LEVELS[0]) ? 0 : -1}
-            className={`gz-key${level === l.id ? ' gz-key-active' : ''}`}
-            onClick={() => selectLevel(l.id)}
+        <div>
+          <div
+            className="gz-tray gz-tray--described"
+            role="radiogroup"
+            onKeyDown={onRadioKeyDown}
+            aria-label="Security posture"
           >
-            {l.label}
-          </button>
-        ))}
-        {level === 'custom' && (
-          <button
-            type="button"
-            // biome-ignore lint/a11y/useSemanticElements: the latched member of the radiogroup, reporting a derived state; inert by design.
-            role="radio"
-            aria-checked
-            className="gz-key gz-key-active gz-key-state"
-            disabled
-          >
-            Custom
-          </button>
-        )}
-      </div>
-      <p className="engagement-mode-description gz-tray-description" aria-live="polite">
-        {level === 'custom' ? (
-          <>
-            <strong>Custom</strong> — individual capabilities below differ from the presets.
-          </>
-        ) : (
-          <>
-            <strong>{LEVELS.find((l) => l.id === level)?.label}</strong> —{' '}
-            {LEVELS.find((l) => l.id === level)?.description ?? ''}
-          </>
-        )}
-      </p>
-
-      <div className="workshop-tempo" style={{ marginTop: '1rem' }}>
-        <h4 className="workshop-tempo-heading">Advanced — individual capabilities</h4>
-        <p className="muted small" style={{ margin: '0 0 0.5rem' }}>
-          Changing any switch off-preset sets the level to “Custom”.
+            {LEVELS.map((l) => (
+              <button
+                key={l.id}
+                type="button"
+                // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of key buttons; a native <input type="radio"> can't carry the keys-in-trays treatment.
+                role="radio"
+                aria-checked={level === l.id}
+                tabIndex={level === l.id || (level === 'custom' && l === LEVELS[0]) ? 0 : -1}
+                className={`gz-key${level === l.id ? ' gz-key-active' : ''}`}
+                onClick={() => selectLevel(l.id)}
+              >
+                {l.label}
+              </button>
+            ))}
+            {level === 'custom' && (
+              <button
+                type="button"
+                // biome-ignore lint/a11y/useSemanticElements: the latched member of the radiogroup, reporting a derived state; inert by design.
+                role="radio"
+                aria-checked
+                className="gz-key gz-key-active gz-key-state"
+                disabled
+              >
+                Custom
+              </button>
+            )}
+          </div>
+          <p className="gz-tray-description" aria-live="polite">
+            {level === 'custom' ? (
+              <>
+                <strong>Custom</strong> — individual capabilities below differ from the presets.
+              </>
+            ) : (
+              <>
+                <strong>{preset?.label}</strong> — {preset?.description ?? ''}
+              </>
+            )}
+          </p>
+        </div>
+        <p className="gz-setting-hint">
+          Locked-down work still flows into the artifacts sandbox, so reviews, prototypes, and
+          documents keep working. Changing the level restarts open chats so crew members pick up the
+          new rules on their next message; a gezel answering right now finishes that answer first.
         </p>
+      </SettingsSection>
+
+      <SettingsSection
+        id="settings-security-capabilities"
+        title="Individual capabilities"
+        hint="Changing a switch away from its level's setting makes the level Custom."
+      >
         {TOGGLES.map((t) => (
-          <label
+          <SettingCheck
             key={t.key}
-            className="debug-toggle"
-            style={{
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '0.5rem',
-              marginTop: '0.6rem',
-            }}
-          >
-            <input
-              type="checkbox"
-              checked={caps[t.key]}
-              onChange={(e) => toggle(t.key, e.target.checked)}
-            />
-            <span>
-              <strong>{t.label}</strong>
-              <br />
-              <span className="muted small">{t.help}</span>
-            </span>
-          </label>
+            label={t.label}
+            hint={t.help}
+            checked={caps[t.key]}
+            onChange={(checked) => toggle(t.key, checked)}
+          />
         ))}
         <WindowsSandboxSetting
           config={config}
           onConfigChanged={onConfigChanged}
           onStatus={setStatus}
         />
-      </div>
-
-      {status && (
-        <p className="muted" style={{ marginTop: '0.75rem' }}>
-          {status}
-        </p>
-      )}
-    </section>
+        {status && <output className="gz-setting-hint">{status}</output>}
+      </SettingsSection>
+    </>
   );
 }
 
@@ -266,37 +258,31 @@ function WindowsSandboxSetting({
   const enabled = config?.scriptSandbox?.windowsContainer !== false;
 
   const save = async (next: boolean) => {
-    onStatus('saving…');
+    onStatus('Saving…');
     try {
       const res = await api.updateConfig({ scriptSandbox: { windowsContainer: next } });
       onConfigChanged(res);
       window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
-      onStatus('saved — open chats restart on their next message.');
+      onStatus(SAVED_STATUS);
       await refresh();
     } catch (err) {
-      onStatus(`save failed: ${(err as Error).message}`);
+      onStatus(`Could not save: ${(err as Error).message}`);
     }
   };
 
   return (
-    <label
-      className="debug-toggle"
-      style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginTop: '0.6rem' }}
-    >
-      <input type="checkbox" checked={enabled} onChange={(e) => void save(e.target.checked)} />
-      <span>
-        <strong>Windows sandbox</strong>
-        <br />
-        <span className="muted small">
+    <SettingCheck
+      label="Windows sandbox"
+      hint={
+        <>
           Run the scripts crew members write inside Windows&rsquo; process container, which limits
           them to their project folder and blocks the network for scripts that shouldn&rsquo;t use
-          it. Off, those scripts don&rsquo;t run.
-        </span>
-        <br />
-        <span className="muted small" aria-live="polite">
-          {describeScriptSandbox(sandbox)}
-        </span>
-      </span>
-    </label>
+          it. Off, those scripts don&rsquo;t run.{' '}
+          <span aria-live="polite">{describeScriptSandbox(sandbox)}</span>
+        </>
+      }
+      checked={enabled}
+      onChange={(checked) => void save(checked)}
+    />
   );
 }

@@ -511,7 +511,7 @@ export interface ConfigResponse {
   tavilyApiKey?: string;
   hasTavilyApiKey: boolean;
   /**
-   * Centralized security & compliance posture (the Security & Compliance
+   * Centralized security & compliance posture (the Security & compliance
    * panel + first-run slider). Absent → the app treats the install as the
    * `free` posture. See `SecurityPolicy` / `resolveSecurityPolicy`.
    */

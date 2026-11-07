@@ -483,7 +483,7 @@ export function ActivityControl() {
                               (item.taskRef || item.sessionId) ? (
                               <button
                                 type="button"
-                                className="btn secondary"
+                                className="gz-link-button"
                                 onClick={() => void openItem(item)}
                               >
                                 {item.taskRef ? 'View task details' : 'Open chat'}

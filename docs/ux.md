@@ -83,6 +83,38 @@ pacing of a transition. If a first-time user can't quite put a finger on
   window controls, the window background and the splash paint that color
   outside the renderer (`BRAND_SAGE` in the Electron main process), so any
   other tone shows as a seam at the controls.
+
+  **Dark mode is walnut, not slate.** The dark blocks in foundation.css
+  re-author the `--gezel-paper-*` and `--gezel-ink*` primitives on one warm
+  hue (red highest, blue lowest): canvas `#191512`, workshop `#201b17`, panel
+  `#221d19`, inset `#29231e`. Trays sit below the canvas and key faces above
+  the inset, each step a few hundredths of OKLCH lightness apart. Text is the
+  titlebar's cream (`--gezel-cream-ink`), muted text `#ada396`; dark chrome
+  has no neutral white or gray. Home's dusk tokens derive from the same
+  primitives, so Home and the rail share one temperature. The cool gray ramp
+  this replaced put a warm Home beside a slate sidebar.
+
+  **Emphasis points the same way in both themes.** Filled actions
+  (`--action-bg`) and latched keys (`--key-pressed-bg`) are the day's deep
+  terracotta with cream ink at night too, so pressed reads deeper, never
+  paler; a pale-peach latch made the selected thing the brightest object on a
+  dark screen. The structural `--accent` lifts to `#c0875d` at night for
+  rings, dots and accent-colored labels, and its fills carry dark ink. A rule
+  that paints cream on any fill other than the action or pressed pair checks
+  its dark contrast. Monaco themes and Squisq reading surfaces cannot read CSS
+  variables and repeat the panel and inset hexes (`monaco-base.ts`,
+  `terminal-monaco-setup.ts`, `transform/surfaces.ts`). The titlebar stays
+  `BRAND_SAGE` in both themes until the Electron main process repaints its
+  overlay on theme change.
+
+  **Spend the accent once per view.** One filled primary per view, reserved
+  for create or commit. The bare `button` face is that filled primary, so a
+  routine action (Refresh, Cancel, Back) takes `.secondary`, or is a link or
+  an icon key. Accent ink is for links and the one primary; a placeholder, a
+  selected tile or a label that wears the accent reads as a link or a
+  warning. The chat composer's placeholder is `--text-muted`, and a selected
+  thread tile in the chat strip sits pressed on its own paper with an accent
+  edge rather than the full latched fill.
 - **Motion** is slow-ish and soft: ~120–160ms ease-out for overlay and
   dialog in/out. Nothing snaps or bounces. See the `gz-overlay` /
   `gz-dialog` keyframes for the canonical cadence; match it elsewhere.
@@ -99,7 +131,19 @@ pacing of a transition. If a first-time user can't quite put a finger on
   buttons — a capsule-shaped *control* is a bug, not a variant; if a
   capsule needs a click handler, it's a key or a small-radius chip
   (`.license-button` is the reference: shares the badge recipe but keeps
-  the small radius because it's a link).
+  the small radius because it's a link). A radius that nears half the
+  element's height is a capsule too: 10px on a 23px chip read as one.
+
+  **One badge family.** A status or kind badge is the `.gz-status-pill`
+  capsule at `--text-2xs`, weight 500, in sentence case, in one of a few
+  tones: neutral (muted ink on a faint wash), ok (`--sage-ink` on sage), warn,
+  info. Kind badges (`.task-badge`: local, bundled, template…) and step
+  states (`.step-status-pill`: Entry) use the same recipe. Never give a badge
+  its own hue per kind, never uppercase it, and never draw it as an
+  outlined rectangle beside capsules. The rubber-stamp "Soon" mark on catalog
+  cards (`.gz-npd-card-badge`) is the one deliberate exception, and only for
+  something not yet available. Keyword tags (a model card's `agentic`,
+  `tools`) are metadata, not status: small-radius chips (`--radius-sm`).
 - **Typography** is a two-font system — **Hanken Grotesk** (sans) for all
   UI chrome and **PT Serif** (serif) for the editorial register. Both are
   bundled woff2 (no CDN). The rules and the shared size scale live in
@@ -261,8 +305,13 @@ Rules:
   copy leads with the latched option's name —
   `<strong>{label}</strong> — description`. The description is a readout of
   the tray, so it sits directly beneath with the recipe's 0.5rem gap; don't
-  wedge other content between them. The Security & Compliance posture
-  switch in Settings is the reference implementation.
+  wedge other content between them. The Security & compliance level
+  switch in Settings is the reference implementation. Set
+  `gz-tray--described` only when the readout renders: a described tray with
+  no readout drops its stem into whatever follows (it did, under the
+  generalist-mode switch), and `styles/described-trays.test.ts` fails on
+  one.
+- **Stacked keys (`.gz-key--stacked`) carry a label and a hint:** the
   label on top, a smaller muted hint beneath, left-aligned, wrapping
   allowed. Put the two lines in `.gz-key-label` and `.gz-key-hint` — the
   recipe styles both, so a new surface never needs its own pair (the
@@ -457,8 +506,14 @@ The contract:
 
 A page of settings is something a person scans for one thing, so its shape
 has to say where that thing is before they read a word. A project's Settings
-tab is the reference implementation. App Settings panels move to the same
-pieces when they are next touched (Settings → About you already uses them).
+tab is the reference implementation, and most app Settings pages use the
+same pieces: General, Device integration, Your team, About you, Folders,
+Security & compliance, Accounts, Artificial intelligence and its
+cloud-provider pages, Web search, Shared toolsets and About. The engine,
+workload, Integrations, Remote servers, Knowledge, Channels and Benchmarks
+pages still draw their own panels and move over when they are next touched.
+Before the move, three neighboring pages were drawn three ways: one big
+bordered card, half boxed, and unboxed, at two different widths.
 The pieces live in
 [components/SettingsSection.tsx](../packages/ui/src/components/SettingsSection.tsx)
 (`SettingsSection`, `SettingField`, `SettingCheck`). The one CSS recipe is the
@@ -524,6 +579,34 @@ Don't restyle a settings page per surface; extend the recipe and this section.
 - **The lifecycle action comes last.** Archive (or Restore) is its own
   final section: a heading, what it does, and one key. It never sits
   between ordinary preferences.
+- **A whole-section action goes in `actions`.** Reset gezel templates and
+  Uninstall sit at the right of their heading row, like Archive.
+- **Name sections in sentence case.** The nav and every section heading:
+  "Your team", "Security & compliance", "Artificial intelligence". Proper
+  names keep their capitals (GitHub Copilot, OpenAI, Anthropic Claude,
+  Night Shift).
+- **A crew role is one control.** Meester, Scribe, Librarian and Inspector
+  are each a label, a picker that names the holder, and a hint
+  (`RoleAssignmentField`). Never put a card of the holder above a "Change …
+  to" select; the picker already says who it is.
+- **Controls keep their own width.** A tray, provider switch or lone key
+  placed directly in a field or a section body sits at its natural width;
+  only layout wrappers fill. A checkbox-card grid is one field and shares
+  the 48rem measure, and inside a section hints and tray readouts use 48rem
+  too, so a hint, its field and a readout end at one edge.
+- **A described tray in a section is one unit.** Wrap the tray and its
+  readout in a plain element so no flex gap or paragraph margin comes
+  between them. Inside a section the readout is muted and margin-free.
+- **Smaller pieces of the recipe.** `.gz-setting-inline` for a control
+  inside a sentence ("Keep sent drafts for [90] days"). `.gz-setting-stack`
+  for a wrapper holding several settings; it keeps the body's 1.5rem rhythm.
+  `.gz-setting-panel` for a box you act on as a unit (a consent step, a
+  new-gezel form). `.gz-setting-more` for an Advanced disclosure at the end
+  of a section. `.gz-setting-steps` for numbered setup steps. `SettingField`
+  takes `className`; `SettingCheck` takes `aside`, a small decorative figure
+  at the row's end.
+- **Save messages are sentences.** "Generalist mode is Automatic. On for
+  cloud providers…", never "generalist mode ON".
 
 ## Typography
 
@@ -592,16 +675,76 @@ panel look "off"):
 
 | Token        | Size            | Use                                            |
 | ------------ | --------------- | ---------------------------------------------- |
-| `--text-2xs` | 0.72rem (~11.5px) | Badges, pills, uppercase eyebrow labels      |
-| `--text-xs`  | 0.8rem (~12.8px)  | Helper / caption text                        |
+| `--text-2xs` | 0.72rem (~11.5px) | Badges, pills                                |
+| `--text-xs`  | 0.8rem (~12.8px)  | Helper / caption text, section labels        |
 | `--text-sm`  | 0.85rem (~13.6px) | Dense controls, secondary body copy          |
 | `--text-md`  | 0.9rem (~14.4px)  | Default UI body                              |
 | `--text-lg`  | 1rem (16px)       | Emphasized body, dialog/panel sub-headings   |
 | `--text-xl`  | 1.1rem (~17.6px)  | Panel & dialog section headings              |
+| `--text-title` | 1.35rem (~21.6px) | An open entity's title (a task, a craftbook) |
 
 Long-form editorial surfaces (chat, Home intro, markdown prose) are the
 deliberate exception — they set their own comfortable reading size (1rem+)
-and don't draw from this scale.
+and don't draw from this scale. Every form control without a size of its own
+gets `--text-sm` from the reset in foundation.css, so nothing falls back to
+the browser's 13.3px.
+
+**Section labels are sentence case.** Small labels over a group (Recent
+activity, Tip of the day, Chat thread, Librarian, the composer's To) are
+`--text-xs`, weight 600, `--text-muted`, in the case they are written in.
+Letter-spaced capitals are kept for three places only: the navigation
+rail's group headers, the category headers in the New Task and New Project
+rails, and the one dateline that opens Home (`.home-workshop-dateline`).
+When nine kinds of label all whispered in capitals, none of them marked a
+section, and a long one wrapped to leave one word alone on a line.
+
+**Names and roles are written one way.** A crew member and their role
+always render through `PersonLabel`
+([components/PersonLabel.tsx](../packages/ui/src/components/PersonLabel.tsx)):
+
+- **Inline**: "Ada Lovelace · Engineer". The name is in the surrounding ink,
+  then a middle dot, then the role in `--text-muted`. It never wraps; in a
+  tight row the role ellipsizes before the name, and a chat timeline under
+  560px drops the dot and role (the role stays in the name's hover text).
+- **Stacked**: the name above the role, the role muted and one step smaller
+  (set `--person-label-name-size` / `--person-label-role-size`).
+
+Names keep their own case: never uppercase or letter-space a name, speaker
+headers included ("You", "System", "Bastien"). Never put parentheses, quotes,
+hyphens or arrows around a name or role; there were seven formats before,
+from "Bastien -" to "→ Ada Lovelace (Engineer)". Roles are plain English:
+pass a stored role through `plainRoleTitle`. With gezel names hidden, the
+role-based name already says the role, so leave the role out. A face, where a
+surface shows one, leads the label as a `GezelIcon`. A mark that belongs to
+the person (the Meester's hat) sits right after the name, before the dot.
+Text that names a person outside a label, such as a History summary, uses
+the same shape: "Created Taemin · Generalist". `PersonLabel` imports only
+React, because the startup screen draws the Meester's caption with it.
+
+**Text fields share one face with selects.** Inputs and textareas take the
+zero-specificity recipe in
+[styles/primitives.css](../packages/ui/src/styles/primitives.css) ("Text
+fields"): `--bg` fill, a 1px `--border`, `--radius-md`, `--text-md`, the
+same padding and line height as `.gz-select-trigger`. A surface that styles
+its own fields still wins. Disabled is muted ink on the same face, never a
+third gray surface. Without it, the craftbook step form showed three field
+styles side by side: the browser's white box, a tan select and a gray
+disabled field. An editable title (a craftbook's name) reads as the title
+it is, in the title face and size, and shows its field on hover and focus.
+
+**Editor chrome is quiet.** Squisq's toolbars and status bars use
+`--font-ui` (bound through `--squisq-ux-font` in
+[styles/squisq-theme.css](../packages/ui/src/styles/squisq-theme.css)),
+and the status bar is a muted footer in the editor's own paper. It used to
+wear the titlebar green, which made word counts the heaviest marks on any
+page with an editor. A short field (a task's description, a note, a step's
+prompt) is a **compact editor**: wrap it in `.gz-compact-editor`. Its
+toolbar shows as faint marks until the editor has focus, and the word counts
+go (the footer keeps its right slot, such as autosave state). Nothing changes
+size on focus, so the page never jumps. `MarkdownField` is always compact.
+Sibling editors on one page share one frame and one left edge: the task
+view's Description and Notes are each a heading over one bordered editor,
+with no card around either.
 
 **Reference implementation:** the `.settings-panel` typography block in
 [styles/settings-and-status.css](../packages/ui/src/styles/settings-and-status.css)
@@ -635,6 +778,17 @@ side-by-side arrangement and the user's saved rail side and size. Switching
 width or opening navigation must preserve the current view, editor, and draft.
 `?layout=mobile` constrains the same app to a phone width for convenient desktop
 testing; it never switches to a second application or a different data store.
+
+**One navigation column at a time.** An area that brings its own list beside
+its content (Crew, Documents, Tasks, Craftbooks, Scripts, History, Settings,
+Handboek, Knowledge, Benchmarks: `LIST_AREAS` in
+[Sidebar.tsx](../packages/ui/src/components/Sidebar.tsx)) folds the wide
+rail to its icons on its own. With both open, the content sat between two
+lists, about 520px of a 1440px window. Leaving the area restores the rail
+the person had. Expanding the rail by hand in such an area pins it open
+there (`gezel:nav:sidebar-stay-open`), and collapsing it there hands it back
+to the automatic fold. The person's own collapse choice for the rest of the
+app is a separate setting that the fold never writes.
 
 The native shell shares the responsive frame, brand, navigation rows, project
 section tabs, character renderer, palette, typography, and controls. Its current
@@ -766,7 +920,16 @@ and each tile's accessible name still carries the full summary.
 On touch screens and windows up to 600px, where a message's action row sits
 in the flow instead of floating in the gutter, it shows only the debug-bundle
 key, and only while debug mode is on; Copy and Save stay desktop affordances.
-A narrow composer (under 480px) moves its thread bar into the editor toolbar
+Wider than that, the thread bar rides the To line: who and which
+conversation are one line of context ("To · Ada Lovelace · Engineer", then the
+thread picker taking what the recipient leaves), and it wraps to a full-width
+line of its own only when the row is full. As a second row it made four layers
+of chrome before the text box. The one exception is the project compose
+frame (`threadBarOwnRow`): its chat mode shares every band with the terminal,
+whose folder picker is a row of its own, and flipping modes must not move
+the frame, so the picker keeps its row there. The label reads "To", not
+"TO:", and the recipient is a `PersonLabel`. A narrow composer (under 480px) moves its thread
+bar into the editor toolbar
 beside the attach keys, as an icon-only picker plus the context meter. New
 thread and New draft are rows in that picker, which lists them at every width,
 so their separate keys drop out there. The picker takes the toolbar's key
@@ -873,8 +1036,8 @@ and the meester's lines in the chat register (serif body). Rules:
   no preference switches, no media downloads. The security posture, names
   and poppetjes, the relevance check and social mode keep their first-run
   defaults; one `--text-xs` line says what that means and links to Settings
-  → Security & Compliance ("Change what I'm allowed to do"). Optional media
-  models live in Settings → Artificial Intelligence.
+  → Security & compliance ("Change what I'm allowed to do"). Optional media
+  models live in Settings → Artificial intelligence.
 - **One surface per message.** While the tools arrive, progress is one
   quiet line under the meester (a thin bar, then "Fetching my tools · 42% ·
   about 3 min left"), not a banner. The composer is open for a draft with
@@ -1088,21 +1251,31 @@ tab. Selecting the tab whose panel is open rolls the intro up, like the chevron.
 A collapsed intro shows no tab as selected, since no panel is showing.
 The intro is a pull-down shade, so its tabs are connected tabs (see
 [Patterns](#patterns)): the tab row is a rail one step darker than the paper
-(`--home-rail`), the open tab takes the sheet's paper, keeps a 2px accent on
-its top edge and erases the seam under it, and the sheet ends in a hem of the
-same rail tone that rides up with it when it rolls. Unselected tabs carry no
+(`--home-rail`), the open tab takes the sheet's paper and erases the seam
+under it, and the sheet ends in a bottom rail of the same tone that rides up
+with it when it rolls. The rail is the shade's pull bar: the whole width is
+one key that rolls the intro up, with a small pull in its middle that lifts
+on hover. It is 20px tall, 28px on a phone. It can also be pulled: the sheet
+follows the pointer, and letting go once it has risen a quarter of the
+sheet's height (at least 48px) rolls the rest of the way up; short of that it
+drops back open. Unselected tabs carry no
 chrome until hovered. Unlike dense project tab rows, this small set never
 drops labels at narrow widths, and it never wraps onto a second row either: a
 tab on an upper row would have no seam to join. A long label breaks inside
 its own tab instead. The date belongs inside the greeting tab, not in
 a tab label. The header stays
 above the conversation. When open, its content overlays 90% of the chat area's
-height, with a shadow over the exposed chat strip below. The conversation keeps
-its full layout and draft behind the sheet. Clicking the exposed strip rolls
-the sheet up to the tab bar and returns focus to chat; that click never activates
-a chat control underneath. Escape does the same. The roll takes 160ms and skips
-motion when reduced motion is requested. Tab content scrolls inside the sheet;
-The Create tab uses the full content width without the figure.
+height, the same height the startup screen draws, so the handover never
+jumps. The strip below it is a plain invitation in the paper ("Write to
+Florian"), laid over the conversation and its composer: as a gray shade over
+the composer itself it sliced the placeholder through its letters, and the
+front door read as disabled and broken. The conversation keeps its full
+layout and draft behind the sheet. Clicking the strip rolls the sheet up to
+the tab bar and puts the caret in the composer; that click never activates a
+chat control underneath. Escape rolls it up and returns focus to chat. The
+roll takes 160ms and skips motion when reduced motion is requested. Tab
+content scrolls inside the sheet; The Create tab uses the full content width
+without the figure.
 
 Home's **Create** tab offers six broad starting points: Research
 report, Word document, Slide deck, PDF report, Website, and Animated slideshow.
@@ -1301,9 +1474,14 @@ paper: **Needs you** is blush, **Working** and **Next** share one honey zone
 (joined into a single card with a dashed hairline when both hold work), and
 **Ready** is sage, the workshop's green rather than `--success` mint. A small
 indicator light leads each heading and each section key, and is lit only when
-that section holds something. An empty section drops its wash for a faint
-outline and an unlit ring, so color on the panel always means something to
-read. Working's light breathes like the titlebar dot. Inside a lit zone, insets
+that section holds something. An empty section is one quiet line with no
+outline, its heading and its note ("Nothing needs your attention.") side by
+side: two empty boxes once stood between the person and the first thing with
+work in it, repeating counts the section keys already show. So color on the
+panel always means something to read. **View task details** on a work row
+is a quiet text link (`.gz-link-button`); as an outlined button it repeated
+down the list and out-drew the work it opens. Working's light breathes like
+the titlebar dot. Inside a lit zone, insets
 (keys, context strips, report rows) take a paler tint of the zone instead of the
 panel's tan, and a question card's border takes the zone's tone, so a finished
 report is never edged in the terracotta that asks for a decision. The tones are
@@ -1356,9 +1534,10 @@ composer's `@ Chat` / `> Terminal` switch, which replaces the whole compose
 stack under it — use the connected treatment: top-rounded corners only, the
 tab hanging off the bottom edge of its host row onto a seam, and the
 selected tab erasing the pixel of seam it stands on so tab and panel read as
-one surface. Selection is carried by that break plus a 2px accent bar on the
-tab's top edge; a latched key fill defeats the whole effect, because the
-panel the tab merges into is not tinted. Unselected tabs stay recessed
+one surface. Selection is carried by that break alone. No accent stripe on
+the tab's top edge: it reads as generic generated UI, and the join already
+says which tab is open. A latched key fill defeats the whole effect, because
+the panel the tab merges into is not tinted. Unselected tabs stay recessed
 (`--tray-bg`) and keep all four edges. The seam is not optional — fill alone
 cannot join anything when the tab's own row and the band below share a
 background, which is how the first attempt read as a chip parked in the
@@ -1422,7 +1601,7 @@ debug mode shows everything. The bakery's Overview had opened on eight rows
 of tool calls and prompt sizes.
 
 **Settings shows the developer areas an install uses.** Ollama, the OpenAI
-Codex and Anthropic Claude CLIs, Remote Servers and Shared Toolsets are listed
+Codex and Anthropic Claude CLIs, Remote servers and Shared Toolsets are listed
 in debug mode, or once this install uses them: the provider is the default,
 the night shift's, has a default model or saved settings; a server is paired
 or this device shares its models; a shared toolset is installed. Nobody loses
@@ -1912,11 +2091,16 @@ the card and its actions on
 the left, the whole document as a portrait page on the right, scrolling in
 place. `.pending-question-splitwrap` is a named `question-card` query
 container, so the same card falls back to one column in a narrow chat
-bubble and the panel keeps its own scroll there. Two rules travel with the
+bubble and the panel keeps its own scroll there. Three rules travel with the
 pattern: the document's own `#`/`##` headings are pulled back to panel
-scale (a report title must not out-shout the question it belongs to), and
-an *answered* card — which collapses to one line — stays single-column,
-because a full-height panel beside one sentence reads as broken.
+scale (a report title must not out-shout the question it belongs to); an
+*answered* card — which collapses to one line — stays single-column,
+because a full-height panel beside one sentence reads as broken; and the
+page fills its frame. Squisq paints its own reading surface, so the page
+reaches the frame's edges under the header row (`Artifact · name · Open`)
+and keeps its margins inside, never as frame padding that shows tan bands
+beside the page. The same holds for the previews in the context strip and
+the draft plan card.
 
 **A question card has one filled action.** Submit is terracotta; Skip,
 Open in chat and Pause task take the secondary face
@@ -2250,7 +2434,7 @@ rail's Task pane where the surface has one, the full task tab otherwise.
 And the one live element, the External-services nudge on start cards
 ("works better with External services — it still runs without it"), reflects
 the *current* security policy: it hides the moment the capability is on,
-and its action **deep-links to Settings → Security & Compliance** — a
+and its action **deep-links to Settings → Security & compliance** — a
 security switch is never flipped from inside chat.
 
 **One card per task per conversation.** A model that re-invokes a plan it
@@ -2328,8 +2512,11 @@ plain text, because a link to nothing is worse than no link.
 
 **A reply's machinery waits behind Details.** Outside debug mode, the step
 count, step timings, thinking and attempted-call expanders do not head a
-reply: the reply's action row carries a **Details** key that shows them, and
-**Hide details** puts them back. What the person needs stays in view without
+reply: the reply's action row carries a **Details** key that shows them and
+stays accent-tinted until it puts them back. The row's keys are icons with their
+words in the tooltip and the accessible name: Copy (two squares), Details (a
+list of steps), Save (a floppy disk), and, once saved, Open (the artifacts
+drawer, where the reply went). What the person needs stays in view without
 the key: media, cards, and a failure the turn never recovered from. Debug
 mode shows everything, as before, and open conversations follow the switch
 at once rather than when they are next opened. A task's id (`lisbon-trip-planning/1`) is
@@ -2352,8 +2539,8 @@ written ("Writing file…"; a tool with no curated label reads "Working…",
 never its slug). Cards, media and an unrecovered failure sit above the
 body, where the finished reply keeps them, so nothing moves when the turn
 commits. A failure whose reason is a machine payload (a JSON envelope, a
-stack trace) reads "didn't finish. Details has the full response." The raw
-text stays behind Details. Audio a folded reply produced joins its media
+stack trace) reads "didn't finish. The steps have the full response." The
+raw text stays behind Details. Audio a folded reply produced joins its media
 strip, so hiding the steps never hides a recording.
 
 **A thread is titled from the sentence.** A thread's title is the person's
@@ -2420,7 +2607,14 @@ element, so the caller's size, radius and clipping still apply, and an older
 opaque mark simply covers it. Marks must stay recognizable in the 44px gallery
 crop. Catalog image renderers must replace missing or failed assets with the
 surface's category glyph or initial; never expose the browser's native
-broken-image placeholder.
+broken-image placeholder. In a card grid, an item with no mark of its own
+(a built-in card, a type Gilde ships without art) paints its glyph in cream
+on its category's ground, through `catalogMarkProps` in
+[CatalogArtwork.tsx](../packages/ui/src/components/CatalogArtwork.tsx), so the
+grid stays one family of full-bleed painted squares. A pale tile with a thin
+terracotta line icon beside the painted marks read as two products in one
+row. Each rail shelf keeps its own glyph; three shelves sharing the sprout
+made the rail's icons say nothing.
 
 **Knowledge catalog artwork: Reference Marks.** Knowledge catalogs get the
 Workshop Marks' sibling: the same cut-paper construction, built as a single
@@ -2910,7 +3104,7 @@ paired servers, and project connections share `.settings-list` with
 `.connected-app-row` rows: a bordered `--radius-md` row naming the thing on the
 left (`.connected-app-name` over a muted detail line) and its actions on the
 right, wrapping under it when narrow. A bare `<ul>` in a settings panel renders
-browser bullets and strands its buttons on their own line — Remote Servers
+browser bullets and strands its buttons on their own line — Remote servers
 shipped that way. Facts about the install (About → Version) use
 `.settings-facts`: muted label, value beside it.
 
@@ -2933,7 +3127,7 @@ a reply that ran on the fallback carries one line saying which server was away
 and what answered instead.
 
 A phone is only ever the connecting side, so it gets the second half of the
-lobby alone: Settings → Artificial Intelligence → **Another device**, below the
+lobby alone: Settings → Artificial intelligence → **Another device**, below the
 phone's own model. Nearby computers, the code field, and connect-by-address sit
 in the same order, and each connected computer lists its models as **Use …**
 keys, the one in use marked "in use". Choosing one does not replace the phone's

@@ -919,6 +919,32 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Alpha')).not.toBeInTheDocument();
   });
 
+  it('folds to icons in an area with its own list, and a hand-opened rail stays open there', () => {
+    const tasks = { kind: 'area', area: 'tasks', at: 0, order: 0 } as const;
+    const project = { kind: 'project', id: 'p1', at: 0, order: 0 } as const;
+    const { rerender } = render(
+      <Sidebar selection={tasks} onSelect={vi.fn()} onOpenArea={vi.fn()} />,
+    );
+    expect(screen.getByTestId('app-sidebar')).toHaveClass('collapsed');
+    // The person's own collapse state is untouched by the automatic fold.
+    expect(window.localStorage.getItem('gezel:nav:sidebar-collapsed')).toBeNull();
+
+    rerender(<Sidebar selection={project} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    expect(screen.getByTestId('app-sidebar')).not.toHaveClass('collapsed');
+
+    rerender(<Sidebar selection={tasks} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }));
+    expect(screen.getByTestId('app-sidebar')).not.toHaveClass('collapsed');
+    expect(window.localStorage.getItem('gezel:nav:sidebar-stay-open')).toBe('1');
+
+    // Folding it again in a list area hands it back to the automatic rule.
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+    expect(screen.getByTestId('app-sidebar')).toHaveClass('collapsed');
+    expect(window.localStorage.getItem('gezel:nav:sidebar-stay-open')).toBe('0');
+    rerender(<Sidebar selection={project} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    expect(screen.getByTestId('app-sidebar')).not.toHaveClass('collapsed');
+  });
+
   it('opens compact navigation without changing the saved desktop width or collapse state', async () => {
     window.localStorage.setItem('gezel:nav:sidebar-collapsed', '1');
     window.localStorage.setItem('gezel:nav:sidebar-width', '320');

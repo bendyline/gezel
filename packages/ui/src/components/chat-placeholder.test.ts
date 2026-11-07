@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { pickChatPlaceholder } from './chat-placeholder.js';
+import { pickChatPlaceholder, taskLaunchPlaceholder } from './chat-placeholder.js';
 
 describe('pickChatPlaceholder', () => {
   it('substitutes the gezel name for meester variants', () => {
@@ -233,5 +233,13 @@ describe('pickChatPlaceholder', () => {
       expect(text).toContain('e.g. "log cabin under a rainbow."');
       expect(text).not.toContain('e.g. "Log cabin');
     });
+  });
+});
+
+describe('taskLaunchPlaceholder', () => {
+  it('names the attached task and the key that starts it', () => {
+    expect(taskLaunchPlaceholder('Accessibility Audit')).toBe(
+      'Enter any further instructions here for your Accessibility Audit. Click the ↑ icon to start.',
+    );
   });
 });

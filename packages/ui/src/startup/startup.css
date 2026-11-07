@@ -75,13 +75,18 @@
   opacity: 0;
   pointer-events: none;
 }
-/* The startup copy covers the live panel while it loads beneath it. */
+/* The startup copy has no collapse to offer yet. */
+.startup-home .home-workshop-sheet-rail {
+  pointer-events: none;
+}
+/* The startup copy covers the live panel while it loads beneath it, leaving
+   the sheet's rail in view. */
 .home-workshop-intro-sheet:has(> .startup-reading-overlay) {
   position: relative;
 }
 .startup-reading-overlay {
   position: absolute;
-  inset: 0;
+  inset: 0 0 var(--home-sheet-rail-h);
   z-index: 1;
   display: flex;
   background: var(--paper);

@@ -1,6 +1,6 @@
 /**
  * `/v1/apps/pair/*` — pairing a device with a connect code, on the LAN
- * listener. The code is shown on this device (Settings → Remote Servers →
+ * listener. The code is shown on this device (Settings → Remote servers →
  * Add a device); the client proves it typed it with SPAKE2 (see
  * core's remote/spake2.ts) instead of anyone clicking Approve here.
  *

@@ -1196,7 +1196,12 @@ function EngineLogViewer() {
       </summary>
       <div style={{ marginTop: '0.5rem' }}>
         <div className="new-row" style={{ alignItems: 'center', gap: '0.5rem' }}>
-          <button type="button" onClick={() => void load()} disabled={state.kind === 'loading'}>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void load()}
+            disabled={state.kind === 'loading'}
+          >
             Refresh
           </button>
           {state.kind === 'loaded' && state.path && (

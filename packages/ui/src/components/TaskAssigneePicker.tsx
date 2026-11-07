@@ -1,6 +1,12 @@
-import { type GezelSummary, type TaskAssignee, displayName } from '@bendyline/gezel';
+import {
+  type GezelSummary,
+  type TaskAssignee,
+  displayName,
+  plainRoleTitle,
+} from '@bendyline/gezel';
 import { Select } from '../primitives/index.js';
 import { GezelIcon } from './GezelIcon.js';
+import { PersonLabel } from './PersonLabel.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowPoppetjes } from './useShowPoppetjes.js';
 
@@ -29,14 +35,21 @@ export function TaskAssigneePicker({
   const roleBasedNameOnly = useRoleBasedNameOnlyMode();
   const gezelFor = (assignee: TaskAssignee | null | undefined) =>
     assignee?.kind === 'gezel' ? gezels.find((gezel) => gezel.id === assignee.gezelId) : undefined;
-  const labelFor = (gezel: GezelSummary) =>
-    !roleBasedNameOnly && gezel.role
-      ? `${gezel.name} · ${gezel.role}`
-      : displayName(gezel, roleBasedNameOnly);
-  const row = (label: string, gezel?: GezelSummary) => (
-    <span className="task-assignee-option">
-      {showPoppetjes && gezel && (
-        <span className="task-assignee-avatar" aria-hidden="true">
+  // With names hidden the name already says the role.
+  const roleFor = (gezel: GezelSummary) =>
+    roleBasedNameOnly || !gezel.role ? undefined : plainRoleTitle(gezel.role);
+  const textFor = (gezel: GezelSummary) => {
+    const role = roleFor(gezel);
+    const name = displayName(gezel, roleBasedNameOnly);
+    return role ? `${name} · ${role}` : name;
+  };
+  const row = (name: string, gezel?: GezelSummary, role?: string) => (
+    <PersonLabel
+      name={name}
+      roleTitle={role}
+      className="task-assignee-option"
+      face={
+        showPoppetjes && gezel ? (
           <GezelIcon
             name={displayName(gezel, roleBasedNameOnly)}
             poppetje={gezel.poppetje}
@@ -44,19 +57,20 @@ export function TaskAssigneePicker({
             iconOverride={gezel.iconOverride}
             size={20}
           />
-        </span>
-      )}
-      <span className="task-assignee-option-label">{label}</span>
-    </span>
+        ) : undefined
+      }
+    />
   );
+  const gezelRow = (gezel: GezelSummary) =>
+    row(displayName(gezel, roleBasedNameOnly), gezel, roleFor(gezel));
   const selectedGezel = gezelFor(value ?? inheritedAssignee);
-  const selectedLabel = !value
-    ? inheritLabel
+  const selected = !value
+    ? row(inheritLabel, selectedGezel)
     : value.kind === 'user'
-      ? 'You'
+      ? row('You')
       : selectedGezel
-        ? labelFor(selectedGezel)
-        : value.gezelId;
+        ? gezelRow(selectedGezel)
+        : row(value.gezelId);
 
   return (
     <Select.Root
@@ -77,7 +91,7 @@ export function TaskAssigneePicker({
         aria-label={ariaLabel}
         title={ariaLabel}
       >
-        <Select.Value>{row(selectedLabel, selectedGezel)}</Select.Value>
+        <Select.Value>{selected}</Select.Value>
       </Select.Trigger>
       <Select.Content className="task-assignee-menu">
         <Select.Item value="__inherit" textValue={inheritLabel}>
@@ -85,8 +99,8 @@ export function TaskAssigneePicker({
         </Select.Item>
         <Select.Item value="__user">You</Select.Item>
         {gezels.map((gezel) => (
-          <Select.Item key={gezel.id} value={gezel.id} textValue={labelFor(gezel)}>
-            {row(labelFor(gezel), gezel)}
+          <Select.Item key={gezel.id} value={gezel.id} textValue={textFor(gezel)}>
+            {gezelRow(gezel)}
           </Select.Item>
         ))}
       </Select.Content>

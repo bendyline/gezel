@@ -4810,7 +4810,7 @@ export class GezelClient {
   }
 
   /**
-   * Pair with the connect code the server shows (Settings → Remote Servers →
+   * Pair with the connect code the server shows (Settings → Remote servers →
    * Add a device). Refusals carry a sentence in `details.message`:
    * `pairing_code_rejected`, `pairing_closed`, `pairing_attempts_exhausted`,
    * `pairing_code_unsupported`.

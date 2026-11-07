@@ -39,7 +39,9 @@ test('Home keeps the draft reachable beside starters on an established install',
   await expect(conversation).toHaveAttribute('inert');
   await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
   await expect(conversation).not.toHaveAttribute('inert');
-  await expect(conversation).toBeFocused();
+  await expect(
+    conversation.locator('[data-testid="chat-composer"] [contenteditable="true"]'),
+  ).toBeFocused();
   // This seeded install already has a folder-backed project. Folder setup
   // is offered only after a first wrap-up when no folder is connected.
   await expect(page.locator('.folder-onboarding')).toHaveCount(0);

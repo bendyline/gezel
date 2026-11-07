@@ -17,7 +17,7 @@ import { invalidateRemoteServers } from './ModelPicker.js';
 import { approvalErrorMessage } from './grant-verification.js';
 
 /**
- * Settings → Remote Servers, shaped like a game's LAN lobby:
+ * Settings → Remote servers, shaped like a game's LAN lobby:
  *
  *  1. "Share this device's models" — the opt-in toggle (off by default), the
  *     address other devices can type, and "Add a device", which shows an
@@ -293,7 +293,7 @@ function ConnectCodeDialog({
             <h3>Connect to {target?.name}</h3>
           </Dialog.Title>
           <Dialog.Description className="muted small">
-            Enter the code shown on {target?.name}. To see one, open Settings → Remote Servers there
+            Enter the code shown on {target?.name}. To see one, open Settings → Remote servers there
             and choose <strong>Add a device</strong>.
           </Dialog.Description>
           <form
@@ -752,7 +752,7 @@ export function RemoteServersPanel() {
 
   return (
     <section className="settings-section remote-servers">
-      <h2>Remote Servers</h2>
+      <h2>Remote servers</h2>
       <p className="muted small">
         Use the models on another gezel device on your network as if they were installed here, or
         share this device's models with your other devices. Only the model runs on the other device:
@@ -1073,7 +1073,7 @@ export function RemoteServersPanel() {
         {awaitingApprovalFrom && (
           <output className="remote-status muted small">
             Waiting for <strong>{awaitingApprovalFrom}</strong> to approve. On that device, open
-            Settings → Remote Servers and approve this device's request.
+            Settings → Remote servers and approve this device's request.
           </output>
         )}
 
@@ -1208,7 +1208,7 @@ export function RemoteServersPanel() {
           pairInspection ? (
             <>
               {pairInspection.displayName} runs an older gezel that can't use a connect code. On it,
-              open Settings → Remote Servers and check that it shows this same identity code:
+              open Settings → Remote servers and check that it shows this same identity code:
               <div className="device-code-block">
                 <code className="device-code">{deviceCode(pairInspection.fingerprint)}</code>
                 <details className="device-code-full">

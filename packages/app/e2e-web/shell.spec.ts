@@ -10,6 +10,16 @@ import { shot } from './helpers/shot.js';
 
 test.describe('app shell', () => {
   test('shell, header, sidebar (light + dark)', async ({ page }) => {
+    // This tour walks the full rail's rows through areas with their own
+    // lists, where the rail otherwise folds to its icons; pinned open, as a
+    // person would after expanding it there.
+    await page.addInitScript(() => {
+      try {
+        localStorage.setItem('gezel:nav:sidebar-stay-open', '1');
+      } catch {
+        /* ignore */
+      }
+    });
     await gotoHome(page);
 
     await expect(page.getByTestId('app-sidebar')).toBeVisible();
@@ -114,7 +124,7 @@ test.describe('app shell', () => {
           getComputedStyle(element).getPropertyValue('--paper').trim(),
         ),
       )
-      .toBe('#1f1c18');
+      .toBe('#201b17');
     await shot(page, 'app-shell', {
       area: 'shell',
       theme: 'dark',

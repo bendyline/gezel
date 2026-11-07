@@ -210,8 +210,8 @@
   color: #eaeaea;
   padding: 0.75rem;
   font-family: "SF Mono", ui-monospace, Menlo, monospace;
-  font-size: 0.8rem;
-  border-radius: 6px;
+  font-size: var(--text-xs);
+  border-radius: var(--radius-md);
   min-height: 160px;
   white-space: pre-wrap;
 }
@@ -235,7 +235,7 @@
   background: var(--panel);
   color: inherit;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   margin-top: 0.25rem;
 }
 
@@ -248,7 +248,7 @@
 .usage-card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-lg);
   padding: 0.75rem 1rem;
 }
 
@@ -257,7 +257,7 @@
 }
 
 .usage-label {
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--text-muted);
@@ -272,7 +272,7 @@
 .usage-detail {
   display: flex;
   justify-content: space-between;
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   margin-top: 0.25rem;
 }
@@ -280,7 +280,7 @@
 .usage-bar-track {
   height: 8px;
   background: rgba(127, 127, 127, 0.2);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
   margin: 0.5rem 0 0.35rem;
 }
@@ -288,7 +288,7 @@
 .usage-bar-fill {
   height: 100%;
   background: var(--accent);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   transition: width 0.3s ease;
 }
 
@@ -297,7 +297,7 @@
 }
 
 .usage-overage {
-  font-size: 0.8rem;
+  font-size: var(--text-xs);
   color: #c0392b;
   margin-top: 0.25rem;
 }
@@ -378,10 +378,10 @@
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   background: var(--surface);
   color: var(--text-muted);
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
@@ -389,6 +389,16 @@
   background: var(--action-bg);
   color: var(--action-ink);
   border-color: var(--accent);
+}
+.msg-action-button > svg {
+  display: block;
+}
+/* Details stays tinted while the steps show, like the composer's expand key:
+   a full latched fill would be the loudest thing in this quiet column. */
+.msg-action-button[aria-expanded="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  color: var(--accent-text);
 }
 
 /* Touch screens and compact windows keep actions in the message flow, where
@@ -427,18 +437,23 @@
    it's an opt-in surface (only visible when `config.debugMode` is on). */
 .msg-action-button-debug {
   border-style: dashed;
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
 }
 
 .msg-role {
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-size: var(--text-xs);
   color: var(--text-muted);
   display: flex;
   align-items: center;
   gap: 0.4rem;
   min-width: 0;
+}
+
+/* A speaker reads as a name, in sentence case and the reading ink, against
+   the muted role, time and status around it (the bubble and sticky headers). */
+.msg-author .person-label-name {
+  color: var(--text);
+  font-weight: 600;
 }
 
 /* Keep messages and document reading/editing surfaces copyable without
@@ -543,7 +558,7 @@
   display: inline-block;
   color: var(--muted, rgba(255, 255, 255, 0.55));
   font-family: var(--font-ui);
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -719,7 +734,7 @@
   gap: 0.35rem;
   text-transform: none;
   letter-spacing: normal;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   color: #7a4a2a;
 }
 
@@ -757,7 +772,7 @@
   align-items: center;
   gap: 0.35rem;
   margin: 0.4rem 0 0.1rem;
-  font-size: 0.82rem;
+  font-size: var(--text-xs);
 }
 
 /* "Consulted N indexed sources" — nested disclosures under a user turn that
@@ -765,7 +780,7 @@
    source opens onto the exact plain-text excerpt sent to the model. */
 .msg-retrieval {
   margin: 0.3rem 0 0.1rem;
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
 }
 
 .msg-retrieval-summary {
@@ -816,7 +831,7 @@
 .msg-retrieval-source-summary::before {
   content: "▸";
   flex: 0 0 auto;
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   opacity: 0.7;
   transition: transform 0.15s ease;
 }
@@ -839,7 +854,7 @@
   margin-left: auto;
   color: var(--muted, #888);
   font-family: var(--font-ui);
-  font-size: 0.72rem;
+  font-size: var(--text-2xs);
   white-space: nowrap;
 }
 
@@ -857,7 +872,7 @@
   background: var(--bg);
   color: var(--text);
   font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -920,7 +935,7 @@
 
 .msg-refs-label {
   color: var(--muted, #888);
-  font-size: 0.75rem;
+  font-size: var(--text-xs);
   font-weight: 500;
   letter-spacing: 0.01em;
   text-transform: uppercase;
@@ -935,7 +950,7 @@
   padding: 0.15rem 0.55rem;
   border-radius: var(--radius-sm);
   font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.78rem;
+  font-size: var(--text-xs);
   line-height: 1.4;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
@@ -970,7 +985,7 @@
   font-size: 0.92em;
   color: var(--accent-text);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   padding: 0 4px;
   text-decoration: none;
   border-bottom: 1px dashed color-mix(in srgb, var(--accent) 55%, transparent);
@@ -1106,7 +1121,7 @@
 }
 
 .deliverable-card-tile-icon {
-  font-size: 1.35rem;
+  font-size: var(--text-title);
 }
 
 .deliverable-card-tile-ext {
@@ -1124,10 +1139,8 @@
 }
 
 .deliverable-card-eyebrow {
-  font-size: var(--text-2xs);
+  font-size: var(--text-xs);
   font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
   color: var(--accent-text);
 }
 
@@ -1230,7 +1243,7 @@
 .msg-body-rendered .squisq-md-mention {
   display: inline-block;
   padding: 0 6px;
-  border-radius: 10px;
+  border-radius: var(--radius-lg);
   font-weight: 500;
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent-text);
@@ -1302,15 +1315,16 @@
   display: contents;
 }
 
-/* A fixed width keeps the tabs after it still when the project changes;
-   a long name ends in an ellipsis instead of wrapping the row. */
+/* It closes the tab row at the far end; a fixed width keeps it still when
+   the project changes, and a long name ends in an ellipsis instead of
+   wrapping the row. */
 .gz-tabs-list .gezel-chat-project-select {
   flex: 0 0 auto;
   width: 15rem;
   min-width: 0;
   max-width: 50vw;
   align-self: center;
-  margin-inline: 0.25rem 0.75rem;
+  margin-inline: auto 0.25rem;
   white-space: nowrap;
 }
 
@@ -1358,9 +1372,24 @@
 }
 
 .chat-composer-to-label {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  font-size: var(--text-xs);
+}
+
+.chat-composer-to-person {
+  font-size: var(--text-xs);
+}
+
+/* The thread picker shares the To line, taking what the recipient leaves.
+   Too little room left and it wraps to a line of its own, full width. Its
+   own band chrome (padding, rule, wash) belongs to the old second row. */
+.chat-composer-to-thread {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+.chat-composer-to-thread > .gezel-chat-session-header {
+  padding: 0.15rem 0;
+  border-bottom: 0;
+  background: transparent;
 }
 
 .chat-composer-to-text {
@@ -1379,7 +1408,7 @@
   overflow: hidden;
   max-width: 12rem;
   color: var(--text-muted);
-  font-size: 0.7rem;
+  font-size: var(--text-2xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1456,10 +1485,8 @@
   align-items: center;
   gap: 0.25rem;
   color: color-mix(in srgb, var(--accent) 76%, var(--text));
-  font-size: 0.66rem;
+  font-size: var(--text-xs);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .chat-composer-task-bar-name {
@@ -1541,7 +1568,7 @@
   color: var(--text-muted);
   background: color-mix(in srgb, var(--warning, #e8c34a) 12%, transparent);
   border-radius: var(--radius-sm);
-  font-size: 0.66rem;
+  font-size: var(--text-2xs);
   letter-spacing: 0.04em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -1618,7 +1645,7 @@
 }
 
 .chat-composer-to-mention {
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   font-weight: 500;
   padding: 0.1rem 0.5rem;
   border-radius: var(--radius-sm);
@@ -2075,15 +2102,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   z-index: 1000;
 }
 
-/* Themed placeholder for the chat composer. Squisq's default is a
-   neutral gray (#9ca3af); swap it for the workshop accent so the
-   "what would you like to make?" prompt reads as part of the gezel
-   palette instead of a generic input hint. Scoped to .chat-editor-wrap
-   so other Squisq surfaces (document editor, artifact viewer) keep
-   the neutral default. */
+/* The chat composer's placeholder takes the workshop's muted ink rather than
+   squisq's cool gray. It once took the accent, which made an invitation read
+   as a link or a warning, in light mode only. */
 .chat-editor-wrap .squisq-wysiwyg-editor p.is-editor-empty:first-child::before {
-  color: var(--accent-text);
-  opacity: 0.7;
+  color: var(--text-muted);
+  opacity: 1;
 }
 
 /* Gezellig palette applied to every Squisq editor chrome in the app
@@ -2148,11 +2172,11 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   background: rgba(176, 114, 76, 0.28);
 }
 
-/* The WYSIWYG typing surface uses a neutral dark gray so it reads as a
-   plain text area against the warm composer chrome above it. */
+/* The WYSIWYG typing surface is the inset paper, the same `--surface` that
+   squisq's own dark rule paints through `--squisq-surface-sunken`. */
 .squisq-editor-shell[data-theme="dark"] .squisq-wysiwyg-editor {
-  background: #242424;
-  color: #e8e8e8;
+  background: var(--surface);
+  color: var(--text);
   box-shadow: none;
 }
 .chat-editor-wrap
@@ -2587,7 +2611,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .msg-body-rich pre {
   background: rgba(0, 0, 0, 0.3);
   padding: 0.5rem 0.75rem;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   overflow-x: auto;
   font-size: 0.85em;
 }
@@ -2627,7 +2651,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .gz-dialog label {
   display: block;
   margin-bottom: 0.75rem;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   color: var(--text-muted);
 }
 
@@ -2696,8 +2720,8 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 1.1rem;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xl);
   padding: 0.3rem 0.6rem;
   cursor: pointer;
 }

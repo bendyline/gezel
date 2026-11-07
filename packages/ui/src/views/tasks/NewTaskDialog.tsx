@@ -31,7 +31,7 @@ import type { SquisqAnnotatedSchema } from '@bendyline/squisq';
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiErrorMessage } from '../../api-error.js';
 import { api } from '../../api.js';
-import { CatalogArtwork } from '../../components/CatalogArtwork.js';
+import { CatalogArtwork, catalogMarkProps } from '../../components/CatalogArtwork.js';
 import { CraftbookToolsetSetup } from '../../components/CraftbookToolsetSetup.js';
 import { GallerySearch } from '../../components/GallerySearch.js';
 import { GezelJsonEditor } from '../../components/GezelJsonEditor.js';
@@ -1220,7 +1220,7 @@ export function NewTaskDialog({
                         className={`gz-npd-rail-item${!searching && activeRail === 'for-you' ? ' active' : ''}`}
                         onClick={() => setActiveRail('for-you')}
                       >
-                        <ProjectGlyph glyph="sprout" size={16} />
+                        <ProjectGlyph glyph="heart" size={16} />
                         <span className="gz-npd-rail-label">For you</span>
                         <span className="gz-npd-rail-count">{forYouBooks.length}</span>
                       </button>
@@ -1242,7 +1242,7 @@ export function NewTaskDialog({
                         className={`gz-npd-rail-item${!searching && activeRail === 'recommended' ? ' active' : ''}`}
                         onClick={() => setActiveRail('recommended')}
                       >
-                        <ProjectGlyph glyph="sprout" size={16} />
+                        <ProjectGlyph glyph="frame" size={16} />
                         <span className="gz-npd-rail-label">{modeCopy.featuredLabel}</span>
                         <span className="gz-npd-rail-count">{suggestedBooks.length}</span>
                       </button>
@@ -1807,7 +1807,11 @@ function GalleryCard({
       onClick={onSelect}
       style={{ '--card-i': Math.min(index, 11) } as React.CSSProperties}
     >
-      <span className="gz-npd-card-mark" aria-hidden="true">
+      <span
+        className="gz-npd-card-mark"
+        aria-hidden="true"
+        {...catalogMarkProps(ground, Boolean(iconSvg || logoUrl))}
+      >
         <CatalogArtwork
           {...(iconSvg ? { iconSvg } : {})}
           {...(logoUrl ? { logoUrl } : {})}

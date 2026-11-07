@@ -14,7 +14,7 @@ import type {
   ToolCallVideo,
 } from '@bendyline/gezel';
 import type { TaskHandoffNote } from '@bendyline/gezel';
-import { roleForMatching } from '@bendyline/gezel';
+import { plainRoleTitle, roleForMatching } from '@bendyline/gezel';
 import {
   handoffContextLine,
   handoffHeadline,
@@ -43,6 +43,7 @@ import {
   type CSSProperties,
   Fragment,
   type MouseEvent,
+  type ReactNode,
   type RefObject,
   useCallback,
   useEffect,
@@ -65,7 +66,9 @@ import { DraftPlanCard } from './DraftPlanCard.js';
 import { GezelIcon } from './GezelIcon.js';
 import { ImagePreview } from './ImagePreview.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
+import { PersonLabel } from './PersonLabel.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
+import { SectionIcon } from './SectionIcon.js';
 import { ToolArgsSummary } from './ToolArgsSummary.js';
 import { ToolCraftbookCard } from './ToolCraftbookCard.js';
 import { ToolDiffBlock } from './ToolDiffBlock.js';
@@ -563,17 +566,8 @@ function openRetrievalSource(
 }
 
 /**
- * Role badge rendered to the right of the gezel name in chat-message
- * headers. Two well-known roles get an iconic glyph in addition to the
- * text — meester (the team concierge / front-door figure) gets a top
- * hat, voorman (project foreman) gets a star matching the existing
- * sidebar convention. Other roles render with just the text, in muted
- * styling, so a custom-named "Reviewer" or "Designer" still surfaces
- * without us having to invent a glyph for every variant.
- */
-/**
  * The bubble header's hover text. It leads with the role because a narrow
- * timeline hides the role suffix (`chat-timeline` container query in
+ * timeline hides the role (`chat-timeline` container query in
  * styles/chat.css), and hovering the name is then the way to read it.
  */
 export function authorTitle(role: string | undefined, tooltip: string | undefined) {
@@ -581,22 +575,22 @@ export function authorTitle(role: string | undefined, tooltip: string | undefine
   return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
-export function RoleSuffix({ role }: { role?: string }) {
+/**
+ * The mark beside a speaker's name in chat headers. Two well-known roles
+ * get one — the meester (the front-door figure) a top hat, the crew lead a
+ * star matching the sidebar — and every other role reads as text alone, so
+ * there is no glyph to invent for each "Reviewer" or "Designer". It rides
+ * with the name, so it stays when a narrow timeline drops the role.
+ */
+export function roleGlyph(role: string | undefined): ReactNode {
   if (!role) return null;
   const key = roleForMatching(role).toLowerCase().trim();
-  let glyph: string | null = null;
-  if (key === 'meester') glyph = '🎩';
-  else if (key === 'voorman') glyph = '⭐';
-  return (
-    <span className="msg-role-suffix">
-      {glyph && (
-        <span className="msg-role-glyph" aria-hidden>
-          {glyph}
-        </span>
-      )}
-      {role}
+  const glyph = key === 'meester' ? '🎩' : key === 'voorman' ? '⭐' : null;
+  return glyph ? (
+    <span className="msg-role-glyph" aria-hidden>
+      {glyph}
     </span>
-  );
+  ) : null;
 }
 
 /**
@@ -1191,15 +1185,21 @@ export function MessageBubble({
             </>
           ) : (
             <>
-              <GezelIcon
-                svg={authorIcon}
-                poppetje={authorPoppetje}
-                iconOverride={authorIconOverride}
+              <PersonLabel
                 name={authorLabel}
-                size={20}
+                roleTitle={authorRole && plainRoleTitle(authorRole)}
+                badge={roleGlyph(authorRole)}
+                face={
+                  <GezelIcon
+                    svg={authorIcon}
+                    poppetje={authorPoppetje}
+                    iconOverride={authorIconOverride}
+                    name={authorLabel}
+                    size={20}
+                  />
+                }
+                className="msg-author"
               />
-              <span>{authorLabel}</span>
-              <RoleSuffix role={authorRole} />
               {driftLabel && <span className="msg-role-drift">{driftLabel}</span>}
             </>
           )}
@@ -1370,6 +1370,45 @@ export function MessageBubble({
 }
 
 /**
+ * Glyphs for the message action keys, drawn to SectionIcon's rules: 24×24,
+ * stroke-only, `currentColor`. Opening a saved reply uses SectionIcon's
+ * artifacts drawer, where the reply was saved.
+ */
+function MessageActionIcon({ name }: { name: 'save' | 'details' }) {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      {name === 'save' ? (
+        // Floppy disk
+        <>
+          <path d="M5 3h11.5L21 7.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+          <path d="M8 3v5h7V3" />
+          <path d="M7 21v-6.5a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1V21" />
+        </>
+      ) : (
+        // A list of steps
+        <>
+          <circle cx="5" cy="6.5" r="1" />
+          <circle cx="5" cy="12" r="1" />
+          <circle cx="5" cy="17.5" r="1" />
+          <path d="M9.5 6.5h10M9.5 12h10M9.5 17.5h6.5" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+/**
  * Hover-reveal toolbar that floats in the gutter alongside a chat
  * bubble. Hidden by default; appears when the bubble (or the toolbar
  * itself, for keyboard nav) is hovered/focused. Side mirrors the
@@ -1485,9 +1524,10 @@ function MessageActions({
             className="msg-action-button"
             onClick={details.onToggle}
             aria-expanded={details.shown}
+            aria-label={details.shown ? 'Hide details' : 'Details'}
             title={details.shown ? 'Hide the steps and thinking' : 'Show the steps and thinking'}
           >
-            {details.shown ? 'Hide details' : 'Details'}
+            <MessageActionIcon name="details" />
           </button>
         )}
         {debug && (
@@ -1519,7 +1559,7 @@ function MessageActions({
                 title={`Open saved response: ${savedPath}`}
                 aria-label="Open saved response in project artifacts"
               >
-                Open
+                <SectionIcon name="artifacts" size={16} />
               </button>
             ) : (
               <button
@@ -1527,11 +1567,11 @@ function MessageActions({
                 className="msg-action-button"
                 onClick={() => void saveResponse()}
                 disabled={saving}
-                title="Save response to project artifacts"
+                title={saving ? 'Saving…' : 'Save response to project artifacts'}
                 aria-label="Save response to project artifacts"
                 aria-busy={saving}
               >
-                {saving ? 'Saving…' : 'Save'}
+                <MessageActionIcon name="save" />
               </button>
             )}
             <output className="sr-only" aria-live="polite">
@@ -2359,15 +2399,21 @@ export function StreamingBubble({
   return (
     <div className={cls} data-msg-id={dataMsgId} data-session-id={dataSessionId}>
       <div className="msg-role" title={authorTitle(authorRole, authorTooltip)}>
-        <GezelIcon
-          svg={authorIcon}
-          poppetje={authorPoppetje}
-          iconOverride={authorIconOverride}
+        <PersonLabel
           name={authorLabel}
-          size={20}
+          roleTitle={authorRole && plainRoleTitle(authorRole)}
+          badge={roleGlyph(authorRole)}
+          face={
+            <GezelIcon
+              svg={authorIcon}
+              poppetje={authorPoppetje}
+              iconOverride={authorIconOverride}
+              name={authorLabel}
+              size={20}
+            />
+          }
+          className="msg-author"
         />
-        <span>{authorLabel}</span>
-        <RoleSuffix role={authorRole} />
         {driftLabel && <span className="msg-role-drift">{driftLabel}</span>}
         <StreamingStatusLine
           failed={failed}
@@ -3420,7 +3466,7 @@ export function ToolHistoryExpando({
           <span className="msg-tool-failure-body">
             <span className="msg-tool-failure-tool">{toolDisplayName(f.name)}</span>
             {plainFailures && isMachinePayload(f.reason)
-              ? "didn't finish. Details has the full response."
+              ? "didn't finish. The steps have the full response."
               : f.reason}
           </span>
         </div>

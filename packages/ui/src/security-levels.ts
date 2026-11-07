@@ -3,7 +3,7 @@ import type { SecurityPresetLevel } from '@bendyline/gezel';
 /**
  * Canonical security-posture presets: the pill label + the scenario copy
  * shown under it. Single source of truth so the first-run onboarding
- * (HomeView) and the Settings → Security & Compliance tab
+ * (HomeView) and the Settings → Security & compliance tab
  * (SecurityComplianceSettings) render identical descriptions and never drift.
  *
  * Descriptions render in a `white-space: pre-line` block, so a blank line in
