@@ -1,3 +1,12 @@
+## @bendyline/gezel-inference [1.0.9](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-inference%401.0.8...%40bendyline%2Fgezel-inference%401.0.9) (2026-11-08)
+
+
+### Dependencies
+
+* **@bendyline/gezel:** upgraded to 1.2.14
+* **@bendyline/gezel-catalog:** upgraded to 1.2.14
+* **@bendyline/gezel-client:** upgraded to 1.2.14
+
 ## @bendyline/gezel-inference [1.0.8](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-inference%401.0.7...%40bendyline%2Fgezel-inference%401.0.8) (2026-11-05)
 
 
