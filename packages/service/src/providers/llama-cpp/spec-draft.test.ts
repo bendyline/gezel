@@ -1,6 +1,7 @@
 import type { PerModelLlamaCppEngineConfig } from '@bendyline/gezel-inference/internal/providers/llama-cpp/engine-flags';
 import {
   drafterCostsContext,
+  drafterCostsGpuResidency,
   llamaCppSidecarLoads,
   resolveSpecDraft,
 } from '@bendyline/gezel-inference/internal/providers/llama-cpp/spec-draft';
@@ -260,5 +261,23 @@ describe('drafterCostsContext', () => {
 
   it('drops one that would buy f16 by shortening the window', () => {
     expect(drafterCostsContext({ kvCacheType: 'f16', ctxCapTokens: 65_536 }, f16, true)).toBe(true);
+  });
+});
+
+describe('drafterCostsGpuResidency', () => {
+  const GiB = 1024 ** 3;
+
+  // The 74B Bolt on a 32 GB card beside a desktop holding 6.5 GB: admission
+  // refused 25.8 GiB against 25.2 free, and the model starts without it.
+  it('drops a drafter the free graphics memory cannot hold', () => {
+    expect(drafterCostsGpuResidency(25.8 * GiB, 25.2 * GiB)).toBe(true);
+  });
+
+  it('keeps one that fits', () => {
+    expect(drafterCostsGpuResidency(23.2 * GiB, 25.2 * GiB)).toBe(false);
+  });
+
+  it('has no say off a discrete card', () => {
+    expect(drafterCostsGpuResidency(200 * GiB, undefined)).toBe(false);
   });
 });

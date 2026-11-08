@@ -91,6 +91,22 @@ export function drafterCostsContext(
   );
 }
 
+/**
+ * Whether a drafter would push the launch past the graphics memory it has.
+ * `gpuPoolBytes` is what a discrete card leaves this launch now (free memory
+ * as device admission measures it, within the card's usable share), and
+ * undefined elsewhere. Checked against the card's total alone, a drafter
+ * stayed while admission refused the model it was meant to speed up: the
+ * 74B Bolt and the 27B on a 32 GB card beside a desktop holding 6.5 GB, both
+ * of which start without it (2026-11-07).
+ */
+export function drafterCostsGpuResidency(
+  withDrafterBytes: number,
+  gpuPoolBytes: number | undefined,
+): boolean {
+  return gpuPoolBytes !== undefined && withDrafterBytes > gpuPoolBytes;
+}
+
 export interface SpecDraftResolution {
   /** The perModel to hand to `buildLlamaCppEngineArgs` (spec rewritten or stripped). */
   perModel: PerModelLlamaCppEngineConfig | undefined;

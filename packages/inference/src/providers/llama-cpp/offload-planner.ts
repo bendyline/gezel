@@ -108,6 +108,12 @@ export interface MoeOffloadInput {
    * consulted on the exact path; 0 / absent = weights-only budgeting.
    */
   kvReserveBytes?: number;
+  /**
+   * Weights outside the GGUF split that stay on the GPU, such as a
+   * speculative drafter. The exact path adds them to its reserves;
+   * `residentBytes` already counts them.
+   */
+  additionalGpuBytes?: number;
 }
 
 export interface MoeOffloadDecision {
@@ -272,7 +278,8 @@ function planFromSplit(
   const kvReserve = Math.max(0, input.kvReserveBytes ?? 0);
   const expertTotal = split.expertBytesByLayer.reduce((sum, v) => sum + v, 0);
   const weightsTotal = split.nonExpertBytes + expertTotal;
-  const reserves = margin + kvReserve + COMPUTE_RESERVE_BYTES;
+  const reserves =
+    margin + kvReserve + COMPUTE_RESERVE_BYTES + Math.max(0, input.additionalGpuBytes ?? 0);
 
   if (weightsTotal + reserves <= input.vramBytes) {
     return {

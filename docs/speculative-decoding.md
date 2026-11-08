@@ -54,11 +54,13 @@ download payloads on each version:
 ## The rules
 
 1. **Speculation is per backend.** A drafter is turned on only for backends it
-   was measured on, today CUDA. Upstream reports DFlash2 at about 1.1x on ROCm
-   and below MTP on Vulkan, where one model lost half its prefill speed. Every
-   other backend, and any build that predates `byBackend`, keeps the base
-   block. An unknown backend (an external server, a host whose probe has not
-   run) is treated as untested.
+   was measured on: CUDA for every entry below, and ROCm and Vulkan for Muse
+   Glimmer. The gain differs by backend and by model (see
+   [AMD results](#amd-rocm-and-vulkan)): the 27B's drafter is barely ahead of
+   MTP on Vulkan, and Bolt E4B's slows Vulkan decode as the context grows.
+   Every other backend, and any build that predates `byBackend`, keeps the
+   base block. An unknown backend (an external server, a host whose probe has
+   not run) is treated as untested.
 2. **A missing drafter never fails a launch.** A live Gilde update can deliver
    the new tuning before the person updates the model, so the drafter is
    often absent. `resolveSpecDraft` ([spec-draft.ts](../packages/inference/src/providers/llama-cpp/spec-draft.ts))
@@ -78,12 +80,19 @@ download payloads on each version:
    If the drafter would make the launch cap the target window (the entry's
    `contextSize`, the 64K default, or the person's own size), drop to a
    coarser KV cache, or stop fitting, the launch leaves it out
-   (`drafterCostsContext`). Above the target it is paid for like any resident
-   memory: adaptive sizing grows the window into what is left, and may give
-   up a slot. On a 40 GB card the 27B's grown window falls from about 248K
-   tokens to 214K with its drafter. Catalog rows and recommendations price
-   models without their drafter, since a drafter that does not fit is
-   dropped, never a reason to refuse the model.
+   (`drafterCostsContext`). On a discrete card it also goes when the model
+   beside it, at that window and one slot, would not fit in the graphics
+   memory free right now (`drafterCostsGpuResidency`), which is the reading
+   device admission charges the launch against. Checked against the card's
+   total alone, the drafter stayed and admission refused a model that starts
+   without it: the 74B Bolt and the 27B on a 32 GB card beside a desktop
+   holding 6.5 GB. Both offload planners count a loaded drafter as GPU memory
+   beside the target's own weights. Above the target it is paid for like any
+   resident memory: adaptive sizing grows the window into what is left, and
+   may give up a slot. On a 40 GB card the 27B's grown window falls from
+   about 248K tokens to 214K with its drafter. Catalog rows and
+   recommendations price models without their drafter, since a drafter that
+   does not fit is dropped, never a reason to refuse the model.
 5. **A failing drafter is dropped, not quarantined.** Drafter formats have
    changed between engine releases. If a start with a catalog drafter fails,
    or the engine later exits unexpectedly with one loaded, `brokenDrafters`
@@ -170,16 +179,71 @@ four characters of MTP on the third, each time at a near-tie word choice.
 The baseline repeated exactly, so the drafter changes nothing MTP's batched
 verification does not.
 
+### AMD (ROCm and Vulkan)
+
+llama.cpp v0.9.0 (native-v0.1.61) on an AMD Radeon AI PRO R9700 (RDNA4, 32
+GB), Windows, the ROCm and Vulkan builds, one slot at a 64K window with f16
+KV. Seven workloads (prose, code and tool calls, greedy and sampled, and a
+25.7K-token prompt), A-B-B-A with a fresh server per arm; every pair of
+repeats agreed within about 1%. Decode is a geometric mean against the
+configuration named.
+
+| Model | Against | ROCm | Vulkan |
+| --- | --- | --- | --- |
+| Qwen 3.8 27B Q4, MTP n=3 | MTP n=4 | 1.08x | 1.19x |
+| Qwen 3.8 27B Q4, DFlash2 n=3 | MTP n=3 | 1.08x | 1.02x |
+| Muse Glimmer 30B Q4, DFlash2 n=3 | no speculation | about 1.54x | about 1.88x |
+| Nemotron 3.5 Bolt E4B Q4, DFlash | no speculation | 1.38x, prefill -43% | 0.88x |
+| Nemotron 3.5 Bolt 74B, DFlash n=7 | no speculation | 1.52x | 1.18x, prose 0.78x |
+| Nemotron 3.5 Bolt 74B, DFlash n=3 | no speculation | 1.54x | 1.28x |
+
+- **Shorter drafts win on Vulkan** for every model and both algorithms. Muse
+  gains 1.30x from n=3 over n=4 there (1.12x on ROCm), and the 74B's n=3 is
+  never below no speculation where n=7 loses 22% on prose. It is not
+  ggml-vulkan's vector-matmul column limit, which is 8 at this revision.
+- **Prefill held up.** The 27B and Muse drafters cost 0 to 1% prefill on
+  both backends; upstream's halved Vulkan prefill did not reproduce. Bolt
+  E4B's drafter alone cuts it by 43%.
+- **Bolt E4B collapses on Vulkan as context grows**: 113 to 23 tok/s from 1K
+  to 26K tokens with its drafter, against 127 to 105 without. ROCm does not.
+  Its drafter is the older DFlash format with BF16 weights; the DFlash2
+  drafters do not show it.
+- **Drafters cost more on ROCm** than the CUDA figures: after the long
+  prompt, 2,826 MiB on the 27B, 2,748 on Muse and 2,690 on Bolt E4B (Vulkan
+  2,564, 2,424 and 1,935). The 74B's costs 2,829 MiB at n=7 on ROCm and
+  2,138 at n=3; Vulkan 2,498 and 1,818.
+- **Muse holds its gain at long context.** Against no speculation at 1K,
+  14K, 43K and 86K-token prompts: Vulkan 1.98x, 1.75x, 1.90x and 1.75x;
+  ROCm 1.74x, 1.49x, 1.54x and 1.38x.
+- **Whole turns gain too.** On the 13-turn loop (twelve 1.5K-token
+  excerpts, greedy, identical output in every arm), Muse's loop time fell
+  from 70.6 s to 49.1 s on Vulkan (1.44x) and from 67.8 s to 49.9 s on ROCm
+  (1.36x). Prefill rose 1% and 4%.
+- **Real evals agree.** Four core scenarios on Vulkan (tictactoe,
+  schema-migration, symptom-debug, conflict-synthesis), one trial each:
+  Muse decoded 33 tok/s without its drafter and 64 to 79 with it (2.09x
+  geometric mean), prefill within 3%. Four passed with the drafter and three
+  without; the miss was a schema-migration repeat-loop abort, which the
+  drafter arm hit too before recovering, so one trial says nothing about it.
+- **Through the daemon,** with the desktop holding 6.5 GB of the card, Muse
+  keeps its drafter at a 106K window, the 27B leaves it out (26.0 GiB needed
+  against 25.5 free), and so does the 74B: the launch prices it about 2 GiB
+  above what it uses, the safe direction.
+
 ## Entries with a drafter
 
-All CUDA only, n=4, greedy, from the Gilde versions that set
-`minGezelVersion: 1.26312`:
+Greedy drafting, from the Gilde versions that set `minGezelVersion: 1.26312`
+(the 74B's predates the contract):
 
-| Entries | Drafter | `residentBytes` |
-| --- | --- | --- |
-| `qwen3.8-27b-q2`, `-q3`, `-q4`, `-q6`, `-q8` | `incoai/Qwen3.8-27B-DFlash2-GGUF`, Q4_K_M (1.1 GB) | 2,720 MiB |
-| `muse-glimmer-30b-q4` | `incoai/Muse-Glimmer-30B-DFlash2-GGUF`, Q4_K_M (1.6 GB) | 2,496 MiB |
-| `nemotron3.5-bolt-e4b-q4` | `nvidia/NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-DFlash`, BF16 (0.7 GB) | 2,032 MiB |
+| Entries | Drafter | Backends and `nMax` | `residentBytes` |
+| --- | --- | --- | --- |
+| `qwen3.8-27b-q2`, `-q3`, `-q4`, `-q6`, `-q8` | `incoai/Qwen3.8-27B-DFlash2-GGUF`, Q4_K_M (1.1 GB) | CUDA 4 | 2,720 MiB |
+| `muse-glimmer-30b-q4` | `incoai/Muse-Glimmer-30B-DFlash2-GGUF`, Q4_K_M (1.6 GB) | CUDA 4; ROCm, Vulkan 3 | 2,752 MiB |
+| `nemotron3.5-bolt-e4b-q4` | `nvidia/NVIDIA-Nemotron-3.5-Bolt-E4B-4GB-DFlash`, BF16 (0.7 GB) | CUDA 4 | 2,032 MiB |
+| `nemotron3.5-bolt-74b-iq2` | `nvidia/NVIDIA-Nemotron-3.5-Bolt-74B-A9B-24GB-LiLiCorr-GGUF` (1.0 GB) | every backend 7; Vulkan 3 | 2,832 MiB |
+
+`qwen3.8-27b-q4` also runs MTP at n=3 on ROCm and Vulkan; its other quants
+keep n=4 there until they are measured.
 
 Meta's own Muse repository has shipped a different DFlash drafter since
 October 20; it is untested here.
@@ -210,8 +274,13 @@ plus `GEZEL_EVAL_SPEC_DRAFT_N_MAX` and `GEZEL_EVAL_SPEC_DRAFT_SAMPLING`.
 
 ## Not covered
 
-- Vulkan, ROCm and Metal are untested, so no entry turns a drafter on there.
-  There is no Windows ARM64 Vulkan build to test with.
+- Metal is untested, so no entry turns a DFlash2 drafter on there. ROCm and
+  Vulkan were measured on one RDNA4 card under Windows; other AMD
+  generations, Linux, and Vulkan on Intel or NVIDIA are not. There is no
+  Windows ARM64 Vulkan build to test with.
+- `residentBytes` is one number for every backend and `nMax`, so it carries
+  the largest measured cost. The 74B's 2,832 MiB is its ROCm n=7 figure, and
+  overprices Vulkan at n=3 by about 1 GB.
 - MTP's own memory is not priced: 1.3 GB on the 27B at a small window and
   2.2 GB at 244K tokens, because its head keeps a full-attention KV cache.
   The planner's headroom has absorbed it so far.

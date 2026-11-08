@@ -43,8 +43,11 @@ assumptions in how a catalog entry described speculation:
    `draftModel.residentBytes` carries the measured cost, with an estimate
    from the file size as the fallback. If the drafter would make the launch
    cap its target window or coarsen its KV cache, the launch leaves it out.
-   Adaptive growth beyond the target pays for it, as it does for any
-   resident memory.
+   On a discrete card it also goes when the model beside it would not fit in
+   the graphics memory free right now, the reading device admission charges:
+   checked against the card's total alone, a drafter turned a model that
+   starts without it into a refusal. Adaptive growth beyond the target pays
+   for it, as it does for any resident memory.
 4. **A drafter can always be dropped.** A missing drafter falls back to the
    base block or to no speculation. A start that fails with a catalog drafter
    retries without it, and the engine and drafter pair is remembered for the
@@ -76,6 +79,7 @@ assumptions in how a catalog entry described speculation:
   Pricing it would change what fits for every MTP model and is separate work.
 - Regression surface: [llama-cpp-spec.test.ts](../../packages/core/src/llama-cpp-spec.test.ts),
   [spec-draft.test.ts](../../packages/service/src/providers/llama-cpp/spec-draft.test.ts),
+  [offload-planner.test.ts](../../packages/service/src/providers/llama-cpp/offload-planner.test.ts),
   [engine-flags.test.ts](../../packages/service/src/providers/llama-cpp/engine-flags.test.ts),
   [catalog-payload-identity.test.ts](../../packages/service/src/models/catalog-payload-identity.test.ts),
   and [models.test.ts](../../packages/service/src/providers/llama-cpp/models.test.ts).

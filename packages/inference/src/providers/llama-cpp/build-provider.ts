@@ -85,6 +85,7 @@ import { reasoningLaunchOverridesFromEnv } from './reasoning-launch.js';
 import {
   brokenDrafters,
   drafterCostsContext,
+  drafterCostsGpuResidency,
   llamaCppSidecarLoads,
   resolveSpecDraft,
 } from './spec-draft.js';
@@ -721,6 +722,52 @@ export async function buildLlamaCppProvider(opts: {
     });
     return probe.minimumSatisfied && probe.slots >= slotCount;
   };
+  // One slot's KV at `ctxTokens`, priced the way the launch reservation
+  // prices it below: the windowed cache unless `--swa-full` is pinned.
+  const planSlotKvReserveBytes = (kv: LlamaCppKvCacheType, ctxTokens: number): number => {
+    if (!headerSummary) return planKvBytesPerToken(kv) * ctxTokens;
+    const geometry = {
+      blockCount: headerSummary.blockCount,
+      embeddingLength: headerSummary.embeddingLength,
+      headCount: headerSummary.headCount,
+      headCountKv: headerSummary.headCountKv,
+      headCountKvPerLayer: headerSummary.headCountKvPerLayer,
+      slidingWindowPattern: headerSummary.slidingWindowPattern,
+      sharedKvLayers: headerSummary.sharedKvLayers,
+      loopCount: headerSummary.loopCount,
+      keyLength: headerSummary.keyLength,
+      valueLength: headerSummary.valueLength,
+      keyLengthSwa: headerSummary.keyLengthSwa,
+      valueLengthSwa: headerSummary.valueLengthSwa,
+      fullAttentionInterval: headerSummary.fullAttentionInterval,
+      ssmInnerSize: headerSummary.ssmInnerSize,
+      ssmStateSize: headerSummary.ssmStateSize,
+      ssmConvKernel: headerSummary.ssmConvKernel,
+      kvCacheType: kv,
+    };
+    const windowed =
+      (config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull ?? false)
+        ? undefined
+        : estimateWindowedKvLinearization({
+            ...geometry,
+            slidingWindow: headerSummary.slidingWindow,
+          });
+    return windowed
+      ? windowed.fixedBytes + windowed.bytesPerToken * ctxTokens
+      : (estimateKvReserveBytes({ ...geometry, ctxTokens }) ?? planKvBytesPerToken(kv) * ctxTokens);
+  };
+  // What a discrete card leaves this launch now: free graphics memory as
+  // device admission measures it, within the card's usable share. Undefined
+  // off discrete cards, where there is no separate pool to run out of.
+  const planGpuPoolBytes = async (): Promise<number | undefined> => {
+    const kind = brokerSnap?.enforced ? brokerSnap.pools.kind : hostCapacity.kind;
+    if (kind !== 'discrete-gpu') return undefined;
+    const freeGpu = await measureAvailableGpuBytes().catch(() => undefined);
+    return Math.max(
+      0,
+      Math.min(budgetBytes - committedOtherBytes, freeGpu ?? Number.POSITIVE_INFINITY),
+    );
+  };
   const planKv = () =>
     planLlamaCppKv({
       architecture: modelCatalogInfo?.architecture,
@@ -740,25 +787,41 @@ export async function buildLlamaCppProvider(opts: {
   // A drafter buys speed; context is what a session runs out of. When a
   // drafter the catalog chose would cap the target window or cost its KV
   // precision, it goes and the model decodes the way it does without one.
-  // Growth above the target, sized later, simply has less room.
+  // Growth above the target, sized later, simply has less room. On a
+  // discrete card it must also leave the model wholly on the GPU in the
+  // memory free now, which is what device admission charges the launch.
   if (draftBudgetBytes() > 0 && !config.llamaCppSpecType && !config.llamaCppDraftModelPath) {
-    const fitsWithDrafter = planFitsAt(
-      kvPlan.kvCacheType,
-      kvPlan.ctxCapTokens ?? effectiveNumCtx,
-      1,
-    );
+    const targetCtx = kvPlan.ctxCapTokens ?? effectiveNumCtx;
+    const fitsWithDrafter = planFitsAt(kvPlan.kvCacheType, targetCtx, 1);
     const drafter = drafterInUse;
     drafterInUse = undefined;
     const withoutDrafter = planKv();
     drafterInUse = drafter;
+    let drafterCost: string | undefined;
     if (drafterCostsContext(kvPlan, withoutDrafter, fitsWithDrafter)) {
+      drafterCost = `beside it the ${effectiveNumCtx}-token window would not keep its size and KV precision`;
+    } else {
+      const gpuPoolBytes = await planGpuPoolBytes();
+      const withDrafterBytes =
+        planResidentBytes() + planSlotKvReserveBytes(kvPlan.kvCacheType, targetCtx);
+      if (drafterCostsGpuResidency(withDrafterBytes, gpuPoolBytes)) {
+        drafterCost = `beside it the model needs ${(withDrafterBytes / 1024 ** 3).toFixed(1)} GiB of graphics memory and ${((gpuPoolBytes ?? 0) / 1024 ** 3).toFixed(1)} GiB is available`;
+      }
+    }
+    if (drafterCost) {
       log.info(
-        `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: leaving the speculative drafter out; beside it the ${effectiveNumCtx}-token window would not keep its size and KV precision`,
+        `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: leaving the speculative drafter out; ${drafterCost}`,
       );
       await leaveDrafterOut();
       kvPlan = withoutDrafter;
     }
   }
+  // What a loaded drafter holds on the GPU, as the resident estimate prices it.
+  const drafterGpuBytes = () =>
+    estimateLlamaCppResidentBytes(0, {
+      draftBytes: draftBudgetBytes(),
+      draftResidentBytes: catalogDraftResidentBytes,
+    }) - estimateLlamaCppResidentBytes(0);
   kvCacheType = kvPlan.kvCacheType;
   if (kvPlan.upgraded) {
     log.info(
@@ -1296,6 +1359,7 @@ export async function buildLlamaCppProvider(opts: {
                     split,
                     ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
                     ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
+                    additionalGpuBytes: drafterGpuBytes(),
                   }
                 : {}),
             });
@@ -1344,7 +1408,7 @@ export async function buildLlamaCppProvider(opts: {
                 ...(denseFfnSplit ? { split: denseFfnSplit } : {}),
                 ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
                 ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
-                additionalGpuBytes: visionBudgetBytes,
+                additionalGpuBytes: visionBudgetBytes + drafterGpuBytes(),
                 ramBudgetBytes: brokerSnap?.enforced
                   ? brokerSnap.pools.ramShareBytes
                   : hostCapacity.ramShareBytes,
