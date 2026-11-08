@@ -39,6 +39,7 @@ import {
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Command, Option } from 'commander';
 import { registerAccountCommands, registerIntegrationCommands } from '../account-command.js';
+import { autoDownloadRequested, downloadForRun } from '../auto-download.js';
 import { registerBenchCommands } from '../bench-command.js';
 import { formatCliFailure, isNotFound } from '../cli-errors.js';
 import {
@@ -158,6 +159,10 @@ program
   .option(
     '--project [folder]',
     'Use this folder as the active project (default and bare flag: cwd).',
+  )
+  .option(
+    '--download',
+    'Download what a command needs (the on-device engine and the recommended model) without asking, printing each step. Also GEZEL_AUTO_DOWNLOAD=1.',
   );
 
 /** Global flags, read off the root program. */
@@ -859,7 +864,12 @@ program
         ? await resolveRunGezel(client, opts.gezel)
         : await ensureCliProjectLead(client, projectId);
       let readiness = await checkRunReadiness(client, gezelId);
-      if (!readiness.ready && canOfferRunSetup()) {
+      if (!readiness.ready && autoDownloadRequested(cliGlobals())) {
+        // Nobody needs to be at the keyboard: an agent or a script asked for
+        // the downloads up front. Progress goes to stderr; stdout stays the reply.
+        await downloadForRun(client, { gezelId, write: (text) => process.stderr.write(text) });
+        readiness = await checkRunReadiness(client, gezelId);
+      } else if (!readiness.ready && canOfferRunSetup()) {
         // A first `npx gezel-cli run …` in a terminal sets up a model and then
         // runs the request, instead of sending the person off to `gezel`.
         // Keep the path indirect so Ink stays out of the main bin.
@@ -1008,16 +1018,24 @@ Examples:
         process.stderr.write(`${shorthandEcho(book.id, shorthandTail)}\n`);
       }
       const parsed = parseCraftbookArguments(craftbook, args, opts.param);
-      const setUp = () =>
-        ensureCraftbookSetup(client, {
+      const autoDownload = autoDownloadRequested(cliGlobals());
+      const setUp = async () => {
+        // The crew's own chat model first: a task started without one fails at
+        // its first turn, long after the command returned.
+        if (autoDownload && !(await checkRunReadiness(client, undefined)).ready) {
+          await downloadForRun(client, { write: stderrProgress() });
+        }
+        await ensureCraftbookSetup(client, {
           projectId,
           label: craftbook.name,
           needs: craftbook,
           params: parsed.params,
           ...(craftbook.paramSchema ? { paramSchema: craftbook.paramSchema } : {}),
           prompter: terminalPrompter(),
+          autoDownload,
           write: stderrProgress(),
         });
+      };
       if (craftbook.cliWorkflow) {
         if (book.source !== 'project')
           throw new CliError('CLI workflow craftbooks must belong to this project.');

@@ -19,7 +19,7 @@ A **Gezel app** is an experience: a page people use, a crew that works it, the c
 
 Work the same loop a person does, using its machine-readable ends:
 
-1. Install the command line with `npm install -g @bendyline/gezel-cli` (Node.js 24 or newer). `gezel app guide` prints this page for the version you installed.
+1. Install the command line with `npm install -g @bendyline/gezel-cli` (Node.js 24 or newer). `gezel app guide` prints this page for the version you installed. Add `--download` to any command that needs a model (`gezel run`, `gezel do`): it downloads the on-device engine and the model that fits this computer, printing each step, instead of stopping to ask.
 2. Start from `gezel app new <name> --with-page`, or from one of the [sample apps](https://github.com/bendyline/gezel/tree/main/examples/apps).
 3. Read the file formats with `gezel app schemas --json`. They are rendered from the build you installed, so they are never out of date.
 4. Run `gezel app validate <folder> --json`. Fix every finding and run it again until `ok` is `true`.

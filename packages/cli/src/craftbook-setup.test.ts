@@ -194,6 +194,49 @@ describe('ensureCraftbookSetup', () => {
     expect(client.installLlamaCppModel).not.toHaveBeenCalled();
   });
 
+  it('with --download, downloads the models away from a terminal without asking', async () => {
+    const state: FakeState = { hasBraveSearchApiKey: false, installed: [] };
+    const client = fakeClient(state);
+    const written: string[] = [];
+    await ensureCraftbookSetup(asClient(client), {
+      ...base,
+      needs: { models: stories.models },
+      prompter: null,
+      autoDownload: true,
+      write: (text) => written.push(text),
+    });
+    expect(state.installed).toEqual(['qwen3.8-27b-q4', 'gemma4-31b-q4']);
+    expect(written.join('')).toContain('Downloading these 2 models (--download)');
+  });
+
+  it('with --download, still needs a person for anything that is not a download', async () => {
+    const client = fakeClient({
+      securityPolicy: LOCKDOWN,
+      hasBraveSearchApiKey: false,
+      installed: [],
+    });
+    const error = await ensureCraftbookSetup(asClient(client), {
+      ...base,
+      prompter: null,
+      autoDownload: true,
+      write: () => {},
+    }).catch((e: Error) => e);
+    expect((error as Error).message).toContain('--download only downloads');
+    expect(client.updateConfig).not.toHaveBeenCalled();
+    expect(client.installLlamaCppModel).not.toHaveBeenCalled();
+  });
+
+  it('away from a terminal, offers --download when only downloads are missing', async () => {
+    const client = fakeClient({ hasBraveSearchApiKey: false, installed: [] });
+    const error = await ensureCraftbookSetup(asClient(client), {
+      ...base,
+      needs: { models: stories.models },
+      prompter: null,
+      write: () => {},
+    }).catch((e: Error) => e);
+    expect((error as Error).message).toContain('run it again with --download');
+  });
+
   it('at a terminal, turns everything on with explicit yeses and downloads the models', async () => {
     const state: FakeState = {
       securityPolicy: LOCKDOWN,

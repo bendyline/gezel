@@ -50,6 +50,21 @@ function makeManager(opts: {
   return mgr;
 }
 
+/**
+ * Resolves when the run's output bubble is published. Message events replay
+ * for a minute, so a run that already finished still resolves. Fixed sleeps
+ * here pushed a three-command test past the 5s budget on a loaded CI runner.
+ */
+function runSettled(projectId: string, runId: string): Promise<void> {
+  return new Promise((resolve) => {
+    events.subscribeProject(projectId, (env) => {
+      if (env.kind === 'message' && env.runId === runId && env.message.kind === 'output') {
+        resolve();
+      }
+    });
+  });
+}
+
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), 'gezel-terminal-test-'));
   store = new Store({ home });
@@ -153,7 +168,7 @@ describe('TerminalManager', () => {
     const mgr = makeManager({ workspaceIndex: stubIndex(null) });
 
     const outcome = await mgr.enqueueRun(projectId, '', 'ls');
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await runSettled(projectId, outcome.runId);
     const thread = await store.getTerminalThread(projectId, outcome.threadId);
     expect(thread?.messages.at(-1)?.fileReferences).toContainEqual({
       label: 'battle-research.md',
@@ -170,9 +185,7 @@ describe('TerminalManager', () => {
 
     const outcome = await mgr.enqueueRun(projectId, '', 'echo hi-from-shell');
     expect(outcome.resolution.kind).toBe('argv');
-
-    // Drain the per-thread queue.
-    await new Promise((r) => setTimeout(r, 1500));
+    await runSettled(projectId, outcome.runId);
 
     const thread = await store.getTerminalThread(projectId, outcome.threadId);
     expect(thread).not.toBeNull();
@@ -206,12 +219,12 @@ describe('TerminalManager', () => {
 
       const mgr = makeManager({ workspaceIndex: stubIndex(null) });
 
+      // `pwd` is an intercept and persists inside enqueueRun; only the `cd`
+      // runs in the shell.
       await mgr.enqueueRun(projectId, '', 'pwd');
-      await new Promise((r) => setTimeout(r, 1500));
-      await mgr.enqueueRun(projectId, '', 'cd inner');
-      await new Promise((r) => setTimeout(r, 1500));
+      const cd = await mgr.enqueueRun(projectId, '', 'cd inner');
+      await runSettled(projectId, cd.runId);
       await mgr.enqueueRun(projectId, '', 'pwd');
-      await new Promise((r) => setTimeout(r, 1500));
 
       const threadId = mgr.threadIdFor('');
       const thread = await store.getTerminalThread(projectId, threadId);
@@ -245,7 +258,7 @@ describe('TerminalManager', () => {
         'echo c1; sleep 0.1; echo c2; sleep 0.1; echo c3',
       );
       expect(outcome.resolution.kind).toBe('argv');
-      await new Promise((r) => setTimeout(r, 2500));
+      await runSettled(projectId, outcome.runId);
 
       const kinds = collected.map((e) => e.kind);
       // Exact order: command message, runStarted, one-or-more
@@ -336,8 +349,7 @@ describe('TerminalManager', () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(mgr.cancelRun(outcome.runId)).toBe(true);
 
-    // Wait for the cancelled run's output bubble to land.
-    await new Promise((r) => setTimeout(r, 1500));
+    await runSettled(projectId, outcome.runId);
     const thread = await store.getTerminalThread(projectId, outcome.threadId);
     const output = thread!.messages.find((m) => m.kind === 'output');
     expect(output).toBeDefined();
@@ -349,7 +361,7 @@ describe('TerminalManager', () => {
     // Shell still alive — next command works.
     const next = await mgr.enqueueRun(projectId, '', 'echo still-alive');
     expect(next.resolution.kind).toBe('argv');
-    await new Promise((r) => setTimeout(r, 1500));
+    await runSettled(projectId, next.runId);
     const nextThread = await store.getTerminalThread(projectId, next.threadId);
     expect(nextThread!.messages.at(-1)?.content).toContain('still-alive');
   });
@@ -384,7 +396,7 @@ describe('TerminalManager', () => {
       // to fire (proving the manager's sendInput plumbing works
       // end-to-end through the pool + shell).
       expect(mgr.sendInput(r1.runId, 'Mike')).toBe(true);
-      await new Promise((r) => setTimeout(r, 1500));
+      await runSettled(projectId, r1.runId);
       const finalMessage = collected
         .flatMap((e) => (e.kind === 'message' && e.runId === r1.runId ? [e] : []))
         .at(-1);
@@ -409,8 +421,8 @@ describe('TerminalManager', () => {
 
     const mgr = makeManager({ workspaceIndex: stubIndex(null) });
 
-    await mgr.enqueueRun(projectId, '', 'cd inner');
-    await new Promise((r) => setTimeout(r, 1500));
+    const cdInner = await mgr.enqueueRun(projectId, '', 'cd inner');
+    await runSettled(projectId, cdInner.runId);
 
     let drift = collected.flatMap((e) => (e.kind === 'workingDirChanged' ? [e] : []));
     expect(drift).toHaveLength(1);
@@ -421,8 +433,8 @@ describe('TerminalManager', () => {
     // anchor — otherwise both old and new display dirs would be
     // `''` and the event would silently skip, stranding the
     // folder picker on `inner`.
-    await mgr.enqueueRun(projectId, '', 'cd ..');
-    await new Promise((r) => setTimeout(r, 1500));
+    const cdUp = await mgr.enqueueRun(projectId, '', 'cd ..');
+    await runSettled(projectId, cdUp.runId);
     drift = collected.flatMap((e) => (e.kind === 'workingDirChanged' ? [e] : []));
     expect(drift).toHaveLength(2);
     expect(drift[1]!.newWorkingDir).toBe('');
@@ -457,7 +469,7 @@ describe('TerminalManager', () => {
       expect(outcome.resolution.resolvedFrom).toBe('hello');
     }
 
-    await new Promise((r) => setTimeout(r, 1500));
+    await runSettled(projectId, outcome.runId);
     const thread = await store.getTerminalThread(projectId, outcome.threadId);
     expect(thread!.messages.at(-1)?.content).toContain('aliased');
   });

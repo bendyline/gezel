@@ -155,7 +155,11 @@ export function formatRunSetupMessage(input: {
   } else {
     lines.push("Gezel isn't set up to chat yet: this device doesn't have an on-device model.");
   }
-  lines.push('', 'Run `gezel` to choose a model and download it, step by step.');
+  lines.push(
+    '',
+    'Run it again with --download to download what this computer needs and run your request.',
+    'Or run `gezel` to choose a model and download it, step by step.',
+  );
   if (steps.length > 0) {
     lines.push('', 'Or set it up directly:', ...steps.map((step) => `  ${step}`));
   }
