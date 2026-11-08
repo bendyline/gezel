@@ -1,6 +1,6 @@
 {
   "name": "gezel-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Gezel's MCP server, gezel-mcp, under its short name. Same program as @bendyline/gezel-mcp.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "mcp", "model-context-protocol"],
