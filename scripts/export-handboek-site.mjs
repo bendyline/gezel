@@ -67,6 +67,8 @@ if (flag('--help') || flag('-h')) {
                  ${DEFAULT_SITE_ORIGIN}); --no-site-origin omits both
   --no-og        skip rendering Open Graph cards into ../gezel-site/${OG_DIR}/
   --no-apps      skip the apps library at ../gezel-site/${APPS_DIR}/ (gezel.com/apps)
+  --open-in-gezel  add gezel:// "Open in Gezel" buttons to craftbook and app pages;
+                 only once a desktop release answers those links (docs/deep-links.md)
   --skip-build   reuse the current packages/cli/dist instead of rebuilding
   --force        wipe the output directory even without an export marker
 `);
@@ -160,6 +162,7 @@ run('rendering handboek', process.execPath, [
   ...(siteOrigin ? ['--canonical-base', `${siteOrigin}/docs/`] : []),
   ...(ogOut ? ['--og-out', ogOut, '--og-base', `${siteOrigin}/${OG_DIR}/`] : []),
   ...(appsOut ? ['--apps-out', appsOut] : []),
+  ...(flag('--open-in-gezel') ? ['--open-in-gezel'] : []),
 ]);
 
 for (const [dir, marker] of [[out, MARKER], ...(appsOut ? [[appsOut, APPS_MARKER]] : [])]) {

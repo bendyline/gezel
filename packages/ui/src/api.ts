@@ -1,4 +1,5 @@
 import type {
+  GezelDeepLink,
   GezmodelEngine,
   GezmodelImportProgress,
   GezmodelImportReview,
@@ -319,6 +320,12 @@ declare global {
       onOpenModelBundle?: (
         callback: (request: { requestId: string; filename: string }) => void,
       ) => void;
+      /**
+       * Receive `gezel://` links opened from a browser (docs/deep-links.md).
+       * Main parses and validates them; the latest one waits here until a
+       * subscriber arrives.
+       */
+      onDeepLink?: (callback: (link: GezelDeepLink) => void) => () => void;
       /**
        * Restart the gezel service. Used by Settings → Folders after a
        * successful externalization move. The supervisor handles

@@ -94,6 +94,15 @@ describe('night-shift oversight task', () => {
     expect(await store.listProjectTasks('default')).toHaveLength(1);
   });
 
+  // Reports opened with "Nightly run: 2026-10-09 (America/Los_Angeles)",
+  // copied from the per-turn date line.
+  it('asks for the night in words, without a time zone', async () => {
+    await ensureNightShiftOversightTask(store, tasks);
+    const { step } = await oversightStep();
+    expect(step.prompt).toContain('"Night of October 9"');
+    expect(step.prompt).toContain('Never write the year, a YYYY-MM-DD date, or a time zone.');
+  });
+
   it('installs the step with a completion gate on the report artifact', async () => {
     await ensureNightShiftOversightTask(store, tasks);
     const { step } = await oversightStep();

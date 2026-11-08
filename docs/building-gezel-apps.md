@@ -27,6 +27,12 @@ include only the parts the experience needs.
 
 ## Read in this order
 
+The first four guides are also gathered on one page for people and AI agents,
+[Build a Gezel app: the complete guide](handboek/technical/build-a-gezel-app.md),
+published at `https://gezel.com/docs/build-a-gezel-app.md` and printed by
+`gezel app guide`. It includes them through `::handboek-include`, so edit the
+guides themselves, never a copy.
+
 | Need | Maintained guide |
 | --- | --- |
 | Build an app, including roles, craftbooks, scripts, data, and project defaults | [Building AI Apps inside Gezel](handboek/technical/building-ai-apps-inside-gezel.md) |

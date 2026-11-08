@@ -105,6 +105,8 @@ ${
 
 Then write ONE consolidated report to \`artifacts/${OVERSIGHT_REPORT_PATH}\` (overwrite any prior copy). Structure it as a list of concrete, approvable recommendations grouped by project, each with: what to change, why, and (where useful) a short ready-to-apply draft (e.g. a rewritten about.md paragraph). These are suggestions for the user to approve in the morning — do NOT apply them, do NOT message crew leads, do NOT start or advance tasks.
 
+Right under the report's title, name the night the way a person would say it, by the evening it began: "Night of October 9". Past midnight, that is yesterday's date. Never write the year, a YYYY-MM-DD date, or a time zone.
+
 ## Actionable recommendations
 
 ${REPORT_ACTION_AUTHORING_GUIDE}

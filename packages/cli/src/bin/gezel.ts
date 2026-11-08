@@ -1436,6 +1436,10 @@ handboek
     '--apps-out <dir>',
     'also write the apps library (gezel.com/apps) into this directory, outside --out',
   )
+  .option(
+    '--open-in-gezel',
+    'add gezel:// "Open in Gezel" buttons to craftbook and app pages (needs a desktop release that answers them)',
+  )
   .action(
     async (opts: {
       out: string;
@@ -1445,6 +1449,7 @@ handboek
       ogOut?: string;
       ogBase?: string;
       appsOut?: string;
+      openInGezel?: boolean;
     }) => {
       if (Boolean(opts.ogOut) !== Boolean(opts.ogBase)) {
         console.error('--og-out and --og-base go together: cards need a directory and a URL.');
@@ -1462,6 +1467,7 @@ handboek
         ogOut: opts.ogOut,
         ogBase: opts.ogBase,
         appsOut: opts.appsOut,
+        openInGezel: opts.openInGezel === true,
       });
       console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
       if (result.apps) {
@@ -1933,6 +1939,18 @@ appCmd
   .action(async (folder: string, opts: { out: string }) => {
     const { runAppDemo } = await loadAppAuthorCommand();
     await runAppDemo(folder, opts);
+  });
+
+appCmd
+  .command('guide')
+  .description(
+    'Print the complete guide to building a Gezel app, for this version (give it to your AI agent)',
+  )
+  .action(async () => {
+    type AppGuideModule = typeof import('../app-guide.js');
+    const appGuideModule = '../app-guide.js';
+    const { runAppGuide } = (await import(appGuideModule)) as AppGuideModule;
+    await runAppGuide();
   });
 
 appCmd

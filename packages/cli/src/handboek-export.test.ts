@@ -9,6 +9,9 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   type HandboekExportResult,
   extractBody,
+  llmsTxt,
+  markdownTwin,
+  openInGezelSection,
   pageScripts,
   resolveCssHref,
   rewriteSiteLinks,
@@ -18,6 +21,7 @@ import {
   wrapTables,
 } from './handboek-export.js';
 import { SCORECARD_FILTER_JS } from './handboek-site-scorecard.js';
+import { OPEN_IN_GEZEL_JS } from './site-open-in-gezel.js';
 
 describe('rewriteSiteLinks', () => {
   const ids = new Set(['welcome', 'the-crew', 'role/meester', 'craftbook/status-report']);
@@ -427,6 +431,91 @@ describe('pageScripts', () => {
   it('links the scorecard filter only where a scorecard rendered', () => {
     expect(pageScripts(`<div ${SCORECARD_DATA_ATTRS.root}="1"></div>`)).toEqual(['scorecard.js']);
     expect(pageScripts('<p>No scorecard here.</p>')).toEqual([]);
+  });
+
+  it('links the open-in-Gezel script only where a page carries the button', () => {
+    expect(pageScripts(openInGezelSection('craftbook/fact-check', '/') ?? '')).toEqual([
+      'open-in-gezel.js',
+    ]);
+  });
+});
+
+describe('openInGezelSection', () => {
+  it('links craftbooks to their launch form and project types to New Project', () => {
+    const craftbook = openInGezelSection('craftbook/fact-check', '/');
+    expect(craftbook).toContain('href="gezel://craftbook/fact-check"');
+    expect(craftbook).toContain('Run this in Gezel');
+    expect(craftbook).toContain('href="/#download"');
+    expect(openInGezelSection('project-type/meal-planner', '/')).toContain(
+      'href="gezel://app/meal-planner"',
+    );
+  });
+
+  it('adds nothing to other pages', () => {
+    expect(openInGezelSection('technical/cli-reference', '/')).toBeUndefined();
+    expect(openInGezelSection('role-template/reisleider', '/')).toBeUndefined();
+  });
+});
+
+describe('markdownTwin', () => {
+  it('keeps an article that starts with its title and titles one that does not', () => {
+    expect(markdownTwin('Ignored', '# Page APIs\n\nBody.\n\n')).toBe('# Page APIs\n\nBody.\n');
+    expect(markdownTwin('Every model', '| Model | Size |')).toBe(
+      '# Every model\n\n| Model | Size |\n',
+    );
+  });
+});
+
+describe('llmsTxt', () => {
+  it('points at the app guide first and lists every twin by area', () => {
+    const text = llmsTxt(
+      [
+        {
+          title: 'Technical',
+          entries: [
+            { id: 'build-a-gezel-app', title: 'Build a Gezel app', summary: 'The  whole\nguide.' },
+            { id: 'cli-reference', title: 'The gezel command line' },
+          ],
+        },
+      ],
+      'https://gezel.com/docs/',
+    );
+    expect(text.startsWith('# Gezel Handboek\n\n> ')).toBe(true);
+    expect(text).toContain(
+      'read [Build a Gezel app: the complete guide](https://gezel.com/docs/build-a-gezel-app.md) first',
+    );
+    expect(text).toContain(
+      '## Technical\n\n- [Build a Gezel app](https://gezel.com/docs/build-a-gezel-app.md): The whole guide.',
+    );
+    expect(text).toContain('- [The gezel command line](https://gezel.com/docs/cli-reference.md)\n');
+  });
+});
+
+describe('rewriteSiteLinks with an absolute base', () => {
+  it('points article links at the published page', () => {
+    const { ids, byStem } = {
+      ids: new Set(['gezel-page-apis']),
+      byStem: new Map([['gezel-page-apis', 'gezel-page-apis']]),
+    };
+    expect(
+      rewriteSiteLinks(
+        'See [files](gezel-page-apis.md#file-cards) and [home](https://gezel.com/).',
+        'build-a-gezel-app',
+        ids,
+        byStem,
+        () => true,
+        'https://gezel.com/docs/',
+      ),
+    ).toBe(
+      'See [files](https://gezel.com/docs/gezel-page-apis/#file-cards) and [home](https://gezel.com/).',
+    );
+  });
+});
+
+describe('OPEN_IN_GEZEL_JS', () => {
+  it('is valid JavaScript with nothing left to interpolate', () => {
+    expect(OPEN_IN_GEZEL_JS).not.toContain('${');
+    expect(() => new Function(OPEN_IN_GEZEL_JS)).not.toThrow();
   });
 });
 

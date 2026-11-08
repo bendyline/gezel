@@ -227,6 +227,7 @@ export * from './tools/step-policy.js';
 export * from './craftbook-params.js';
 export * from './craftbook-inputs.js';
 export * from './craftbook-launch.js';
+export * from './deep-links.js';
 export * from './starter-craftbooks.js';
 export * from './craftbook-setup.js';
 export * from './craftbook-invocation-key.js';

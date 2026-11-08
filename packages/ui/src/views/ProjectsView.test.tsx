@@ -1426,7 +1426,7 @@ describe('ProjectsView', () => {
       expect(api.listProjectIndexFilesDetail).toHaveBeenCalledWith('pj-alpha', { hidden: false });
     });
     // Newest first, from the index-backed list (fresh.md is not in the walk).
-    const flatButtons = await screen.findByRole('button', { name: /fresh\.md/ });
+    const flatButtons = await screen.findByRole('button', { name: /^fresh\.md/ });
     expect(flatButtons).toBeInTheDocument();
 
     // Stale index surfaces the notice with an Index now action.

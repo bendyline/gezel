@@ -5,6 +5,7 @@ import { type Root, createRoot } from 'react-dom/client';
 import { AppBrand } from '../components/AppBrand.js';
 import { NavigationHome } from '../components/PrimaryNavigation.js';
 import { greetingForHour } from '../views/home/greeting.js';
+import { RAIL_DRAG_SLOP_PX, railDragHeight, railRollsUp } from '../views/home/sheet-rail.js';
 import { StartupReading } from './Reading.js';
 import type { StartupHomeBridge } from './types.js';
 import './startup.css';
@@ -67,8 +68,10 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   content.id = 'startup-reading';
   content.setAttribute('role', 'tabpanel');
   content.tabIndex = 0;
-  const rail = element('div', 'home-workshop-sheet-rail');
-  rail.setAttribute('aria-hidden', 'true');
+  const rail = element('button', 'home-workshop-sheet-rail');
+  rail.type = 'button';
+  rail.title = 'Roll up';
+  rail.setAttribute('aria-label', 'Roll up the greeting');
   sheet.append(content, rail);
   band.append(top, sheet);
   const loading = element('div', 'startup-loading');
@@ -87,8 +90,11 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   layout.append(sidebar, pane);
   root.append(layout);
 
+  // A rolled-up sheet is handed over as the conversation tab, which the live
+  // Home opens rolled up. Each launch still opens the sheet.
+  let collapsed = false;
   function current(): StartupHomeView {
-    return { ...view };
+    return collapsed ? { ...view, tab: 'chat' } : { ...view };
   }
   // Navigation uses a synchronous, bounded IPC copy. Disk writes stay asynchronous.
   const save = () => {
@@ -120,6 +126,7 @@ export function mountStartup(bridge: StartupHomeBridge): void {
     target.classList.toggle('home-workshop-greeting-cols-fill', view.tab === 'tour');
     for (const [id, button] of buttons) {
       button.setAttribute('aria-selected', String(id === view.tab));
+      button.setAttribute('aria-expanded', String(!collapsed && id === view.tab));
       button.dataset.state = id === view.tab ? 'active' : 'inactive';
       button.tabIndex = id === view.tab ? 0 : -1;
     }
@@ -160,11 +167,17 @@ export function mountStartup(bridge: StartupHomeBridge): void {
     button.type = 'button';
     button.setAttribute('role', 'tab');
     button.setAttribute('aria-controls', content.id);
+    // As on the live Home: the open tab rolls its sheet up, any tab reopens it.
     button.onclick = () => {
-      view.tab = id;
-      view.scroll = 0;
-      render();
-      save();
+      if (!collapsed && view.tab === id) {
+        setCollapsed(true);
+        return;
+      }
+      if (view.tab !== id) {
+        view.tab = id;
+        view.scroll = 0;
+      }
+      setCollapsed(false);
     };
     button.onkeydown = (event) => {
       const next =
@@ -186,6 +199,57 @@ export function mountStartup(bridge: StartupHomeBridge): void {
     buttons.set(id, button);
     tabs.append(button);
   });
+  function setCollapsed(next: boolean) {
+    collapsed = next;
+    band.classList.toggle('home-workshop-greeting-collapsed', next);
+    sheet.setAttribute('aria-hidden', String(next));
+    sheet.inert = next;
+    render();
+    save();
+  }
+  // The rail pulls like the live one: the sheet follows the pointer with its
+  // transition off, and letting go past the threshold rolls it the rest of
+  // the way up. A drag swallows the click that follows it.
+  let drag: { pointerId: number; startY: number; height: number; moved: boolean } | null = null;
+  let skipRailClick = false;
+  rail.addEventListener('pointerdown', (event) => {
+    skipRailClick = false;
+    if (event.button !== 0 || collapsed) return;
+    rail.setPointerCapture?.(event.pointerId);
+    drag = {
+      pointerId: event.pointerId,
+      startY: event.clientY,
+      height: sheet.getBoundingClientRect().height,
+      moved: false,
+    };
+  });
+  rail.addEventListener('pointermove', (event) => {
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const lift = drag.startY - event.clientY;
+    if (!drag.moved && Math.abs(lift) < RAIL_DRAG_SLOP_PX) return;
+    drag.moved = true;
+    sheet.dataset.dragging = '';
+    sheet.style.height = `${railDragHeight(drag.height, lift)}px`;
+  });
+  const endRailDrag = (event: PointerEvent, letGo: boolean) => {
+    const ended = drag;
+    if (!ended || ended.pointerId !== event.pointerId) return;
+    drag = null;
+    if (!ended.moved) return;
+    skipRailClick = true;
+    sheet.style.height = '';
+    delete sheet.dataset.dragging;
+    if (letGo && railRollsUp(ended.height, ended.startY - event.clientY)) setCollapsed(true);
+  };
+  rail.addEventListener('pointerup', (event) => endRailDrag(event, true));
+  rail.addEventListener('pointercancel', (event) => endRailDrag(event, false));
+  rail.onclick = () => {
+    if (skipRailClick) {
+      skipRailClick = false;
+      return;
+    }
+    setCollapsed(true);
+  };
   document.body.append(root);
   const appRoot = document.getElementById('root');
   if (appRoot) appRoot.inert = true;

@@ -1,4 +1,5 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { fireEvent } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mountStartup } from './screen.js';
 import type { StartupHomeBridge } from './types.js';
 
@@ -81,4 +82,81 @@ it('keeps the reader and draft usable if saving to the live app fails', async ()
   expect(document.getElementById('startup-home')!.inert).toBe(false);
   expect(window.__GEZEL_STARTUP__!.state().draft).toBe('Do not lose this');
   expect(host.finish).not.toHaveBeenCalled();
+});
+
+describe('the sheet rail', () => {
+  const rail = () => document.querySelector<HTMLButtonElement>('.home-workshop-sheet-rail')!;
+  const band = () => document.querySelector<HTMLElement>('.home-workshop-greeting')!;
+  const sheet = () => document.querySelector<HTMLElement>('.home-workshop-intro-sheet')!;
+  const rolledUp = () => band().classList.contains('home-workshop-greeting-collapsed');
+
+  it('rolls the sheet up, and a tab opens it again on that tab', () => {
+    const host = bridge();
+    mountStartup(host);
+    rail().click();
+    expect(rolledUp()).toBe(true);
+    expect(sheet().inert).toBe(true);
+    expect(window.__GEZEL_STARTUP__!.state().tab).toBe('chat');
+    expect(host.save).toHaveBeenLastCalledWith(expect.objectContaining({ tab: 'chat' }));
+
+    document.getElementById('startup-tab-tour')!.click();
+    expect(rolledUp()).toBe(false);
+    expect(sheet().inert).toBe(false);
+    expect(window.__GEZEL_STARTUP__!.state().tab).toBe('tour');
+    expect(document.getElementById('startup-tab-tour')).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('rolls up when the open tab is chosen again', () => {
+    mountStartup(bridge());
+    const greeting = document.getElementById('startup-tab-greeting')!;
+    greeting.click();
+    expect(rolledUp()).toBe(true);
+    expect(greeting).toHaveAttribute('aria-expanded', 'false');
+    greeting.click();
+    expect(rolledUp()).toBe(false);
+    expect(window.__GEZEL_STARTUP__!.state().tab).toBe('greeting');
+  });
+
+  it('hands a rolled-up sheet to the live Home as the conversation', async () => {
+    vi.useFakeTimers();
+    mountStartup(bridge());
+    rail().click();
+    const accept = vi.fn(async () => {});
+    window.__GEZEL_STARTUP__!.connect(accept);
+    await vi.runAllTimersAsync();
+    expect(accept).toHaveBeenCalledWith(expect.objectContaining({ tab: 'chat' }));
+  });
+
+  function pull(lift: number, end: 'pointerUp' | 'pointerCancel' = 'pointerUp') {
+    mountStartup(bridge());
+    sheet().getBoundingClientRect = () => ({ height: 400 }) as DOMRect;
+    fireEvent.pointerDown(rail(), { button: 0, pointerId: 1, clientY: 500 });
+    fireEvent.pointerMove(rail(), { pointerId: 1, clientY: 500 - lift / 2 });
+    const midway = sheet().style.height;
+    const dragging = sheet().hasAttribute('data-dragging');
+    fireEvent.pointerMove(rail(), { pointerId: 1, clientY: 500 - lift });
+    fireEvent[end](rail(), { pointerId: 1, clientY: 500 - lift });
+    fireEvent.click(rail());
+    return { midway, dragging };
+  }
+
+  it('follows the pointer, then rolls up when let go past a quarter of the sheet', () => {
+    const { midway, dragging } = pull(120);
+    expect(midway).toBe('340px');
+    expect(dragging).toBe(true);
+    expect(rolledUp()).toBe(true);
+    expect(sheet().style.height).toBe('');
+    expect(sheet().hasAttribute('data-dragging')).toBe(false);
+  });
+
+  it('drops back open when let go short of it, without the click rolling it up', () => {
+    pull(80);
+    expect(rolledUp()).toBe(false);
+    expect(sheet().style.height).toBe('');
+  });
+
+  it('drops back open when the pointer is taken away', () => {
+    pull(200, 'pointerCancel');
+    expect(rolledUp()).toBe(false);
+  });
 });

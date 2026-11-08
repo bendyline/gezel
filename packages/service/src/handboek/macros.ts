@@ -69,6 +69,26 @@ export interface MacroContext {
   roundNotes?: ScorecardRoundNote[];
   /** Figures referenced by expanded markdown accumulate here. */
   figures: HandboekFigure[];
+  /** Other curated articles, for `include`. Absent means it renders nothing. */
+  includes?: HandboekIncludes;
+}
+
+/** An article another one includes: its own macros already expanded. */
+export interface IncludedArticle {
+  id: string;
+  title: string;
+  summary?: string;
+  markdown: string;
+}
+
+export interface HandboekIncludes {
+  /**
+   * Inline the included article (the published site, `gezel app guide`), or
+   * list it as a link (the app's Handboek and its knowledge index, which
+   * already hold the article itself and should not hold it twice).
+   */
+  inline: boolean;
+  resolve(id: string): Promise<IncludedArticle | null>;
 }
 
 type MacroFn = (attrs: Record<string, string>, ctx: MacroContext) => Promise<string>;
@@ -98,7 +118,60 @@ export const MACROS: Record<string, MacroFn> = {
   'project-type-composition': projectTypeComposition,
   'suggested-work': suggestedWork,
   'whats-new-list': whatsNewList,
+  include: includeArticle,
 };
+
+/**
+ * `::handboek-include{id=<article-id>}`: another curated article, in full as
+ * a section of this one, or as a link where the reader already has it. Lets
+ * one page gather a set of guides without a copy of them to drift.
+ */
+async function includeArticle(attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
+  const id = attrs.id;
+  if (!id || !ctx.includes) return '';
+  const article = await ctx.includes.resolve(id);
+  if (!article) {
+    log.warn(`::handboek-include: no curated article "${id}"`);
+    return '';
+  }
+  if (!ctx.includes.inline) {
+    return `- [${article.title}](${article.id}.md)${article.summary ? `: ${article.summary}` : ''}`;
+  }
+  return asIncludedSection(article.title, article.markdown);
+}
+
+/**
+ * An article's markdown as a `##` section of another: its own `#` title gives
+ * way to the section heading and every other heading drops one level, so the
+ * including page keeps one outline. Fenced code is left alone, where `#` is a
+ * shell comment.
+ */
+export function asIncludedSection(title: string, markdown: string): string {
+  const out = [`## ${title}`];
+  let fence: string | null = null;
+  let titleSeen = false;
+  for (const line of markdown.split('\n')) {
+    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (marker) {
+      if (!fence) fence = marker[0] as string;
+      else if (marker[0] === fence) fence = null;
+      out.push(line);
+      continue;
+    }
+    const heading = fence ? null : /^(#{1,6})(\s.*)$/.exec(line);
+    if (!heading) {
+      out.push(line);
+      continue;
+    }
+    const level = (heading[1] as string).length;
+    if (level === 1 && !titleSeen) {
+      titleSeen = true;
+      continue;
+    }
+    out.push(`${'#'.repeat(Math.min(level + 1, 6))}${heading[2]}`);
+  }
+  return out.join('\n');
+}
 
 /** Releases listed inline before the rest stay reachable through the TOC. */
 const WHATS_NEW_LIST_DEFAULT_LIMIT = 12;

@@ -17,6 +17,10 @@ Read its public [authoring guide](docs/handboek/technical/building-ai-apps-insid
 [page style guide](docs/handboek/technical/gezel-app-page-style-guide.md) before implementing,
 and organize the page by the [app UX guide](docs/handboek/technical/gezel-app-ux-guide.md):
 Home and noun tabs, actions as keys that open dialogs, and row actions.
+All four are gathered for outside builders and their agents in
+[Build a Gezel app](docs/handboek/technical/build-a-gezel-app.md) through
+`::handboek-include` (inlined on gezel.com and by `gezel app guide`, linked in
+the app's Handboek), so edit the guides themselves, never that page's copy.
 
 A Gezel app is composed by a project type; its page, roles, craftbooks, scripts,
 and project defaults are optional parts chosen for the user flow. Public catalog
@@ -327,6 +331,10 @@ A notification must be earned by something durable that happened. The sources ar
 - **The phone's UI** ([useHostNotifications.ts](packages/ui/src/components/useHostNotifications.ts)) drives `window.__GEZEL__.earnedNotifications`, the mobile bridge over `@capacitor/local-notifications` ([mobile/src/notifications.ts](packages/mobile/src/notifications.ts)). Its ledger is localStorage. It asks the OS for permission the first time something earned happens while the person is in the app, and clears the tray when they return.
 
 **Reminders** are the only time-based source, and the time must come from the project's own state. A script with the `reminders` capability calls `gezel.reminder.set({ at, title, body })` / `clear()`; `parseReminderRequest` enforces a future time at most 30 days out. The host stores one per project (`projects/{id}/reminder.json` through `Store` / `PortableStore`), announces `reminders_updated`, and `GET /api/reminders` lists them. `planReminders` schedules the week ahead, at most the cap per day. The desktop arms one timer and re-checks on resume; the phone hands them to the OS. Flashcards 1.1.2 is the reference content.
+
+### `gezel://` links
+
+gezel.com's craftbook and app pages open the desktop app on that item's form: `gezel://app/<project-type-id>`, `gezel://craftbook/<id>`, `gezel://docs/<article-id>`, and Home for anything else. A link only opens a form the person submits. It carries no text, and never creates, runs, installs or downloads anything, because any web page can send one. One parser reads them (`parseGezelDeepLink`, [core deep-links.ts](packages/core/src/deep-links.ts)). Main registers the scheme: electron-builder `protocols`, plus a per-user `setAsDefaultProtocolClient` on Windows, never from dev or test runs. It sends `gezel:deep-link` only to the loaded app page, and [DeepLinkHost](packages/ui/src/components/DeepLinkHost.tsx) opens the dialog. Contract in [docs/deep-links.md](docs/deep-links.md).
 
 ### Device connectors and lookouts
 

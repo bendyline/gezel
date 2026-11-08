@@ -66,7 +66,7 @@ export function pageAppComponentsSource(): string {
       trigger.type='button';trigger.setAttribute('aria-haspopup','dialog');flash.className='flash';flash.setAttribute('role','status');flash.setAttribute('aria-live','polite');
       sheet.className='sheet';buttons.className='buttons';heading.id='title';dialog.setAttribute('aria-labelledby','title');cancel.type='button';submit.classList.add('primary');
       buttons.append(cancel,submit);sheet.append(heading,description,fields,status,buttons);dialog.append(sheet);box=sheet;s.root.append(style,trigger,flash,dialog);
-      trigger.onclick=function(){open();};cancel.onclick=function(){close();};
+      trigger.onclick=function(){show(undefined,trigger);};cancel.onclick=function(){close();};
       dialog.addEventListener('cancel',function(event){if(busy)event.preventDefault();});
       dialog.addEventListener('close',function(){s.host.removeAttribute('data-gezel-dialog-open');var back=returnFocus;returnFocus=null;if(back&&back.isConnected&&typeof back.focus==='function')back.focus();});
       // Close on a backdrop click only when the press also began there, so a text selection dragged outside keeps the form.
@@ -97,9 +97,11 @@ export function pageAppComponentsSource(): string {
     function reset(values){if(busy||stopped)return;fill(values);}
     function deepActive(){var active=document.activeElement;while(active&&active.shadowRoot&&active.shadowRoot.activeElement)active=active.shadowRoot.activeElement;return active;}
     function firstField(){var first=controls.find(function(c){return !c.label.hidden&&!c.input.disabled;});if(first)first.input.focus();}
-    function open(values){
+    function open(values){show(values,null);}
+    // Focus goes back to whatever opened the dialog: the key, or a row action that called open(). WebKit does not focus a clicked button, so the key passes itself and a body-focused open falls back to the key.
+    function show(values,from){
       if(stopped)return;if(values)reset(values);
-      if(mode==='dialog'){if(!dialog.open){returnFocus=trigger&&!trigger.hidden?trigger:deepActive();if(!busy)status.textContent='';s.host.setAttribute('data-gezel-dialog-open','');try{dialog.showModal();}catch(_){dialog.setAttribute('open','');}}}
+      if(mode==='dialog'){if(!dialog.open){var active=deepActive();returnFocus=from||(active&&active!==document.body?active:trigger&&!trigger.hidden?trigger:null);if(!busy)status.textContent='';s.host.setAttribute('data-gezel-dialog-open','');try{dialog.showModal();}catch(_){dialog.setAttribute('open','');}}}
       else if(mode==='disclosure')box.open=true;
       firstField();
     }

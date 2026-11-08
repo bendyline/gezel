@@ -53,7 +53,8 @@ or file-write capability.
 else the title; `primary: true` fills it with the action color) that opens the
 form in a modal `<dialog>`: one column of fields, Cancel and the submit verb,
 Escape or a backdrop click to close, refused while a save is pending. A save
-closes it, returns focus to the key, and confirms beside it; a failure keeps the
+closes it, returns focus to whatever opened it (the key, or a row action that
+called `open()`), and confirms beside it; a failure keeps the
 dialog and its values. `trigger: false` hides the key for a dialog the page opens
 itself. `'inline'` is an always-open form for a settings panel, without
 "(optional)" suffixes. The default `'disclosure'` is the original expandable
