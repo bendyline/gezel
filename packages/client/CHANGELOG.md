@@ -1,3 +1,10 @@
+## @bendyline/gezel-client [1.2.14](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-client%401.2.13...%40bendyline%2Fgezel-client%401.2.14) (2026-11-08)
+
+
+### Dependencies
+
+* **@bendyline/gezel:** upgraded to 1.2.14
+
 ## @bendyline/gezel-client [1.2.13](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-client%401.2.12...%40bendyline%2Fgezel-client%401.2.13) (2026-11-05)
 
 
