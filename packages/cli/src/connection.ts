@@ -65,6 +65,8 @@ export interface CliGlobals {
   project?: string | boolean;
   /** Skip legacy full-product system-service compatibility and use the per-user daemon. */
   standalone?: boolean;
+  /** Download what a command needs without asking (see auto-download.ts). */
+  download?: boolean;
 }
 
 /** A user-facing CLI failure — printed without a stack trace. */

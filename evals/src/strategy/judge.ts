@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
-import { readFile, stat, writeFile } from 'node:fs/promises';
+import { readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve, sep } from 'node:path';
+import { join, posix, relative, resolve, sep } from 'node:path';
 import { type CraftbookContract, type Task, criterionEnforce } from '@bendyline/gezel';
+import { loadCraftbookTestSpecAtVersionSync } from '../craftbooks/test-spec-loader.ts';
 import { contractTask } from './contract-grade.ts';
 
 /**
@@ -21,9 +22,15 @@ export const JUDGE_MODEL = process.env.GEZEL_STRATEGY_JUDGE_MODEL ?? 'claude-opu
  * Bumped whenever the prompt or the bundle changes, so scores from two
  * versions are never mixed. 2: the judge reads formatting as delivered (v1
  * scored a report stripped to one paragraph no lower on craft, 0 of 7
- * planted defects) and is told whether a binary deliverable exists.
+ * planted defects) and is told whether a binary deliverable exists. 3: a
+ * folder deliverable (refactor-module's `./`, invoice-run's `invoices`) is
+ * shown as the files the work changed or added, beside the seed it started
+ * from; v2 read the folder as a file, showed `[missing]`, and scored every
+ * code book 0 in every round.
  */
-export const JUDGE_PROMPT_VERSION = 2;
+export const JUDGE_PROMPT_VERSION = 3;
+/** v3 changed only folder deliverables, so a v2 report stands for a trial without one. */
+const FILE_ONLY_COMPATIBLE_VERSION = 2;
 export const JUDGE_SAMPLES = 3;
 const JUDGE_TIMEOUT_MS = 600_000;
 /** Per-file and whole-bundle caps, so a huge deliverable cannot crowd out the sources. */
@@ -64,11 +71,20 @@ export interface JudgeReport {
   promptVersion?: number;
 }
 
-/** A saved report this version of the judge can use. */
-export function isCurrentJudgeReport(report: Partial<JudgeReport> | null): report is JudgeReport {
+/**
+ * A saved report this version of the judge can use. Pass `folderDeliverable`
+ * (from `trialHasFolderDeliverable`) to accept a v2 report whose bundle v3
+ * left unchanged; without it only this version counts.
+ */
+export function isCurrentJudgeReport(
+  report: Partial<JudgeReport> | null,
+  opts: { folderDeliverable?: boolean } = {},
+): report is JudgeReport {
+  const version = report?.promptVersion;
   return (
-    report?.promptVersion === JUDGE_PROMPT_VERSION &&
-    Array.isArray(report.samples) &&
+    (version === JUDGE_PROMPT_VERSION ||
+      (version === FILE_ONLY_COMPATIBLE_VERSION && opts.folderDeliverable === false)) &&
+    Array.isArray(report?.samples) &&
     report.samples.length > 0
   );
 }
@@ -117,6 +133,147 @@ async function readUnder(root: string, file: string): Promise<string | null> {
   }
 }
 
+async function folderUnder(root: string, file: string): Promise<string | null> {
+  const full = resolve(root, file.replace(/^\.?\/+/, ''));
+  if (full !== root && !full.startsWith(`${root}${sep}`)) return null;
+  try {
+    return (await stat(full)).isDirectory() ? full : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Installed and generated trees the work did not write. */
+const SKIPPED_FOLDERS = new Set(['node_modules', 'dist', 'build', 'coverage']);
+const LOCKFILES = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', 'bun.lockb']);
+const MAX_FOLDER_CHARS = MAX_BUNDLE_CHARS / 2;
+
+/** `./src/`, `src` and `src/` name one folder; the drawer root is `.`. */
+function drawerPath(path: string): string {
+  return posix.normalize(path.replace(/^\.?\/+/, '') || '.').replace(/(.)\/+$/, '$1');
+}
+
+async function filesUnder(dir: string, base = dir): Promise<string[]> {
+  const out: string[] = [];
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith('.')) continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (!SKIPPED_FOLDERS.has(entry.name)) out.push(...(await filesUnder(full, base)));
+    } else if (entry.isFile() && !LOCKFILES.has(entry.name)) {
+      out.push(relative(base, full).split(sep).join('/'));
+    }
+  }
+  return out.sort();
+}
+
+function fenced(text: string): string {
+  const longest = Math.max(0, ...[...text.matchAll(/`+/g)].map((m) => m[0].length));
+  const fence = '`'.repeat(Math.max(3, longest + 1));
+  return `${fence}\n${text.replace(/\n$/, '')}\n${fence}`;
+}
+
+/**
+ * A folder deliverable as the person finds it: every file the work changed
+ * or added, in full, and the untouched ones by name. Code books deliver
+ * `./`, edited in place, so the seed shows what changed.
+ */
+async function folderText(
+  folder: { dir: string; artifact: boolean },
+  path: string,
+  seed: ReadonlyMap<string, string>,
+): Promise<string> {
+  const prefix = drawerPath(path);
+  const shown: string[] = [];
+  const unchanged: string[] = [];
+  for (const rel of await filesUnder(folder.dir)) {
+    // The drawer's task folders are the run's mechanics, which never reach the judge.
+    if (folder.artifact && prefix === '.' && rel.startsWith('tasks/')) continue;
+    const key = prefix === '.' ? rel : `${prefix}/${rel}`;
+    const bytes = await readFile(join(folder.dir, rel));
+    if (bytes.includes(0)) {
+      shown.push(`#### ${key} (binary, ${bytes.length} bytes)`);
+      continue;
+    }
+    const text = bytes.toString('utf8');
+    const original = seed.get(key);
+    if (original === text) {
+      unchanged.push(key);
+      continue;
+    }
+    const state = seed.size === 0 ? '' : original === undefined ? ' (added)' : ' (changed)';
+    shown.push(`#### ${key}${state}\n\n${fenced(clip(text, MAX_FILE_CHARS))}`);
+  }
+  const lead =
+    seed.size === 0
+      ? `The folder \`${path}\` as delivered.`
+      : `The folder \`${path}\` as delivered: each file the work changed or added, in full. The starting version of a changed file is among the sources.`;
+  return clip(
+    [
+      lead,
+      ...(shown.length > 0 ? shown : ['[no files were changed or added]']),
+      ...(unchanged.length > 0 ? [`Unchanged: ${unchanged.join(', ')}`] : []),
+    ].join('\n\n'),
+    MAX_FOLDER_CHARS,
+  );
+}
+
+/** The files a trial's project was seeded with, from the sidecar of the version it ran. */
+function seedFiles(task: Task): Array<{ path: string; content: string; artifact: boolean }> {
+  const spec = task.craftbook.version
+    ? loadCraftbookTestSpecAtVersionSync(task.craftbook.id, task.craftbook.version)
+    : null;
+  return (spec?.setup.files ?? [])
+    .filter((f) => f.surface !== 'harness')
+    .map((f) => ({
+      path: drawerPath(f.path),
+      content: f.content,
+      artifact: f.surface === 'artifact',
+    }));
+}
+
+async function readContractTask(trialDir: string, craftbookId: string): Promise<Task | null> {
+  let state: { tasks?: { tasks?: Task[] } | Task[] };
+  try {
+    state = JSON.parse(await readFile(join(trialDir, 'state.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+  const tasks = Array.isArray(state.tasks) ? state.tasks : (state.tasks?.tasks ?? []);
+  const task = contractTask(tasks, craftbookId);
+  return task?.craftbook.contract ? task : null;
+}
+
+function trialRoots(trialDir: string, task: Task) {
+  const workspace = resolve(trialDir, 'workspace', task.projectId);
+  const artifacts = resolve(trialDir, 'artifacts', task.projectId);
+  return {
+    workspace,
+    artifacts,
+    /** The folder a deliverable names, on its own drawer first, as `read` looks. */
+    folder: async (path: string, artifact: boolean | undefined) => {
+      const first = await folderUnder(artifact ? artifacts : workspace, path);
+      if (first) return { dir: first, artifact: Boolean(artifact) };
+      const second = await folderUnder(artifact ? workspace : artifacts, path);
+      return second ? { dir: second, artifact: !artifact } : null;
+    },
+  };
+}
+
+/** Whether a deliverable of this trial's contract is a folder on disk (judge v3 changed only those). */
+export async function trialHasFolderDeliverable(
+  trialDir: string,
+  craftbookId: string,
+): Promise<boolean> {
+  const task = await readContractTask(trialDir, craftbookId);
+  if (!task?.craftbook.contract) return false;
+  const roots = trialRoots(trialDir, task);
+  for (const d of task.craftbook.contract.deliverables) {
+    if (!d.textSource && (await roots.folder(d.path, d.artifact))) return true;
+  }
+  return false;
+}
+
 /**
  * The blinded bundle for one trial: the task's request, the contract's stated
  * bar (eval-only criteria stay hidden, as from the model under test), each
@@ -127,18 +284,13 @@ export async function buildJudgeBundle(
   craftbookId: string,
   sourcePaths: readonly string[],
 ): Promise<JudgeBundle | null> {
-  let state: { tasks?: { tasks?: Task[] } | Task[] };
-  try {
-    state = JSON.parse(await readFile(join(trialDir, 'state.json'), 'utf8'));
-  } catch {
-    return null;
-  }
-  const tasks = Array.isArray(state.tasks) ? state.tasks : (state.tasks?.tasks ?? []);
-  const task = contractTask(tasks, craftbookId);
+  const task = await readContractTask(trialDir, craftbookId);
   if (!task?.craftbook.contract) return null;
   const contract: CraftbookContract = task.craftbook.contract;
-  const workspace = resolve(trialDir, 'workspace', task.projectId);
-  const artifacts = resolve(trialDir, 'artifacts', task.projectId);
+  const roots = trialRoots(trialDir, task);
+  const { workspace, artifacts } = roots;
+  const seed = seedFiles(task);
+  let folders = 0;
   const read = async (path: string, artifact: boolean | undefined) =>
     (await readUnder(artifact ? artifacts : workspace, path)) ??
     (await readUnder(artifact ? workspace : artifacts, path));
@@ -149,9 +301,19 @@ export async function buildJudgeBundle(
 
   const deliverables: JudgeBundle['deliverables'] = [];
   for (const [i, d] of contract.deliverables.entries()) {
-    const text = d.textSource
-      ? await read(d.textSource.path, d.textSource.artifact)
-      : await read(d.path, d.artifact);
+    const folder = d.textSource ? null : await roots.folder(d.path, d.artifact);
+    if (folder) folders++;
+    const text = folder
+      ? await folderText(
+          folder,
+          d.path,
+          new Map(
+            seed.filter((f) => f.artifact === folder.artifact).map((f) => [f.path, f.content]),
+          ),
+        )
+      : d.textSource
+        ? await read(d.textSource.path, d.textSource.artifact)
+        : await read(d.path, d.artifact);
     // Without this the judge marked a deck down for "nothing confirms the
     // file exists", which it could not have seen.
     let note = '';
@@ -164,15 +326,20 @@ export async function buildJudgeBundle(
     }
     deliverables.push({
       label: `Deliverable ${i + 1} (${d.kind}): ${d.description}${note}`,
-      text: text === null ? '[missing]' : blind(clip(text, MAX_FILE_CHARS)),
+      text: text === null ? '[missing]' : blind(folder ? text : clip(text, MAX_FILE_CHARS)),
       kind: d.kind,
     });
   }
   const sources: JudgeBundle['sources'] = [];
   let budget = MAX_BUNDLE_CHARS - deliverables.reduce((n, d) => n + d.text.length, 0);
-  for (const path of sourcePaths) {
+  // A folder is edited in place, so its sources come from the seed: the
+  // workspace copy of a source file IS the delivered change.
+  const fromSeed = folders > 0 && seed.length > 0;
+  for (const path of fromSeed ? seed.map((f) => f.path) : sourcePaths) {
     if (budget <= 0) break;
-    const text = await readUnder(workspace, path);
+    const text = fromSeed
+      ? (seed.find((f) => f.path === path)?.content ?? null)
+      : await readUnder(workspace, path);
     if (text === null) continue;
     const clipped = clip(text, Math.min(MAX_FILE_CHARS, budget));
     budget -= clipped.length;

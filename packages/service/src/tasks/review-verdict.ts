@@ -69,6 +69,18 @@ function isScaffolding(trimmed: string): boolean {
   );
 }
 
+/**
+ * A source list judges nothing. The evidence ledger appends `## Sources` to
+ * every factual-mode file that cites `[n]`, a reviewer's verdict included,
+ * and a source titled "Failing tests" must not read as a FAIL.
+ */
+const SOURCES_NAME =
+  '(?:\\*\\*|__)?(?:sources|references|citations|bibliography|works cited|bronnen)(?:\\*\\*|__)?\\s*:?\\s*(?:\\*\\*|__)?$';
+// The whole line, so a criterion heading such as "## Citations: FAIL" is still read.
+const SOURCES_HEADING = new RegExp(`^(#{1,6})\\s*${SOURCES_NAME}`, 'i');
+const SOURCES_LABEL = new RegExp(`^${SOURCES_NAME}`, 'i');
+const SOURCE_ENTRY = /^(?:[-*+]\s*)?\[\d{1,3}\]/;
+
 interface LineVerdict {
   criteria: number;
   /** The first line whose decision is FAIL. */
@@ -87,9 +99,19 @@ export function readLineVerdict(text: string): LineVerdict {
   const lines = text.split(/\r?\n/);
   const verdict: LineVerdict = { criteria: 0 };
   const quote = (line: string) => `"${line.trim().slice(0, 120)}"`;
+  // A headed list runs to the next heading at its level or above; a labeled
+  // one only over its `[n]` entries, so criteria after it are still read.
+  let sources: 'labeled' | number | null = null;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     const trimmed = line.trim();
+    const heading = /^#{1,6}(?=\s|$)/.exec(trimmed)?.[0].length;
+    if (typeof sources === 'number' && heading !== undefined && heading <= sources) sources = null;
+    if (sources === 'labeled' && trimmed && !SOURCE_ENTRY.test(trimmed)) sources = null;
+    const sourcesHeading = SOURCES_HEADING.exec(trimmed);
+    if (sourcesHeading) sources = sourcesHeading[1]!.length;
+    else if (SOURCES_LABEL.test(trimmed)) sources = 'labeled';
+    if (sources !== null) continue;
     if (!trimmed || /^(?:```|~~~)/.test(trimmed)) continue;
     const detail = verdict.criteria > 0 && /^\s+\S/.test(line);
     const { pass, fail } = lineDecision(line, detail);

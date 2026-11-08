@@ -32,8 +32,8 @@
  * (`win32-x64`, `win32-arm64`, `darwin-arm64`, `linux-x64`, `linux-arm64`).
  */
 
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { duckdbInstalledBinary } from './duckdb-pin.js';
 import { detectLlamaBackend, resolveAvailableLlamaBinary } from './llama-backend.js';
 import type { DetectInput, GpuVendorHint, LlamaBackend } from './llama-backend.js';
@@ -225,6 +225,19 @@ export function isCudaArchivePath(path: string): boolean {
  * its env var unset; the dependent provider then surfaces its own
  * actionable error on first use.
  */
+const LLAMA_BACKENDS: readonly LlamaBackend[] = ['cuda', 'rocm', 'vulkan', 'metal', 'cpu'];
+
+/** The backend a llama-server build records beside itself, if it records one. */
+export function presetLlamaBackend(binaryPath: string): LlamaBackend | null {
+  try {
+    const raw = readFileSync(join(dirname(binaryPath), 'gezel-llama-build.json'), 'utf8');
+    const backend = (JSON.parse(raw) as { backend?: unknown }).backend;
+    return LLAMA_BACKENDS.find((known) => known === backend) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
   const log = input.logger;
   const fileExists = input.fileExists ?? existsSync;
@@ -260,6 +273,13 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
       source: 'pre-set',
       path: process.env.GEZEL_LLAMA_SERVER_BIN,
     });
+    // A hand-picked build still says what it was built for. Without it the
+    // model list prices and downloads for no backend while the launch reads
+    // the build's own file, and the two disagree about a CUDA-only drafter.
+    if (!process.env.GEZEL_LLAMA_SERVER_BACKEND) {
+      const backend = presetLlamaBackend(process.env.GEZEL_LLAMA_SERVER_BIN);
+      if (backend) process.env.GEZEL_LLAMA_SERVER_BACKEND = backend;
+    }
   } else {
     const probe = detectLlamaBackend({
       engineVersion: LLAMA_ENGINE_VERSION,

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { ReleaseNoteEntry } from './content.js';
 import type { HandboekDeviceInfo, HandboekGezelInfo } from './device.js';
 import { siteDeviceInfo } from './device.js';
-import { type HandboekCatalog, expandMacros, parseAttrs } from './macros.js';
+import { type HandboekCatalog, asIncludedSection, expandMacros, parseAttrs } from './macros.js';
 
 function gezel(id: string, name: string, role: string): HandboekGezelInfo {
   return { id, name, role, poppetje: poppetjeFromSeed(seedFromKey(id)) };
@@ -94,6 +94,82 @@ function ctx(
 ) {
   return { mode, catalog: stubCatalog, device, releases } as const;
 }
+
+describe('asIncludedSection', () => {
+  it('trades the title for a section heading and drops every other heading a level', () => {
+    expect(
+      asIncludedSection(
+        'Page APIs',
+        ['# Page APIs', '', 'Intro.', '', '## Reading files', '', '#### Deep', '###### Floor'].join(
+          '\n',
+        ),
+      ),
+    ).toBe(
+      [
+        '## Page APIs',
+        '',
+        'Intro.',
+        '',
+        '### Reading files',
+        '',
+        '##### Deep',
+        '###### Floor',
+      ].join('\n'),
+    );
+  });
+
+  it('leaves fenced code alone, where # is a comment', () => {
+    const body = ['# Title', '```sh', '# install it', '```', '~~~', '## not a heading', '~~~'];
+    expect(asIncludedSection('Title', body.join('\n')).split('\n').slice(1)).toEqual(body.slice(1));
+  });
+});
+
+describe('include macro', () => {
+  const article = {
+    id: 'page-apis',
+    title: 'Page APIs',
+    summary: 'Talk to Gezel.',
+    markdown: '# Page APIs\n\n## Files',
+  };
+  const resolve = async (id: string) => (id === 'page-apis' ? article : null);
+
+  it('inlines or links the named article', async () => {
+    const base = {
+      mode: 'site' as const,
+      catalog: {} as HandboekCatalog,
+      device: siteDeviceInfo,
+      releases: [],
+    };
+    const inline = await expandMacros('::handboek-include{id=page-apis}', {
+      ...base,
+      includes: { inline: true, resolve },
+    });
+    expect(inline.markdown).toBe('## Page APIs\n\n### Files');
+    const linked = await expandMacros('::handboek-include{id=page-apis}', {
+      ...base,
+      includes: { inline: false, resolve },
+    });
+    expect(linked.markdown).toBe('- [Page APIs](page-apis.md): Talk to Gezel.');
+  });
+
+  it('renders nothing for an unknown article or without includes', async () => {
+    const base = {
+      mode: 'site' as const,
+      catalog: {} as HandboekCatalog,
+      device: siteDeviceInfo,
+      releases: [],
+    };
+    expect(
+      (
+        await expandMacros('::handboek-include{id=nope}', {
+          ...base,
+          includes: { inline: true, resolve },
+        })
+      ).markdown,
+    ).toBe('');
+    expect((await expandMacros('::handboek-include{id=page-apis}', base)).markdown).toBe('');
+  });
+});
 
 describe('parseAttrs', () => {
   it('parses bare and quoted attribute values', () => {

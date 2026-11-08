@@ -130,6 +130,23 @@ export const ChatModelLlamaCppSourceSchema = z
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
         /** Size on disk after download. */
         sizeBytes: z.number().int().positive(),
+        /**
+         * The only llama-server backends that use this drafter, for one a
+         * tuning `spec.byBackend` turns on there. Elsewhere it is neither
+         * fetched nor counted as part of the install. Absent means every
+         * backend. Read through `llamaCppDraftModelApplies`.
+         */
+        backends: z.array(z.enum(['cuda', 'rocm', 'vulkan', 'metal', 'cpu'])).optional(),
+        /**
+         * Measured cost of running with this drafter: GPU memory after a long
+         * prompt, against the same launch without speculation. Its buffers
+         * depend on the target as much as on the drafter (beyond the weights,
+         * about 0.75 GiB on Muse Glimmer 30B and 1.5 GiB on the hybrid Qwen 3.8
+         * 27B, whose rollback checkpoints carry recurrent state), so the file
+         * size alone misprices it. Absent → estimated from `sizeBytes`. Read
+         * through `llamaCppDraftResidentBytes`.
+         */
+        residentBytes: z.number().int().positive().optional(),
       })
       .optional(),
     /**

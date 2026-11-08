@@ -2639,22 +2639,6 @@ body.chat-rail-resizing webview {
   overflow: hidden;
 }
 
-/* Give the Meester composer the same quiet, self-contained compose surface as
-   project chat. The small inset keeps all four rounded corners legible inside
-   the larger conversation rail, while a deeper paper band groups the
-   recipient, thread picker, and toolbar above the lighter draft. */
-.home-workshop-conversation .chat-composer {
-  --compose-frame-bg: var(--chat-compose-header-bg);
-  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
-  --compose-toolbar-bg: var(--chat-compose-header-bg);
-  /* On the chat's one 0.75rem gutter with the timeline above it, keeping the
-     tighter right inset beside the reference rail. */
-  margin: 0 0.25rem 0.25rem 0.75rem;
-  border: 1px solid var(--compose-frame-border);
-  border-radius: var(--radius-md);
-  background: var(--compose-frame-bg);
-}
-
 /* ── Interleaved chat timeline (project + global Meester views) ── */
 
 /* Typed colors let Chromium interpolate the native scrollbar paint even
@@ -3493,10 +3477,9 @@ button.timeline-session-divider-child::before {
   line-height: 1.45;
 }
 
-/* Inset matches .chat-composer-to so the banner shares the recipient
-   row's left edge rather than the composer's outer padding. */
+/* Edges match .chat-composer-to and the editor below it. */
 .chat-composer-error {
-  margin: 0 0.25rem 0.45rem 0.25rem;
+  margin: 0 0 0.45rem;
 }
 
 .chat-timeline-error > .error {

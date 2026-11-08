@@ -4,7 +4,7 @@ import { holm, mcnemarExact, meanOf, quantile, seededRandom } from '../ab-stats.
 import { CONTROL_ARM, STRATEGY_ARMS, STRATEGY_BOOK_CLASSES } from './books.ts';
 import { type ContractGrade, gradeContract } from './contract-grade.ts';
 import { type TrialEngineMetrics, readEngineMetrics } from './engine-metrics.ts';
-import { type JudgeReport, isCurrentJudgeReport } from './judge.ts';
+import { type JudgeReport, isCurrentJudgeReport, trialHasFolderDeliverable } from './judge.ts';
 
 /**
  * One strategy-benchmark trial, read back from its directory and graded.
@@ -94,7 +94,11 @@ export async function gradeTrial(
     contract,
     p1: testPass && (contract ? contract.acceptancePassed : true),
     p2: checked > 0 ? passed / checked : null,
-    p3: isCurrentJudgeReport(judge) ? judge.mean : null,
+    p3: isCurrentJudgeReport(judge, {
+      folderDeliverable: await trialHasFolderDeliverable(trialDir, meta.craftbookId),
+    })
+      ? judge.mean
+      : null,
     durationMs: Number(result.durationMs ?? 0),
     ...(typeof result.failureMode === 'string' ? { failureMode: result.failureMode } : {}),
     ...(typeof result.failureClass === 'string' ? { failureClass: result.failureClass } : {}),

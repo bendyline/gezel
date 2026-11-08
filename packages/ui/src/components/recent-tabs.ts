@@ -1,4 +1,10 @@
-import type { RecentTab, RecentTabArea } from '@bendyline/gezel';
+import {
+  type Project,
+  type RecentTab,
+  type RecentTabArea,
+  isSharedLibraryProject,
+} from '@bendyline/gezel';
+import type { ConfigResponse } from '@bendyline/gezel-client';
 
 /**
  * The navigation selection model. A single entity (or top-level area) is
@@ -84,4 +90,14 @@ export function toRecentTab(input: RecentTabInput): RecentTab {
     case 'area':
       return { kind: 'area', area: input.area, at, order: 0 };
   }
+}
+
+/** New work uses the last project visited, or Default before one is chosen. */
+export function deriveLaunchProjectId(config: ConfigResponse | null, projects: Project[]): string {
+  const ids = new Set(projects.filter((p) => !isSharedLibraryProject(p)).map((p) => p.id));
+  const recent = (config?.recentTabs ?? []).slice().sort((a, b) => b.at - a.at);
+  for (const tab of recent) {
+    if (tab.kind === 'project' && ids.has(tab.id)) return tab.id;
+  }
+  return 'default';
 }

@@ -326,3 +326,48 @@ Unlike the interim look, this readout does not rest on the defective book. But o
 - The small-tier gap is width, not harm. By this run's SDs, 48 pairs would resolve outcome's P3 and 64 outcome-bare's, against 36 run.
 - The large tier and the cloud reference were not run.
 - `auto` still never picks outcome; acting on this result is a code change and the owner's decision.
+
+**2026-11-07, judge v3: folder deliverables, re-judged (post hoc).** The judge read each contract deliverable as a file. Four books deliver a folder: bug-fix-tdd, codemod-sweep and refactor-module deliver `./`, and invoice-run delivers `invoices`. For those, the judge was shown `[missing]` and told that a missing deliverable scores 0. So the three code books scored 0 in every trial of every round, and invoice-run was judged on its report alone ("no HTML invoices"). The grades (P1, P2) were unaffected; P3 was wrong for these books. Paired deltas looked unharmed because a 0 in both arms cancels, which hid the defect.
+
+Judge v3 (`JUDGE_PROMPT_VERSION` 3) shows a folder deliverable as every file the work changed or added, in full, with untouched files listed by name. The seed files from the trial's own book version are shown as sources, because the workspace copy of an edited file is the change itself. Nothing else in the bundle or prompt changed, so v2 reports stand for trials without a folder deliverable. The 273 affected trials of round 1, round 2, the 2026-11-04 screen and round 3 were re-judged, three samples each, with no errors. Each v2 report is kept beside its trial as `judge-v2.json`. Scripts, logs and the per-summary comparison are in `evals/runs/rejudge-v3-2026-11-07/`. Each rescored summary is written beside its original as `*.judge-v3.json`. The pilot, the 32K-context side run and the 52 v1 reports were not re-judged.
+
+On the re-judged trials, the retest SD was 0.29, against v2's 0.28. Trials that passed P1 scored 7.22 on average and failed ones 3.79.
+
+The registered readout (round 1) with v3 P3:
+
+| Tier | Arm | P3 Δ vs stepwise, v2 | v3 | Conditions, v3 |
+|---|---|---|---|---|
+| Tiny | outcome | +0.45 [−0.26, +1.30] | +0.83 [+0.03, +1.72] | all pass |
+| | outcome-bare | +0.46 [−0.23, +1.29] | +0.72 [−0.03, +1.59] | all pass |
+| Small | outcome | −0.23 [−0.65, +0.16] | +0.23 [−0.39, +0.90] | all pass |
+| | outcome-bare | −0.06 [−0.57, +0.50] | +0.52 [−0.23, +1.30] | all pass |
+| Medium | outcome | +0.07 [−0.20, +0.30] | +0.11 [−0.17, +0.34] | all pass |
+| | outcome-bare | −0.09 [−0.36, +0.16] | −0.02 [−0.33, +0.26] | all pass |
+
+Generalist still fails condition 3 on every tier.
+
+Outcome-bare against outcome under v3:
+
+| Tier | P3 Δ | Wall |
+|---|---|---|
+| Tiny | −0.11 [−0.52, +0.26] | ×0.75 |
+| Small | +0.29 [−0.27, +0.93] | ×0.90 |
+| Medium | −0.13 [−0.28, +0.01] | ×0.72 |
+
+The rule's picks under v3 are outcome-bare on all three tiers:
+
+- **Tiny:** unchanged.
+- **Small:** v2 kept stepwise, because both outcome variants failed condition 2. Both now pass.
+- **Medium:** v2 picked outcome, because outcome-bare scored significantly lower on P3, −0.16 [−0.30, −0.02]. That difference is no longer significant, so the cheaper variant wins.
+
+These are the strategies the catalog has shipped since 2026-11-04 on the strength of round 2 and the screen. Round 1 and round 2 now agree.
+
+Under v3, round 2 also moved toward the outcome arms:
+
+- Tiny outcome-bare: +1.20 [+0.52, +1.98].
+- Small outcome: +0.77 [+0.09, +1.54].
+- Medium, outcome against outcome-bare: −0.21 [−0.52, +0.08].
+
+The small-tier screen's outcome moved to +1.42 [+0.17, +2.43].
+
+On the code books themselves, stepwise was the arm that lost quality on the small models. On Qwen 3.5 9B, refactor-module scored 2.6–2.8 under stepwise across rounds 1 and 2, against 6.1–8.1 for outcome-bare. On Qwen 3.8 27B, every arm scored 7–8.

@@ -260,7 +260,7 @@ test('demo bootstrap is idempotent and never replaces a live host', async ({ pag
       const api = make({ page: { typeName: 'Demo' } });
       return { same: api === make({}), mode: api.page.mode, components: api.ui.components.version };
     }),
-  ).toEqual({ same: true, mode: 'demo', components: 1 });
+  ).toEqual({ same: true, mode: 'demo', components: 2 });
 });
 const mountScript = `const api=window.gezel;
 api.ui.components.fileAdder('#adder',{target:'library',onAdded:files=>files.forEach(file=>api.ui.components.fileCard('#cards',{file}))});`;

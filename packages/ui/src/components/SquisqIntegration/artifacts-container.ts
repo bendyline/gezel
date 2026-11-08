@@ -49,7 +49,7 @@ export function createProjectContentContainer(
           writeBinary: (path, data, mime) =>
             client.writeProjectWorkspaceBinary(projectId, path, data, mime),
           remove: (path) => client.rmProjectWorkspacePath(projectId, path, { recursive: true }),
-          list: (path) => client.listProjectWorkspace(projectId, path, true),
+          list: (path) => client.listProjectWorkspace(projectId, path, true, { stats: true }),
         }
       : {
           readText: (path) => client.readProjectArtifact(projectId, path),
@@ -58,7 +58,7 @@ export function createProjectContentContainer(
           writeBinary: (path, data, mime) =>
             client.writeProjectArtifactBinary(projectId, path, data, mime),
           remove: (path) => client.deleteProjectArtifact(projectId, path),
-          list: (path) => client.listProjectArtifacts(projectId, path, true),
+          list: (path) => client.listProjectArtifacts(projectId, path, true, { stats: true }),
         };
   return createContentContainer(options, storage);
 }

@@ -94,6 +94,7 @@ describe('writeAppsSite', () => {
       out,
       docsBase: '/docs/',
       siteOrigin: 'https://gezel.com',
+      openInGezel: true,
     });
     expect(result).toEqual({ apps: 2, demos: 1 });
 
@@ -114,6 +115,12 @@ describe('writeAppsSite', () => {
     expect(page).not.toContain('Page plan day');
     expect(page).toContain('<em>Where are you going?</em>');
     expect(page).toContain('<code>trip.json</code>');
+    // Hidden until the inline script finds a computer to open it on.
+    expect(page).toContain(
+      '<span class="open-in-gezel" data-gezel-open hidden><a class="button" href="gezel://app/trip-planner">Open in Gezel</a>',
+    );
+    expect(page).toContain('href="/platform/#ai-apps">Make one like this');
+    expect(page).toContain("document.querySelectorAll('[data-gezel-open]')");
     expect(await readFile(join(out, 'trip-planner', 'logo.webp'), 'utf8')).toBe('WEBP');
 
     const demo = await readFile(
@@ -127,5 +134,15 @@ describe('writeAppsSite', () => {
     const native = await readFile(join(out, 'email', 'index.html'), 'utf8');
     expect(native).toContain('Runs in the Gezel app');
     expect(native).not.toContain('<iframe');
+  });
+
+  it('leaves out Open in Gezel until the export asks for it', async () => {
+    out = await mkdtemp(join(tmpdir(), 'gezel-apps-site-'));
+    const site = await buildSiteCatalog(catalog);
+    await writeAppsSite(catalog, site, { out, docsBase: '/docs/' });
+    const page = await readFile(join(out, 'trip-planner', 'index.html'), 'utf8');
+    expect(page).not.toContain('gezel://');
+    expect(page).not.toContain('data-gezel-open');
+    expect(page).toContain('<a class="button" href="/#download">Get Gezel</a>');
   });
 });

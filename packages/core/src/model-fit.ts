@@ -75,6 +75,22 @@ export const LLAMA_CPP_FIXED_ENGINE_BYTES = 256 * 1024 ** 2;
 export const LLAMA_CPP_VISION_COMPUTE_BYTES = 384 * 1024 ** 2;
 
 /**
+ * Extra cost of a loaded speculative drafter beyond its weights: its compute
+ * buffers (the logits alone are vocab × ubatch × 4 bytes) and the target's
+ * rollback checkpoints, some allocated only once decoding starts. Measured
+ * with llama.cpp v0.9.0 on CUDA after a long prompt, it follows the target
+ * more than the drafter: 1,512 MiB on Qwen 3.8 27B, whose checkpoints carry
+ * recurrent state, 1,252 MiB on Nemotron 3.5 Bolt E4B, whose 262K vocabulary
+ * makes the logits buffer alone 512 MiB, and 757 MiB on Muse Glimmer 30B.
+ * Context barely moves it (the 27B's load-time figure was within 60 MiB from a
+ * small window to 244K tokens, and across Q2, Q4 and IQ1-S), because every
+ * DFlash2 drafter's layers use a sliding window. Only the fallback for an
+ * entry with no measured `draftModel.residentBytes`, so it takes the largest
+ * measured case.
+ */
+export const LLAMA_CPP_DRAFT_CONTEXT_BYTES = 1536 * 1024 ** 2;
+
+/**
  * Resident llama.cpp footprint. `mmprojBytes` is the multimodal projector's
  * on-disk size, which is NOT part of `approxSizeBytes` — the installed
  * manifest counts the GGUF alone, so a vision model that loads a 1.3 GiB
@@ -84,16 +100,26 @@ export const LLAMA_CPP_VISION_COMPUTE_BYTES = 384 * 1024 ** 2;
  *
  * The projector is weights-like — tensors llama.cpp buffers the same way — so
  * it rides the same proportional term rather than getting one of its own.
+ *
+ * `draftBytes` is a loaded drafter's file size, and `draftResidentBytes` its
+ * measured cost from the catalog, which replaces the estimate when present.
  */
 export function estimateLlamaCppResidentBytes(
   approxSizeBytes: number,
-  opts?: { mmprojBytes?: number },
+  opts?: { mmprojBytes?: number; draftBytes?: number; draftResidentBytes?: number | undefined },
 ): number {
   const mmprojBytes = opts?.mmprojBytes ?? 0;
+  const draftBytes = opts?.draftBytes ?? 0;
+  const draftResidentBytes =
+    draftBytes > 0
+      ? (opts?.draftResidentBytes ??
+        Math.round(draftBytes * LLAMA_CPP_WEIGHTS_MULTIPLIER) + LLAMA_CPP_DRAFT_CONTEXT_BYTES)
+      : 0;
   return (
     Math.round((approxSizeBytes + mmprojBytes) * LLAMA_CPP_WEIGHTS_MULTIPLIER) +
     LLAMA_CPP_FIXED_ENGINE_BYTES +
-    (mmprojBytes > 0 ? LLAMA_CPP_VISION_COMPUTE_BYTES : 0)
+    (mmprojBytes > 0 ? LLAMA_CPP_VISION_COMPUTE_BYTES : 0) +
+    draftResidentBytes
   );
 }
 

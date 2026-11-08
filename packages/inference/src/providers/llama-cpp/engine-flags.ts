@@ -61,7 +61,16 @@ export interface PerModelLlamaCppEngineConfig {
   chatTemplate?: string;
   threads?: number;
   batchSize?: number;
-  spec?: { type?: string; mtp?: boolean; draftModelId?: string; nMax?: number };
+  spec?: {
+    type?: string;
+    mtp?: boolean;
+    draftModelId?: string;
+    nMax?: number;
+    sampling?: 'greedy' | 'probabilistic';
+    byBackend?: Partial<
+      Record<string, { type?: string; nMax?: number; sampling?: 'greedy' | 'probabilistic' }>
+    >;
+  };
 }
 
 /** Phase v2 hardware-aware offload decision (lowest precedence). */
@@ -105,7 +114,8 @@ export interface EngineFlagInput {
   /**
    * Absolute path to a catalog-installed speculative draft sidecar.
    * Separate MTP assistants (Gemma) and other draft algorithms need this;
-   * combined MTP GGUFs (Qwen) intentionally leave it unset.
+   * combined MTP GGUFs (Qwen) leave it unset, even with a DFlash drafter on
+   * disk: `--spec-draft-model` would make MTP load the wrong file.
    */
   installedDraftModelPath?: string | undefined;
   /**
@@ -367,7 +377,7 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   // MTP is ON by default for a GGUF that carries the head, having cleared the
   // A/B gate this comment used to wait for (reports/llama-mtp-eval-20260829.md):
   // +12.7% / +4.1% / +15.6% / +19.3% decode at 5.5k / 21.7k / 54k / 87k
-  // context, never negative, byte-identical greedy output, +1.35 GB resident.
+  // context, never negative, +1.35 GB resident.
   // The gain GROWS with context — long-context decode is bound by reading the
   // KV cache, and verifying K drafted tokens costs one pass over it instead of
   // K — which is the regime agent turns actually run in.
@@ -376,6 +386,8 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   // FATALLY when draft-mtp is selected for a model with no MTP tensors, so
   // the default may only ever apply where the metadata confirms the head.
   // Explicit config and manifest `spec.type` still win, including 'none'.
+  // `perModel` arrives with its `spec.byBackend` already applied by
+  // `resolveSpecDraft`, which also decided whether a drafter is in play.
   const specType =
     config.llamaCppSpecType ?? perModel?.spec?.type ?? (ggufHasMtp ? 'draft-mtp' : undefined);
   const safeSpecType = specType === 'draft-mtp' && !ggufHasMtp ? undefined : specType;
@@ -388,14 +400,17 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     }
     const nMax = config.llamaCppSpecDraftNMax ?? perModel?.spec?.nMax;
     if (typeof nMax === 'number') args.push('--spec-draft-n-max', String(nMax));
-    // v0.7.0 supports probabilistic selection only for MTP/simple drafts
-    // (DFlash/LiLiCorr ignore it).
-    // Leave the upstream greedy default untouched unless explicitly set.
+    // MTP, simple and DFlash2 honor probabilistic selection; a DFlash 1 or
+    // LiLiCorr drafter takes the flag and ignores it. Leave the upstream greedy
+    // default untouched unless someone chose otherwise.
+    const draftSampling = config.llamaCppSpecDraftSampling ?? perModel?.spec?.sampling;
     if (
-      (safeSpecType === 'draft-mtp' || safeSpecType === 'draft-simple') &&
-      config.llamaCppSpecDraftSampling
+      (safeSpecType === 'draft-mtp' ||
+        safeSpecType === 'draft-simple' ||
+        safeSpecType === 'draft-dflash') &&
+      draftSampling
     ) {
-      args.push('--spec-draft-sampling', config.llamaCppSpecDraftSampling);
+      args.push('--spec-draft-sampling', draftSampling);
     }
   }
 

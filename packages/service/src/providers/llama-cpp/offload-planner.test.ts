@@ -141,6 +141,21 @@ describe('planMoeOffload — exact tensor split (graduated)', () => {
     expect(planMoeOffload({ ...base, vramBytes: 3 * GiB }).gpuBytes).toBeUndefined();
     expect(planMoeOffload({ ...base, vramBytes: 26 * GiB }).gpuBytes).toBeUndefined();
   });
+
+  // The split covers the target GGUF only; a drafter beside it was planned as
+  // free, so a "full residency" plan overran the card by the drafter's size.
+  it('counts weights outside the split, such as a drafter', () => {
+    expect(planMoeOffload({ ...base, vramBytes: 24 * GiB }).fullGpuResidency).toBe(true);
+    const withDrafter = planMoeOffload({
+      ...base,
+      vramBytes: 24 * GiB,
+      additionalGpuBytes: 2.5 * GiB,
+    });
+    expect(withDrafter.fullGpuResidency).toBeUndefined();
+    // 24 − 1 − 0.5 − 2.5 − 2 = 18 GiB of experts: 36 of 40 layers.
+    expect(withDrafter.nCpuMoe).toBe(4);
+    expect(withDrafter.gpuBytes).toBe(24 * GiB);
+  });
 });
 
 describe('degradeMoeOffloadDecision — the OOM ladder', () => {

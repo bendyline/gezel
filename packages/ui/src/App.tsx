@@ -24,6 +24,7 @@ import { AddFolderSheet, openAddFolder } from './components/AddFolderSheet.js';
 import { AppBrand } from './components/AppBrand.js';
 import { BackupRestoreDialog } from './components/BackupRestoreDialog.js';
 import { ClaudeCliPoolPill } from './components/ClaudeCliPoolPill.js';
+import { DeepLinkHost } from './components/DeepLinkHost.js';
 import { EngagementModeIcon } from './components/EngagementModeIcon.js';
 import { EngagementModeMenu } from './components/EngagementModeMenu.js';
 import { EngineStatusPill } from './components/EngineStatusPill.js';
@@ -361,6 +362,7 @@ function FullApp() {
     (area: RecentTabArea) => commitSelection(toRecentTab({ kind: 'area', area })),
     [commitSelection],
   );
+  const goHome = useCallback(() => commitSelection(null), [commitSelection]);
   const preloadSelection = useCallback((next: RecentTab | null) => {
     if (next === null) void loadHomeViewModule().catch(() => {});
     else preloadTabContent(next);
@@ -756,6 +758,9 @@ function FullApp() {
       {runtimeCapabilities().daemonSettings && (
         <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
       )}
+      {/* gezel:// links from gezel.com: each opens a form or an article for
+          the person to act on, never the work itself. */}
+      <DeepLinkHost onHome={goHome} />
       {/* The top bar remains the OS title bar (drag region + native
           window-control reservations via CSS padding). The brand mark routes
           to the Meester home. Compact layouts trade it for the navigation

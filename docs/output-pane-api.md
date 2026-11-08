@@ -33,8 +33,9 @@ controls. The host accepts at most four slots and discards them on navigation.
 `ui.components.appLayout(content, { title?, description?, chat? })` wraps an
 existing element, expands its content width in fullscreen, and mounts one native
 conversation alongside it. `chat` accepts the usual chat options or `false`.
-The conversation stacks below the content at narrow widths. Hide/show and
-restore preserve its handle; visible `dialog[open]` or `[aria-modal="true"]`
+The conversation stacks below the content at narrow widths. Its Hide key sits
+in the conversation's header; Show conversation takes a row above the content
+only while it is hidden. Hide/show and restore preserve its handle; visible `dialog[open]` or `[aria-modal="true"]`
 elements suppress its slot until closed. Its handle supports `update` and
 `destroy`; destroying restores the content to its original parent and styling.
 
@@ -48,15 +49,44 @@ retained, and a failed refresh is distinguished from a failed save. Updating
 options preserves entered values where still valid. This adds no new transport
 or file-write capability.
 
-`collectionFilter(mount, { container, selector, label?, placeholder? })` filters
+`presentation` fixes how the form appears. `'dialog'` draws a key (`buttonLabel`,
+else the title; `primary: true` fills it with the action color) that opens the
+form in a modal `<dialog>`: one column of fields, Cancel and the submit verb,
+Escape or a backdrop click to close, refused while a save is pending. A save
+closes it, returns focus to whatever opened it (the key, or a row action that
+called `open()`), and confirms beside it; a failure keeps the
+dialog and its values. `trigger: false` hides the key for a dialog the page opens
+itself. `'inline'` is an always-open form for a settings panel, without
+"(optional)" suffixes. The default `'disclosure'` is the original expandable
+card. Version 2 handles add `open(values?)` (resets to defaults and fills the
+named fields first when given, then opens and focuses the first field),
+`close()`, and `reset(values?)`.
+
+`tabs(mount, { tabs: [{ id, label, panel, badge? }], label?, selected?, remember?, onChange? })`
+draws underline tabs and shows one page-owned panel at a time. Panels stay in
+the page's light DOM and get `role="tabpanel"`; the others are `hidden`. Arrow
+keys, Home, and End move between tabs. A positive `badge` draws a count beside
+the label. The choice is kept in the URL fragment (`#tab=<id>`, through
+`history.replaceState`, so the host's back button is unaffected) unless
+`remember: false`. Updating the same tabs patches labels and badges in place.
+The handle adds `select(id)` and `selected()`; destroying it shows every panel.
+
+`collectionFilter(mount, { container, selector, label?, placeholder?, minItems? })` filters
 rendered elements by their text, ignoring case and accents. A mutation observer
 reapplies the filter after data updates; it never replaces record controls.
-Destroying it restores the filtered elements. This is presentation filtering,
-not a query over unrendered or unreadable data.
+`minItems` hides the search box while the collection is shorter and nothing is
+typed; the match count shows only while filtering. Destroying it restores the
+filtered elements. This is presentation filtering, not a query over unrendered
+or unreadable data.
 
-All three return `{ element, update, destroy }`. The SDK's page types contain
+All return `{ element, update, destroy }`. `ui.components.version` is 2 when
+dialog and inline forms, `tabs`, and `minItems` are present; feature-detect
+before using them, since an older host draws every form as a disclosure. A
+component dialog marks its host element `data-gezel-dialog-open`, which
+`appLayout` treats like an open page dialog. The SDK's page types contain
 their complete option contracts; see the
-[application authoring example](handboek/technical/gezel-page-apis.md#building-a-full-page-workspace).
+[application authoring example](handboek/technical/gezel-page-apis.md#building-a-full-page-workspace)
+and the [app UX guide](handboek/technical/gezel-app-ux-guide.md) for when to use each.
 
 ## Shared file UI and scoped imports
 

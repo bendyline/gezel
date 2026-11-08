@@ -8,7 +8,8 @@ export interface ContentStorage {
   writeText(path: string, content: string): Promise<unknown>;
   writeBinary(path: string, data: ArrayBuffer | Uint8Array, mime: string): Promise<unknown>;
   remove(path: string): Promise<unknown>;
-  list(path?: string): Promise<{ files: { path: string; isDirectory: boolean }[] }>;
+  /** Recursive listing; entries carry `size` when the listing was asked for stats. */
+  list(path?: string): Promise<{ files: { path: string; isDirectory: boolean; size?: number }[] }>;
 }
 
 export interface ContentScope {
@@ -119,7 +120,7 @@ export function createContentContainer(
       return files.flatMap((file) => {
         if (file.isDirectory || (rootPrefix && !file.path.startsWith(rootPrefix))) return [];
         const path = rootPrefix ? file.path.slice(rootPrefix.length) : file.path;
-        return [{ path, mimeType: guessMime(path), size: 0 }];
+        return [{ path, mimeType: guessMime(path), size: file.size ?? 0 }];
       });
     },
     async exists(path): Promise<boolean> {

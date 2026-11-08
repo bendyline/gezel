@@ -210,14 +210,59 @@ const form = gezel.ui.components.actionForm('#add-guest', {
 });
 ```
 
+On a current host, draw actions as keys that open dialogs, following the
+[app UX guide](gezel-app-ux-guide.md). A row's own key can open the same dialog
+filled in for that record:
+
+```js
+const components = gezel.ui.components;
+const modern = components.version >= 2;
+const addGuest = components.actionForm('#guest-actions', {
+  title: 'Add a guest', tool: 'page_add_guest', presentation: 'dialog', primary: true,
+  submitLabel: 'Add guest',
+  fields: [
+    { name: 'name', label: 'Guest or household', required: true },
+    { name: 'party', label: 'Party size', type: 'number', min: 1, step: 1, required: true },
+  ],
+  onSaved: () => refreshGuests(),
+});
+function editParty(guest) {
+  if (modern) addGuest.open({ name: guest.name, party: guest.party });
+}
+```
+
+`presentation: 'inline'` draws an always-open form for a settings panel; call
+`reset(values)` with the saved values after each read so it shows what is set
+now. Older hosts ignore `presentation` and draw a disclosure, so keep the action
+reachable there and feature-detect `open`.
+
+`tabs` organizes a workspace into page-owned panels. Put the summary tiles and
+main view on Home, one noun per tab, and Settings last:
+
+```js
+const tabs = gezel.ui.components.tabs('#tabs', {
+  label: 'Guest list',
+  tabs: [
+    { id: 'home', label: 'Home', panel: '#home' },
+    { id: 'guests', label: 'Guests', panel: '#guests', badge: awaitingReply },
+    { id: 'settings', label: 'Settings', panel: '#settings' },
+  ],
+});
+```
+
+The component only labels, shows, and hides the panels; the page owns their
+content. `tabs.update({ tabs })` with new badges keeps keyboard focus. Destroy
+the handle with the view.
+
 Give the page its own alias when a model already uses the action: `page_add_guest`
 and `add_guest` share the same script and bindings, while only the former appears
 in `pages.tools`. Workspace policy, tool schema validation, and script
 permissions still apply. Forms do not write files directly. Standalone demos
 provide in-memory handlers for the same aliases.
 
-`collectionFilter('#search', { container: '#guests', selector: 'li', label:
-'Find a guest' })` adds accent-insensitive search over rendered records. It
+`collectionFilter('#search', { container: '#guests', selector: 'li:not(.empty)', label:
+'Find a guest', placeholder: 'Name or household', minItems: 8 })` adds accent-insensitive
+search over rendered records, shown once the list reaches `minItems`. It
 updates when the collection changes and preserves existing buttons and controls.
 It searches only those rendered items; describe pagination or truncation honestly.
 Keep the handle and destroy it with the view.

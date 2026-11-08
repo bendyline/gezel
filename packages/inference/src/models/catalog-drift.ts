@@ -50,6 +50,8 @@ export interface EvaluateCatalogDriftOptions {
   installedVersion?: string;
   installed: InstalledPayloadRecord;
   manifest: ChatModelManifest;
+  /** The backend a llama.cpp copy runs on. Defaults to the process's own. */
+  llamaCppBackend?: string | undefined;
   /**
    * False for models resolved out of a read-only overlay (the machine asset
    * store) and while an install is in flight for this id — the verdict still
@@ -69,7 +71,7 @@ export async function evaluateCatalogDrift(
     return { updateAvailable: false };
   }
 
-  const catalog = describeCatalogPayload(opts.manifest, opts.engine);
+  const catalog = describeCatalogPayload(opts.manifest, opts.engine, opts.llamaCppBackend);
   if (!catalog) {
     // The catalog no longer describes this engine's payload at all (a source
     // block was pulled). Nothing to download, so nothing to offer.

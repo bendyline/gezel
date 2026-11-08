@@ -513,12 +513,12 @@ describe('LlamaCppSettings', () => {
       expect(screen.getByText(/using external engine/)).toBeInTheDocument();
     });
   });
-  it('defaults draft sampling to greedy and explains the experimental alternative', async () => {
+  it('leaves draft sampling to the model and explains the experimental alternative', async () => {
     render(
       <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
     );
     await openAdvanced();
-    expect(screen.getByRole('combobox', { name: 'Draft sampling' })).toHaveValue('greedy');
+    expect(screen.getByRole('combobox', { name: 'Draft sampling' })).toHaveValue('auto');
     expect(screen.getByText(/Probabilistic mode can improve speed/)).toBeInTheDocument();
   });
 
@@ -543,7 +543,7 @@ describe('LlamaCppSettings', () => {
     });
   });
 
-  it('clears the draft-sampling override when returning to greedy', async () => {
+  it('clears the draft-sampling override when returning to auto', async () => {
     render(
       <LlamaCppSettings
         config={{ ...BASE_CONFIG, llamaCppSpecDraftSampling: 'probabilistic' }}
@@ -554,7 +554,7 @@ describe('LlamaCppSettings', () => {
     await openAdvanced();
     expect(screen.getByRole('combobox', { name: 'Draft sampling' })).toHaveValue('probabilistic');
     fireEvent.change(screen.getByRole('combobox', { name: 'Draft sampling' }), {
-      target: { value: 'greedy' },
+      target: { value: 'auto' },
     });
     await waitFor(() => {
       expect(api.updateConfig).toHaveBeenCalledWith({ llamaCppSpecDraftSampling: null });

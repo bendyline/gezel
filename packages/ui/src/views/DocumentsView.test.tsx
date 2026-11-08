@@ -69,7 +69,7 @@ vi.mock('../components/FileTree.js', () => ({
                 type="button"
                 key={action.label}
                 onClick={() => action.onSelect(e)}
-                data-testid={`action-${e.path}`}
+                data-testid={`action-${e.path}-${action.label}`}
               >
                 {action.label}
               </button>
@@ -227,6 +227,8 @@ describe('DocumentsView', () => {
       'title',
       'Open in file manager',
     );
+    fireEvent.click(screen.getByRole('button', { name: 'Open in file manager' }));
+    await waitFor(() => expect(api.revealDocuments).toHaveBeenCalledTimes(1));
 
     fireEvent.click(within(tray).getByRole('radio', { name: 'All files by last modified' }));
     expect(window.localStorage.getItem('gezel.documentsFilesView')).toBe('flat-modified');
@@ -236,6 +238,19 @@ describe('DocumentsView', () => {
       expect(api.listDocuments).toHaveBeenLastCalledWith('', true, { stats: true, hidden: true });
     });
     expect(window.localStorage.getItem('gezel.documentsFilesHidden')).toBe('1');
+  });
+
+  it("names the platform's own file manager on the Open key", async () => {
+    const previousBridge = window.__GEZEL__;
+    window.__GEZEL__ = { ...previousBridge, token: 'test', platform: 'win32' };
+    try {
+      vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+      render(<DocumentsView />);
+      await screen.findByTestId('file-tree');
+      expect(screen.getByRole('button', { name: 'Open in File Explorer' })).toBeInTheDocument();
+    } finally {
+      window.__GEZEL__ = previousBridge;
+    }
   });
 
   it('renders the file tree when documents come back', async () => {
@@ -254,18 +269,28 @@ describe('DocumentsView', () => {
     vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
     render(<DocumentsView />);
 
-    fireEvent.click(await screen.findByTestId('action-mission.md'));
+    fireEvent.click(await screen.findByTestId('action-mission.md-Pin to Documents list'));
     expect(
       JSON.parse(window.localStorage.getItem('gezel:documents:quick-list:v1') ?? '{}'),
     ).toEqual(expect.objectContaining({ pinnedPaths: ['mission.md'] }));
 
-    expect(await screen.findByTestId('action-mission.md')).toHaveTextContent(
-      'Unpin from Documents list',
-    );
-    fireEvent.click(screen.getByTestId('action-mission.md'));
+    fireEvent.click(await screen.findByTestId('action-mission.md-Unpin from Documents list'));
     expect(
       JSON.parse(window.localStorage.getItem('gezel:documents:quick-list:v1') ?? '{}'),
     ).toEqual(expect.objectContaining({ pinnedPaths: [] }));
+  });
+
+  it('copies a document path from the left-pane row actions', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listDocuments).mockResolvedValue({ files: FAKE_ENTRIES } as never);
+    vi.mocked(api.resolveDocumentFileLocation).mockResolvedValue({
+      path: '/home/a/Documents/mission.md',
+    } as never);
+    render(<DocumentsView />);
+
+    await user.click(await screen.findByTestId('action-mission.md-Copy file path'));
+    expect(api.resolveDocumentFileLocation).toHaveBeenCalledWith('mission.md');
+    expect(await navigator.clipboard.readText()).toBe('/home/a/Documents/mission.md');
   });
 
   it('hides managed outside-in companion folders from the document tree', async () => {

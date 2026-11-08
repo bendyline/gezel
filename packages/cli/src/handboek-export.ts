@@ -1,8 +1,8 @@
 import { existsSync } from 'node:fs';
 import { cp, mkdir, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { HandboekArea, HandboekTocArea, HandboekTocEntry } from '@bendyline/gezel';
-import { SCORECARD_DATA_ATTRS } from '@bendyline/gezel';
+import { SCORECARD_DATA_ATTRS, isGezelDeepLink } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import {
   OG_CARD_HEIGHT,
@@ -29,6 +29,7 @@ import {
   dataTableMounts,
   insertDataTables,
 } from './handboek-data-tables.js';
+import { PUBLISHED_HANDBOEK, rewriteSiteLinks, siteLinkIndex } from './handboek-links.js';
 import type { OgCardPlan, OgCardsResult } from './handboek-og-cards.js';
 import { ogCardPath, writeOgCards } from './handboek-og-cards.js';
 import { scorecardRoundSitePages } from './handboek-scorecard-rounds.js';
@@ -45,6 +46,7 @@ import {
 import { BASELINE_CSS } from './handboek-site-css.js';
 import { SCORECARD_FILTER_JS } from './handboek-site-scorecard.js';
 import { writePageDemo, writePageDemoAssets } from './page-demo-export.js';
+import { OPEN_IN_GEZEL_ATTR, OPEN_IN_GEZEL_JS, openInGezelHtml } from './site-open-in-gezel.js';
 
 /**
  * Render the Handboek as a static HTML site — the same documentation
@@ -126,6 +128,12 @@ export interface HandboekExportOptions {
    * published at `/docs/` beside it.
    */
   appsOut?: string;
+  /**
+   * Put "Run this in Gezel" / "Open in Gezel" on craftbook and app pages.
+   * Off until a desktop release that answers `gezel://` links is out, or
+   * every click on the site would open nothing (docs/deep-links.md).
+   */
+  openInGezel?: boolean;
 }
 
 /**
@@ -141,6 +149,9 @@ const SCORECARD_SCRIPT = 'scorecard.js';
 /** The squisq player: every watch page, and article pages with a data table. */
 const PLAYER_SCRIPT = 'squisq-player.js';
 
+/** Shows "Run this in Gezel" on computers, linked where a page carries one. */
+const OPEN_IN_GEZEL_SCRIPT = 'open-in-gezel.js';
+
 /**
  * Behavior scripts a rendered page needs, decided from the markup it
  * actually produced rather than from its article id — the scorecard macro
@@ -150,9 +161,32 @@ const PLAYER_SCRIPT = 'squisq-player.js';
 export function pageScripts(body: string): string[] {
   return [
     ...(body.includes(SCORECARD_DATA_ATTRS.root) ? [SCORECARD_SCRIPT] : []),
+    ...(body.includes(OPEN_IN_GEZEL_ATTR) ? [OPEN_IN_GEZEL_SCRIPT] : []),
     // Deferred scripts run in order: the player must exist before the mount.
     ...(body.includes(DATA_TABLE_ATTR) ? [PLAYER_SCRIPT, DATA_TABLE_SCRIPT] : []),
   ];
+}
+
+/**
+ * A `gezel://` link under the title of a craftbook or project-type page, so a
+ * reader with Gezel installed can go straight to its launch form. Published
+ * site only (`siteUrl` set): the download fallback points at its landing page.
+ */
+export function openInGezelSection(entryId: string, siteUrl: string): string | undefined {
+  const [area, id] = entryId.split('/');
+  const target =
+    area === 'craftbook' && id
+      ? { link: { kind: 'craftbook' as const, id }, label: 'Run this in Gezel' }
+      : area === 'project-type' && id
+        ? { link: { kind: 'app' as const, id }, label: 'Open in Gezel' }
+        : undefined;
+  if (!target || !isGezelDeepLink(target.link)) return undefined;
+  return `<p class="hb-open">${openInGezelHtml({
+    ...target,
+    buttonClass: 'hb-open-button',
+    noteClass: 'hb-open-note',
+    downloadHref: `${esc(siteUrl)}#download`,
+  })}</p>`;
 }
 
 const AREA_BLURBS: Record<HandboekArea, string> = {
@@ -210,16 +244,15 @@ export async function runHandboekExport(
     ...areas.flatMap((a) => a.entries),
     ...site.pages.filter((p) => !p.listed && !p.replaces).map((p) => p.entry),
   ];
-  const ids = new Set(entries.map((e) => e.id));
-  const byStem = new Map<string, string>();
-  for (const e of entries) {
-    const stem = e.id.split('/').pop();
-    if (stem && !byStem.has(stem)) byStem.set(stem, e.id);
-  }
+  const { ids, byStem } = siteLinkIndex(entries.map((e) => e.id));
+  // The markdown twins are read away from the page (an agent's fetch,
+  // `gezel app guide`), so their links are absolute.
+  const twinBase = normalizeBase(opts.canonicalBase) ?? PUBLISHED_HANDBOEK;
 
   await mkdir(join(out, 'assets'), { recursive: true });
   await writeFile(join(out, 'assets', PLAYER_SCRIPT), PLAYER_BUNDLE, 'utf8');
   await writeFile(join(out, 'assets', SCORECARD_SCRIPT), SCORECARD_FILTER_JS, 'utf8');
+  await writeFile(join(out, 'assets', OPEN_IN_GEZEL_SCRIPT), OPEN_IN_GEZEL_JS, 'utf8');
   await writeFile(join(out, 'assets', DATA_TABLE_SCRIPT), DATA_TABLE_JS, 'utf8');
   const skipped: string[] = [];
   const warnings: string[] = [];
@@ -244,14 +277,22 @@ export async function runHandboekExport(
           markdown: sitePage.markdown,
           defaultDuration: undefined,
         }
-      : await engine.article(entry.id, { mode: 'site' });
+      : await engine.article(entry.id, { mode: 'site', inlineIncludes: true });
     if (!article) {
       skipped.push(entry.id);
       continue;
     }
     const depth = entry.id.split('/').length;
-    const markdown = rewriteSiteLinks(article.markdown, entry.id, ids, byStem, (asset) =>
-      existsSync(join(contentDir, asset)),
+    const hasAsset = (asset: string) => existsSync(join(contentDir, asset));
+    const markdown = rewriteSiteLinks(article.markdown, entry.id, ids, byStem, hasAsset);
+    await mkdir(dirname(join(out, `${entry.id}.md`)), { recursive: true });
+    await writeFile(
+      join(out, `${entry.id}.md`),
+      markdownTwin(
+        entry.title,
+        rewriteSiteLinks(article.markdown, entry.id, ids, byStem, hasAsset, twinBase),
+      ),
+      'utf8',
     );
     const parsed = parseMarkdown(markdown);
     const doc = markdownToDoc(parsed, {
@@ -275,6 +316,8 @@ export async function runHandboekExport(
       const appsPage = opts.appsOut ? `/apps/${demo.projectTypeId}/` : undefined;
       rendered = insertDemoSection(rendered, demoSectionHtml(demo, entry.title, appsPage));
     }
+    const open = siteUrl && opts.openInGezel ? openInGezelSection(entry.id, siteUrl) : undefined;
+    if (open) rendered = insertAfterTitle(rendered, open);
     if (art) rendered = insertAfterTitle(rendered, craftbookArtHtml(entry.title, art.ground));
     const { html: body, headings } = withHeadingIds(rendered);
     const dir = join(out, ...entry.id.split('/'));
@@ -351,6 +394,11 @@ export async function runHandboekExport(
   }
   await writeFile(join(out, 'index.html'), landingPage(areas, css, siteUrl, landingSocial), 'utf8');
   pages += 1;
+  const written = areas.map((a) => ({
+    ...a,
+    entries: a.entries.filter((e) => !skipped.includes(e.id)),
+  }));
+  await writeFile(join(out, 'llms.txt'), llmsTxt(written, twinBase), 'utf8');
 
   const assetsSrc = join(contentDir, 'assets');
   if (existsSync(assetsSrc)) {
@@ -380,6 +428,7 @@ export async function runHandboekExport(
         out: resolve(opts.appsOut),
         docsBase: '/docs/',
         ...(canonicalBase ? { siteOrigin: new URL(canonicalBase).origin } : {}),
+        ...(opts.openInGezel ? { openInGezel: true } : {}),
       })
     : undefined;
 
@@ -396,50 +445,49 @@ function normalizeBase(base: string | undefined): string | undefined {
   return trimmed.endsWith('/') ? trimmed : `${trimmed}/`;
 }
 
+export { rewriteSiteLinks } from './handboek-links.js';
+
 /**
- * Rewrite intra-handboek links for the static layout. Articles link two
- * ways — relative `.md` paths in curated prose, bare article ids in
- * generated tables — and both must land on `<root>/<target-id>/` from a
- * page nested at `<root>/<page-id>/`. An asset this content tree does not
- * carry (an npm install leaves out the scorecard evidence) links to its
- * gezel.com copy, as the in-app Handboek does.
+ * An article as plain markdown beside its page (`<root>/<id>.md`): what an AI
+ * agent should fetch instead of the HTML. Starts with the title when the
+ * article's own markdown does not.
  */
-export function rewriteSiteLinks(
-  markdown: string,
-  pageId: string,
-  ids: Set<string>,
-  byStem: Map<string, string>,
-  hasAsset: (path: string) => boolean = () => true,
+export function markdownTwin(title: string, markdown: string): string {
+  const body = markdown.trimStart();
+  const titled = body.startsWith('# ') ? body : `# ${title}\n\n${body}`;
+  return `${titled.trimEnd()}\n`;
+}
+
+/**
+ * `llms.txt` for the docs root (llmstxt.org): what Gezel is, the one page to
+ * read before building an app, and every article's markdown twin by area.
+ */
+export function llmsTxt(
+  areas: readonly {
+    title: string;
+    entries: readonly { id: string; title: string; summary?: string }[];
+  }[],
+  base: string,
 ): string {
-  const prefix = up(pageId.split('/').length);
-  return markdown.replace(/\]\(([^()\s]+)\)/g, (whole, rawTarget: string) => {
-    if (
-      /^[a-z][a-z0-9+.-]*:/i.test(rawTarget) ||
-      rawTarget.startsWith('//') ||
-      rawTarget.startsWith('#')
-    ) {
-      return whole;
+  const lines = [
+    '# Gezel Handboek',
+    '',
+    '> Gezel is a free, open-source app and platform for running a crew of AI agents on your own computer, with local models or a cloud plan you already have. Every article below is plain markdown.',
+    '',
+    `To build a Gezel app, read [Build a Gezel app: the complete guide](${base}${APP_GUIDE_ID}.md) first. It holds the working loop, the rules, and the four app-building guides in full.`,
+  ];
+  for (const area of areas) {
+    lines.push('', `## ${area.title}`, '');
+    for (const entry of area.entries) {
+      const summary = entry.summary ? `: ${entry.summary.replace(/\s+/g, ' ').trim()}` : '';
+      lines.push(`- [${entry.title}](${base}${entry.id}.md)${summary}`);
     }
-    const [path, suffix = ''] = splitLinkSuffix(rawTarget);
-    const candidate = path.replace(/^(\.\.?\/)+/, '');
-    if (candidate.startsWith('assets/')) {
-      return hasAsset(candidate)
-        ? `](${prefix}${candidate}${suffix})`
-        : `](${PUBLISHED_HANDBOEK}${candidate}${suffix})`;
-    }
-    const article = candidate.replace(/\.md$/, '');
-    const target = ids.has(article) ? article : byStem.get(article.split('/').pop() ?? '');
-    if (!target) return whole;
-    return `](${prefix}${target}/${suffix})`;
-  });
+  }
+  return `${lines.join('\n')}\n`;
 }
 
-function splitLinkSuffix(raw: string): [string, string] {
-  const idx = raw.search(/[?#]/);
-  return idx === -1 ? [raw, ''] : [raw.slice(0, idx), raw.slice(idx)];
-}
-
-const PUBLISHED_HANDBOEK = 'https://gezel.com/docs/';
+/** The integrated app-building page: `gezel app guide` prints the same article. */
+const APP_GUIDE_ID = 'build-a-gezel-app';
 
 const up = (depth: number): string => '../'.repeat(depth);
 
@@ -761,7 +809,7 @@ ${sidebar(areas, entry, depth)}
 <article class="hb-article">
 ${body}
 </article>
-<p class="hb-watch"><a href="watch.html">Watch this article as a slideshow</a></p>
+<p class="hb-watch"><a href="watch.html">Watch this article as a slideshow</a> · <a href="../${esc(entry.id.split('/').pop() ?? entry.id)}.md">Read it as markdown, for AI agents</a></p>
 </main>
 ${aside}
 </div>

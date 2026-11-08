@@ -75,9 +75,9 @@
   opacity: 0;
   pointer-events: none;
 }
-/* The startup copy has no collapse to offer yet. */
-.startup-home .home-workshop-sheet-rail {
-  pointer-events: none;
+/* Rolled up, the loading line stands where the conversation will open. */
+.home-workshop-greeting-collapsed + .startup-loading {
+  height: 100%;
 }
 /* The startup copy covers the live panel while it loads beneath it, leaving
    the sheet's rail in view. */

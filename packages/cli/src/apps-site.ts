@@ -12,6 +12,7 @@ import {
 } from '@bendyline/gezel';
 import type { SiteCatalog, SiteCatalogSource, SiteDemo } from './handboek-site-catalog.js';
 import { writePageDemo, writePageDemoAssets } from './page-demo-export.js';
+import { OPEN_IN_GEZEL_JS, openInGezelHtml } from './site-open-in-gezel.js';
 
 /**
  * gezel.com/apps: the library of Gezel apps. Every project type in the catalog
@@ -50,6 +51,8 @@ export interface AppsSiteOptions {
   docsBase: string;
   /** Absolute origin for canonical and Open Graph URLs, e.g. `https://gezel.com`. */
   siteOrigin?: string;
+  /** "Open in Gezel" on each app page; see HandboekExportOptions.openInGezel. */
+  openInGezel?: boolean;
 }
 
 export interface AppsSiteResult {
@@ -221,7 +224,7 @@ function masthead(): string {
 <a href="/apps/" aria-current="page">Apps</a>
 <a href="/docs/">Docs</a>
 <a href="/docs/model-scorecard/">Model scorecard</a>
-<a href="/platform/">For developers</a>
+<a href="/platform/">Platform</a>
 <a href="https://github.com/bendyline/gezel">GitHub</a>
 </nav>
 </header>`;
@@ -230,7 +233,7 @@ function masthead(): string {
 function footer(ctx: PageContext): string {
   return `<footer>
 <p>© 2026 Bendyline · Free and open source under the MIT license</p>
-<p><a href="https://github.com/bendyline/gezel">GitHub</a><span class="sep" aria-hidden="true">·</span><a href="/platform/">For developers</a><span class="sep" aria-hidden="true">·</span><a href="${esc(ctx.docsBase)}craftbooks-index/">Craftbooks</a><span class="sep" aria-hidden="true">·</span><a href="https://github.com/bendyline/gilde">Contribute an app</a></p>
+<p><a href="https://github.com/bendyline/gezel">Star on GitHub</a><span class="sep" aria-hidden="true">·</span><a href="/platform/">Platform</a><span class="sep" aria-hidden="true">·</span><a href="${esc(ctx.docsBase)}craftbooks-index/">Craftbooks</a><span class="sep" aria-hidden="true">·</span><a href="https://github.com/bendyline/gilde">Contribute an app</a></p>
 </footer>`;
 }
 
@@ -417,7 +420,17 @@ ${mark(app, 200, 'logo.webp')}
 <div>
 <h1>${esc(m.name)}</h1>
 <p class="lede">${esc(m.description)}</p>
-<p class="app-actions"><a class="button" href="/#download">Get Gezel</a><a class="text-link" href="${esc(docs)}project-type/${esc(m.id)}/">Read about it in the docs<span aria-hidden="true"> →</span></a></p>
+<p class="app-actions">${
+    ctx.openInGezel
+      ? `${openInGezelHtml({
+          link: { kind: 'app', id: m.id },
+          label: 'Open in Gezel',
+          buttonClass: 'button',
+          noteClass: 'open-in-gezel-note',
+          downloadHref: '/#download',
+        })}<a class="button button-quiet" href="/#download">Get Gezel</a>`
+      : '<a class="button" href="/#download">Get Gezel</a>'
+  }<a class="text-link" href="${esc(docs)}project-type/${esc(m.id)}/">Read about it in the docs<span aria-hidden="true"> →</span></a><a class="text-link" href="/platform/#ai-apps">Make one like this<span aria-hidden="true"> →</span></a></p>
 </div>
 </section>
 ${demo}
@@ -444,7 +457,7 @@ ${
 </main>
 ${footer(ctx)}
 </div>
-</body>
+${ctx.openInGezel ? `<script>\n${OPEN_IN_GEZEL_JS}</script>\n` : ''}</body>
 </html>
 `;
 }
@@ -531,6 +544,11 @@ header.masthead { display: flex; align-items: center; justify-content: space-bet
 .app-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 24px; margin: 1.2rem 0 0; }
 .button { display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 6px; background: var(--action-bg); color: var(--action-ink); font-weight: 600; box-shadow: inset 0 1px 0 rgba(255,255,255,0.2), 0 1px 2px rgba(0,0,0,0.15); }
 .button:hover { color: var(--action-ink); filter: brightness(1.06); }
+.button-quiet { background: transparent; color: var(--text); box-shadow: inset 0 0 0 2px var(--accent-line); }
+.button-quiet:hover { color: var(--accent); filter: none; box-shadow: inset 0 0 0 2px var(--accent); }
+.open-in-gezel { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.open-in-gezel[hidden], .open-in-gezel-note[hidden] { display: none; }
+.open-in-gezel-note { flex-basis: 100%; font-size: 0.86rem; color: var(--muted-strong); }
 .demo { margin: 8px 0 48px; }
 .demo-head { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .demo h2, .inside h2, .steps h2, .more h2 { font-size: 1.6rem; margin: 0 0 0.4rem; }

@@ -59,7 +59,10 @@ without an app release. Picks as of 2026-11-04: Gemma 4 E4B, Qwen 3.5 9B,
 Ornith 1.5 9B and Qwen 3.8 27B all run outcome without the recipe. Round 2
 scored the 9B higher with the recipe as advice, but the recipe overflowed a
 32K window on powerpoint-deck, and a later screen tied the two on five of six
-books. Round 1 had picked the 27B with the recipe and the 9B stepwise. Every
+books. Round 1 had picked the 27B with the recipe and the 9B stepwise, but
+its judge scored every folder deliverable 0, all three code books included;
+re-judged (judge v3, 2026-11-07), round 1 picks outcome without the recipe
+for both. Every
 measured on-device model beat stepwise at a third of the wall time or less,
 which is why an unmeasured one starts there.
 

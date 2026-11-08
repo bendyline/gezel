@@ -262,6 +262,7 @@ describe('line-based reviewer verdict enforcement', () => {
     'Amounts PASS\n  FAIL — bad date',
     '# Verdict',
     '',
+    '## Sources\n\n[1] ledger.json',
   ])('rejects malformed or incomplete verdict text: %s', async (text) => {
     expect((await evaluate(text)).decision).toBe('reject');
   });
@@ -304,6 +305,21 @@ describe('line-based reviewer verdict enforcement', () => {
       'a code fence and a rule',
       '```\nAmounts reconcile PASS\n---\nDue dates match terms PASS\n```',
     ],
+    // The evidence ledger appends this list to a factual-mode verdict that
+    // cites [n]; it paused qwen3.8-27b's invoice-run three reviews running
+    // with every criterion PASS (2026-11-07).
+    [
+      'the Sources list the evidence ledger appends',
+      'Amounts trace to the ledger [1][2] PASS\nDue dates follow the terms [3] PASS\n\n## Sources\n\n[1] ledger.json\n[2] invoices/2026-042.html\n[3] clients.json\n',
+    ],
+    [
+      'a source whose title reads as a decision',
+      'Amounts reconcile [1] PASS\n\n### References\n\n- [1] Failing invoices in July — notes/ci.md\n',
+    ],
+    [
+      'a labeled source list',
+      'Amounts reconcile [1] PASS\n\n**Sources:**\n[1] ledger.json\n[2] clients.json',
+    ],
   ])('accepts a passing verdict written with %s', async (_shape, text) => {
     const result = await evaluate(text);
     expect(result.message).toBeUndefined();
@@ -330,6 +346,15 @@ describe('line-based reviewer verdict enforcement', () => {
     ['a negated lower-case pass', 'Amounts reconcile PASS\nDue dates match terms: did not pass'],
     ['a contracted negation', "Amounts reconcile PASS\nDue dates match terms: doesn't pass"],
     ['a negated PASS', 'Amounts reconcile PASS\nDue dates match terms: NOT PASS'],
+    [
+      'a FAIL after the source list ends',
+      'Amounts reconcile [1] PASS\n\n## Sources\n\n[1] ledger.json\n\n## Due dates\n\nDue dates match terms FAIL',
+    ],
+    [
+      'a FAIL after a labeled source list',
+      'Amounts reconcile [1] PASS\nSources:\n[1] ledger.json\nDue dates match terms FAIL',
+    ],
+    ['a criterion heading that names citations', 'Amounts reconcile PASS\n## Citations: FAIL'],
   ])('rejects a verdict with %s', async (_shape, text) => {
     const result = await evaluate(text);
     expect(result.decision).toBe('reject');

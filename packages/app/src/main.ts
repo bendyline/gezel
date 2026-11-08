@@ -22,7 +22,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import {
   type FatalProcessErrorSource,
+  GEZEL_URL_SCHEME,
   GEZEL_VERSION,
+  type GezelDeepLink,
   type GezmodelImportProgress,
   type ReferenceFileLocationRequest,
   ReferenceFileLocationRequestSchema,
@@ -45,6 +47,7 @@ import {
   stopAmbientMonitoring,
 } from './ambient-display/host.js';
 import { autostart } from './autostart/index.js';
+import { deepLinkKey, findDeepLinkArguments } from './deep-link-args.js';
 import { devToolsAllowed } from './devtools-policy.js';
 import { resumeEarnedNotifications, startEarnedNotifications } from './earned-notifications.js';
 import { buildEditableContextMenuTemplate } from './editable-context-menu.js';
@@ -191,6 +194,16 @@ async function rendererExternalNetworkAllowed(): Promise<boolean> {
 // a compromised renderer cannot turn the IPC method into arbitrary file read.
 const openedModelBundles = new Map<string, { path: string; filename: string }>();
 const queuedModelBundleOpens: Array<{ requestId: string; filename: string }> = [];
+// A `gezel://` link waiting for the app page. Only the latest is kept, and a
+// repeat of the same target is dropped for a moment, so a page firing links
+// at the app opens one dialog rather than a stack of them.
+let pendingDeepLink: GezelDeepLink | null = null;
+let lastDeepLink: { key: string; at: number } | null = null;
+const DEEP_LINK_REPEAT_MS = 2_000;
+// Set once startup has asked for the first window. A link that arrives before
+// then is delivered by that startup path; one that arrives after may need the
+// window recreated (macOS keeps running with none).
+let startupWindowRequested = false;
 // Set true once a real quit is underway (tray "Quit", app menu, before-quit)
 // so the close-to-tray handler lets the window actually close.
 let isQuitting = false;
@@ -359,6 +372,7 @@ app.on('second-instance', (_event, commandLine, workingDirectory) => {
   for (const path of findGezmodelArguments(commandLine, workingDirectory || process.cwd())) {
     void queueOpenedModelBundle(path);
   }
+  for (const link of findDeepLinkArguments(commandLine)) queueDeepLink(link);
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
@@ -374,6 +388,55 @@ app.on('open-file', (event, path) => {
 
 for (const path of findGezmodelArguments(process.argv, process.cwd())) {
   void queueOpenedModelBundle(path);
+}
+
+// macOS delivers `gezel://` links here, before ready on a cold launch from the
+// browser. Windows and Linux pass them on the command line instead.
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  for (const link of findDeepLinkArguments([url])) queueDeepLink(link);
+});
+
+for (const link of findDeepLinkArguments(process.argv)) queueDeepLink(link);
+
+registerGezelUrlScheme();
+
+/**
+ * Make this copy the handler for `gezel://`. Store builds declare the scheme
+ * in their manifests, and packaged macOS and Linux builds also get it from
+ * electron-builder's `protocols`; Windows' NSIS target writes no protocol
+ * keys, so the per-user registration here is what makes links work there.
+ * A dev launch or a test run would take the scheme away from an installed
+ * copy, so those register only on request.
+ */
+function registerGezelUrlScheme(): void {
+  if (process.mas || process.windowsStore) return;
+  if (process.env.GEZEL_E2E === '1' || packagedSmoke) return;
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient(GEZEL_URL_SCHEME);
+    return;
+  }
+  const entry = process.argv[1];
+  if (process.env.GEZEL_DEV_URL_SCHEME === '1' && entry) {
+    app.setAsDefaultProtocolClient(GEZEL_URL_SCHEME, process.execPath, [resolve(entry)]);
+  }
+}
+
+function queueDeepLink(link: GezelDeepLink): void {
+  const key = deepLinkKey(link);
+  const now = Date.now();
+  if (lastDeepLink?.key === key && now - lastDeepLink.at < DEEP_LINK_REPEAT_MS) return;
+  lastDeepLink = { key, at: now };
+  pendingDeepLink = link;
+  if (startupWindowRequested) void ensureWindow().then(flushDeepLink);
+}
+
+/** The app page answers links; the splash and a page still loading do not. */
+function flushDeepLink(): void {
+  if (!pendingDeepLink || splashShowing) return;
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.webContents.isLoading()) return;
+  mainWindow.webContents.send('gezel:deep-link', pendingDeepLink);
+  pendingDeepLink = null;
 }
 
 async function queueOpenedModelBundle(candidate: string): Promise<void> {
@@ -566,7 +629,8 @@ function rememberPreviewDocument(candidate: string, allowExternalServices: boole
  * 'unsafe-inline' (React inline styles); images allow only
  * self/data:/blob:. Remote passive resources are deliberately
  * excluded: images and media can still disclose user state through URLs even
- * when they cannot execute. connect-src is 'self' (the API is same-origin).
+ * when they cannot execute. connect-src is 'self' (the API is same-origin)
+ * plus blob: (in-memory bytes, which Chromium does not count as 'self').
  *
  * `frame-src 'self'` lets the renderer embed the same-origin sandboxed
  * preview iframes (the output pane's live HTML preview, chat references).
@@ -588,7 +652,10 @@ const GEZEL_CSP = [
   "font-src 'self' data:",
   "media-src 'self' blob: data:",
   "worker-src 'self' blob:",
-  "connect-src 'self'",
+  // blob: is in-memory bytes the page already holds, never the network.
+  // Chromium does not count it as 'self', and the squisq data card fetches
+  // the blob: URL its media provider resolves.
+  "connect-src 'self' blob:",
   "object-src 'none'",
   "base-uri 'none'",
   "frame-src 'self'",
@@ -841,6 +908,10 @@ async function createWindow(): Promise<void> {
     );
     if (reload) mainWindow?.webContents.reload();
   });
+  // A daemon restart or a renderer recovery reloads the app page without going
+  // through navigateToApp, and the page can still report loading (subframes)
+  // when navigateToApp flushes. Either way the link waits for the page to stop.
+  mainWindow.webContents.on('did-stop-loading', () => flushDeepLink());
   startRendererMemoryLog();
 
   // Close-to-tray: when the tray is active, the window's X button hides
@@ -896,6 +967,7 @@ async function navigateToApp(): Promise<void> {
   splashShowing = false;
   flushOpenedModelBundles();
   flushMacUninstallDialogRequest();
+  flushDeepLink();
 }
 
 /**
@@ -3036,6 +3108,7 @@ app.whenReady().then(async () => {
   // which is minutes of work on a cold machine; doing this afterwards is what
   // made a fresh install look like it had failed to launch.
   launchHidden = app.isPackaged && launchedAtLogin(startAtLoginDeps(), process.argv);
+  startupWindowRequested = true;
   await createWindow();
   const startedHidden = launchHidden;
   launchHidden = false;

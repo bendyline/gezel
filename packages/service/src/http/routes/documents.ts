@@ -1,5 +1,8 @@
+import { realpath, stat } from 'node:fs/promises';
 import {
   CreateDocumentFolderRequestSchema,
+  ReferenceFileLocationRequestSchema,
+  ReferenceFileLocationResponseSchema,
   RenameDocumentRequestSchema,
   SearchDocumentsRequestSchema,
   WriteDocumentRequestSchema,
@@ -8,6 +11,7 @@ import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal
 import { Hono } from 'hono';
 import { DocumentPathExistsError, DocumentPathNotFoundError } from '../../fs/documents-store.js';
 import type { ServiceContext } from '../context.js';
+import { revealInFileManager } from '../file-manager.js';
 
 export function documentRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
@@ -33,20 +37,32 @@ export function documentRoutes(ctx: ServiceContext): Hono {
   });
 
   // Same "Open" affordance the project file panels have, now that the library
-  // is browsed through the same panel. Same argv-array launch as
-  // `POST /api/projects/:id/reveal`: never an interpolated shell string, since
-  // the documents root is relocatable via ExternalFolders.
+  // is browsed through the same panel.
   app.post('/reveal', async (c) => {
     const dir = ctx.store.documentsDir();
-    const { execFile } = await import('node:child_process');
-    const launcher: { cmd: string; args: string[] } =
-      process.platform === 'darwin'
-        ? { cmd: 'open', args: [dir] }
-        : process.platform === 'win32'
-          ? { cmd: 'explorer', args: [dir] }
-          : { cmd: 'xdg-open', args: [dir] };
-    execFile(launcher.cmd, launcher.args, { windowsHide: true }, () => {});
+    revealInFileManager(dir);
     return c.json({ ok: true, path: dir });
+  });
+
+  // The absolute host path of one library file, for the file panel's "Copy
+  // file path". Same containment and file-only answer as the projects'
+  // `reference-file-location`.
+  app.get('/location', async (c) => {
+    const request = ReferenceFileLocationRequestSchema.parse({
+      kind: 'document',
+      path: c.req.query('path'),
+    });
+    const base = ctx.store.documentsDir();
+    const joined = safeJoin(base, request.path);
+    if (!joined || !(await realpathContained(base, joined))) {
+      return c.json({ error: 'path traversal' }, 400);
+    }
+    try {
+      if (!(await stat(joined)).isFile()) return c.json({ error: 'not found' }, 404);
+      return c.json(ReferenceFileLocationResponseSchema.parse({ path: await realpath(joined) }));
+    } catch {
+      return c.json({ error: 'not found' }, 404);
+    }
   });
 
   app.get('/search', async (c) => {

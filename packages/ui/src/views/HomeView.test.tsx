@@ -1031,6 +1031,32 @@ describe('HomeView', () => {
     expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
   });
 
+  it('opens rolled up when the startup sheet was rolled up while loading', async () => {
+    const view = {
+      tab: 'chat' as const,
+      article: 0,
+      scroll: 0,
+      draft: '',
+      focused: false,
+      selectionStart: 0,
+      selectionEnd: 0,
+    };
+    window.__GEZEL_STARTUP__ = {
+      state: () => view,
+      reading: () => document.createElement('section'),
+      connect: (accept) => void accept(view),
+    };
+    try {
+      render(<HomeView />);
+      await screen.findByRole('button', { name: 'Expand the greeting' });
+      await waitFor(() => expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument());
+      expect(document.querySelector('.startup-reading-overlay')).toBeNull();
+      expect(api.updateConfig).not.toHaveBeenCalledWith({ homeGreetingCollapsed: true });
+    } finally {
+      delete window.__GEZEL_STARTUP__;
+    }
+  });
+
   it('switches to the "what is gezel" tour tab', async () => {
     render(<HomeView />);
     const tourName = 'Handboek';

@@ -40,6 +40,16 @@ fileAssociations:
     description: Portable Gezel local AI model
     role: Editor
 
+# `gezel://` links from gezel.com (docs/deep-links.md). This writes macOS
+# CFBundleURLTypes, the Linux desktop entry's x-scheme-handler MimeType, and
+# the APPX protocol extension; the store configs inherit it. The NSIS target
+# writes no protocol keys, so main.ts registers the scheme per user on Windows
+# and the uninstaller removes that registration.
+protocols:
+  - name: Gezel link
+    schemes:
+      - gezel
+
 # The shipped service bundle ships as a single gzipped tarball plus a small
 # JSON sidecar (`{version, sha256, sizeBytes, fileCount}`) instead of as
 # ~100k loose files. NSIS extracting one big file vs. 100k tiny ones is

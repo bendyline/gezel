@@ -331,6 +331,81 @@ describe('judge', () => {
     expect(summary.axes.craft).toBe(8);
     expect(summary.mean).toBeCloseTo(7.75);
   });
+
+  // v2 read refactor-module's `./` as a file, showed "[missing]", and the
+  // judge scored every code book 0 in every round.
+  describe('a folder deliverable', () => {
+    let dir: string;
+    afterEach(async () => {
+      if (dir) await rm(dir, { recursive: true, force: true });
+    });
+
+    it('shows the changed and added files, and the seed as sources', async () => {
+      const { buildJudgeBundle, isCurrentJudgeReport, trialHasFolderDeliverable } = await import(
+        './judge.ts'
+      );
+      const { loadCraftbookTestSpecsSync } = await import('../craftbooks/test-spec-loader.ts');
+      const book = loadCraftbookTestSpecsSync().find((s) => s.craftbookId === 'refactor-module');
+      const seed = (book?.spec.setup.files ?? []).filter((f) => f.path.endsWith('.js'));
+      expect(seed.length).toBeGreaterThan(1);
+      const [edited, untouched] = seed;
+      const folderTask = {
+        ...task,
+        craftbook: {
+          ...task.craftbook,
+          id: 'refactor-module',
+          version: book!.version,
+          contract: {
+            goal: 'Restructure the module without changing behavior.',
+            deliverables: [
+              {
+                id: 'code',
+                path: './',
+                kind: 'code-module',
+                description: 'The restructured source',
+              },
+            ],
+            criteria: [],
+          },
+        },
+      } as unknown as Task;
+      dir = await mkdtemp(join(tmpdir(), 'gezel-strategy-judge-'));
+      await writeFile(join(dir, 'state.json'), JSON.stringify({ tasks: { tasks: [folderTask] } }));
+      const ws = join(dir, 'workspace', 'p');
+      for (const f of seed) {
+        await mkdir(join(ws, f.path, '..'), { recursive: true });
+        await writeFile(join(ws, f.path), f.content);
+      }
+      await writeFile(join(ws, edited!.path), '// the delivered refactor\n');
+      await mkdir(join(ws, 'src', 'lib'), { recursive: true });
+      await writeFile(join(ws, 'src', 'lib', 'helper.js'), 'export const helper = 1;\n');
+      await mkdir(join(ws, 'node_modules', 'dep'), { recursive: true });
+      await writeFile(join(ws, 'node_modules', 'dep', 'index.js'), 'installed');
+      await writeFile(join(ws, 'pnpm-lock.yaml'), 'lockfileVersion: 9');
+
+      const bundle = await buildJudgeBundle(dir, 'refactor-module', []);
+      const text = bundle!.deliverables[0]!.text;
+      expect(text).toContain(`#### ${edited!.path} (changed)`);
+      expect(text).toContain('// the delivered refactor');
+      expect(text).toContain('#### src/lib/helper.js (added)');
+      expect(text).toMatch(new RegExp(`Unchanged: .*${untouched!.path}`));
+      expect(text).not.toContain('installed');
+      expect(text).not.toContain('lockfileVersion');
+      // The workspace copy of an edited file is the change, not its source.
+      const source = bundle!.sources.find((s) => s.label === edited!.path);
+      expect(source?.text).toBe(edited!.content);
+
+      expect(await trialHasFolderDeliverable(dir, 'refactor-module')).toBe(true);
+      const v2 = {
+        model: 'm',
+        promptVersion: 2,
+        samples: [{ scores: { fitness: 0, completeness: 0, grounding: 0, craft: 0 }, reasons: '' }],
+      };
+      expect(isCurrentJudgeReport(v2)).toBe(false);
+      expect(isCurrentJudgeReport(v2, { folderDeliverable: true })).toBe(false);
+      expect(isCurrentJudgeReport(v2, { folderDeliverable: false })).toBe(true);
+    });
+  });
 });
 
 describe('round-2 arms and engine metrics', () => {

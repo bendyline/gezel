@@ -27,11 +27,18 @@ include only the parts the experience needs.
 
 ## Read in this order
 
+The first four guides are also gathered on one page for people and AI agents,
+[Build a Gezel app: the complete guide](handboek/technical/build-a-gezel-app.md),
+published at `https://gezel.com/docs/build-a-gezel-app.md` and printed by
+`gezel app guide`. It includes them through `::handboek-include`, so edit the
+guides themselves, never a copy.
+
 | Need | Maintained guide |
 | --- | --- |
 | Build an app, including roles, craftbooks, scripts, data, and project defaults | [Building AI Apps inside Gezel](handboek/technical/building-ai-apps-inside-gezel.md) |
 | Build its browser interface and connect it to project files and tools | [Using the Gezel page APIs](handboek/technical/gezel-page-apis.md) |
 | Understand injected CSS, fonts, theme, layout, and accessible controls | [Gezel app page style guide](handboek/technical/gezel-app-page-style-guide.md) |
+| Organize the app: Home and noun tabs, Settings, dialog actions, row actions | [Gezel app UX guide](handboek/technical/gezel-app-ux-guide.md) |
 | Look up exact page methods, permissions, modes, limits, and error codes | [Output Pane API reference](output-pane-api.md), [TypeScript declarations](../packages/sdk/src/page.ts) |
 | Look up composition, adoption, upgrades, and `.gezapp` formats | [Project-type specification](project-types.md) |
 | Write a deterministic action or gate | [Script SDK guide](handboek/technical/writing-scripts-with-gezel-sdk.md) |

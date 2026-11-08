@@ -54,8 +54,13 @@ describe('document companion scope', () => {
   it('lists and writes only inside the active document companion', async () => {
     const listDocuments = vi.fn().mockResolvedValue({
       files: [
-        { path: 'test_files/hero.png', name: 'hero.png', isDirectory: false },
-        { path: 'test_files/.versions/test.123.md', name: 'test.123.md', isDirectory: false },
+        { path: 'test_files/hero.png', name: 'hero.png', isDirectory: false, size: 2048 },
+        {
+          path: 'test_files/.versions/test.123.md',
+          name: 'test.123.md',
+          isDirectory: false,
+          size: 12,
+        },
       ],
     });
     const writeDocumentBinary = vi.fn().mockResolvedValue({ ok: true });
@@ -68,9 +73,9 @@ describe('document companion scope', () => {
     const provider = createDocumentMediaProvider(container, 'test_files');
 
     await expect(provider.listMedia()).resolves.toEqual([
-      { name: 'test_files/hero.png', mimeType: 'image/png', size: 0 },
+      { name: 'test_files/hero.png', mimeType: 'image/png', size: 2048 },
     ]);
-    expect(listDocuments).toHaveBeenCalledWith('test_files', true);
+    expect(listDocuments).toHaveBeenCalledWith('test_files', true, { stats: true });
 
     const bytes = new Uint8Array([1, 2, 3]);
     await expect(provider.addMedia('photo.png', bytes, 'image/png')).resolves.toBe(
@@ -110,8 +115,8 @@ describe('document companion scope', () => {
     await first.listMedia();
     await second.listMedia();
 
-    expect(listDocuments).toHaveBeenNthCalledWith(1, 'first_files', true);
-    expect(listDocuments).toHaveBeenNthCalledWith(2, 'second_files', true);
+    expect(listDocuments).toHaveBeenNthCalledWith(1, 'first_files', true, { stats: true });
+    expect(listDocuments).toHaveBeenNthCalledWith(2, 'second_files', true, { stats: true });
   });
 
   it('falls back for legacy loose media without resolving a sibling companion', async () => {

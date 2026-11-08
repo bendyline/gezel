@@ -25,6 +25,7 @@ export default defineConfig({
     'knowledge-command': 'src/knowledge-command.ts',
     'app-command': 'src/app-command.ts',
     'app-author-command': 'src/app-author-command.ts',
+    'app-guide': 'src/app-guide.ts',
   },
   format: ['esm'],
   dts: false,

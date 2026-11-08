@@ -209,15 +209,18 @@ export function HomeWorkshop({
         // so it is no reason to hold that copy in place.
         const saved = window.__GEZEL__?.startupHome?.snapshot?.status;
         const savedStatus = saved && isFreshStatus(saved.at) ? saved : null;
-        const keepReading = view.tab !== 'greeting' || view.scroll > 0 || savedStatus !== null;
-        if (keepReading || draftId || view.focused) {
+        // The startup sheet was rolled up: there is no copy to hold in place.
+        const rolledUp = view.tab === 'chat';
+        const keepReading =
+          !rolledUp && (view.tab !== 'greeting' || view.scroll > 0 || savedStatus !== null);
+        if (keepReading || rolledUp || draftId || view.focused) {
           startupTransferred.current = true;
           userToggledCollapse.current = true;
           reconciledCollapse.current = true;
           homeVisit.greeted = true;
           const nextTab = view.tab === 'chat' ? 'greeting' : view.tab;
           setTab(nextTab);
-          setCollapsed(view.tab === 'chat' || view.focused);
+          setCollapsed(rolledUp || view.focused);
           if (keepReading) setStartupReading({ tab: nextTab, node, savedStatus });
         }
         setStartupDraftId(draftId);

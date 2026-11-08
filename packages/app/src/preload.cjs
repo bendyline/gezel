@@ -37,6 +37,15 @@ ipcRenderer.on('gezel:open-model-bundle', (_event, request) => {
   else pendingModelBundleOpens.push(request);
 });
 
+// A `gezel://` link from the browser, buffered the same way: main sends it as
+// soon as the app page loads, before React subscribes. Only the latest is kept.
+let pendingDeepLink = null;
+let deepLinkCallback = null;
+ipcRenderer.on('gezel:deep-link', (_event, link) => {
+  if (deepLinkCallback) deepLinkCallback(link);
+  else pendingDeepLink = link;
+});
+
 const modelBundleExportProgressCallbacks = new Set();
 ipcRenderer.on('gezel:model-bundle-export-progress', (_event, progress) => {
   for (const callback of modelBundleExportProgressCallbacks) callback(progress);
@@ -194,6 +203,17 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
   onOpenModelBundle: (callback) => {
     modelBundleOpenCallback = callback;
     while (pendingModelBundleOpens.length > 0) callback(pendingModelBundleOpens.shift());
+  },
+  onDeepLink: (callback) => {
+    deepLinkCallback = callback;
+    if (pendingDeepLink) {
+      const link = pendingDeepLink;
+      pendingDeepLink = null;
+      callback(link);
+    }
+    return () => {
+      if (deepLinkCallback === callback) deepLinkCallback = null;
+    };
   },
   // Restart the gezel service. Used by the Folders settings tab after a
   // successful externalization move so the new path config takes

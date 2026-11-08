@@ -28,7 +28,7 @@ import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { CliError } from './connection.js';
 import { formatGb, pullChatModel } from './model-pull.js';
-import { installNativeToolkit } from './native-command.js';
+import { type NativeCommandClient, installNativeToolkit } from './native-command.js';
 import {
   SECURITY_LEVEL_LABELS,
   policyWithCapability,
@@ -73,6 +73,12 @@ export interface CraftbookSetupOptions {
   params?: Readonly<Record<string, string>>;
   paramSchema?: Craftbook['paramSchema'];
   prompter: SetupPrompter | null;
+  /**
+   * `--download`: download the book's models without asking, at a terminal or
+   * not. Never turns on a security setting or asks for a key; those still need
+   * a person.
+   */
+  autoDownload?: boolean;
   /** Status lines and download progress — stderr, so `--json` stdout stays clean. */
   write: (text: string) => void;
   platform?: NodeJS.Platform;
@@ -110,7 +116,8 @@ export async function ensureCraftbookSetup(
 
   const sizes = await modelSizes(client, gaps);
   const lines = gaps.map((gap) => `  • ${describeGap(gap, sizes)}`);
-  if (!options.prompter) {
+  const onlyDownloads = gaps.every((gap) => gap.kind === 'model');
+  if (!options.prompter && !(options.autoDownload && onlyDownloads)) {
     throw new CliError(
       [
         `${options.label} is not set up to run yet:`,
@@ -118,12 +125,21 @@ export async function ensureCraftbookSetup(
         '',
         'Run the same command in a terminal to set it up step by step, or run:',
         ...instructions(gaps).map((line) => `  ${line}`),
+        ...(onlyDownloads
+          ? ['', 'Or run it again with --download to download them without asking.']
+          : options.autoDownload
+            ? ['', '--download only downloads; the other steps need a person.']
+            : []),
       ].join('\n'),
     );
   }
 
   options.write(`${options.label} needs some setup first:\n${lines.join('\n')}\n\n`);
-  const prompter = options.prompter;
+  // Reached without a prompter only when every gap is a download.
+  const prompter: SetupPrompter = options.prompter ?? {
+    confirm: async () => false,
+    secret: async () => '',
+  };
   const stop = (from: CraftbookSetupGap): never => {
     const rest = gaps.slice(gaps.indexOf(from));
     throw new CliError(
@@ -198,11 +214,16 @@ export async function ensureCraftbookSetup(
       }
     }
     const what = downloads.length === 1 ? 'this model' : `these ${downloads.length} models`;
-    const yes = await prompter.confirm(
-      `Download ${what} now? It is a one-time download${total > 0 ? ` of ${formatGb(total)} GB` : ''}. [y/N] `,
-    );
-    if (!yes) stop(downloads[0]!);
-    await ensureEngines(
+    const size = total > 0 ? ` of ${formatGb(total)} GB` : '';
+    if (options.autoDownload) {
+      options.write(`Downloading ${what} (--download), a one-time download${size}.\n`);
+    } else {
+      const yes = await prompter.confirm(
+        `Download ${what} now? It is a one-time download${size}. [y/N] `,
+      );
+      if (!yes) stop(downloads[0]!);
+    }
+    await ensureModelEngines(
       client,
       downloads.map((gap) => gap.provider),
       options.write,
@@ -483,8 +504,9 @@ function serviceErrorText(error: unknown): string {
 }
 
 /** A first download on a fresh machine also needs the engine that runs it. */
-async function ensureEngines(
-  client: CraftbookSetupClient,
+/** Install the native engines these model engines run on; shared with `--download`. */
+export async function ensureModelEngines(
+  client: NativeCommandClient,
   engines: readonly CraftbookModelEngine[],
   write: (text: string) => void,
 ): Promise<void> {

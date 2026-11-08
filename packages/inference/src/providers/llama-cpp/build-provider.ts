@@ -1,4 +1,4 @@
-import { delimiter, dirname, join } from 'node:path';
+import { basename, delimiter, dirname, join } from 'node:path';
 import {
   DEFAULT_LOCAL_ENGINE_IDLE_TIMEOUT_MS,
   type GezelConfig,
@@ -6,6 +6,8 @@ import {
   estimateLlamaCppResidentBytes,
   llamaCppBackendExclusion,
   llamaCppBackendLabel,
+  llamaCppDraftResidentBytes,
+  llamaCppSpecNeedsDraftModel,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import type { LlamaBackend, StartupCrashVerdict } from '@bendyline/gezel/native';
@@ -80,7 +82,13 @@ import {
 } from './offload-planner.js';
 import { LlamaCppProvider } from './provider.js';
 import { reasoningLaunchOverridesFromEnv } from './reasoning-launch.js';
-import { resolveSpecDraft } from './spec-draft.js';
+import {
+  brokenDrafters,
+  drafterCostsContext,
+  drafterCostsGpuResidency,
+  llamaCppSidecarLoads,
+  resolveSpecDraft,
+} from './spec-draft.js';
 
 const log = createLogger('chat');
 
@@ -406,13 +414,17 @@ export async function buildLlamaCppProvider(opts: {
   }
   // Install refuses an excluded backend; this catches a model installed
   // before the exclusion was authored, or copied in by hand.
+  let catalogDraftResidentBytes: number | undefined;
   if (modelCatalogInfo && opts.catalog) {
     const engineBackend = binaryBackend ?? currentLlamaCppBackend();
     const detail = await opts.catalog.get('chat-model', modelCatalogInfo.id).catch(() => null);
-    const excluded = llamaCppBackendExclusion(
-      detail?.manifest.kind === 'chat-model' ? detail.manifest.llamaCpp : undefined,
-      engineBackend,
+    const catalogSource =
+      detail?.manifest.kind === 'chat-model' ? detail.manifest.llamaCpp : undefined;
+    catalogDraftResidentBytes = llamaCppDraftResidentBytes(
+      catalogSource?.draftModel,
+      modelCatalogInfo.draftModelPath,
     );
+    const excluded = llamaCppBackendExclusion(catalogSource, engineBackend);
     if (excluded && engineBackend) {
       const err = new Error(
         `Local model: ${modelCatalogInfo.name} cannot run on the ${llamaCppBackendLabel(engineBackend)} llama.cpp engine. ${excluded} Pick another local model in Settings → ${localDeviceSettingsLabel()}.`,
@@ -471,6 +483,44 @@ export async function buildLlamaCppProvider(opts: {
         opts.modelOverride?.modelId ?? defaultModelId,
       )
     : undefined;
+
+  // Speculative-decoding resolution — the catalog's per-backend overlay, and
+  // whether the drafter it names is on disk. Settled here, above the memory
+  // planning, for the same reason as vision: the launch and the budget must
+  // agree on whether a drafter is resident. See providers/llama-cpp/spec-draft.ts.
+  const llamaBuildMetadata = binary ? await readLlamaCppBuildMetadata(binary) : null;
+  const llamaBackend = llamaBuildMetadata?.backend ?? process.env.GEZEL_LLAMA_SERVER_BACKEND;
+  const resolveSpec = (installedDraftModelPath: string | undefined) =>
+    resolveSpecDraft({
+      perModel: manifestEngineConfig,
+      backend: llamaBackend,
+      configSpecType: config.llamaCppSpecType,
+      configDraftModelPath: config.llamaCppDraftModelPath,
+      installedDraftModelPath,
+      resolveDraftPath: (id) =>
+        opts.llamaCppModels ? opts.llamaCppModels.resolveModelPath(id) : Promise.resolve(null),
+    });
+  const brokenDrafterKey = `${binary ?? ''}|${modelCatalogInfo?.draftModelPath ?? ''}`;
+  let drafterInUse = brokenDrafters.has(brokenDrafterKey)
+    ? undefined
+    : modelCatalogInfo?.draftModelPath;
+  let specDraft = await resolveSpec(drafterInUse);
+  if (specDraft.log) log[specDraft.log.level](specDraft.log.message);
+  let resolvedManifestEngineConfig = specDraft.perModel;
+  const specTypeNow = () => config.llamaCppSpecType ?? resolvedManifestEngineConfig?.spec?.type;
+  const draftBudgetBytes = () => (drafterInUse ? (modelCatalogInfo?.draftModelSizeBytes ?? 0) : 0);
+  // A drafter the catalog chose, which this launch can run without. One someone
+  // forced stays theirs to answer for.
+  const catalogDrafterLoaded = () =>
+    !!drafterInUse &&
+    !config.llamaCppSpecType &&
+    !config.llamaCppDraftModelPath &&
+    llamaCppSpecNeedsDraftModel(resolvedManifestEngineConfig?.spec?.type);
+  const leaveDrafterOut = async () => {
+    drafterInUse = undefined;
+    specDraft = await resolveSpec(undefined);
+    resolvedManifestEngineConfig = specDraft.perModel;
+  };
 
   const PREFERRED_CTX_DEFAULT = 65_536;
   // Explicit numeric values win: env, then the per-model override, then the
@@ -554,6 +604,15 @@ export async function buildLlamaCppProvider(opts: {
       headerSummary = null;
     }
   }
+  if (
+    !llamaCppSidecarLoads({
+      specType: specTypeNow(),
+      targetHasMtp: (headerSummary?.nextnPredictLayers ?? 0) > 0,
+      perBackend: !!manifestEngineConfig?.spec?.byBackend,
+    })
+  ) {
+    drafterInUse = undefined;
+  }
   const exactPerSlotKvF16 = headerSummary
     ? estimateExactPerSlotKvBytesF16(
         {
@@ -608,9 +667,12 @@ export async function buildLlamaCppProvider(opts: {
   // contract in planLlamaCppKv. Priced from the cached exact GGUF walk above,
   // including any v0.4 lazy-tensor deduction.
   const PLAN_REFERENCE_CTX = 4096;
-  const planResidentBytes = estimateLlamaCppResidentBytes(planWeightsBytes, {
-    mmprojBytes: visionBudgetBytes,
-  });
+  const planResidentBytes = () =>
+    estimateLlamaCppResidentBytes(planWeightsBytes, {
+      mmprojBytes: visionBudgetBytes,
+      draftBytes: draftBudgetBytes(),
+      draftResidentBytes: catalogDraftResidentBytes,
+    });
   const planCapacity = hostCapacity;
   const planKvBytesPerToken = (kv: LlamaCppKvCacheType) => {
     const exact = headerSummary
@@ -652,7 +714,7 @@ export async function buildLlamaCppProvider(opts: {
       slots: slotCount,
       minimumPerTurnCtxTokens: ctxTokens,
       kvBytesPerToken: planKvBytesPerToken(kv),
-      weightsResidentBytes: planResidentBytes,
+      weightsResidentBytes: planResidentBytes(),
       budgetBytes: brokerSnap?.enforced ? brokerSnap.budgetBytes : planCapacity.budgetBytes,
       committedOtherBytes,
       freeSystemRamBytes: availableSystemRamBytes(),
@@ -660,20 +722,106 @@ export async function buildLlamaCppProvider(opts: {
     });
     return probe.minimumSatisfied && probe.slots >= slotCount;
   };
-  const kvPlan = planLlamaCppKv({
-    architecture: modelCatalogInfo?.architecture,
-    modelId: defaultModelId ?? undefined,
-    override: config.llamaCppKvCacheType,
-    slotsConfigured: configuredSlots !== undefined,
-    ...(configuredSlots !== undefined ? { configuredSlots } : {}),
-    requestedCtxTokens: effectiveNumCtx,
-    minimumCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
-    ctxConfigured:
-      explicitCtx !== undefined || (config.llamaCppContextSizing ?? 'adaptive') === 'model-max',
-    ceilingFor,
-    fitsAt: planFitsAt,
-    maxSlots: defaultLocalEngineSlots(budgetBytes),
-  });
+  // One slot's KV at `ctxTokens`, priced the way the launch reservation
+  // prices it below: the windowed cache unless `--swa-full` is pinned.
+  const planSlotKvReserveBytes = (kv: LlamaCppKvCacheType, ctxTokens: number): number => {
+    if (!headerSummary) return planKvBytesPerToken(kv) * ctxTokens;
+    const geometry = {
+      blockCount: headerSummary.blockCount,
+      embeddingLength: headerSummary.embeddingLength,
+      headCount: headerSummary.headCount,
+      headCountKv: headerSummary.headCountKv,
+      headCountKvPerLayer: headerSummary.headCountKvPerLayer,
+      slidingWindowPattern: headerSummary.slidingWindowPattern,
+      sharedKvLayers: headerSummary.sharedKvLayers,
+      loopCount: headerSummary.loopCount,
+      keyLength: headerSummary.keyLength,
+      valueLength: headerSummary.valueLength,
+      keyLengthSwa: headerSummary.keyLengthSwa,
+      valueLengthSwa: headerSummary.valueLengthSwa,
+      fullAttentionInterval: headerSummary.fullAttentionInterval,
+      ssmInnerSize: headerSummary.ssmInnerSize,
+      ssmStateSize: headerSummary.ssmStateSize,
+      ssmConvKernel: headerSummary.ssmConvKernel,
+      kvCacheType: kv,
+    };
+    const windowed =
+      (config.llamaCppSwaFull ?? manifestEngineConfig?.swaFull ?? false)
+        ? undefined
+        : estimateWindowedKvLinearization({
+            ...geometry,
+            slidingWindow: headerSummary.slidingWindow,
+          });
+    return windowed
+      ? windowed.fixedBytes + windowed.bytesPerToken * ctxTokens
+      : (estimateKvReserveBytes({ ...geometry, ctxTokens }) ?? planKvBytesPerToken(kv) * ctxTokens);
+  };
+  // What a discrete card leaves this launch now: free graphics memory as
+  // device admission measures it, within the card's usable share. Undefined
+  // off discrete cards, where there is no separate pool to run out of.
+  const planGpuPoolBytes = async (): Promise<number | undefined> => {
+    const kind = brokerSnap?.enforced ? brokerSnap.pools.kind : hostCapacity.kind;
+    if (kind !== 'discrete-gpu') return undefined;
+    const freeGpu = await measureAvailableGpuBytes().catch(() => undefined);
+    return Math.max(
+      0,
+      Math.min(budgetBytes - committedOtherBytes, freeGpu ?? Number.POSITIVE_INFINITY),
+    );
+  };
+  const planKv = () =>
+    planLlamaCppKv({
+      architecture: modelCatalogInfo?.architecture,
+      modelId: defaultModelId ?? undefined,
+      override: config.llamaCppKvCacheType,
+      slotsConfigured: configuredSlots !== undefined,
+      ...(configuredSlots !== undefined ? { configuredSlots } : {}),
+      requestedCtxTokens: effectiveNumCtx,
+      minimumCtxTokens: contextRequirement.minimumPerTurnCtxTokens,
+      ctxConfigured:
+        explicitCtx !== undefined || (config.llamaCppContextSizing ?? 'adaptive') === 'model-max',
+      ceilingFor,
+      fitsAt: planFitsAt,
+      maxSlots: defaultLocalEngineSlots(budgetBytes),
+    });
+  let kvPlan = planKv();
+  // A drafter buys speed; context is what a session runs out of. When a
+  // drafter the catalog chose would cap the target window or cost its KV
+  // precision, it goes and the model decodes the way it does without one.
+  // Growth above the target, sized later, simply has less room. On a
+  // discrete card it must also leave the model wholly on the GPU in the
+  // memory free now, which is what device admission charges the launch.
+  if (draftBudgetBytes() > 0 && !config.llamaCppSpecType && !config.llamaCppDraftModelPath) {
+    const targetCtx = kvPlan.ctxCapTokens ?? effectiveNumCtx;
+    const fitsWithDrafter = planFitsAt(kvPlan.kvCacheType, targetCtx, 1);
+    const drafter = drafterInUse;
+    drafterInUse = undefined;
+    const withoutDrafter = planKv();
+    drafterInUse = drafter;
+    let drafterCost: string | undefined;
+    if (drafterCostsContext(kvPlan, withoutDrafter, fitsWithDrafter)) {
+      drafterCost = `beside it the ${effectiveNumCtx}-token window would not keep its size and KV precision`;
+    } else {
+      const gpuPoolBytes = await planGpuPoolBytes();
+      const withDrafterBytes =
+        planResidentBytes() + planSlotKvReserveBytes(kvPlan.kvCacheType, targetCtx);
+      if (drafterCostsGpuResidency(withDrafterBytes, gpuPoolBytes)) {
+        drafterCost = `beside it the model needs ${(withDrafterBytes / 1024 ** 3).toFixed(1)} GiB of graphics memory and ${((gpuPoolBytes ?? 0) / 1024 ** 3).toFixed(1)} GiB is available`;
+      }
+    }
+    if (drafterCost) {
+      log.info(
+        `[llama-cpp] ${modelCatalogInfo?.id ?? defaultModelId ?? 'model'}: leaving the speculative drafter out; ${drafterCost}`,
+      );
+      await leaveDrafterOut();
+      kvPlan = withoutDrafter;
+    }
+  }
+  // What a loaded drafter holds on the GPU, as the resident estimate prices it.
+  const drafterGpuBytes = () =>
+    estimateLlamaCppResidentBytes(0, {
+      draftBytes: draftBudgetBytes(),
+      draftResidentBytes: catalogDraftResidentBytes,
+    }) - estimateLlamaCppResidentBytes(0);
   kvCacheType = kvPlan.kvCacheType;
   if (kvPlan.upgraded) {
     log.info(
@@ -703,7 +851,7 @@ export async function buildLlamaCppProvider(opts: {
   // concurrent requests correctly with zero engine errors, so the failure this
   // clamp guards against looks stale — but one probe is not grounds for
   // deleting a safety measure, so it stays for anyone who opted in explicitly.
-  const selectedSpecType = config.llamaCppSpecType ?? manifestEngineConfig?.spec?.type;
+  const selectedSpecType = specTypeNow();
   if (selectedSpecType === 'draft-mtp' && slots > 1) {
     log.info(
       `[llama-cpp] limiting ${modelCatalogInfo?.id ?? 'MTP model'} to one slot because draft-mtp is not reliable with --parallel > 1 in the bundled engine`,
@@ -780,19 +928,6 @@ export async function buildLlamaCppProvider(opts: {
         ? 'catalog'
         : 'unbounded';
 
-  // Speculative-decoding draft resolution — a manifest names its draft by
-  // catalog id; resolve it to the installed GGUF path (or disable) before the
-  // argv is built. See providers/llama-cpp/spec-draft.ts for the full rules.
-  const specDraft = await resolveSpecDraft({
-    perModel: manifestEngineConfig,
-    configSpecType: config.llamaCppSpecType,
-    configDraftModelPath: config.llamaCppDraftModelPath,
-    resolveDraftPath: (id) =>
-      opts.llamaCppModels ? opts.llamaCppModels.resolveModelPath(id) : Promise.resolve(null),
-  });
-  const resolvedManifestEngineConfig = specDraft.perModel;
-  if (specDraft.log) log[specDraft.log.level](specDraft.log.message);
-
   // Phase v4 — hardware-aware structured-weight offload. Probe device VRAM (cached to
   // `engines/llama-cpp/devices.json` via `--list-devices`) and read the
   // model's MoE metadata from its GGUF header; the planner decides
@@ -821,7 +956,6 @@ export async function buildLlamaCppProvider(opts: {
   // cross-check for an explicit draft-mtp request.
   let ggufHasMtp = false;
   let mtpLayerCount = 0;
-  const llamaBuildMetadata = binary ? await readLlamaCppBuildMetadata(binary) : null;
   let llamaGpuDevice: import('./devices.js').LlamaDevice | null = null;
   let nvidiaRuntimeDevice: import('./devices.js').NvidiaRuntimeDevice | undefined;
   let llamaDevices: import('./devices.js').LlamaDevice[] = [];
@@ -844,8 +978,10 @@ export async function buildLlamaCppProvider(opts: {
       offloadBlockCount = summary.blockCount;
       mtpLayerCount = summary.nextnPredictLayers ?? 0;
       ggufHasMtp = mtpLayerCount > 0;
-      if (!ggufHasMtp && modelCatalogInfo?.draftModelPath) {
-        const draftSummary = await readGgufSummaryAsync(modelCatalogInfo.draftModelPath);
+      // Only a companion this launch loads can supply the head: one left out
+      // for memory would turn MTP on with nothing to run it.
+      if (!ggufHasMtp && drafterInUse) {
+        const draftSummary = await readGgufSummaryAsync(drafterInUse);
         mtpLayerCount = draftSummary.nextnPredictLayers ?? 0;
         ggufHasMtp = mtpLayerCount > 0;
       }
@@ -854,6 +990,8 @@ export async function buildLlamaCppProvider(opts: {
       const residentWeightBytes = Math.max(0, approxBytes - lazyTensorBytes);
       const residentBytes = estimateLlamaCppResidentBytes(residentWeightBytes, {
         mmprojBytes: visionBudgetBytes,
+        draftBytes: draftBudgetBytes(),
+        draftResidentBytes: catalogDraftResidentBytes,
       });
       if (lazyTensorBytes > 0) {
         log.info(
@@ -1221,6 +1359,7 @@ export async function buildLlamaCppProvider(opts: {
                     split,
                     ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
                     ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
+                    additionalGpuBytes: drafterGpuBytes(),
                   }
                 : {}),
             });
@@ -1269,7 +1408,7 @@ export async function buildLlamaCppProvider(opts: {
                 ...(denseFfnSplit ? { split: denseFfnSplit } : {}),
                 ...(summary.blockCount !== undefined ? { blockCount: summary.blockCount } : {}),
                 ...(kvReserveBytes !== undefined ? { kvReserveBytes } : {}),
-                additionalGpuBytes: visionBudgetBytes,
+                additionalGpuBytes: visionBudgetBytes + drafterGpuBytes(),
                 ramBudgetBytes: brokerSnap?.enforced
                   ? brokerSnap.pools.ramShareBytes
                   : hostCapacity.ramShareBytes,
@@ -1312,8 +1451,8 @@ export async function buildLlamaCppProvider(opts: {
       if (ggufHasMtp) {
         log.info(
           `[llama-cpp] ${modelCatalogInfo?.id ?? 'model'} ships an MTP head (nextn_predict_layers=${mtpLayerCount}); speculative decoding ${
-            config.llamaCppSpecType || manifestEngineConfig?.spec?.type
-              ? 'follows the explicit setting'
+            specTypeNow()
+              ? `runs ${specTypeNow()} (${config.llamaCppSpecType ? 'Settings' : 'catalog'})`
               : 'is ON by default (+4-19% decode; disable with llamaCppSpecType: "none")'
           }.`,
         );
@@ -1401,6 +1540,7 @@ export async function buildLlamaCppProvider(opts: {
     onExit: (snapshot) => {
       providerHolder.current?.getCacheAdapter()?.resetEngineState();
       if (snapshot.expected) return;
+      if (catalogDrafterLoaded()) brokenDrafters.add(brokenDrafterKey);
       logFile.writeIncident(snapshot);
       if (snapshot.panicKind === 'host-out-of-memory') {
         noteHostOutOfMemory({
@@ -1491,6 +1631,17 @@ export async function buildLlamaCppProvider(opts: {
     // restarts of this provider, so a recovered engine doesn't re-OOM on its
     // next boot.
     recoverStartup: ({ panicKind }) => {
+      // The drafter is the one part of this launch it can do without, and
+      // drafters have changed format between engine releases. Without this a
+      // bad one reads as a build that cannot run, and three of those quarantine
+      // the whole GPU backend; `resolveLaunch` drops it from the retry.
+      if (catalogDrafterLoaded()) {
+        brokenDrafters.add(brokenDrafterKey);
+        log.warn(
+          `[llama-cpp] ${panicKind ?? 'failed start'} while starting ${modelCatalogInfo?.id ?? 'model'} with its speculative drafter — retrying without it`,
+        );
+        return true;
+      }
       if (panicKind !== 'cuda-out-of-memory' && panicKind !== 'vulkan-out-of-memory') {
         return false;
       }
@@ -1554,6 +1705,9 @@ export async function buildLlamaCppProvider(opts: {
       return true;
     },
     resolveLaunch: async () => {
+      if (catalogDrafterLoaded() && brokenDrafters.has(brokenDrafterKey)) {
+        await leaveDrafterOut();
+      }
       gpuWatch = new GpuStartupWatch(binaryBackend);
       // Again at every launch, not only at build: llama.cpp from the 0.1.51
       // release refuses a --slot-save-path that does not exist ("not a
@@ -1581,7 +1735,7 @@ export async function buildLlamaCppProvider(opts: {
         kvCacheType,
         slots,
         ggufHasMtp,
-        installedDraftModelPath: modelCatalogInfo?.draftModelPath,
+        installedDraftModelPath: drafterInUse,
         // Opt-in A/B lever: `GEZEL_LLAMA_REASONING_FORMAT=none`
         // disables llama-server's chat-template output parsing so mangled
         // model output reaches `delta.content` for provider-side salvage.
@@ -1720,6 +1874,10 @@ export async function buildLlamaCppProvider(opts: {
           ubatchSize: lastArgValue(resolvedAdvancedArgs, '--ubatch-size') ?? 'default',
           flashAttention: lastArgValue(resolvedAdvancedArgs, '--flash-attn') ?? 'default',
           threads: lastArgValue(resolvedAdvancedArgs, '--threads') ?? 'default',
+          specType: lastArgValue(resolvedAdvancedArgs, '--spec-type') ?? 'default',
+          specDraftModel: basename(
+            lastArgValue(resolvedAdvancedArgs, '--spec-draft-model') ?? 'none',
+          ),
           reasoningBudgetTokens: reasoningBudgetTokens ?? 'unbounded',
           reasoningBudgetSource,
           reasoningPreserve,

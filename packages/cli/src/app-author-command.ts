@@ -203,6 +203,7 @@ export async function runAppNew(
   }
   console.log(`Scaffolded ${id} (${files.length} files) in ${target}`);
   console.log('Next:');
+  console.log('  0. Read the guide first (or give it to your AI agent): gezel app guide');
   console.log('  1. Edit items/ — start with the two about.md files and the version manifest.');
   console.log(`  2. gezel app validate ${id}`);
   console.log(`  3. gezel app pack ${id}`);

@@ -12,6 +12,7 @@ import {
   type SharedModelMigrationRequest,
   type SharedModelMigrationResult,
   type SharedModelMigrationSource,
+  llamaCppDraftModelApplies,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
@@ -20,6 +21,7 @@ import {
   describeCatalogPayload,
 } from '@bendyline/gezel-inference/internal/models/catalog-payload-identity';
 import { GezmodelManager } from '@bendyline/gezel-inference/internal/models/gezmodel';
+import { currentLlamaCppBackend } from '@bendyline/gezel-inference/internal/providers/llama-cpp/backend-health';
 import { LlamaCppModelManager } from '@bendyline/gezel-inference/internal/providers/llama-cpp/models';
 import { MlxModelManager } from '@bendyline/gezel-inference/internal/providers/mlx/models';
 import type { MachineEngineBridge } from '../machine-engine/bridge.js';
@@ -461,15 +463,20 @@ function assertCatalogPayloadIntegrity(
     expected.set(path, source.sha256);
     required.add(path);
   }
-  // Both engine sources can ship a draft companion, and `buildDownloadPlan`
-  // fetches a declared one unconditionally — so it must be in `expected` for
-  // either engine, or the integrity sweep below rejects it as an unexpected
-  // GGUF and the migration fails on a file we put there ourselves.
+  // Both engine sources can ship a draft companion, so it must be in
+  // `expected` for either engine, or the integrity sweep below rejects it as
+  // an unexpected GGUF and the migration fails on a file we put there
+  // ourselves. A llama.cpp drafter limited to other backends may be absent.
   if (source.draftModel) {
     const draft = source.draftModel;
     const path = basename(draft.filename);
     expected.set(path, draft.sha256);
-    required.add(path);
+    if (
+      engine !== 'llama-cpp' ||
+      llamaCppDraftModelApplies(catalog.llamaCpp?.draftModel, currentLlamaCppBackend())
+    ) {
+      required.add(path);
+    }
   }
   if (engine === 'llama-cpp' && catalog.llamaCpp?.mmproj) {
     expected.set(basename(catalog.llamaCpp.mmproj.filename), catalog.llamaCpp.mmproj.sha256);

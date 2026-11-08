@@ -24,20 +24,13 @@ export interface HomeChip {
 }
 
 export { greetingForHour, freshStatusReport, isFreshStatus, STATUS_FRESH_MS } from './greeting.js';
+// Lives with the recent-tabs model because the shell needs it: importing this file from the
+// shell made Rolldown split the entry chunk, 38 -> 58 startup requests at the same byte size.
+export { deriveLaunchProjectId } from '../../components/recent-tabs.js';
 
 /** Compact relative time, e.g. "just now" · "18m ago" · "yesterday" · "2w ago". */
 export function timeAgo(iso: string | undefined, now: number = Date.now()): string {
   return formatRelativeTime(iso, { now });
-}
-
-/** New work uses the last project visited, or Default before one is chosen. */
-export function deriveLaunchProjectId(config: ConfigResponse | null, projects: Project[]): string {
-  const ids = new Set(projects.filter((p) => !isSharedLibraryProject(p)).map((p) => p.id));
-  const recent = (config?.recentTabs ?? []).slice().sort((a, b) => b.at - a.at);
-  for (const tab of recent) {
-    if (tab.kind === 'project' && ids.has(tab.id)) return tab.id;
-  }
-  return 'default';
 }
 
 /**

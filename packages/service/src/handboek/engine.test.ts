@@ -222,6 +222,39 @@ describe('handboek engine', () => {
 
 // Give each mode its own budget: the combined corpus pass exceeded 15s under
 // CI coverage instrumentation, and its runtime grows with authored content.
+describe('the integrated app-building guide', () => {
+  const GUIDES = [
+    'Building AI Apps inside Gezel',
+    'Using the Gezel page APIs',
+    'Gezel app page style guide',
+    'Gezel app UX guide',
+  ];
+
+  it('inlines the four guides as sections when asked, under one title', async () => {
+    const article = await makeEngine().article('build-a-gezel-app', {
+      mode: 'site',
+      inlineIncludes: true,
+    });
+    const markdown = article!.markdown;
+    for (const title of GUIDES) expect(markdown).toContain(`\n## ${title}\n`);
+    const prose = markdown.replace(/^(`{3,}|~{3,})[\s\S]*?^\1/gm, '');
+    expect(prose.match(/^# /gm)).toHaveLength(1);
+    // A guide's own sections drop a level under its heading.
+    expect(markdown).toContain('\n### Validate, pack, and share\n');
+    expect(markdown).not.toContain('::handboek-include');
+  });
+
+  it('lists the guides as links where the reader already has them', async () => {
+    // The app's Handboek and its knowledge index render in app and site mode
+    // without inlining; holding each guide twice would double every search hit.
+    for (const mode of ['app', 'site'] as const) {
+      const markdown = (await makeEngine().article('build-a-gezel-app', { mode }))!.markdown;
+      expect(markdown).toContain('- [Using the Gezel page APIs](gezel-page-apis.md): ');
+      expect(markdown).not.toContain('\n## Using the Gezel page APIs\n');
+    }
+  });
+});
+
 describe('no surviving directives (content lint)', { timeout: 15_000 }, () => {
   const modes: HandboekRenderMode[] = ['app', 'site', 'agent'];
 

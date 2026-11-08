@@ -21,16 +21,11 @@ import { NightReviewPanel } from './NightReviewPanel.js';
 import { type StartupHandover, StartupReadingOverlay } from './StartupReadingOverlay.js';
 import { StatusReportPanel } from './StatusReportPanel.js';
 import { TipOfDay } from './TipOfDay.js';
+import { RAIL_DRAG_SLOP_PX, railDragHeight, railRollsUp } from './sheet-rail.js';
 import { type HomeChip, type HomeNavView, greetingForHour } from './utils.js';
 
 /** Which panel the greeting band's tab strip is showing. */
 export type HomeGreetingTab = 'greeting' | 'night' | 'make' | 'tour';
-
-/** Movement under this is a press on the rail, not a drag. */
-const RAIL_DRAG_SLOP_PX = 4;
-/** Let go after lifting the rail this share of the sheet, and it rolls up. */
-const RAIL_ROLL_UP_SHARE = 0.25;
-const RAIL_ROLL_UP_MIN_PX = 48;
 
 /** Symmetric SVG chevron for the greeting's collapse / expand toggle.
  *  The Unicode arrowhead glyphs (⌃ ⌄) render asymmetrically and off-center
@@ -217,7 +212,7 @@ export function GreetingBand({
     if (!drag.moved && Math.abs(lift) < RAIL_DRAG_SLOP_PX) return;
     drag.moved = true;
     sheet.dataset.dragging = '';
-    sheet.style.height = `${drag.height - Math.min(Math.max(lift, 0), drag.height)}px`;
+    sheet.style.height = `${railDragHeight(drag.height, lift)}px`;
   };
   const endRailDrag = (event: ReactPointerEvent<HTMLButtonElement>, letGo: boolean) => {
     const drag = railDrag.current;
@@ -231,7 +226,7 @@ export function GreetingBand({
       delete sheet.dataset.dragging;
     }
     const lift = drag.startY - event.clientY;
-    if (letGo && lift >= Math.max(RAIL_ROLL_UP_MIN_PX, drag.height * RAIL_ROLL_UP_SHARE)) {
+    if (letGo && railRollsUp(drag.height, lift)) {
       onToggleCollapse();
     }
   };

@@ -122,6 +122,23 @@ const CATALOG_INDEX_PATH = join(TEMPLATES_ROOT, 'index.json');
 
 let cache: LoadedCraftbookTestSpec[] | null = null;
 
+/** One book version's `test.json`, so a trial is read against the sidecar it ran with. */
+export function loadCraftbookTestSpecAtVersionSync(
+  id: string,
+  version: string,
+): CraftbookTestSpec | null {
+  try {
+    const raw = readFileSync(
+      join(TEMPLATES_ROOT, id.slice(0, 2), id, 'versions', version, CRAFTBOOK_TEST_FILENAME),
+      'utf8',
+    );
+    const parsed = parseCraftbookTestSpec(JSON.parse(raw), { mode: 'tolerant' });
+    return parsed.ok ? parsed.spec : null;
+  } catch {
+    return null;
+  }
+}
+
 export function loadCraftbookTestSpecsSync(): LoadedCraftbookTestSpec[] {
   if (cache) return cache;
   const loaded: LoadedCraftbookTestSpec[] = [];

@@ -201,18 +201,19 @@ export function FileHiddenKey({
 }
 
 /**
- * "Open in file manager" — an action key in the toolbar row. It is a verb,
- * not a mode, so it sits in its own tray with nothing latched
- * (docs/ux.md → "A tray may also hold actions").
+ * "Open in File Explorer / Finder" — an action key in the toolbar row. It is
+ * a verb, not a mode, so it sits in its own tray with nothing latched
+ * (docs/ux.md → "A tray may also hold actions"). `label` comes from
+ * `openInFileManagerLabel`, which names the platform's own file manager.
  */
-export function FileRevealKey({ onReveal }: { onReveal: () => void }) {
+export function FileRevealKey({ label, onReveal }: { label: string; onReveal: () => void }) {
   return (
     <div className="gz-tray file-reveal-tray">
       <button
         type="button"
         className="gz-key gz-key--icon"
-        title="Open in file manager"
-        aria-label="Open in file manager"
+        title={label}
+        aria-label={label}
         onClick={onReveal}
       >
         <RevealIcon />

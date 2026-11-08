@@ -16,7 +16,7 @@ import {
 } from './content.js';
 import type { HandboekDeviceInfo } from './device.js';
 import { type GeneratedSummary, buildGeneratedBody, listGeneratedSummaries } from './generated.js';
-import { type HandboekCatalog, expandMacros } from './macros.js';
+import { type HandboekCatalog, type HandboekIncludes, expandMacros } from './macros.js';
 
 export type { CuratedArticle, ReleaseNoteEntry, ScorecardRoundNote } from './content.js';
 // The CLI's site export builds its catalog over this: the catalog cannot find
@@ -49,13 +49,19 @@ export type {
 export {
   MACROS,
   SCORECARD_ROUND_PAGES,
+  asIncludedSection,
   expandMacros,
   parseAttrs,
   renderScorecardRoundPages,
   scorecardRoundPageId,
   scorecardRoundTitles,
 } from './macros.js';
-export type { HandboekCatalog, ScorecardRoundPage } from './macros.js';
+export type {
+  HandboekCatalog,
+  HandboekIncludes,
+  IncludedArticle,
+  ScorecardRoundPage,
+} from './macros.js';
 export {
   GEZEL_SITE_THEME,
   OG_CARD_HEIGHT,
@@ -88,6 +94,12 @@ export interface HandboekEngineOptions {
 
 export interface HandboekArticleOptions {
   mode?: HandboekRenderMode;
+  /**
+   * Inline the articles `::handboek-include` names instead of linking them.
+   * The published site and `gezel app guide` do; the app's Handboek and its
+   * knowledge index leave it off, so they never hold one article twice.
+   */
+  inlineIncludes?: boolean;
 }
 
 export interface HandboekEngine {
@@ -120,6 +132,41 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
 
   const curated = (): CuratedArticle[] => (contentDir ? loadCuratedArticles(contentDir) : []);
   const roundNotes = () => (contentDir ? loadScorecardRoundNotes(contentDir) : []);
+
+  // One level only: an included article's own includes are listed as links.
+  const includesFor = (
+    mode: HandboekRenderMode,
+    inline: boolean,
+    curatedArticles: CuratedArticle[],
+  ): HandboekIncludes => {
+    const find = (id: string) => curatedArticles.find((a) => a.id === id);
+    const asLinks: HandboekIncludes = {
+      inline: false,
+      async resolve(id) {
+        const match = find(id);
+        return match
+          ? { id: match.id, title: match.title, summary: match.summary, markdown: '' }
+          : null;
+      },
+    };
+    if (!inline) return asLinks;
+    return {
+      inline: true,
+      async resolve(id) {
+        const match = find(id);
+        if (!match) return null;
+        const { markdown } = await expandMacros(match.body, {
+          mode,
+          catalog: opts.catalog,
+          device: opts.device,
+          releases: listReleaseNotes(curatedArticles),
+          roundNotes: roundNotes(),
+          includes: asLinks,
+        });
+        return { id: match.id, title: match.title, summary: match.summary, markdown };
+      },
+    };
+  };
 
   const engine: HandboekEngine = {
     async toc(): Promise<HandboekToc> {
@@ -178,6 +225,7 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
           device: opts.device,
           releases: listReleaseNotes(curatedArticles),
           roundNotes: roundNotes(),
+          includes: includesFor(mode, articleOpts?.inlineIncludes === true, curatedArticles),
         });
         return {
           id,

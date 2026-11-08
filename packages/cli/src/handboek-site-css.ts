@@ -578,6 +578,26 @@ th[aria-sort='descending'] .hb-data-table-sort::after { content: ' ↓'; opacity
 }
 .hb-demo-open { font-size: 0.9rem; }
 
+/* "Run this in Gezel": a gezel:// link under a craftbook's or app's title.
+   Hidden until open-in-gezel.js shows it, on computers only. */
+.hb-open { margin: 0 0 1.5rem; }
+.open-in-gezel { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.9rem; }
+.open-in-gezel[hidden], .hb-open-note[hidden] { display: none; }
+.hb-open-button {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 1rem;
+  border-radius: var(--hb-radius-sm);
+  background: var(--hb-accent);
+  color: #fff;
+  font-family: var(--hb-font-ui);
+  font-weight: 600;
+  text-decoration: none;
+}
+.hb-open-button:hover { background: var(--hb-accent-hover); color: #fff; }
+.hb-open-note { flex-basis: 100%; font-size: 0.86rem; color: var(--hb-ink-muted); }
+
 /* Craftbook marks: one under each craftbook's title, and a gallery shelf.
    Marks are transparent cut-outs, so the image's own background is the
    colored paper the app paints behind them, picked by data-ground. Cream

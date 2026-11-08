@@ -651,6 +651,8 @@ export const ProjectFileEntrySchema = z.object({
   isDirectory: z.boolean(),
   /** File mtime (ms epoch). Populated only when the caller opts into stats. */
   mtimeMs: z.number().optional(),
+  /** File size in bytes. Populated only when the caller opts into stats. */
+  size: z.number().optional(),
 });
 export type ProjectFileEntry = z.infer<typeof ProjectFileEntrySchema>;
 

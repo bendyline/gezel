@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 import { chatModelInstallIdentity } from './model-sources.ts';
+import { resolveLlamaBinary } from './native-bin.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
 
 /**
@@ -402,7 +403,16 @@ export async function staleInstall(opts: {
   // install pipeline flattens it into the model dir, so a full-path check
   // never finds a correctly-installed draft — and would report a
   // just-downloaded model stale, re-evicting and refetching it every run.
-  if (expected.draftFilename && !existsSync(join(dir, basename(expected.draftFilename)))) {
+  // A drafter limited to other backends is not part of this host's install.
+  const draftExpected =
+    expected.draftFilename &&
+    (!expected.draftBackends ||
+      expected.draftBackends.includes(resolveLlamaBinary().build?.backend ?? ''));
+  if (
+    draftExpected &&
+    expected.draftFilename &&
+    !existsSync(join(dir, basename(expected.draftFilename)))
+  ) {
     return {
       kind: 'sidecar-missing',
       reason: `missing draft (MTP) weights ${basename(expected.draftFilename)} added by catalog`,

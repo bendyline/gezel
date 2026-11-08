@@ -65,7 +65,7 @@ export function createDocumentsContentContainer(
     writeText: (path, content) => client.writeDocument(path, content),
     writeBinary: (path, data, mime) => client.writeDocumentBinary(path, data, mime),
     remove: (path) => client.deleteDocument(path),
-    list: (path) => client.listDocuments(path, true),
+    list: (path) => client.listDocuments(path, true, { stats: true }),
   });
 }
 

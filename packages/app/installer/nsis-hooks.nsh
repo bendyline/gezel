@@ -1260,5 +1260,10 @@ FunctionEnd
     ${If} $0 != 0
       DetailPrint "WARNING: Gezel could not fully remove its Office add-in registration (exit $0). Remove it from Word, Excel, or PowerPoint's add-in list."
     ${EndIf}
+    ; gezel:// links are registered per user by main.ts (the NSIS target
+    ; writes no protocol keys). Remove this account's registration so a link
+    ; from gezel.com no longer points at an exe that is gone. Guarded like
+    ; the Office cleanup: an update keeps it, and the new build re-registers.
+    DeleteRegKey HKCU "Software\Classes\gezel"
   ${EndIf}
 !macroend

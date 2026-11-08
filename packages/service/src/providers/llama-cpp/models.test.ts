@@ -1068,6 +1068,145 @@ describe('LlamaCppModelManager.install', () => {
     );
   });
 
+  it.each([
+    ['cuda', true],
+    ['vulkan', false],
+  ])('on %s, fetching a drafter limited to CUDA is %s', async (backend, fetched) => {
+    const weights = buildGguf({ arch: 'qwen3', contextLength: 262144 });
+    const draft = buildGguf({ arch: 'dflash' });
+    const catalog = fakeCatalog(
+      new Map<string, ChatModelManifest>([
+        [
+          'limited-draft',
+          {
+            schemaVersion: 1,
+            kind: 'chat-model',
+            id: 'limited-draft',
+            name: 'Limited Draft',
+            description: 'fixture',
+            tags: [],
+            maintainer: { name: 'Test' },
+            version: '1.0.0',
+            releasedAt: '2026-11-06T00:00:00Z',
+            availableVersions: ['1.0.0'],
+            parameterSize: '27B',
+            approxSizeBytes: weights.byteLength,
+            supportsTools: true,
+            llamaCpp: {
+              huggingfaceRepo: 'test-org/target-GGUF',
+              revision: 'a'.repeat(40),
+              filename: 'target.gguf',
+              sha256: sha256Hex(weights),
+              approxSizeBytes: weights.byteLength,
+              quantization: 'Q4_K_M',
+              draftModel: {
+                huggingfaceRepo: 'test-org/target-DFlash2-GGUF',
+                revision: 'd'.repeat(40),
+                filename: 'target-DFlash2.gguf',
+                sha256: sha256Hex(draft),
+                sizeBytes: draft.byteLength,
+                backends: ['cuda'],
+              },
+            },
+          } as ChatModelManifest,
+        ],
+      ]),
+    );
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const href = typeof input === 'string' ? input : input.toString();
+      requested.push(href);
+      const buf = href.includes('DFlash2') ? draft : weights;
+      return new Response(buf, {
+        status: 200,
+        headers: { 'content-length': String(buf.byteLength) },
+      });
+    }) as typeof fetch;
+    const mgr = new LlamaCppModelManager({
+      home,
+      catalog,
+      fetchImpl,
+      resolveBackend: () => backend,
+    });
+    const events = await drain(mgr.install('limited-draft'));
+    expect(
+      events.find((event) => event.type === 'done'),
+      JSON.stringify(events),
+    ).toBeDefined();
+    expect(requested.some((url) => url.includes('DFlash2'))).toBe(fetched);
+    const [installed] = await mgr.listInstalled();
+    expect(installed?.draftModelPath !== undefined).toBe(fetched);
+    if (fetched) expect(installed?.draftModelSizeBytes).toBe(draft.byteLength);
+  });
+
+  it('links a drafter another quant already verified instead of downloading it', async () => {
+    const draft = buildGguf({ arch: 'dflash' });
+    const quant = (id: string, weights: Buffer) =>
+      [
+        id,
+        {
+          schemaVersion: 1,
+          kind: 'chat-model',
+          id,
+          name: id,
+          description: 'fixture',
+          tags: [],
+          maintainer: { name: 'Test' },
+          version: '1.0.0',
+          releasedAt: '2026-11-06T00:00:00Z',
+          availableVersions: ['1.0.0'],
+          parameterSize: '27B',
+          approxSizeBytes: weights.byteLength,
+          supportsTools: true,
+          llamaCpp: {
+            huggingfaceRepo: 'test-org/target-GGUF',
+            revision: 'a'.repeat(40),
+            filename: `${id}.gguf`,
+            sha256: sha256Hex(weights),
+            approxSizeBytes: weights.byteLength,
+            quantization: 'Q4_K_M',
+            draftModel: {
+              huggingfaceRepo: 'test-org/target-DFlash2-GGUF',
+              revision: 'd'.repeat(40),
+              filename: 'target-DFlash2.gguf',
+              sha256: sha256Hex(draft),
+              sizeBytes: draft.byteLength,
+            },
+          },
+        } as ChatModelManifest,
+      ] as const;
+    const q4 = buildGguf({ arch: 'qwen3', contextLength: 262144 });
+    const q2 = buildGguf({ arch: 'qwen3', contextLength: 131072 });
+    const catalog = fakeCatalog(new Map([quant('target-q4', q4), quant('target-q2', q2)]));
+    const requested: string[] = [];
+    const fetchImpl = (async (input: string | URL) => {
+      const href = typeof input === 'string' ? input : input.toString();
+      requested.push(href);
+      const buf = href.includes('DFlash2') ? draft : href.includes('target-q4') ? q4 : q2;
+      return new Response(buf, {
+        status: 200,
+        headers: { 'content-length': String(buf.byteLength) },
+      });
+    }) as typeof fetch;
+    const mgr = new LlamaCppModelManager({ home, catalog, fetchImpl });
+
+    await drain(mgr.install('target-q4'));
+    expect(requested.filter((url) => url.includes('DFlash2'))).toHaveLength(1);
+    const events = await drain(mgr.install('target-q2'));
+    expect(
+      events.find((event) => event.type === 'done'),
+      JSON.stringify(events),
+    ).toBeDefined();
+    expect(requested.filter((url) => url.includes('DFlash2'))).toHaveLength(1);
+
+    const root = join(home, 'engines', 'llama-cpp', 'models');
+    const q2Drafter = join(root, 'target-q2', 'target-DFlash2.gguf');
+    expect(readFileSync(q2Drafter)).toEqual(Buffer.from(draft));
+    // Removing the quant it came from must leave this one whole.
+    rmSync(join(root, 'target-q4'), { recursive: true });
+    expect(readFileSync(q2Drafter)).toEqual(Buffer.from(draft));
+  });
+
   // Default OFF is the load-bearing half. Loading a projector makes
   // llama-server 501 on slot save/restore, which latches disk-KV prefix
   // caching off for that model process-wide — a cost paid on every text turn.

@@ -121,6 +121,7 @@ import { checkPlaywrightApproval, runNpx, runPackageScript } from '../../workspa
 import { isFirstPartyCaller } from '../auth.js';
 import { CAMERA_PIXELS_WITHHELD, callerMaySeeFilePixels } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
+import { revealInFileManager } from '../file-manager.js';
 import { mutationActor } from '../mutation-actor.js';
 import { buildTimeline } from './timeline.js';
 
@@ -1191,21 +1192,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       which === 'workspace'
         ? await ctx.store.projectWorkspaceDir(id)
         : ctx.store.projectArtifactsDir(id);
-    // Use execFile with an argv array — never `exec` with an
-    // interpolated shell string. A project workingDir can contain shell
-    // metacharacters (it is settable by the model via `update_project`),
-    // and `open "${dir}"` would let `"; rm -rf … #` inject host commands
-    // that run as the user the next time someone clicks "reveal".
-    const { execFile } = await import('node:child_process');
-    const launcher: { cmd: string; args: string[] } =
-      process.platform === 'darwin'
-        ? { cmd: 'open', args: [dir] }
-        : process.platform === 'win32'
-          ? { cmd: 'explorer', args: [dir] }
-          : { cmd: 'xdg-open', args: [dir] };
-    // Fire-and-forget: the file manager owns the window; ignore launcher
-    // exit codes (explorer.exe returns non-zero even on success).
-    execFile(launcher.cmd, launcher.args, () => {});
+    revealInFileManager(dir);
     return c.json({ ok: true, path: dir });
   });
 
@@ -1263,14 +1250,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // Reveal the file without launching its OS association. Recent paths can
     // point at scripts or binaries, and `/open` must not turn an agent-written
     // reference into an execution surface.
-    const { execFile } = await import('node:child_process');
-    const launcher: { cmd: string; args: string[] } =
-      process.platform === 'darwin'
-        ? { cmd: 'open', args: ['-R', path] }
-        : process.platform === 'win32'
-          ? { cmd: 'explorer', args: ['/select,', path] }
-          : { cmd: 'xdg-open', args: [dirname(path)] };
-    execFile(launcher.cmd, launcher.args, { windowsHide: true }, () => {});
+    revealInFileManager(path, { select: true });
     return c.json(ReferenceFileLocationResponseSchema.parse({ path }));
   });
 
