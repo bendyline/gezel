@@ -192,8 +192,11 @@ reaches the document. Indentation and Markdown links are kept.
 check. `[n]` numbers do not bind inside a file, so each fact is checked
 against all the evidence, not just what a marker names. A file that cites
 `[n]` gets a `## Sources` list at its foot that maps each number to its
-title and link, unless it already lists its own sources. Code and data files
-are never checked. This exists because a writer asked to "write a paragraph
+title and link, unless it already lists its own sources. A reviewer's verdict
+gets one too, so the review gate's line reader skips a Sources or References
+section; before it did, the list's `[1] ledger.json` lines read as criteria
+with no decision and paused a review that passed every criterion. Code and
+data files are never checked. This exists because a writer asked to "write a paragraph
 about Martha Washington's children" saved one from memory with four wrong
 facts, and its chat reply was a single line naming the file.
 
