@@ -41,72 +41,72 @@
  */
 
 /** Native release version this build pins. Placeholder until first public release. */
-export const NATIVE_ENGINE_RELEASE = '0.1.61';
+export const NATIVE_ENGINE_RELEASE = '0.1.62';
 
 /** sha256 of the pinned release's `SHA256SUMS` asset. All-zeros = unpinned. */
-export const SHA256SUMS_DIGEST = 'f78bfce01740cca58d46afabcbb22fb2005b28d9974f41e0f5c5ffdcc1ddd80b';
+export const SHA256SUMS_DIGEST = '9c2e726c1cef4152b5ffb8cee8e9970cf24127786d3fafcce3582dcf0df9badb';
 
 // BEGIN PINNED NATIVE ARCHIVE HASHES
-/** Exact SHA256 values for every engine archive published by native-v0.1.61. */
+/** Exact SHA256 values for every engine archive published by native-v0.1.62. */
 export const NATIVE_ENGINE_ARCHIVE_SHA256: Readonly<Record<string, string>> = Object.freeze({
-  'gezel-native-0.1.61-darwin-arm64-metal.tar.gz':
-    '7036c0a483ba34bd30ac147da5a0f2f0d00804e311c2bf721bffb2a251da94c3',
-  'gezel-native-0.1.61-darwin-arm64.tar.gz':
-    '3ccb5418f3efacbfcf6c806833a92f27f27214d14e19a414feb0e0789edc0354',
-  'gezel-native-0.1.61-linux-arm64-cpu.tar.gz':
-    '30d6f84b8e828a76474a4f5dec3e5f636c4304e6ca305bcada401264758feb3b',
-  'gezel-native-0.1.61-linux-arm64-cuda.tar.gz':
-    '3ed620f795becb010c96d23094603827e25a3390cb1d1df67fb7becc4ba4f8bb',
-  'gezel-native-0.1.61-linux-arm64.tar.gz':
-    'bc87dedb6b9d6f67a79a744629d590f78c7dc6b8a76c666c698c860cc6ac262e',
-  'gezel-native-0.1.61-linux-x64-cpu.tar.gz':
-    '010b75d96924ee97301dba0a02150407a588a0fad828274e147086eb2bd9f492',
-  'gezel-native-0.1.61-linux-x64-cuda.tar.gz':
-    'cdfc914c1a1f8b0b3429c2d8263b72c5b8bf306cdc96ec045804f9e9d5e13191',
-  'gezel-native-0.1.61-linux-x64-rocm.tar.gz':
-    '530c7cd39617a5f235343bf646fb72e51b101ec4f00db4bc8c48d59e0a6bfb2c',
-  'gezel-native-0.1.61-linux-x64-vulkan.tar.gz':
-    'ecc9e643fd06ed6636b6f34640fd6916d5d6e0c07d7e3d9c121a484bf957bd8e',
-  'gezel-native-0.1.61-linux-x64.tar.gz':
-    'e47135d62bbd4c5798ff06d1b52ccb1c2c77ad71e64a06c2e88f0ddab2204b00',
-  'gezel-native-0.1.61-win32-arm64-cpu.zip':
-    '386409ef3ee601c264561a5d86028f15c935c38c9fc35e087e5f4a7f1811c4d6',
-  'gezel-native-0.1.61-win32-arm64-cuda.zip':
-    'adb985a1bd72313c690090406ee5d9f3ccbe6bb24afb82c688e80bb050d915ed',
-  'gezel-native-0.1.61-win32-arm64.zip':
-    '22c30445353be2c33142870375fbc6b8cf0795e7331101bd6d83793bed3bea0d',
-  'gezel-native-0.1.61-win32-x64-cpu.zip':
-    '80d2acfdafdccfd64419decedc84bc06f6940de0d47a1cc179435649b38383b1',
-  'gezel-native-0.1.61-win32-x64-cuda.zip':
-    '82fa01a2dc373a628e275bb68d176654b1b1b8185a91a3542f1b3135da56f169',
-  'gezel-native-0.1.61-win32-x64-rocm.zip':
-    '03c4f0b8887f7b4e2c2c2d86489a8a1d0e1fb179ca70cdf8a9650f83513714d2',
-  'gezel-native-0.1.61-win32-x64-vulkan.zip':
-    '939f8b13ade3f0aa40419d4d3d17afdc0e4b525cb3975aed78fb47bda4ef6dab',
-  'gezel-native-0.1.61-win32-x64.zip':
-    '767f55c72ac39c131a42c7c719715d1e35b0badb804b59217588fcb123cefba8',
+  'gezel-native-0.1.62-darwin-arm64-metal.tar.gz':
+    '0ac76122fdc7bd33e6774fb5f62dea6ff22220c483c78026667e33ff8014936d',
+  'gezel-native-0.1.62-darwin-arm64.tar.gz':
+    '23607c3e5c3e6ac050f0594bcf4ca997cff91c57a4b65af985511e1d87843764',
+  'gezel-native-0.1.62-linux-arm64-cpu.tar.gz':
+    'e9a69cdb07f5ad0103da8d99715e4a1bd257219c55457716ff93e34ee4a544ab',
+  'gezel-native-0.1.62-linux-arm64-cuda.tar.gz':
+    '6389e97d85a2d4b53b4a1c6735669e5cd6022f393fdccabe4c18c9957f9073fc',
+  'gezel-native-0.1.62-linux-arm64.tar.gz':
+    'cd263de007b14be6de5b828985d3066490a339f097ef199086cd51692495b9f0',
+  'gezel-native-0.1.62-linux-x64-cpu.tar.gz':
+    '2f1b382a02082767187340f8ecd037dfa72953004977e5716ca95127429e4f0b',
+  'gezel-native-0.1.62-linux-x64-cuda.tar.gz':
+    '8f28018fdfd5a38e48dc886a92eab392f92193d3a58c322c85dcd16c6f80fd13',
+  'gezel-native-0.1.62-linux-x64-rocm.tar.gz':
+    '37b88b81bdcbe06fa3c5ebe3b07f0d0112b555449cc2d29775d5ad8373150f18',
+  'gezel-native-0.1.62-linux-x64-vulkan.tar.gz':
+    'c39fff97dceeacb377a1948ebe9f9553a98485cf21cda9492fbfbe18dd279193',
+  'gezel-native-0.1.62-linux-x64.tar.gz':
+    '2d0c927f98379c0cd1dd05d68f2cc4b87178ede077a65e948bf36e124d560993',
+  'gezel-native-0.1.62-win32-arm64-cpu.zip':
+    'f867d50591df2da2c2d78cbf844a5b87679da9f5abc9a29ed6b06905c5423bed',
+  'gezel-native-0.1.62-win32-arm64-cuda.zip':
+    'd42c79845f64ee1fb5e97ea45dde44c6b4705ad6bc4cd6ce9360caffc27cf67f',
+  'gezel-native-0.1.62-win32-arm64.zip':
+    'd4e660181cd387051d4f8728d6ae008004969786f68da15c76e44704db247af0',
+  'gezel-native-0.1.62-win32-x64-cpu.zip':
+    '85a350c01454e77d49e2a7e463089025d71b6f7cd25daa30b5b0fe8498cf3f2a',
+  'gezel-native-0.1.62-win32-x64-cuda.zip':
+    'edddeeb820f4612453c036bccd4882c507811464520eb772dfa5bf7b4aa2658f',
+  'gezel-native-0.1.62-win32-x64-rocm.zip':
+    '8640280b49fbc4bc6152b734fcb2dd02b0b9c3375797685470da52406a46aa34',
+  'gezel-native-0.1.62-win32-x64-vulkan.zip':
+    'a57071775f8876800d6e5689d38a3f7362c4b585e8137596ee19e45ee38b6991',
+  'gezel-native-0.1.62-win32-x64.zip':
+    '357e6c79a4d02968a2ba67299e78efed8dc2ab2d4b40a1e8f866073506b6b2b6',
 });
 
-/** Download size in bytes of every engine archive published by native-v0.1.61. */
+/** Download size in bytes of every engine archive published by native-v0.1.62. */
 export const NATIVE_ENGINE_ARCHIVE_BYTES: Readonly<Record<string, number>> = Object.freeze({
-  'gezel-native-0.1.61-darwin-arm64-metal.tar.gz': 7578332,
-  'gezel-native-0.1.61-darwin-arm64.tar.gz': 42917160,
-  'gezel-native-0.1.61-linux-arm64-cpu.tar.gz': 9519074,
-  'gezel-native-0.1.61-linux-arm64-cuda.tar.gz': 624413405,
-  'gezel-native-0.1.61-linux-arm64.tar.gz': 43077065,
-  'gezel-native-0.1.61-linux-x64-cpu.tar.gz': 13762287,
-  'gezel-native-0.1.61-linux-x64-cuda.tar.gz': 1016230446,
-  'gezel-native-0.1.61-linux-x64-rocm.tar.gz': 313876628,
-  'gezel-native-0.1.61-linux-x64-vulkan.tar.gz': 26687115,
-  'gezel-native-0.1.61-linux-x64.tar.gz': 58390304,
-  'gezel-native-0.1.61-win32-arm64-cpu.zip': 6219235,
-  'gezel-native-0.1.61-win32-arm64-cuda.zip': 245764149,
-  'gezel-native-0.1.61-win32-arm64.zip': 42822053,
-  'gezel-native-0.1.61-win32-x64-cpu.zip': 9357064,
-  'gezel-native-0.1.61-win32-x64-cuda.zip': 761449962,
-  'gezel-native-0.1.61-win32-x64-rocm.zip': 241630432,
-  'gezel-native-0.1.61-win32-x64-vulkan.zip': 21898398,
-  'gezel-native-0.1.61-win32-x64.zip': 56194037,
+  'gezel-native-0.1.62-darwin-arm64-metal.tar.gz': 7577614,
+  'gezel-native-0.1.62-darwin-arm64.tar.gz': 42917428,
+  'gezel-native-0.1.62-linux-arm64-cpu.tar.gz': 9518882,
+  'gezel-native-0.1.62-linux-arm64-cuda.tar.gz': 624413294,
+  'gezel-native-0.1.62-linux-arm64.tar.gz': 43076642,
+  'gezel-native-0.1.62-linux-x64-cpu.tar.gz': 13762290,
+  'gezel-native-0.1.62-linux-x64-cuda.tar.gz': 1016218245,
+  'gezel-native-0.1.62-linux-x64-rocm.tar.gz': 313875007,
+  'gezel-native-0.1.62-linux-x64-vulkan.tar.gz': 26687129,
+  'gezel-native-0.1.62-linux-x64.tar.gz': 58389984,
+  'gezel-native-0.1.62-win32-arm64-cpu.zip': 6219263,
+  'gezel-native-0.1.62-win32-arm64-cuda.zip': 245764366,
+  'gezel-native-0.1.62-win32-arm64.zip': 42822090,
+  'gezel-native-0.1.62-win32-x64-cpu.zip': 9357113,
+  'gezel-native-0.1.62-win32-x64-cuda.zip': 761458453,
+  'gezel-native-0.1.62-win32-x64-rocm.zip': 241630451,
+  'gezel-native-0.1.62-win32-x64-vulkan.zip': 21898409,
+  'gezel-native-0.1.62-win32-x64.zip': 56194044,
 });
 // END PINNED NATIVE ARCHIVE HASHES
 
