@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-capacitor",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "On-device Gezel App SDK transport and native host for Capacitor.",
   "license": "MIT",
   "keywords": [
