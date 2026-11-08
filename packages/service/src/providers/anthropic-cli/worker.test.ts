@@ -589,6 +589,7 @@ describe('ClaudeWorker — system prompt delivery', () => {
       });
       if (process.platform !== 'win32') expect((await stat(path)).mode & 0o777).toBe(0o600);
       expect(capturedArgs.join(' ')).not.toContain('fixture-only');
+      expect(capturedArgs).toContain('--strict-mcp-config');
     } finally {
       await worker.shutdown();
     }
@@ -671,6 +672,26 @@ describe('ClaudeWorker — system prompt delivery', () => {
     const idx = capturedArgs.indexOf('--append-system-prompt');
     expect(idx).toBeGreaterThanOrEqual(0);
     expect(capturedArgs[idx + 1]).toBe('You are a test gezel.');
+
+    await worker.shutdown();
+  });
+
+  it("keeps the person's own MCP servers out even when Gezel passes none", async () => {
+    const binPath = await makeFakeClaude({ sessionId: 'cli-strict', turns: [] });
+    let capturedArgs: string[] = [];
+    const worker = buildCapturingWorker({
+      binPath,
+      systemMessage: 'You are a test gezel.',
+      manageRuntimeFiles: true,
+      sessionId: 'sess-strict',
+      capture: (a) => {
+        capturedArgs = a;
+      },
+    });
+    await worker.start();
+
+    expect(capturedArgs).not.toContain('--mcp-config');
+    expect(capturedArgs).toContain('--strict-mcp-config');
 
     await worker.shutdown();
   });

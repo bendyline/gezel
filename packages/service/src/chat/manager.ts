@@ -255,8 +255,13 @@ import {
   resolveMlxEffectiveNumCtx,
 } from '@bendyline/gezel-inference/internal/providers/mlx/build-provider';
 import { mlxToolGrammarActive } from '@bendyline/gezel-inference/internal/providers/mlx/request-shape';
+import { providerCanReachHostedMcp } from '../providers/hosted-mcp-transports.js';
 import { McpBridgePool } from '../providers/mcp-bridge-pool.js';
-import type { OpenAIFunctionTool, StdioMcpServerSpec } from '../providers/mcp-bridge.js';
+import {
+  type OpenAIFunctionTool,
+  type StdioMcpServerSpec,
+  isHttpSpec,
+} from '../providers/mcp-bridge.js';
 import {
   hasLocalPreviewBrowserNetworkOverride,
   localPreviewBrowserLaunchArgs,
@@ -15195,18 +15200,21 @@ export class ChatManager extends LocalEngineRuntime {
     // the old single fallback line told users to bootstrap an already-
     // bootstrapped install (this exact confusion happened in the field).
     let browserAutomationRoleExcluded = false;
-    const providerSupportsHttpMcp =
-      record.providerName !== 'copilot' && record.providerName !== 'anthropic-cli';
     const providerUsesBrowserWrappers = providerUsesManagedMcpBridge(record.providerName);
     const workspacePreviewOrigin = this.getWorkspacePreviewOrigin();
     const securityPolicy = resolveSecurityPolicy(globalConfig);
     for (const t of [...activePerGezel, ...activeShared, ...activeSystem, ...activePerProject]) {
       if (t.runtime.kind === 'http-mcp') {
-        if (providerSupportsHttpMcp) installedToolsetIds.add(t.toolsetId);
+        if (providerCanReachHostedMcp(record.providerName, t.runtime.transport)) {
+          installedToolsetIds.add(t.toolsetId);
+        }
         continue;
       }
       if (t.runtime.kind === 'custom-mcp') {
-        if (t.runtime.transport === 'stdio' || providerSupportsHttpMcp) {
+        if (
+          t.runtime.transport === 'stdio' ||
+          providerCanReachHostedMcp(record.providerName, t.runtime.transport)
+        ) {
           installedToolsetIds.add(t.toolsetId);
         }
         continue;
@@ -16563,10 +16571,8 @@ export class ChatManager extends LocalEngineRuntime {
     // Two runtime shapes are wired into the bridge today:
     //   - npm-package → stdio subprocess (existing)
     //   - http-mcp    → hosted HTTP server (Streamable HTTP / SSE);
-    //                   bridge-backed providers consume these directly;
-    //                   Codex CLI writes Streamable HTTP entries into
-    //                   config.toml, while Copilot/Claude CLI currently
-    //                   only wire stdio extras.
+    //                   every provider takes these except Codex CLI over
+    //                   SSE (`providerCanReachHostedMcp`).
     // Other kinds (stdio-mcp-binary, builtin) still no-op here.
     // On id collision: per-gezel wins over shared wins over system
     // (the merge order below mirrors this).
@@ -16859,14 +16865,23 @@ export class ChatManager extends LocalEngineRuntime {
     // has been verified. Managed Playwright is a separate narrow exception:
     // only its local-preview surface is advertised, every call is guarded,
     // and Chromium is forced through the non-forwarding preview listener.
+    const reachableExtras = extras.filter((extra) => {
+      if (!isHttpSpec(extra) || providerCanReachHostedMcp(record.providerName, extra.transport)) {
+        return true;
+      }
+      log.warn(
+        `tool-surface: ${record.providerName} cannot reach ${extra.id} over ${extra.transport}; it is left out of this session`,
+      );
+      return false;
+    });
     const allowNonBuiltinToolsets = securityPolicy.allowNonBuiltinToolsets;
     const permittedExtras = allowNonBuiltinToolsets
-      ? extras
-      : extras.filter(
+      ? reachableExtras
+      : reachableExtras.filter(
           (extra) =>
             trustedConstrainedExtraIds.has(extra.id) || localPreviewBrowserExtraIds.has(extra.id),
         );
-    const blockedExtraCount = extras.length - permittedExtras.length;
+    const blockedExtraCount = reachableExtras.length - permittedExtras.length;
     if (blockedExtraCount > 0) {
       log.info(
         `security: blocking ${blockedExtraCount} non-builtin MCP toolset(s) for ${record.gezelId} — external toolsets are disabled by the security policy`,

@@ -25,7 +25,8 @@ import type {
 } from '@bendyline/gezel-inference/internal/providers/types';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import { scriptToolNamesFromEnv } from '../../project-type/script-tools.js';
-import { isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
+import { providerCanReachHostedMcp } from '../hosted-mcp-transports.js';
+import { type McpServerSpec, isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
 import type { CodexBinaryCapabilities } from './binary.js';
 import { CODEX_CLI_EXCLUDED_MCP_TOOLS } from './excluded-mcp-tools.js';
 import { type CodexInvokerHooks, type CodexPermissionMode, runCodexTurn } from './invoker.js';
@@ -35,6 +36,18 @@ import {
   writeRuntimeCodexHome,
 } from './runtime-files.js';
 import { withCodexToolGuide } from './tool-guide.js';
+
+/**
+ * Codex's config can describe a command or a URL it reaches, nothing served
+ * inside this daemon. The chat manager already withholds everything this
+ * refuses; this is the backstop.
+ */
+function codexCanReach(extra: McpServerSpec): boolean {
+  return (
+    isStdioSpec(extra) ||
+    (isHttpSpec(extra) && providerCanReachHostedMcp('codex-cli', extra.transport))
+  );
+}
 
 export interface CodexSessionDeps {
   binaryPath: string;
@@ -144,7 +157,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       // We can't enumerate their tools without starting the server, so
       // surface a wildcard marker per server id so the debug bundle at
       // least signals the server was configured.
-      out.push(`mcp__${extra.id}__*`);
+      if (codexCanReach(extra)) out.push(`mcp__${extra.id}__*`);
     }
     return out;
   }
@@ -269,6 +282,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
     // path so the independent auto-reviewer sees the boundary. Plan also uses
     // prompt; paired with `--ask-for-approval never`, that denies the call.
     for (const extra of this.deps.extraMcpServers ?? []) {
+      if (!codexCanReach(extra)) continue;
       if (isHttpSpec(extra)) {
         const envHttpHeaders: Record<string, string> = {};
         let index = 0;
@@ -293,10 +307,6 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
           ...(extra.cwd ? { cwd: extra.cwd } : {}),
         };
       }
-      // Anything else (an in-memory app-tool relay) is served inside this
-      // daemon and cannot be described in Codex's config file. The chat
-      // manager already withholds those from CLI providers; this is the
-      // type-level backstop.
     }
     const config: CodexRuntimeConfig = {
       instructions: withCodexToolGuide(this.deps.systemMessage, this.getRegisteredToolNames()),

@@ -378,7 +378,7 @@ export class UvRuntime {
     }
 
     const err = new Error(
-      'Python runtime unavailable. Packaged Gezel should include its own managed runtime; reinstall Gezel, or install uv / Python 3.11 when running gezeld from source.',
+      "Python runtime unavailable: the uv helper from Gezel's native toolkit is missing. Run `gezel native install`, reinstall the Gezel app, or install uv or Python 3.11.",
     );
     (err as Error & { isActionable: boolean }).isActionable = true;
     throw err;

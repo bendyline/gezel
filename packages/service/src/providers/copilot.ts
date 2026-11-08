@@ -25,7 +25,7 @@ import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/us
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import type { QuotaBucket } from '../chat/usage.js';
 import { resolveCopilotCliPath } from './copilot-cli.js';
-import { isStdioSpec } from './mcp-bridge.js';
+import { isHttpSpec, isStdioSpec } from './mcp-bridge.js';
 
 const log = createLogger('copilot');
 
@@ -319,10 +319,17 @@ export class CopilotProvider implements LLMProvider {
         // Namespace by toolset id. If a toolset collides with `gezel`
         // somehow, the primary wins since it's added first.
         if (extra.id === 'gezel' || mcpServers[extra.id]) continue;
-        // Copilot's MCP integration only speaks stdio (`type: 'local'`);
-        // hosted http-mcp entries would need a different shape we don't
-        // wire up today, and an in-memory relay bridge has no command line
-        // at all — skip both silently.
+        if (isHttpSpec(extra)) {
+          mcpServers[extra.id] = {
+            type: extra.transport === 'sse' ? 'sse' : 'http',
+            url: extra.url,
+            headers: extra.headers,
+            tools: ['*'],
+          };
+          continue;
+        }
+        // An in-memory relay is served inside this daemon and has no command
+        // line or URL the SDK could reach.
         if (!isStdioSpec(extra)) continue;
         mcpServers[extra.id] = {
           type: 'local',

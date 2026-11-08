@@ -153,7 +153,8 @@ gezel model list            local chat models for this computer's engine
 gezel model list --available
                             catalog models that fit this computer, with sizes and
                             the published scorecard's measured pass rate for each
-gezel model pull <id>       download a chat model from the catalog
+gezel model pull <id>       download a chat model from the catalog, and the
+                            engine it runs on if that is missing
 gezel model use <id>        make chats use a downloaded model
 gezel model context <id> [tokens]
                             show or set a model's context window (auto clears it)

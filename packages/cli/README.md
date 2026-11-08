@@ -77,7 +77,7 @@ Run `gezel --help`, or `--help` on any command, for every option.
 | `gezel project list\|create\|install\|indexing` | Manage projects, their npm packages, and background indexing (`gezel env` is the same command) |
 | `gezel skills list\|import\|convert` | Find SKILL.md skills and turn them into craftbooks |
 | `gezel app …` | Build, install, apply, and serve AI Apps (`.gezapp`): `new`, `validate`, `pack`, `add`, `update`, `list`, `show`, `apply`, `status`, `serve`, `enable`, `disable`, `remove`, `schemas` |
-| `gezel model list\|pull\|use\|export` | On-device chat models. `list --available` shows the catalog models that fit this machine, with sizes; `use <id>` makes chats use a downloaded model (a pull does this itself when no working default is set); `export <id> [file]` writes a portable, checksum-verified `.gezmodel` |
+| `gezel model list\|pull\|use\|export` | On-device chat models. `list --available` shows the catalog models that fit this machine, with sizes; `pull <id>` downloads one, plus the engine it runs on if that is missing; `use <id>` makes chats use a downloaded model (a pull does this itself when no working default is set); `export <id> [file]` writes a portable, checksum-verified `.gezmodel` |
 | `gezel model context\|concurrency` | A local model's context window, and how many requests a local engine serves at once |
 | `gezel native install\|list\|status` | The native engines that run models on this computer |
 | `gezel image status\|models\|pull\|rm` | Image-generation models |

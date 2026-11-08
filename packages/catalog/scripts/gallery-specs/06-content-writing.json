@@ -526,7 +526,8 @@
         "prompt": "Write the summary to the scoped format and length. 1) Lead with the single most important point or conclusion. 2) Cover every major section/argument in proportion to its importance — do not over-weight the intro or skip the conclusion. 3) Write in your own words; do not copy long passages. 4) Include nothing not present in the source — no inference presented as the document's claim. 5) Make it stand alone: a reader who never sees the original should grasp the key content. 6) Output the chosen format in markdown (e.g. a 'TL;DR:' line then an 'Executive summary' paragraph then 'Key points' bullets, as scoped). Save to the produces path and note the final word count.",
         "produces": {
           "path": "summary.md",
-          "kind": "markdown-doc"
+          "kind": "markdown-doc",
+          "artifact": true
         }
       }
     ],
@@ -535,7 +536,8 @@
       "loopBackTo": "summarize",
       "deliverable": {
         "path": "summary.md",
-        "kind": "markdown-doc"
+        "kind": "markdown-doc",
+        "artifact": true
       }
     },
     "release": {
