@@ -59,8 +59,9 @@ Image generation follows Gezel's cloud cost-confirmation setting. Other apps usi
 ### Codex CLI
 
 Choose **OpenAI Codex CLI (cloud, experimental)** in Settings → Image generation.
-Install or update Codex CLI and run `codex login` with your ChatGPT account. Gezel
-uses that existing sign-in and Codex usage limits; it does not need an image API key.
+Install or update Codex CLI and sign it in with `codex login`. Gezel uses whatever
+the CLI is signed in with, under that account's usage limits and terms; it does not
+need a separate image API key.
 The CLI runs on the machine hosting your per-user Gezel service. If needed, set its
 binary path in Settings → OpenAI Codex CLI → Advanced.
 

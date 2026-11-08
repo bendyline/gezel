@@ -13,6 +13,7 @@ import type {
   EnsureProjectOptions,
 } from './host-types.js';
 import { GezelProject } from './project.js';
+import type { AppToolsRegistration } from './types.js';
 
 /**
  * Gezel, as your application holds it: one connection, the models it needs,
@@ -37,6 +38,12 @@ import { GezelProject } from './project.js';
 export class Gezel {
   private readonly app: GezelApp;
   private closing: Promise<void> | undefined;
+  /**
+   * Tool registrations made through this connection's projects. Each holds a
+   * relay stream that reconnects until closed, so an app that registered tools
+   * and called only `close()` never exited (2026-11-04 npm ship audit).
+   */
+  private readonly registrations = new Set<AppToolsRegistration>();
 
   private constructor(readonly daemon: DaemonConnection) {
     this.app = new GezelApp({
@@ -107,20 +114,25 @@ export class Gezel {
       },
       opts,
     );
-    return new GezelProject(this.daemon, applied.projectId, {
-      gezels: applied.gezels,
-      ...(applied.leadGezelId ? { leadGezelId: applied.leadGezelId } : {}),
-      ...(applied.appId
-        ? {
-            app: {
-              id: applied.appId,
-              version: applied.version ?? '',
-              imported: applied.imported === true,
-              modelsEnsured: applied.modelsEnsured,
-            },
-          }
-        : {}),
-    });
+    return new GezelProject(
+      this.daemon,
+      applied.projectId,
+      {
+        gezels: applied.gezels,
+        ...(applied.leadGezelId ? { leadGezelId: applied.leadGezelId } : {}),
+        ...(applied.appId
+          ? {
+              app: {
+                id: applied.appId,
+                version: applied.version ?? '',
+                imported: applied.imported === true,
+                modelsEnsured: applied.modelsEnsured,
+              },
+            }
+          : {}),
+      },
+      this.registrations,
+    );
   }
 
   /**
@@ -138,15 +150,26 @@ export class Gezel {
       if (!project.gezelIds?.includes(gezel.id)) continue;
       if (gezel.templateId) gezels[gezel.templateId] = gezel.id;
     }
-    return new GezelProject(this.daemon, project.id, {
-      gezels,
-      ...(project.voormanGezelId ? { leadGezelId: project.voormanGezelId } : {}),
-    });
+    return new GezelProject(
+      this.daemon,
+      project.id,
+      {
+        gezels,
+        ...(project.voormanGezelId ? { leadGezelId: project.voormanGezelId } : {}),
+      },
+      this.registrations,
+    );
   }
 
-  /** Stop a daemon this process started; release the transport either way. */
+  /**
+   * Withdraw the tools this application registered, stop a daemon this
+   * process started, and release the transport either way.
+   */
   close(): Promise<void> {
     this.closing ??= (async () => {
+      const open = [...this.registrations];
+      this.registrations.clear();
+      await Promise.allSettled(open.map((registration) => registration.close()));
       await this.app.close().catch(() => undefined);
       await this.daemon.close();
     })();

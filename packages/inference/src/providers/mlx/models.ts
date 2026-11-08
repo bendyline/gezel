@@ -318,6 +318,8 @@ export class MlxModelManager {
    * polled view of it.
    */
   private readonly activeInstalls = new Map<string, MlxActiveInstallSnapshot>();
+  /** One abort per running install; see the llama.cpp manager's twin. */
+  private readonly installAborts = new Map<string, AbortController>();
   /**
    * Model directories we've already warned about skipping. `listInstalled`
    * runs on every picker/settings poll; a broken directory should be loud
@@ -593,7 +595,7 @@ export class MlxModelManager {
    */
   async *install(
     catalogId: string,
-    options?: { skipSha?: boolean },
+    options?: { skipSha?: boolean; signal?: AbortSignal },
   ): AsyncIterable<MlxInstallEvent> {
     const skipSha = options?.skipSha === true;
     if (!isSafeId(catalogId)) {
@@ -621,6 +623,9 @@ export class MlxModelManager {
       startedAt: new Date().toISOString(),
     };
     this.activeInstalls.set(catalogId, tracked);
+    const abort = new AbortController();
+    const signal = options?.signal ? AbortSignal.any([options.signal, abort.signal]) : abort.signal;
+    this.installAborts.set(catalogId, abort);
     try {
       const detail = await this.catalog.get('chat-model', catalogId);
       if (!detail || detail.manifest.kind !== 'chat-model') {
@@ -708,6 +713,8 @@ export class MlxModelManager {
       tracked.bytesWritten = perFileBytes.reduce((sum, bytes) => sum + bytes, 0);
       const queue = new AsyncEventQueue<MlxInstallEvent>();
       const ac = new AbortController();
+      const stopPool = (): void => ac.abort();
+      signal.addEventListener('abort', stopPool, { once: true });
       const push = (ev: MlxInstallEvent): void => queue.push(ev);
 
       let cursor = 0;
@@ -762,6 +769,13 @@ export class MlxModelManager {
         if (ev.type === 'error') sawError = true;
       }
       const results = await settled;
+      signal.removeEventListener('abort', stopPool);
+      // Workers stopped from outside return 'aborted' and push nothing; say
+      // so rather than committing half-downloaded files.
+      if (signal.aborted && !sawError) {
+        yield { type: 'error', error: 'download aborted' };
+        return;
+      }
       // A worker that threw (rather than returning 'error') still has to
       // produce a terminal event, or a subscriber would hang on a job
       // that silently stopped emitting.
@@ -805,7 +819,7 @@ export class MlxModelManager {
         );
       }
 
-      if (src.drafter) await this.installDrafter(catalogId, src.drafter);
+      if (src.drafter) await this.installDrafter(catalogId, src.drafter, signal);
 
       tracked.phase = 'extracting-metadata';
       yield { type: 'extracting-metadata' };
@@ -970,8 +984,15 @@ export class MlxModelManager {
       }
       yield { type: 'done', id: catalogId, ...(warning ? { warning } : {}) };
     } finally {
+      abort.abort();
+      this.installAborts.delete(catalogId);
       this.activeInstalls.delete(catalogId);
     }
+  }
+
+  /** Stop every download this manager is running. Shutdown calls it. */
+  abortInstalls(): void {
+    for (const abort of this.installAborts.values()) abort.abort();
   }
 
   /**
@@ -1003,6 +1024,7 @@ export class MlxModelManager {
   private async installDrafter(
     catalogId: string,
     drafter: NonNullable<ChatModelMlxSource['drafter']>,
+    signal: AbortSignal,
   ): Promise<void> {
     const draftersRoot = join(dirname(this.modelsRoot), 'drafters');
     const destDir = join(draftersRoot, `${catalogId}-${drafter.kind}`);
@@ -1027,6 +1049,7 @@ export class MlxModelManager {
           destPath: finalPath,
           approxSizeBytes: file.sizeBytes,
           fetchImpl: this.fetchImpl,
+          signal,
         });
         let done = false;
         while (!done) {

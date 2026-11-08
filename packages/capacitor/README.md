@@ -80,8 +80,8 @@ unavailable, preserve it and show the reason; do not silently pick another model
   process-wide and may cancel active work. A closed client cannot be reused.
 - Backgrounding cancels inference and pauses downloads; foregrounding does not
   automatically restart either. Memory/thermal admission remains native.
-- Model files belong to the host app's sandbox. Sharing this package between
-  Docblocks and Qualla does **not** share their live model files or permissions.
+- Model files belong to the host app's sandbox. Two apps that embed this
+  package do **not** share their live model files or permissions.
 - The embedding application owns WebView navigation and content trust, as with
   other Capacitor native plugins. Keep untrusted pages out of the privileged
   app bridge; this plugin does not override the application's navigation policy.
@@ -95,7 +95,7 @@ there is no browser runtime stub pretending to run a local model.
 `createMobileSpeech()` adds Whisper dictation and Kokoro narration on the device,
 through the `GezelOfflineSpeech` plugin and the gezel-speech runtime
 (whisper.cpp and ONNX Runtime, built by
-[`native/mobile/speech/build.py`](../../native/mobile/speech/build.py)). The
+[`native/mobile/speech/build.py`](https://github.com/bendyline/gezel/blob/main/native/mobile/speech/build.py)). The
 published package carries the runtime from the same native release as its
 engines. A checkout packed without one still builds, and `status()` reports
 speech unavailable.
@@ -179,49 +179,30 @@ const connection = { ...(await connectEmbeddingRuntime()), knowledge };
 - **Licenses.** The worker and the tokenizer compile third-party code into
   `dist/`; the build stages their license texts in `dist/licenses/npm/`.
 
-## Local development and distribution
-
-This is a local preview; registry publication is not required. The producer
-stages the runtime once using [the native host guide](../../native/runtime/README.md),
-then builds and packs this package. Install matching local tarballs for `gezk`,
-core, client, App SDK and Capacitor in the consumer app, and run `npx cap sync`.
+## Install
 
 ```sh
-# In the Gezel checkout; dependency installation follows the repository's lease policy.
-node packages/capacitor/scripts/stage-native.mjs ios /path/to/staged-ios-runtime
-node packages/capacitor/scripts/stage-native.mjs android /path/to/staged-android-runtime
-# Build core and app-sdk first, then this package. Pack with pnpm so workspace:*
-# references become ordinary package versions.
-pnpm --filter @bendyline/gezel-capacitor build
-pnpm --filter @bendyline/gezel-capacitor pack --pack-destination /path/to/local-packages
+npm install @bendyline/gezel-capacitor @capacitor/core
+npx cap sync
 ```
 
-Pack the other four workspace packages into that same folder with `pnpm pack`.
-For pnpm 11 local previews, put overrides for the five `@bendyline/*` packages
-in the **consumer's** `pnpm-workspace.yaml`, so transitive dependencies resolve to
-the matching tarballs rather than looking up unreleased versions in a registry:
+The package carries the prebuilt engines and speech runtime for both
+platforms: a self-contained Swift package for iOS and a folder Maven repository
+for Android. `npx cap sync` adds them to the app's native projects; nothing is
+built from source and no sibling checkout is needed.
 
-```yaml
-overrides:
-  '@bendyline/gezel-capacitor': file:/path/to/local-packages/bendyline-gezel-capacitor-0.1.0.tgz
-  '@bendyline/gezel-app-sdk': file:/path/to/local-packages/bendyline-gezel-app-sdk-1.0.10.tgz
-  '@bendyline/gezel-client': file:/path/to/local-packages/bendyline-gezel-client-1.1.2.tgz
-  '@bendyline/gezel': file:/path/to/local-packages/bendyline-gezel-1.1.2.tgz
-  '@bendyline/gezk': file:/path/to/local-packages/bendyline-gezk-1.0.2.tgz
-```
-
-Use the filenames actually produced by your checkout. Then add the Capacitor
-package and `@capacitor/core` to that app's dependencies normally. Registry
-releases will remove the need for these local overrides. No `node_modules`
-folder or running model service needs to be shared between the applications.
-
-The `prepack` check verifies both native payloads and requires matching versions.
-The tarball includes a self-contained Swift package and folder Maven repository.
-There are no consumer references to `native/mobile/.build` or sibling checkouts.
 Use Capacitor 8.5.2, Android API 28+ (compile SDK 36), and iOS 16.4+ with a current
 Xcode toolchain supporting the Foundation Models adapter. System AI availability
-depends on OS, hardware, configuration and model readiness. The current engine
-preview includes arm64 Android, arm64 iOS devices and arm64 iOS simulators.
+depends on OS, hardware, configuration and model readiness. The engines cover
+arm64 Android, arm64 iOS devices and arm64 iOS simulators.
+
+### Building from a Gezel checkout
+
+To change the native runtime itself, stage it with
+`packages/capacitor/scripts/stage-native.mjs` and pack this package from the
+checkout, as [the native host guide](https://github.com/bendyline/gezel/blob/main/native/runtime/README.md)
+describes. The `prepack` check verifies both native payloads and refuses
+versions that do not match the pinned native release.
 
 Native generation on physical devices, store distribution, and third-party
 application adoption remain qualification steps; package compilation alone is

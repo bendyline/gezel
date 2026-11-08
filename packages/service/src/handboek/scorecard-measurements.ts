@@ -2,6 +2,7 @@ import {
   type ModelScore,
   SCORECARD_DATA_ATTRS,
   type ScorecardObservation,
+  scorecardJudgeLabel,
   scorecardModelFamilyId,
 } from '@bendyline/gezel';
 
@@ -38,7 +39,11 @@ function tables(scores: ModelScore[]) {
     ...new Set(groups.flatMap(({ group }) => group.judgments.map((judge) => judge.rubricId))),
   ].sort();
   const judges = [
-    ...new Set(groups.flatMap(({ group }) => group.judgments.map((judge) => judge.judgeModel))),
+    ...new Set(
+      groups.flatMap(({ group }) =>
+        group.judgments.map((judge) => scorecardJudgeLabel(judge.judgeModel)),
+      ),
+    ),
   ];
   const hasNotApplicable = groups.some(({ group }) => (group.notApplicableReviews ?? 0) > 0);
   const hasObservedPrefill = groups.some(({ group }) => group.observedPrefillTokensPerSec);

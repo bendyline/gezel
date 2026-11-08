@@ -393,6 +393,13 @@ export class LlamaCppModelManager {
    */
   private readonly activeInstalls = new Map<string, ActiveInstallSnapshot>();
   /**
+   * One abort per running install. Unwinding the install generator alone
+   * does not stop a download: its ranged transfers keep writing on their own
+   * sockets, and a stopped service kept a 7-socket download alive past
+   * `stop()` (2026-11-08 npm ship audit).
+   */
+  private readonly installAborts = new Map<string, AbortController>();
+  /**
    * Model directories we've already warned about skipping. `listInstalled`
    * runs on every picker/settings poll; a broken directory should be loud
    * exactly once per process, not once per poll.
@@ -739,7 +746,7 @@ export class LlamaCppModelManager {
    */
   async *install(
     catalogId: string,
-    options?: { skipSha?: boolean; includeMmproj?: boolean },
+    options?: { skipSha?: boolean; includeMmproj?: boolean; signal?: AbortSignal },
   ): AsyncIterable<InstallEvent> {
     const skipSha = options?.skipSha === true;
     // Default ON — see `planDownloads`. ds4 passes `false` because it has no
@@ -773,6 +780,9 @@ export class LlamaCppModelManager {
       startedAt: new Date().toISOString(),
     };
     this.activeInstalls.set(catalogId, tracked);
+    const abort = new AbortController();
+    const signal = options?.signal ? AbortSignal.any([options.signal, abort.signal]) : abort.signal;
+    this.installAborts.set(catalogId, abort);
     try {
       const detail = await this.catalog.get('chat-model', catalogId);
       if (!detail || detail.manifest.kind !== 'chat-model') {
@@ -800,10 +810,19 @@ export class LlamaCppModelManager {
         }
       }
       tracked.totalBytes = installSrc.approxSizeBytes;
-      yield* this.runInstall(catalogId, manifest, tracked, skipSha, includeMmproj);
+      yield* this.runInstall(catalogId, manifest, tracked, skipSha, includeMmproj, signal);
     } finally {
+      // Runs when a caller returns the generator mid-download too (a cancel,
+      // a registry cleared at shutdown), which is what stops the transfer.
+      abort.abort();
+      this.installAborts.delete(catalogId);
       this.activeInstalls.delete(catalogId);
     }
+  }
+
+  /** Stop every download this manager is running. Shutdown calls it. */
+  abortInstalls(): void {
+    for (const abort of this.installAborts.values()) abort.abort();
   }
 
   /**
@@ -821,6 +840,7 @@ export class LlamaCppModelManager {
     tracked: ActiveInstallSnapshot,
     skipSha: boolean,
     includeMmproj: boolean,
+    signal: AbortSignal,
   ): AsyncIterable<InstallEvent> {
     const src = this.srcBlock(manifest);
     if (!src) {
@@ -915,6 +935,7 @@ export class LlamaCppModelManager {
         destPath,
         approxSizeBytes: entry.sizeBytes,
         fetchImpl: this.fetchImpl,
+        signal,
       });
       let entryBytesWritten = 0;
       let inlineSha: string | undefined;

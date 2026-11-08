@@ -46,6 +46,20 @@ export function cellAttributableTrials(cell: ScorecardCell): number {
   return Math.max(0, cell.trials - cell.nonModelFailures);
 }
 
+/**
+ * How a recorded judge reads to a person. The id stays as recorded in the
+ * downloads, where it is checked against the evaluation's own ledger.
+ * `codex-inline/current-session` means the OpenAI Codex agent that ran a
+ * round reviewed its artifacts in that same session; the ledger kept no
+ * model name, and an article that printed the raw id read like debug output.
+ */
+export function scorecardJudgeLabel(judgeModel: string): string {
+  if (judgeModel === 'codex-inline/current-session') {
+    return 'the OpenAI Codex agent that ran the round (in-session review)';
+  }
+  return judgeModel;
+}
+
 /** Render a pass fraction, refusing to quote a rate the sample can't support. */
 export function formatPassClaim(successes: number, trials: number): string {
   if (trials <= 0) return 'not measured';

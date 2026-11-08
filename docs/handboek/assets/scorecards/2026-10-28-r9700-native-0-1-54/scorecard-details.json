@@ -130557,7 +130557,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-tictactoe/tictactoe/tictactoe-qwen3-8-27b-q4-2026-10-28T05-23-55-736Z-onqb",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -131368,7 +131368,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-tictactoe/tictactoe/tictactoe-gemma4-12b-q4-2026-10-28T05-26-23-120Z-7o1r",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -132197,7 +132197,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-petshop/petshop/petshop-gemma4-12b-q4-2026-10-28T05-28-09-204Z-etff",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -133042,7 +133042,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-petshop/petshop/petshop-qwen3-8-27b-q4-2026-10-28T05-31-10-795Z-w24d",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -133905,7 +133905,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-tankcombat/tankcombat/tankcombat-qwen3-8-27b-q4-2026-10-28T05-43-34-863Z-emmz",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -134722,7 +134722,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-tankcombat/tankcombat/tankcombat-gemma4-12b-q4-2026-10-28T05-46-59-248Z-gezh",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -135517,7 +135517,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-schema-migration/schema-migration/schema-migration-gemma4-12b-q4-2026-10-28T05-48-56-487Z-41l5",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -136327,7 +136327,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-schema-migration/schema-migration/schema-migration-qwen3-8-27b-q4-2026-10-28T05-51-32-609Z-53ws",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -137120,7 +137120,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-failing-tests-spec/failing-tests-spec/failing-tests-spec-qwen3-8-27b-q4-2026-10-28T05-54-31-278Z-8ibz",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -137844,7 +137844,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-failing-tests-spec/failing-tests-spec/failing-tests-spec-gemma4-12b-q4-2026-10-28T05-55-53-121Z-79fe",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -138581,7 +138581,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-symptom-debug/symptom-debug/symptom-debug-gemma4-12b-q4-2026-10-28T05-57-24-105Z-bp6t",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -139267,7 +139267,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-symptom-debug/symptom-debug/symptom-debug-qwen3-8-27b-q4-2026-10-28T06-00-55-990Z-gdiu",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -139919,7 +139919,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-data-wrangle/data-wrangle/data-wrangle-qwen3-8-27b-q4-2026-10-28T06-02-16-258Z-hzq2",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -140680,7 +140680,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-data-wrangle/data-wrangle/data-wrangle-gemma4-12b-q4-2026-10-28T06-05-46-077Z-p7hr",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -141528,7 +141528,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-incident-postmortem/incident-postmortem/incident-postmortem-gemma4-12b-q4-2026-10-28T06-22-38-881Z-uqcz",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -142287,7 +142287,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-incident-postmortem/incident-postmortem/incident-postmortem-qwen3-8-27b-q4-2026-10-28T06-28-49-340Z-6hco",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -142995,7 +142995,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-ops-runbook-anomaly/ops-runbook-anomaly/ops-runbook-anomaly-qwen3-8-27b-q4-2026-10-28T06-36-16-585Z-3k5p",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -143747,7 +143747,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-ops-runbook-anomaly/ops-runbook-anomaly/ops-runbook-anomaly-gemma4-12b-q4-2026-10-28T06-38-11-307Z-zs1p",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -144499,7 +144499,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-plan-and-estimate/plan-and-estimate/plan-and-estimate-gemma4-12b-q4-2026-10-28T06-39-59-007Z-ii5v",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -145181,7 +145181,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-plan-and-estimate/plan-and-estimate/plan-and-estimate-qwen3-8-27b-q4-2026-10-28T06-41-07-173Z-slu1",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -145868,7 +145868,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-qwen3-8-27b-q4-2026-10-28T06-42-44-928Z-6l2v",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -146695,7 +146695,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-gemma4-12b-q4-2026-10-28T06-48-02-327Z-z3gb",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -147455,7 +147455,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-constrained-comms/constrained-comms/constrained-comms-gemma4-12b-q4-2026-10-28T06-49-16-281Z-u42s",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -148204,7 +148204,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-constrained-comms/constrained-comms/constrained-comms-qwen3-8-27b-q4-2026-10-28T06-50-36-343Z-5o6g",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -148908,7 +148908,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-records-intake/records-intake/records-intake-qwen3-8-27b-q4-2026-10-28T06-52-13-743Z-kiq5",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -149581,7 +149581,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-records-intake/records-intake/records-intake-gemma4-12b-q4-2026-10-28T06-56-57-201Z-rjnk",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -150305,7 +150305,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-plan-and-estimate/plan-and-estimate/plan-and-estimate-gemma4-12b-q4-2026-10-28T06-58-51-171Z-117t",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -150987,7 +150987,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-plan-and-estimate/plan-and-estimate/plan-and-estimate-qwen3-8-27b-q4-2026-10-28T06-59-59-215Z-7hzw",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -151675,7 +151675,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-meeting-followup/meeting-followup/meeting-followup-qwen3-8-27b-q4-2026-10-28T07-01-35-777Z-xf7j",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -152478,7 +152478,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-meeting-followup/meeting-followup/meeting-followup-gemma4-12b-q4-2026-10-28T07-04-45-616Z-bstk",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -153347,7 +153347,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-gemma4-12b-q4-2026-10-28T07-07-59-690Z-a5qj",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -154278,7 +154278,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-10-28T07-15-32-477Z-rtw0",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -155160,7 +155160,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-qwen3-8-27b-q4-2026-10-28T07-28-51-608Z-bzg0",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -155987,7 +155987,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-gemma4-12b-q4-2026-10-28T07-33-06-211Z-ww7x",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -156787,7 +156787,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-28T07-34-19-799Z-j1ey",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -157707,7 +157707,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-28T07-39-12-051Z-y9ln",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -158638,7 +158638,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-10-28T07-43-16-483Z-ns7e",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -159666,7 +159666,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-gemma4-12b-q4-2026-10-28T07-49-46-540Z-0o2n",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -160627,7 +160627,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-wikipedia-research-brief/wikipedia-research-brief/wikipedia-research-brief-gemma4-12b-q4-2026-10-28T07-52-42-666Z-sp16",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -161499,7 +161499,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-wikipedia-research-brief/wikipedia-research-brief/wikipedia-research-brief-qwen3-8-27b-q4-2026-10-28T07-55-01-962Z-8xs5",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -162429,7 +162429,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-craftbook-week-plan/craftbook-week-plan/craftbook-week-plan-qwen3-8-27b-q4-2026-10-28T07-58-19-295Z-atgg",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -163351,7 +163351,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-craftbook-week-plan/craftbook-week-plan/craftbook-week-plan-gemma4-12b-q4-2026-10-28T08-36-07-642Z-hdfz",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -164340,7 +164340,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-gemma4-12b-q4-2026-10-28T08-43-12-702Z-x169",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -165293,7 +165293,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-qwen3-8-27b-q4-2026-10-28T08-53-16-250Z-6rkt",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -166235,7 +166235,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-craftbook-annotated-bibliography/craftbook-annotated-bibliography/craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-10-28T09-00-54-543Z-bapp",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -167182,7 +167182,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-craftbook-annotated-bibliography/craftbook-annotated-bibliography/craftbook-annotated-bibliography-gemma4-12b-q4-2026-10-28T09-05-15-676Z-2d9t",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -168131,7 +168131,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-productivity-craftbook-research-to-document/craftbook-research-to-document/craftbook-research-to-document-gemma4-12b-q4-2026-10-28T09-07-50-879Z-do8x",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -169169,7 +169169,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-productivity-craftbook-research-to-document/craftbook-research-to-document/craftbook-research-to-document-qwen3-8-27b-q4-2026-10-28T09-11-16-068Z-z54t",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -170090,7 +170090,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-developer-fix-squisq-bugs/fix-squisq-bugs/fix-squisq-bugs-qwen3-8-27b-q4-2026-10-28T09-16-49-881Z-70a3",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -170777,7 +170777,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-developer-fix-squisq-bugs/fix-squisq-bugs/fix-squisq-bugs-gemma4-12b-q4-2026-10-28T09-18-46-005Z-sngs",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -171513,7 +171513,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-developer-dev-craftbook-routing/dev-craftbook-routing/dev-craftbook-routing-gemma4-12b-q4-2026-10-28T09-20-18-942Z-jhea",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -172197,7 +172197,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-developer-dev-craftbook-routing/dev-craftbook-routing/dev-craftbook-routing-qwen3-8-27b-q4-2026-10-28T09-25-42-047Z-6pff",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -172889,7 +172889,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-developer-interface-contract/interface-contract/interface-contract-qwen3-8-27b-q4-2026-10-28T09-27-25-635Z-z41e",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -173631,7 +173631,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-developer-interface-contract/interface-contract/interface-contract-gemma4-12b-q4-2026-10-28T09-29-09-125Z-vayi",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -174394,7 +174394,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-developer-craftbook-code-review/craftbook-code-review/craftbook-code-review-gemma4-12b-q4-2026-10-28T09-30-39-025Z-3jsp",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -175264,7 +175264,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-developer-craftbook-code-review/craftbook-code-review/craftbook-code-review-qwen3-8-27b-q4-2026-10-28T09-33-05-483Z-7ms4",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -176154,7 +176154,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-developer-craftbook-api-contract-review/craftbook-api-contract-review/craftbook-api-contract-review-qwen3-8-27b-q4-2026-10-28T09-36-19-002Z-xav5",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -177116,7 +177116,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-developer-craftbook-api-contract-review/craftbook-api-contract-review/craftbook-api-contract-review-gemma4-12b-q4-2026-10-28T09-46-33-966Z-fj21",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -178020,7 +178020,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-developer-craftbook-deep-security-review/craftbook-deep-security-review/craftbook-deep-security-review-gemma4-12b-q4-2026-10-28T09-59-45-318Z-igsq",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -178868,7 +178868,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-developer-craftbook-deep-security-review/craftbook-deep-security-review/craftbook-deep-security-review-qwen3-8-27b-q4-2026-10-28T10-03-42-532Z-zymw",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -179699,7 +179699,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-developer-large-pr-review/large-pr-review/large-pr-review-qwen3-8-27b-q4-2026-10-28T10-07-17-816Z-ulrz",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -180412,7 +180412,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-developer-large-pr-review/large-pr-review/large-pr-review-gemma4-12b-q4-2026-10-28T10-42-02-247Z-1i85",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -181170,7 +181170,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-developer-craftbook-codemod-sweep/craftbook-codemod-sweep/craftbook-codemod-sweep-gemma4-12b-q4-2026-10-28T11-03-52-686Z-nylt",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -182225,7 +182225,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-developer-craftbook-codemod-sweep/craftbook-codemod-sweep/craftbook-codemod-sweep-qwen3-8-27b-q4-2026-10-28T11-13-03-769Z-e92z",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -183205,7 +183205,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-developer-craftbook-refactor-module/craftbook-refactor-module/craftbook-refactor-module-qwen3-8-27b-q4-2026-10-28T11-36-44-673Z-k924",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -184257,7 +184257,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-developer-craftbook-refactor-module/craftbook-refactor-module/craftbook-refactor-module-gemma4-12b-q4-2026-10-28T12-19-48-294Z-ptll",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -185324,7 +185324,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-developer-craftbook-bug-fix-tdd/craftbook-bug-fix-tdd/craftbook-bug-fix-tdd-gemma4-12b-q4-2026-10-28T13-04-04-423Z-ucj2",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -186382,7 +186382,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-developer-craftbook-bug-fix-tdd/craftbook-bug-fix-tdd/craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-10-28T13-26-16-872Z-pw9i",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -190053,7 +190053,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-complex-work-craftbook-find-vs-create/craftbook-find-vs-create/craftbook-find-vs-create-qwen3-8-27b-q4-2026-10-28T14-01-45-113Z-id2z",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -190833,7 +190833,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-complex-work-craftbook-find-vs-create/craftbook-find-vs-create/craftbook-find-vs-create-gemma4-12b-q4-2026-10-28T14-19-41-073Z-tlbz",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -191636,7 +191636,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-complex-work-craftbook-edit-midtask/craftbook-edit-midtask/craftbook-edit-midtask-gemma4-12b-q4-2026-10-28T14-21-07-915Z-6o6t",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -192423,7 +192423,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-complex-work-craftbook-edit-midtask/craftbook-edit-midtask/craftbook-edit-midtask-qwen3-8-27b-q4-2026-10-28T14-24-19-975Z-j3dv",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -193347,7 +193347,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-complex-work-craftbook-invoice-run/craftbook-invoice-run/craftbook-invoice-run-qwen3-8-27b-q4-2026-10-28T14-34-30-042Z-6p6y",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -194509,7 +194509,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-complex-work-craftbook-invoice-run/craftbook-invoice-run/craftbook-invoice-run-gemma4-12b-q4-2026-10-28T14-49-09-362Z-u26z",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -195558,7 +195558,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-complex-work-craftbook-author-linear/craftbook-author-linear/craftbook-author-linear-gemma4-12b-q4-2026-10-28T14-52-58-787Z-pr9c",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -196418,7 +196418,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-complex-work-craftbook-author-linear/craftbook-author-linear/craftbook-author-linear-qwen3-8-27b-q4-2026-10-28T15-19-39-294Z-tpi2",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -197337,7 +197337,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-complex-work-craftbook-route-multi/craftbook-route-multi/craftbook-route-multi-qwen3-8-27b-q4-2026-10-28T15-35-33-566Z-dytg",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -198245,7 +198245,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-complex-work-craftbook-route-multi/craftbook-route-multi/craftbook-route-multi-gemma4-12b-q4-2026-10-28T15-52-58-126Z-3da3",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -199080,7 +199080,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-complex-work-craftbook-export-generalize/craftbook-export-generalize/craftbook-export-generalize-gemma4-12b-q4-2026-10-28T15-58-49-171Z-nu8s",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -199879,7 +199879,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-complex-work-craftbook-export-generalize/craftbook-export-generalize/craftbook-export-generalize-qwen3-8-27b-q4-2026-10-28T16-03-47-199Z-n2if",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -200767,7 +200767,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-complex-work-craftbook-author-params/craftbook-author-params/craftbook-author-params-qwen3-8-27b-q4-2026-10-28T16-14-34-627Z-5x6f",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -201664,7 +201664,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-complex-work-craftbook-author-params/craftbook-author-params/craftbook-author-params-gemma4-12b-q4-2026-10-28T16-32-38-593Z-22w8",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -202529,7 +202529,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-complex-work-craftbook-author-gate-script/craftbook-author-gate-script/craftbook-author-gate-script-gemma4-12b-q4-2026-10-28T16-40-45-276Z-skon",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -203462,7 +203462,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-complex-work-craftbook-author-gate-script/craftbook-author-gate-script/craftbook-author-gate-script-qwen3-8-27b-q4-2026-10-28T16-50-08-940Z-2of7",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -204516,7 +204516,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-qwen-complex-work-craftbook-author-fanout/craftbook-author-fanout/craftbook-author-fanout-qwen3-8-27b-q4-2026-10-28T18-00-19-443Z-185g",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -205477,7 +205477,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r1-gemma-complex-work-craftbook-author-fanout/craftbook-author-fanout/craftbook-author-fanout-gemma4-12b-q4-2026-10-28T18-21-03-152Z-qtxl",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -206416,7 +206416,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-tictactoe/tictactoe/tictactoe-gemma4-12b-q4-2026-10-28T18-51-46-543Z-qpep",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -207237,7 +207237,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-tictactoe/tictactoe/tictactoe-qwen3-8-27b-q4-2026-10-28T18-53-41-112Z-32ab",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -208064,7 +208064,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-petshop/petshop/petshop-qwen3-8-27b-q4-2026-10-28T18-56-10-806Z-om70",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -209025,7 +209025,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-petshop/petshop/petshop-gemma4-12b-q4-2026-10-28T19-12-09-178Z-15ui",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -209884,7 +209884,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-tankcombat/tankcombat/tankcombat-gemma4-12b-q4-2026-10-28T19-17-12-620Z-5feh",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -210705,7 +210705,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-tankcombat/tankcombat/tankcombat-qwen3-8-27b-q4-2026-10-28T19-19-13-055Z-6dac",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -211499,7 +211499,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-schema-migration/schema-migration/schema-migration-qwen3-8-27b-q4-2026-10-28T19-21-55-959Z-zapy",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -212322,7 +212322,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-schema-migration/schema-migration/schema-migration-gemma4-12b-q4-2026-10-28T19-25-28-671Z-okxv",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -213182,7 +213182,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-failing-tests-spec/failing-tests-spec/failing-tests-spec-gemma4-12b-q4-2026-10-28T19-28-24-385Z-gcnc",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -213971,7 +213971,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-failing-tests-spec/failing-tests-spec/failing-tests-spec-qwen3-8-27b-q4-2026-10-28T19-32-00-825Z-s027",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -214656,7 +214656,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-symptom-debug/symptom-debug/symptom-debug-qwen3-8-27b-q4-2026-10-28T19-33-23-307Z-0xer",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -215338,7 +215338,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-symptom-debug/symptom-debug/symptom-debug-gemma4-12b-q4-2026-10-28T19-34-45-407Z-owt6",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -216105,7 +216105,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-data-wrangle/data-wrangle/data-wrangle-gemma4-12b-q4-2026-10-28T19-36-35-458Z-8hr2",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -216830,7 +216830,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-data-wrangle/data-wrangle/data-wrangle-qwen3-8-27b-q4-2026-10-28T19-45-21-912Z-zv8g",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -217536,7 +217536,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-incident-postmortem/incident-postmortem/incident-postmortem-qwen3-8-27b-q4-2026-10-28T19-49-58-267Z-1o1c",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -218325,7 +218325,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-incident-postmortem/incident-postmortem/incident-postmortem-gemma4-12b-q4-2026-10-28T19-53-34-304Z-i6au",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -219047,7 +219047,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-ops-runbook-anomaly/ops-runbook-anomaly/ops-runbook-anomaly-gemma4-12b-q4-2026-10-28T19-55-57-717Z-q13d",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -219831,7 +219831,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-ops-runbook-anomaly/ops-runbook-anomaly/ops-runbook-anomaly-qwen3-8-27b-q4-2026-10-28T19-58-53-364Z-pr9t",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -220557,7 +220557,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-plan-and-estimate/plan-and-estimate/plan-and-estimate-qwen3-8-27b-q4-2026-10-28T20-00-56-377Z-hcrv",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -221239,7 +221239,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-plan-and-estimate/plan-and-estimate/plan-and-estimate-gemma4-12b-q4-2026-10-28T20-02-38-124Z-cxdu",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -221967,7 +221967,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-gemma4-12b-q4-2026-10-28T20-03-49-696Z-cbsl",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -222753,7 +222753,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-qwen3-8-27b-q4-2026-10-28T20-06-10-900Z-jwqz",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -223514,7 +223514,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-constrained-comms/constrained-comms/constrained-comms-qwen3-8-27b-q4-2026-10-28T20-09-08-075Z-5qoe",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -224263,7 +224263,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-constrained-comms/constrained-comms/constrained-comms-gemma4-12b-q4-2026-10-28T20-10-50-318Z-5eny",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -225006,7 +225006,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-records-intake/records-intake/records-intake-gemma4-12b-q4-2026-10-28T20-12-20-390Z-c7h6",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -225680,7 +225680,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-records-intake/records-intake/records-intake-qwen3-8-27b-q4-2026-10-28T20-15-10-387Z-p08n",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -226315,7 +226315,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-plan-and-estimate/plan-and-estimate/plan-and-estimate-qwen3-8-27b-q4-2026-10-28T20-16-38-349Z-ne6q",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -226997,7 +226997,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-plan-and-estimate/plan-and-estimate/plan-and-estimate-gemma4-12b-q4-2026-10-28T20-18-18-180Z-9f2u",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -227725,7 +227725,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-meeting-followup/meeting-followup/meeting-followup-gemma4-12b-q4-2026-10-28T20-19-28-905Z-apgq",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -228594,7 +228594,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-meeting-followup/meeting-followup/meeting-followup-qwen3-8-27b-q4-2026-10-28T20-23-25-152Z-wx92",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -229433,7 +229433,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-10-28T20-26-43-306Z-b7w7",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -230357,7 +230357,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-gemma4-12b-q4-2026-10-28T20-36-29-218Z-dj6k",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -231257,7 +231257,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-gemma4-12b-q4-2026-10-28T20-44-40-575Z-5ybi",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -232020,7 +232020,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-qwen3-8-27b-q4-2026-10-28T20-45-56-336Z-52qf",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -232860,7 +232860,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-28T20-49-14-397Z-7705",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -233717,7 +233717,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-28T20-53-33-817Z-u53p",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -234639,7 +234639,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-gemma4-12b-q4-2026-10-28T20-57-42-700Z-v2m8",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -235662,7 +235662,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-10-28T21-00-55-777Z-23z7",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -236632,7 +236632,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-wikipedia-research-brief/wikipedia-research-brief/wikipedia-research-brief-qwen3-8-27b-q4-2026-10-28T21-09-09-514Z-ahct",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -237504,7 +237504,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-wikipedia-research-brief/wikipedia-research-brief/wikipedia-research-brief-gemma4-12b-q4-2026-10-28T21-13-19-861Z-9zjw",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -238410,7 +238410,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-craftbook-week-plan/craftbook-week-plan/craftbook-week-plan-gemma4-12b-q4-2026-10-28T21-15-56-180Z-ktof",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -239432,7 +239432,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-craftbook-week-plan/craftbook-week-plan/craftbook-week-plan-qwen3-8-27b-q4-2026-10-28T21-24-28-898Z-8ygd",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -240373,7 +240373,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-qwen3-8-27b-q4-2026-10-28T22-07-08-572Z-8qsq",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -241314,7 +241314,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-gemma4-12b-q4-2026-10-28T22-21-37-292Z-81iy",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -242263,7 +242263,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-craftbook-annotated-bibliography/craftbook-annotated-bibliography/craftbook-annotated-bibliography-gemma4-12b-q4-2026-10-28T22-29-01-217Z-f6tw",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -243222,7 +243222,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-craftbook-annotated-bibliography/craftbook-annotated-bibliography/craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-10-28T22-33-01-205Z-fpw3",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -244170,7 +244170,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-productivity-craftbook-research-to-document/craftbook-research-to-document/craftbook-research-to-document-qwen3-8-27b-q4-2026-10-28T22-36-53-352Z-p48b",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -245295,7 +245295,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-productivity-craftbook-research-to-document/craftbook-research-to-document/craftbook-research-to-document-gemma4-12b-q4-2026-10-28T22-43-07-559Z-hyf1",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -246610,7 +246610,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-developer-fix-squisq-bugs/fix-squisq-bugs/fix-squisq-bugs-gemma4-12b-q4-2026-10-28T23-15-18-032Z-foqh",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -247327,7 +247327,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-developer-fix-squisq-bugs/fix-squisq-bugs/fix-squisq-bugs-qwen3-8-27b-q4-2026-10-28T23-17-05-247Z-oxhg",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -248033,7 +248033,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-developer-dev-craftbook-routing/dev-craftbook-routing/dev-craftbook-routing-qwen3-8-27b-q4-2026-10-28T23-19-17-569Z-1qjw",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -248744,7 +248744,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-developer-dev-craftbook-routing/dev-craftbook-routing/dev-craftbook-routing-gemma4-12b-q4-2026-10-28T23-21-58-998Z-btbc",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -249491,7 +249491,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-developer-interface-contract/interface-contract/interface-contract-gemma4-12b-q4-2026-10-28T23-28-11-724Z-hzzk",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -250235,7 +250235,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-developer-interface-contract/interface-contract/interface-contract-qwen3-8-27b-q4-2026-10-28T23-29-35-991Z-rq2b",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -250994,7 +250994,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-developer-craftbook-code-review/craftbook-code-review/craftbook-code-review-qwen3-8-27b-q4-2026-10-28T23-31-25-426Z-ohy5",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -251862,7 +251862,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-developer-craftbook-code-review/craftbook-code-review/craftbook-code-review-gemma4-12b-q4-2026-10-28T23-34-37-433Z-nuby",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -252758,7 +252758,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-developer-craftbook-api-contract-review/craftbook-api-contract-review/craftbook-api-contract-review-gemma4-12b-q4-2026-10-28T23-37-03-072Z-wyvd",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -253704,7 +253704,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-developer-craftbook-api-contract-review/craftbook-api-contract-review/craftbook-api-contract-review-qwen3-8-27b-q4-2026-10-28T23-41-42-772Z-07aw",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -254576,7 +254576,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-developer-craftbook-deep-security-review/craftbook-deep-security-review/craftbook-deep-security-review-qwen3-8-27b-q4-2026-10-28T23-50-46-409Z-snny",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -255446,7 +255446,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-developer-craftbook-deep-security-review/craftbook-deep-security-review/craftbook-deep-security-review-gemma4-12b-q4-2026-10-28T23-53-53-853Z-9vtd",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -256336,7 +256336,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-developer-large-pr-review/large-pr-review/large-pr-review-gemma4-12b-q4-2026-10-28T23-58-46-311Z-ehf4",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -257008,7 +257008,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-developer-large-pr-review/large-pr-review/large-pr-review-qwen3-8-27b-q4-2026-10-29T00-22-39-057Z-w4w5",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -257736,7 +257736,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-developer-craftbook-codemod-sweep/craftbook-codemod-sweep/craftbook-codemod-sweep-qwen3-8-27b-q4-2026-10-29T00-50-23-015Z-yqhz",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -258752,7 +258752,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-developer-craftbook-codemod-sweep/craftbook-codemod-sweep/craftbook-codemod-sweep-gemma4-12b-q4-2026-10-29T01-32-25-425Z-hv7y",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -261174,7 +261174,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-developer-craftbook-refactor-module/craftbook-refactor-module/craftbook-refactor-module-gemma4-12b-q4-2026-10-29T02-25-22-011Z-8tpb",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -262358,7 +262358,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-developer-craftbook-refactor-module/craftbook-refactor-module/craftbook-refactor-module-qwen3-8-27b-q4-2026-10-29T03-14-10-019Z-dx3d",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -263354,7 +263354,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-developer-craftbook-bug-fix-tdd/craftbook-bug-fix-tdd/craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-10-29T03-37-12-663Z-oq5i",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -265982,7 +265982,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-developer-craftbook-bug-fix-tdd/craftbook-bug-fix-tdd/craftbook-bug-fix-tdd-gemma4-12b-q4-2026-10-29T04-13-57-916Z-o5jv",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -267471,7 +267471,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-complex-work-craftbook-find-vs-create/craftbook-find-vs-create/craftbook-find-vs-create-gemma4-12b-q4-2026-10-29T04-55-28-987Z-1csu",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -268226,7 +268226,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-complex-work-craftbook-find-vs-create/craftbook-find-vs-create/craftbook-find-vs-create-qwen3-8-27b-q4-2026-10-29T04-58-09-941Z-r980",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -268987,7 +268987,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-complex-work-craftbook-edit-midtask/craftbook-edit-midtask/craftbook-edit-midtask-qwen3-8-27b-q4-2026-10-29T04-59-52-790Z-ui5l",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -269805,7 +269805,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-complex-work-craftbook-edit-midtask/craftbook-edit-midtask/craftbook-edit-midtask-gemma4-12b-q4-2026-10-29T05-08-50-506Z-x2nj",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -270666,7 +270666,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-complex-work-craftbook-invoice-run/craftbook-invoice-run/craftbook-invoice-run-gemma4-12b-q4-2026-10-29T05-12-25-602Z-o3d7",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -271743,7 +271743,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-complex-work-craftbook-invoice-run/craftbook-invoice-run/craftbook-invoice-run-qwen3-8-27b-q4-2026-10-29T05-16-19-789Z-d3v0",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -272760,7 +272760,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-complex-work-craftbook-author-linear/craftbook-author-linear/craftbook-author-linear-qwen3-8-27b-q4-2026-10-29T05-22-23-314Z-r3zv",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -273604,7 +273604,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-complex-work-craftbook-author-linear/craftbook-author-linear/craftbook-author-linear-gemma4-12b-q4-2026-10-29T05-36-50-171Z-hon3",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -274475,7 +274475,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-complex-work-craftbook-route-multi/craftbook-route-multi/craftbook-route-multi-gemma4-12b-q4-2026-10-29T05-44-50-307Z-ueh6",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -275301,7 +275301,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-complex-work-craftbook-route-multi/craftbook-route-multi/craftbook-route-multi-qwen3-8-27b-q4-2026-10-29T05-51-12-753Z-ou6d",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -276168,7 +276168,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-complex-work-craftbook-export-generalize/craftbook-export-generalize/craftbook-export-generalize-qwen3-8-27b-q4-2026-10-29T06-10-16-961Z-6j9y",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -277026,7 +277026,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-complex-work-craftbook-export-generalize/craftbook-export-generalize/craftbook-export-generalize-gemma4-12b-q4-2026-10-29T06-22-47-478Z-8khw",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -277823,7 +277823,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-complex-work-craftbook-author-params/craftbook-author-params/craftbook-author-params-gemma4-12b-q4-2026-10-29T06-37-49-564Z-uylh",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -278662,7 +278662,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-complex-work-craftbook-author-params/craftbook-author-params/craftbook-author-params-qwen3-8-27b-q4-2026-10-29T07-00-01-754Z-0btm",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -279595,7 +279595,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-complex-work-craftbook-author-gate-script/craftbook-author-gate-script/craftbook-author-gate-script-qwen3-8-27b-q4-2026-10-29T07-17-44-868Z-24uc",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -280593,7 +280593,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-complex-work-craftbook-author-gate-script/craftbook-author-gate-script/craftbook-author-gate-script-gemma4-12b-q4-2026-10-29T08-29-38-805Z-8z2y",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -281534,7 +281534,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-gemma-complex-work-craftbook-author-fanout/craftbook-author-fanout/craftbook-author-fanout-gemma4-12b-q4-2026-10-29T09-03-41-141Z-tkue",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -282565,7 +282565,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r2-qwen-complex-work-craftbook-author-fanout/craftbook-author-fanout/craftbook-author-fanout-qwen3-8-27b-q4-2026-10-29T09-33-11-079Z-vmk1",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -283550,7 +283550,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-tictactoe/tictactoe/tictactoe-qwen3-8-27b-q4-2026-10-29T10-16-34-056Z-k42x",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -284371,7 +284371,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-tictactoe/tictactoe/tictactoe-gemma4-12b-q4-2026-10-29T10-18-44-554Z-ytv0",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -285201,7 +285201,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-petshop/petshop/petshop-gemma4-12b-q4-2026-10-29T10-20-32-094Z-acb9",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -286045,7 +286045,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-petshop/petshop/petshop-qwen3-8-27b-q4-2026-10-29T10-23-30-509Z-20fc",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -286908,7 +286908,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-tankcombat/tankcombat/tankcombat-qwen3-8-27b-q4-2026-10-29T10-39-45-521Z-dror",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -287719,7 +287719,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-tankcombat/tankcombat/tankcombat-gemma4-12b-q4-2026-10-29T10-43-02-353Z-l687",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -288556,7 +288556,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-schema-migration/schema-migration/schema-migration-gemma4-12b-q4-2026-10-29T10-45-31-124Z-0utg",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -289366,7 +289366,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-schema-migration/schema-migration/schema-migration-qwen3-8-27b-q4-2026-10-29T10-48-26-030Z-yupt",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -290172,7 +290172,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-failing-tests-spec/failing-tests-spec/failing-tests-spec-qwen3-8-27b-q4-2026-10-29T10-51-34-751Z-qa45",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -290896,7 +290896,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-failing-tests-spec/failing-tests-spec/failing-tests-spec-gemma4-12b-q4-2026-10-29T10-52-56-163Z-qbk2",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -291582,7 +291582,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-symptom-debug/symptom-debug/symptom-debug-gemma4-12b-q4-2026-10-29T10-54-05-051Z-ft5w",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -292227,7 +292227,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-symptom-debug/symptom-debug/symptom-debug-qwen3-8-27b-q4-2026-10-29T10-55-44-217Z-auca",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -292917,7 +292917,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-data-wrangle/data-wrangle/data-wrangle-qwen3-8-27b-q4-2026-10-29T10-56-58-822Z-8fcp",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -293752,7 +293752,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-data-wrangle/data-wrangle/data-wrangle-gemma4-12b-q4-2026-10-29T11-03-03-938Z-zjwh",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -294540,7 +294540,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-incident-postmortem/incident-postmortem/incident-postmortem-gemma4-12b-q4-2026-10-29T11-18-14-927Z-7cei",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -295357,7 +295357,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-incident-postmortem/incident-postmortem/incident-postmortem-qwen3-8-27b-q4-2026-10-29T11-22-06-348Z-r329",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -296102,7 +296102,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-ops-runbook-anomaly/ops-runbook-anomaly/ops-runbook-anomaly-qwen3-8-27b-q4-2026-10-29T11-27-28-917Z-j5an",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -296853,7 +296853,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-ops-runbook-anomaly/ops-runbook-anomaly/ops-runbook-anomaly-gemma4-12b-q4-2026-10-29T11-29-26-546Z-gvue",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -297605,7 +297605,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-plan-and-estimate/plan-and-estimate/plan-and-estimate-gemma4-12b-q4-2026-10-29T11-31-16-280Z-wies",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -298287,7 +298287,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-plan-and-estimate/plan-and-estimate/plan-and-estimate-qwen3-8-27b-q4-2026-10-29T11-32-26-452Z-hw7i",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -299025,7 +299025,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-qwen3-8-27b-q4-2026-10-29T11-34-11-661Z-yktd",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -299847,7 +299847,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-core-conflict-synthesis/conflict-synthesis/conflict-synthesis-gemma4-12b-q4-2026-10-29T11-41-46-488Z-9j7k",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -300626,7 +300626,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-constrained-comms/constrained-comms/constrained-comms-gemma4-12b-q4-2026-10-29T11-44-06-460Z-othl",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -301355,7 +301355,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-constrained-comms/constrained-comms/constrained-comms-qwen3-8-27b-q4-2026-10-29T11-45-14-565Z-c7fe",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -302078,7 +302078,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-records-intake/records-intake/records-intake-qwen3-8-27b-q4-2026-10-29T11-46-58-766Z-jolh",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -302751,7 +302751,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-records-intake/records-intake/records-intake-gemma4-12b-q4-2026-10-29T11-49-19-035Z-20pb",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -303466,7 +303466,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-plan-and-estimate/plan-and-estimate/plan-and-estimate-gemma4-12b-q4-2026-10-29T11-52-08-950Z-v3l7",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -304148,7 +304148,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-plan-and-estimate/plan-and-estimate/plan-and-estimate-qwen3-8-27b-q4-2026-10-29T11-53-18-213Z-krwd",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -304837,7 +304837,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-meeting-followup/meeting-followup/meeting-followup-qwen3-8-27b-q4-2026-10-29T11-54-57-485Z-4y6a",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -305641,7 +305641,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-meeting-followup/meeting-followup/meeting-followup-gemma4-12b-q4-2026-10-29T11-58-11-281Z-8dac",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -306483,7 +306483,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-gemma4-12b-q4-2026-10-29T12-01-07-689Z-2bh9",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -307404,7 +307404,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-craftbook-spreadsheet-model/craftbook-spreadsheet-model/craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-10-29T12-04-21-391Z-br8m",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -308283,7 +308283,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-qwen3-8-27b-q4-2026-10-29T12-10-38-576Z-euvl",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -309069,7 +309069,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-conflict-synthesis/conflict-synthesis/conflict-synthesis-gemma4-12b-q4-2026-10-29T12-13-34-625Z-0dp2",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -309912,7 +309912,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-29T12-15-54-612Z-k1l8",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -310845,7 +310845,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-29T12-25-12-545Z-4m7n",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -311718,7 +311718,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-10-29T12-28-56-820Z-2eqc",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -312747,7 +312747,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-craftbook-powerpoint-deck/craftbook-powerpoint-deck/craftbook-powerpoint-deck-gemma4-12b-q4-2026-10-29T12-36-15-024Z-tqef",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -313709,7 +313709,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-wikipedia-research-brief/wikipedia-research-brief/wikipedia-research-brief-gemma4-12b-q4-2026-10-29T12-39-20-131Z-jwiq",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -314584,7 +314584,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-wikipedia-research-brief/wikipedia-research-brief/wikipedia-research-brief-qwen3-8-27b-q4-2026-10-29T12-41-24-684Z-y4wi",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -315509,7 +315509,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-craftbook-week-plan/craftbook-week-plan/craftbook-week-plan-qwen3-8-27b-q4-2026-10-29T12-46-20-096Z-h5rh",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -316497,7 +316497,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-craftbook-week-plan/craftbook-week-plan/craftbook-week-plan-gemma4-12b-q4-2026-10-29T13-02-52-515Z-usu2",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -317486,7 +317486,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-gemma4-12b-q4-2026-10-29T13-10-54-136Z-u5jt",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -318445,7 +318445,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-craftbook-ab-test-readout/craftbook-ab-test-readout/craftbook-ab-test-readout-qwen3-8-27b-q4-2026-10-29T13-19-11-270Z-0br8",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -319390,7 +319390,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-craftbook-annotated-bibliography/craftbook-annotated-bibliography/craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-10-29T13-28-20-233Z-v4hr",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -320329,7 +320329,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-craftbook-annotated-bibliography/craftbook-annotated-bibliography/craftbook-annotated-bibliography-gemma4-12b-q4-2026-10-29T13-34-03-458Z-r2db",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -321278,7 +321278,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-productivity-craftbook-research-to-document/craftbook-research-to-document/craftbook-research-to-document-gemma4-12b-q4-2026-10-29T13-36-30-245Z-653j",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -322329,7 +322329,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-productivity-craftbook-research-to-document/craftbook-research-to-document/craftbook-research-to-document-qwen3-8-27b-q4-2026-10-29T13-39-46-945Z-hv0r",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -323314,7 +323314,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-developer-fix-squisq-bugs/fix-squisq-bugs/fix-squisq-bugs-qwen3-8-27b-q4-2026-10-29T13-50-05-844Z-vso8",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -324017,7 +324017,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-developer-fix-squisq-bugs/fix-squisq-bugs/fix-squisq-bugs-gemma4-12b-q4-2026-10-29T13-51-57-163Z-kctk",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -324890,7 +324890,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-developer-dev-craftbook-routing/dev-craftbook-routing/dev-craftbook-routing-gemma4-12b-q4-2026-10-29T14-01-00-329Z-3hsk",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -325654,7 +325654,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-developer-dev-craftbook-routing/dev-craftbook-routing/dev-craftbook-routing-qwen3-8-27b-q4-2026-10-29T14-12-46-796Z-3sho",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -326398,7 +326398,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-developer-interface-contract/interface-contract/interface-contract-qwen3-8-27b-q4-2026-10-29T14-25-36-658Z-d4pa",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -327138,7 +327138,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-developer-interface-contract/interface-contract/interface-contract-gemma4-12b-q4-2026-10-29T14-27-36-320Z-1bkb",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -327900,7 +327900,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-developer-craftbook-code-review/craftbook-code-review/craftbook-code-review-gemma4-12b-q4-2026-10-29T14-29-01-280Z-wmbi",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -328771,7 +328771,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-developer-craftbook-code-review/craftbook-code-review/craftbook-code-review-qwen3-8-27b-q4-2026-10-29T14-31-30-099Z-olvx",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -329664,7 +329664,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-developer-craftbook-api-contract-review/craftbook-api-contract-review/craftbook-api-contract-review-qwen3-8-27b-q4-2026-10-29T14-34-46-586Z-vxj9",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -330614,7 +330614,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-developer-craftbook-api-contract-review/craftbook-api-contract-review/craftbook-api-contract-review-gemma4-12b-q4-2026-10-29T14-53-36-525Z-ujkv",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -331507,7 +331507,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-developer-craftbook-deep-security-review/craftbook-deep-security-review/craftbook-deep-security-review-gemma4-12b-q4-2026-10-29T15-00-28-651Z-vdfo",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -332363,7 +332363,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-developer-craftbook-deep-security-review/craftbook-deep-security-review/craftbook-deep-security-review-qwen3-8-27b-q4-2026-10-29T15-04-31-689Z-js15",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -333188,7 +333188,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-developer-large-pr-review/large-pr-review/large-pr-review-qwen3-8-27b-q4-2026-10-29T15-08-22-168Z-z6l1",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -333904,7 +333904,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-developer-large-pr-review/large-pr-review/large-pr-review-gemma4-12b-q4-2026-10-29T15-25-14-328Z-ulv9",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -334669,7 +334669,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-developer-craftbook-codemod-sweep/craftbook-codemod-sweep/craftbook-codemod-sweep-gemma4-12b-q4-2026-10-29T15-46-34-265Z-bohx",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -335818,7 +335818,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-developer-craftbook-codemod-sweep/craftbook-codemod-sweep/craftbook-codemod-sweep-qwen3-8-27b-q4-2026-10-29T16-05-51-397Z-toyo",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -336796,7 +336796,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-developer-craftbook-refactor-module/craftbook-refactor-module/craftbook-refactor-module-qwen3-8-27b-q4-2026-10-29T16-47-19-820Z-9rfr",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -337853,7 +337853,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-developer-craftbook-refactor-module/craftbook-refactor-module/craftbook-refactor-module-gemma4-12b-q4-2026-10-29T17-18-31-460Z-2e57",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -339263,7 +339263,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-developer-craftbook-bug-fix-tdd/craftbook-bug-fix-tdd/craftbook-bug-fix-tdd-gemma4-12b-q4-2026-10-29T18-20-57-021Z-8yfj",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -340774,7 +340774,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-developer-craftbook-bug-fix-tdd/craftbook-bug-fix-tdd/craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-10-29T18-52-45-138Z-q0zh",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -345117,7 +345117,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-complex-work-craftbook-find-vs-create/craftbook-find-vs-create/craftbook-find-vs-create-qwen3-8-27b-q4-2026-10-29T19-49-11-981Z-vows",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -345908,7 +345908,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-complex-work-craftbook-find-vs-create/craftbook-find-vs-create/craftbook-find-vs-create-gemma4-12b-q4-2026-10-29T19-50-48-093Z-9rg7",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -346733,7 +346733,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-complex-work-craftbook-edit-midtask/craftbook-edit-midtask/craftbook-edit-midtask-gemma4-12b-q4-2026-10-29T19-54-59-105Z-6sc4",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -347602,7 +347602,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-complex-work-craftbook-edit-midtask/craftbook-edit-midtask/craftbook-edit-midtask-qwen3-8-27b-q4-2026-10-29T20-17-28-088Z-0zvu",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -348500,7 +348500,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-complex-work-craftbook-invoice-run/craftbook-invoice-run/craftbook-invoice-run-qwen3-8-27b-q4-2026-10-29T20-31-57-277Z-nctq",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -349580,7 +349580,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-complex-work-craftbook-invoice-run/craftbook-invoice-run/craftbook-invoice-run-gemma4-12b-q4-2026-10-29T20-38-36-495Z-rgwy",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -350626,7 +350626,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-complex-work-craftbook-author-linear/craftbook-author-linear/craftbook-author-linear-gemma4-12b-q4-2026-10-29T20-42-42-455Z-5c0z",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -351434,7 +351434,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-complex-work-craftbook-author-linear/craftbook-author-linear/craftbook-author-linear-qwen3-8-27b-q4-2026-10-29T20-50-24-108Z-d7oi",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -352351,7 +352351,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-complex-work-craftbook-route-multi/craftbook-route-multi/craftbook-route-multi-qwen3-8-27b-q4-2026-10-29T21-08-51-959Z-t6t0",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -353227,7 +353227,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-complex-work-craftbook-route-multi/craftbook-route-multi/craftbook-route-multi-gemma4-12b-q4-2026-10-29T21-25-09-905Z-qrjj",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -354003,7 +354003,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-complex-work-craftbook-export-generalize/craftbook-export-generalize/craftbook-export-generalize-gemma4-12b-q4-2026-10-29T21-28-30-841Z-x20d",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -354787,7 +354787,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-complex-work-craftbook-export-generalize/craftbook-export-generalize/craftbook-export-generalize-qwen3-8-27b-q4-2026-10-29T21-47-22-802Z-mv9e",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -355650,7 +355650,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-complex-work-craftbook-author-params/craftbook-author-params/craftbook-author-params-qwen3-8-27b-q4-2026-10-29T22-29-43-746Z-bdsq",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -356604,7 +356604,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-complex-work-craftbook-author-params/craftbook-author-params/craftbook-author-params-gemma4-12b-q4-2026-10-29T22-43-50-681Z-rdws",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -357519,7 +357519,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-complex-work-craftbook-author-gate-script/craftbook-author-gate-script/craftbook-author-gate-script-gemma4-12b-q4-2026-10-29T22-52-06-249Z-x9da",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -358332,7 +358332,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-complex-work-craftbook-author-gate-script/craftbook-author-gate-script/craftbook-author-gate-script-qwen3-8-27b-q4-2026-10-29T23-03-12-280Z-3lxv",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -359354,7 +359354,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-qwen-complex-work-craftbook-author-fanout/craftbook-author-fanout/craftbook-author-fanout-qwen3-8-27b-q4-2026-10-29T23-59-25-584Z-bcd7",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -360416,7 +360416,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/r3-gemma-complex-work-craftbook-author-fanout/craftbook-author-fanout/craftbook-author-fanout-gemma4-12b-q4-2026-10-30T00-38-54-778Z-zdpa",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -361298,7 +361298,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/activation-correction-001/r1-qwen-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-30T01-28-17-594Z-5i41",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -362114,7 +362114,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/activation-correction-001/r1-gemma-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-30T01-31-33-505Z-0dc0",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -362865,7 +362865,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/activation-correction-001/r2-gemma-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-30T01-38-09-921Z-8pec",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -363644,7 +363644,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/activation-correction-001/r2-qwen-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-30T01-45-36-836Z-o09y",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -364438,7 +364438,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/activation-correction-001/r3-qwen-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-10-30T01-53-14-508Z-tw5q",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",
@@ -365246,7 +365246,7 @@
         "modelTier": "medium",
         "runDir": "evals/runs/scorecard-2026-10-27-r9700-native-0-1-54/activation-correction-001/r3-gemma-productivity-docblocks-theme-roundtrip/docblocks-theme-roundtrip/docblocks-theme-roundtrip-gemma4-12b-q4-2026-10-30T01-55-45-313Z-bj4k",
         "host": {
-          "hostname": "MIKEAM-WINSRV",
+          "hostname": "<host>",
           "platform": "win32",
           "arch": "x64",
           "osRelease": "10.0.26300",

@@ -320,6 +320,14 @@ describe('line-based reviewer verdict enforcement', () => {
       'a labeled source list',
       'Amounts reconcile [1] PASS\n\n**Sources:**\n[1] ledger.json\n[2] clients.json',
     ],
+    [
+      'an unnumbered reference whose title reads as a decision',
+      'Amounts reconcile PASS\n\n## References\n\n- Smith, Failing Forward (2019)\n',
+    ],
+    [
+      'a passing criterion under a Sources heading',
+      '## Accuracy\n\n- Numbers match: PASS\n\n## Sources\n\n- Every claim cites a dated source: PASS\n\n[1] ledger.json',
+    ],
   ])('accepts a passing verdict written with %s', async (_shape, text) => {
     const result = await evaluate(text);
     expect(result.message).toBeUndefined();
@@ -355,6 +363,14 @@ describe('line-based reviewer verdict enforcement', () => {
       'Amounts reconcile [1] PASS\nSources:\n[1] ledger.json\nDue dates match terms FAIL',
     ],
     ['a criterion heading that names citations', 'Amounts reconcile PASS\n## Citations: FAIL'],
+    [
+      'a FAIL criterion under a Sources heading',
+      '## Accuracy\n\n- Numbers match: PASS\n\n## Sources\n\n- Every claim cites a dated source: FAIL',
+    ],
+    [
+      'a FAIL criterion under a References heading',
+      'Amounts reconcile PASS\n\n### References\n\n- API references current: **FAIL** — two links 404',
+    ],
   ])('rejects a verdict with %s', async (_shape, text) => {
     const result = await evaluate(text);
     expect(result.decision).toBe('reject');

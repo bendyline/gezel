@@ -75,6 +75,9 @@ floor in Settings → Night Shift, or add a daily reserve that scales with
 the time left — 10% a day with four days until your quota resets keeps
 the last 40% for you.
 
+Before you let night work use a subscription, check that its terms allow
+automated use: some consumer plans don't.
+
 Work that's already running always finishes; only new work is held. Held
 work resumes on its own when a quota window resets (if the machine is
 awake) or the next night, and the moon menu says what's being protected

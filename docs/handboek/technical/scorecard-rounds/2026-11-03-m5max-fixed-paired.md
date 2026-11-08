@@ -6,14 +6,14 @@ runs:
 
 This follow-up compared Qwen 3.8 27B Q4 and Gemma 4 12B Q4 on MLX and
 llama.cpp after fixes, using native 0.1.55 on an Apple M5 Max with 128 GB
-of unified memory. The user shortened the original 516-trial plan for time.
+of unified memory. We shortened the original 516-trial plan to save time.
 The comparison contains **72 matched trials: 18 pairs per model, one
 repetition**, across core and productivity. Developer and complex-work were
 not run. This chronological subset was selected after outcomes were visible,
 so the findings are exploratory.
 
 Both models passed **16/18 on MLX and 18/18 on llama.cpp**. Practical
-equivalence within the user-selected **±5 percentage points is not
+equivalence within our chosen margin of **±5 percentage points is not
 established**. The observed difference is −11.11 pp; the conservative paired
 95% interval is [−38.09, +20.66] pp and the scenario-cluster bootstrap interval
 is [−26.32, 0.00] pp for each model. These data also do not establish that the

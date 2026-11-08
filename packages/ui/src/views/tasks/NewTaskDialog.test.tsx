@@ -158,7 +158,7 @@ describe('NewTaskDialog', () => {
     expect(screen.getByRole('radio', { name: 'Blog Post' })).toBeInTheDocument();
   });
 
-  it('hides connector-backed craftbooks while WIP features are off', async () => {
+  it('shows connector-backed craftbooks with preview features off', async () => {
     vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
       items: [
         bookItem('plain-report', 'Plain Report'),
@@ -175,29 +175,7 @@ describe('NewTaskDialog', () => {
     renderDialog();
 
     expect(await screen.findByRole('radio', { name: 'Plain Report' })).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: 'Social Digest' })).not.toBeInTheDocument();
-  });
-
-  it('shows connector-backed craftbooks while WIP features are on', async () => {
-    vi.mocked(api.getConfig).mockResolvedValue({
-      provider: 'mock',
-      showWorkInProgressFeatures: true,
-    } as never);
-    vi.mocked(api.listProjectCraftbooks).mockResolvedValue({
-      items: [
-        bookItem('social-digest', 'Social Digest', {
-          connectors: [{ typeId: 'bluesky-posts', optional: true }],
-        }),
-      ],
-      missingToolsets: {},
-      projectType: null,
-      suggestedIds: [],
-      establishedCodebase: false,
-    });
-
-    renderDialog();
-
-    expect(await screen.findByRole('radio', { name: 'Social Digest' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Social Digest' })).toBeInTheDocument();
   });
 
   it('shelves craftbooks by subject category, grouped into subject families', async () => {

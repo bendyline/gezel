@@ -157,7 +157,10 @@ describe('acquireSingleInstanceLock', () => {
       const runtimeDir = await freshRuntimeDir();
       const lockPath = join(runtimeDir, 'lock');
       await mkdir(runtimeDir, { recursive: true });
-      await writeHolder(lockPath, identity({ hostname: 'old-container', instance: 'killed' }));
+      await writeHolder(
+        lockPath,
+        identity({ hostname: 'old-container', pidNs: 'pid:[9]', instance: 'killed' }),
+      );
       const mtime = (await stat(lockPath)).mtimeMs;
       let clock = mtime;
       const lock = await acquireSingleInstanceLock({
@@ -196,8 +199,11 @@ describe('sharesPidNamespace', () => {
     expect(sharesPidNamespace(identity({ pidNs: 'pid:[2]' }), identity())).toBe(false);
   });
 
-  it('separates boots and hosts', () => {
+  it('separates boots, and ignores a hostname the network changed', () => {
     expect(sharesPidNamespace(identity({ bootId: 'boot-b' }), identity())).toBe(false);
-    expect(sharesPidNamespace(identity({ hostname: 'laptop' }), identity())).toBe(false);
+    expect(sharesPidNamespace(identity({ hostname: 'laptop' }), identity())).toBe(true);
+    expect(
+      sharesPidNamespace({ pid: 7, hostname: 'mac.local' }, { pid: 8, hostname: 'mac.lan' }),
+    ).toBe(true);
   });
 });

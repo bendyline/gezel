@@ -36,9 +36,10 @@ envelopes:
 
 Both local `stdio` servers and remote Streamable HTTP/SSE servers are supported.
 Imported environment values and HTTP headers go into Gezel's secret store rather
-than the ordinary installed-toolsets JSON. Provider-native MCP integrations that
-only accept local processes (currently Copilot and Claude CLI) load the `stdio`
-entries and skip hosted entries.
+than the ordinary installed-toolsets JSON. Every provider loads both kinds,
+except Codex CLI, which reaches a hosted server only over Streamable HTTP and
+leaves SSE entries out of its sessions. A Claude CLI session gets only the
+servers Gezel gives it, never your own Claude settings or claude.ai connectors.
 
 For third-party options, the toolset browser also lists thousands of community MCP servers, marked **Community**. Review a community server before adding it to a crew; these entries are outside Gezel's first-party toolsets.
 

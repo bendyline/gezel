@@ -208,7 +208,7 @@ describe('CommandsPanel sections', () => {
     expect(screen.getByText('Imports to review (1)')).toBeTruthy();
   });
 
-  it('hides connector-backed craftbooks from the command launcher while WIP is off', async () => {
+  it('shows connector-backed craftbooks in the command launcher with preview features off', async () => {
     apiMocks.listProjectCraftbooks.mockResolvedValue({
       items: [CRAFTBOOK, CONNECTOR_CRAFTBOOK],
     });
@@ -216,16 +216,7 @@ describe('CommandsPanel sections', () => {
     render(<CommandsPanel projectId="p1" section="tasks" onStageCommand={() => {}} />);
 
     expect(await screen.findByText('Ship it')).toBeTruthy();
-    expect(screen.queryByText('Social Digest')).toBeNull();
-  });
-
-  it('shows connector-backed craftbooks in the command launcher while WIP is on', async () => {
-    apiMocks.getConfig.mockResolvedValue({ showWorkInProgressFeatures: true });
-    apiMocks.listProjectCraftbooks.mockResolvedValue({ items: [CONNECTOR_CRAFTBOOK] });
-
-    render(<CommandsPanel projectId="p1" section="tasks" onStageCommand={() => {}} />);
-
-    expect(await screen.findByText('Social Digest')).toBeTruthy();
+    expect(screen.getByText('Social Digest')).toBeTruthy();
   });
 });
 

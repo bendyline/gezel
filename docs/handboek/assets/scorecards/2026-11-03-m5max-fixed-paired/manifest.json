@@ -6,13 +6,13 @@
   "files": [
     {
       "path": "packages/core/src/scorecard/data/runs/2026-11-03-m5max-fixed-paired.json",
-      "bytes": 29873,
-      "sha256": "e8253649e7f0c815ccc27f4352fb22b73075feb6f26455cad37974e1117e4b98"
+      "bytes": 29897,
+      "sha256": "214bbf28733e15042cb06f2fba260be620a3ecdf1e813616986ce731c1956c23"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/scorecard.json",
-      "bytes": 29873,
-      "sha256": "e8253649e7f0c815ccc27f4352fb22b73075feb6f26455cad37974e1117e4b98"
+      "bytes": 29897,
+      "sha256": "214bbf28733e15042cb06f2fba260be620a3ecdf1e813616986ce731c1956c23"
     },
     {
       "path": "docs/handboek/assets/scorecards/2026-11-03-m5max-fixed-paired/analysis.json",
