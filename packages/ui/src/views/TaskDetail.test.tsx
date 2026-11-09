@@ -203,6 +203,50 @@ describe('TaskDetail', () => {
     });
   });
 
+  it('shows a schedule as its runs, opens on Task, and starts a run with Run now', async () => {
+    // squisq/18 showed one "Wait for schedule" step with an Add step stop,
+    // which read as a plan stuck before it began.
+    const host = {
+      ...TASK,
+      num: 18,
+      ref: 'pj-alpha/18',
+      title: 'Night shift: Test Coverage Review',
+      craftbook: {
+        ...TASK.craftbook,
+        steps: [{ id: 'wait', name: 'Wait for schedule', createdAt: '2025-01-01T00:00:00Z' }],
+        entryStepId: 'wait',
+      },
+      activeStepId: 'wait',
+      cron: { expression: '*/30 * * * *', overlap: 'skip' },
+      nightShift: { enabled: true, onceADay: true },
+      spawnsCraftbook: {
+        id: 'test-coverage-review',
+        name: 'Test Coverage Review',
+        steps: [{ id: 'audit', name: 'Audit the test suite', createdAt: '2025-01-01T00:00:00Z' }],
+        entryStepId: 'audit',
+        createdAt: '2025-01-01T00:00:00Z',
+        updatedAt: '2025-01-01T00:00:00Z',
+      },
+    } as unknown as Task;
+    vi.mocked(api.getNightShiftStatus).mockResolvedValue({ active: false, source: null } as never);
+    vi.mocked(api.spawnTaskInstances).mockResolvedValue({ children: [] } as never);
+
+    render(<TaskDetail task={host} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+    expect(screen.getByRole('group', { name: 'Runs of this schedule' })).toBeInTheDocument();
+    expect(screen.queryByTestId('task-step-tracker')).toBeNull();
+    const views = within(screen.getByRole('group', { name: 'Task view' }));
+    expect(views.getByRole('button', { name: 'Task' })).toHaveAttribute('aria-pressed', 'true');
+    // The half-hourly check never reads as the schedule.
+    expect(await screen.findByText('Once a night, during the Night Shift.')).toBeInTheDocument();
+    expect(screen.queryByText('*/30 * * * *')).toBeNull();
+    expect(screen.queryByRole('button', { name: '+ Spawn instance' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run now' }));
+    await waitFor(() =>
+      expect(api.spawnTaskInstances).toHaveBeenCalledWith('pj-alpha', 18, { count: 1 }),
+    );
+  });
+
   it('shows a gezel poppetje beside a gezel-authored note', async () => {
     vi.mocked(api.listTaskNotes).mockResolvedValue({
       notes: [

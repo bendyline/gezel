@@ -24,6 +24,29 @@ export function useTaskEvents(
   taskRef: string | undefined,
   onEvent: () => void,
 ): void {
+  useTaskEventStream(projectId, taskRef ?? null, onEvent);
+}
+
+/**
+ * Like {@link useTaskEvents}, for every task in the project. A schedule's
+ * runs are tasks of their own, and a new run has a ref nobody knew to ask for.
+ */
+export function useProjectTaskEvents(
+  projectId: string | undefined,
+  enabled: boolean,
+  onEvent: () => void,
+): void {
+  useTaskEventStream(projectId, enabled ? ANY_TASK : null, onEvent);
+}
+
+const ANY_TASK = '*';
+
+function useTaskEventStream(
+  projectId: string | undefined,
+  /** One task's ref, {@link ANY_TASK}, or null for no subscription. */
+  taskRef: string | null,
+  onEvent: () => void,
+): void {
   const latest = useRef(onEvent);
   latest.current = onEvent;
   useEffect(() => {
@@ -39,7 +62,8 @@ export function useTaskEvents(
           fetch: api.getFetch(),
         })) {
           const event = (env as ChatEventEnvelope).event;
-          if (event.type !== 'task_event' || event.taskRef !== taskRef) continue;
+          if (event.type !== 'task_event') continue;
+          if (taskRef !== ANY_TASK && event.taskRef !== taskRef) continue;
           if (timer !== null) window.clearTimeout(timer);
           timer = window.setTimeout(() => {
             timer = null;

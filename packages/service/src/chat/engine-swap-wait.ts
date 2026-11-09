@@ -11,7 +11,9 @@
  * - a consultation the asker's turn is blocked on. Waiting for the asker's
  *   engine to go idle, or stepping aside so it can, would wait forever.
  * - ambient chores. They must not line a model swap up behind the person's
- *   turn, and are not worth cutting short for one.
+ *   turn, and are not worth cutting short for one. They bind as background
+ *   work (`EngineWaitOpts.background`): they never take an engine a turn was
+ *   just handed, and a turn never steps aside for their drain.
  */
 export function turnWaitsForEngineSwap(
   opts: { ambient?: boolean } | undefined,
@@ -21,10 +23,11 @@ export function turnWaitsForEngineSwap(
 }
 
 /**
- * How many times one send may step aside for a swap before it fails. Each
- * step waits a whole turn of the other model, so reaching this means the
- * engine changed hands that many times in the moment between this turn
- * getting its model back and starting on it.
+ * How many times one send may rebind before it fails — after stepping aside
+ * for a swap, or finding its engine evicted before it started. Each swap waits
+ * a whole turn of the other model, so reaching this means the engine changed
+ * hands that many times in the moment between this turn getting its model back
+ * and starting on it.
  */
 export const MAX_ENGINE_REBINDS_PER_SEND = 8;
 

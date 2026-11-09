@@ -1240,6 +1240,52 @@ button.bench-step-foot:disabled {
   font-weight: 400;
 }
 
+/* A stop that has not happened yet: a schedule's next run. Dashed like the
+   add stop, but it is a promise rather than a control. */
+.step-stop.is-upcoming {
+  border-style: dashed;
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+  background: var(--bg);
+}
+
+.bench-step.upcoming .bench-step-name {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.bench-step.upcoming .bench-step-status {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ── Schedule host: its runs take the bench ───────────────────────── */
+
+.task-bench-row > .schedule-runs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.schedule-runs-readout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0 0.75rem 0.6rem;
+}
+
+.schedule-runs-readout p {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.schedule-runs-readout button {
+  flex: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .status-active .step-stop::after {
     animation: none;

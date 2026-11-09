@@ -1243,6 +1243,56 @@ describe('measured accelerator headroom', () => {
     await expect(pool.ensure('mlx', 'fits', 0, 7 * GB)).resolves.toBeDefined();
   });
 
+  // The ledger counts a model larger than the card against a budget that
+  // includes system RAM, so a second model clears the ledger while the first
+  // one's engine fills the card. Captured: a 4.6 GB task model refused with
+  // 3.1 GB free while an idle 31B held the card, blaming "another program".
+  const cardFullOfIdleModel = (made: FakeProvider[]) => {
+    const broker = discreteBroker();
+    broker.setAllowRamSpillover(true);
+    const builder: ProviderBuilder = async ({ modelId, replicaIdx }) => {
+      const provider = new FakeProvider(`${modelId}:${replicaIdx}`);
+      made.push(provider);
+      return { provider, residentBytes: modelId === 'big' ? 9 * GB : 4 * GB };
+    };
+    const bigKey = makeEngineKey('mlx', 'big', 0);
+    const pool: ProviderPool = new ProviderPool({
+      broker,
+      builders: { mlx: builder },
+      vramHeadroom: async () => ({
+        freeBytes: pool.has(bigKey) ? 1 * GB : 11 * GB,
+        totalBytes: 12 * GB,
+      }),
+      sleep: async () => {},
+    });
+    return { broker, pool, bigKey };
+  };
+
+  it('unloads an idle model of its own when the ledger fits but the card is full', async () => {
+    const made: FakeProvider[] = [];
+    const { broker, pool, bigKey } = cardFullOfIdleModel(made);
+    await pool.ensure('mlx', 'big', 0, 9 * GB);
+    expect(broker.canReserve(4 * GB)).toBe(true);
+
+    const small = await pool.ensure('mlx', 'small', 0, 4 * GB);
+    expect(small).toBe(made[1]);
+    expect(made[0]?.shutdownCalls).toBe(1);
+    expect(pool.has(bigKey)).toBe(false);
+    expect(pool.has(makeEngineKey('mlx', 'small', 0))).toBe(true);
+  });
+
+  it('leaves a model foreground work holds on the card for background work', async () => {
+    const made: FakeProvider[] = [];
+    const { pool, bigKey } = cardFullOfIdleModel(made);
+    await pool.ensure('mlx', 'big', 0, 9 * GB);
+
+    await expect(pool.ensure('mlx', 'small', 0, 4 * GB, { background: true })).rejects.toThrow(
+      /while Gezel's other models are in use/,
+    );
+    expect(made[0]?.shutdownCalls).toBe(0);
+    expect(pool.has(bigKey)).toBe(true);
+  });
+
   it('never blocks a spawn on an unusable reading', async () => {
     const noReading = new ProviderPool({
       broker: discreteBroker(),
@@ -1465,5 +1515,120 @@ describe('ProviderPool released-reservation reclamation', () => {
     expect(pool.has(makeEngineKey('mlx', 'running', 0))).toBe(true);
     expect(made[0]!.shutdownCalls).toBe(0);
     expect(builder).toHaveBeenCalledTimes(2); // running + one denied new attempt
+  });
+});
+
+describe('ProviderPool background work', () => {
+  it('never evicts an engine foreground work was just handed', async () => {
+    // Captured: the task's model loaded, and before its turn reached the
+    // queue a night-shift summary evicted it as idle. The turn failed with
+    // "provider disposed (engine was evicted)".
+    const t = { now: 0 };
+    const made: BusyFakeProvider[] = [];
+    const pool = new ProviderPool({
+      broker: new CapacityBroker({ budgetBytes: 10 * GB }),
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+      now: () => t.now,
+      sleep: async () => {
+        t.now += 1_000;
+      },
+    });
+    await pool.ensure('mlx', 'task', 0, 10 * GB);
+
+    await expect(
+      pool.ensure('mlx', 'summarizer', 0, 10 * GB, { background: true, drainWaitMs: 10_000 }),
+    ).rejects.toMatchObject({ code: 'engine-busy' });
+    expect(pool.has(makeEngineKey('mlx', 'task', 0))).toBe(true);
+    expect(made[0]!.shutdownCalls).toBe(0);
+    expect(made).toHaveLength(1);
+    expect(pool.snapshot().entries[0]!.draining).toBe(false);
+  });
+
+  it('may unload an engine foreground work has left idle', async () => {
+    const t = { now: 0 };
+    const made: BusyFakeProvider[] = [];
+    const pool = new ProviderPool({
+      broker: new CapacityBroker({ budgetBytes: 10 * GB }),
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+      now: () => t.now,
+    });
+    await pool.ensure('mlx', 'task', 0, 10 * GB);
+    t.now += 60_000;
+
+    const summarizer = await pool.ensure('mlx', 'summarizer', 0, 10 * GB, { background: true });
+    expect(summarizer).toBe(made[1]);
+    expect(made[0]!.shutdownCalls).toBe(1);
+  });
+
+  it('neither makes a turn step aside nor keeps foreground work off its engine', async () => {
+    const t = { now: 0 };
+    const made: BusyFakeProvider[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const pool = new ProviderPool({
+      broker: new CapacityBroker({ budgetBytes: 10 * GB }),
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+      now: () => t.now,
+      sleep: () => gate,
+    });
+    const taskKey = makeEngineKey('mlx', 'task', 0);
+    await pool.ensure('mlx', 'task', 0, 10 * GB);
+    made[0]!.busy = true;
+
+    const summary = pool.ensure('mlx', 'summarizer', 0, 10 * GB, {
+      background: true,
+      drainWaitMs: 10_000,
+    });
+    await new Promise((r) => setTimeout(r, 5));
+    expect(pool.snapshot().entries[0]!.draining).toBe(true);
+    expect(pool.isDraining(taskKey)).toBe(false);
+    // The task's next turn binds its engine at once instead of waiting.
+    await expect(pool.ensure('mlx', 'task', 0, 10 * GB)).resolves.toBe(made[0]);
+
+    t.now += 11_000;
+    release();
+    await expect(summary).rejects.toMatchObject({ code: 'engine-busy' });
+    expect(made[0]!.shutdownCalls).toBe(0);
+    expect(pool.snapshot().entries[0]!.draining).toBe(false);
+  });
+
+  it('waits behind a foreground swap instead of reloading the model it drained', async () => {
+    // Captured: each time a task drained the summarizer's model, a queued
+    // summary reloaded it before the task's model could reserve its room.
+    const t = { now: 0 };
+    const made: BusyFakeProvider[] = [];
+    let steppedAside = false;
+    const taskKey = makeEngineKey('mlx', 'task', 0);
+    const pool: ProviderPool = new ProviderPool({
+      broker: new CapacityBroker({ budgetBytes: 10 * GB }),
+      builders: { mlx: mkBusyBuilder(10 * GB, made) },
+      now: () => t.now,
+      sleep: async () => {
+        t.now += 1_000;
+        if (t.now >= 5_000) made[0]!.busy = false; // the summary in flight finishes
+        steppedAside ||= pool.isDraining(taskKey);
+      },
+    });
+    await pool.ensure('mlx', 'summarizer', 0, 10 * GB, { background: true });
+    made[0]!.busy = true;
+
+    const task = pool.ensure('mlx', 'task', 0, 10 * GB, {
+      drainWaitMs: Number.POSITIVE_INFINITY,
+    });
+    const summary = pool.ensure('mlx', 'summarizer', 0, 10 * GB, {
+      background: true,
+      drainWaitMs: 20_000,
+    });
+
+    const [taskResult, summaryResult] = await Promise.allSettled([task, summary]);
+    expect(taskResult).toEqual({ status: 'fulfilled', value: made[1] });
+    expect(summaryResult).toMatchObject({ status: 'rejected', reason: { code: 'engine-busy' } });
+    expect(made).toHaveLength(2);
+    expect(made[1]!.shutdownCalls).toBe(0);
+    expect(pool.has(taskKey)).toBe(true);
+    expect(pool.has(makeEngineKey('mlx', 'summarizer', 0))).toBe(false);
+    expect(steppedAside).toBe(false);
   });
 });

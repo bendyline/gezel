@@ -211,6 +211,7 @@ export * from './tasks/work-time.js';
 export * from './tasks/step-turn-steering.js';
 export * from './tasks/step-dispatch-seed.js';
 export * from './tasks/step-routing.js';
+export * from './tasks/schedule-next-run.js';
 export * from './tools/access.js';
 export * from './tools/assignee-arg.js';
 export * from './tools/envelope.js';
