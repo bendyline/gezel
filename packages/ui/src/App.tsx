@@ -60,6 +60,15 @@ import {
 } from './components/tab-content-loaders.js';
 import { useHostNotifications } from './components/useHostNotifications.js';
 import { useIsFirstRun } from './components/useIsFirstRun.js';
+import { HistoryKeys } from './components/view-history/HistoryKeys.js';
+import {
+  ViewHistoryProvider,
+  ViewLocationRoot,
+  useViewHistoryApi,
+  useViewHistoryState,
+} from './components/view-history/ViewHistoryContext.js';
+import { useHistoryShortcuts } from './components/view-history/useHistoryShortcuts.js';
+import { currentEntry, selectionKey } from './components/view-history/view-history.js';
 import { readAppSurface } from './embedded/app-surface.js';
 import { type DocumentFocus, readDocumentFocus } from './embedded/document-focus.js';
 import { useBackNavigation } from './hooks/useBackNavigation.js';
@@ -202,7 +211,15 @@ function FullApp() {
   const [navigationOpen, setNavigationOpen] = useState(true);
   const openNavigation = useCallback(() => setNavigationOpen(true), []);
   const toggleNavigation = useCallback(() => setNavigationOpen((open) => !open), []);
-  useBackNavigation(compact, navigationOpen, openNavigation);
+  const [initialSelection] = useState(readStoredSelection);
+  // The view stack behind Back, Forward and the history menu. Every
+  // commitSelection adds a step unless told otherwise; a traversal changes
+  // the history first and the selection follows (see the revision effect).
+  const [viewHistoryState, viewHistoryDispatch] = useViewHistoryState(initialSelection);
+  const viewHistory = useViewHistoryApi(viewHistoryState, viewHistoryDispatch);
+  const { back: historyBack, forward: historyForward } = viewHistory;
+  useBackNavigation(compact, navigationOpen, openNavigation, viewHistory);
+  useHistoryShortcuts(viewHistory);
   const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [outputPaneMaximized, setOutputPaneMaximized] = useState(false);
   // Per-project signals painted on the sidebar rows: which projects have a
@@ -277,7 +294,7 @@ function FullApp() {
   // The single navigation selection. `null` = Meester home; otherwise the
   // entity / area shown in the main pane (routed by TabContent). Persisted
   // to localStorage so the last view is restored on boot.
-  const [selection, setSelection] = useState<RecentTab | null>(() => readStoredSelection());
+  const [selection, setSelection] = useState<RecentTab | null>(initialSelection);
   // Ref mirror so long-lived window-event listeners can read the latest
   // selection without re-subscribing.
   const selectionRef = useRef<RecentTab | null>(selection);
@@ -320,23 +337,43 @@ function FullApp() {
     window.addEventListener(OUTPUT_PANE_MAXIMIZED_EVENT, onMaximizedChange);
     return () => window.removeEventListener(OUTPUT_PANE_MAXIMIZED_EVENT, onMaximizedChange);
   }, []);
-  const commitSelection = useCallback((next: RecentTab | null) => {
-    // Any navigation closes the first-run window. The estimate is re-run on
-    // every config save, and a provider switched before its key is pasted
-    // reads as "not set up" — without this, saving in Settings would throw the
-    // user back to Home and clear their stored selection.
-    setupOpened.current = true;
-    beginNavigation(next ? tabKey(next) : 'home');
-    preloadTabData(next);
-    startTransition(() => setSelection(next));
-    setNavigationOpen(false);
-    try {
-      if (next) window.localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(next));
-      else window.localStorage.removeItem(SELECTION_STORAGE_KEY);
-    } catch {
-      /* private mode / quota — selection still lives in memory */
+  const commitSelection = useCallback(
+    (next: RecentTab | null, options?: CommitOptions) => {
+      // Any navigation closes the first-run window. The estimate is re-run on
+      // every config save, and a provider switched before its key is pasted
+      // reads as "not set up" — without this, saving in Settings would throw the
+      // user back to Home and clear their stored selection.
+      setupOpened.current = true;
+      const historyMode = options?.history ?? 'push';
+      if (historyMode !== 'none') viewHistoryDispatch({ type: historyMode, selection: next });
+      beginNavigation(next ? tabKey(next) : 'home');
+      preloadTabData(next);
+      startTransition(() => setSelection(next));
+      setNavigationOpen(false);
+      try {
+        if (next) window.localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(next));
+        else window.localStorage.removeItem(SELECTION_STORAGE_KEY);
+      } catch {
+        /* private mode / quota — selection still lives in memory */
+      }
+    },
+    [viewHistoryDispatch],
+  );
+
+  // Back, Forward or a pick from the history menu moved the stack: show the
+  // entry it landed on. A move inside one view (same selection) is the view's
+  // own business — useViewLocation hands it the place to restore.
+  const appliedHistoryRevision = useRef(viewHistoryState.revision);
+  useEffect(() => {
+    if (viewHistoryState.revision === appliedHistoryRevision.current) return;
+    appliedHistoryRevision.current = viewHistoryState.revision;
+    const entry = currentEntry(viewHistoryState.history);
+    if (selectionKey(entry.selection) !== selectionKey(selectionRef.current)) {
+      commitSelection(entry.selection, { history: 'none' });
+    } else {
+      setNavigationOpen(false);
     }
-  }, []);
+  }, [viewHistoryState, commitSelection]);
 
   useEffect(() => {
     if (!firstRun || setupOpened.current) return;
@@ -344,7 +381,7 @@ function FullApp() {
     // would otherwise hide Home. This is a startup affordance only: navigating
     // or saving settings closes the window below, so a later estimate cannot
     // reopen it underneath someone mid-task.
-    commitSelection(null);
+    commitSelection(null, { history: 'replace' });
   }, [firstRun, commitSelection]);
 
   useEffect(() => {
@@ -471,12 +508,17 @@ function FullApp() {
     const onDeleted = (e: Event) => {
       const detail = (e as CustomEvent<{ gezelId?: string }>).detail;
       if (!detail?.gezelId) return;
+      const gezelId = detail.gezelId;
+      viewHistoryDispatch({
+        type: 'purge',
+        isGone: (tab) => tab?.kind === 'gezel' && tab.id === gezelId,
+      });
       const sel = selectionRef.current;
-      if (sel?.kind === 'gezel' && sel.id === detail.gezelId) commitSelection(null);
+      if (sel?.kind === 'gezel' && sel.id === gezelId) commitSelection(null);
     };
     window.addEventListener('gezel:gezel-deleted', onDeleted);
     return () => window.removeEventListener('gezel:gezel-deleted', onDeleted);
-  }, [commitSelection]);
+  }, [commitSelection, viewHistoryDispatch]);
 
   // Project deletion → if the deleted project occupies the main pane,
   // return to the Meester home. Without clearing the persisted selection,
@@ -485,12 +527,21 @@ function FullApp() {
     const onDeleted = (e: Event) => {
       const detail = (e as CustomEvent<{ projectId?: string }>).detail;
       if (!detail?.projectId) return;
+      const projectId = detail.projectId;
+      // The project's tasks and scripts went with it.
+      viewHistoryDispatch({
+        type: 'purge',
+        isGone: (tab) =>
+          (tab?.kind === 'project' && tab.id === projectId) ||
+          (tab?.kind === 'task' && tab.ref.startsWith(`${projectId}/`)) ||
+          (tab?.kind === 'script' && tab.projectId === projectId),
+      });
       const sel = selectionRef.current;
-      if (sel?.kind === 'project' && sel.id === detail.projectId) commitSelection(null);
+      if (sel?.kind === 'project' && sel.id === projectId) commitSelection(null);
     };
     window.addEventListener('gezel:project-deleted', onDeleted);
     return () => window.removeEventListener('gezel:project-deleted', onDeleted);
-  }, [commitSelection]);
+  }, [commitSelection, viewHistoryDispatch]);
 
   // Document deletion → if the deleted doc (or a folder containing it) is
   // the current selection, fall back to Meester home. The Sidebar refreshes
@@ -499,17 +550,15 @@ function FullApp() {
     const onDeleted = (e: Event) => {
       const detail = (e as CustomEvent<{ path?: string }>).detail;
       if (!detail?.path) return;
-      const sel = selectionRef.current;
-      if (
-        sel?.kind === 'document' &&
-        (sel.path === detail.path || sel.path.startsWith(`${detail.path}/`))
-      ) {
-        commitSelection(null);
-      }
+      const path = detail.path;
+      const inside = (tab: RecentTab | null) =>
+        tab?.kind === 'document' && (tab.path === path || tab.path.startsWith(`${path}/`));
+      viewHistoryDispatch({ type: 'purge', isGone: inside });
+      if (inside(selectionRef.current)) commitSelection(null);
     };
     window.addEventListener('gezel:document-deleted', onDeleted);
     return () => window.removeEventListener('gezel:document-deleted', onDeleted);
-  }, [commitSelection]);
+  }, [commitSelection, viewHistoryDispatch]);
 
   // Document rename → keep a directly-open document (or a document inside a
   // renamed folder) attached to its new path instead of leaving a stale tab.
@@ -517,20 +566,20 @@ function FullApp() {
     const onRenamed = (e: Event) => {
       const detail = (e as CustomEvent<{ fromPath?: string; toPath?: string }>).detail;
       if (!detail?.fromPath || !detail.toPath) return;
+      const { fromPath, toPath } = detail;
+      const moved = (tab: RecentTab | null): RecentTab | null =>
+        tab?.kind === 'document' && (tab.path === fromPath || tab.path.startsWith(`${fromPath}/`))
+          ? { ...tab, path: `${toPath}${tab.path.slice(fromPath.length)}` }
+          : tab;
+      // Every visit to the renamed document follows it, the current one included.
+      viewHistoryDispatch({ type: 'rewrite', map: moved });
       const sel = selectionRef.current;
-      if (
-        sel?.kind === 'document' &&
-        (sel.path === detail.fromPath || sel.path.startsWith(`${detail.fromPath}/`))
-      ) {
-        commitSelection({
-          ...sel,
-          path: `${detail.toPath}${sel.path.slice(detail.fromPath.length)}`,
-        });
-      }
+      const next = moved(sel);
+      if (next !== sel) commitSelection(next, { history: 'none' });
     };
     window.addEventListener('gezel:document-renamed', onRenamed);
     return () => window.removeEventListener('gezel:document-renamed', onRenamed);
-  }, [commitSelection]);
+  }, [commitSelection, viewHistoryDispatch]);
 
   // Global search shortcuts: ⌘P / Ctrl+P → quick-open (names/files),
   // ⌘K / Ctrl+K → full unified search. Both focus the titlebar box via
@@ -727,6 +776,15 @@ function FullApp() {
         commitSelection(null);
         return;
       }
+      // View → Back / Forward in the app menu.
+      if (v === 'history:back') {
+        historyBack();
+        return;
+      }
+      if (v === 'history:forward') {
+        historyForward();
+        return;
+      }
       // The File menu's Add Folder…, and a folder opened from the Dock.
       if (v === 'add-folder' || v.startsWith('add-folder:')) {
         const path = v.slice('add-folder:'.length);
@@ -744,169 +802,188 @@ function FullApp() {
     };
     window.addEventListener('gezel:navigate', onCustomNavigate);
     return () => window.removeEventListener('gezel:navigate', onCustomNavigate);
-  }, [openArea, commitSelection]);
+    // The preload's onNavigate has no unsubscribe, so every dependency here
+    // must be stable or each re-run would add another IPC listener.
+  }, [openArea, commitSelection, historyBack, historyForward]);
 
   return (
-    <div className={`app${compact ? ' app-compact' : ''}${preview ? ' app-mobile-preview' : ''}`}>
-      {/* Global consent dialog for /v1/apps/register. Mounts here so a
+    <ViewHistoryProvider value={viewHistory}>
+      <div className={`app${compact ? ' app-compact' : ''}${preview ? ' app-mobile-preview' : ''}`}>
+        {/* Global consent dialog for /v1/apps/register. Mounts here so a
           pending grant can surface from any view without the user having
           to navigate to Settings → Integrations. */}
-      {runtimeCapabilities().connections && <GrantConsentDialog />}
-      {runtimeCapabilities().daemonSettings && <MacUninstallDialog />}
-      {runtimeCapabilities().daemonSettings && <StorageCleanupDialog />}
-      {runtimeCapabilities().backups && <BackupRestoreDialog />}
-      {runtimeCapabilities().daemonSettings && (
-        <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
-      )}
-      {/* gezel:// links from gezel.com: each opens a form or an article for
+        {runtimeCapabilities().connections && <GrantConsentDialog />}
+        {runtimeCapabilities().daemonSettings && <MacUninstallDialog />}
+        {runtimeCapabilities().daemonSettings && <StorageCleanupDialog />}
+        {runtimeCapabilities().backups && <BackupRestoreDialog />}
+        {runtimeCapabilities().daemonSettings && (
+          <ModelBundleImportController onEngineIdentified={openModelBundleSettings} />
+        )}
+        {/* gezel:// links from gezel.com: each opens a form or an article for
           the person to act on, never the work itself. */}
-      <DeepLinkHost onHome={goHome} />
-      {/* The top bar remains the OS title bar (drag region + native
+        <DeepLinkHost onHome={goHome} />
+        {/* The top bar remains the OS title bar (drag region + native
           window-control reservations via CSS padding). The brand mark routes
           to the Meester home. Compact layouts trade it for the navigation
           button instead of spending a separate content row: the navigation
           leads with Home, so the brand would be a second key for one place. */}
-      <HeaderDensityContext.Provider value={headerDensity}>
-        <header ref={headerRef} className="app-header" data-testid="app-header">
-          {/* Leads the bar, where a phone's menu button sits, and stays while
+        <HeaderDensityContext.Provider value={headerDensity}>
+          <header ref={headerRef} className="app-header" data-testid="app-header">
+            {/* Leads the bar, where a phone's menu button sits, and stays while
               the navigation is open so the keys beside it never shift. */}
-          {compact && (
-            <button
-              type="button"
-              className="app-header-navigation"
-              onClick={toggleNavigation}
-              aria-label="Navigation"
-              aria-pressed={navigationOpen}
-              title="Navigation"
-            >
-              <NavigationMenuIcon />
-            </button>
-          )}
-          {!compact && (
-            <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
-          )}
-          {/* Unified search is anchored near the brand so changing status-pill
+            {compact && (
+              <button
+                type="button"
+                className="app-header-navigation"
+                onClick={toggleNavigation}
+                aria-label="Navigation"
+                aria-pressed={navigationOpen}
+                title="Navigation"
+              >
+                <NavigationMenuIcon />
+              </button>
+            )}
+            {!compact && (
+              <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
+            )}
+            {/* Back, Forward and the trail of views visited. Compact layouts
+              leave them out (the bar has no room); the phone's Back walks the
+              same stack through useBackNavigation. */}
+            {!compact && <HistoryKeys />}
+            {/* Unified search is anchored near the brand so changing status-pill
             widths do not recenter it. It stays shrinkable in the flex row, so
             crowded titlebars still give the pills room without overlap — and
             because only its right edge moves when it shrinks, the results
             palette hangs off its left edge (`align="start"`) and holds still
             while the pills breathe. */}
-          {runtimeCapabilities().search && (
-            <>
-              <TitlebarSearch compact={compact} />
-              <SearchResultsOverlay />
-            </>
-          )}
-          {/* The empty stretch between the brand and the status cluster is the
+            {runtimeCapabilities().search && (
+              <>
+                <TitlebarSearch compact={compact} />
+                <SearchResultsOverlay />
+              </>
+            )}
+            {/* The empty stretch between the brand and the status cluster is the
             primary OS drag target — `.app-header-right`'s `margin-left: auto`
             pushes the pills right, leaving the remaining gap (and the
             reserved window-control padding) as draggable titlebar. */}
-          <div className="app-header-right" ref={headerClusterRef}>
-            <NarrationStopButton />
-            {/* First run is a conversation with the meester, and the welcome
+            <div className="app-header-right" ref={headerClusterRef}>
+              <NarrationStopButton />
+              {/* First run is a conversation with the meester, and the welcome
               already shows the one download in flight. Activity, engine,
               quota, indexing and tempo controls describe a running workshop
               (on a fresh install Activity counted the scheduled Night Shift
               oversight as "1 waiting"), so they join once there is one. */}
-            {!firstRun &&
-              (runtimeCapabilities().engineStatus || runtimeCapabilities().structuredQuestions) && (
-                <ActivityControl />
+              {!firstRun &&
+                (runtimeCapabilities().engineStatus ||
+                  runtimeCapabilities().structuredQuestions) && <ActivityControl />}
+              {!firstRun && runtimeCapabilities().connections && <WatchingIndicator />}
+              {!firstRun && runtimeCapabilities().engineStatus && <EngineStatusPill />}
+              {!firstRun && runtimeCapabilities().daemonSettings && (
+                <>
+                  <ClaudeCliPoolPill />
+                  <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
+                </>
               )}
-            {!firstRun && runtimeCapabilities().connections && <WatchingIndicator />}
-            {!firstRun && runtimeCapabilities().engineStatus && <EngineStatusPill />}
-            {!firstRun && runtimeCapabilities().daemonSettings && (
-              <>
-                <ClaudeCliPoolPill />
-                <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
-              </>
-            )}
-            {/* The header tray: icon keys set into one slot, read as a
+              {/* The header tray: icon keys set into one slot, read as a
               toolbar beside the status readouts. */}
-            {((!firstRun && runtimeCapabilities().daemonSettings) || outputPaneMaximized) && (
-              <div className="app-header-tray">
-                {!firstRun && runtimeCapabilities().daemonSettings && (
-                  <TaskSpeedMenu
-                    mode={engagementMode}
-                    nightShift={nightShift}
-                    onNightShiftChange={setNightShift}
-                  />
-                )}
-                {outputPaneMaximized && (
-                  <button
-                    type="button"
-                    className="app-output-restore"
-                    onClick={requestOutputPaneRestore}
-                    title="Restore output pane (F5)"
-                    aria-label="Restore output pane"
-                  >
-                    <OutputPaneRestoreIcon />
-                  </button>
-                )}
-              </div>
+              {((!firstRun && runtimeCapabilities().daemonSettings) || outputPaneMaximized) && (
+                <div className="app-header-tray">
+                  {!firstRun && runtimeCapabilities().daemonSettings && (
+                    <TaskSpeedMenu
+                      mode={engagementMode}
+                      nightShift={nightShift}
+                      onNightShiftChange={setNightShift}
+                    />
+                  )}
+                  {outputPaneMaximized && (
+                    <button
+                      type="button"
+                      className="app-output-restore"
+                      onClick={requestOutputPaneRestore}
+                      title="Restore output pane (F5)"
+                      aria-label="Restore output pane"
+                    >
+                      <OutputPaneRestoreIcon />
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          </header>
+        </HeaderDensityContext.Provider>
+        {compact && (outputPaneMaximized || preview) && (
+          <div className="app-compact-navigation">
+            {outputPaneMaximized && (
+              <button
+                type="button"
+                onClick={requestOutputPaneRestore}
+                aria-label="Restore output pane"
+              >
+                Restore workspace
+              </button>
+            )}
+            {preview && (
+              <button type="button" onClick={exitPreview}>
+                Exit mobile preview
+              </button>
             )}
           </div>
-        </header>
-      </HeaderDensityContext.Provider>
-      {compact && (outputPaneMaximized || preview) && (
-        <div className="app-compact-navigation">
-          {outputPaneMaximized && (
-            <button
-              type="button"
-              onClick={requestOutputPaneRestore}
-              aria-label="Restore output pane"
-            >
-              Restore workspace
-            </button>
-          )}
-          {preview && (
-            <button type="button" onClick={exitPreview}>
-              Exit mobile preview
-            </button>
-          )}
-        </div>
-      )}
-      <FirstRunProvider value={firstRun}>
-        <ResponsiveAppShell
-          compact={compact}
-          navigationOpen={navigationOpen}
-          navigation={
-            <Sidebar
-              compact={compact}
-              selection={selection}
-              onSelect={commitSelection}
-              onOpenArea={openArea}
-              onPreload={preloadSelection}
-              activeProjectIds={activeProjectIds}
-              activeGezelIds={activeGezelIds}
-              pendingByProject={pendingByProject}
-              poisonedProjects={poisonedProjects}
-            />
-          }
-        >
-          <Suspense fallback={null}>
-            {selection === null ? (
-              <HomeView
-                platform={window.__GEZEL__?.platform}
-                onNavigate={(v) => {
-                  if (v === 'home') commitSelection(null);
-                  else openArea(v);
-                }}
+        )}
+        <FirstRunProvider value={firstRun}>
+          <ResponsiveAppShell
+            compact={compact}
+            navigationOpen={navigationOpen}
+            navigation={
+              <Sidebar
+                compact={compact}
+                selection={selection}
+                onSelect={commitSelection}
+                onOpenArea={openArea}
+                onPreload={preloadSelection}
+                activeProjectIds={activeProjectIds}
+                activeGezelIds={activeGezelIds}
+                pendingByProject={pendingByProject}
+                poisonedProjects={poisonedProjects}
               />
-            ) : (
-              <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
-                <TabContent
-                  tab={selection}
-                  activeProjectsByGezel={activeProjectsByGezel}
-                  activeTurnsReady={activeTurnsReady}
-                />
-              </TabErrorBoundary>
-            )}
-          </Suspense>
-        </ResponsiveAppShell>
-      </FirstRunProvider>
-      {runtimeCapabilities().connections && <LookoutAlertToast />}
-    </div>
+            }
+          >
+            <Suspense fallback={null}>
+              <ViewLocationRoot selection={selection}>
+                {selection === null ? (
+                  <HomeView
+                    platform={window.__GEZEL__?.platform}
+                    onNavigate={(v) => {
+                      if (v === 'home') commitSelection(null);
+                      else openArea(v);
+                    }}
+                  />
+                ) : (
+                  <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
+                    <TabContent
+                      tab={selection}
+                      activeProjectsByGezel={activeProjectsByGezel}
+                      activeTurnsReady={activeTurnsReady}
+                    />
+                  </TabErrorBoundary>
+                )}
+              </ViewLocationRoot>
+            </Suspense>
+          </ResponsiveAppShell>
+        </FirstRunProvider>
+        {runtimeCapabilities().connections && <LookoutAlertToast />}
+      </div>
+    </ViewHistoryProvider>
   );
+}
+
+interface CommitOptions {
+  /**
+   * How the view stack records this move. `push` (the default) adds a step;
+   * `replace` swaps the current one (a move the person did not make);
+   * `none` leaves the stack alone (Back/Forward already moved it, or a
+   * rename it has already followed).
+   */
+  history?: 'push' | 'replace' | 'none';
 }
 
 function OutputPaneRestoreIcon() {

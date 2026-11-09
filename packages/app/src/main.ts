@@ -2874,6 +2874,22 @@ function installMenu(): void {
     {
       label: 'View',
       submenu: [
+        // The page owns these keys (and the mouse's side buttons), so a key
+        // typed into a field stays with the field. The accelerators here are
+        // shown, not registered.
+        {
+          label: 'Back',
+          accelerator: isMac ? 'Cmd+[' : 'Alt+Left',
+          registerAccelerator: false,
+          click: () => navigateTo('history:back'),
+        },
+        {
+          label: 'Forward',
+          accelerator: isMac ? 'Cmd+]' : 'Alt+Right',
+          registerAccelerator: false,
+          click: () => navigateTo('history:forward'),
+        },
+        { type: 'separator' },
         ...viewTabs.map(
           (t): Electron.MenuItemConstructorOptions => ({
             label: t.label,

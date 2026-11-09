@@ -1,13 +1,24 @@
 import { useEffect } from 'react';
 import { markBackDismiss } from '../back-dismiss.js';
 
+/** The part of the view stack the Back gesture needs (ViewHistoryContext.tsx). */
+export interface BackHistory {
+  canGoBack: boolean;
+  back: () => void;
+}
+
 /** The native Back gesture follows the same overlay dismissal and navigation
- * state as the visible controls. Hidden panes remain mounted with their drafts. */
+ * state as the visible controls: an open overlay closes first, then the view
+ * stack steps back, then a compact layout opens its navigation. Anything left
+ * unhandled goes to the system. Hidden panes remain mounted with their drafts. */
 export function useBackNavigation(
   compact: boolean,
   navigationOpen: boolean,
   openNavigation: () => void,
+  history?: BackHistory,
 ): void {
+  const canGoBack = history?.canGoBack ?? false;
+  const goBack = history?.back;
   useEffect(() => {
     const back = (event: Event) => {
       const overlay = [
@@ -31,6 +42,9 @@ export function useBackNavigation(
         // tell this apart from the user pressing the key.
         markBackDismiss(dismiss);
         (document.activeElement ?? document).dispatchEvent(dismiss);
+      } else if (canGoBack && goBack) {
+        event.preventDefault();
+        goBack();
       } else if (compact && !navigationOpen) {
         event.preventDefault();
         openNavigation();
@@ -38,5 +52,5 @@ export function useBackNavigation(
     };
     window.addEventListener('gezel:back', back);
     return () => window.removeEventListener('gezel:back', back);
-  }, [compact, navigationOpen, openNavigation]);
+  }, [compact, navigationOpen, openNavigation, canGoBack, goBack]);
 }

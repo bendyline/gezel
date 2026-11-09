@@ -3,6 +3,7 @@ import {
   type Project,
   type Task,
   type TaskStatus,
+  parseTaskRef,
   taskEffectiveStatus,
 } from '@bendyline/gezel';
 import {
@@ -16,6 +17,11 @@ import {
 import { api } from '../api.js';
 import { TASK_STATUS_KEY_ORDER, TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
+import {
+  ViewLocationScope,
+  useRestoredViewPart,
+  useViewLocation,
+} from '../components/view-history/ViewHistoryContext.js';
 import { DropdownChevron, DropdownMenu, Select } from '../primitives/index.js';
 import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
@@ -235,7 +241,10 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
   const [hasLoadedTasks, setHasLoadedTasks] = useState(false);
   const requestVersion = useRef(0);
   const [expandedParents, setExpandedParents] = useState<Set<string>>(() => new Set());
+  // Back to this list reopens the task it was left on.
+  const restoredPart = useRestoredViewPart('tasks');
   const [selectedRef, setSelectedRef] = useState<string | null>(() => {
+    if (typeof restoredPart?.value === 'string') return restoredPart.value;
     try {
       return projectId === undefined
         ? window.localStorage.getItem(SELECTED_TASK_STORAGE_KEY)
@@ -284,6 +293,24 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
     },
     [commitSelection],
   );
+
+  // The view stack: one chosen task is a place. A multi-selection (a drag or
+  // shift-click across rows) is a working state, not somewhere to come back to.
+  const singleRef = selectedRefs.size <= 1 ? selectedRef : null;
+  const singleTitle = singleRef ? tasks.find((task) => task.ref === singleRef)?.title : undefined;
+  const tasksLocation = useViewLocation('tasks', {
+    part: singleRef
+      ? {
+          key: singleRef,
+          value: singleRef,
+          label: singleTitle ?? `Task ${parseTaskRef(singleRef)?.num ?? singleRef}`,
+        }
+      : null,
+    onRestore: (part) => {
+      if (typeof part.value === 'string') openTask(part.value);
+    },
+  });
+  const replaceNextLocation = tasksLocation.replaceNext;
 
   useEffect(() => {
     if (projectId !== undefined) setProjectFilter(projectId);
@@ -364,18 +391,24 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
     const available = new Set(selectableRefs);
     const current = selectedRefsRef.current;
     const next = new Set([...current].filter((ref) => available.has(ref)));
+    // Landing on the newest task, or dropping one a filter hid, is the list
+    // correcting itself rather than the person moving: no step of its own.
     if (next.size === 0) {
       const first = selectableRefs[0];
       if (first) {
         selectionAnchorRef.current = first;
+        replaceNextLocation(first);
         commitSelection(new Set([first]), first);
       }
       return;
     }
     const unchanged = next.size === current.size && [...next].every((ref) => current.has(ref));
     const primary = selectedRef && next.has(selectedRef) ? selectedRef : ([...next].at(-1) ?? null);
-    if (!unchanged || primary !== selectedRef) commitSelection(next, primary);
-  }, [commitSelection, selectableRefs, selectedRef]);
+    if (!unchanged || primary !== selectedRef) {
+      if (next.size === 1 && primary) replaceNextLocation(primary);
+      commitSelection(next, primary);
+    }
+  }, [commitSelection, selectableRefs, selectedRef, replaceNextLocation]);
 
   const refsBetween = useCallback(
     (anchor: string, target: string) => {
@@ -766,7 +799,13 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
           {selectedTasks.length > 1 ? (
             <BulkTaskDetail tasks={selectedTasks} onTaskChanged={onTaskChanged} />
           ) : selectedRef ? (
-            <TaskTabContent key={selectedRef} taskRef={selectedRef} onTaskChanged={onTaskChanged} />
+            <ViewLocationScope location={tasksLocation}>
+              <TaskTabContent
+                key={selectedRef}
+                taskRef={selectedRef}
+                onTaskChanged={onTaskChanged}
+              />
+            </ViewLocationScope>
           ) : (
             <p className="placeholder">Click a task to view it here.</p>
           )}

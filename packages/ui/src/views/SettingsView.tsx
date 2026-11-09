@@ -42,6 +42,10 @@ import { shortModelName } from '../components/model-display-name.js';
 import { providerLabel } from '../components/provider-label.js';
 import { useCopilotAvailability } from '../components/useCopilotAvailability.js';
 import { useTotalRamBytes } from '../components/useTotalRamBytes.js';
+import {
+  useRestoredViewPart,
+  useViewLocation,
+} from '../components/view-history/ViewHistoryContext.js';
 import { Poppetje } from '../poppetje/index.js';
 import { Select } from '../primitives/index.js';
 import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
@@ -239,6 +243,43 @@ type SectionId =
   | 'about'
   | 'benchmarks';
 
+const SECTION_IDS: ReadonlySet<string> = new Set<SectionId>([
+  'general',
+  'deviceIntegration',
+  'team',
+  'aboutYou',
+  'folders',
+  'defaults',
+  'copilot',
+  'openai',
+  'codexCli',
+  'anthropic',
+  'anthropicCli',
+  'ollama',
+  'llamaCpp',
+  'mlx',
+  'ds4',
+  'imageEngine',
+  'videoEngine',
+  'imageRecognition',
+  'audio',
+  'webSearch',
+  'channels',
+  'connectedApps',
+  'remoteServers',
+  'toolsets',
+  'knowledge',
+  'securityCompliance',
+  'accounts',
+  'about',
+  'benchmarks',
+]);
+
+/** A section the view stack may restore. Never the Workloads heading, which opens no page. */
+function isSectionId(value: unknown): value is SectionId {
+  return typeof value === 'string' && SECTION_IDS.has(value);
+}
+
 function preloadSettingsSection(section: SectionId): void {
   let loading: Promise<unknown> | undefined;
   switch (section) {
@@ -417,10 +458,27 @@ function DaemonSettingsView() {
   // section so the deep link doesn't race the event listener below. The
   // read is non-destructive and the clear waits for a committed mount: a
   // lazy view's first render can be discarded — see settings-nav.ts.
+  // A link that names a section wins; otherwise Back's restored section.
+  const restoredSection = useRestoredViewPart('settings');
   const [section, setSection] = useState<SectionId>(
-    () => (peekPendingSettingsSection() as SectionId | null) ?? 'general',
+    () =>
+      (peekPendingSettingsSection() as SectionId | null) ??
+      (isSectionId(restoredSection?.value) ? restoredSection.value : 'general'),
   );
   useEffect(() => clearPendingSettingsSection(), []);
+  // The view stack: each section is a place. Declared ahead of the redirect
+  // effects below so their replaceNext lands on the report it is meant for.
+  const sectionLabels = useMemo(
+    () => new Map(buildSections(window.__GEZEL__?.platform).map((s) => [s.id, s.label])),
+    [],
+  );
+  const settingsLocation = useViewLocation('settings', {
+    part: { key: section, value: section, label: sectionLabels.get(section) ?? 'Settings' },
+    onRestore: (part) => {
+      if (isSectionId(part.value)) setSection(part.value);
+    },
+  });
+  const replaceNextLocation = settingsLocation.replaceNext;
   // Collapsed nav groups (expanded by default → empty set). The "Artificial
   // Intelligence" and "Workloads" headers toggle membership here.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<SettingsGroup>>(() => new Set());
@@ -551,9 +609,10 @@ function DaemonSettingsView() {
   // config to load before deciding, or the first paint bounces the user out.
   useEffect(() => {
     if (section === 'channels' && config && config.showWorkInProgressFeatures !== true) {
+      replaceNextLocation('general');
       setSection('general');
     }
-  }, [section, config]);
+  }, [section, config, replaceNextLocation]);
 
   const setMeester = useCallback(async (id: string) => {
     setStatus('saving…');
@@ -1712,8 +1771,11 @@ function DaemonSettingsView() {
   // "any section missing from `sections`" — config loads async, and a blanket
   // rule would bounce every deep link before its gate had an answer.
   useEffect(() => {
-    if (externalChatBlocked && EXTERNAL_CHAT_SECTIONS.has(section)) setSection('defaults');
-  }, [externalChatBlocked, section]);
+    if (externalChatBlocked && EXTERNAL_CHAT_SECTIONS.has(section)) {
+      replaceNextLocation('defaults');
+      setSection('defaults');
+    }
+  }, [externalChatBlocked, section, replaceNextLocation]);
 
   const activeSectionGroup = useMemo(
     () => sections.find((s) => s.id === section)?.group,

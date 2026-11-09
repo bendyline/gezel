@@ -44,6 +44,10 @@ import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
 import { useSocialMode } from '../components/useSocialMode.js';
+import {
+  useRestoredViewPart,
+  useViewLocation,
+} from '../components/view-history/ViewHistoryContext.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { type ItemSlot, Poppetje, PoppetjeItem } from '../poppetje/index.js';
 import { Dialog, Select, Tabs } from '../primitives/index.js';
@@ -54,6 +58,21 @@ import './GezelDetail.css';
 import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 
 type DetailTab = 'about' | 'appearance' | 'growth' | 'chat' | 'toolsets' | 'memories' | 'settings';
+
+/** Each tab's name as its trigger shows it, for the history menu. */
+const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
+  chat: 'Chat',
+  about: 'About',
+  appearance: 'Appearance',
+  growth: 'Growth',
+  toolsets: 'Toolsets',
+  memories: 'Memories',
+  settings: 'Settings',
+};
+
+function isDetailTab(value: unknown): value is DetailTab {
+  return typeof value === 'string' && value in DETAIL_TAB_LABELS;
+}
 
 interface GezelDetailProps {
   gezelId: string;
@@ -81,7 +100,11 @@ export function GezelDetail({
   const [generatingAbout, setGeneratingAbout] = useState(false);
   const [applyingAbout, setApplyingAbout] = useState(false);
   const [aboutRev, setAboutRev] = useState(0);
-  const [detailTab, setDetailTab] = useState<DetailTab>('chat');
+  // Back to this gezel reopens the tab it was left on.
+  const restoredPart = useRestoredViewPart('gezel');
+  const [detailTab, setDetailTab] = useState<DetailTab>(() =>
+    isDetailTab(restoredPart?.value) ? restoredPart.value : 'chat',
+  );
   const [projectPickerSlot, setProjectPickerSlot] = useState<HTMLSpanElement | null>(null);
   const [showIterate, setShowIterate] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
@@ -104,6 +127,22 @@ export function GezelDetail({
       ? 'chat'
       : detailTab;
   const generationEngineLabel = useGenerationEngineLabel(selected?.fixedFunction);
+  // The view stack: each tab is a place. Reported once the gezel has loaded,
+  // since which tabs exist depends on it.
+  useViewLocation('gezel', {
+    part:
+      selected?.id === gezelId
+        ? {
+            key: activeDetailTab,
+            value: activeDetailTab,
+            label: DETAIL_TAB_LABELS[activeDetailTab],
+          }
+        : null,
+    title: selected?.id === gezelId ? selected.name : undefined,
+    onRestore: (part) => {
+      if (isDetailTab(part.value)) setDetailTab(part.value);
+    },
+  });
 
   const selectedRef = useRef<GezelDetailData | null>(null);
   const saveAbout = useCallback(

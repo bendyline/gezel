@@ -330,6 +330,10 @@ public final class MobileUiSmokeTest {
             await api('/api/projects/' + project.id + '/gezels', 'POST', {gezelId:crew.id});
             await api('/api/projects/' + project.id, 'PUT', {voormanGezelId:crew.id});
             await api('/api/config', 'PUT', {provider:'llama-cpp',meesterGezelId:crew.id});
+            // Start from Home with an empty trail of visited views, whatever
+            // an earlier test left open.
+            localStorage.removeItem('gezel:nav:selection');
+            sessionStorage.removeItem('gezel:nav:history');
             return true;
             """);
         reload();
@@ -354,6 +358,14 @@ public final class MobileUiSmokeTest {
         run("""
             await until(()=>!visible(document.querySelector('[role="alertdialog"]')),'Back dismisses dialog');
             check(!visible(document.querySelector('[data-testid="app-sidebar"]')),'Modal Back must keep project chat open');
+            return true;
+            """);
+        hardwareBack();
+        // With nothing open, Back steps back through the views visited:
+        // the project was opened from Home, so it returns there first.
+        run("""
+            await until(()=>window.localStorage.getItem('gezel:nav:selection')===null,'Back returns to Home');
+            check(!visible(document.querySelector('[data-testid="app-sidebar"]')),'Back to Home must not open navigation');
             return true;
             """);
         hardwareBack();

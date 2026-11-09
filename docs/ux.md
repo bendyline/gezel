@@ -442,6 +442,47 @@ follows five rules now.
   compact header's 44px keys keep their own lighter face and the corner
   status light; none of this desktop styling applies there.
 
+### Back and forward
+
+Gezel keeps a trail of the views a person visits, the way a browser tab
+does: a parent task, then its child task, then the project, then the
+project's Chat tab. Back, Forward and the trail itself sit in one tray at
+the left of the titlebar, right after the brand
+([HistoryKeys.tsx](../packages/ui/src/components/view-history/HistoryKeys.tsx)).
+
+- **Three keys, one tray.** Back and Forward are titlebar keys in a
+  `.app-header-history` tray. A narrow third key with the dropdown chevron
+  opens the trail. The arrows are the rail's caret turned to point the way
+  they lead; never use `DropdownChevron` for them. A key with nowhere to go
+  stays in place, dimmed and flat, so the tray never changes shape. The
+  narrowest bars drop the trail key first. Right-clicking either arrow
+  opens the same trail, as in a browser.
+- **Keys name where they lead.** The tooltip and accessible name say
+  "Back to Invoices · Tasks", never just "Back", plus the shortcut:
+  Alt+Left/Right, or ⌘[ / ⌘] on macOS. The mouse's side buttons work too.
+  Shortcuts typed into a field belong to the field.
+- **The trail reads newest first.** Each item shows the view's own name on
+  the first line (a project's or task's title, else the area's label) and
+  where inside it on one muted hint line ("Tasks · Draft the invoices"),
+  else what kind of thing it is. The current view carries a check.
+- **What counts as a view.** A step is a top-level selection, a tab inside a
+  view (a project's Chat or Tasks, a gezel's tabs, a Settings section, a
+  task's Task or Chat), or one chosen item in a list (a task in Tasks, a
+  Knowledge article). Dialogs, scroll position, a run's step panels, a
+  multi-selection, and the compact navigation screen are not steps. A view
+  correcting itself, such as landing on its first row or leaving a section
+  that closed, adds no step. Views report this through `useViewLocation`
+  ([ViewHistoryContext.tsx](../packages/ui/src/components/view-history/ViewHistoryContext.tsx));
+  a new view with tabs or a list should report its place the same way.
+- **Back reopens the place, not just the screen.** Going back to a project
+  reopens the tab it was left on, and the task chosen on that tab.
+- **One window session.** The trail survives a reload or a service restart
+  and ends when the app quits. Deleting something removes it from the trail.
+  At most 50 steps are kept.
+- **Phones and narrow windows.** The compact bar has no room for the tray.
+  The phone's Back closes an open overlay first, then steps back through
+  the trail, then opens navigation, and only after that leaves the app.
+
 ## Controls: checkbox cards
 
 Keys latch **one** choice. When several options may be picked at once — the

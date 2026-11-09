@@ -412,7 +412,8 @@
     .quota-meter,
     .boekwachter-pill,
     .app-engagement-trigger,
-    .app-output-restore
+    .app-output-restore,
+    .app-history-key
   ) {
   height: var(--titlebar-control-h);
   padding-block: 0;
@@ -434,7 +435,8 @@
     .quota-meter,
     .boekwachter-pill:where(button),
     .app-engagement-trigger,
-    .app-output-restore
+    .app-output-restore,
+    .app-history-key:not(:disabled)
   ):hover {
   background: var(--titlebar-key-bg-hover);
 }
@@ -448,7 +450,8 @@
     .quota-meter,
     .boekwachter-pill:where(button),
     .app-engagement-trigger,
-    .app-output-restore
+    .app-output-restore,
+    .app-history-key:not(:disabled)
   ):active,
 .app-header
   :is(
@@ -457,7 +460,8 @@
     .queue-meter-button-open,
     .quota-meter[aria-expanded="true"],
     .boekwachter-pill[data-state="open"],
-    .app-engagement-trigger[data-state="open"]
+    .app-engagement-trigger[data-state="open"],
+    .app-history-trail[data-state="open"]
   ) {
   background: var(--titlebar-key-pressed-bg);
   box-shadow: var(--titlebar-key-pressed-shadow);
@@ -529,6 +533,123 @@
   outline: none;
   box-shadow: var(--titlebar-key-shadow), inset 0 0 0 2px
     color-mix(in srgb, var(--titlebar-ink) 75%, transparent);
+}
+
+/* ── Back and forward ─────────────────────────────────────────────────────
+   Three keys in one tray beside the brand (docs/ux.md, "Back and forward"):
+   Back, Forward, and a narrow key that opens the trail of views visited. The
+   tray tucks in closer to the brand than the bar's usual gap, and the search
+   that follows gives up its own lead margin, so the search moves right by
+   about the tray's width and no more. Wide layouts only; the compact bar has
+   no room and the phone's Back walks the same stack. */
+.app-header-history {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--titlebar-control-h);
+  margin-left: -0.75rem;
+  padding: 2px;
+  border: 1px solid var(--titlebar-well-border);
+  border-radius: var(--radius-lg);
+  background: var(--titlebar-well-bg);
+  box-shadow: var(--titlebar-well-shadow);
+}
+
+.app-header-history + .titlebar-search {
+  margin-left: clamp(0px, 1.5vw, 16px);
+}
+
+.app-header .app-header-history > .app-history-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 26px;
+  height: 100%;
+  padding: 0;
+  color: var(--titlebar-ink);
+  cursor: pointer;
+}
+
+.app-header .app-header-history > .app-history-trail {
+  width: 18px;
+}
+
+.app-header-history > .app-history-key > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.app-header-history > .app-history-trail > svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Nowhere to go: the key stays in place, dimmed and flat, so the tray never
+   changes shape as the trail grows. */
+.app-header .app-header-history > .app-history-key:disabled {
+  cursor: default;
+  color: color-mix(in srgb, var(--titlebar-ink) 42%, transparent);
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.app-header-history > .app-history-key:focus-visible {
+  outline: none;
+  box-shadow: var(--titlebar-key-shadow), inset 0 0 0 2px
+    color-mix(in srgb, var(--titlebar-ink) 75%, transparent);
+}
+
+/* The narrowest bars keep Back and Forward and let the trail key go; right-
+   clicking either arrow still opens the trail. */
+@container app-header (max-width: 640px) {
+  .app-header-history > .app-history-trail {
+    display: none;
+  }
+}
+
+.view-history-menu {
+  min-width: 14rem;
+  max-width: 22rem;
+}
+
+.view-history-menu-item {
+  align-items: flex-start;
+}
+
+.view-history-menu-mark {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin-top: 0.15rem;
+}
+
+.view-history-menu-mark > svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.view-history-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.view-history-menu-title,
+.view-history-menu-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.view-history-menu-hint {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 400;
 }
 
 /* ── Unified titlebar search ──────────────────────────────────────────────

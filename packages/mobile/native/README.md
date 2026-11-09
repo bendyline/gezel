@@ -198,8 +198,9 @@ WebViews. `test-html-preview.mjs` verifies relative assets and escaping in Chrom
 shared UI tests verify snapshot disposal and that forged page RPC is ignored.
 
 Android system Back dispatches the cancelable `gezel:back` event to the packaged
-main document. The shared responsive UI dismisses overlays first, then reveals
-navigation while preserving the mounted draft. An unhandled event (or a stalled
+main document. The shared responsive UI dismisses overlays first, then steps
+back through the views visited (the same trail as the desktop's Back key), then
+reveals navigation while preserving the mounted draft. An unhandled event (or a stalled
 renderer) delegates to Android's ordinary Back behavior; native code does not own
 a separate navigation model. The Android UI smoke uses real system Back actions
 and checks both a popover and the shared backup dialog before reopening the draft.

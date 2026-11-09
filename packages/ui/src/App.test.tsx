@@ -269,6 +269,116 @@ describe('Responsive navigation in the desktop app', () => {
   });
 });
 
+describe('View history', () => {
+  let narrow = false;
+  let mediaEvents: EventTarget;
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.sessionStorage.clear();
+    narrow = false;
+    mediaEvents = new EventTarget();
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn(() => ({
+        get matches() {
+          return narrow;
+        },
+        addEventListener: mediaEvents.addEventListener.bind(mediaEvents),
+        removeEventListener: mediaEvents.removeEventListener.bind(mediaEvents),
+      })),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const openTab = (detail: Record<string, unknown>) =>
+    act(() => {
+      window.dispatchEvent(new CustomEvent('gezel:open-tab', { detail }));
+    });
+
+  it('walks back and forward through the views visited', async () => {
+    render(<App />);
+    const back = await screen.findByTestId('history-back');
+    const forward = screen.getByTestId('history-forward');
+    expect(back).toBeDisabled();
+
+    openTab({ kind: 'project', id: 'p1' });
+    expect(await screen.findByText('project:p1')).toBeInTheDocument();
+    openTab({ kind: 'gezel', id: 'g1' });
+    expect(await screen.findByText('gezel:g1')).toBeInTheDocument();
+    expect(back).toHaveAccessibleName('Back to Project');
+
+    fireEvent.click(back);
+    expect(await screen.findByText('project:p1')).toBeInTheDocument();
+    fireEvent.click(back);
+    expect(await screen.findByText('Home view')).toBeInTheDocument();
+    expect(back).toBeDisabled();
+
+    fireEvent.click(forward);
+    expect(await screen.findByText('project:p1')).toBeInTheDocument();
+    // Alt+Left / Cmd+[ and the mouse's back button step back too.
+    fireEvent.keyDown(window, { key: 'ArrowLeft', altKey: true });
+    fireEvent.keyDown(window, { key: '[', metaKey: true });
+    expect(await screen.findByText('Home view')).toBeInTheDocument();
+    fireEvent.mouseUp(window, { button: 4 });
+    expect(await screen.findByText('project:p1')).toBeInTheDocument();
+    fireEvent.mouseUp(window, { button: 3 });
+    expect(await screen.findByText('Home view')).toBeInTheDocument();
+  });
+
+  it('follows the app menu and leaves keys typed into a field alone', async () => {
+    render(<App />);
+    openTab({ kind: 'project', id: 'p1' });
+    const draft = await screen.findByRole('textbox', { name: 'Project draft' });
+    fireEvent.keyDown(draft, { key: 'ArrowLeft', altKey: true });
+    fireEvent.keyDown(draft, { key: '[', metaKey: true });
+    expect(screen.getByText('project:p1')).toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(new CustomEvent('gezel:navigate', { detail: { view: 'history:back' } }));
+    });
+    expect(await screen.findByText('Home view')).toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('gezel:navigate', { detail: { view: 'history:forward' } }),
+      );
+    });
+    expect(await screen.findByText('project:p1')).toBeInTheDocument();
+  });
+
+  it('forgets a deleted project and everything inside it', async () => {
+    render(<App />);
+    openTab({ kind: 'project', id: 'p1' });
+    openTab({ kind: 'task', ref: 'p1/3' });
+    openTab({ kind: 'project', id: 'p2' });
+    expect(await screen.findByText('project:p2')).toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('gezel:project-deleted', { detail: { projectId: 'p1' } }),
+      );
+    });
+    fireEvent.click(screen.getByTestId('history-back'));
+    expect(await screen.findByText('Home view')).toBeInTheDocument();
+    expect(screen.getByTestId('history-back')).toBeDisabled();
+  });
+
+  it('lets the phone Back step through views before it opens navigation', async () => {
+    narrow = true;
+    render(<App />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
+    expect(await screen.findByText('project:mobile-project')).toBeVisible();
+    expect(screen.queryByTestId('history-back')).toBeNull();
+    let handled = false;
+    act(() => {
+      handled = !window.dispatchEvent(new CustomEvent('gezel:back', { cancelable: true }));
+    });
+    expect(handled).toBe(true);
+    expect(await screen.findByText('Home view')).toBeInTheDocument();
+  });
+});
+
 describe('Output pane titlebar restore', () => {
   beforeEach(() => {
     window.localStorage.clear();

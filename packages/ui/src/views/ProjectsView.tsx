@@ -136,6 +136,12 @@ import { makeReportActionFenceRenderers } from '../components/report-actions/Rep
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
 import { useDebugMode } from '../components/useDebugMode.js';
+import {
+  ViewLocationScope,
+  useRestoredViewPart,
+  useViewLocation,
+} from '../components/view-history/ViewHistoryContext.js';
+import type { ViewPart } from '../components/view-history/view-history.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
@@ -258,6 +264,38 @@ type ProjectTab =
   // Compact-only: when the project area is too narrow for the output
   // pane to sit beside the content, it becomes its own tab instead.
   | 'output';
+
+/** Each tab's name as its key shows it, for the history menu. */
+const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
+  settings: 'Settings',
+  about: 'Settings',
+  overview: 'Overview',
+  chat: 'Chat',
+  tasks: 'Tasks',
+  packages: 'Tools',
+  workspace: 'Workspace',
+  artifacts: 'Artifacts',
+  proposals: 'Proposals',
+  github: 'GitHub',
+  mail: 'Mail',
+  connections: 'Connections',
+  map: 'Views',
+  history: 'History',
+  output: 'Output',
+};
+
+/** Where a project view stood, as the view stack keeps it. */
+interface ProjectLocation {
+  projectId: string;
+  tab: ProjectTab;
+}
+
+function projectLocationOf(part: ViewPart | undefined): ProjectLocation | null {
+  const value = part?.value as Partial<ProjectLocation> | undefined;
+  if (!value || typeof value.projectId !== 'string' || typeof value.tab !== 'string') return null;
+  if (!(value.tab in PROJECT_TAB_LABELS)) return null;
+  return { projectId: value.projectId, tab: value.tab };
+}
 
 function preloadProjectTab(tab: ProjectTab): void {
   let loading: Promise<unknown> | undefined;
@@ -505,7 +543,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [createMode, setCreateMode] = useState<'crew' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<ProjectTab>('chat');
+  // Back to this project reopens the tab it was left on (see openProject).
+  const restoredPart = useRestoredViewPart('project');
+  const restoreTabRef = useRef<ProjectLocation | null>(projectLocationOf(restoredPart));
+  const [tab, setTab] = useState<ProjectTab>(() => restoreTabRef.current?.tab ?? 'chat');
+  // The project whose openProject has settled: until then `tab` is still the
+  // previous project's (or the default), so the view stack is not told.
+  const [openedProjectId, setOpenedProjectId] = useState<string | null>(null);
   const debugMode = useDebugMode();
   const showViewsTab = useCallback(() => setTab('map'), []);
   const projectViews = useProjectViews({
@@ -1253,13 +1297,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       setWorkspaceHtmlFiles([]);
       setArtifactFiles([]);
       setWorkspaceIndexPaneOpen(false);
+      // A link that names a section wins; otherwise Back's restored tab.
       const section = consumeProjectSection(id);
+      const restore = restoreTabRef.current?.projectId === id ? restoreTabRef.current : null;
+      restoreTabRef.current = null;
       if (section && section !== 'overview') {
         setTab('map');
         queueViewsRequest({ projectId: id, view: section.view, path: section.path });
       } else {
-        setTab(section ?? 'chat');
+        setTab(section ?? restore?.tab ?? 'chat');
       }
+      setOpenedProjectId(id);
       setWorkingDirDraft(project.workingDir ?? '');
       setGitHubUrlDraft(project.github?.url ?? '');
       setGitStatus('');
@@ -1312,6 +1360,34 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     },
     [],
   );
+
+  // The view stack: a project's tab is a place of its own, so moving from
+  // Chat to Tasks is a step Back undoes. In the Projects area the project
+  // itself is part of the place, since choosing one there does not change
+  // the app's selection.
+  const projectLocation = useViewLocation('project', {
+    part:
+      selected && openedProjectId === selected.id
+        ? {
+            key: detailOnly ? tab : `${selected.id}:${tab}`,
+            value: { projectId: selected.id, tab } satisfies ProjectLocation,
+            label: detailOnly
+              ? PROJECT_TAB_LABELS[tab]
+              : `${selected.name} · ${PROJECT_TAB_LABELS[tab]}`,
+          }
+        : null,
+    title: detailOnly ? selected?.name : undefined,
+    onRestore: (part) => {
+      const location = projectLocationOf(part);
+      if (!location) return;
+      if (location.projectId === selected?.id) {
+        setTab(location.tab);
+        return;
+      }
+      restoreTabRef.current = location;
+      void openProject(location.projectId);
+    },
+  });
 
   // Respond to nav-shortcut clicks from the top-bar MRU chips in App.tsx:
   // the shortcut dispatches `gezel:open-project` with the id, and we open
@@ -2265,9 +2341,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     if (detailOnly) return;
     if (selected) return;
     if (projects.length === 0) return;
-    let saved: string | null = null;
+    // Back to this area reopens the project it was left on, not the last
+    // one chosen anywhere.
+    let saved: string | null = restoreTabRef.current?.projectId ?? null;
     try {
-      saved = window.localStorage.getItem(SELECTED_PROJECT_STORAGE_KEY);
+      saved ??= window.localStorage.getItem(SELECTED_PROJECT_STORAGE_KEY);
     } catch {
       saved = null;
     }
@@ -3402,7 +3480,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                   {tab === 'tasks' && (
                     <ProjectPaneBoundary>
-                      <TasksView projectId={selected.id} />
+                      <ViewLocationScope location={projectLocation}>
+                        <TasksView projectId={selected.id} />
+                      </ViewLocationScope>
                     </ProjectPaneBoundary>
                   )}
 

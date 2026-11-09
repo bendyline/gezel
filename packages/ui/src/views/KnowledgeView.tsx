@@ -18,6 +18,11 @@ import { queueComposerPrefill } from '../components/composer-prefill.js';
 import { AuthedMediaPreview } from '../components/file-browser/FilePreview.js';
 import { navigateToTab } from '../components/nav-actions.js';
 import { consumeOpenKnowledge } from '../components/pending-open-knowledge.js';
+import {
+  useRestoredViewPart,
+  useViewLocation,
+} from '../components/view-history/ViewHistoryContext.js';
+import type { ViewPart } from '../components/view-history/view-history.js';
 import { MODEL_INVENTORY_CHANGED_EVENT, changedInventoryKey } from '../model-inventory.js';
 import { Select } from '../primitives/index.js';
 import { useEffectiveTheme } from '../theme.js';
@@ -71,11 +76,31 @@ function writeExpandedTopics(catalogId: string, ids: Set<string>): void {
  * left, the document directory in the middle, the article on the
  * right with its provenance (source, license, citation) always visible.
  * Document selection stays internal to the view: encyclopedia articles
- * never flood the global navigation model.
+ * never flood the global navigation model. They are places in the view stack
+ * all the same, so Back returns to the article read before, as in a browser.
  */
+/** Where the Knowledge view stood, as the view stack keeps it. */
+interface KnowledgeLocation {
+  catalogId: string;
+  documentId: string | null;
+}
+
+function knowledgeLocationOf(part: ViewPart | undefined): KnowledgeLocation | null {
+  const value = part?.value as Partial<KnowledgeLocation> | undefined;
+  if (!value || typeof value.catalogId !== 'string') return null;
+  return {
+    catalogId: value.catalogId,
+    documentId: typeof value.documentId === 'string' ? value.documentId : null,
+  };
+}
+
 export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string } = {}) {
   const [catalogs, setCatalogs] = useState<KnowledgeCatalogStatus[] | null>(null);
+  // Back to Knowledge reopens the article it was left on.
+  const restoredPart = useRestoredViewPart('knowledge');
+  const restored = knowledgeLocationOf(restoredPart);
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(() => {
+    if (restored) return restored.catalogId;
     if (initialCatalogId) return initialCatalogId;
     try {
       return window.localStorage.getItem(CATALOG_KEY);
@@ -88,6 +113,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   const [expandedTopics, setExpandedTopics] = useState<Set<string>>(() => new Set());
   const topicIdPrefix = useId();
   const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
+    if (restored) return restored.documentId;
     if (initialCatalogId === 'handboek') return 'welcome';
     try {
       return window.localStorage.getItem(DOCUMENT_KEY);
@@ -114,6 +140,34 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
 
   const effectiveTheme = useEffectiveTheme();
   const surface = effectiveTheme === 'light' ? GEZEL_LIGHT_SURFACE : undefined;
+
+  // The view stack: an article (or a catalog's front page) is a place.
+  // Declared ahead of the effects that correct the selection, so their
+  // replaceNext lands on the report it is meant for.
+  const catalogName = catalogs?.find((c) => c.ref.catalogId === selectedCatalogId)?.name;
+  const docTitle =
+    doc && selectedDocId && (doc.id === selectedDocId || doc.slug === selectedDocId)
+      ? doc.title
+      : undefined;
+  const knowledgeLocation = useViewLocation('knowledge', {
+    part:
+      catalogs && selectedCatalogId
+        ? {
+            key: `${selectedCatalogId}:${selectedDocId ?? ''}`,
+            value: { catalogId: selectedCatalogId, documentId: selectedDocId },
+            label: docTitle ?? catalogName ?? selectedCatalogId,
+          }
+        : null,
+    onRestore: (part) => {
+      const location = knowledgeLocationOf(part);
+      if (!location) return;
+      setSelectedCatalogId(location.catalogId);
+      setSelectedDocId(location.documentId);
+      setPlaying(null);
+      setMobilePane(location.documentId ? 'reader' : 'topics');
+    },
+  });
+  const replaceNextLocation = knowledgeLocation.replaceNext;
 
   // Catalog roster + queued search-intent consumption (mount only).
   useEffect(() => {
@@ -169,10 +223,11 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
       return;
     const next = catalogs[0]?.ref.catalogId ?? null;
     if (next === selectedCatalogId) return;
+    if (next) replaceNextLocation(`${next}:`);
     setSelectedCatalogId(next);
     setSelectedDocId(null);
     setMobilePane('topics');
-  }, [catalogs, selectedCatalogId]);
+  }, [catalogs, selectedCatalogId, replaceNextLocation]);
 
   useEffect(() => {
     try {
@@ -186,10 +241,11 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
     if (selectedCatalogId === lastCatalogRef.current) return;
     lastCatalogRef.current = selectedCatalogId;
     if (selectedCatalogId === 'handboek' && !selectedDocId) {
+      replaceNextLocation('handboek:welcome');
       setSelectedDocId('welcome');
       setMobilePane('reader');
     }
-  }, [selectedCatalogId, selectedDocId]);
+  }, [selectedCatalogId, selectedDocId, replaceNextLocation]);
 
   // Topic tree per catalog.
   useEffect(() => {
