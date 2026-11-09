@@ -3194,6 +3194,8 @@ describe('outsideToolProjectAbout', () => {
     expect(about).toContain('A tiny profile module.');
     expect(about).toContain('Inputs: `src/api.js`.');
     expect(about).toContain('Required deliverables: `report.md`, `tasks/eval/readout.md`.');
-    expect(about).not.toMatch(/write_artifact|read_artifact|read_file|drawer|change-notes|verify-sweep/);
+    expect(about).not.toMatch(
+      /write_artifact|read_artifact|read_file|drawer|change-notes|verify-sweep/,
+    );
   });
 });

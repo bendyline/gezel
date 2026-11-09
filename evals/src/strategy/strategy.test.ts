@@ -598,10 +598,17 @@ describe('pi arm', () => {
       cmd.args.flatMap((a, i) => (a === flag ? [cmd.args[i + 1]] : []));
     expect(pairs('--tmpfs')).toEqual(['/home', '/root', '/tmp', '/var/lib/gezel']);
     const { hiddenPathArgs } = await import('./pi-harness.ts');
-    expect(hiddenPathArgs((path) => path === '/var/lib/gezel')).toEqual(['--tmpfs', '/var/lib/gezel']);
+    expect(hiddenPathArgs((path) => path === '/var/lib/gezel')).toEqual([
+      '--tmpfs',
+      '/var/lib/gezel',
+    ]);
     expect(hiddenPathArgs(() => false)).toEqual([]);
     expect(pairs('--ro-bind')).toEqual(
-      expect.arrayContaining(['/tools/oc/bin', '/tools/rg/bin', '/runs/t/home/integrations/opencode']),
+      expect.arrayContaining([
+        '/tools/oc/bin',
+        '/tools/rg/bin',
+        '/runs/t/home/integrations/opencode',
+      ]),
     );
     expect(pairs('--bind')).toEqual(['/runs/t/ws', '/runs/t/opencode']);
     expect(cmd.args.slice(cmd.args.indexOf('--') + 1)).toEqual([

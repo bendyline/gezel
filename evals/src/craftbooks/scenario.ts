@@ -990,7 +990,10 @@ async function startOpenCodeForTask(
  * that tool would run it; Gezel's OpenCode setup and bridge serve local
  * models only. The key comes from the harness's environment.
  */
-function nativeCloudModelFor(daemon: { provider: string; modelId: string }): NativeCloudModel | null {
+function nativeCloudModelFor(daemon: {
+  provider: string;
+  modelId: string;
+}): NativeCloudModel | null {
   if (daemon.provider !== 'anthropic') return null;
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (!apiKey) throw new Error('an outside tool on an Anthropic model needs ANTHROPIC_API_KEY');

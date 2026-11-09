@@ -150,7 +150,16 @@ export async function startOpenCodeRun(input: {
   const instructionsPath = appendix ? join(input.stateDir, 'instructions.md') : undefined;
   if (instructionsPath && appendix) await writeFile(instructionsPath, `${appendix}\n`);
   const opencodeBin = await realpath(OPENCODE_BIN);
-  const args = ['run', '--format', 'json', '--auto', '--pure', '--model', input.model, input.request];
+  const args = [
+    'run',
+    '--format',
+    'json',
+    '--auto',
+    '--pure',
+    '--model',
+    input.model,
+    input.request,
+  ];
   const cmd = sandboxedOpenCodeCommand({
     opencodeBin,
     nodeBin: process.execPath,
