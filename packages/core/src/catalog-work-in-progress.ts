@@ -15,9 +15,9 @@ export function resolveShowWorkInProgressFeatures(
 }
 
 /**
- * Connector-backed catalog content is the first member of the app's
- * work-in-progress feature bucket. Optional connector declarations count too:
- * the gate hides early connector affordances, not only hard prerequisites.
+ * Whether catalog content uses connectors: a craftbook that declares any
+ * (optional ones included), or a project type built on one. Connector-backed
+ * content was the first preview and left the preview bucket in 1.26313.
  */
 export function catalogItemUsesConnectors(
   item: CatalogItemSummary,
@@ -48,14 +48,15 @@ export function connectorCraftbookIds(items: ReadonlyArray<CatalogItemSummary>):
 }
 
 /**
- * Apply the UX/CLI-only WIP catalog gate. Service APIs intentionally continue
- * to return and accept this content.
+ * Apply the UX/CLI-only preview catalog gate. Service APIs intentionally
+ * continue to return and accept this content. No catalog content is in
+ * preview today, so every item is visible; launchers keep calling this so the
+ * next catalog preview needs no change at their call sites.
  */
 export function visibleCatalogItems(
   items: ReadonlyArray<CatalogItemSummary>,
-  showWorkInProgressFeatures: boolean,
-  connectorIds: ReadonlySet<string> = connectorCraftbookIds(items),
+  _showWorkInProgressFeatures: boolean,
+  _connectorIds?: ReadonlySet<string>,
 ): CatalogItemSummary[] {
-  if (showWorkInProgressFeatures) return [...items];
-  return items.filter((item) => !catalogItemUsesConnectors(item, connectorIds));
+  return [...items];
 }

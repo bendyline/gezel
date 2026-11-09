@@ -109,8 +109,10 @@ export function buildSpawnedChildTask(opts: {
   assignee: TaskAssignee;
   variation: TaskVariation | undefined;
   now: string;
+  /** A person's Run now: the child starts now, not at the next shift. */
+  runNow?: boolean;
 }): Task {
-  const { parent, num, craftbook, assignee, variation, now } = opts;
+  const { parent, num, craftbook, assignee, variation, now, runNow } = opts;
   const title = variation?.title ?? parent.title;
   const description = variation?.description ?? craftbook.description ?? parent.description;
   const plan = variation?.plan ?? craftbook.plan ?? parent.plan;
@@ -165,8 +167,9 @@ export function buildSpawnedChildTask(opts: {
     ...(parent.diffpackId ? { diffpackId: String(num) } : {}),
     // A child of a night-shift host is itself night-shift work — the
     // runner gates its dispatch to an active shift. The child is a plain
-    // task (no cron/spawn), so `onceADay` doesn't carry over.
-    ...(parent.nightShift?.enabled ? { nightShift: { enabled: true } } : {}),
+    // task (no cron/spawn), so `onceADay` doesn't carry over. A Run now
+    // is the person's, so it is not held for the shift.
+    ...(parent.nightShift?.enabled && !runNow ? { nightShift: { enabled: true } } : {}),
     activeStepId: craftbook.entryStepId,
     parentTaskRef: parent.ref,
     // Shards share the HOST's folder: the host's collect-barrier gates

@@ -405,6 +405,69 @@ describe('judge', () => {
       expect(isCurrentJudgeReport(v2, { folderDeliverable: true })).toBe(false);
       expect(isCurrentJudgeReport(v2, { folderDeliverable: false })).toBe(true);
     });
+
+    it('mutates only the lines the work changed, never imports', async () => {
+      const { changedLines, mutants } = await import('./code-defects.ts');
+      const seed = "import { x } from './x.js';\nexport const same = a === b;\n";
+      const text = `${seed}export const fresh = c === d;\n`;
+      const changed = changedLines(text, seed);
+      expect([...changed]).toEqual([2]);
+      const all = [...mutants(text, changed)];
+      expect(all).toContain(`${seed}export const fresh = c !== d;\n`);
+      expect(all.every((m) => m.startsWith(seed))).toBe(true);
+      expect([...mutants(text, new Set([0]))]).toEqual([]);
+    });
+
+    it('plants code defects the project’s own tests confirm', async () => {
+      const { copyTrial, plantFolderDefect } = await import('./code-defects.ts');
+      const { loadCraftbookTestSpecsSync } = await import('../craftbooks/test-spec-loader.ts');
+      const book = loadCraftbookTestSpecsSync().find((s) => s.craftbookId === 'refactor-module');
+      const seed = book?.spec.setup.files ?? [];
+      const format = seed.find((f) => f.path === 'src/format-name.js');
+      expect(format?.content).toContain('toUpperCase');
+      const folderTask = {
+        ...task,
+        craftbook: {
+          ...task.craftbook,
+          id: 'refactor-module',
+          version: book!.version,
+          contract: {
+            goal: 'Restructure the module without changing behavior.',
+            deliverables: [
+              { id: 'code', path: './', kind: 'code-module', description: 'The source' },
+            ],
+            criteria: [],
+          },
+        },
+      } as unknown as Task;
+      dir = await mkdtemp(join(tmpdir(), 'gezel-strategy-defect-'));
+      await writeFile(join(dir, 'state.json'), JSON.stringify({ tasks: { tasks: [folderTask] } }));
+      const ws = join(dir, 'workspace', 'p');
+      for (const f of seed.filter((f) => f.surface !== 'harness' && f.surface !== 'artifact')) {
+        await mkdir(join(ws, f.path, '..'), { recursive: true });
+        await writeFile(join(ws, f.path), f.content);
+      }
+      const delivered =
+        "export function formatName(raw) {\n  return String(raw).trim().split(/\\s+/).map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');\n}\n";
+      await writeFile(join(ws, 'src', 'format-name.js'), delivered);
+
+      const broken = await copyTrial(dir, 'refactor-module', join(dir, 'broken'));
+      const planted = await plantFolderDefect(broken!, 'behavior-broken');
+      expect(planted).toMatchObject({ testsBefore: true, testsAfter: false });
+      expect(planted!.note).toMatch(/^src\/format-name\.js: /);
+
+      const undone = await copyTrial(dir, 'refactor-module', join(dir, 'undone'));
+      expect(await plantFolderDefect(undone!, 'change-undone')).toMatchObject({
+        note: 'src/format-name.js restored to its starting version',
+        testsAfter: true,
+      });
+      // Tests are promised only by a code-with-tests deliverable.
+      const plain = await copyTrial(dir, 'refactor-module', join(dir, 'plain'));
+      expect(await plantFolderDefect(plain!, 'tests-removed')).toBeNull();
+      // Nothing in the original trial changed.
+      const { readFile } = await import('node:fs/promises');
+      expect(await readFile(join(ws, 'src', 'format-name.js'), 'utf8')).toBe(delivered);
+    });
   });
 });
 
@@ -445,5 +508,133 @@ describe('round-2 arms and engine metrics', () => {
       resolvedSource: 'model',
     });
     expect(parseEngineMetrics('', 'eval-proj/1').resolvedStrategy).toBeNull();
+  });
+});
+
+describe('pi arm', () => {
+  it('describes the model to pi the way Gezel’s pi setup does', async () => {
+    const { piModelsJson } = await import('./pi-harness.ts');
+    const config = JSON.parse(
+      piModelsJson({
+        baseUrl: 'https://127.0.0.1:6228/',
+        token: 't0k',
+        model: { id: 'llama-cpp:qwen3.8-27b-q4', contextWindow: 262_144, supportsReasoning: true },
+      }),
+    );
+    const provider = config.providers.gezel;
+    expect(provider).toMatchObject({
+      baseUrl: 'https://127.0.0.1:6228/v1',
+      api: 'openai-completions',
+      apiKey: 't0k',
+    });
+    expect(provider.models[0]).toMatchObject({
+      id: 'llama-cpp:qwen3.8-27b-q4',
+      reasoning: true,
+      contextWindow: 262_144,
+      maxTokens: 32_768,
+    });
+  });
+
+  it('confines pi to the workspace and its own state', async () => {
+    const { sandboxedCommand } = await import('./pi-harness.ts');
+    const { args } = sandboxedCommand({
+      piBin: '/opt/pi',
+      nodeBin: '/opt/node/bin/node',
+      workspace: '/tmp/home-x/projects/p/workspace',
+      stateDir: '/home/me/runs/t/pi',
+      args: ['--mode', 'json', 'do it'],
+    });
+    const at = (flag: string, value: string) =>
+      args.findIndex((a, i) => a === flag && args[i + 1] === value);
+    expect(at('--ro-bind', '/')).toBe(0);
+    // Hiding /home and /tmp must come before the binds that reopen the trial's folders.
+    expect(at('--tmpfs', '/home')).toBeLessThan(at('--bind', '/home/me/runs/t/pi'));
+    expect(at('--tmpfs', '/tmp')).toBeLessThan(at('--bind', '/tmp/home-x/projects/p/workspace'));
+    expect(args.slice(-3)).toEqual(['--mode', 'json', 'do it']);
+  });
+
+  it('gives pi the book description only on the pi-book arm', async () => {
+    const { piPromptAppendix } = await import('./pi-harness.ts');
+    const { STRATEGY_ARMS } = await import('./books.ts');
+    expect(piPromptAppendix({ about: 'A studio.' })).toBe('## About this project\n\nA studio.');
+    expect(piPromptAppendix({})).toBeUndefined();
+    const both = piPromptAppendix({
+      about: 'A studio.',
+      book: { name: 'Monthly Invoice Run', description: 'One HTML invoice per client.' },
+    });
+    expect(both).toContain('## About this project\n\nA studio.');
+    expect(both).toContain(
+      'This request comes with the **Monthly Invoice Run** craftbook. One HTML invoice per client.',
+    );
+    expect(
+      piPromptAppendix({ about: 'A studio.', missionObjectives: 'Numbering never skips.' }),
+    ).toBe('## About this project\n\nA studio.\n\n## Mission objectives\n\nNumbering never skips.');
+    expect(STRATEGY_ARMS.pi?.bookDescription).toBeUndefined();
+    expect(STRATEGY_ARMS['pi-book']).toMatchObject({ harness: 'pi', bookDescription: true });
+  });
+
+  it('runs OpenCode offline on the managed config, with the same appendix as pi', async () => {
+    const { openCodeOverlay, sandboxedOpenCodeCommand, countOpenCodeEvent } = await import(
+      './opencode-harness.ts'
+    );
+    const { STRATEGY_ARMS } = await import('./books.ts');
+    expect(JSON.parse(openCodeOverlay({ instructionsPath: '/s/instructions.md' }))).toEqual({
+      instructions: ['/s/instructions.md'],
+      permission: { webfetch: 'deny', websearch: 'deny' },
+    });
+    expect(JSON.parse(openCodeOverlay({}))).not.toHaveProperty('instructions');
+
+    const cmd = sandboxedOpenCodeCommand({
+      opencodeBin: '/tools/oc/bin/opencode',
+      nodeBin: '/node/bin/node',
+      workspace: '/runs/t/ws',
+      stateDir: '/runs/t/opencode',
+      integrationDir: '/runs/t/home/integrations/opencode',
+      rgDir: '/tools/rg/bin',
+      args: ['run', 'hello'],
+      hidden: ['--tmpfs', '/var/lib/gezel'],
+    });
+    const pairs = (flag: string) =>
+      cmd.args.flatMap((a, i) => (a === flag ? [cmd.args[i + 1]] : []));
+    expect(pairs('--tmpfs')).toEqual(['/home', '/root', '/tmp', '/var/lib/gezel']);
+    const { hiddenPathArgs } = await import('./pi-harness.ts');
+    expect(hiddenPathArgs((path) => path === '/var/lib/gezel')).toEqual([
+      '--tmpfs',
+      '/var/lib/gezel',
+    ]);
+    expect(hiddenPathArgs(() => false)).toEqual([]);
+    expect(pairs('--ro-bind')).toEqual(
+      expect.arrayContaining([
+        '/tools/oc/bin',
+        '/tools/rg/bin',
+        '/runs/t/home/integrations/opencode',
+      ]),
+    );
+    expect(pairs('--bind')).toEqual(['/runs/t/ws', '/runs/t/opencode']);
+    expect(cmd.args.slice(cmd.args.indexOf('--') + 1)).toEqual([
+      '/tools/oc/bin/opencode',
+      'run',
+      'hello',
+    ]);
+
+    const state = { running: true, exitCode: null, turns: 0, toolCalls: 0 };
+    for (const line of [
+      '{"type":"step_start"}',
+      '{"type":"tool_use","part":{"tool":"write"}}',
+      '{"type":"step_finish"}',
+      'not json',
+      '{"type":"error","error":{"message":"boom"}}',
+    ]) {
+      countOpenCodeEvent(state, line);
+    }
+    expect(state).toMatchObject({ turns: 1, toolCalls: 1 });
+    expect((state as { error?: string }).error).toContain('boom');
+
+    expect(STRATEGY_ARMS.opencode).toMatchObject({ harness: 'opencode' });
+    expect(STRATEGY_ARMS.opencode?.bookDescription).toBeUndefined();
+    expect(STRATEGY_ARMS['opencode-book']).toMatchObject({
+      harness: 'opencode',
+      bookDescription: true,
+    });
   });
 });

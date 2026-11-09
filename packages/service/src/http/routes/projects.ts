@@ -46,6 +46,7 @@ import {
 } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { playwrightBrowsersDir, projectThumbnailsDir } from '@bendyline/gezel/paths';
 import { type Context, Hono } from 'hono';
+import { compress } from 'hono/compress';
 import { previewFolder } from '../../about/folder-preview.js';
 import { generateProjectAboutFromRepo } from '../../about/project-generator.js';
 import {
@@ -468,7 +469,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   // toolsets) the launcher uses to render a "needs setup" affordance.
   // Unlike `requirements`, a missing toolset does NOT hide the craftbook
   // — it stays listed so the user can install it inline.
-  app.get('/:id/craftbooks', async (c) => {
+  // Every catalog manifest, steps included, is 3.3 MB of JSON for 297 books;
+  // compressed it crosses the wire as a tenth of that (see loopback-listener).
+  app.get('/:id/craftbooks', compress(), async (c) => {
     const id = c.req.param('id');
     // Project-local books (including project-type installs) shadow same-id
     // catalog entries — mirroring the task resolver's precedence.

@@ -1885,3 +1885,110 @@ describe('LlamaCppModelManager.install reuses files the update did not change', 
     expect(secondRun).toHaveLength(2);
   });
 });
+
+describe('LlamaCppModelManager stops downloads it is told to stop', () => {
+  /**
+   * A fetch that trickles a few bytes every 20 ms and never finishes on its
+   * own, the way a slow real download looks; its body errors when the
+   * request's signal fires, as a real one does.
+   */
+  function tricklingFetch(totalBytes: number): { fetchImpl: typeof fetch; aborted: () => boolean } {
+    let signal: AbortSignal | undefined;
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      signal = init?.signal ?? undefined;
+      let timer: ReturnType<typeof setInterval> | undefined;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          timer = setInterval(() => controller.enqueue(new Uint8Array(16)), 20);
+          signal?.addEventListener('abort', () => {
+            clearInterval(timer);
+            controller.error(new DOMException('The operation was aborted.', 'AbortError'));
+          });
+        },
+        cancel() {
+          clearInterval(timer);
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-length': String(totalBytes) },
+      });
+    }) as typeof fetch;
+    return { fetchImpl, aborted: () => signal?.aborted === true };
+  }
+
+  function catalogFor(blob: Buffer): CatalogService {
+    return fakeCatalog(
+      new Map<string, ChatModelManifest>([
+        [
+          'stall-test',
+          {
+            schemaVersion: 1,
+            kind: 'chat-model',
+            id: 'stall-test',
+            name: 'Stall Test',
+            description: 'fixture',
+            tags: [],
+            maintainer: { name: 'Test' },
+            version: '1.0.0',
+            releasedAt: '2026-04-22T00:00:00Z',
+            availableVersions: ['1.0.0'],
+            parameterSize: '2B',
+            approxSizeBytes: blob.byteLength,
+            supportsTools: true,
+            llamaCpp: {
+              huggingfaceRepo: 'test-org/test-repo',
+              filename: 'stall.gguf',
+              sha256: sha256Hex(blob),
+              approxSizeBytes: blob.byteLength,
+              quantization: 'Q4_K_M',
+            },
+          } as ChatModelManifest,
+        ],
+      ]),
+    );
+  }
+
+  it('abortInstalls ends an install mid-download, as service shutdown does', async () => {
+    const blob = Buffer.alloc(1 << 20, 7);
+    const stub = tricklingFetch(blob.byteLength);
+    const mgr = new LlamaCppModelManager({
+      home,
+      catalog: catalogFor(blob),
+      fetchImpl: stub.fetchImpl,
+    });
+    const iterator = mgr.install('stall-test')[Symbol.asyncIterator]();
+    while ((await iterator.next()).value?.type !== 'progress') {
+      // Wait until bytes are flowing.
+    }
+
+    mgr.abortInstalls();
+    const rest: InstallEvent[] = [];
+    for (let step = await iterator.next(); !step.done; step = await iterator.next()) {
+      rest.push(step.value);
+    }
+
+    expect(stub.aborted()).toBe(true);
+    expect(rest.at(-1)).toEqual({ type: 'error', error: 'download aborted' });
+    expect(mgr.getActiveInstalls()).toEqual([]);
+  });
+
+  it('aborts the transfer when a caller returns the generator mid-download', async () => {
+    const blob = Buffer.alloc(1 << 20, 7);
+    const stub = tricklingFetch(blob.byteLength);
+    const mgr = new LlamaCppModelManager({
+      home,
+      catalog: catalogFor(blob),
+      fetchImpl: stub.fetchImpl,
+    });
+    const iterator = mgr.install('stall-test')[Symbol.asyncIterator]();
+    while ((await iterator.next()).value?.type !== 'progress') {
+      // Wait until bytes are flowing.
+    }
+
+    await iterator.return?.(undefined);
+
+    expect(stub.aborted()).toBe(true);
+    expect(mgr.getActiveInstalls()).toEqual([]);
+  });
+});

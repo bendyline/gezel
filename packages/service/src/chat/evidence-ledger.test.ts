@@ -153,6 +153,40 @@ describe('EvidenceLedger', () => {
     expect(ledger.checkProseFileWrite('write_file', manyNames)?.kind).toBe('reject');
   });
 
+  // squisq/38, 2026-11-09: in a codebase, Title Case labels refused each
+  // step's notes as unsourced names.
+  it('checks no names in a codebase, and still refuses an invented number', () => {
+    const audit = {
+      path: 'tasks/38/audit.md',
+      content: [
+        '- **Current State**: Extremely high volume of unit tests.',
+        '- **Semantic Equality**: Some format tests use `.toContain()`.',
+        '- **Component State Transitions**: Rapid interactions are not exercised.',
+      ].join('\n'),
+    };
+    const reviewer = (names: boolean) => {
+      const ledger = new EvidenceLedger();
+      ledger.beginTurn('Audit the test suite.');
+      ledger.labelToolResult(
+        'read_file',
+        { path: 'packages/core/src/__tests__/convert.test.ts' },
+        'Listed 180 entries.',
+      );
+      ledger.setNameChecks(names);
+      return ledger;
+    };
+    expect(reviewer(true).checkProseFileWrite('write_artifact', audit)?.kind).toBe('reject');
+
+    const ledger = reviewer(false);
+    expect(ledger.checkProseFileWrite('write_artifact', audit)).toBeNull();
+    expect(ledger.takeUnverifiedWrites().sentences).toEqual([]);
+    const invented = {
+      path: 'tasks/38/audit.md',
+      content: '- **Current State**: Coverage is 94% across 312 files.',
+    };
+    expect(ledger.checkProseFileWrite('write_artifact', invented)?.kind).toBe('reject');
+  });
+
   it('refuses for invented dates, numbers, quotes and citations, not for names alone', () => {
     const sentence = (checks: Array<{ kind: string; found: boolean }>, missing: string[] = []) =>
       ({ text: 's', cites: [], status: 'uncited', checks, missing }) as never;

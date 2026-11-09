@@ -11,6 +11,7 @@ interface FakeState {
   pinned?: string;
   installed?: string[];
   llamaServer?: boolean;
+  uv?: boolean;
   platformKey?: string | null;
   gezelProvider?: string;
   llamaCppBaseUrl?: string;
@@ -32,7 +33,10 @@ function fakeClient(state: FakeState): RunReadinessClient {
         release: '0.1.46',
         pinned: true,
         platformKey: state.platformKey === undefined ? 'win32-x64' : state.platformKey,
-        engines: [{ name: 'llama-server', installed: state.llamaServer ?? false }],
+        engines: [
+          { name: 'llama-server', installed: state.llamaServer ?? false },
+          { name: 'uv', installed: state.uv ?? false },
+        ],
       }) as never,
     listLlamaCppModels: async () =>
       ({ models: (state.installed ?? []).map((id) => ({ id })) }) as never,
@@ -75,6 +79,34 @@ describe('checkRunReadiness', () => {
     expect(result.ready).toBe(false);
     if (result.ready) return;
     expect(result.message).toContain("gemma4-e4b-q4, isn't downloaded yet");
+  });
+
+  it('treats a toolkit without uv as a missing engine for MLX, even with the model downloaded', async () => {
+    const result = await checkRunReadiness(
+      fakeClient({ provider: 'mlx', pinned: 'gemma4-12b-q4', installed: ['gemma4-12b-q4'] }),
+      undefined,
+      NO_MOCK,
+    );
+    expect(result.ready).toBe(false);
+    if (result.ready) return;
+    expect(result.message).toContain("Gezel's on-device engine isn't installed yet.");
+    expect(result.message).toContain('--download');
+    expect(result.message).toContain('gezel native install');
+  });
+
+  it('is ready for MLX once uv and the model are installed, whatever llama-server says', async () => {
+    const result = await checkRunReadiness(
+      fakeClient({
+        provider: 'mlx',
+        pinned: 'gemma4-12b-q4',
+        installed: ['gemma4-12b-q4'],
+        uv: true,
+        llamaServer: false,
+      }),
+      undefined,
+      NO_MOCK,
+    );
+    expect(result).toEqual({ ready: true });
   });
 
   it('passes cloud providers straight through', async () => {

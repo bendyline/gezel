@@ -252,7 +252,7 @@ describe('NewProjectDialog GitHub repository drafting', () => {
     expect(screen.getByRole('textbox', { name: /^About/ })).toHaveValue('');
   });
 
-  it('hides connector-backed project types and the Email kind while WIP is off', async () => {
+  it('shows connector-backed project types and the Email kind with preview features off', async () => {
     const plainType = catalogItem({
       kind: 'project-type',
       id: 'plain-office',
@@ -266,45 +266,14 @@ describe('NewProjectDialog GitHub repository drafting', () => {
       category: 'communication',
       craftbooks: ['social-digest'],
     });
-    const connectorBook = catalogItem({
-      kind: 'craftbook-template',
-      id: 'social-digest',
-      name: 'Social Digest',
-      connectors: [{ typeId: 'bluesky-posts', optional: true }],
-    });
-    vi.mocked(api.listCatalogItems).mockImplementation(
-      async (kind) =>
-        ({ items: kind === 'project-type' ? [plainType, socialType] : [connectorBook] }) as never,
-    );
+    vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [plainType, socialType] } as never);
 
     render(
       <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
     );
 
     expect(await screen.findByRole('radio', { name: 'Plain Office' })).toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: 'Social Feed' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('radio', { name: 'E-Mail' })).not.toBeInTheDocument();
-  });
-
-  it('shows connector-backed project types and the Email kind while WIP is on', async () => {
-    vi.mocked(api.getConfig).mockResolvedValue({
-      provider: 'mock',
-      showWorkInProgressFeatures: true,
-    } as never);
-    const socialType = catalogItem({
-      kind: 'project-type',
-      id: 'social-feed',
-      name: 'Social Feed',
-      category: 'communication',
-      craftbooks: ['social-digest'],
-    });
-    vi.mocked(api.listCatalogItems).mockResolvedValue({ items: [socialType] } as never);
-
-    render(
-      <NewProjectDialog open mode="crew" onClose={() => undefined} onCreated={() => undefined} />,
-    );
-
-    expect(await screen.findByRole('radio', { name: 'Social Feed' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Social Feed' })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'E-Mail' })).toBeInTheDocument();
   });
 

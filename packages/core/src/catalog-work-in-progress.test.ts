@@ -83,12 +83,13 @@ describe('work-in-progress catalog visibility', () => {
     ).toBe(true);
   });
 
-  it('filters only while the WIP bucket is disabled', () => {
-    expect(visibleCatalogItems([plainBook, connectorBook], false)).toEqual([plainBook]);
-    expect(visibleCatalogItems([plainBook, connectorBook], true)).toEqual([
-      plainBook,
-      connectorBook,
-    ]);
+  it('shows connector-backed content whether or not preview features are on', () => {
+    for (const preview of [false, true]) {
+      expect(visibleCatalogItems([plainBook, connectorBook], preview)).toEqual([
+        plainBook,
+        connectorBook,
+      ]);
+    }
   });
 
   it('defaults on in development and off in releases while respecting explicit choices', () => {

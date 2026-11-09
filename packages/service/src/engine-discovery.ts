@@ -5,7 +5,7 @@ import { createLogger } from '@bendyline/gezel';
 import { electronNativeBinCandidates } from '@bendyline/gezel-client/node';
 import { reuseVerifiedElectronNativeBinaries } from '@bendyline/gezel-inference/internal/engines/electron-native-reuse';
 import { effectiveEngineRelease } from '@bendyline/gezel-inference/internal/engines/native-manifest';
-import { discoverNativeBinaries } from '@bendyline/gezel/native';
+import { discoverNativeBinaries, warmRocmDeviceCheck } from '@bendyline/gezel/native';
 import { nativePayloadVerificationPath } from '@bendyline/gezel/paths';
 const log = createLogger('engines');
 export async function prepareNativeEngines(home: string, bootConfig: GezelConfig): Promise<void> {
@@ -50,13 +50,17 @@ export async function prepareNativeEngines(home: string, bootConfig: GezelConfig
     'native-bin',
     effectiveEngineRelease(),
   );
-  const nativeDiscovery = discoverNativeBinaries({
+  const discoverInput = {
     home,
     ...(bootConfig.llamaCppBackendOverride
       ? { llamaCppBackendOverride: bootConfig.llamaCppBackendOverride }
       : {}),
-    logger: { info: (m) => log.info(m), warn: (m) => log.warn(m) },
-  });
+    logger: { info: (m: string) => log.info(m), warn: (m: string) => log.warn(m) },
+  };
+  // An embedded daemon shares Electron's main thread: the ROCm probe must not
+  // run synchronously inside discovery.
+  await warmRocmDeviceCheck(discoverInput);
+  const nativeDiscovery = discoverNativeBinaries(discoverInput);
   if (nativeDiscovery.llamaBackend) {
     const lb = nativeDiscovery.llamaBackend;
     log.info(

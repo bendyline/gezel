@@ -14,7 +14,8 @@ All 59 applicable artifacts were judged, including outputs from failed
 attempts. The **Artifact reviews** tables keep each rubric separate, exclude
 three A/B reviews with mismatched axes, and distinguish 70 tasks with no
 applicable rubric from missing artifacts. These were unblinded source and
-artifact reviews by `codex-inline/current-session`. Nine deferred browser
+artifact reviews by the OpenAI Codex agent that ran the round, in the same
+session. Nine deferred browser
 checks subsequently passed on unchanged saved artifacts; these short checks
 do not establish complete gameplay or visual quality.
 

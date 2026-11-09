@@ -1996,7 +1996,7 @@ function DaemonSettingsView() {
               <SettingsSection
                 id="settings-night-shift-quota"
                 title="Night Shift cloud quota"
-                hint="For Claude, Codex, and Copilot subscriptions. Crew members on local models are never held."
+                hint="For Claude, Codex, and Copilot plans with usage quotas; check that your plan allows automated use. Crew members on local models are never held."
               >
                 <SettingField
                   label="Hold night work when"
@@ -3825,7 +3825,7 @@ function DaemonSettingsView() {
                 />
                 <SettingCheck
                   label="Show preview features"
-                  hint="Preview features are usable but still changing shape. The current preview is Connectors and the project types and craftbooks that use them."
+                  hint="Preview features are usable but still changing shape. The current preview is Channels, which lets your crew send messages to a webhook, such as a Slack channel or a phone notification service."
                   checked={config?.showWorkInProgressFeatures === true}
                   onChange={(checked) => void saveShowWorkInProgressFeatures(checked)}
                 />

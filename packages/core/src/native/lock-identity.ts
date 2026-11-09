@@ -89,17 +89,26 @@ export function parseLockFile(text: string): LockIdentity | null {
 }
 
 /**
- * Whether a pid check against `holder` means anything here. Any field the
- * holder recorded must match ours; a legacy pid-only record is assumed to be
- * in our namespace, which is how it was judged before.
+ * Whether a pid check against `holder` means anything here. The boot id and
+ * pid namespace decide, and only Linux records them, so a Linux holder and a
+ * macOS or Windows reader never share one. A legacy pid-only record is assumed
+ * to be in our namespace, which is how it was judged before.
+ *
+ * The hostname decides only where Linux could not name a pid namespace. On
+ * macOS and Windows, and on Linux desktops whose hostname comes from DHCP, it
+ * changes with the network: comparing it made a Mac that joined another Wi-Fi
+ * treat its own running daemon as one in another container.
  */
 export function sharesPidNamespace(holder: LockIdentity, me: LockIdentity): boolean {
   const same = (a: string | undefined, b: string | undefined) => !a || !b || a === b;
-  return (
-    same(holder.hostname, me.hostname) &&
-    same(holder.bootId, me.bootId) &&
-    same(holder.pidNs, me.pidNs)
-  );
+  const linux = (id: LockIdentity) => id.bootId !== undefined || id.pidNs !== undefined;
+  const recorded = (id: LockIdentity) => id.hostname !== undefined || linux(id);
+  if (recorded(holder) && recorded(me) && linux(holder) !== linux(me)) return false;
+  if (!same(holder.bootId, me.bootId) || !same(holder.pidNs, me.pidNs)) return false;
+  if (linux(holder) && linux(me) && (!holder.pidNs || !me.pidNs)) {
+    return same(holder.hostname, me.hostname);
+  }
+  return true;
 }
 
 /** What to tell someone whose home is in use by a daemon in another container. */

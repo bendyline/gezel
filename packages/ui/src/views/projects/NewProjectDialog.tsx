@@ -332,10 +332,6 @@ export function NewProjectDialog({
     };
   }, [open, showWorkInProgressFeatures]);
 
-  useEffect(() => {
-    if (!showWorkInProgressFeatures && kind === 'email') setKind('general');
-  }, [kind, showWorkInProgressFeatures]);
-
   // Fetch the user's accessible repos once they're known to be signed
   // in. Drives the datalist suggestions on the GitHub URL field. The
   // service caches for 5 min, so re-opening the dialog is cheap.
@@ -578,9 +574,9 @@ export function NewProjectDialog({
         if (item.id === 'folder' && !caps.externalFolders) return false;
         if (item.id === 'github' && !caps.git) return false;
         if (item.id === 'email' && !caps.connections) return false;
-        return showWorkInProgressFeatures || item.id !== 'email';
+        return true;
       }),
-    [showWorkInProgressFeatures],
+    [],
   );
   const normalizedProjectTypeQuery = projectTypeQuery.trim().toLowerCase();
   const filteredProjectKinds = useMemo(() => {

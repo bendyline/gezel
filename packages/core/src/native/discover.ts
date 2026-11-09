@@ -47,6 +47,7 @@ import {
   type RocmBlocker,
   type RocmCheck,
   checkRocmBuild,
+  checkRocmBuildAsync,
   publishRocmCheck,
 } from './rocm-devices.js';
 
@@ -238,6 +239,46 @@ export function presetLlamaBackend(binaryPath: string): LlamaBackend | null {
   }
 }
 
+function llamaDetectInput(
+  input: DiscoverInput,
+  platform: NodeJS.Platform,
+  arch: string,
+): Parameters<typeof detectLlamaBackend>[0] {
+  return {
+    engineVersion: LLAMA_ENGINE_VERSION,
+    home: input.home,
+    ...(input.llamaCppBackendOverride ? { override: input.llamaCppBackendOverride } : {}),
+    ...(input.llamaProbeOverride
+      ? { probe: { ...input.llamaProbeOverride, platform, arch: arch as NodeJS.Architecture } }
+      : { probe: { platform, arch: arch as NodeJS.Architecture } }),
+  };
+}
+
+/**
+ * Run the ROCm device probe {@link discoverNativeBinaries} would run, as a
+ * child process the event loop waits on, so discovery then reads the cached
+ * answer instead of blocking on HIP's startup (seconds, and up to its 30 s
+ * timeout when a driver hangs). Does nothing unless discovery would prefer the
+ * ROCm build, so machines without an AMD GPU never start it.
+ */
+export async function warmRocmDeviceCheck(input: DiscoverInput): Promise<void> {
+  if (process.env.GEZEL_LLAMA_SERVER_BIN || input.rocmCheckFor) return;
+  const platform = input.platform ?? process.platform;
+  const arch = input.arch ?? process.arch;
+  const dir = input.nativeBinDirOverride ?? process.env.GEZEL_NATIVE_BIN_DIR;
+  const platformKey = resolvePlatformKey(platform, arch);
+  if (!dir || !platformKey) return;
+  if (detectLlamaBackend(llamaDetectInput(input, platform, arch)).backend !== 'rocm') return;
+  const binary = resolveNativeBinaryUnder(
+    dir,
+    'llama-server',
+    `${platformKey}-rocm`,
+    platform,
+    input.fileExists ?? existsSync,
+  );
+  if (binary) await checkRocmBuildAsync(input.home, binary, { platform });
+}
+
 export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
   const log = input.logger;
   const fileExists = input.fileExists ?? existsSync;
@@ -281,14 +322,7 @@ export function discoverNativeBinaries(input: DiscoverInput): DiscoverResult {
       if (backend) process.env.GEZEL_LLAMA_SERVER_BACKEND = backend;
     }
   } else {
-    const probe = detectLlamaBackend({
-      engineVersion: LLAMA_ENGINE_VERSION,
-      home: input.home,
-      ...(input.llamaCppBackendOverride ? { override: input.llamaCppBackendOverride } : {}),
-      ...(input.llamaProbeOverride
-        ? { probe: { ...input.llamaProbeOverride, platform, arch: arch as NodeJS.Architecture } }
-        : { probe: { platform, arch: arch as NodeJS.Architecture } }),
-    });
+    const probe = detectLlamaBackend(llamaDetectInput(input, platform, arch));
     // Publish the probe result regardless of whether the matching
     // binary is bundled. The Settings UI / Home tab reads
     // `GEZEL_LLAMA_DETECTED_BACKEND` and `GEZEL_LLAMA_DETECTED_VENDOR`

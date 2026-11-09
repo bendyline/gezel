@@ -5,21 +5,34 @@ import { primitivesMock } from '../test-utils/primitivesMock.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
-vi.mock('./CatalogBrowser.js', () => ({
-  CatalogBrowser: ({
-    initialItems,
-    action,
-  }: {
-    initialItems?: Array<{ manifest: { id: string } }>;
-    action: (item: unknown) => React.ReactNode;
-  }) => (
-    <div data-testid="catalog-browser">
-      {initialItems?.map((item) => (
-        <div key={item.manifest.id}>{action(item)}</div>
-      ))}
-    </div>
-  ),
-}));
+// Like the real picker, the stub loads the whole catalog itself when it opens.
+vi.mock('./CatalogBrowser.js', async () => {
+  const { useEffect, useState } = await import('react');
+  const { api: mockedApi } = await import('../api.js');
+  return {
+    CatalogBrowser: ({
+      kind,
+      action,
+    }: {
+      kind: 'toolset';
+      action: (item: unknown) => React.ReactNode;
+    }) => {
+      const [items, setItems] = useState<Array<{ manifest: { id: string } }>>([]);
+      useEffect(() => {
+        void mockedApi
+          .listCatalogItems(kind)
+          .then((res) => setItems(res.items as Array<{ manifest: { id: string } }>));
+      }, [kind]);
+      return (
+        <div data-testid="catalog-browser">
+          {items.map((item) => (
+            <div key={item.manifest.id}>{action(item)}</div>
+          ))}
+        </div>
+      );
+    },
+  };
+});
 
 const { ToolsetsEditor } = await import('./ToolsetsEditor.js');
 const { api } = await import('../api.js');
@@ -82,6 +95,34 @@ describe('ToolsetsEditor community tier', () => {
       }),
     );
     expect(api.listCatalogItems).toHaveBeenCalledTimes(2);
+  });
+
+  it('loads reviewed toolsets and the installed community ones, not the whole registry', async () => {
+    vi.mocked(api.listInstalledToolsets).mockResolvedValue({
+      toolsets: [
+        {
+          toolsetId: 'someone-wallet',
+          sourceId: 'community',
+          version: '1.0.0',
+          installedAt: '2026-09-01T00:00:00.000Z',
+          runtime: { kind: 'http-mcp', url: 'https://example.invalid/mcp' },
+        },
+      ],
+    } as never);
+    vi.mocked(api.listCatalogItems).mockImplementation(
+      async (_kind, opts) =>
+        ({
+          items: opts?.ids
+            ? [{ sourceId: 'community', kind: 'toolset', manifest: walletManifest }]
+            : [],
+        }) as never,
+    );
+    render(<ToolsetsEditor scope={{ kind: 'shared' }} subject="everyone" />);
+    expect(await screen.findByText('Someone Wallet')).toBeInTheDocument();
+    expect(vi.mocked(api.listCatalogItems).mock.calls.map((call) => call[1])).toEqual([
+      { community: false },
+      { ids: ['someone-wallet'] },
+    ]);
   });
 
   it('captions an installed community toolset as unreviewed', async () => {

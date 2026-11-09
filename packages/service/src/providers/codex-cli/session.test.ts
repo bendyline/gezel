@@ -356,6 +356,35 @@ describe('CodexCliSession', () => {
     expect(body).not.toContain('secret-key');
   });
 
+  it('leaves SSE servers out of config.toml, since Codex reaches only streamable HTTP', async () => {
+    const codex = await makeFakeCodex(happyPathStream);
+    const deps = buildDeps({ binaryPath: codex });
+    deps.mcpServer = { command: 'node', args: ['/tmp/gezel-mcp.js'], env: {} };
+    deps.extraMcpServers = [
+      {
+        id: 'legacy-api',
+        kind: 'http',
+        transport: 'sse',
+        url: 'https://example.com/sse',
+        headers: {},
+      },
+      {
+        id: 'remote-api',
+        kind: 'http',
+        transport: 'streamable-http',
+        url: 'https://example.com/mcp',
+        headers: {},
+      },
+    ];
+    const session = new CodexCliSession(deps);
+    expect(session.getRegisteredToolNames()).not.toContain('mcp__legacy-api__*');
+    await session.sendAndWait('hello');
+    const body = await readFile(join(deps.runtimeDir, 'proj-1', 'sess-1', 'config.toml'), 'utf8');
+    expect(body).not.toContain('legacy-api');
+    expect(body).not.toContain('https://example.com/sse');
+    expect(body).toContain('[mcp_servers.remote-api]');
+  });
+
   it('routes extra MCP calls through review and installs the command guard in Reviewed mode', async () => {
     const codex = await makeFakeCodex(happyPathStream);
     const deps = buildDeps({ binaryPath: codex });

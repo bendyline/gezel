@@ -1,7 +1,9 @@
 import type {
+  AIEngagementMode,
   ChatSessionSummary,
   CompleteStepGateInfo,
   GezelSummary,
+  NightShiftStatusResponse,
   Outcome,
   Task,
   TaskAssignee,
@@ -10,6 +12,7 @@ import type {
   UpdateTaskStepRequest,
 } from '@bendyline/gezel';
 import {
+  isScheduleHost,
   plainRoleTitle,
   planGuardrails,
   summarizePlanDocument,
@@ -24,6 +27,7 @@ import { DeliverableCard } from '../components/DeliverableCard.js';
 import { GezelIcon } from '../components/GezelIcon.js';
 import { PersonLabel } from '../components/PersonLabel.js';
 import { PromptDialog } from '../components/PromptDialog.js';
+import { ScheduleRunsTracker } from '../components/ScheduleRunsTracker.js';
 import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
 import { TaskOutputsList } from '../components/TaskOutputsList.js';
@@ -31,9 +35,9 @@ import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { TaskStepPanel } from '../components/TaskStepPanel.js';
 import { TaskStepTracker } from '../components/TaskStepTracker.js';
 import { markdownEquivalent } from '../components/markdown-baseline.js';
-import { openProjectFileActions, runNavActions } from '../components/nav-actions.js';
+import { navigateToTab, openProjectFileActions, runNavActions } from '../components/nav-actions.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
-import { useTaskEvents, useTaskResult } from '../components/useTaskResult.js';
+import { useProjectTaskEvents, useTaskEvents, useTaskResult } from '../components/useTaskResult.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
@@ -165,12 +169,34 @@ export function TaskDetail({
     (CompleteStepGateInfo & { stepId: string }) | null
   >(null);
   const [addStepOpen, setAddStepOpen] = useState(false);
+  // A schedule never works its own placeholder step: its bench shows its runs
+  // and when the next one starts. Hosts without background work keep the
+  // plain step bench, since nothing there ever fires.
+  const scheduleHost = isScheduleHost(task) && runtimeCapabilities().background;
   // Chat is where a running task is followed. A draft's description and
   // outcomes are edited on Task, and a task assigned to the person has no
-  // chat, so those two open there instead.
+  // chat, so those two open there instead. A schedule has no chat of its own.
   const [tab, setTab] = useState<'task' | 'chat'>(() =>
-    task.status === 'draft' || task.assignee.kind === 'user' ? 'task' : 'chat',
+    task.status === 'draft' || task.assignee.kind === 'user' || scheduleHost ? 'task' : 'chat',
   );
+  const [nightShift, setNightShift] = useState<NightShiftStatusResponse | null>(null);
+  const [engagementMode, setEngagementMode] = useState<AIEngagementMode | undefined>(undefined);
+  // A child task names its parent in the header, so the person can see what
+  // the run belongs to and get back to it.
+  const [parentTask, setParentTask] = useState<Task | null>(null);
+  useEffect(() => {
+    setParentTask(null);
+    const ref = task.parentTaskRef;
+    if (!ref) return;
+    const controller = new AbortController();
+    api.getTaskByRef(ref, controller.signal).then(
+      (parent) => {
+        if (!controller.signal.aborted) setParentTask(parent);
+      },
+      () => {},
+    );
+    return () => controller.abort();
+  }, [task.parentTaskRef]);
   // What the task has made. A run's own events re-read it, so the deck shows
   // up here the moment it is published rather than on the next visit.
   const [resultVersion, setResultVersion] = useState(0);
@@ -267,6 +293,41 @@ export function TaskDetail({
     void loadSessions();
     void loadChildren();
   }, [loadNotes, loadSessions, loadChildren]);
+
+  // When a schedule's next run starts depends on the Night Shift window and on
+  // Crew activity, which both change while the page is open.
+  const loadScheduleContext = useCallback(() => {
+    if (!scheduleHost) return;
+    api
+      .getNightShiftStatus()
+      .then(setNightShift)
+      .catch(() => {});
+    api
+      .getConfig()
+      .then((cfg) => setEngagementMode(cfg.aiEngagementMode ?? 'proactive'))
+      .catch(() => {});
+  }, [scheduleHost]);
+  useEffect(() => {
+    if (!scheduleHost) return;
+    loadScheduleContext();
+    const timer = window.setInterval(loadScheduleContext, 120_000);
+    const onConfigUpdated = (e: Event) => {
+      const mode = (e as CustomEvent<{ aiEngagementMode?: AIEngagementMode } | undefined>).detail
+        ?.aiEngagementMode;
+      if (mode) setEngagementMode(mode);
+      else loadScheduleContext();
+    };
+    window.addEventListener('gezel:config-updated', onConfigUpdated);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('gezel:config-updated', onConfigUpdated);
+    };
+  }, [scheduleHost, loadScheduleContext]);
+  // A run is a task of its own: follow every task event in the project, so a
+  // run that starts, advances or finishes moves on the route as it happens.
+  useProjectTaskEvents(task.projectId, scheduleHost, () => {
+    void loadChildren();
+  });
 
   const postNote = useCallback(async () => {
     const text = composerDraft.current.trim();
@@ -523,6 +584,8 @@ export function TaskDetail({
     task.status === 'draft' && !curatedBook ? planGuardrails(summarizePlanDocument(task)) : [];
 
   const chatTabActive = selectedStepId === null && tab === 'chat';
+  const parentRef = task.parentTaskRef;
+  const parentTitle = parentTask?.title?.trim();
 
   return (
     <div
@@ -533,6 +596,20 @@ export function TaskDetail({
         <div>
           <span className="task-detail-ref">{task.ref}</span>
           {projectName && <span className="task-detail-project">{projectName}</span>}
+          {parentRef && (
+            <span className="task-detail-parent">
+              {parentTask && isScheduleHost(parentTask) ? 'Run of' : 'Part of'}{' '}
+              <button
+                type="button"
+                className="gz-link-button task-detail-parent-link"
+                title={`View parent task ${parentRef}`}
+                onClick={() => navigateToTab({ kind: 'task', ref: parentRef })}
+              >
+                {parentTitle || parentRef}
+              </button>
+              {parentTitle && <span className="task-detail-parent-ref">{parentRef}</span>}
+            </span>
+          )}
           <h3>{task.title}</h3>
         </div>
         <div className="task-detail-actions">
@@ -679,25 +756,39 @@ export function TaskDetail({
             </button>
           </fieldset>
         </div>
-        <TaskStepTracker
-          key={task.ref}
-          steps={task.craftbook.steps}
-          {...(task.activeStepId ? { activeStepId: task.activeStepId } : {})}
-          selectedStepId={selectedStepId}
-          onSelect={handleSelectStep}
-          onAddStep={
-            runtimeCapabilities().taskStructureEditing ? () => setAddStepOpen(true) : undefined
-          }
-          busy={busy || isSystemJob || effectiveStatus !== 'active'}
-          gezels={gezels}
-          taskStatus={effectiveStatus}
-          onAssign={
-            runtimeCapabilities().taskStructureEditing
-              ? (stepId, assignee) => void updateStep(stepId, { assignee })
-              : undefined
-          }
-          taskAssignee={systemOwnerId ? { kind: 'gezel', gezelId: systemOwnerId } : task.assignee}
-        />
+        {scheduleHost ? (
+          <ScheduleRunsTracker
+            key={task.ref}
+            host={task}
+            runs={children}
+            gezels={gezels}
+            nightShift={nightShift}
+            {...(engagementMode ? { engagementMode } : {})}
+            busy={busy}
+            onOpenRun={(ref) => navigateToTab({ kind: 'task', ref })}
+            {...(effectiveStatus === 'active' ? { onRunNow: () => void spawnInstance() } : {})}
+          />
+        ) : (
+          <TaskStepTracker
+            key={task.ref}
+            steps={task.craftbook.steps}
+            {...(task.activeStepId ? { activeStepId: task.activeStepId } : {})}
+            selectedStepId={selectedStepId}
+            onSelect={handleSelectStep}
+            onAddStep={
+              runtimeCapabilities().taskStructureEditing ? () => setAddStepOpen(true) : undefined
+            }
+            busy={busy || isSystemJob || effectiveStatus !== 'active'}
+            gezels={gezels}
+            taskStatus={effectiveStatus}
+            onAssign={
+              runtimeCapabilities().taskStructureEditing
+                ? (stepId, assignee) => void updateStep(stepId, { assignee })
+                : undefined
+            }
+            taskAssignee={systemOwnerId ? { kind: 'gezel', gezelId: systemOwnerId } : task.assignee}
+          />
+        )}
       </div>
 
       {selectedStepId !== null && (
@@ -914,14 +1005,6 @@ export function TaskDetail({
             </ul>
           </section>
 
-          {task.parentTaskRef && (
-            <section className="task-parent-link">
-              <p className="muted small">
-                Instance of <code>{task.parentTaskRef}</code>
-              </p>
-            </section>
-          )}
-
           {task.spawnsCraftbook && (
             <section className="task-template">
               <h4>
@@ -947,7 +1030,8 @@ export function TaskDetail({
                   <strong>Default plan:</strong> {task.spawnsCraftbook.plan}
                 </p>
               )}
-              {runtimeCapabilities().background && (
+              {/* A schedule's Run now sits beside its runs, at the top. */}
+              {runtimeCapabilities().background && !scheduleHost && (
                 <div className="task-template-actions">
                   <button type="button" onClick={() => void spawnInstance()} disabled={busy}>
                     + Spawn instance
@@ -975,10 +1059,13 @@ export function TaskDetail({
           {task.spawnsCraftbook && runtimeCapabilities().background && (
             <section className="task-children">
               <h4>
-                Instances <span className="muted small">({children.length})</span>
+                {scheduleHost ? 'Runs' : 'Instances'}{' '}
+                <span className="muted small">({children.length})</span>
               </h4>
               {children.length === 0 ? (
-                <p className="muted small">No children spawned yet.</p>
+                <p className="muted small">
+                  {scheduleHost ? 'No runs yet.' : 'No children spawned yet.'}
+                </p>
               ) : (
                 <ul className="task-children-list">
                   {children.map((c) => (
@@ -986,9 +1073,19 @@ export function TaskDetail({
                       <span className={`task-status task-status-${taskEffectiveStatus(c)}`}>
                         {taskEffectiveStatus(c)}
                       </span>
-                      <span className="task-ref">{c.ref}</span>
+                      <button
+                        type="button"
+                        className="link-button task-ref"
+                        onClick={() => navigateToTab({ kind: 'task', ref: c.ref })}
+                      >
+                        {c.ref}
+                      </button>
                       <span className="task-title">{c.title}</span>
-                      <span className="task-session-time">{c.updatedAt}</span>
+                      <span className="task-session-time" title={formatAbsoluteTime(c.updatedAt)}>
+                        {scheduleHost
+                          ? `started ${formatAbsoluteTime(c.createdAt)}`
+                          : formatRelativeTime(c.updatedAt)}
+                      </span>
                     </li>
                   ))}
                 </ul>
@@ -998,12 +1095,22 @@ export function TaskDetail({
 
           {task.cron && runtimeCapabilities().background && (
             <section className="task-cron">
-              <h4>Cron</h4>
-              <p className="muted small">
-                <code>{task.cron.expression}</code>
-                {task.cron.nextTickAt && <> — next tick {task.cron.nextTickAt}</>}
-                {task.cron.lastTickAt && <> — last tick {task.cron.lastTickAt}</>}
-              </p>
+              <h4>Schedule</h4>
+              {/* A night-shift host's cron is only how often it checks for
+                  the window; showing it read as "runs every 30 minutes". */}
+              {task.nightShift?.enabled ? (
+                <p className="muted small">
+                  {task.nightShift.onceADay
+                    ? 'Once a night, during the Night Shift.'
+                    : 'Through the night, during the Night Shift.'}
+                </p>
+              ) : (
+                <p className="muted small">
+                  <code>{task.cron.expression}</code> (UTC)
+                  {task.cron.nextTickAt && <> · next {formatAbsoluteTime(task.cron.nextTickAt)}</>}
+                  {task.cron.lastTickAt && <> · last {formatAbsoluteTime(task.cron.lastTickAt)}</>}
+                </p>
+              )}
               <label className="task-cron-overlap">
                 Overlap
                 <Select.Root

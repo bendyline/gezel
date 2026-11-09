@@ -80,6 +80,13 @@ const SOURCES_NAME =
 const SOURCES_HEADING = new RegExp(`^(#{1,6})\\s*${SOURCES_NAME}`, 'i');
 const SOURCES_LABEL = new RegExp(`^${SOURCES_NAME}`, 'i');
 const SOURCE_ENTRY = /^(?:[-*+]\s*)?\[\d{1,3}\]/;
+/**
+ * Inside a source list only a decision written in capitals is a criterion:
+ * "- Every claim cites a dated source: FAIL" under a "## Sources" heading was
+ * skipped with the list and the review passed, while a title such as
+ * "Failing Forward (2019)" must still read as a title.
+ */
+const CAPITAL_DECISION = /(?:^|[^A-Za-z0-9])(?:PASS(?:ED|ES)?|FAIL(?:S|ED|ING)?)(?:$|[^A-Za-z0-9])/;
 
 interface LineVerdict {
   criteria: number;
@@ -111,7 +118,12 @@ export function readLineVerdict(text: string): LineVerdict {
     const sourcesHeading = SOURCES_HEADING.exec(trimmed);
     if (sourcesHeading) sources = sourcesHeading[1]!.length;
     else if (SOURCES_LABEL.test(trimmed)) sources = 'labeled';
-    if (sources !== null) continue;
+    if (
+      sources !== null &&
+      (sourcesHeading || SOURCE_ENTRY.test(trimmed) || !CAPITAL_DECISION.test(trimmed))
+    ) {
+      continue;
+    }
     if (!trimmed || /^(?:```|~~~)/.test(trimmed)) continue;
     const detail = verdict.criteria > 0 && /^\s+\S/.test(line);
     const { pass, fail } = lineDecision(line, detail);

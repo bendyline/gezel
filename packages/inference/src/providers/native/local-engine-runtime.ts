@@ -63,6 +63,8 @@ export interface LocalEngineBindOpts {
   engineDrainWaitMs?: number;
   signal?: AbortSignal;
   onDrainWait?: EngineWaitOpts['onDrainWait'];
+  /** See {@link EngineWaitOpts.background}. */
+  engineBackground?: boolean;
 }
 
 export interface EngineConfigStore {
@@ -2198,6 +2200,7 @@ export class LocalEngineRuntime {
         ...(opts.engineDrainWaitMs !== undefined ? { drainWaitMs: opts.engineDrainWaitMs } : {}),
         ...(opts.signal ? { signal: opts.signal } : {}),
         ...(opts.onDrainWait ? { onDrainWait: opts.onDrainWait } : {}),
+        ...(opts.engineBackground ? { background: true } : {}),
       },
       opts.priorEngineKey,
     );
@@ -2205,7 +2208,7 @@ export class LocalEngineRuntime {
   protected async getLocalProviderForModel(
     name: LocalProviderName,
     modelId: string | undefined,
-    opts: { engineDrainWaitMs?: number },
+    opts: { engineDrainWaitMs?: number; engineBackground?: boolean },
     fallback: () => Promise<LLMProvider>,
   ): Promise<LLMProvider> {
     const seeded = this.providers.get(name);
@@ -2251,6 +2254,7 @@ export class LocalEngineRuntime {
       ...(opts.engineDrainWaitMs !== undefined
         ? { engineDrainWaitMs: opts.engineDrainWaitMs }
         : {}),
+      ...(opts.engineBackground ? { engineBackground: true } : {}),
     });
     return provider;
   }

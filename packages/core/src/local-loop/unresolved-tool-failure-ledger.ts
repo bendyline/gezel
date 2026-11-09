@@ -77,6 +77,35 @@ const VALIDATION_ERROR_PATTERNS: readonly RegExp[] = [
   /instead of a real object\/array/i,
 ];
 
+/**
+ * Tools whose failure means a step's work was not saved. A model that emits
+ * a save and `advance_task_step` in one batch has not read the save's result
+ * when the advance runs: squisq/38 queued a `write_artifact` the
+ * factual-writing check refused and an advance behind it, so each step spent
+ * a gate attempt on a file that was never written (2026-11-09).
+ */
+const SAVE_TOOLS: ReadonlySet<string> = new Set([
+  'write_file',
+  'write_artifact',
+  'write_document',
+  'append_to_file',
+  'replace_in_file',
+  'replace_lines',
+  'insert_at_marker',
+  'apply_patch',
+  'copy_artifact_to_workspace',
+  'write_task_note',
+  'doc_insert_text',
+  'doc_replace_selection',
+  'slide_insert',
+]);
+
+/** What a save wrote to: its path, or the tool itself when it names none. */
+function saveTarget(toolName: string, args: Record<string, unknown> | undefined): string {
+  const path = args?.path;
+  return typeof path === 'string' && path.trim() ? path.trim() : toolName;
+}
+
 export function isValidationFailure(text: string): boolean {
   return VALIDATION_ERROR_PATTERNS.some((re) => re.test(text));
 }
@@ -110,6 +139,10 @@ export interface UnresolvedToolFailureLedgerOpts {
 
 export class UnresolvedToolFailureLedger {
   private readonly entries = new Map<string, Entry>();
+  /** Saves that failed with no later success on the same target, by target. */
+  private readonly unsaved = new Map<string, { toolName: string; message: string }>();
+  /** Targets that have already held an advance; each holds one until it saves. */
+  private readonly heldTargets = new Set<string>();
   private readonly repeatThreshold: number;
   private readonly gatedTools: ReadonlySet<string>;
   private readonly hasTool: ((name: string) => boolean) | undefined;
@@ -126,11 +159,25 @@ export class UnresolvedToolFailureLedger {
    * model actually saw and re-reacted to, so it's the right thing to
    * compare for "identical".
    */
-  record(advertisedName: string, text: string, isError: boolean): void {
+  record(
+    advertisedName: string,
+    text: string,
+    isError: boolean,
+    args?: Record<string, unknown>,
+  ): void {
     // Key on the canonical name so a legacy spelling and its canonical
     // form are the same tool — otherwise a naming-A/B session could fail
     // under one spelling and clear under the other.
     const toolName = canonicalToolName(advertisedName);
+    if (SAVE_TOOLS.has(toolName)) {
+      const target = saveTarget(toolName, args);
+      if (!isError) {
+        this.unsaved.delete(target);
+        this.heldTargets.delete(target);
+      } else if (!this.heldTargets.has(target)) {
+        this.unsaved.set(target, { toolName: advertisedName, message: text });
+      }
+    }
     if (!isError) {
       // Any success clears the tool: whatever was wrong, the model
       // found a shape that works and is no longer spinning.
@@ -179,7 +226,7 @@ export class UnresolvedToolFailureLedger {
     const toolName = canonicalToolName(advertisedName);
     if (!this.gatedTools.has(toolName)) return null;
     const blockers = this.unresolved();
-    if (blockers.length === 0) return null;
+    if (blockers.length === 0) return this.takeUnsavedHold(advertisedName);
     const list = blockers.map((b) => `\`${b.toolName}\` (${b.count}× identical)`).join(', ');
     const detail = blockers[0]!.lastMessage.trim();
     const stop =
@@ -195,6 +242,33 @@ export class UnresolvedToolFailureLedger {
       '',
       'Fix the failing call and make it succeed — then advancing is allowed again.',
       `If it cannot be made to work, ${stop} Do not claim the step is done.`,
+    ].join('\n');
+  }
+
+  /**
+   * Hold one advance behind a save that failed since its target last saved.
+   * Held once per target: the hold puts the failure in front of the model,
+   * and an advance it then makes anyway goes to the step gate, so a save
+   * that can never work does not trap the step between the two calls.
+   */
+  private takeUnsavedHold(advertisedName: string): string | null {
+    if (this.unsaved.size === 0) return null;
+    const failed = [...this.unsaved].map(([target, { toolName, message }]) => {
+      const what = target === canonicalToolName(toolName) ? '' : ` of \`${target}\``;
+      const first = message.trim().split('\n')[0] ?? '';
+      const reason = first.length > 300 ? `${first.slice(0, 299)}…` : first;
+      return `- \`${toolName}\`${what}: ${reason}`;
+    });
+    for (const target of this.unsaved.keys()) this.heldTargets.add(target);
+    this.unsaved.clear();
+    log.info(
+      `unresolved-failure ledger: held ${advertisedName} behind ${failed.length} failed save(s)`,
+    );
+    return [
+      `ERROR: \`${advertisedName}\` was not run: ${failed.length === 1 ? 'a save' : 'saves'} you made for this step failed, so that work is not saved.`,
+      ...failed,
+      '',
+      'Read that result, fix what it names, and save again. Then advance.',
     ].join('\n');
   }
 }

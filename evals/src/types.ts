@@ -62,6 +62,18 @@ export interface TrialTaskStrategy {
     subagents?: boolean;
     contract?: 'enforced' | 'shown' | 'hidden';
   };
+  /**
+   * An outside agent tool works the request instead of Gezel. The task is
+   * still created, assigned to nobody who runs it, so its contract snapshot
+   * grades the folder like every other arm's.
+   */
+  harness?: 'pi' | 'opencode';
+  /**
+   * Give the outside tool the craftbook description Gezel's kickoff shows
+   * (`renderEntryPreface`), so the two get the same information. For gallery
+   * books it outlines the recipe's phases, paths and formats.
+   */
+  bookDescription?: boolean;
 }
 
 export interface EvalContext {
@@ -72,6 +84,17 @@ export interface EvalContext {
    * deliverables the book's contract declares.
    */
   taskStrategy?: TrialTaskStrategy;
+  /** The trial daemon, for an outside tool that talks to it directly. Setup only. */
+  daemon?: {
+    baseUrl: string;
+    token: string;
+    home: string;
+    runDir: string;
+    provider: string;
+    modelId: string;
+    /** The daemon's per-launch loopback certificate, when it serves HTTPS. */
+    cert?: string;
+  };
   meesterId: string;
   /**
    * Per-trial state shared by the one-shot setup hook and every polled

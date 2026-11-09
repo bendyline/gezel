@@ -5,6 +5,18 @@ import type { LoopbackCert } from './cert.js';
 
 const connections = new WeakMap<ServerType, Set<Socket>>();
 
+/**
+ * Per-connection HTTP/2 memory cap, in megabytes. Node's default of 10 counts
+ * every response body still queued for the client, and once a connection
+ * passes it Node refuses each new stream with ENHANCE_YOUR_CALM, which a
+ * browser reports as a failed fetch. Opening a project's Connections tab
+ * queued the 19 MB toolset catalog beside the 3.3 MB craftbook list, and the
+ * requests behind them failed ("Gezel API transport unavailable … Failed to
+ * fetch") in 6 of 9 loads. The listener is loopback-only, so the cap guards
+ * against a stuck client, not a remote flood.
+ */
+export const HTTP2_SESSION_MEMORY_MB = 128;
+
 /** Both daemon roles use the same loopback-only, pinned TLS transport. */
 export function listenLoopback(
   fetch: Parameters<typeof serve>[0]['fetch'],
@@ -27,6 +39,7 @@ export function listenLoopback(
                 allowHTTP1: true,
                 minVersion: 'TLSv1.3',
                 ALPNProtocols: ['h2', 'http/1.1'],
+                maxSessionMemory: HTTP2_SESSION_MEMORY_MB,
               },
             }
           : {}),

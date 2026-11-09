@@ -88,7 +88,8 @@ export interface CraftbookSetupOptions {
 const BRAVE_KEY_URL = 'https://brave.com/search/api/';
 const SEARCH_CHECK = { query: 'Gezel web search check', limit: 1 };
 
-const ENGINE_BINARY: Record<CraftbookModelEngine, NativeEngineName> = {
+/** The toolkit engine each model engine runs on; MLX runs in the Python runtime uv provides. */
+export const ENGINE_BINARY: Record<CraftbookModelEngine, NativeEngineName> = {
   'llama-cpp': 'llama-server',
   mlx: 'uv',
   ds4: 'ds4-server',

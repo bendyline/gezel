@@ -21,8 +21,8 @@ import {
 import type { Store } from '../fs/store.js';
 import type { TokenStore } from '../http/token-store.js';
 import { createMutationQueue } from '../local-harness/base.js';
-import { detectClaudeBinary } from '../providers/anthropic-cli/binary.js';
-import { detectCodexBinary, runTextProbe } from '../providers/codex-cli/binary.js';
+import { getCliPresence } from '../providers/cli-detection.js';
+import { runTextProbe } from '../providers/codex-cli/binary.js';
 import { discoverVSCodeProfiles, vscodeUserDir } from '../vscode-setup/profiles.js';
 import {
   type HarnessClientAdapter,
@@ -98,22 +98,25 @@ export class HarnessToolsManager {
       platform: opts.platform ?? process.platform,
       run: opts.run ?? ((command, args) => runTextProbe(command, args, 30_000)),
     };
+    // Presence only: status is read by `gezel mcp status` and Settings, and
+    // must not execute the apps it reports on. Setting one up runs its own
+    // `mcp add`, which says plainly when the command does not work.
     const claude = cachedFor(BINARY_CACHE_MS, async () => {
       if (opts.claudeBinary) return opts.claudeBinary();
       const config = await opts.store.readConfig();
-      const found = await detectClaudeBinary({
-        ...(config.anthropicCli?.binaryPath ? { override: config.anthropicCli.binaryPath } : {}),
-        env: this.ctx.env,
-      });
+      const found = getCliPresence(
+        config.anthropicCli ? { anthropicCli: config.anthropicCli } : {},
+        this.ctx.env,
+      ).anthropicCli;
       return found.installed ? (found.path ?? null) : null;
     });
     const codex = cachedFor(BINARY_CACHE_MS, async () => {
       if (opts.codexBinary) return opts.codexBinary();
       const config = await opts.store.readConfig();
-      const found = await detectCodexBinary({
-        ...(config.codexCli?.binaryPath ? { override: config.codexCli.binaryPath } : {}),
-        env: this.ctx.env,
-      });
+      const found = getCliPresence(
+        config.codexCli ? { codexCli: config.codexCli } : {},
+        this.ctx.env,
+      ).codexCli;
       return found.installed ? (found.path ?? null) : null;
     });
     this.adapters = {

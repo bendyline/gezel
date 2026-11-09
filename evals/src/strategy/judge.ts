@@ -149,11 +149,11 @@ const LOCKFILES = new Set(['package-lock.json', 'pnpm-lock.yaml', 'yarn.lock', '
 const MAX_FOLDER_CHARS = MAX_BUNDLE_CHARS / 2;
 
 /** `./src/`, `src` and `src/` name one folder; the drawer root is `.`. */
-function drawerPath(path: string): string {
+export function drawerPath(path: string): string {
   return posix.normalize(path.replace(/^\.?\/+/, '') || '.').replace(/(.)\/+$/, '$1');
 }
 
-async function filesUnder(dir: string, base = dir): Promise<string[]> {
+export async function filesUnder(dir: string, base = dir): Promise<string[]> {
   const out: string[] = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     if (entry.name.startsWith('.')) continue;
@@ -219,7 +219,7 @@ async function folderText(
 }
 
 /** The files a trial's project was seeded with, from the sidecar of the version it ran. */
-function seedFiles(task: Task): Array<{ path: string; content: string; artifact: boolean }> {
+export function seedFiles(task: Task): Array<{ path: string; content: string; artifact: boolean }> {
   const spec = task.craftbook.version
     ? loadCraftbookTestSpecAtVersionSync(task.craftbook.id, task.craftbook.version)
     : null;
@@ -232,7 +232,10 @@ function seedFiles(task: Task): Array<{ path: string; content: string; artifact:
     }));
 }
 
-async function readContractTask(trialDir: string, craftbookId: string): Promise<Task | null> {
+export async function readContractTask(
+  trialDir: string,
+  craftbookId: string,
+): Promise<Task | null> {
   let state: { tasks?: { tasks?: Task[] } | Task[] };
   try {
     state = JSON.parse(await readFile(join(trialDir, 'state.json'), 'utf8'));
@@ -244,7 +247,7 @@ async function readContractTask(trialDir: string, craftbookId: string): Promise<
   return task?.craftbook.contract ? task : null;
 }
 
-function trialRoots(trialDir: string, task: Task) {
+export function trialRoots(trialDir: string, task: Task) {
   const workspace = resolve(trialDir, 'workspace', task.projectId);
   const artifacts = resolve(trialDir, 'artifacts', task.projectId);
   return {

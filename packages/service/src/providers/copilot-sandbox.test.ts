@@ -163,6 +163,58 @@ describe('Copilot provider sandbox default', () => {
   });
 });
 
+describe('Copilot extra MCP servers', () => {
+  it('passes hosted HTTP and SSE servers with their headers, and drops in-memory relays', async () => {
+    const configs: Array<Record<string, unknown>> = [];
+    const provider = new CopilotProvider({});
+    vi.spyOn(
+      provider as unknown as { loadSdk: () => Promise<unknown> },
+      'loadSdk',
+    ).mockResolvedValue(fakeCopilotSdk(configs));
+
+    await provider.createSession({
+      systemMessage: 'hosted',
+      extraMcpServers: [
+        {
+          id: 'remote-api',
+          kind: 'http',
+          transport: 'streamable-http',
+          url: 'https://example.com/mcp',
+          headers: { 'x-api-key': 'fixture-only' },
+        },
+        {
+          id: 'legacy',
+          kind: 'http',
+          transport: 'sse',
+          url: 'https://example.com/sse',
+          headers: {},
+        },
+        { id: 'local', kind: 'stdio', command: 'node', args: ['server.js'], env: {} },
+        {
+          id: 'app-tools',
+          kind: 'in-memory',
+          label: 'app',
+          connect: () => {
+            throw new Error('relays never reach the SDK');
+          },
+        },
+      ],
+    });
+    expect(configs[0]!.mcpServers).toEqual({
+      'remote-api': {
+        type: 'http',
+        url: 'https://example.com/mcp',
+        headers: { 'x-api-key': 'fixture-only' },
+        tools: ['*'],
+      },
+      legacy: { type: 'sse', url: 'https://example.com/sse', headers: {}, tools: ['*'] },
+      local: { type: 'local', command: 'node', args: ['server.js'], env: {}, tools: ['*'] },
+    });
+
+    await provider.shutdown();
+  });
+});
+
 describe('non-sandbox overlap hiding', () => {
   it('hides our MCP tools that duplicate a Copilot built-in', () => {
     for (const name of ['fetch_url', 'grep_files', 'find_files', 'read_image_as_base64']) {

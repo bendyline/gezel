@@ -145,7 +145,12 @@ export async function evaluatePortableTaskGate(
     if (failures.length)
       return {
         approved: false,
-        message: formatGateVerdict([...(await locateMissingGateFiles(checks, ws)), ...failures]),
+        message: formatGateVerdict([
+          ...(await locateMissingGateFiles(checks, ws, {
+            taskDir: task.artifactDir ?? `tasks/${task.num}`,
+          })),
+          ...failures,
+        ]),
       };
     const scripts = await evaluateGateScripts(
       gate?.scripts ?? [],

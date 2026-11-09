@@ -150,6 +150,9 @@ export async function startService(
     cleanup.push(() => {
       components.cacheController.stop();
       components.engineBinaries.clear();
+      components.llamaCppModels.abortInstalls();
+      components.ds4Models.abortInstalls();
+      components.mlxModels.abortInstalls();
     });
     class HostedInference extends EngineInference {
       private apple?: AppleFoundationModelsProvider;

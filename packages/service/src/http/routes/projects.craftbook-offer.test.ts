@@ -9,6 +9,7 @@ import { type RunningService, startService } from '../../service.js';
 let svc: RunningService;
 let client: GezelClient;
 let home: string;
+let rawFetch: (path: string, headers: Record<string, string>) => Promise<Response>;
 
 const priorMockFlag = process.env.GEZEL_MOCK_PROVIDER;
 
@@ -23,6 +24,10 @@ beforeAll(async () => {
     token: svc.context.token,
     fetch: httpFetch,
   });
+  rawFetch = (path, headers) =>
+    httpFetch(`${scheme}://127.0.0.1:${svc.port}${path}`, {
+      headers: { Authorization: `Bearer ${svc.context.token}`, ...headers },
+    });
 }, 30_000);
 
 afterAll(async () => {
@@ -42,5 +47,15 @@ describe('a typed project’s craftbook offer', () => {
     const offer = await client.listProjectCraftbooks(project.id);
     expect(offer.suggestedIds).toContain('training-recap');
     expect(offer.projectType).toEqual({ id: 'fitness-coach', label: 'Fitness Coach' });
+  }, 30_000);
+});
+
+describe('the craftbook offer on the wire', () => {
+  it('is compressed for a client that accepts gzip, and reads the same', async () => {
+    const res = await rawFetch('/api/projects/default/craftbooks', { 'Accept-Encoding': 'gzip' });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-encoding')).toBe('gzip');
+    const body = (await res.json()) as { items: unknown[] };
+    expect(body.items.length).toBe((await client.listProjectCraftbooks('default')).items.length);
   }, 30_000);
 });

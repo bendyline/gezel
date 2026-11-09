@@ -147,3 +147,71 @@ describe('UnresolvedToolFailureLedger', () => {
     expect(ledger.blockReason('advance_task_step')).toBeNull();
   });
 });
+
+describe('UnresolvedToolFailureLedger: a failed save holds the advance behind it', () => {
+  // squisq/38, 2026-11-09: the factual-writing check refused the step's
+  // write_artifact, and the advance queued behind it in the same batch spent
+  // a gate attempt on a file that was never written.
+  const REFUSAL =
+    'Not saved: 6 sentences state facts that no evidence in this conversation shows.\n- "**Current State**: …" cites nothing.';
+  const audit = { path: 'tasks/38/audit.md', content: '# Audit' };
+
+  it('holds one advance, naming the save and why it failed', () => {
+    const ledger = new UnresolvedToolFailureLedger();
+    ledger.record('write_artifact', REFUSAL, true, audit);
+    const held = ledger.blockReason('advance_task_step');
+    expect(held).toContain('`advance_task_step` was not run');
+    expect(held).toContain(
+      '- `write_artifact` of `tasks/38/audit.md`: Not saved: 6 sentences state facts',
+    );
+    expect(held).not.toContain('Current State');
+    expect(ledger.blockReason('write_task_note')).toBeNull();
+    // Seen once, the choice is the model's: the step gate judges the next one.
+    expect(ledger.blockReason('advance_task_step')).toBeNull();
+  });
+
+  it('lets the advance through once the same target saves', () => {
+    const ledger = new UnresolvedToolFailureLedger();
+    ledger.record('write_artifact', REFUSAL, true, audit);
+    ledger.record('write_artifact', 'Saved tasks/38/audit.md', false, audit);
+    expect(ledger.blockReason('advance_task_step')).toBeNull();
+  });
+
+  it('keeps the hold when only a different file saved', () => {
+    const ledger = new UnresolvedToolFailureLedger();
+    ledger.record('write_artifact', REFUSAL, true, audit);
+    ledger.record('write_artifact', 'Saved', false, { path: 'tasks/38/notes.md' });
+    expect(ledger.blockReason('advance_task_step')).toContain('`tasks/38/audit.md`');
+  });
+
+  it('holds once per target until it saves, so a save that cannot work never traps the step', () => {
+    const ledger = new UnresolvedToolFailureLedger();
+    const denied = 'ERROR: this project does not allow workspace writes';
+    ledger.record('write_file', denied, true, { path: 'notes.md' });
+    expect(ledger.blockReason('advance_task_step')).not.toBeNull();
+    ledger.record('write_file', denied, true, { path: 'notes.md' });
+    expect(ledger.blockReason('advance_task_step')).toBeNull();
+    // A success re-arms it: the next failure there is news again.
+    ledger.record('write_file', 'Wrote notes.md', false, { path: 'notes.md' });
+    ledger.record('write_file', denied, true, { path: 'notes.md' });
+    expect(ledger.blockReason('advance_task_step')).not.toBeNull();
+  });
+
+  it('names a save with no path by its tool, and ignores failures of tools that save nothing', () => {
+    const ledger = new UnresolvedToolFailureLedger();
+    ledger.record('read_file', 'ERROR: file not found', true, { path: 'a.md' });
+    expect(ledger.blockReason('advance_task_step')).toBeNull();
+    ledger.record('write_task_note', 'ERROR: stale step', true, { ref: 'p/1', text: 'x' });
+    expect(ledger.blockReason('advance_task_step')).toContain('- `write_task_note`: ERROR: stale');
+  });
+
+  it('puts the repeated-failure block first and keeps the hold for later', () => {
+    const ledger = new UnresolvedToolFailureLedger();
+    ledger.record('write_artifact', REFUSAL, true, audit);
+    ledger.record('convert_document', CONVERT_REJECTION, true);
+    ledger.record('convert_document', CONVERT_REJECTION, true);
+    expect(ledger.blockReason('advance_task_step')).toContain('unresolved tool failure');
+    ledger.record('convert_document', 'docblocks://artifacts/1', false);
+    expect(ledger.blockReason('advance_task_step')).toContain('`tasks/38/audit.md`');
+  });
+});

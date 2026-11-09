@@ -80,6 +80,7 @@ export {
   ROCM_GFX_TARGETS,
   ROCM_KPACK_DIR,
   checkRocmBuild,
+  checkRocmBuildAsync,
   gfxFromTargetVersion,
   linuxKfdGfxTargets,
   parseRocmDeviceLog,
@@ -123,6 +124,7 @@ export {
   isCudaArchivePath,
   resolveNativeBinaryUnder,
   cudaArchiveCarries,
+  warmRocmDeviceCheck,
 } from './discover.js';
 export {
   windowsDetachedSpawnOptions,

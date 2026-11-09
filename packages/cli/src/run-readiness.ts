@@ -1,5 +1,6 @@
 import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
+import { ENGINE_BINARY } from './craftbook-setup.js';
 import { providerFlag } from './model-choice.js';
 
 /**
@@ -83,9 +84,13 @@ export async function checkRunReadiness(
     provider === 'mlx' ? await client.listMlxModels() : await client.listLlamaCppModels();
   const installedIds = installed.models.map((model) => model.id);
   const pinned = config.defaultModel?.[provider];
-  const engineMissing =
-    provider === 'llama-cpp' &&
-    !native.engines.some((engine) => engine.name === 'llama-server' && engine.installed);
+  // MLX's engine is the toolkit's uv, as the TUI gate reads it. Checking only
+  // llama-server let a Mac whose toolkit lacked uv read as ready: every turn
+  // then failed "Python runtime unavailable", and `--download`, which repairs
+  // only a run that is not ready, never fetched it (2026-11-08 npm ship audit).
+  const engineMissing = !native.engines.some(
+    (engine) => engine.name === ENGINE_BINARY[provider] && engine.installed,
+  );
   const modelReady = pinned ? installedIds.includes(pinned) : installedIds.length > 0;
   if (!engineMissing && modelReady) return READY;
 

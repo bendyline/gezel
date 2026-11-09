@@ -304,6 +304,8 @@ export class EvidenceLedger {
   private given = '';
   /** Given text that holds for the whole session; see `setSessionGiven`. */
   private sessionGiven = '';
+  /** Whether capitalized words are checked as names; see `setNameChecks`. */
+  private nameChecks = true;
   private turnStart: number;
   /** Consecutive refusals by write target, spanning task continuation turns. */
   private readonly refusals = new Map<string, number>();
@@ -371,6 +373,14 @@ export class EvidenceLedger {
     this.sessionGiven = given;
   }
 
+  /**
+   * Off for a project that holds code: names there are identifiers, which
+   * the check already skips, and Title Case is a label. See `GroundOptions.names`.
+   */
+  setNameChecks(on: boolean): void {
+    this.nameChecks = on;
+  }
+
   /** Number one piece of evidence; the same text from the same place keeps its number. */
   add(
     kind: Entry['kind'],
@@ -394,6 +404,7 @@ export class EvidenceLedger {
     return groundText(text, [...this.entries.values()], {
       given: this.sessionGiven ? `${this.sessionGiven}\n${this.given}` : this.given,
       opaque: (n) => n <= this.floor,
+      names: this.nameChecks,
     });
   }
 

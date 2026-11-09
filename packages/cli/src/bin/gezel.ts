@@ -71,7 +71,7 @@ import {
   resolveCraftbookInvocation,
   waitForTask,
 } from '../craftbook-command.js';
-import { ensureCraftbookSetup, terminalPrompter } from '../craftbook-setup.js';
+import { ensureCraftbookSetup, ensureModelEngines, terminalPrompter } from '../craftbook-setup.js';
 import {
   SHORTHAND_FLAG,
   craftbookForShorthand,
@@ -2602,6 +2602,10 @@ model
     const client = await connectOwned(cliGlobals());
     const provider = resolveModelProvider(opts.provider);
     const progress = stderrProgress();
+    // A pull asks for a runnable model, so fetch the engine it runs on too,
+    // as `--download` does. On a Mac that engine is the toolkit's uv, and a
+    // pull without it left a model no chat could load.
+    await ensureModelEngines(client, [provider], progress);
     await pullChatModel(client, provider, id, progress);
     if (provider === 'mlx') await waitForMlxRuntime(client, progress);
     if ((await pinPulledModel(client, provider, id)) === 'pinned') {

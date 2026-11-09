@@ -93,6 +93,7 @@ export async function runActivationGate(
   const outcome = await evaluateStepGate({
     gate,
     ws: reader,
+    taskDir: task.artifactDir ?? `tasks/${task.num}`,
     // Activation gates run with no session in flight; standard-scope
     // scripts are trusted, everything else respects engagement mode.
     runScript: async (ref) => {

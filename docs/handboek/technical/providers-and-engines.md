@@ -21,12 +21,12 @@ Cloud models are the strongest option and need no hardware to speak of. The trad
 
 ### Claude and Codex CLIs
 
-The first-class way to reach cloud models is through a coding CLI you already have installed and signed in:
+One way to reach cloud models is through a coding CLI you already have installed and signed in:
 
-- **Claude CLI** — if Anthropic's `claude` command (Claude Code) is on your machine, gezel finds it automatically and drives it directly. Your existing login carries over — a Claude subscription works as-is, with no API key to manage. Gezel wires its own tools (memories, tasks, team management, documents, history) into each conversation, so your gezels keep their full craft while Claude does the thinking.
+- **Claude CLI** — if Anthropic's `claude` command (Claude Code) is on your machine, gezel finds it automatically and drives it directly. It uses whatever the CLI is signed in with, so there is no separate key to set up in Gezel. Gezel wires its own tools (memories, tasks, team management, documents, history) into each conversation, so your gezels keep their full craft while Claude does the thinking.
 - **Codex CLI** — same idea for OpenAI's `codex` command. Whatever the CLI is signed in with (a ChatGPT account via `codex login`, or an API key in your environment) is what gezel uses.
 
-This interop is the recommended path because the account you already pay for keeps working, the CLIs bring their own strong agentic loop, and there's no separate credential to create or store. Settings shows whether each CLI was detected, and you can point gezel at a specific binary if it lives somewhere unusual.
+With a CLI, Gezel stores no credential of its own, and the CLI brings its own agentic loop. The terms of the account a CLI is signed in with apply to how Gezel uses it, including work that runs while you are away, so check them before you give a subscription account night work. Settings shows whether each CLI was detected, and you can point gezel at a specific binary if it lives somewhere unusual.
 
 ### Codex turn recovery
 

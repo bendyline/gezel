@@ -48,6 +48,38 @@ const PROVIDERS_TO_ENUMERATE: readonly ProviderName[] = [
 ];
 const LOCAL_PROVIDERS: readonly ProviderName[] = ['llama-cpp', 'mlx', 'ds4'];
 
+/**
+ * Providers whose listing runs the person's own programs: the Claude and
+ * Codex command lines are executed to read their models, and Ollama's port
+ * is probed (and its app possibly launched). An app listing models must not
+ * set those off on a machine whose owner never chose them (2026-11-04 and
+ * 2026-11-08 npm ship audits), so they are listed only once chosen.
+ */
+const OPT_IN_PROVIDERS: ReadonlySet<ProviderName> = new Set([
+  'anthropic-cli',
+  'codex-cli',
+  'ollama',
+]);
+
+/** The install's provider, a gezel's own provider, or that provider's own settings. */
+export function providerChosen(
+  provider: ProviderName,
+  config: {
+    provider?: string;
+    anthropicCli?: object;
+    codexCli?: object;
+    ollamaBaseUrl?: string;
+  } | null,
+  gezels: ReadonlyArray<{ provider?: string }>,
+): boolean {
+  if (config?.provider === provider) return true;
+  if (gezels.some((gezel) => gezel.provider === provider)) return true;
+  if (provider === 'anthropic-cli') return config?.anthropicCli !== undefined;
+  if (provider === 'codex-cli') return config?.codexCli !== undefined;
+  if (provider === 'ollama') return config?.ollamaBaseUrl !== undefined;
+  return true;
+}
+
 interface V1ModelsRouteOptions {
   /** List only on-device engines plus downloadable on-device catalog entries. */
   localOnly?: boolean;
@@ -258,10 +290,11 @@ async function buildModelEntries(
   // effective fallback first because a number of generic clients pick
   // the first entry by default. Role + name form the human-readable
   // routing id; `gezel_id` remains stable metadata for richer integrations.
+  const config = options.localOnly ? null : await ctx.store.readConfig().catch(() => null);
+  const gezels =
+    options.localOnly || !ctx.store.listGezels ? [] : await ctx.store.listGezels().catch(() => []);
   let gezelEntries: OpenAIModelEntry[] = [];
   if (!options.localOnly && ctx.store.listGezels) {
-    const config = await ctx.store.readConfig().catch(() => null);
-    const gezels = await ctx.store.listGezels().catch(() => []);
     const fallbackGezelId = await resolveFallbackGezelId(
       ctx,
       config?.openaiEndpoints?.servingGezelId,
@@ -293,7 +326,8 @@ async function buildModelEntries(
     if (item.manifest.kind === 'chat-model') manifests.set(item.manifest.id, item.manifest);
   const providers = (options.localOnly ? LOCAL_PROVIDERS : PROVIDERS_TO_ENUMERATE).filter(
     (provider) =>
-      provider !== 'mlx' || resolveDistributionProfile().pythonProvisioning !== 'frozen-only',
+      (provider !== 'mlx' || resolveDistributionProfile().pythonProvisioning !== 'frozen-only') &&
+      (!OPT_IN_PROVIDERS.has(provider) || providerChosen(provider, config, gezels)),
   );
   const buckets = await Promise.all(
     providers.map(async (provider) => {

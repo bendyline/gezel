@@ -258,6 +258,40 @@ describe('GET /v1/models catalog metadata', () => {
     expect(providers).toEqual(['llama-cpp', 'mlx', 'ds4']);
     expect(ctx.store.listGezels).not.toHaveBeenCalled();
   });
+
+  it("never runs someone's Claude or Codex command line, or probes Ollama, unless they chose it", async () => {
+    const ctx = modelContext();
+    const providers: string[] = [];
+    ctx.chat.listModelsForProvider = vi.fn(async (provider: string) => {
+      providers.push(provider);
+      return [];
+    });
+
+    expect((await v1ModelsRoutes(ctx).request('http://localhost/')).status).toBe(200);
+    expect(providers).not.toContain('anthropic-cli');
+    expect(providers).not.toContain('codex-cli');
+    expect(providers).not.toContain('ollama');
+    expect(providers).toContain('openai');
+  });
+
+  it('lists them once chosen: as the provider, by a gezel, or through their own settings', async () => {
+    const ctx = modelContext();
+    const providers: string[] = [];
+    ctx.store.readConfig = vi.fn(async () => ({
+      provider: 'codex-cli',
+      anthropicCli: {},
+    })) as never;
+    ctx.store.listGezels = vi.fn(async () => [
+      { id: 'otis', name: 'Otis', provider: 'ollama' },
+    ]) as never;
+    ctx.chat.listModelsForProvider = vi.fn(async (provider: string) => {
+      providers.push(provider);
+      return [];
+    });
+
+    expect((await v1ModelsRoutes(ctx).request('http://localhost/')).status).toBe(200);
+    expect(providers).toEqual(expect.arrayContaining(['anthropic-cli', 'codex-cli', 'ollama']));
+  });
 });
 
 it('reuses one Apple readiness check across listings instead of launching the helper each time', async () => {

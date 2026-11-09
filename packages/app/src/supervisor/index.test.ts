@@ -175,6 +175,7 @@ vi.mock('@bendyline/gezel/native', () => ({
   },
   publishLlamaCudaBlocker: () => {},
   checkRocmBuild: () => ({ blocker: null, devices: [], visibleDevices: null }),
+  checkRocmBuildAsync: async () => ({ blocker: null, devices: [], visibleDevices: null }),
   publishRocmCheck: () => {},
   // Which -cuda archives carry which CUDA engine builds is core's to test.
   cudaArchiveCarries: (name: string, platform: string, arch: string) =>

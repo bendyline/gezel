@@ -26,7 +26,8 @@ input limit. Ten attempts produced no artifact to score. The four task
 rubrics stay separate: the **Artifact reviews** tables show HTML, code, data
 and document quality means with eligible artifact counts, plus counts for
 missing artifacts and excluded reviews. These were unblinded reviews by
-`codex-inline/current-session`; no combined quality score is calculated.
+the OpenAI Codex agent that ran the round, in the same session; no combined
+quality score is calculated.
 
 The **Task performance** tables show output and prefill speed, wall time,
 peak system RSS and peak GPU memory as per-trial medians with ranges and

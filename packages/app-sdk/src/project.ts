@@ -31,6 +31,8 @@ export class GezelProject {
     private readonly daemon: DaemonConnection,
     readonly id: string,
     readonly facts: GezelProjectFacts,
+    /** Open tool registrations, shared with the `Gezel` that closes them. */
+    private readonly registrations?: Set<AppToolsRegistration>,
   ) {}
 
   /** Gezel id by role template id. */
@@ -59,7 +61,21 @@ export class GezelProject {
    * Offer tools this application runs itself to the gezels in this project.
    * See {@link registerAppTools}.
    */
-  registerTools(input: Omit<RegisterAppToolsInput, 'projectId'>): Promise<AppToolsRegistration> {
-    return registerAppTools(this.daemon, { ...input, projectId: this.id });
+  async registerTools(
+    input: Omit<RegisterAppToolsInput, 'projectId'>,
+  ): Promise<AppToolsRegistration> {
+    const registration = await registerAppTools(this.daemon, { ...input, projectId: this.id });
+    const open = this.registrations;
+    if (!open) return registration;
+    open.add(registration);
+    return {
+      relayId: registration.relayId,
+      ready: registration.ready,
+      update: (tools, opts) => registration.update(tools, opts),
+      close: async () => {
+        open.delete(registration);
+        await registration.close();
+      },
+    };
   }
 }

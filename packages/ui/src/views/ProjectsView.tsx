@@ -136,7 +136,6 @@ import { makeReportActionFenceRenderers } from '../components/report-actions/Rep
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
 import { useDebugMode } from '../components/useDebugMode.js';
-import { useShowWorkInProgressFeatures } from '../components/useShowWorkInProgressFeatures.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
@@ -483,7 +482,6 @@ export function ProjectDetailView({
 
 export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewProps = {}) {
   const detailOnly = forceProjectId !== undefined;
-  const showWorkInProgressFeatures = useShowWorkInProgressFeatures();
   // Auto-compact: observe the outermost container's width and flip
   // to compact layout when it drops below the threshold. The
   // explicit `compact` prop is OR-merged in — a host that knows
@@ -509,9 +507,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
   const [tab, setTab] = useState<ProjectTab>('chat');
   const debugMode = useDebugMode();
-  useEffect(() => {
-    if (!showWorkInProgressFeatures && tab === 'mail') setTab('about');
-  }, [showWorkInProgressFeatures, tab]);
   const showViewsTab = useCallback(() => setTab('map'), []);
   const projectViews = useProjectViews({
     project: selected,
@@ -2512,7 +2507,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       value: 'mail',
                       label: 'Mail',
                       icon: 'mail',
-                      show: showWorkInProgressFeatures && isEmailProject(selected),
+                      show: isEmailProject(selected),
                     },
                     {
                       ...projectViews.tabItem,
@@ -3423,7 +3418,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     </ProjectPaneBoundary>
                   )}
 
-                  {showWorkInProgressFeatures && tab === 'mail' && (
+                  {tab === 'mail' && (
                     <ProjectPaneBoundary>
                       <ProjectMailTab project={selected} onProjectChange={setSelected} />
                     </ProjectPaneBoundary>

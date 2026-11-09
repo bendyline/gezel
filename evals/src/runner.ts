@@ -92,6 +92,7 @@ import {
 } from './sniff-feedback.ts';
 import { shutdownTrialDaemon, spawnTrialDaemon } from './spawn.ts';
 import { sessionServesFinishedPass } from './stale-step-session.ts';
+import { EXTERNAL_HARNESS_STATE_KEY } from './strategy/pi-harness.ts';
 import { taskStepRouteFor } from './task-step-routing.ts';
 import { writeTrialFacts } from './trial-facts.ts';
 import type {
@@ -1179,6 +1180,7 @@ export async function runTrial(
   perf.start(spawned.pid);
   let metrics: TrialMetrics | null = null;
 
+  const scenarioState = new Map<string, unknown>();
   try {
     // Phase 4: configure provider + short-circuit first-run bootstrap.
     // `buildProviderConfig` returns the provider + defaultModel pair
@@ -1387,7 +1389,19 @@ export async function runTrial(
     // and before the kickoff prompt — gives scenarios like
     // `self-correction-broken-js` a place to seed workspace state the
     // prompt then references. Errors bubble up and fail the trial.
-    const scenarioState = new Map<string, unknown>();
+    const trialDaemon = opts.taskStrategy?.harness
+      ? {
+          daemon: {
+            baseUrl: spawned.baseUrl,
+            token: spawned.token,
+            home: trialHome,
+            runDir,
+            provider: engine,
+            modelId: opts.modelId,
+            ...(spawned.cert ? { cert: spawned.cert } : {}),
+          },
+        }
+      : {};
     if (scenario.setup) {
       log('[trial] running scenario setup hook');
       const setupTimeoutMs = scenario.setupTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS;
@@ -1400,6 +1414,7 @@ export async function runTrial(
                   repairPolicy: scenario.repairPolicy,
                   userSimulation: opts.qualification?.userSimulation,
                   ...(opts.taskStrategy ? { taskStrategy: opts.taskStrategy } : {}),
+                  ...trialDaemon,
                   meesterId,
                   ...(mockRuntime ? { mocks: mockRuntime } : {}),
                   state: scenarioState,
@@ -1411,6 +1426,7 @@ export async function runTrial(
                 client,
                 meesterId,
                 ...(opts.taskStrategy ? { taskStrategy: opts.taskStrategy } : {}),
+                ...trialDaemon,
                 ...(mockRuntime ? { mocks: mockRuntime } : {}),
                 state: scenarioState,
                 log,
@@ -1574,6 +1590,13 @@ export async function runTrial(
       log(`[trial] crash: ${reason}`);
     }
   } finally {
+    // An outside tool (the strategy benchmark's pi arm) outlives the poll
+    // loop unless stopped, and must not keep calling a daemon being torn down.
+    await (
+      scenarioState.get(EXTERNAL_HARNESS_STATE_KEY) as { stop?: () => Promise<void> } | undefined
+    )
+      ?.stop?.()
+      .catch(() => undefined);
     // Phase 8: stop perf collector (one usage probe before the daemon
     // goes away), capture forensic state, then shut down.
     // Flush terminal telemetry before the collector reads the recording.

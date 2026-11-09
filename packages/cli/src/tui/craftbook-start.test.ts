@@ -72,7 +72,7 @@ describe('craftbook start helpers', () => {
     ]);
   });
 
-  it('hides connector-backed craftbooks unless WIP features are enabled', () => {
+  it('lists connector-backed craftbooks whether or not preview features are on', () => {
     const items = [
       catalogCraftbook({ id: 'plain', name: 'Plain' }),
       catalogCraftbook({
@@ -82,11 +82,12 @@ describe('craftbook start helpers', () => {
       }),
     ];
 
-    expect(normalizeCraftbooks(items).map((book) => book.id)).toEqual(['plain']);
-    expect(normalizeCraftbooks(items, true).map((book) => book.id)).toEqual([
-      'plain',
-      'social-digest',
-    ]);
+    for (const preview of [false, true]) {
+      expect(normalizeCraftbooks(items, preview).map((book) => book.id)).toEqual([
+        'plain',
+        'social-digest',
+      ]);
+    }
   });
 
   it('builds a recommended first stage plus subject shelves', () => {

@@ -2937,6 +2937,11 @@ export async function startProductService(
       chatInstalls.llamaCpp.clear();
       chatInstalls.ds4.clear();
       chatInstalls.mlx.clear();
+      // Clearing a registry only unwinds its generators; this also stops the
+      // transfers, including /v1/models/ensure jobs no registry tracks.
+      llamaCppModels.abortInstalls();
+      ds4Models.abortInstalls();
+      mlxModels.abortInstalls();
       videoPulls.clear();
       engineBinaries.clear();
       systemToolsetInstalls.clear();

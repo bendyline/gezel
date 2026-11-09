@@ -672,6 +672,11 @@ export class ClaudeWorker {
       args.push('--mcp-config', this.mcpConfigPath);
       args.push('--permission-prompt-tool', 'mcp__gezel__request_tool_permission');
     }
+    // Without this the CLI also loads the person's own MCP servers and
+    // claude.ai connectors (Gmail, Drive, …) into a gezel session, past the
+    // security posture's toolset ceiling and every tool clamp. A session
+    // Gezel gives no servers must get none.
+    args.push('--strict-mcp-config');
     if (this.quotaSettingsPath) {
       args.push('--settings', this.quotaSettingsPath);
     }

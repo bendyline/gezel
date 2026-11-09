@@ -552,6 +552,13 @@ export const TaskSchema = z.object({
    * `executionMode` is the strategy.
    */
   strategy: TaskStrategySchema.optional(),
+  /**
+   * The strategy the creator asked for, when they named one; absent under
+   * `auto`. A schedule host's own `strategy` was resolved against its
+   * one-step placeholder, so its runs inherit this instead and otherwise
+   * resolve their own, as a change to the model or the setting should reach.
+   */
+  requestedStrategy: TaskStrategySchema.optional(),
   strategyOptions: TaskStrategyOptionsSchema.optional(),
   craftbook: TaskCraftbookSchema,
   spawnsCraftbook: TaskCraftbookSchema.optional(),

@@ -171,6 +171,34 @@ describe('locateMissingGateFiles', () => {
     ]);
   });
 
+  // squisq/38, 2026-11-09: the factual-writing check refused the write, and
+  // the gate blamed the model for the files earlier nightly runs left.
+  it("never calls another task's file this task's misplaced copy", async () => {
+    const earlierRuns = reader(
+      {},
+      {
+        'tasks/13/scope.md': '# Scope',
+        'tasks/34/audit.md': '# Audit',
+        'tasks/38/audit.md': '# Audit',
+        'tasks/38/drafts/scope.md': '# Scope',
+      },
+    );
+    const scope: GateCheck[] = [
+      { kind: 'minBytes', file: 'tasks/38/scope.md', artifact: true, bytes: 120 },
+    ];
+    expect(await locateMissingGateFiles(scope, earlierRuns)).toEqual([
+      'The checks read `tasks/38/scope.md` at exactly that path in the artifacts drawer; it was saved as `tasks/38/drafts/scope.md` instead. Save it at `tasks/38/scope.md` in the artifacts drawer.',
+    ]);
+    // A deliverable at the drawer root: only the judged task's own folder is a misplacement.
+    const root: GateCheck[] = [{ kind: 'minBytes', file: 'audit.md', artifact: true, bytes: 1 }];
+    expect(await locateMissingGateFiles(root, earlierRuns, { taskDir: 'tasks/38' })).toEqual([
+      'The checks read `audit.md` at exactly that path in the artifacts drawer; it was saved as `tasks/38/audit.md` instead. Save it at `audit.md` in the artifacts drawer.',
+    ]);
+    expect(await locateMissingGateFiles(root, earlierRuns)).toEqual([
+      'The checks read `audit.md` at exactly that path in the artifacts drawer, and nothing is saved there yet.',
+    ]);
+  });
+
   it('says nothing is there yet when no copy exists, and names the tree it read', async () => {
     expect(
       await locateMissingGateFiles(
