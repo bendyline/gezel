@@ -71,25 +71,8 @@ export async function buildNightShiftReview(
   };
 
   for (const project of projects) {
-    const projectTasks = await store.listProjectTasks(project.id).catch(() => []);
-    for (const task of projectTasks) {
-      // Tasks carry no top-level completion stamp — the last completed
-      // step's stamp is the closest truth, with `updatedAt` (written on
-      // the status flip) as the fallback.
-      const completedAt =
-        task.craftbook.steps.reduce<string | undefined>(
-          (latest, step) =>
-            step.completedAt && (!latest || step.completedAt > latest) ? step.completedAt : latest,
-          undefined,
-        ) ?? (task.status === 'complete' ? task.updatedAt : undefined);
-      const ranThisWindow = task.nightShift?.lastRunDay === key;
-      const completedInWindow =
-        task.status === 'complete' &&
-        completedAt !== undefined &&
-        Date.parse(completedAt) >= startMs &&
-        Date.parse(completedAt) < endMs;
-      if (!ranThisWindow && !completedInWindow) continue;
-
+    for (const task of await nightTasksOf(store, project.id, key, startMs, endMs)) {
+      const completedAt = taskCompletedAt(task);
       // Spawn hosts stay active — list the WORK (children/workables), not
       // the host machinery. The nightly review is the runtime's own run;
       // the report it leaves is what the person reads.
@@ -226,6 +209,53 @@ export function normalizeNightShiftReportAttachment(question: Question): Questio
  * and then attaching it to the morning card put a raw JSON literal in
  * front of the user where the night's write-up belonged.
  */
+/**
+ * Tasks carry no top-level completion stamp — the last completed step's
+ * stamp is the closest truth, with `updatedAt` (written on the status flip)
+ * as the fallback.
+ */
+function taskCompletedAt(task: Task): string | undefined {
+  return (
+    task.craftbook.steps.reduce<string | undefined>(
+      (latest, step) =>
+        step.completedAt && (!latest || step.completedAt > latest) ? step.completedAt : latest,
+      undefined,
+    ) ?? (task.status === 'complete' ? task.updatedAt : undefined)
+  );
+}
+
+/**
+ * One project's tasks that ran in this window or completed inside it,
+ * streamed and filtered rather than listed whole: building this card at boot
+ * held all ~304k tasks of a media-review project at once and ran the
+ * daemon's 8 GB heap out of memory (2026-11-09). A listing that fails
+ * contributes no tasks, as before.
+ */
+async function nightTasksOf(
+  store: Pick<Store, 'iterateProjectTasks'>,
+  projectId: string,
+  key: string,
+  startMs: number,
+  endMs: number,
+): Promise<Task[]> {
+  const found: Task[] = [];
+  try {
+    for await (const task of store.iterateProjectTasks(projectId)) {
+      const completedAt = taskCompletedAt(task);
+      const ranThisWindow = task.nightShift?.lastRunDay === key;
+      const completedInWindow =
+        task.status === 'complete' &&
+        completedAt !== undefined &&
+        Date.parse(completedAt) >= startMs &&
+        Date.parse(completedAt) < endMs;
+      if (ranThisWindow || completedInWindow) found.push(task);
+    }
+  } catch {
+    return [];
+  }
+  return found;
+}
+
 function declaredArtifacts(task: Task): string[] {
   const out: string[] = [];
   for (const step of task.craftbook.steps) {

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_NIGHT_SHIFT_WINDOW, type Question } from '@bendyline/gezel';
 import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatManager } from '../chat/manager.js';
 import { DiffpackManager } from '../diffpack/manager.js';
 import { Store } from '../fs/store.js';
@@ -144,6 +144,45 @@ describe('buildNightShiftReview', () => {
       title: 'Security posture',
       actionCounts: { total: 1, suggested: 1, fired: 0, applied: 0, dismissed: 0 },
     });
+  });
+
+  // A media-review project held ~304k tasks; listing them all at once to build
+  // this card ran the daemon out of heap at boot (2026-11-09).
+  it('streams each project instead of holding its whole task list', async () => {
+    const project = await store.createProject({ name: 'Media' });
+    const finish = async (title: string, completedAt: string) => {
+      const created = await tasks.create(project.id, {
+        title,
+        assignee: { kind: 'user' },
+        steps: [{ name: 'Review' }],
+      });
+      const record = (await store.readTask(project.id, created.num))!;
+      await store.writeTask({
+        ...record,
+        status: 'complete',
+        craftbook: {
+          ...record.craftbook,
+          steps: record.craftbook.steps.map((step) => ({ ...step, completedAt })),
+        },
+      });
+    };
+    await finish('Reviewed overnight', IN_WINDOW);
+    await finish('Reviewed the day before', new Date(2026, 5, 19, 12, 0).toISOString());
+    await tasks.create(project.id, {
+      title: 'Still open',
+      assignee: { kind: 'user' },
+      steps: [{ name: 'Review' }],
+    });
+    const listing = vi.spyOn(store, 'listProjectTasks');
+
+    const review = await buildNightShiftReview(
+      { store, tasks, reportActions, diffpacks },
+      DEFAULT_NIGHT_SHIFT_WINDOW,
+      NOW,
+    );
+    expect(listing).not.toHaveBeenCalled();
+    expect(review.tasksCompleted.map((task) => task.title)).toEqual(['Reviewed overnight']);
+    expect(review.tasksCompleted[0]?.completedAt).toBe(IN_WINDOW);
   });
 
   it('does not count a declared data deliverable as a report', async () => {
