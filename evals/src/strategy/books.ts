@@ -65,6 +65,24 @@ export const STRATEGY_ARMS: Readonly<Record<string, TrialTaskStrategy>> = {
     strategy: 'outcome',
     options: { procedure: 'none', contract: 'hidden' },
   },
+  // The same request in pi (strategy/pi-harness.ts), on the same model through
+  // the daemon's /v1: nothing of Gezel's runtime, graded like the rest.
+  pi: {
+    arm: 'pi',
+    strategy: 'outcome',
+    options: { procedure: 'none', contract: 'hidden' },
+    harness: 'pi',
+  },
+  // Pi with the craftbook description Gezel's kickoff carries, which outlines
+  // the recipe for gallery books: separates what pi lacks in information
+  // from what it lacks in runtime.
+  'pi-book': {
+    arm: 'pi-book',
+    strategy: 'outcome',
+    options: { procedure: 'none', contract: 'hidden' },
+    harness: 'pi',
+    bookDescription: true,
+  },
 };
 
 export const DEFAULT_STRATEGY_ARMS: readonly string[] = ['stepwise', 'generalist', 'outcome'];

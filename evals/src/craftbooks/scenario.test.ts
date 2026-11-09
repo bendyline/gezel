@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { MockServicesRuntime } from '../mock/mock-server.ts';
+import { EXTERNAL_HARNESS_STATE_KEY } from '../strategy/pi-harness.ts';
 import type { EvalContext } from '../types.ts';
 import {
   CRAFTBOOK_STEP_MILESTONE_CAP,
@@ -1347,6 +1348,69 @@ describe('craftbook generic scenario adapter', () => {
         logChanged: vi.fn(),
       } as unknown as EvalContext),
     ).resolves.toEqual({ done: false });
+  });
+
+  it("judges an outside tool's trial without Gezel's task graph, whichever arm ran first", async () => {
+    // One scenario object serves every arm of a book. The task-graph drop
+    // used to ride the once-per-scenario contract scoping, so a pi trial
+    // that followed a Gezel arm was judged on a task graph it never touches.
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValue({ projects: [{ id: 'project-1', name: 'Sample Project' }] }),
+      listProjectTasks: vi.fn().mockResolvedValue({
+        tasks: [
+          {
+            projectId: 'project-1',
+            num: 1,
+            ref: 'T-1',
+            title: 'Run workflow',
+            status: 'active',
+            assignee: { kind: 'user' },
+            activeStepId: 'build',
+            craftbook: {
+              id: 'sample-book',
+              steps: [
+                { id: 'build', name: 'Build' },
+                { id: 'finish', name: 'Finish', terminal: true },
+              ],
+            },
+            sourceCraftbookIds: [{ catalogId: 'sample-book' }],
+          },
+        ],
+      }),
+      listChatSessions: vi.fn().mockResolvedValue({ sessions: [] }),
+      listGezels: vi.fn().mockResolvedValue({ gezels: [] }),
+      messageGezel: vi.fn().mockResolvedValue({ accepted: true }),
+      sendToChatSession: vi.fn().mockResolvedValue({ accepted: true }),
+    };
+    const scenario = craftbookScenarioFromSpec({
+      ...directWorkerSpec(),
+      success: {
+        summary: 'The work is done.',
+        taskGraph: { requireCraftbookTask: true, requireTerminalStep: true },
+      },
+    });
+    const trial = (taskStrategy: Record<string, unknown>, state: Map<string, unknown>) =>
+      scenario.successCheck({
+        client,
+        meesterId: 'meester',
+        log: vi.fn(),
+        logChanged: vi.fn(),
+        taskStrategy,
+        state,
+      } as unknown as EvalContext);
+
+    const gezel = await trial({ arm: 'outcome-bare', strategy: 'outcome', options: {} }, new Map());
+    expect(gezel).toMatchObject({ done: false });
+    const piState = new Map<string, unknown>([
+      [
+        EXTERNAL_HARNESS_STATE_KEY,
+        { state: { running: false, exitCode: 0, turns: 3, toolCalls: 4 } },
+      ],
+    ]);
+    const pi = await trial({ arm: 'pi', strategy: 'outcome', options: {}, harness: 'pi' }, piState);
+    expect(pi).toMatchObject({ done: true, success: true });
   });
 
   it('does not pass workflow mode while its attributed task is non-terminal', async () => {

@@ -371,3 +371,27 @@ Under v3, round 2 also moved toward the outcome arms:
 The small-tier screen's outcome moved to +1.42 [+0.17, +2.43].
 
 On the code books themselves, stepwise was the arm that lost quality on the small models. On Qwen 3.5 9B, refactor-module scored 2.6–2.8 under stepwise across rounds 1 and 2, against 6.1–8.1 for outcome-bare. On Qwen 3.8 27B, every arm scored 7–8.
+
+**2026-11-08, judge v3 validity on folder deliverables.** Pre-registered in `evals/runs/judge-folder-validity-2026-11-08/PREREG.md` before any damaged copy was judged. Planted defects were placed in copies of 16 passing trials, four per folder book (`evals/src/strategy/code-defects.ts`). A code defect counted only if the project's own `node --test` confirmed it.
+
+The judge caught 22 of 22 (threshold 90%):
+
+| Defect | Axis | Caught | Mean drop |
+|---|---|---|---|
+| Behavior broken (one mutation the tests reject) | craft | 8 of 8 | 5.9 |
+| One edited source file restored to its seed | completeness | 7 of 7 | 4.1 |
+| One invoice deleted | completeness | 4 of 4 | 4.6 |
+| One invoice amount changed | grounding | 3 of 3 | 4.7 |
+
+Ten more defects were skipped because the clean axis was below 6, as the rule requires. Most were on bug-fix-tdd, where clean completeness is about 5 in every arm. Its request asks for red-then-green proof, which a folder cannot show.
+
+Sonnet scored a fixed quarter of the 273 re-judged trials (69). Overall α was 0.95 (threshold 0.6), and Sonnet averaged 0.37 higher. Within a book, agreement follows the spread:
+
+| Book | Spread (Opus SD) | Correlation (r) |
+|---|---|---|
+| refactor-module | 2.85 | 0.99 |
+| invoice-run | 1.65 | 0.92 |
+| bug-fix-tdd | 0.38 | 0.58 |
+| codemod-sweep | 0.17 | −0.19 |
+
+On the last two, scores sat in a band under a point wide, so there was too little spread to measure agreement. The judge passes for folder deliverables.
