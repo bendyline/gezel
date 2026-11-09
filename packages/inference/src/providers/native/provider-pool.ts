@@ -179,6 +179,21 @@ export interface EngineWaitOpts {
   signal?: AbortSignal;
   /** Fired when the wait begins and every few seconds while it lasts. */
   onDrainWait?: (wait: EngineDrainWait) => void;
+  /**
+   * Work no person or task is waiting on: index summaries, memory extraction,
+   * digests. It gets an engine only by waiting for one, never by taking it
+   * from foreground work. It never evicts an engine foreground work was handed
+   * within {@link FOREGROUND_HOLD_MS}, never makes a bound turn step aside
+   * (see {@link ProviderPool.isDraining}), and never starts loading a model
+   * while a foreground request is still making room for its own.
+   *
+   * Without this, a night-shift summary stream won every model swap: each time
+   * a waiting task drained the summarizer's model, a queued summary reloaded
+   * it before the task's model could reserve, and once the task's model did
+   * load, the next summary evicted it as idle before its turn was sent. The
+   * turn failed with "provider disposed (engine was evicted)".
+   */
+  background?: boolean;
 }
 
 /** The engine a caller is waiting on, and whose turns it is waiting for. */
@@ -284,6 +299,14 @@ interface PoolEntry {
   draining: boolean;
   /** Callers currently waiting for this entry to drain; the last to give up clears `draining`. */
   drainClaims: number;
+  /** The subset of {@link drainClaims} that are foreground; see {@link ProviderPool.isDraining}. */
+  foregroundDrainClaims: number;
+  /**
+   * When foreground work was last handed this engine. A caller holds the
+   * provider for a moment before its turn reaches the queue, and an engine
+   * with an empty queue looks idle; background work must not take it then.
+   */
+  foregroundAt: number;
   /**
    * Recent use timestamps (pruned to {@link DEMAND_WINDOW_MS}). Drives
    * demand-weighted eviction: under memory pressure the pool evicts the
@@ -299,6 +322,13 @@ const DEMAND_WINDOW_MS = 60_000;
 
 const DEFAULT_DRAIN_WAIT_MS = 30_000;
 const DRAIN_POLL_MS = 500;
+/**
+ * How long an engine handed to foreground work stays off-limits to background
+ * work while its queue is still empty. Covers the gap between a bind and the
+ * turn reaching the queue: session construction, retrieval, prompt assembly.
+ * Captured at 1.4 s; a cold embedder or MCP spawn adds seconds.
+ */
+const FOREGROUND_HOLD_MS = 30_000;
 /** Matches the provider queue's wait-notice cadence. */
 const DRAIN_NOTICE_REPEAT_MS = 5_000;
 
@@ -367,6 +397,8 @@ export class ProviderPool {
   // Lock per key so two parallel `ensure` calls don't race to build
   // the same engine. Hit path stays lock-free (Map.get).
   private readonly buildLocks = new Map<string, Promise<LLMProvider>>();
+  /** Builds started for foreground callers; background builds wait for these. */
+  private readonly foregroundBuilds = new Set<Promise<LLMProvider>>();
   // In-flight evictions per key — parallel evict() calls join the
   // same teardown instead of double-shutting-down the provider.
   private readonly evicting = new Map<string, Promise<void>>();
@@ -429,44 +461,109 @@ export class ProviderPool {
     }
     await this.sweepFailedStarts();
     const key = makeEngineKey(provider, modelId, replicaIdx);
-    const hit = this.entries.get(key);
-    if (hit && !hit.draining) {
-      hit.lastUsedAt = this.now();
-      return hit.provider;
-    }
-    if (hit?.draining) {
-      // The entry is being torn down to make room elsewhere. Handing
-      // it out would keep it busy forever (starvation); instead wait,
-      // on this caller's terms, for the eviction to settle, then
-      // rebuild below. If every drain gave up, or this caller's own
-      // wait ran out first, the entry survives — return it rather
-      // than double-building over a still-reserved key.
-      await this.waitForDrainToSettle(key, hit, opts);
-      const survived = this.entries.get(key);
-      if (survived) {
-        survived.lastUsedAt = this.now();
-        return survived.provider;
+    let foregroundWaitDeadline: number | undefined;
+    for (;;) {
+      const hit = this.entries.get(key);
+      // A background drain only waits for a turn boundary: foreground work
+      // keeps the engine, and that drain gives up at its own deadline.
+      if (hit && (!hit.draining || (!opts.background && hit.foregroundDrainClaims === 0))) {
+        return this.handOut(hit, opts);
       }
-      // Retirement may have started while this ensure was parked behind the
-      // drain. Never resurrect a user-owned engine after broker adoption.
+      if (hit?.draining) {
+        // The entry is being torn down to make room elsewhere. Handing
+        // it out would keep it busy forever (starvation); instead wait,
+        // on this caller's terms, for the eviction to settle, then
+        // rebuild below. If every drain gave up, or this caller's own
+        // wait ran out first, the entry survives — return it rather
+        // than double-building over a still-reserved key.
+        await this.waitForDrainToSettle(key, hit, opts);
+        const survived = this.entries.get(key);
+        if (survived) return this.handOut(survived, opts);
+        // Retirement may have started while this ensure was parked behind the
+        // drain. Never resurrect a user-owned engine after broker adoption.
+        if (this.retiring) {
+          throw new Error('local engine pool retired after machine engine adoption');
+        }
+      }
       if (this.retiring) {
         throw new Error('local engine pool retired after machine engine adoption');
       }
+      const pending = this.buildLocks.get(key);
+      if (pending) return this.joinBuild(key, pending, opts);
+      // A foreground request that drained an engine must load into the room
+      // it made. Starting a background load now would take that room, often
+      // by reloading the very model just drained for it.
+      if (opts.background && this.foregroundBuilds.size > 0) {
+        foregroundWaitDeadline ??= this.now() + (opts.drainWaitMs ?? this.drainWaitMs);
+        await this.waitForForegroundBuilds(key, foregroundWaitDeadline, opts);
+        continue;
+      }
+      break;
     }
-    if (this.retiring) {
-      throw new Error('local engine pool retired after machine engine adoption');
-    }
-    const pending = this.buildLocks.get(key);
-    if (pending) return pending;
     const build = this.buildEntry(provider, modelId, replicaIdx, residentBytes, opts).finally(
       () => {
         // Identity-guarded like `evicting` below: a retry build started after
         // this one settled must not be evicted by this one's cleanup.
         if (this.buildLocks.get(key) === build) this.buildLocks.delete(key);
+        this.foregroundBuilds.delete(build);
       },
     );
     this.buildLocks.set(key, build);
+    if (!opts.background) this.foregroundBuilds.add(build);
     return build;
+  }
+
+  /** Give `entry` to a caller, holding it for foreground work until the turn queues. */
+  private handOut(entry: PoolEntry, opts: EngineWaitOpts): LLMProvider {
+    const now = this.now();
+    entry.lastUsedAt = now;
+    if (!opts.background) entry.foregroundAt = now;
+    return entry.provider;
+  }
+
+  /** Share a build already under way; a foreground joiner holds the result like its builder. */
+  private async joinBuild(
+    key: string,
+    pending: Promise<LLMProvider>,
+    opts: EngineWaitOpts,
+  ): Promise<LLMProvider> {
+    const provider = await pending;
+    const entry = this.entries.get(key);
+    if (entry?.provider === provider) this.handOut(entry, opts);
+    return provider;
+  }
+
+  /**
+   * Park a background build until no foreground build is in flight, within the
+   * caller's own deadline and signal. Waiting out a foreground swap can take a
+   * whole turn of the model it drains; background work fails instead.
+   */
+  private async waitForForegroundBuilds(
+    key: string,
+    deadline: number,
+    opts: EngineWaitOpts,
+  ): Promise<void> {
+    log.info(`${key}: background request waits for a foreground model load to finish`);
+    while (this.foregroundBuilds.size > 0) {
+      throwIfAborted(opts.signal);
+      if (this.now() >= deadline) {
+        throw new EngineBusyError(
+          `engine ${key} was not loaded: another model is loading for foreground work. Background work retries later.`,
+        );
+      }
+      const settled = Promise.race([...this.foregroundBuilds].map((b) => b.catch(() => {})));
+      await Promise.race([settled, this.sleep(DRAIN_POLL_MS)]);
+    }
+  }
+
+  /**
+   * Whether `entry` must not be taken for this caller. Background work also
+   * leaves alone an engine foreground work was just handed: that caller's turn
+   * may not have reached the queue yet.
+   */
+  private occupiedFor(entry: PoolEntry, opts: EngineWaitOpts): boolean {
+    if (isBusy(entry)) return true;
+    return opts.background === true && this.now() - entry.foregroundAt < FOREGROUND_HOLD_MS;
   }
 
   private async buildEntry(
@@ -490,13 +587,20 @@ export class ProviderPool {
         panicDecision.reason ?? 'Local models are paused after a recent GPU kernel panic.',
       );
     }
-    const evictedOwnEngine = await this.makeRoom(residentBytes, opts);
+    const key = makeEngineKey(provider, modelId, replicaIdx);
+    const backgroundDeadline = this.now() + (opts.drainWaitMs ?? this.drainWaitMs);
+    let evictedOwnEngine = await this.makeRoom(residentBytes, opts);
+    // A foreground request that began while this one was making room needs
+    // that room more; let it load first, then make room again.
+    while (opts.background && this.foregroundBuilds.size > 0) {
+      await this.waitForForegroundBuilds(key, backgroundDeadline, opts);
+      evictedOwnEngine = (await this.makeRoom(residentBytes, opts)) || evictedOwnEngine;
+    }
     // A caller may wait a whole turn for room; the service can begin
     // shutting down in that time, and must not get a new engine for it.
     if (this.retiring) {
       throw new Error('local engine pool retired after machine engine adoption');
     }
-    const key = makeEngineKey(provider, modelId, replicaIdx);
     // Pre-flight: makeRoom evicts what it can, but on a memory-tight
     // machine a model larger than the whole budget can never fit (no
     // amount of eviction helps). Deny BEFORE spawning so we don't load
@@ -524,7 +628,7 @@ export class ProviderPool {
     const pools = this.broker.committed().pools;
     const largerThanCard = pools.kind === 'discrete-gpu' && residentBytes > pools.fastBytes;
     if (!largerThanCard) {
-      const measured = await this.measuredVramDenial(modelId, residentBytes, evictedOwnEngine);
+      const measured = await this.freeCardFor(modelId, residentBytes, evictedOwnEngine, opts);
       if (measured) {
         log.error(capacityDenialLogLine(key, measured.reason));
         throw new CapacityDeniedError(measured.message);
@@ -602,6 +706,7 @@ export class ProviderPool {
         rebuilt.provider,
         rebuilt.residentBytes,
         rebuilt.modelWeightsBytes,
+        opts,
       );
       return rebuilt.provider;
     }
@@ -613,8 +718,44 @@ export class ProviderPool {
       built.provider,
       finalBytes,
       built.modelWeightsBytes,
+      opts,
     );
     return built.provider;
+  }
+
+  /**
+   * Make room on the card itself when the ledger already said yes.
+   *
+   * The ledger counts a model larger than the card against a budget that
+   * includes system RAM, while its engine fills the card. A second model then
+   * clears the ledger and finds the card full. This unloads what the caller may
+   * take, as makeRoom does — idle engines first, then (for foreground work) a
+   * busy one at its turn boundary — and reads the card again after each.
+   * Captured: a task step routed to a 4.6 GB model was refused with 3.1 GB free
+   * while an idle 31B held the card, and the denial blamed another program.
+   */
+  private async freeCardFor(
+    modelId: string,
+    required: number,
+    evictedOwnEngine: boolean,
+    opts: EngineWaitOpts,
+  ): Promise<{ reason: string; message: string } | null> {
+    let measured = await this.measuredVramDenial(modelId, required, evictedOwnEngine);
+    while (measured) {
+      const victim =
+        this.idleByEvictionOrder(opts)[0]?.key ?? (opts.background ? null : this.lruKey(opts));
+      if (!victim) break;
+      log.info(`graphics card short for ${modelId}; unloading ${victim} to make room on the card`);
+      await this.evict(victim, opts);
+      measured = await this.measuredVramDenial(modelId, required, true);
+    }
+    if (measured && opts.background && this.entries.size > 0) {
+      return {
+        reason: measured.reason,
+        message: `Not enough graphics memory to load ${modelId} while Gezel's other models are in use. Background work waits for them and retries later.`,
+      };
+    }
+    return measured;
   }
 
   private installEntry(
@@ -624,7 +765,8 @@ export class ProviderPool {
     replicaIdx: number,
     instance: LLMProvider,
     residentBytes: number,
-    modelWeightsBytes?: number,
+    modelWeightsBytes: number | undefined,
+    opts: EngineWaitOpts,
   ): void {
     const at = this.now();
     this.entries.set(key, {
@@ -638,6 +780,8 @@ export class ProviderPool {
       createdAt: at,
       draining: false,
       drainClaims: 0,
+      foregroundDrainClaims: 0,
+      foregroundAt: opts.background ? Number.NEGATIVE_INFINITY : at,
       recentHits: [at],
     });
     // Registration is lazy: most providers do not launch their native child
@@ -667,12 +811,15 @@ export class ProviderPool {
   }
 
   /**
-   * True while a waiting request is draining `key` so another model can
-   * load. A turn bound to it that can rebind should step aside rather than
-   * start — see `SendAndWaitOpts.queue.yieldToSwap`.
+   * True while a waiting foreground request is draining `key` so another
+   * model can load. A turn bound to it that can rebind should step aside
+   * rather than start — see `SendAndWaitOpts.queue.yieldToSwap`. A background
+   * drain does not count: it only waits for a turn boundary, and a person's or
+   * a task's turn never steps aside for a chore.
    */
   isDraining(key: string): boolean {
-    return this.entries.get(key)?.draining === true;
+    const entry = this.entries.get(key);
+    return entry?.draining === true && entry.foregroundDrainClaims > 0;
   }
 
   /**
@@ -829,23 +976,21 @@ export class ProviderPool {
     }
     const waitMs = opts.drainWaitMs ?? this.drainWaitMs;
     const deadline = this.now() + waitMs;
-    for (;;) {
-      const entry = this.entries.get(key);
-      if (!entry) {
-        await this.evicting.get(key);
-        return;
-      }
-      // Idle check and teardown share a tick, so no turn can start between them.
-      if (!isBusy(entry)) return this.teardown(key, entry);
-      await this.drainFor(key, entry, waitMs, deadline, opts);
+    const entry = this.entries.get(key);
+    if (!entry) {
+      await this.evicting.get(key);
+      return;
     }
+    // Idle check and teardown share a tick, so no turn can start between them.
+    if (!this.occupiedFor(entry, opts)) return this.teardown(key, entry);
+    return this.drainFor(key, entry, waitMs, deadline, opts);
   }
 
   /**
-   * Hold `entry` draining until its queue empties, the entry is replaced,
-   * or this caller's deadline or signal ends the wait. The last caller to
-   * give up clears `draining`, so the engine serves hits again; a caller
-   * that saw it drain leaves the flag set for the teardown that follows.
+   * Hold `entry` draining until its queue empties, then tear it down; or stop
+   * when the entry is replaced, or this caller's deadline or signal ends the
+   * wait. The last caller to give up clears `draining`, so the engine serves
+   * hits again.
    */
   private async drainFor(
     key: string,
@@ -855,17 +1000,20 @@ export class ProviderPool {
     opts: EngineWaitOpts,
   ): Promise<void> {
     entry.drainClaims += 1;
+    if (!opts.background) entry.foregroundDrainClaims += 1;
     if (!entry.draining) {
       entry.draining = true;
       this.fireChange();
     }
     log.info(
-      `evict ${key}: engine busy — draining (${Number.isFinite(waitMs) ? `cap ${waitMs}ms` : 'until idle'})`,
+      `evict ${key}: engine busy — draining (${Number.isFinite(waitMs) ? `cap ${waitMs}ms` : 'until idle'}${
+        opts.background ? ', background' : ''
+      })`,
     );
     const notice = this.drainNotifier(key, entry, opts);
     let drained = false;
     try {
-      while (isBusy(entry)) {
+      while (this.occupiedFor(entry, opts)) {
         // A force-evict (service shutdown) may have torn the entry
         // down underneath this drain — if our entry is no longer the
         // resident one, the eviction is done.
@@ -884,11 +1032,16 @@ export class ProviderPool {
       drained = true;
     } finally {
       entry.drainClaims -= 1;
+      if (!opts.background) entry.foregroundDrainClaims -= 1;
       if (!drained && entry.drainClaims === 0 && this.entries.get(key) === entry) {
         entry.draining = false;
         this.fireChange();
       }
     }
+    // Same tick as the idle check that ended the loop. Returning to the caller
+    // first would leave a moment in which a hit could be handed this engine
+    // just before it is shut down.
+    await this.teardown(key, entry);
   }
 
   /**
@@ -1058,7 +1211,7 @@ export class ProviderPool {
   private async makeRoom(needed: number, opts: EngineWaitOpts = {}): Promise<boolean> {
     let evictedOwnEngine = false;
     while (!this.broker.canReserve(needed) && this.entries.size > 0) {
-      const idleBatch = this.idleVictimsFor(needed);
+      const idleBatch = this.idleVictimsFor(needed, opts);
       if (idleBatch.length > 0) {
         const evicted = await Promise.all(
           idleBatch.map(async (k) => {
@@ -1084,7 +1237,7 @@ export class ProviderPool {
       // No idle candidates — evict a single busy/draining victim. This
       // path waits on the caller's terms (and may throw on a busy engine
       // that won't drain in time, which propagates to the caller).
-      const victim = this.lruKey();
+      const victim = this.lruKey(opts);
       if (!victim) {
         // Only teardowns are left in flight — wait for one to release
         // its memory and re-check the budget.
@@ -1106,7 +1259,7 @@ export class ProviderPool {
    * or when no eviction is required. Lets {@link makeRoom} batch idle
    * evictions in parallel instead of one-at-a-time.
    */
-  private idleVictimsFor(needed: number): string[] {
+  private idleVictimsFor(needed: number, opts: EngineWaitOpts): string[] {
     // The broker owns the arithmetic: two constraints bind here (the total
     // budget and, when RAM spillover is off, the co-residency ceiling) and
     // sizing the batch against only the first left this returning no victims
@@ -1114,11 +1267,22 @@ export class ProviderPool {
     // evicting a BUSY engine instead of the idle ones sitting right there.
     let deficit = this.broker.shortfallFor(needed);
     if (deficit <= 0) return [];
+    const out: string[] = [];
+    for (const v of this.idleByEvictionOrder(opts)) {
+      if (deficit <= 0) break;
+      out.push(v.key);
+      deficit -= v.bytes;
+    }
+    return out;
+  }
+
+  /** Engines this caller may unload without waiting, in the order to unload them. */
+  private idleByEvictionOrder(opts: EngineWaitOpts): Array<{ key: string; bytes: number }> {
     const now = this.now();
     const idle: Array<{ key: string; at: number; bytes: number; demand: number }> = [];
     for (const [key, entry] of this.entries) {
       if (entry.draining) continue;
-      if (isBusy(entry)) continue;
+      if (this.occupiedFor(entry, opts)) continue;
       pruneHits(entry, now);
       idle.push({
         key,
@@ -1133,16 +1297,10 @@ export class ProviderPool {
     // dropping it just because one caller idled. Falls back to pure-oldest
     // when demand is uniform (e.g. all single-hit), preserving prior behavior.
     idle.sort((a, b) => a.demand - b.demand || a.at - b.at);
-    const out: string[] = [];
-    for (const v of idle) {
-      if (deficit <= 0) break;
-      out.push(v.key);
-      deficit -= v.bytes;
-    }
-    return out;
+    return idle;
   }
 
-  private lruKey(): string | null {
+  private lruKey(opts: EngineWaitOpts): string | null {
     let oldestIdle: { key: string; at: number } | null = null;
     let draining: string | null = null;
     let oldestBusy: { key: string; at: number } | null = null;
@@ -1153,7 +1311,7 @@ export class ProviderPool {
         draining ??= key;
         continue;
       }
-      if (isBusy(entry)) {
+      if (this.occupiedFor(entry, opts)) {
         if (oldestBusy === null || entry.lastUsedAt < oldestBusy.at) {
           oldestBusy = { key, at: entry.lastUsedAt };
         }

@@ -96,6 +96,7 @@ function waitOptsOf(ctx: EngineWaitOpts): EngineWaitOpts {
     ...(ctx.drainWaitMs !== undefined ? { drainWaitMs: ctx.drainWaitMs } : {}),
     ...(ctx.signal ? { signal: ctx.signal } : {}),
     ...(ctx.onDrainWait ? { onDrainWait: ctx.onDrainWait } : {}),
+    ...(ctx.background ? { background: true } : {}),
   };
 }
 

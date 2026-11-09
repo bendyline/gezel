@@ -44,6 +44,7 @@ import {
   explicitStepJump,
   gateHandoffNoteText,
   isEngagementAllowed,
+  isScheduleHost,
   nightShiftDayKey,
   normalizeScriptRefs,
   normalizeStepGate,
@@ -3164,6 +3165,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       gate,
       ws,
       steps: task.craftbook.steps,
+      taskDir: task.artifactDir ?? `tasks/${task.num}`,
       runScript: (ref) => this.runGateScript(projectId, task, step, ref),
       deps: {
         // Paths the task itself handed the assignee (invocation params,
@@ -4164,12 +4166,18 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
    * and squisq/23, 2026-10-31). The clone also shared the host's folder
    * across runs, never derived a book's own fanout, and never drafted a
    * proposal for a `diffpackCapable` book that nobody was watching.
+   *
+   * `runNow` is the person's Run now. A night-shift host's run would
+   * otherwise be held until the next shift, which is not what a click
+   * asked for, so it drops the night flag. It never stamps `lastRunDay`, so
+   * the night's own run still happens (unless the overlap rule finds this
+   * one still going).
    */
-  async launchScheduledRun(parentRef: string): Promise<Task> {
+  async launchScheduledRun(parentRef: string, opts: { runNow?: boolean } = {}): Promise<Task> {
     const parent = await this.getByRef(parentRef);
     if (!parent) throw new Error(`task ${parentRef} not found`);
     const source = parent.sourceCraftbookIds?.find((s) => s.role === 'spawn');
-    if (!source) return this.spawnChild(parentRef);
+    if (!source) return this.spawnChild(parentRef, undefined, { runNow: opts.runNow === true });
     if (taskEffectiveStatus(parent) !== 'active') {
       throw new Error(
         `task ${parentRef}: cannot launch a scheduled run while its effective status is ${taskEffectiveStatus(parent)}`,
@@ -4198,7 +4206,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         ...(parent.strategyOptions ? { strategyOptions: parent.strategyOptions } : {}),
         // A cron fire is as unattended as a night-shift one.
         ...(template?.diffpackCapable ? { deliveryMode: 'propose' as const } : {}),
-        ...(parent.nightShift?.enabled ? { nightShift: { enabled: true } } : {}),
+        ...(parent.nightShift?.enabled && !opts.runNow ? { nightShift: { enabled: true } } : {}),
         ...(parent.roleBasedNameOnlyMode !== undefined
           ? { roleBasedNameOnlyMode: parent.roleBasedNameOnlyMode }
           : {}),
@@ -4245,11 +4253,13 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
    * starts at `status: 'active'` with the spawn craftbook's entry step
    * active, which fires the `onStepActivated` hook. `opts.notes` land on the
    * entry step before that dispatch, so the child's first prompt carries them.
+   * `opts.runNow` is a person's Run now of an inline-template schedule: see
+   * {@link launchScheduledRun}.
    */
   async spawnChild(
     parentRef: string,
     variation?: TaskVariation,
-    opts: { notes?: string[] } = {},
+    opts: { notes?: string[]; runNow?: boolean } = {},
   ): Promise<Task> {
     const parent = await this.getByRef(parentRef);
     if (!parent) throw new Error(`task ${parentRef} not found`);
@@ -4297,6 +4307,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       assignee: inheritedAssignee,
       variation,
       now,
+      runNow: opts.runNow === true,
     });
     await this.store.createTask(child);
 
@@ -4389,13 +4400,30 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
 
   /**
    * Imperative fanout: spawn N children on demand. Used by the
-   * `spawn_task_instances` MCP tool and the "Spawn instance" UI button.
+   * `spawn_task_instances` MCP tool and the task page's Run now key.
+   *
+   * On a schedule host, a spawn without variations is one more fire of the
+   * schedule and goes through {@link launchScheduledRun}, like the scheduler's.
+   * Cloning the host's snapshot instead was the squisq/22 failure all over
+   * again: a literal `{{workPath}}` in every prompt and gate, and the run
+   * writing into the host's folder. Only a spawn that names its variations
+   * is an imperative fanout and clones the template.
    */
   async spawnInstances(
     parentRef: string,
     count: number,
     variations?: TaskVariation[],
   ): Promise<Task[]> {
+    if (!variations?.length) {
+      const parent = await this.getByRef(parentRef);
+      if (parent && isScheduleHost(parent)) {
+        const runs: Task[] = [];
+        for (let i = 0; i < count; i++) {
+          runs.push(await this.launchScheduledRun(parentRef, { runNow: true }));
+        }
+        return runs;
+      }
+    }
     const children: Task[] = [];
     for (let i = 0; i < count; i++) {
       const variation = variations?.[i];

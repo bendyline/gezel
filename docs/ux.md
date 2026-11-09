@@ -1386,6 +1386,23 @@ are enabled, show a 20 × 20px portrait beside the name in both the selected
 value and menu options, including a resolved default assignee. Keep every row
 on one line; disabling poppetjes returns these pickers to text only.
 
+**A schedule's bench shows its runs, not its own step.** A recurring task
+(`isScheduleHost`) never works its placeholder "Wait for schedule" step, and
+showing that lone step with an Add step stop read as a plan stuck before it
+began (squisq/18). `ScheduleRunsTracker` puts the same route to work instead:
+one stop per run, oldest to newest (the latest twelve; the Task tab lists
+every run), each captioned with when it started and where it stands
+("Finished", "Step 2 of 5", "Paused at step 1 of 5", "Waits for the Night
+Shift"), and selecting a stop opens that run. The route ends in a dashed
+**Next run** stop, inert because it is a promise rather than a control, with
+its time above and its day beneath ("Tonight", "After this run", "On hold").
+One sentence under the route gives the cadence and why the next run starts
+when it does, beside a **Run now** key. `scheduleNextRun` in core mirrors the
+scheduler's own rules, so the page never promises a fire the scheduler would
+skip, and `scheduleRunsSummary` decides the wording. A night-shift schedule's
+half-hourly check is machinery: it never appears as the schedule or as its
+next run. A schedule opens on Task, since it has no chat of its own.
+
 In a task's Chat tab, keep the composer at the bottom of the available pane
 and scroll the conversation above it. The task header and bench stay visible.
 This holds both when opening a task directly and beside the Tasks list;

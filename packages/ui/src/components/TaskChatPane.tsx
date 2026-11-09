@@ -58,6 +58,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
     );
   }
   const targetGezelName = displayName(targetGezel, roleBasedNameOnlyMode);
+  const taskName = task.title.trim() || task.ref;
 
   return (
     <div className="task-detail-chat">
@@ -68,6 +69,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
         onFocusSession={(sid, gid) => {
           if (gid === targetGezel.id) setSessionId(sid);
         }}
+        emptyPlaceholder={`No messages yet. Use this chat with ${targetGezelName} for questions or updates about “${taskName}”.`}
       />
       <ChatComposer
         gezelId={targetGezel.id}

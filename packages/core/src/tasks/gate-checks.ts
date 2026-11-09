@@ -25,6 +25,7 @@ import {
 import type { WorkspaceLike } from '../checks/types.js';
 import { todayIso } from '../prompt-clock.js';
 import type { GateCheck } from '../schemas/gate.js';
+import { normalizeFolder } from '../task-owned-paths.js';
 
 /**
  * A workspace view plus, optionally, the project's artifacts drawer. A check
@@ -313,6 +314,9 @@ export const MAX_GATE_VERDICT_BULLETS = 6;
  * A rejected gate's message: each failing check as a bullet, capped so a
  * small local model reading it verbatim is not buried under a wall of them.
  */
+/** `tasks/<num>`, the folder each task gets in the artifacts drawer by default (ADR 0008). */
+const TASK_ARTIFACT_FOLDER = /^tasks\/\d+(?=\/)/;
+
 /**
  * Where a rejected gate looked for each file it could not find, and any file
  * of the same name saved somewhere else. "handover.md not found" alone sent a
@@ -320,10 +324,19 @@ export const MAX_GATE_VERDICT_BULLETS = 6;
  * guard fired: nothing told it the check reads `handover.md` at the root of
  * the artifacts drawer. Call only for a gate that already failed; it lists
  * the tree it searches.
+ *
+ * `taskDir` is the artifacts folder of the task being judged. A same-named
+ * file in another task's folder is that task's work, never this one's
+ * misplaced copy: a nightly Test Coverage Review whose `write_artifact` of
+ * `tasks/38/audit.md` the factual-writing check had refused was told it
+ * "was saved as `tasks/34/audit.md` instead", naming the previous night's
+ * run (squisq/38, 2026-11-09). Without `taskDir` the folder is read from the
+ * checked path, and with neither every task folder is someone else's.
  */
 export async function locateMissingGateFiles(
   checks: readonly GateCheck[],
   ws: GateWorkspaceReader,
+  opts: { taskDir?: string | undefined } = {},
 ): Promise<string[]> {
   const lines: string[] = [];
   const seen = new Set<string>();
@@ -343,9 +356,17 @@ export async function locateMissingGateFiles(
         reader.list().catch(() => []),
       );
     const base = file.slice(file.lastIndexOf('/') + 1).toLowerCase();
+    const ownTaskFolder = normalizeFolder(opts.taskDir) || TASK_ARTIFACT_FOLDER.exec(file)?.[0];
+    const anotherTasks = (path: string) => {
+      const folder = TASK_ARTIFACT_FOLDER.exec(path)?.[0];
+      return artifact && folder !== undefined && folder !== ownTaskFolder;
+    };
     const elsewhere = (await listings.get(artifact)!)
       .filter(
-        (path) => path !== file && path.slice(path.lastIndexOf('/') + 1).toLowerCase() === base,
+        (path) =>
+          path !== file &&
+          path.slice(path.lastIndexOf('/') + 1).toLowerCase() === base &&
+          !anotherTasks(path),
       )
       .slice(0, 3);
     const where = artifact ? 'the artifacts drawer' : 'the project workspace';

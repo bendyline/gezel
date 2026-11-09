@@ -30,6 +30,14 @@ export interface StepMeta {
   assigneeControl?: ReactNode;
   /** Lifecycle word under the step name (e.g. "Signed off", "Active"). */
   statusWord?: string;
+  /** Glyph inside the stop in place of the status glyph (a paused run's bars). */
+  glyph?: ReactNode;
+  /** Small label above the name in place of the step's position ("01"). */
+  numLabel?: string;
+  /** A stop that has not happened yet (a schedule's next run): dashed and inert. */
+  upcoming?: boolean;
+  /** Tooltip and accessible name in place of the step-centric default. */
+  title?: string;
 }
 
 interface StepTrackerProps<T extends StepTrackerStep> {
@@ -66,7 +74,8 @@ interface StepTrackerProps<T extends StepTrackerStep> {
    * tracker switches a docked step panel. `button` is for a read-only
    * progress display whose steps merely lead somewhere else — it keeps the
    * tracker out of any surrounding tablist and marks the current step with
-   * `aria-current`.
+   * `aria-current`. On the bench, arrow keys then leave focus alone, since
+   * selecting a stop navigates away.
    */
   stepRole?: 'tab' | 'button';
   /**
@@ -416,9 +425,14 @@ export function StepTracker<T extends StepTrackerStep>({
       : undefined;
 
   if (variant === 'bench') {
+    const asTabs = stepRole === 'tab';
     return (
       <TrackerScroll remeasureKey={steps.length} centerStepId={centerStepId}>
-        <nav className="step-tracker step-bench" aria-label={ariaLabel} role="tablist">
+        <nav
+          className="step-tracker step-bench"
+          aria-label={ariaLabel}
+          role={asTabs ? 'tablist' : 'group'}
+        >
           {steps.length === 0 && (
             <span className="step-tracker-empty muted small">No steps yet —</span>
           )}
@@ -427,12 +441,15 @@ export function StepTracker<T extends StepTrackerStep>({
             const selected = step.id === selectedStepId;
             const isEntry = entryStepId != null && step.id === entryStepId;
             const meta = stepOf?.(step, idx) ?? {};
-            const num = String(idx + 1).padStart(2, '0');
+            const num = meta.numLabel ?? String(idx + 1).padStart(2, '0');
+            const inert = busy || meta.upcoming === true;
+            const label = meta.title ?? stepTitle(step, status, isEntry);
             const cls = [
               'bench-step',
               `status-${status}`,
               selected ? 'selected' : '',
               isEntry ? 'entry' : '',
+              meta.upcoming ? 'upcoming' : '',
             ]
               .filter(Boolean)
               .join(' ');
@@ -454,20 +471,25 @@ export function StepTracker<T extends StepTrackerStep>({
                     type="button"
                     className="bench-step-marker"
                     onClick={() => onSelect(step.id)}
-                    onKeyDown={(e) => handleKey(e, idx)}
-                    disabled={busy}
-                    role="tab"
-                    aria-selected={selected}
+                    {...(asTabs
+                      ? { onKeyDown: (e: KeyboardEvent<HTMLElement>) => handleKey(e, idx) }
+                      : {})}
+                    disabled={inert}
+                    {...(asTabs ? { role: 'tab' as const, 'aria-selected': selected } : {})}
                     aria-current={status === 'active' ? 'step' : undefined}
-                    aria-label={stepTitle(step, status, isEntry)}
+                    aria-label={label}
                     {...dndProps(step.id)}
-                    title={stepTitle(step, status, isEntry)}
+                    title={label}
                   >
                     <span
-                      className={`bench-peg step-stop${meta.figure ? ' step-stop-portrait' : ''}`}
+                      className={`bench-peg step-stop${meta.figure ? ' step-stop-portrait' : ''}${
+                        meta.upcoming ? ' is-upcoming' : ''
+                      }`}
                       aria-hidden="true"
                     >
-                      {meta.figure ?? (isEntry && status === 'pending' ? '▸' : statusGlyph(status))}
+                      {meta.figure ??
+                        meta.glyph ??
+                        (isEntry && status === 'pending' ? '▸' : statusGlyph(status))}
                     </span>
                   </button>
                 </span>
@@ -475,9 +497,9 @@ export function StepTracker<T extends StepTrackerStep>({
                   type="button"
                   className="bench-step-foot"
                   onClick={() => onSelect(step.id)}
-                  disabled={busy}
+                  disabled={inert}
                   tabIndex={-1}
-                  title={stepTitle(step, status, isEntry)}
+                  title={label}
                 >
                   <span className="bench-step-num">{num}</span>
                   <span className="bench-step-name">{step.name}</span>

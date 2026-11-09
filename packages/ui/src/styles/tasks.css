@@ -417,8 +417,7 @@
 
 .task-template,
 .task-children,
-.task-fanout,
-.task-parent-link {
+.task-fanout {
   margin-top: 1rem;
   padding: 0.75rem;
   border-top: 1px solid var(--border);
@@ -713,6 +712,33 @@
   margin-left: 0.5rem;
   font-size: var(--text-xs);
   color: var(--muted);
+}
+
+/* A child task's way back to the run it belongs to. The parent's title can be
+   as long as the child's, so it truncates rather than pushing the row wide. */
+.task-detail-parent {
+  margin-left: 0.5rem;
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.task-detail-parent::before {
+  content: "·" / "";
+  margin-right: 0.5rem;
+}
+
+.task-detail-parent-link {
+  display: inline-block;
+  max-width: 40ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.task-detail-parent-ref {
+  margin-left: 0.4rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .task-detail h3 {
@@ -1238,6 +1264,52 @@ button.bench-step-foot:disabled {
 
 .bench-step-add .bench-step-name {
   font-weight: 400;
+}
+
+/* A stop that has not happened yet: a schedule's next run. Dashed like the
+   add stop, but it is a promise rather than a control. */
+.step-stop.is-upcoming {
+  border-style: dashed;
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+  background: var(--bg);
+}
+
+.bench-step.upcoming .bench-step-name {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.bench-step.upcoming .bench-step-status {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ── Schedule host: its runs take the bench ───────────────────────── */
+
+.task-bench-row > .schedule-runs {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.schedule-runs-readout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0 0.75rem 0.6rem;
+}
+
+.schedule-runs-readout p {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.schedule-runs-readout button {
+  flex: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

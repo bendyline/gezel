@@ -204,6 +204,24 @@ describe('groundText', () => {
     expect(groundText(`${sentence} [1][2].`, ev).sentences[0]?.status).toBe('supported');
   });
 
+  // squisq/38, 2026-11-09: a Test Coverage Review's labels were refused as
+  // unsourced names on every step of a codebase project.
+  it('checks no names when told not to, and still checks numbers and quotes', () => {
+    const ev = [{ n: 1, text: 'Listed 180 entries in packages/core/src/__tests__.' }];
+    const statuses = (text: string, names?: boolean) =>
+      groundText(text, ev, names === undefined ? {} : { names }).sentences.map((s) => s.status);
+    const label = '- **Current State**: Semantic Equality checks are thin.';
+    expect(statuses(label)).toEqual(['uncited']);
+    expect(statuses(label, false)).toEqual(['non-factual']);
+    expect(statuses('**Current State**: The suite holds 180 test files.', false)).toEqual([
+      'unattributed',
+    ]);
+    expect(statuses('**Current State**: The suite holds 240 test files.', false)).toEqual([
+      'uncited',
+    ]);
+    expect(statuses('It says "every branch is covered by a test".', false)).toEqual(['uncited']);
+  });
+
   it('starts a sentence at a bold lead, so its label is not a name', () => {
     const ev = [{ n: 1, text: 'This memo supersedes the product memo on timing.' }];
     const result = groundText(

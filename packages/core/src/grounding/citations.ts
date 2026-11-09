@@ -690,6 +690,15 @@ export interface GroundOptions {
    * restating someone's own facts back to them is not invention.
    */
   given?: string;
+  /**
+   * Whether capitalized words are checked as names (default on). Off for a
+   * codebase, where what a writer names is an identifier or a path, already
+   * skipped as code, and Title Case is a label: a Test Coverage Review's
+   * `**Current State**:` and `**Schema Validation**:` were refused as
+   * unsourced names on every step (squisq/38, 2026-11-09). Numbers, dates
+   * and quotes are still checked.
+   */
+  names?: boolean;
 }
 
 interface GroundContext {
@@ -700,6 +709,7 @@ interface GroundContext {
   /** The same texts kept apart, for checks that must not read across sources. */
   sources: string[];
   given: string;
+  names: boolean;
   opaque?: (n: number) => boolean;
 }
 
@@ -715,6 +725,7 @@ function groundContext(
     everything: [...normalized.values()].join('\n') + given,
     sources: [...normalized.values(), ...(given ? [given] : [])],
     given,
+    names: options.names ?? true,
     ...(options.opaque ? { opaque: options.opaque } : {}),
   };
 }
@@ -788,7 +799,7 @@ function groundWith(
   if (sentence.cites.length === 0 && DISCLAIMS.test(sentence.text)) {
     return { ...sentence, status: 'non-factual', checks: [], missing: [] };
   }
-  const claims = extractClaims(sentence.text);
+  const claims = extractClaims(sentence.text).filter((c) => ctx.names || c.kind !== 'name');
   const opaque = sentence.cites.filter((n) => !ctx.evidence.has(n) && ctx.opaque?.(n));
   const badCites = sentence.cites.filter((n) => !ctx.evidence.has(n) && !opaque.includes(n));
   if (badCites.length > 0) {

@@ -31,6 +31,7 @@ import {
   leanSession,
   mainContentParamKey,
   plainRoleTitle,
+  projectHoldsCode,
   projectLeadGezelId,
   projectTypeTurnRules,
   renamedRoleBasedName,
@@ -8436,9 +8437,10 @@ export class ChatManager extends LocalEngineRuntime {
           if (err instanceof ProviderDisposedError && !inflightTurn.cancelled) {
             // Only the provider's pre-start guards use this error type. A
             // mid-tool-loop failure must never replay already executed work.
-            // One rebind for an evicted engine; a turn stepping aside for a
-            // swap may have to again, since the engine can change hands
-            // between this turn getting its model back and starting on it.
+            // The engine can change hands between this turn getting its model
+            // and starting on it — a swap it steps aside for, or an eviction —
+            // so it rebinds each time, up to the cap. The raw "re-resolve it"
+            // text is an instruction to this loop, never a message for a person.
             let cause: ProviderDisposedError = err;
             for (let rebinds = 1; ; rebinds++) {
               log.info(
@@ -8478,7 +8480,7 @@ export class ChatManager extends LocalEngineRuntime {
                 break;
               } catch (retryErr) {
                 if (
-                  !(retryErr instanceof ProviderDrainingError) ||
+                  !(retryErr instanceof ProviderDisposedError) ||
                   inflightTurn.cancelled ||
                   rebinds >= MAX_ENGINE_REBINDS_PER_SEND
                 ) {
@@ -11842,10 +11844,14 @@ export class ChatManager extends LocalEngineRuntime {
     let effectiveProviderName = providerName;
     let provider: LLMProvider;
     const modelWasPinned = Boolean(opts.model) || pinnedByGezel;
+    // Housekeeping waits for an engine instead of taking one from a turn.
+    const engine = opts.ambient ? { engineBackground: true } : {};
     const bgTarget = modelWasPinned ? null : await wait(this.selectEngineForTask(providerName));
     if (bgTarget) {
       try {
-        provider = await wait(this.getProviderForModel(bgTarget.provider, bgTarget.modelId));
+        provider = await wait(
+          this.getProviderForModel(bgTarget.provider, bgTarget.modelId, engine),
+        );
         effectiveProviderName = bgTarget.provider;
         model = bgTarget.modelId;
         reasoningEffort = config.defaultReasoningEffort?.[bgTarget.provider];
@@ -11861,10 +11867,10 @@ export class ChatManager extends LocalEngineRuntime {
             err instanceof Error ? err.message : String(err)
           }`,
         );
-        provider = await wait(this.resolveOneShotProvider(providerName, model));
+        provider = await wait(this.resolveOneShotProvider(providerName, model, engine));
       }
     } else {
-      provider = await wait(this.resolveOneShotProvider(providerName, model));
+      provider = await wait(this.resolveOneShotProvider(providerName, model, engine));
     }
 
     // Ambient chores must never COLD-LOAD a local engine into a machine
@@ -12932,6 +12938,7 @@ export class ChatManager extends LocalEngineRuntime {
     opts: { ambient?: boolean } | undefined,
     signal: AbortSignal,
   ): LocalEngineBindOpts {
+    if (opts?.ambient === true) return { signal, engineBackground: true };
     if (!turnWaitsForEngineSwap(opts, this.isInflightAskTarget(sessionId))) return { signal };
     return {
       engineDrainWaitMs: Number.POSITIVE_INFINITY,
@@ -13009,7 +13016,7 @@ export class ChatManager extends LocalEngineRuntime {
   async getProviderForModel(
     name: ProviderName,
     modelId?: string,
-    opts: { engineDrainWaitMs?: number } = {},
+    opts: { engineDrainWaitMs?: number; engineBackground?: boolean } = {},
   ): Promise<LLMProvider> {
     assertQualificationProvider(name);
     if (name === 'remote') return this.getRemoteProvider(modelId);
@@ -13114,9 +13121,10 @@ export class ChatManager extends LocalEngineRuntime {
   private async resolveOneShotProvider(
     name: ProviderName,
     model: string | undefined,
+    engine: { engineBackground?: boolean } = {},
   ): Promise<LLMProvider> {
     try {
-      return await this.getProviderForModel(name, model);
+      return await this.getProviderForModel(name, model, engine);
     } catch (err) {
       if (err instanceof ModelNotInstalledError) {
         oneShotLog.warn(
@@ -15374,6 +15382,7 @@ export class ChatManager extends LocalEngineRuntime {
         task: workTask,
       }),
     );
+    evidenceLedger?.setNameChecks(!(project && projectHoldsCode(project)));
     const promptSurface = await resolveSessionToolSurface({
       surface: 'prompt',
       session: record,

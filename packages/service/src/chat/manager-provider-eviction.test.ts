@@ -20,6 +20,7 @@ import type { MemoryManager } from '../memory/manager.js';
 import { PreviewLogBuffer } from '../preview-log/buffer.js';
 import { MockProvider } from '../providers/mock.js';
 import { FileSecretStore } from '../secrets/file-store.js';
+import { MAX_ENGINE_REBINDS_PER_SEND } from './engine-swap-wait.js';
 import { ChatEventBus } from './events.js';
 import { ChatManager } from './manager.js';
 
@@ -208,7 +209,25 @@ describe('chat recovery after local engine eviction', () => {
     expect(saved?.resumeFailed).not.toBe(true);
   });
 
-  it('stops after one pre-start retry if the replacement is evicted too', async () => {
+  it('recovers when the replacement engine is evicted before the turn starts too', async () => {
+    // Captured: a task's Try again rebound after an eviction, and its new
+    // engine was evicted again before the turn reached it. The second loss
+    // surfaced as "provider disposed (engine was evicted) — re-resolve it".
+    let evictions = 0;
+    afterCreate = async () => {
+      if (evictions >= 2) return;
+      evictions += 1;
+      await router.pool.evict(key);
+    };
+    const record = await manager.createSession({ gezelId: 'worker' });
+    await expect(manager.send(record.id, 'Review this')).resolves.toMatchObject({
+      content: 'Review complete.',
+    });
+    expect(generations).toHaveLength(3);
+    expect(requests).toHaveLength(1);
+  });
+
+  it('stops after a bounded number of pre-start retries if every replacement is evicted', async () => {
     afterCreate = async () => {
       await router.pool.evict(key);
     };
@@ -216,7 +235,7 @@ describe('chat recovery after local engine eviction', () => {
     await expect(manager.send(record.id, 'Review this')).rejects.toBeInstanceOf(
       ProviderDisposedError,
     );
-    expect(generations).toHaveLength(2);
+    expect(generations).toHaveLength(1 + MAX_ENGINE_REBINDS_PER_SEND);
     expect(requests).toHaveLength(0);
   });
 

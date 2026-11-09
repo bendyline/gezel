@@ -146,11 +146,18 @@ test('gallery creates a Job Hunt project: two-gezel crew and the pipeline board'
 
   // The pinned dashboard is the pipeline board: one column per stage, seeded
   // empty, with the coach-voiced empty state and no template placeholders.
+  // Job Hunt 1.1 (app shell v2) opens on Home and keeps the board under its
+  // Applications tab; its Update dialog's Stage picker repeats every stage
+  // name, so the column checks are scoped to the board.
   const outputFrame = page.frameLocator('.page-preview-host.project-output-iframe > iframe');
-  await expect(outputFrame.getByText('Applied', { exact: true })).toBeVisible({ timeout: 20_000 });
-  await expect(outputFrame.getByText('Screening', { exact: true })).toBeVisible();
-  await expect(outputFrame.getByText('Interview', { exact: true })).toBeVisible();
-  await expect(outputFrame.getByText('Offer', { exact: true })).toBeVisible();
+  await outputFrame.getByRole('tab', { name: 'Applications', exact: true }).click({
+    timeout: 20_000,
+  });
+  const board = outputFrame.locator('#board');
+  await expect(board.getByText('Applied', { exact: true })).toBeVisible();
+  await expect(board.getByText('Screening', { exact: true })).toBeVisible();
+  await expect(board.getByText('Interview', { exact: true })).toBeVisible();
+  await expect(board.getByText('Offer', { exact: true })).toBeVisible();
   // Gilde 0.3 names the roles in plain English; either line passes.
   await expect(outputFrame.getByText(/tell your (?:Loopbaancoach|career coach)/)).toBeVisible();
   await expect(outputFrame.getByText('{{')).toHaveCount(0);
