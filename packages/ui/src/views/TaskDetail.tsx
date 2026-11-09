@@ -181,6 +181,22 @@ export function TaskDetail({
   );
   const [nightShift, setNightShift] = useState<NightShiftStatusResponse | null>(null);
   const [engagementMode, setEngagementMode] = useState<AIEngagementMode | undefined>(undefined);
+  // A child task names its parent in the header, so the person can see what
+  // the run belongs to and get back to it.
+  const [parentTask, setParentTask] = useState<Task | null>(null);
+  useEffect(() => {
+    setParentTask(null);
+    const ref = task.parentTaskRef;
+    if (!ref) return;
+    const controller = new AbortController();
+    api.getTaskByRef(ref, controller.signal).then(
+      (parent) => {
+        if (!controller.signal.aborted) setParentTask(parent);
+      },
+      () => {},
+    );
+    return () => controller.abort();
+  }, [task.parentTaskRef]);
   // What the task has made. A run's own events re-read it, so the deck shows
   // up here the moment it is published rather than on the next visit.
   const [resultVersion, setResultVersion] = useState(0);
@@ -568,6 +584,8 @@ export function TaskDetail({
     task.status === 'draft' && !curatedBook ? planGuardrails(summarizePlanDocument(task)) : [];
 
   const chatTabActive = selectedStepId === null && tab === 'chat';
+  const parentRef = task.parentTaskRef;
+  const parentTitle = parentTask?.title?.trim();
 
   return (
     <div
@@ -578,6 +596,20 @@ export function TaskDetail({
         <div>
           <span className="task-detail-ref">{task.ref}</span>
           {projectName && <span className="task-detail-project">{projectName}</span>}
+          {parentRef && (
+            <span className="task-detail-parent">
+              {parentTask && isScheduleHost(parentTask) ? 'Run of' : 'Part of'}{' '}
+              <button
+                type="button"
+                className="gz-link-button task-detail-parent-link"
+                title={`View parent task ${parentRef}`}
+                onClick={() => navigateToTab({ kind: 'task', ref: parentRef })}
+              >
+                {parentTitle || parentRef}
+              </button>
+              {parentTitle && <span className="task-detail-parent-ref">{parentRef}</span>}
+            </span>
+          )}
           <h3>{task.title}</h3>
         </div>
         <div className="task-detail-actions">
@@ -972,14 +1004,6 @@ export function TaskDetail({
               })}
             </ul>
           </section>
-
-          {task.parentTaskRef && (
-            <section className="task-parent-link">
-              <p className="muted small">
-                Instance of <code>{task.parentTaskRef}</code>
-              </p>
-            </section>
-          )}
 
           {task.spawnsCraftbook && (
             <section className="task-template">

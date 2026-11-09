@@ -3165,6 +3165,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       gate,
       ws,
       steps: task.craftbook.steps,
+      taskDir: task.artifactDir ?? `tasks/${task.num}`,
       runScript: (ref) => this.runGateScript(projectId, task, step, ref),
       deps: {
         // Paths the task itself handed the assignee (invocation params,

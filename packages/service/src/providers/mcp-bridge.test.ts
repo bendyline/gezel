@@ -2126,7 +2126,42 @@ describe('McpBridge', () => {
 
     afterEach(() => {
       bridge.failureLedger = undefined;
+      bridge.grounding = undefined;
       bridge.onToolCall = undefined;
+    });
+
+    // squisq/38, 2026-11-09: the advance queued in the same batch as a
+    // refused write_artifact spent a gate attempt on a file never written.
+    it('holds the advance behind a write the grounding check refused, once', async () => {
+      const ledger = new UnresolvedToolFailureLedger();
+      bridge.failureLedger = ledger;
+      bridge.grounding = {
+        checkWrite: (tool) =>
+          tool === 'write_artifact'
+            ? {
+                kind: 'reject',
+                error:
+                  'Not saved: 6 sentences state facts that no evidence in this conversation shows.',
+              }
+            : null,
+        labelEvidence: () => null,
+      };
+      const write = await bridge.callToolRich('write_artifact', {
+        path: 'tasks/38/audit.md',
+        content: '# Audit',
+      });
+      expect(write.isError).toBe(true);
+
+      const advance = { ref: 'default/1', stepId: 'audit' };
+      const held = await bridge.callToolRich('advance_task_step', advance);
+      expect(held.isError).toBe(true);
+      expect(held.text).toContain('`advance_task_step` was not run');
+      expect(held.text).toContain('`write_artifact` of `tasks/38/audit.md`: Not saved');
+      // The hold is not filed as a failure of advance_task_step itself.
+      expect(ledger.unresolved()).toEqual([]);
+
+      const next = await bridge.callToolRich('advance_task_step', advance);
+      expect(next.text).not.toContain('was not run');
     });
 
     it('refuses the advance without dispatching, then allows it once the tool succeeds', async () => {

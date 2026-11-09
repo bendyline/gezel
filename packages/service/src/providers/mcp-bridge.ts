@@ -1115,7 +1115,7 @@ export class McpBridge {
       // the tool. See unresolved-tool-failure-ledger.ts.
       // A refusal is policy, not a validation failure the model could fix.
       if (!blockedByLedger && egressIndicators.length === 0) {
-        this.failureLedger?.record(toolName, combined, isError);
+        this.failureLedger?.record(toolName, combined, isError, effectiveArgs);
       }
       // Persist images to the project's artifacts/ tree before firing the
       // event so the persisted paths can ride along on the ToolCallEvent.

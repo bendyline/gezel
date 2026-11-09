@@ -92,6 +92,8 @@ export async function evaluateStepGate(opts: {
   deps?: GateEvalDeps;
   /** The task's declared steps; a gate route to any other step is a fault. */
   steps?: ReadonlyArray<{ id: string }>;
+  /** The judged task's artifacts folder, so another task's same-named file is never called its copy. */
+  taskDir?: string;
 }): Promise<StepGateOutcome> {
   const { gate, ws, runScript, deps } = opts;
   const runs: StepGateOutcome['runs'] = [];
@@ -118,7 +120,7 @@ export async function evaluateStepGate(opts: {
       return {
         decision: 'reject',
         message: formatGateVerdict([
-          ...(await locateMissingGateFiles(gate.checks, ws)),
+          ...(await locateMissingGateFiles(gate.checks, ws, { taskDir: opts.taskDir })),
           ...result.failures,
         ]),
         skipped,

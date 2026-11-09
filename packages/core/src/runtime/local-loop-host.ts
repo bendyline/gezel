@@ -411,7 +411,7 @@ export class PortableToolExecutor implements LocalToolExecutor {
         }
       }
     }
-    if (!blockedByLedger) ledger?.record(toolName, text, isError);
+    if (!blockedByLedger) ledger?.record(toolName, text, isError, effective);
     if (isError) return `ERROR: ${text}`;
     return capToolOutput(text || '(empty)', opts?.budgetChars ?? MAX_TOOL_OUTPUT_CHARS, {
       ...(opts?.numCtxTokens !== undefined ? { numCtxTokens: opts.numCtxTokens } : {}),

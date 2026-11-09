@@ -316,6 +316,47 @@ describe('TaskDetail', () => {
     expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
   });
 
+  it('links a child task to its parent by title in the header', async () => {
+    vi.mocked(api.getTaskByRef).mockResolvedValue({
+      ...TASK,
+      ref: 'pj-alpha/40',
+      num: 40,
+      title: 'Proof every loaf',
+    } as never);
+    const opened = vi.fn();
+    window.addEventListener('gezel:open-tab', opened);
+    try {
+      const child = { ...TASK, parentTaskRef: 'pj-alpha/40' } as Task;
+      render(<TaskDetail task={child} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+
+      const link = await screen.findByRole('button', { name: 'Proof every loaf' });
+      expect(link.closest('.task-detail-parent')).toHaveTextContent(
+        'Part of Proof every loafpj-alpha/40',
+      );
+      expect(api.getTaskByRef).toHaveBeenCalledWith('pj-alpha/40', expect.any(AbortSignal));
+
+      fireEvent.click(link);
+      expect(opened).toHaveBeenCalledTimes(1);
+      expect((opened.mock.calls[0]?.[0] as CustomEvent).detail).toMatchObject({
+        kind: 'task',
+        ref: 'pj-alpha/40',
+      });
+    } finally {
+      window.removeEventListener('gezel:open-tab', opened);
+    }
+  });
+
+  it('falls back to the parent ref when the parent cannot be read', async () => {
+    vi.mocked(api.getTaskByRef).mockRejectedValue(new Error('gone'));
+    const child = { ...TASK, parentTaskRef: 'pj-alpha/40' } as Task;
+    render(<TaskDetail task={child} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+
+    expect(await screen.findByRole('button', { name: 'pj-alpha/40' })).toHaveAttribute(
+      'title',
+      'View parent task pj-alpha/40',
+    );
+  });
+
   it('reassigning to user dispatches setTaskAssignee with kind:user', async () => {
     vi.mocked(api.setTaskAssignee).mockResolvedValue({ ...TASK } as never);
     render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);

@@ -31,6 +31,7 @@ import {
   leanSession,
   mainContentParamKey,
   plainRoleTitle,
+  projectHoldsCode,
   projectLeadGezelId,
   projectTypeTurnRules,
   renamedRoleBasedName,
@@ -15381,6 +15382,7 @@ export class ChatManager extends LocalEngineRuntime {
         task: workTask,
       }),
     );
+    evidenceLedger?.setNameChecks(!(project && projectHoldsCode(project)));
     const promptSurface = await resolveSessionToolSurface({
       surface: 'prompt',
       session: record,
