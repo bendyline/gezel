@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { createWriteStream } from 'node:fs';
+import { createWriteStream, existsSync } from 'node:fs';
 import { mkdir, realpath, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
@@ -94,6 +94,21 @@ export async function piModelFromDaemon(
   }
 }
 
+/**
+ * A hosted model reached through the tool's own provider, with nothing of
+ * Gezel in the path: how a person using that tool with that model runs it.
+ */
+export interface NativeCloudModel {
+  provider: 'anthropic';
+  model: string;
+  apiKey: string;
+}
+
+/** The environment variable each native provider reads its key from. */
+export function nativeKeyEnv(cloud: NativeCloudModel): Record<string, string> {
+  return { ANTHROPIC_API_KEY: cloud.apiKey };
+}
+
 export interface PiRunState {
   running: boolean;
   exitCode: number | null;
@@ -108,13 +123,21 @@ export interface PiRun {
   done: Promise<PiRunState>;
 }
 
-/** What pi's system prompt gets beyond its own: the sections Gezel's sessions carry. */
+/**
+ * What an outside tool's system prompt gets beyond its own: the project
+ * sections Gezel's sessions carry (its description and mission objectives),
+ * and the craftbook's description for the `-book` arms.
+ */
 export function piPromptAppendix(input: {
   about?: string;
+  missionObjectives?: string;
   book?: { name: string; description: string };
 }): string | undefined {
   const sections = [
     ...(input.about?.trim() ? [`## About this project\n\n${input.about.trim()}`] : []),
+    ...(input.missionObjectives?.trim()
+      ? [`## Mission objectives\n\n${input.missionObjectives.trim()}`]
+      : []),
     ...(input.book?.description.trim()
       ? [
           `## The craftbook for this request\n\nThis request comes with the **${input.book.name}** craftbook. ${input.book.description.trim()}`,
@@ -124,6 +147,20 @@ export function piPromptAppendix(input: {
   return sections.length > 0 ? sections.join('\n\n') : undefined;
 }
 
+/**
+ * A Gezel installed on the same machine keeps its catalog, every book's
+ * grading checks included, under these paths. An outside tool looking for
+ * the "artifacts drawer" a book description mentions went grepping the
+ * installed app (2026-11-09), so they are hidden even though nothing graded
+ * had been read.
+ */
+export const HIDDEN_GEZEL_PATHS = ['/opt/Gezel', '/var/lib/gezel'] as const;
+
+/** `--tmpfs` over each hidden path that exists here (bubblewrap needs the mount point). */
+export function hiddenPathArgs(exists: (path: string) => boolean = existsSync): string[] {
+  return HIDDEN_GEZEL_PATHS.filter((path) => exists(path)).flatMap((path) => ['--tmpfs', path]);
+}
+
 /** The bubblewrap command line that confines pi to the workspace and its state folder. */
 export function sandboxedCommand(input: {
   piBin: string;
@@ -131,6 +168,7 @@ export function sandboxedCommand(input: {
   workspace: string;
   stateDir: string;
   args: readonly string[];
+  hidden?: readonly string[];
 }): { command: string; args: string[] } {
   const ro = (path: string) => ['--ro-bind', path, path];
   return {
@@ -145,6 +183,7 @@ export function sandboxedCommand(input: {
       '/root',
       '--tmpfs',
       '/tmp',
+      ...(input.hidden ?? hiddenPathArgs()),
       '--dev',
       '/dev',
       '--proc',
@@ -179,10 +218,13 @@ export async function startPiRun(input: {
   baseUrl: string;
   token: string;
   model: PiModel;
+  /** Run a hosted model on pi's own provider instead of the daemon's `/v1`. */
+  cloud?: NativeCloudModel;
   workspace: string;
   stateDir: string;
   request: string;
   about?: string;
+  missionObjectives?: string;
   book?: { name: string; description: string };
   /** Runs after pi exits and before the run reads as finished. */
   onExit?: () => Promise<void>;
@@ -192,25 +234,28 @@ export async function startPiRun(input: {
   await mkdir(join(input.stateDir, 'agent'), { recursive: true });
   await mkdir(join(input.stateDir, 'sessions'), { recursive: true });
   await mkdir(join(input.stateDir, 'home'), { recursive: true });
-  await writeFile(
-    join(input.stateDir, 'agent', 'models.json'),
-    piModelsJson({ baseUrl: input.baseUrl, token: input.token, model: input.model }),
-    { mode: 0o600 },
-  );
+  if (!input.cloud) {
+    await writeFile(
+      join(input.stateDir, 'agent', 'models.json'),
+      piModelsJson({ baseUrl: input.baseUrl, token: input.token, model: input.model }),
+      { mode: 0o600 },
+    );
+  }
   // The pi install folder: `<prefix>/node_modules/.bin/pi` resolves to the package.
   const piBin = await realpath(PI_BIN);
   const piPrefix = piBin.slice(0, piBin.indexOf('/node_modules/'));
   const appendix = piPromptAppendix({
     ...(input.about ? { about: input.about } : {}),
+    ...(input.missionObjectives ? { missionObjectives: input.missionObjectives } : {}),
     ...(input.book ? { book: input.book } : {}),
   });
   const args = [
     '--mode',
     'json',
     '--provider',
-    'gezel',
+    input.cloud ? input.cloud.provider : 'gezel',
     '--model',
-    input.model.id,
+    input.cloud ? input.cloud.model : input.model.id,
     '--session-dir',
     join(input.stateDir, 'sessions'),
     '--no-extensions',
@@ -229,7 +274,9 @@ export async function startPiRun(input: {
     args,
   });
   input.log(
-    `[pi] starting in ${workspace} model=${input.model.id} window=${input.model.contextWindow ?? 'default'} reasoning=${input.model.supportsReasoning === true} book=${input.book ? 'yes' : 'no'}`,
+    input.cloud
+      ? `[pi] starting in ${workspace} model=${input.cloud.provider}/${input.cloud.model} (pi's own provider, default thinking) book=${input.book ? 'yes' : 'no'}`
+      : `[pi] starting in ${workspace} model=${input.model.id} window=${input.model.contextWindow ?? 'default'} reasoning=${input.model.supportsReasoning === true} book=${input.book ? 'yes' : 'no'}`,
   );
   const child: ChildProcess = spawn(cmd.command, cmd.args, {
     cwd: workspace,
@@ -241,8 +288,12 @@ export async function startPiRun(input: {
       PI_OFFLINE: '1',
       PI_SKIP_VERSION_CHECK: '1',
       PI_TELEMETRY: '0',
-      // The trial daemon's loopback certificate is self-signed.
-      NODE_TLS_REJECT_UNAUTHORIZED: '0',
+      ...(input.cloud
+        ? nativeKeyEnv(input.cloud)
+        : {
+            // The trial daemon's loopback certificate is self-signed.
+            NODE_TLS_REJECT_UNAUTHORIZED: '0',
+          }),
       TERM: 'dumb',
     },
   });

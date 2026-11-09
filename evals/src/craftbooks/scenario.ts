@@ -18,8 +18,10 @@ import {
   postMissingDeliverableFeedback,
   postSniffFeedback,
 } from '../sniff-feedback.ts';
+import { startOpenCodeRun } from '../strategy/opencode-harness.ts';
 import {
   EXTERNAL_HARNESS_STATE_KEY,
+  type NativeCloudModel,
   type PiRun,
   piModelFromDaemon,
   startPiRun,
@@ -282,6 +284,53 @@ export function craftbookEvalProjectAbout(spec: CraftbookEvalSpec): string {
       : null,
   ].filter((line): line is string => !!line);
   return [spec.setup?.about?.trim(), lines.join('\n\n')].filter(Boolean).join('\n\n');
+}
+
+/**
+ * The project description an outside tool gets: the person's own description
+ * and the same eval facts Gezel's sessions read (seeded inputs, required
+ * deliverables), without Gezel's tool names or its artifacts drawer. Handed
+ * the Gezel wording, outside tools hunted the machine for the drawer, and on
+ * codemod-sweep wrote the drawer's notes into the repo, where the sweep
+ * verifier found the old name in them (2026-11-09). A drawer file the contract
+ * grades is asked for at the same path in the folder, where
+ * `deliverDrawerDeliverables` picks it up; one it does not grade is a recipe
+ * record kept outside the folder in Gezel, and is left out.
+ */
+export function outsideToolProjectAbout(
+  spec: CraftbookEvalSpec,
+  gradedDrawerPaths: readonly string[],
+): string {
+  const seededPaths = sourceWorkspaceFixturePaths(spec);
+  const outputs = [...new Set([...workspaceDeliverablePaths(spec), ...gradedDrawerPaths])];
+  const quoted = (paths: readonly string[]) => paths.map((path) => `\`${path}\``).join(', ');
+  const lines = [
+    '### Project files',
+    'Every path here is relative to the project folder.',
+    seededPaths.length > 0 ? `Inputs: ${quoted(seededPaths)}.` : null,
+    outputs.length > 0
+      ? `Required deliverable${outputs.length === 1 ? '' : 's'}: ${quoted(outputs)}. A summary in your reply does not count; the file has to exist at that path.`
+      : null,
+  ].filter((line): line is string => !!line);
+  return [spec.setup?.about?.trim(), lines.join('\n\n')].filter(Boolean).join('\n\n');
+}
+
+/**
+ * The project's own mission objectives, which Gezel injects into every session
+ * here, without the harness lines about invoking craftbooks and creating tasks
+ * (the deliverable paths are already in `outsideToolProjectAbout`).
+ */
+function outsideToolMissionObjectives(spec: CraftbookEvalSpec): { missionObjectives?: string } {
+  const text = spec.setup?.missionObjectives?.trim();
+  return text ? { missionObjectives: text } : {};
+}
+
+/** Drawer paths the task's contract grades: where an outside tool's copies are delivered. */
+function contractDrawerPaths(task: Task): string[] {
+  return (task.craftbook.contract?.deliverables ?? []).flatMap((d) => [
+    ...(d.artifact ? [d.path] : []),
+    ...(d.textSource?.artifact ? [d.textSource.path] : []),
+  ]);
 }
 
 export function craftbookEvalMissionObjectives(spec: CraftbookEvalSpec): string {
@@ -860,11 +909,17 @@ async function dispatchCraftbookTask(
   ctx.log(
     `[craftbook:${spec.craftbookId}] created ${external ? `(not dispatched; ${external} works it)` : '+ dispatched'} workflow craftbook task ${task.ref} in project ${projectId}`,
   );
-  if (external === 'pi') await startPiForTask(ctx, projectId, task);
+  if (external === 'pi') await startPiForTask(ctx, spec, projectId, task);
+  if (external === 'opencode') await startOpenCodeForTask(ctx, spec, projectId, task);
 }
 
 /** Start pi on the task's own request in the project's folder (strategy/pi-harness.ts). */
-async function startPiForTask(ctx: EvalContext, projectId: string, task: Task): Promise<void> {
+async function startPiForTask(
+  ctx: EvalContext,
+  spec: CraftbookEvalSpec,
+  projectId: string,
+  task: Task,
+): Promise<void> {
   const daemon = ctx.daemon;
   if (!daemon || !ctx.state) throw new Error('the pi arm needs the trial daemon and state');
   const project = await ctx.client.getProject(projectId);
@@ -875,38 +930,102 @@ async function startPiForTask(ctx: EvalContext, projectId: string, task: Task): 
     `${daemon.provider}:${daemon.modelId}`,
     daemon.cert ? createTrustingFetch({ cert: daemon.cert }) : fetch,
   );
+  const cloud = nativeCloudModelFor(daemon);
   const run = await startPiRun({
     baseUrl: daemon.baseUrl,
     token: daemon.token,
     model,
+    ...(cloud ? { cloud } : {}),
     workspace,
     stateDir: join(daemon.runDir, 'pi'),
     request: task.description ?? '',
-    ...(project.about ? { about: project.about } : {}),
-    ...(ctx.taskStrategy?.bookDescription && task.craftbook.description
-      ? { book: { name: task.craftbook.name, description: task.craftbook.description } }
-      : {}),
-    // Pi has no artifacts drawer, so a deliverable the contract keeps there
-    // (cohort-analysis's tasks/eval/readout.md) is written into the folder
-    // at the same path; deliver it where the person would find it.
-    onExit: async () => {
-      const paths = (task.craftbook.contract?.deliverables ?? []).flatMap((d) => [
-        ...(d.artifact ? [d.path] : []),
-        ...(d.textSource?.artifact ? [d.textSource.path] : []),
-      ]);
-      for (const path of paths) {
-        const text = await ctx.client
-          .fetchProjectWorkspaceBlob(projectId, path)
-          .then((blob) => blob.text())
-          .catch(() => null);
-        if (text === null) continue;
-        await ctx.client.writeProjectArtifact(projectId, path, text);
-        ctx.log(`[pi] delivered ${path} from the folder to the artifacts drawer`);
-      }
-    },
+    about: outsideToolProjectAbout(spec, contractDrawerPaths(task)),
+    ...outsideToolMissionObjectives(spec),
+    ...externalBookFor(ctx, task),
+    onExit: () => deliverDrawerDeliverables(ctx, projectId, task, 'pi'),
     log: ctx.log,
   });
   ctx.state.set(EXTERNAL_HARNESS_STATE_KEY, run);
+}
+
+/**
+ * Start OpenCode the way Settings sets it up: the trial daemon's own OpenCode
+ * setup writes the managed config and starts its bridge, and OpenCode runs on
+ * that config (strategy/opencode-harness.ts).
+ */
+async function startOpenCodeForTask(
+  ctx: EvalContext,
+  spec: CraftbookEvalSpec,
+  projectId: string,
+  task: Task,
+): Promise<void> {
+  const daemon = ctx.daemon;
+  if (!daemon || !ctx.state) throw new Error('the opencode arm needs the trial daemon and state');
+  const project = await ctx.client.getProject(projectId);
+  const workspace = project.workingDir ?? join(daemon.home, 'projects', projectId, 'workspace');
+  const cloud = nativeCloudModelFor(daemon);
+  const target = `${daemon.provider}:${daemon.modelId}`;
+  const setup = cloud ? null : await ctx.client.configureOpenCode({ model: target });
+  if (setup && setup.state !== 'configured') {
+    throw new Error(`OpenCode setup is ${setup.state}: ${setup.message ?? 'no message'}`);
+  }
+  const run = await startOpenCodeRun({
+    ...(setup
+      ? { configPath: setup.configPath, model: `${setup.providerId}/${target}` }
+      : { cloud: cloud!, model: `${cloud!.provider}/${cloud!.model}` }),
+    workspace,
+    stateDir: join(daemon.runDir, 'opencode'),
+    request: task.description ?? '',
+    about: outsideToolProjectAbout(spec, contractDrawerPaths(task)),
+    ...outsideToolMissionObjectives(spec),
+    ...externalBookFor(ctx, task),
+    onExit: () => deliverDrawerDeliverables(ctx, projectId, task, 'opencode'),
+    log: ctx.log,
+  });
+  ctx.state.set(EXTERNAL_HARNESS_STATE_KEY, run);
+}
+
+/**
+ * A hosted model runs on the outside tool's own provider, as a person using
+ * that tool would run it; Gezel's OpenCode setup and bridge serve local
+ * models only. The key comes from the harness's environment.
+ */
+function nativeCloudModelFor(daemon: { provider: string; modelId: string }): NativeCloudModel | null {
+  if (daemon.provider !== 'anthropic') return null;
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) throw new Error('an outside tool on an Anthropic model needs ANTHROPIC_API_KEY');
+  return { provider: 'anthropic', model: daemon.modelId, apiKey };
+}
+
+function externalBookFor(
+  ctx: EvalContext,
+  task: Task,
+): { book?: { name: string; description: string } } {
+  return ctx.taskStrategy?.bookDescription && task.craftbook.description
+    ? { book: { name: task.craftbook.name, description: task.craftbook.description } }
+    : {};
+}
+
+/**
+ * An outside tool has no artifacts drawer, so a deliverable the contract keeps
+ * there (cohort-analysis's tasks/eval/readout.md) is written into the folder
+ * at the same path; deliver it where the person would find it.
+ */
+async function deliverDrawerDeliverables(
+  ctx: EvalContext,
+  projectId: string,
+  task: Task,
+  label: string,
+): Promise<void> {
+  for (const path of contractDrawerPaths(task)) {
+    const text = await ctx.client
+      .fetchProjectWorkspaceBlob(projectId, path)
+      .then((blob) => blob.text())
+      .catch(() => null);
+    if (text === null) continue;
+    await ctx.client.writeProjectArtifact(projectId, path, text);
+    ctx.log(`[${label}] delivered ${path} from the folder to the artifacts drawer`);
+  }
 }
 
 async function ensureWorkspaceToolsetsForWorker(
@@ -2458,6 +2577,10 @@ export function craftbookScenarioFromSpec(bookSpec: CraftbookEvalSpec): EvalScen
       const external = ctx.taskStrategy?.harness
         ? (ctx.state?.get(EXTERNAL_HARNESS_STATE_KEY) as PiRun | undefined)
         : undefined;
+      // Read once, before the files: a tool that exits mid-check must not be
+      // listed as unfinished and then judged over in the same pass (one Sonnet
+      // pi trial on 2026-11-09 failed that way with complete work).
+      const externalRunning = !external || external.state.running;
       if (!ctx.taskStrategy?.harness && (spec.mode === 'workflow' || spec.success.taskGraph)) {
         taskGraph = await taskGraphTextForSpec(ctx.client, projectId, spec, {
           requireFinished: Boolean(ctx.taskStrategy),
@@ -2503,7 +2626,7 @@ export function craftbookScenarioFromSpec(bookSpec: CraftbookEvalSpec): EvalScen
         );
       }
       if (taskGraph) failures.unshift(...taskGraph.failures);
-      if (ctx.taskStrategy?.harness && (!external || external.state.running)) {
+      if (ctx.taskStrategy?.harness && externalRunning) {
         failures.unshift(`${ctx.taskStrategy.harness} has not finished`);
       }
       if (spec.success.mocks && spec.success.mocks.length > 0 && ctx.mocks) {
@@ -2592,9 +2715,7 @@ export function craftbookScenarioFromSpec(bookSpec: CraftbookEvalSpec): EvalScen
       // Full production-workflow probes let the craftbook's own gates route
       // repairs; injected file-writing turns can bypass roles and stage order.
       if ((ctx.repairPolicy ?? spec.repairPolicy) === 'runtime') {
-        const running = ctx.taskStrategy?.harness
-          ? !external || external.state.running
-          : taskGraph?.workflowRunning;
+        const running = ctx.taskStrategy?.harness ? externalRunning : taskGraph?.workflowRunning;
         return running
           ? { done: false }
           : { done: true, success: false, reason: repairFailures.join(' | ') };

@@ -566,7 +566,68 @@ describe('pi arm', () => {
     expect(both).toContain(
       'This request comes with the **Monthly Invoice Run** craftbook. One HTML invoice per client.',
     );
+    expect(
+      piPromptAppendix({ about: 'A studio.', missionObjectives: 'Numbering never skips.' }),
+    ).toBe('## About this project\n\nA studio.\n\n## Mission objectives\n\nNumbering never skips.');
     expect(STRATEGY_ARMS.pi?.bookDescription).toBeUndefined();
     expect(STRATEGY_ARMS['pi-book']).toMatchObject({ harness: 'pi', bookDescription: true });
+  });
+
+  it('runs OpenCode offline on the managed config, with the same appendix as pi', async () => {
+    const { openCodeOverlay, sandboxedOpenCodeCommand, countOpenCodeEvent } = await import(
+      './opencode-harness.ts'
+    );
+    const { STRATEGY_ARMS } = await import('./books.ts');
+    expect(JSON.parse(openCodeOverlay({ instructionsPath: '/s/instructions.md' }))).toEqual({
+      instructions: ['/s/instructions.md'],
+      permission: { webfetch: 'deny', websearch: 'deny' },
+    });
+    expect(JSON.parse(openCodeOverlay({}))).not.toHaveProperty('instructions');
+
+    const cmd = sandboxedOpenCodeCommand({
+      opencodeBin: '/tools/oc/bin/opencode',
+      nodeBin: '/node/bin/node',
+      workspace: '/runs/t/ws',
+      stateDir: '/runs/t/opencode',
+      integrationDir: '/runs/t/home/integrations/opencode',
+      rgDir: '/tools/rg/bin',
+      args: ['run', 'hello'],
+      hidden: ['--tmpfs', '/var/lib/gezel'],
+    });
+    const pairs = (flag: string) =>
+      cmd.args.flatMap((a, i) => (a === flag ? [cmd.args[i + 1]] : []));
+    expect(pairs('--tmpfs')).toEqual(['/home', '/root', '/tmp', '/var/lib/gezel']);
+    const { hiddenPathArgs } = await import('./pi-harness.ts');
+    expect(hiddenPathArgs((path) => path === '/var/lib/gezel')).toEqual(['--tmpfs', '/var/lib/gezel']);
+    expect(hiddenPathArgs(() => false)).toEqual([]);
+    expect(pairs('--ro-bind')).toEqual(
+      expect.arrayContaining(['/tools/oc/bin', '/tools/rg/bin', '/runs/t/home/integrations/opencode']),
+    );
+    expect(pairs('--bind')).toEqual(['/runs/t/ws', '/runs/t/opencode']);
+    expect(cmd.args.slice(cmd.args.indexOf('--') + 1)).toEqual([
+      '/tools/oc/bin/opencode',
+      'run',
+      'hello',
+    ]);
+
+    const state = { running: true, exitCode: null, turns: 0, toolCalls: 0 };
+    for (const line of [
+      '{"type":"step_start"}',
+      '{"type":"tool_use","part":{"tool":"write"}}',
+      '{"type":"step_finish"}',
+      'not json',
+      '{"type":"error","error":{"message":"boom"}}',
+    ]) {
+      countOpenCodeEvent(state, line);
+    }
+    expect(state).toMatchObject({ turns: 1, toolCalls: 1 });
+    expect((state as { error?: string }).error).toContain('boom');
+
+    expect(STRATEGY_ARMS.opencode).toMatchObject({ harness: 'opencode' });
+    expect(STRATEGY_ARMS.opencode?.bookDescription).toBeUndefined();
+    expect(STRATEGY_ARMS['opencode-book']).toMatchObject({
+      harness: 'opencode',
+      bookDescription: true,
+    });
   });
 });

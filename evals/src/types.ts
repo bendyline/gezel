@@ -67,7 +67,7 @@ export interface TrialTaskStrategy {
    * still created, assigned to nobody who runs it, so its contract snapshot
    * grades the folder like every other arm's.
    */
-  harness?: 'pi';
+  harness?: 'pi' | 'opencode';
   /**
    * Give the outside tool the craftbook description Gezel's kickoff shows
    * (`renderEntryPreface`), so the two get the same information. For gallery

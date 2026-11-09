@@ -83,6 +83,21 @@ export const STRATEGY_ARMS: Readonly<Record<string, TrialTaskStrategy>> = {
     harness: 'pi',
     bookDescription: true,
   },
+  // OpenCode (strategy/opencode-harness.ts) on the same model, configured by
+  // the trial daemon's own OpenCode setup and reached through its bridge.
+  opencode: {
+    arm: 'opencode',
+    strategy: 'outcome',
+    options: { procedure: 'none', contract: 'hidden' },
+    harness: 'opencode',
+  },
+  'opencode-book': {
+    arm: 'opencode-book',
+    strategy: 'outcome',
+    options: { procedure: 'none', contract: 'hidden' },
+    harness: 'opencode',
+    bookDescription: true,
+  },
 };
 
 export const DEFAULT_STRATEGY_ARMS: readonly string[] = ['stepwise', 'generalist', 'outcome'];
