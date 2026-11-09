@@ -22,6 +22,7 @@ import {
   LLAMA_ENGINE_VERSION,
   type LlamaBackend,
   checkRocmBuild,
+  checkRocmBuildAsync,
   createLlamaBuildCheck,
   cudaArchiveCarries,
   detectLlamaBackend,
@@ -1476,6 +1477,17 @@ async function connectOrStartPrepared(opts: ConnectOptions): Promise<SupervisedS
     // resolution entirely — so spawn and embedded launches would keep
     // relaunching a build already known to crash on this machine.
     const quarantine = readLlamaQuarantine(opts.home);
+    // Ask the ROCm build about this machine's GPUs off the main thread. The
+    // resolver below checks synchronously, and on a cache miss (the first
+    // launch after an upgrade or a driver update) that check started HIP with
+    // spawnSync, freezing the splash for seconds and up to its 30 s timeout.
+    // Warmed here, it reads the cached answer, as engine launches do.
+    if (probe.backend === 'rocm') {
+      const rocmBinary = resolveNativeBinaryPath('llama-server', import.meta.url, 'rocm', {
+        preferDevelopmentBuild: !opts.packaged,
+      });
+      if (rocmBinary) await checkRocmBuildAsync(opts.home, rocmBinary);
+    }
     // The same check also passes over a Linux CUDA build the NVIDIA driver
     // cannot run (nvidia-driver.ts), which would otherwise start on the CPU,
     // and a ROCm build with no code for this machine's AMD GPUs

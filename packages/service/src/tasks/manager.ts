@@ -936,6 +936,13 @@ export class TaskManager {
        * changed since the owner vouched for them.
        */
       trustedScriptHashes?: readonly string[];
+      /**
+       * The owner when nothing else names one: no assignee given and the
+       * entry step resolved to nobody. A schedule host's gezel reaches its
+       * runs this way, so it never overrides a step's role or the owner
+       * generalist mode picks.
+       */
+      defaultAssignee?: TaskAssignee;
     },
   ): Promise<Task> {
     const project = await this.store.getProject(projectId);
@@ -1188,7 +1195,8 @@ export class TaskManager {
     // one's benefit. A draft resolved nothing above; `activate()` restamps.
     const assigneeAuto = input.assignee === undefined;
     const assignee: TaskAssignee = input.assignee ??
-      stepOwnAssignee(craftbook, activeStepId) ?? { kind: 'user' };
+      stepOwnAssignee(craftbook, activeStepId) ??
+      extras?.defaultAssignee ?? { kind: 'user' };
 
     const requestRef =
       extras?.requestRef ??
@@ -1211,6 +1219,7 @@ export class TaskManager {
       ...(assigneeAuto ? { assigneeAuto: true } : {}),
       ...(executionMode ? { executionMode } : {}),
       ...(strategy ? { strategy } : {}),
+      ...(requestedStrategy !== 'auto' ? { requestedStrategy } : {}),
       ...(strategyOptions ? { strategyOptions } : {}),
       craftbook,
       ...(input.trustScripts || extras?.trustedScriptHashes?.length
@@ -1692,6 +1701,7 @@ export class TaskManager {
       status: 'active',
       executionMode: applied.mode,
       strategy: applied.strategy,
+      ...(requested !== 'auto' ? { requestedStrategy: requested } : {}),
       ...(applied.strategyOptions ? { strategyOptions: applied.strategyOptions } : {}),
       craftbook,
       activeStepId: entry,
@@ -4177,19 +4187,14 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         craftbookId: source.catalogId,
         ...(source.sourceId ? { craftbookSourceId: source.sourceId } : {}),
         ...(parent.spawnsCraftbookParams ? { craftbookParams: parent.spawnsCraftbookParams } : {}),
-        // Every run is the host's, as a cloned one was: its gezel, its mode and
-        // the scripts its owner trusted. Without the gezel, a book whose entry
-        // step names no role started with nobody on it, and the default overlap
-        // rule then skipped every later fire behind that idle run. A step's own
-        // role still resolves; the host's gezel only fills what nothing names.
-        ...(parent.assignee.kind === 'gezel' ? { assignee: parent.assignee } : {}),
-        // An outcome request fails the launch when the run's book cannot render
+        // Only what the host's creator asked for carries: the host's own
+        // strategy was resolved against its placeholder step, and on-device it
+        // forced every run stepwise past the model's measured strategy. An
+        // outcome request fails the launch when the run's book cannot render
         // as one, so an outcome host's runs resolve their strategy afresh.
-        ...(parent.strategy && parent.strategy !== 'outcome'
-          ? { strategy: parent.strategy }
-          : !parent.strategy && parent.executionMode
-            ? { executionMode: parent.executionMode }
-            : {}),
+        ...(parent.requestedStrategy && parent.requestedStrategy !== 'outcome'
+          ? { strategy: parent.requestedStrategy }
+          : {}),
         ...(parent.strategyOptions ? { strategyOptions: parent.strategyOptions } : {}),
         // A cron fire is as unattended as a night-shift one.
         ...(template?.diffpackCapable ? { deliveryMode: 'propose' as const } : {}),
@@ -4200,9 +4205,18 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
         parentTaskRef: parent.ref,
         createdBy: parent.createdBy,
       },
-      parent.cliTrustedScriptHashes
-        ? { trustedScriptHashes: parent.cliTrustedScriptHashes }
-        : undefined,
+      {
+        ...(parent.cliTrustedScriptHashes
+          ? { trustedScriptHashes: parent.cliTrustedScriptHashes }
+          : {}),
+        // Without the host's gezel a book whose entry step names no role
+        // started with nobody on it, and the default overlap rule then skipped
+        // every later fire behind that idle run. As a default it fills only
+        // what nothing names: an explicit assignee was pinned on every step
+        // under generalist and outcome strategies, so a suggested-work host's
+        // Crew Lead did all of every run.
+        ...(parent.assignee.kind === 'gezel' ? { defaultAssignee: parent.assignee } : {}),
+      },
     );
     // `create()` hands only an auto-advanced entry to the activation hook;
     // an ordinary entry is dispatched here, as `spawnChild` does.

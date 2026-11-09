@@ -52,10 +52,17 @@ describe('WorkspaceWatchManager', () => {
     await manager.reconcile();
     expect(manager.watched()).toEqual([project.id]);
 
-    await writeFile(join(dir, 'note.md'), '# hallo\n');
-    await waitFor(() => refresh.mock.calls.length > 0);
+    // On a loaded machine, a write made just after the watch attaches is
+    // sometimes never reported (6 in 40 under heavy file churn); production
+    // leaves those to the polling tick. Write until one is reported.
+    const deadline = Date.now() + 15_000;
+    for (let n = 0; refresh.mock.calls.length === 0; n++) {
+      if (Date.now() > deadline) throw new Error('no refresh after repeated workspace writes');
+      await writeFile(join(dir, 'note.md'), `# hallo ${n}\n`);
+      await new Promise((r) => setTimeout(r, 500));
+    }
     expect(refresh).toHaveBeenCalledWith(project.id);
-  });
+  }, 20_000);
 
   it('ignores churn in skip dirs and drops watchers for projects leaving the MRU', async () => {
     if (!RECURSIVE_WATCH) return;

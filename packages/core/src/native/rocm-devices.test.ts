@@ -1,9 +1,12 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { delimiter, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   LLAMA_ROCM_BLOCKER_ENV,
   ROCM_GFX_TARGETS,
   checkRocmBuild,
+  checkRocmBuildAsync,
   gfxFromTargetVersion,
   linuxKfdGfxTargets,
   parseRocmDeviceLog,
@@ -240,6 +243,60 @@ describe('checkRocmBuild', () => {
     const fake = fakeIo();
     const check = checkRocmBuild(home, binary, { ...fake.io, canOpen: () => false });
     expect(check.blocker?.kind).toBe('no-device-access');
+    expect(fake.probes()).toBe(0);
+  });
+
+  // The supervisor and an embedded daemon run on Electron's main thread: they
+  // probe asynchronously first, so the synchronous check reads the cache.
+  it('probes without blocking, then answers the synchronous check from the cache', async () => {
+    const fake = fakeIo();
+    let asyncProbes = 0;
+    const io = {
+      ...fake.io,
+      listDevicesAsync: async () => {
+        asyncProbes += 1;
+        return MIXED_LOG;
+      },
+    };
+    expect(await checkRocmBuildAsync(home, binary, io)).toMatchObject({ visibleDevices: [1] });
+    expect(checkRocmBuild(home, binary, io)).toMatchObject({ visibleDevices: [1] });
+    expect(asyncProbes).toBe(1);
+    expect(fake.probes()).toBe(0);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'runs the real probe as a child process and reads its output',
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), 'gezel-rocm-probe-'));
+      try {
+        const script = join(dir, 'gezel-llama-server');
+        const printsDevices = `#!/bin/sh\ncat <<'EOF'\n${MIXED_LOG}\nEOF\n`;
+        writeFileSync(script, printsDevices);
+        chmodSync(script, 0o755);
+        const fake = fakeIo();
+        const io = { ...fake.io, listDevices: undefined, listDevicesAsync: undefined };
+        expect(await checkRocmBuildAsync(home, script, io)).toMatchObject({ blocker: null });
+
+        writeFileSync(script, '#!/bin/sh\nexit 3\n');
+        const failed = await checkRocmBuildAsync(home, script, {
+          ...io,
+          fingerprint: () => 'changed',
+        });
+        expect(failed.blocker?.kind).toBe('probe-failed');
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('records a failed asynchronous probe like a failed synchronous one', async () => {
+    const fake = fakeIo();
+    const check = await checkRocmBuildAsync(home, binary, {
+      ...fake.io,
+      listDevicesAsync: async () => null,
+    });
+    expect(check.blocker?.kind).toBe('probe-failed');
+    expect(checkRocmBuild(home, binary, fake.io).blocker?.kind).toBe('probe-failed');
     expect(fake.probes()).toBe(0);
   });
 });

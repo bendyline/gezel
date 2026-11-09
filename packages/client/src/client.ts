@@ -2222,8 +2222,21 @@ export class GezelClient {
 
   // ── Catalog (bundled + remote items) ──
 
-  listCatalogItems(kind: CatalogKind): Promise<{ items: CatalogItemSummary[] }> {
-    return this.request('GET', `/api/catalog/${kind}`);
+  /**
+   * `community: false` leaves out the public MCP registry's unreviewed
+   * entries (nearly all of the 19 MB toolset list); `ids` returns only the
+   * named items. A daemon older than these filters ignores them and returns
+   * everything, so callers must still tolerate the full list.
+   */
+  listCatalogItems(
+    kind: CatalogKind,
+    opts: { community?: boolean; ids?: readonly string[] } = {},
+  ): Promise<{ items: CatalogItemSummary[] }> {
+    const query = new URLSearchParams();
+    if (opts.community === false) query.set('community', '0');
+    if (opts.ids) query.set('ids', opts.ids.join(','));
+    const qs = query.toString();
+    return this.request('GET', `/api/catalog/${kind}${qs ? `?${qs}` : ''}`);
   }
 
   /**

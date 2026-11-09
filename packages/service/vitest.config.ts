@@ -81,6 +81,14 @@ const INTEGRATION_SUITES = [
 ];
 
 /**
+ * Suites that wait for the OS to report a real file change. While the rest of
+ * the suite churns the temp folder, macOS FSEvents reported a write ~30 s
+ * late, past these tests' windows (2026-11-08). They run in their own group
+ * with nothing else from this suite beside them.
+ */
+const FS_EVENT_SUITES = ['src/workspace/watch-manager.test.ts', 'src/library-e2e.test.ts'];
+
+/**
  * Three times in five days (2026-07-22, -25, -26) a fork died with "Worker
  * exited unexpectedly" AFTER its own tests had passed. All three macOS crash
  * reports have the same shape: the main thread is inside node:sqlite
@@ -202,12 +210,27 @@ export default defineConfig({
         test: {
           name: 'unit',
           include: ['src/**/*.test.ts'],
-          exclude: INTEGRATION_SUITES,
+          exclude: [...INTEGRATION_SUITES, ...FS_EVENT_SUITES],
           pool: 'forks',
           execArgv: WORKER_EXEC_ARGV,
           // One worker is already occupied by the concurrent integration
           // project; keep the combined project total inside MAX_WORKERS.
           maxWorkers: UNIT_WORKERS,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'fs-events',
+          include: FS_EVENT_SUITES,
+          pool: 'forks',
+          execArgv: WORKER_EXEC_ARGV,
+          // Vitest runs groups one after another: the unit files (group 0),
+          // then this one, then the integration files, which it always runs
+          // last because they are isolated with a single worker. One file at
+          // a time, so neither adds churn to the other's watcher.
+          sequence: { groupOrder: 1 },
+          fileParallelism: false,
         },
       },
     ],

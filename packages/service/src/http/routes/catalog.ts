@@ -17,6 +17,7 @@ import {
 } from '@bendyline/gezel';
 import { BUILTIN_TOOLSETS, installNpmPackageToolset } from '@bendyline/gezel-catalog';
 import { Hono } from 'hono';
+import { compress } from 'hono/compress';
 import { z } from 'zod';
 import { roleToolsetGroups } from '../../chat/role-tool-filter.js';
 import {
@@ -74,6 +75,8 @@ type ToolsetInstallResult =
   | { ok: true; installed: InstalledToolset }
   | { ok: false; status: 400 | 403 | 404 | 500 | 501; error: string };
 
+/** The source id `CommunitySource` gives the public MCP registry's entries. */
+const COMMUNITY_SOURCE_ID = 'community';
 const TOOLSET_APPROVAL_WAIT_MS = 10 * 60 * 1000;
 const TOOLSET_APPROVAL_POLL_MS = 500;
 
@@ -434,10 +437,22 @@ export function catalogRoutes(ctx: ServiceContext): Hono {
     return c.json({ ok: true as const, imported, warnings: parsed.warnings });
   });
 
-  app.get('/:kind', async (c) => {
+  // The toolset list is 19 MB, nearly all of it the public MCP registry's
+  // unreviewed entries. `?community=0` leaves those out and `?ids=a,b` returns
+  // only the named items, so a panel naming its installed toolsets need not
+  // load the whole registry; the picker that browses it still can.
+  app.get('/:kind', compress(), async (c) => {
     const kind = CatalogKindSchema.safeParse(c.req.param('kind'));
     if (!kind.success) return c.json({ error: 'unknown kind' }, 400);
-    const items = await ctx.catalog.list(kind.data);
+    let items = await ctx.catalog.list(kind.data);
+    if (c.req.query('community') === '0') {
+      items = items.filter((item) => item.sourceId !== COMMUNITY_SOURCE_ID);
+    }
+    const ids = c.req.query('ids');
+    if (ids !== undefined) {
+      const wanted = new Set(ids.split(',').filter(Boolean));
+      items = items.filter((item) => wanted.has(item.manifest.id));
+    }
     return c.json({ items });
   });
 

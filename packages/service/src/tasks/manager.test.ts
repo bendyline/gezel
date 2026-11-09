@@ -1306,6 +1306,52 @@ describe('TaskManager spawn craftbooks & children', () => {
     expect(activations).toEqual([{ ref: run.ref, gezelId: 'gz-sexton' }]);
   });
 
+  it("lets a scheduled run resolve its own strategy and owner unless the host's creator chose them", async () => {
+    // The host's strategy was resolved against its placeholder step, so passing
+    // it on froze every run (stepwise on-device), and a host gezel passed as an
+    // explicit assignee was pinned on every step of a generalist run.
+    tasks.setCraftbookResolver({
+      async resolve(id) {
+        return {
+          craftbook: {
+            id,
+            name: 'Weekly Digest',
+            description: 'Summarize the week for the person.',
+            steps: [{ id: 'write', name: 'Write the digest', terminal: true }],
+            entryStepId: 'write',
+            createdAt: '2026-01-01T00:00:00Z',
+            updatedAt: '2026-01-01T00:00:00Z',
+          },
+          sourceId: 'bundled',
+        };
+      },
+    });
+    const requested: string[] = [];
+    let generalist = false;
+    tasks.setExecutionModeResolver(async (args) => {
+      requested.push(args.requested);
+      return generalist ? { mode: 'generalist', ownerGezelId: 'gen-1' } : { mode: 'stepwise' };
+    });
+    const host = await tasks.create('website', {
+      title: 'Schedule: Weekly Digest',
+      assignee: { kind: 'gezel', gezelId: 'gz-voorman' },
+      steps: [{ name: 'Wait' }],
+      spawnsCraftbookId: 'weekly-digest',
+      cron: { expression: '0 9 * * 1' },
+    });
+    expect(host.strategy).toBe('stepwise');
+    expect(host.requestedStrategy).toBeUndefined();
+    // The model or the install setting changed after the schedule was made.
+    generalist = true;
+
+    const run = await tasks.launchScheduledRun(host.ref);
+    expect(requested.at(-1)).toBe('auto');
+    expect(run.strategy).toBe('generalist');
+    expect(run.requestedStrategy).toBeUndefined();
+    expect(run.craftbook.steps[0]!.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+    expect(run.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
+  });
+
   it('binds every shard of a proposal-drafting host to its own proposal', async () => {
     // Fail-safe, not fail-open: a shard that came up unbound would send its
     // edits to the real workspace, which is the one outcome the whole

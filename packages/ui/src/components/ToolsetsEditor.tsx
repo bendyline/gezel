@@ -209,11 +209,21 @@ export function ToolsetsEditor({ scope: incomingScope, subject, hint }: Toolsets
 
   const refresh = useCallback(async () => {
     try {
-      const [system, roster, items] = await Promise.all([
+      // The reviewed toolsets, plus the installed community ones this panel
+      // names. The picker loads the whole registry itself, only when opened:
+      // this panel mounts with every project's Connections tab.
+      const [system, roster, reviewed] = await Promise.all([
         api.listInstalledToolsets({ kind: 'system' }),
         api.listInstalledToolsets(scope),
-        api.listCatalogItems('toolset'),
+        api.listCatalogItems('toolset', { community: false }),
       ]);
+      const reviewedIds = new Set(reviewed.items.map((item) => item.manifest.id));
+      const unlisted = (roster.toolsets ?? [])
+        .map((entry) => entry.toolsetId)
+        .filter((toolsetId) => !reviewedIds.has(toolsetId));
+      const items = unlisted.length
+        ? [...reviewed.items, ...(await api.listCatalogItems('toolset', { ids: unlisted })).items]
+        : reviewed.items;
       setIncluded(
         (system.toolsets ?? []).filter(
           (entry) => entry.toolsetId === 'docblocks' && entry.sourceId === 'bundled',
@@ -222,7 +232,7 @@ export function ToolsetsEditor({ scope: incomingScope, subject, hint }: Toolsets
       setInstalled(roster.toolsets ?? []);
       setRoleDefault(roster.roleDefault ?? null);
       setDiscoveryWarnings((roster.discoveryWarnings ?? []).map((warning) => warning.message));
-      setCatalog(items.items);
+      setCatalog(items);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -598,13 +608,6 @@ export function ToolsetsEditor({ scope: incomingScope, subject, hint }: Toolsets
                 <CatalogBrowser
                   kind="toolset"
                   emptyMessage="No toolsets in the catalog yet."
-                  // Pass items only after the parent fetch has populated
-                  // them, so the picker doesn't briefly flash an empty
-                  // state when opened mid-fetch. catalog.length === 0 is
-                  // treated as "not yet loaded" — a truly empty catalog
-                  // would just trigger one redundant fetch with the same
-                  // result.
-                  initialItems={catalog.length > 0 ? catalog : undefined}
                   action={(item) => {
                     if (item.manifest.kind !== 'toolset') return null;
                     const m = item.manifest;

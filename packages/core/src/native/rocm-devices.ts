@@ -31,7 +31,7 @@
  * enumerates devices; it never loads a model or runs a kernel.
  */
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   constants,
   accessSync,
@@ -322,6 +322,8 @@ export interface RocmProbeIo {
   fingerprint?: (path: string) => string | null;
   /** Run the build's `--list-devices`; returns combined output, or null when it failed. */
   listDevices?: (binaryPath: string, env: NodeJS.ProcessEnv) => string | null;
+  /** The same, without blocking the event loop ({@link checkRocmBuildAsync}). */
+  listDevicesAsync?: (binaryPath: string, env: NodeJS.ProcessEnv) => Promise<string | null>;
   now?: () => Date;
 }
 
@@ -389,23 +391,97 @@ function canOpenDefault(path: string): boolean {
   }
 }
 
+const LIST_DEVICES_ARGS = ['--log-verbosity', '4', '--list-devices'];
+const LIST_DEVICES_MAX_BYTES = 4 * 1024 * 1024;
+
 function listDevicesDefault(binaryPath: string, env: NodeJS.ProcessEnv): string | null {
-  const result = spawnSync(binaryPath, ['--log-verbosity', '4', '--list-devices'], {
+  const result = spawnSync(binaryPath, LIST_DEVICES_ARGS, {
     env,
     encoding: 'utf8',
     timeout: LIST_DEVICES_TIMEOUT_MS,
-    maxBuffer: 4 * 1024 * 1024,
+    maxBuffer: LIST_DEVICES_MAX_BYTES,
     ...windowsHeadlessSpawnOptions(),
   });
   if (result.error || result.status !== 0) return null;
   return `${result.stdout ?? ''}\n${result.stderr ?? ''}`;
 }
 
+function listDevicesAsyncDefault(
+  binaryPath: string,
+  env: NodeJS.ProcessEnv,
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn>;
+    try {
+      child = spawn(binaryPath, LIST_DEVICES_ARGS, {
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        ...windowsHeadlessSpawnOptions(),
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    let failed = false;
+    const collect = (chunk: Buffer) => {
+      bytes += chunk.length;
+      if (bytes > LIST_DEVICES_MAX_BYTES) {
+        failed = true;
+        child.kill();
+        return;
+      }
+      chunks.push(chunk);
+    };
+    child.stdout?.on('data', collect);
+    child.stderr?.on('data', collect);
+    const timer = setTimeout(() => {
+      failed = true;
+      child.kill();
+    }, LIST_DEVICES_TIMEOUT_MS);
+    child.once('error', () => {
+      failed = true;
+    });
+    child.once('close', (code) => {
+      clearTimeout(timer);
+      resolve(failed || code !== 0 ? null : Buffer.concat(chunks).toString('utf8'));
+    });
+  });
+}
+
 /**
  * Whether the ROCm build at `binaryPath` can drive a GPU here, probing the
  * build once per build-and-driver and caching the answer under `home`.
+ *
+ * On a cache miss this waits for the build to start HIP, which takes seconds
+ * and up to the 30 s timeout when a driver hangs. Callers on a thread that
+ * must stay responsive (Electron's main process, a daemon's event loop) run
+ * {@link checkRocmBuildAsync} first, so this only reads the cached answer.
  */
 export function checkRocmBuild(home: string, binaryPath: string, io: RocmProbeIo = {}): RocmCheck {
+  const step = startRocmCheck(home, binaryPath, io);
+  if ('check' in step) return step.check;
+  return step.finish((io.listDevices ?? listDevicesDefault)(binaryPath, step.env));
+}
+
+/** {@link checkRocmBuild} without blocking: the probe runs as a child process. */
+export async function checkRocmBuildAsync(
+  home: string,
+  binaryPath: string,
+  io: RocmProbeIo = {},
+): Promise<RocmCheck> {
+  const step = startRocmCheck(home, binaryPath, io);
+  if ('check' in step) return step.check;
+  return step.finish(await (io.listDevicesAsync ?? listDevicesAsyncDefault)(binaryPath, step.env));
+}
+
+type RocmCheckStep =
+  | { check: RocmCheck }
+  | { env: NodeJS.ProcessEnv; finish: (output: string | null) => RocmCheck };
+
+/** Everything up to the probe itself: the answer when it is known, else how to ask. */
+function startRocmCheck(home: string, binaryPath: string, io: RocmProbeIo): RocmCheckStep {
   const platform = io.platform ?? process.platform;
   const readFile = io.readFile ?? ((path: string) => readFileSync(path, 'utf8'));
   const listDir = io.listDir ?? ((path: string) => readdirSync(path));
@@ -417,12 +493,14 @@ export function checkRocmBuild(home: string, binaryPath: string, io: RocmProbeIo
   // it finds nothing and the build would run on the CPU; say why instead.
   if (platform === 'linux' && !canOpen(LINUX_AMD_KFD_PATH)) {
     return {
-      blocker: {
-        kind: 'no-device-access',
-        detail: `${LINUX_AMD_KFD_PATH} is not readable and writable by this account; add it to the "render" and "video" groups`,
+      check: {
+        blocker: {
+          kind: 'no-device-access',
+          detail: `${LINUX_AMD_KFD_PATH} is not readable and writable by this account; add it to the "render" and "video" groups`,
+        },
+        devices: [],
+        visibleDevices: null,
       },
-      devices: [],
-      visibleDevices: null,
     };
   }
 
@@ -439,7 +517,7 @@ export function checkRocmBuild(home: string, binaryPath: string, io: RocmProbeIo
         cached.check.blocker?.kind === 'probe-failed' &&
         now.getTime() - Date.parse(cached.probedAt) >= PROBE_FAILED_RETRY_MS
       );
-    if (fresh && cached.check) return cached.check;
+    if (fresh && cached.check) return { check: cached.check };
   } catch {
     // Missing or unreadable — probe.
   }
@@ -453,29 +531,31 @@ export function checkRocmBuild(home: string, binaryPath: string, io: RocmProbeIo
   };
   // The probe must see every GPU, so an inherited filter cannot narrow it.
   delete env.HIP_VISIBLE_DEVICES;
-  const output = (io.listDevices ?? listDevicesDefault)(binaryPath, env);
-  const check =
-    output === null
-      ? {
-          blocker: {
-            kind: 'probe-failed' as const,
-            detail: `${binaryPath} --list-devices failed or timed out`,
-          },
-          devices: [],
-          visibleDevices: null,
-        }
-      : rocmCheckFromDevices(parseRocmDeviceLog(output), rocmBuildTargets(binaryPath, readFile));
+  const finish = (output: string | null): RocmCheck => {
+    const check =
+      output === null
+        ? {
+            blocker: {
+              kind: 'probe-failed' as const,
+              detail: `${binaryPath} --list-devices failed or timed out`,
+            },
+            devices: [],
+            visibleDevices: null,
+          }
+        : rocmCheckFromDevices(parseRocmDeviceLog(output), rocmBuildTargets(binaryPath, readFile));
 
-  const writeFile =
-    io.writeFile ?? ((path: string, data: string) => writeFileSync(path, data, 'utf8'));
-  try {
-    if (!io.writeFile) mkdirSync(dirname(cachePath), { recursive: true });
-    const file: CacheFile = { schemaVersion: 1, key, check, probedAt: now.toISOString() };
-    writeFile(cachePath, `${JSON.stringify(file, null, 2)}\n`);
-  } catch {
-    // Best-effort: the probe runs again next time.
-  }
-  return check;
+    const writeFile =
+      io.writeFile ?? ((path: string, data: string) => writeFileSync(path, data, 'utf8'));
+    try {
+      if (!io.writeFile) mkdirSync(dirname(cachePath), { recursive: true });
+      const file: CacheFile = { schemaVersion: 1, key, check, probedAt: now.toISOString() };
+      writeFile(cachePath, `${JSON.stringify(file, null, 2)}\n`);
+    } catch {
+      // Best-effort: the probe runs again next time.
+    }
+    return check;
+  };
+  return { env, finish };
 }
 
 /**
