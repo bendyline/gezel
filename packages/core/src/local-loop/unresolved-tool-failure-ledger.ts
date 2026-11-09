@@ -261,7 +261,9 @@ export class UnresolvedToolFailureLedger {
     });
     for (const target of this.unsaved.keys()) this.heldTargets.add(target);
     this.unsaved.clear();
-    log.info(`unresolved-failure ledger: held ${advertisedName} behind ${failed.length} failed save(s)`);
+    log.info(
+      `unresolved-failure ledger: held ${advertisedName} behind ${failed.length} failed save(s)`,
+    );
     return [
       `ERROR: \`${advertisedName}\` was not run: ${failed.length === 1 ? 'a save' : 'saves'} you made for this step failed, so that work is not saved.`,
       ...failed,

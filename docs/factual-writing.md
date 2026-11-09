@@ -159,6 +159,15 @@ matches the ISO date ("July 9, 2026" or "9 July" for `2026-07-09`, bound to
 the year when the sentence gives one), common technical acronyms (HTTP, UTC, API) are
 vocabulary rather than names, and a name inside a file attribution
 ("(timeline.md, Notes)") never anchors a number.
+
+A project that holds code (`projectHoldsCode`) checks no names at all
+(`GroundOptions.names`, set through `EvidenceLedger.setNameChecks`). What a
+writer names there is an identifier or a path, which is already skipped as
+code, and Title Case is a label: a Test Coverage Review's `**Current State**:`
+and `**Schema Validation**:` were refused as unsourced names on every step
+(squisq/38, 2026-11-09). Numbers, dates, months and quotations are still
+checked.
+
 Each sentence ends up as one of:
 
 | Status | Meaning |
