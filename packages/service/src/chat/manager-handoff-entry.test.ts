@@ -521,6 +521,105 @@ describe('handoff seed wording', () => {
     expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(1);
   });
 
+  // An invoice-run shard on GPT-6.1 Sol ended its turn reporting a blocker in
+  // prose and neither finished nor paused; its host waited at the post-fanout
+  // barrier until the run was stopped nine minutes later (2026-11-10).
+  async function invoiceShard() {
+    const host = await tasks.create('p1', {
+      title: 'Monthly Invoice Run',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [{ id: 'collect', name: 'Collect', prompt: 'Collect the invoices.', terminal: true }],
+      entryStepId: 'collect',
+      spawnsSteps: [
+        {
+          id: 'draft-invoice',
+          name: 'Draft the invoice',
+          prompt: 'Write invoices/2026-044.html with write_file.',
+        },
+      ],
+      createdBy: { kind: 'user' },
+    });
+    const shard = await tasks.spawnChild(host.ref, {
+      title: 'Invoice 2026-044',
+      context: { number: '2026-044' },
+    });
+    return { host, shard };
+  }
+
+  it('retries a fanout shard whose turn left its step open, then reports it for a pause', async () => {
+    const { shard } = await invoiceShard();
+    const blocked = 'Blocked: the workspace write_file tool is unavailable, so I cannot save it.';
+    for (let i = 0; i < 12; i++) mock.script(blocked);
+    const exhausted = vi.fn(async () => {});
+    manager.setHandoffExhaustedHandler(exhausted);
+
+    await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: shard.ref,
+      stepId: 'draft-invoice',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    const recoveries = mock.calls.filter(
+      (call) =>
+        call.kind === 'send' && String(call.prompt).includes('still open (bounded recovery'),
+    );
+    expect(recoveries.map((call) => String(call.prompt).match(/recovery (\d\/\d)/)?.[1])).toEqual([
+      '1/2',
+      '2/2',
+    ]);
+    expect(String(recoveries[0]!.prompt)).toContain('waits for this step before it can go on');
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    expect(exhausted).toHaveBeenCalledWith({
+      taskRef: shard.ref,
+      stepId: 'draft-invoice',
+      gezelId: 'worker',
+      detail: expect.stringContaining('the workspace write_file tool is unavailable'),
+    });
+  });
+
+  it('stops retrying a fanout shard once its task settles', async () => {
+    const { shard } = await invoiceShard();
+    mock.script('Blocked: I could not find the client details.');
+    // Every send after the first is slow, so the task can settle while the
+    // recovery turn is still running, as it does when a model finishes there.
+    mock.scriptSendDelay(0);
+    for (let i = 0; i < 6; i++) mock.scriptSendDelay(400);
+    const exhausted = vi.fn(async () => {});
+    manager.setHandoffExhaustedHandler(exhausted);
+
+    await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: shard.ref,
+      stepId: 'draft-invoice',
+      kind: 'entry',
+    });
+    await vi.waitFor(
+      () =>
+        expect(
+          mock.calls.some(
+            (call) =>
+              call.kind === 'send' &&
+              String(call.prompt).includes('still open (bounded recovery 1/2)'),
+          ),
+        ).toBe(true),
+      { timeout: 10_000, interval: 5 },
+    );
+    await tasks.setStatus('p1', shard.num, 'complete');
+    await manager.drainBackground();
+
+    expect(
+      mock.calls.filter(
+        (call) =>
+          call.kind === 'send' && String(call.prompt).includes('still open (bounded recovery 2/2)'),
+      ),
+    ).toHaveLength(0);
+    expect(exhausted).not.toHaveBeenCalled();
+  });
+
   it('retries a fixed-action handoff that returns text without publishing its checkpoint', async () => {
     const task = await tasks.create('p1', {
       title: 'Publish a review checkpoint',

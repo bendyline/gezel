@@ -2,7 +2,7 @@ import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/que
 import { SessionResumeError } from '@bendyline/gezel-inference/internal/providers/types';
 import { describe, expect, it } from 'vitest';
 import type { ClaudeReasoningEffort } from './reasoning.js';
-import { AnthropicCliSession, isResumeFailureSignal } from './session.js';
+import { AnthropicCliSession, type SessionDeps, isResumeFailureSignal } from './session.js';
 import type { ClaudeWorkerPool, ClaudeWorkerSpec, PoolSnapshot } from './worker-pool.js';
 import type { WorkerTurnHooks } from './worker.js';
 
@@ -161,6 +161,76 @@ describe('AnthropicCliSession — façade contract', () => {
     const session = buildSession(ctrl.pool);
     await session.disconnect();
     await expect(session.sendAndWait('hi')).rejects.toThrow(/disconnected/);
+  });
+});
+
+describe('AnthropicCliSession — tool guide in the system prompt', () => {
+  const gezelMcp = (env: Record<string, string> = {}) => ({
+    command: 'node',
+    args: ['/fake/gezel-mcp/server.js'],
+    env,
+  });
+
+  async function sentSystemMessage(overrides: Partial<SessionDeps>): Promise<string> {
+    const ctrl = makeMockPool();
+    const session = new AnthropicCliSession({
+      binaryPath: '/fake/claude',
+      model: 'sonnet',
+      permissionMode: 'acceptEdits',
+      systemMessage: 'You are a test gezel.',
+      context: { sessionId: 'sess-1', gezelId: 'g-1', projectId: 'p-1', cwd: '/tmp' },
+      runtimeDir: '/tmp/runtime',
+      manageRuntimeFiles: false,
+      queue: new ProviderQueue({ concurrency: 4 }),
+      pool: ctrl.pool,
+      ...overrides,
+    });
+    await session.sendAndWait('go');
+    return ctrl.runTurnCalls[0]?.spec.systemMessage ?? '';
+  }
+
+  it('hands the worker the system message with the guide appended', async () => {
+    const sent = await sentSystemMessage({ mcpServer: gezelMcp() });
+    expect(sent).toMatch(/^You are a test gezel\.\n\n---\n\n### Gezel tools in Claude Code\n/);
+    expect(sent).toContain('`write_file` → `Write` or `Edit`');
+    expect(sent).toContain('Use `run_package_script` and `run_npx`');
+  });
+
+  it("applies the session's permission mode, disallowed built-ins and Gezel allowlist", async () => {
+    const plan = await sentSystemMessage({ mcpServer: gezelMcp(), permissionMode: 'plan' });
+    expect(plan).toContain('`read_file`');
+    expect(plan).not.toContain('write_file');
+
+    const readOnlyRole = await sentSystemMessage({
+      mcpServer: gezelMcp(),
+      context: {
+        sessionId: 'sess-1',
+        gezelId: 'g-1',
+        projectId: 'p-1',
+        cwd: '/tmp',
+        disallowedBuiltinTools: ['Write', 'Edit', 'NotebookEdit', 'Bash'],
+      },
+    });
+    expect(readOnlyRole).toContain('`grep_files` → `Grep`');
+    expect(readOnlyRole).not.toContain('write_file');
+
+    const withheld = await sentSystemMessage({
+      mcpServer: gezelMcp(),
+      toolAllowlist: new Set(['read_file', 'run_package_script']),
+    });
+    expect(withheld).toContain('`read_file` → `Read`');
+    expect(withheld).not.toContain('write_file');
+    expect(withheld).not.toContain('`run_npx`');
+  });
+
+  it('keeps a drafting task off the built-in writers', async () => {
+    const sent = await sentSystemMessage({ mcpServer: gezelMcp({ GEZEL_DIFFPACK_ID: '7' }) });
+    expect(sent).toContain('### Gezel tools in Claude Code');
+    expect(sent).not.toContain('write_file');
+  });
+
+  it('sends the system message unchanged when no Gezel MCP server is wired', async () => {
+    expect(await sentSystemMessage({})).toBe('You are a test gezel.');
   });
 });
 

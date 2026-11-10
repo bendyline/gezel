@@ -26,6 +26,7 @@ import {
 } from './anthropic-options.js';
 import { type ApiObservationContext, apiToolSurface, observeApiStream } from './api-observation.js';
 import { CLOUD_TOOL_ROUND_LIMIT } from './cloud-tool-limits.js';
+import { HOSTED_PROVIDER_DEFAULT_MODELS } from './hosted-default-models.js';
 import { McpBridgePool } from './mcp-bridge-pool.js';
 
 const log = createLogger('anthropic');
@@ -42,7 +43,7 @@ const log = createLogger('anthropic');
  * blocks stay in the wire history separately from the visible reply.
  */
 
-const DEFAULT_MODEL = 'claude-opus-5-5';
+const DEFAULT_MODEL = HOSTED_PROVIDER_DEFAULT_MODELS.anthropic;
 
 function isReasoningModel(id: string): boolean {
   return anthropicReasoningEfforts(id) !== undefined;

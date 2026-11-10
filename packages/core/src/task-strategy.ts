@@ -18,13 +18,15 @@
  * `Task.executionMode` two-valued for older readers and the eval harness.
  *
  * `auto` follows evidence: the strategy the benchmark measured for the model
- * that will run the task (its catalog `tuning.taskStrategy`), else the
- * default for its kind of provider: outcome without the recipe on device,
- * `generalistMode`'s task rule everywhere else. See docs/task-strategies.md.
+ * that will run the task (its catalog `tuning.taskStrategy`, or for a hosted
+ * model {@link HOSTED_MODEL_TASK_STRATEGIES}), else outcome without the recipe
+ * on device and on a hosted frontier provider, and `generalistMode`'s task
+ * rule for anything else. See docs/task-strategies.md.
  */
 import {
   type GeneralistModeSetting,
   type TaskExecutionMode,
+  isFrontierProvider,
   resolveTaskExecutionMode,
 } from './generalist-mode.js';
 
@@ -79,6 +81,35 @@ export interface ModelStrategyAffinity {
   procedure?: 'advisory' | 'none' | undefined;
 }
 
+/**
+ * Measured strategies for hosted models, which have no Gilde catalog entry to
+ * carry `tuning.taskStrategy`. Keyed `<provider>:<model id>`: a measurement is
+ * of the model through that provider's tool loop, so the same model through
+ * another provider (Copilot, the Claude CLI) stays unmeasured and gets the
+ * provider default.
+ *
+ * - `anthropic:claude-sonnet-5-5`: recipe as advice matched one owner on every
+ *   quality measure at 0.35x the wall time and about a quarter of the cost
+ *   (18 books, 162 trials, 2026-11-09; evals/runs/frontier-2026-11-09/PREREG.md).
+ * - `codex-cli:gpt-6.1-sol`: both goal-based strategies qualified against one
+ *   owner, and goal only scored higher on judged quality than recipe as advice
+ *   (18 books, 162 trials, 2026-11-10;
+ *   evals/runs/frontier-sol-2026-11-09/PREREG.md).
+ */
+export const HOSTED_MODEL_TASK_STRATEGIES: Readonly<Record<string, ModelStrategyAffinity>> = {
+  'anthropic:claude-sonnet-5-5': { strategy: 'outcome', procedure: 'advisory' },
+  'codex-cli:gpt-6.1-sol': { strategy: 'outcome', procedure: 'none' },
+};
+
+/** A hosted model's measured strategy, or undefined when it was never measured. */
+export function hostedModelTaskStrategy(
+  providerName: string | undefined,
+  modelId: string | undefined,
+): ModelStrategyAffinity | undefined {
+  if (!providerName || !modelId) return undefined;
+  return HOSTED_MODEL_TASK_STRATEGIES[`${providerName}:${modelId}`];
+}
+
 export interface AutoTaskStrategy {
   strategy: TaskStrategy;
   /** Options the model's pick carries (outcome without a recipe). */
@@ -97,8 +128,11 @@ export interface AutoTaskStrategy {
  * `auto` for one model. An explicit `generalistMode` (`on` / `off`) is the
  * person's choice about task execution and wins over the model's
  * measurement; under `auto` the measurement wins. A model without one runs
- * outcome without the recipe on device and `generalistMode`'s task rule
- * elsewhere.
+ * outcome without the recipe on device and on a hosted frontier provider:
+ * both frontier models measured (Sonnet 5.5, GPT-6.1 Sol, 2026-11-10) beat
+ * one owner walking the recipe with a goal-based strategy, and goal only was
+ * Sol's pick. Anything else (the mock provider, an unknown name) keeps
+ * `generalistMode`'s task rule.
  */
 export function resolveAutoTaskStrategy(args: {
   generalistMode?: GeneralistModeSetting | undefined;
@@ -111,7 +145,7 @@ export function resolveAutoTaskStrategy(args: {
     args.affinity && isTaskStrategy(args.affinity.strategy) ? args.affinity : undefined;
   const explicit = args.generalistMode === 'on' || args.generalistMode === 'off';
   if (!measured || explicit) {
-    if (!explicit && ON_DEVICE_MODEL_PROVIDER_NAMES.includes(args.providerName ?? '')) {
+    if (!explicit && defaultsToGoalOnly(args.providerName)) {
       return { strategy: 'outcome', options: { procedure: 'none' }, source: 'tier', fallback };
     }
     return { strategy: fallback, source: 'tier', fallback };
@@ -124,6 +158,12 @@ export function resolveAutoTaskStrategy(args: {
     source: 'model',
     fallback,
   };
+}
+
+function defaultsToGoalOnly(providerName: string | undefined): boolean {
+  return (
+    ON_DEVICE_MODEL_PROVIDER_NAMES.includes(providerName ?? '') || isFrontierProvider(providerName)
+  );
 }
 
 export function isTaskStrategy(value: unknown): value is TaskStrategy {

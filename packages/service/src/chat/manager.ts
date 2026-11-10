@@ -460,6 +460,7 @@ import {
   formatExpectedDeliverableAnnotation,
   normalizeExpectedDeliverablePath,
 } from './expected-deliverable.js';
+import { fanoutShardRecoveryText, openFanoutShardStep } from './fanout-shard-recovery.js';
 import { fileHandoffIntentKey, staleWorkspaceFileRequest } from './file-handoff-intent.js';
 import {
   IMAGE_EDITOR_NEEDS_INSTRUCTION,
@@ -1387,6 +1388,10 @@ function providerQueueIsBusy(provider: LLMProvider): boolean {
   return Boolean(
     snapshot && snapshot.running + snapshot.queuedInteractive + snapshot.queuedBackground > 0,
   );
+}
+
+function handoffPassKey(taskRef: string, stepId: string): string {
+  return `${taskRef}\u0000${stepId}`;
 }
 
 export class ChatManager extends LocalEngineRuntime {
@@ -2440,12 +2445,88 @@ export class ChatManager extends LocalEngineRuntime {
       if (record.stepActivationId !== args.previousActivationAt) continue;
       if (!this.inflight.has(sessionId)) continue;
       bindStepActivation(record, args.activationAt);
+      // The handoff whose turn keeps the repair keeps the pass with it.
+      const claim = this.handoffPasses.get(handoffPassKey(args.taskRef, args.stepId));
+      if (claim?.sessionId === sessionId && claim.activation === args.previousActivationAt) {
+        claim.activation = args.activationAt;
+      }
       void this.store.writeSession(record).catch((err) => {
         log.warn(
           `session ${sessionId.slice(0, 8)}: persisting adopted step activation failed: ${err instanceof Error ? err.message : err}`,
         );
       });
     }
+  }
+
+  /**
+   * The handoff driving each task step's current pass, keyed by task ref and
+   * step id. A gate loop-back re-activates a step under a new dispatch while an
+   * earlier handoff's turn may still run in the same session (a generalist
+   * owner keeps one), so "the step is still active" no longer says whether
+   * that earlier handoff failed.
+   */
+  private readonly handoffPasses = new Map<
+    string,
+    { token: symbol; sessionId: string; activation: string | undefined }
+  >();
+
+  private claimHandoffPass(
+    taskRef: string,
+    stepId: string,
+    sessionId: string,
+    activation: string | undefined,
+  ): symbol {
+    const token = Symbol(`${taskRef}/${stepId}`);
+    this.handoffPasses.set(handoffPassKey(taskRef, stepId), { token, sessionId, activation });
+    return token;
+  }
+
+  private releaseHandoffPass(taskRef: string, stepId: string, token: symbol): void {
+    const key = handoffPassKey(taskRef, stepId);
+    if (this.handoffPasses.get(key)?.token === token) this.handoffPasses.delete(key);
+  }
+
+  /**
+   * Whether the handoff holding `token` still drives `task`'s current pass of
+   * `stepId`: no newer handoff claimed the step, and the step has not been
+   * re-activated since, except by a gate self-loop its own turn adopted.
+   */
+  private ownsHandoffPass(taskRef: string, stepId: string, token: symbol, task: Task): boolean {
+    const claim = this.handoffPasses.get(handoffPassKey(taskRef, stepId));
+    if (claim?.token !== token) return false;
+    const current = currentStepActivation(task, stepId);
+    return claim.activation === undefined || current === undefined || current === claim.activation;
+  }
+
+  /**
+   * TaskRunner's cancel for a dispatch it judged superseded. One session can
+   * carry several of a task's dispatches (a generalist owner's one transcript,
+   * a same-gezel continuation), and the runner keeps an earlier pass's
+   * dispatch while that session stays busy. When the session has since been
+   * re-pinned to another step or pass, its live turn serves that one, and
+   * cancelling it would abort healthy work for a dispatch that already ended.
+   */
+  async cancelSupersededHandoff(
+    sessionId: string,
+    pass?: { taskRef: string; stepId: string; activationAt?: string },
+  ): Promise<{ cancelled: boolean }> {
+    const record = this.states.get(sessionId)?.record;
+    if (
+      pass &&
+      record?.taskRef === pass.taskRef &&
+      record.stepId !== undefined &&
+      (record.stepId !== pass.stepId ||
+        (pass.activationAt !== undefined &&
+          record.stepActivationId !== undefined &&
+          record.stepActivationId !== pass.activationAt))
+    ) {
+      log.debug(
+        `[chat] session ${sessionId.slice(0, 8)} now serves ${record.taskRef}/${record.stepId}; ` +
+          `its turn is not cancelled for the superseded ${pass.stepId} dispatch`,
+      );
+      return { cancelled: false };
+    }
+    return this.cancelInflight(sessionId, 'task-superseded');
   }
 
   /**
@@ -4213,7 +4294,10 @@ export class ChatManager extends LocalEngineRuntime {
       !args.resumeExisting &&
       selfHandoff &&
       previous?.gezelId === args.gezelId &&
-      previous.stepId !== dispatchStepId &&
+      // A generalist owner's later pass of the SAME step (a gate loop-back)
+      // continues that transcript too. A fresh session ran beside it as a
+      // second owner on corpus-synthesis (GPT-6.1 Sol, 2026-11-10).
+      (previous.stepId !== dispatchStepId || generalistTask) &&
       // A generalist task keeps its one transcript even with a send queued
       // behind the current turn: the re-pin below waits for that queue to
       // drain, so the queued input runs under the old step before the
@@ -4456,6 +4540,14 @@ export class ChatManager extends LocalEngineRuntime {
     // UI, not as a tool-call error in the voorman's chat. Retry on "already
     // in flight" so the handoff lands even if the next gezel was mid-turn.
     const handoffSession = session;
+    const passToken = this.claimHandoffPass(
+      args.taskRef,
+      dispatchStepId,
+      handoffSession.id,
+      dispatchActivationId,
+    );
+    const ownsPass = (task: Task) =>
+      this.ownsHandoffPass(args.taskRef, dispatchStepId, passToken, task);
     this.trackBackground(
       (async () => {
         if (reusedAcrossSteps) {
@@ -4480,6 +4572,27 @@ export class ChatManager extends LocalEngineRuntime {
             await new Promise<void>((resolve) =>
               this.runAfterSessionIdle(handoffSession.id, resolve),
             );
+          }
+          // The wait can outlast this dispatch's pass: the step completed, or a
+          // gate looped the task and a newer dispatch holds the step. Re-pinning
+          // anyway told the owner the task "has advanced to `report`" while it
+          // sat on `evaluate`, and the turn fought the scope guard
+          // (content-accuracy-review, GPT-6.1 Sol, 2026-11-10).
+          const waitedTask = parsedTaskRef
+            ? await this.readEffectiveTask(parsedTaskRef.projectId, parsedTaskRef.num)
+            : null;
+          // A task that stopped meanwhile is re-dispatched by whatever resumes it.
+          if (
+            waitedTask &&
+            (taskEffectiveStatus(waitedTask) !== 'active' ||
+              waitedTask.activeStepId !== dispatchStepId ||
+              !ownsPass(waitedTask))
+          ) {
+            log.info(
+              `[chat] handoff for ${args.taskRef}/${dispatchStepId} outlived its pass while session ` +
+                `${handoffSession.id.slice(0, 8)} was busy; leaving the task to its current dispatch`,
+            );
+            return;
           }
           const live = this.states.get(handoffSession.id);
           const record =
@@ -4517,6 +4630,7 @@ export class ChatManager extends LocalEngineRuntime {
         // bad child across dozens of batches far less likely to strand the
         // host after the provider has already spent its own corrective turns.
         const maxHandoffSendAttempts = 3;
+        let shardLeftStepOpen = false;
         for (let attempt = 1; attempt <= maxHandoffSendAttempts; attempt += 1) {
           const gap = await checkpointGapForStep(
             this.store,
@@ -4530,7 +4644,17 @@ export class ChatManager extends LocalEngineRuntime {
               ? seed
               : requiresExactOutcome && dispatchStep?.prompt?.trim()
                 ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.${gap ? ` Right now ${gap}.` : ''}` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
-                : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
+                : shardLeftStepOpen
+                  ? fanoutShardRecoveryText({
+                      stepId: dispatchStepId,
+                      ...(dispatchStep?.advanceWhen?.file
+                        ? { file: dispatchStep.advanceWhen.file }
+                        : {}),
+                      attempt: attempt - 1,
+                      of: maxHandoffSendAttempts - 1,
+                    })
+                  : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
+          shardLeftStepOpen = false;
           try {
             const sendStartedAt = nowIso();
             await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
@@ -4565,6 +4689,16 @@ export class ChatManager extends LocalEngineRuntime {
                 taskEffectiveStatus(afterSend) === 'active' &&
                 afterSend.activeStepId === dispatchStepId
               ) {
+                // Active again is not still active: a gate loop-back that
+                // re-entered the step began a newer pass with its own
+                // dispatch. Retrying this one spent its budget on a pass the
+                // task had judged and paused the newer one as `step_stalled`.
+                if (!ownsPass(afterSend)) {
+                  log.info(
+                    `[chat] ${args.taskRef}/${dispatchStepId}: handoff turn ended after a newer pass of the step began; that pass's dispatch carries it`,
+                  );
+                  break;
+                }
                 throw new Error(
                   `fixed-action handoff returned without completing ${args.taskRef}/${dispatchStepId}`,
                 );
@@ -4578,7 +4712,8 @@ export class ChatManager extends LocalEngineRuntime {
               if (
                 afterBail &&
                 taskEffectiveStatus(afterBail) === 'active' &&
-                afterBail.activeStepId === dispatchStepId
+                afterBail.activeStepId === dispatchStepId &&
+                ownsPass(afterBail)
               ) {
                 log.info(
                   `[chat] ${args.taskRef}/${dispatchStepId}: handoff turn ended on an immediate-write bail with the step still active — sending one continuation`,
@@ -4590,6 +4725,24 @@ export class ChatManager extends LocalEngineRuntime {
                 );
               }
             }
+            if (!requiresExactOutcome) {
+              // See fanout-shard-recovery.ts: an ordinary step waits for the
+              // stuck-step sweep, but a host and its siblings wait on a shard.
+              const openShard = await openFanoutShardStep(this.store, {
+                taskRef: args.taskRef,
+                stepId: dispatchStepId,
+                session:
+                  this.states.get(handoffSession.id)?.record ??
+                  (await this.store
+                    .getSession(handoffSession.gezelId, handoffSession.id)
+                    .catch(() => null)),
+                since: sendStartedAt,
+              });
+              if (openShard) {
+                shardLeftStepOpen = true;
+                throw new Error(openShard);
+              }
+            }
             break;
           } catch (error) {
             // A turn someone stopped on purpose (Stop, interrupt, emergency
@@ -4597,11 +4750,24 @@ export class ChatManager extends LocalEngineRuntime {
             // handoff, and re-sending it undoes the stop. Shutdown also
             // refuses every later send.
             if (this.shuttingDown || turnCancelReasonOf(error)) throw error;
-            if (attempt === maxHandoffSendAttempts) throw error;
             const parsed = parseTaskRef(args.taskRef);
             const currentTask = parsed
               ? await this.readEffectiveTask(parsed.projectId, parsed.num)
               : null;
+            // Neither retried nor exhausted: the failure belongs to a pass the
+            // task left, and exhausting would pause the pass that replaced it.
+            if (
+              currentTask &&
+              taskEffectiveStatus(currentTask) === 'active' &&
+              currentTask.activeStepId === dispatchStepId &&
+              !ownsPass(currentTask)
+            ) {
+              log.info(
+                `[chat] handoff turn for ${args.taskRef}/${dispatchStepId} failed after a newer pass of the step began; not retried`,
+              );
+              return;
+            }
+            if (attempt === maxHandoffSendAttempts) throw error;
             if (
               !currentTask ||
               taskEffectiveStatus(currentTask) !== 'active' ||
@@ -4628,37 +4794,39 @@ export class ChatManager extends LocalEngineRuntime {
             );
           }
         }
-      })().catch(async (err) => {
-        const detail = err instanceof Error ? err.message : String(err);
-        const cancelReason = this.shuttingDown ? 'service-restart' : turnCancelReasonOf(err);
-        if (cancelReason) {
-          // Not a failed handoff, so never "paused for help". After a
-          // shutdown the task stays active and rehydrates on the next boot;
-          // otherwise whoever stopped the turn owns what happens next: Stop
-          // pauses the task, an interrupt carries on in this session, and a
-          // superseding dispatch already holds the step.
-          log.info(
-            `[chat] handoff for ${args.taskRef}/${dispatchStepId ?? '(unpinned)'} ended by ${cancelReason}; not retried`,
-          );
-          return;
-        }
-        log.error(
-          `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}): ${detail}`,
-        );
-        if (this.handoffExhausted && dispatchStepId) {
-          await this.handoffExhausted({
-            taskRef: args.taskRef,
-            stepId: dispatchStepId,
-            gezelId: args.gezelId,
-            detail,
-          }).catch((hookErr: unknown) => {
-            log.warn(
-              `[chat] handoff-exhausted handler failed for ${args.taskRef}/${dispatchStepId}:`,
-              hookErr instanceof Error ? hookErr.message : hookErr,
+      })()
+        .catch(async (err) => {
+          const detail = err instanceof Error ? err.message : String(err);
+          const cancelReason = this.shuttingDown ? 'service-restart' : turnCancelReasonOf(err);
+          if (cancelReason) {
+            // Not a failed handoff, so never "paused for help". After a
+            // shutdown the task stays active and rehydrates on the next boot;
+            // otherwise whoever stopped the turn owns what happens next: Stop
+            // pauses the task, an interrupt carries on in this session, and a
+            // superseding dispatch already holds the step.
+            log.info(
+              `[chat] handoff for ${args.taskRef}/${dispatchStepId ?? '(unpinned)'} ended by ${cancelReason}; not retried`,
             );
-          });
-        }
-      }),
+            return;
+          }
+          log.error(
+            `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}): ${detail}`,
+          );
+          if (this.handoffExhausted && dispatchStepId) {
+            await this.handoffExhausted({
+              taskRef: args.taskRef,
+              stepId: dispatchStepId,
+              gezelId: args.gezelId,
+              detail,
+            }).catch((hookErr: unknown) => {
+              log.warn(
+                `[chat] handoff-exhausted handler failed for ${args.taskRef}/${dispatchStepId}:`,
+                hookErr instanceof Error ? hookErr.message : hookErr,
+              );
+            });
+          }
+        })
+        .finally(() => this.releaseHandoffPass(args.taskRef, dispatchStepId, passToken)),
     );
     return { sessionId: handoffSession.id };
   }

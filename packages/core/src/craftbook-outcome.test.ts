@@ -178,12 +178,21 @@ describe('resolveAutoTaskStrategy', () => {
     );
   });
 
-  it('keeps the tier rule for an unmeasured model off device', () => {
-    expect(resolveAutoTaskStrategy({ providerName: 'anthropic', tier: 'cloud' })).toEqual({
-      strategy: 'generalist',
-      source: 'tier',
-      fallback: 'generalist',
-    });
+  it('runs an unmeasured hosted frontier model as an outcome without the recipe', () => {
+    for (const providerName of ['copilot', 'anthropic', 'anthropic-cli', 'openai', 'codex-cli']) {
+      expect(resolveAutoTaskStrategy({ providerName, tier: 'cloud' })).toEqual({
+        strategy: 'outcome',
+        options: { procedure: 'none' },
+        source: 'tier',
+        fallback: 'generalist',
+      });
+    }
+    expect(
+      resolveAutoTaskStrategy({ generalistMode: 'on', providerName: 'anthropic' }).strategy,
+    ).toBe('generalist');
+  });
+
+  it('keeps the tier rule for any other provider', () => {
     expect(resolveAutoTaskStrategy({ providerName: 'mock' }).strategy).toBe('stepwise');
     expect(resolveAutoTaskStrategy({ providerName: undefined }).strategy).toBe('stepwise');
   });

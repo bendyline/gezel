@@ -3,6 +3,7 @@ import {
   type ModelTaskStrategy,
   type ProviderName,
   type Task,
+  hostedModelTaskStrategy,
   isLocalProvider,
   parseTaskRef,
 } from '@bendyline/gezel';
@@ -13,6 +14,7 @@ import {
 } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
 import { resolveCatalogIdFromModelId } from '@bendyline/gezel-inference/internal/providers/catalog-model-config';
 import type { Store } from '../fs/store.js';
+import { hostedProviderDefaultModel } from '../providers/hosted-default-models.js';
 import { type StepSniffName, runStepSniff } from './step-sniff.js';
 
 /**
@@ -63,7 +65,11 @@ export interface ExecutionModelProfile {
   tier: LocalModelTier;
   /** The model id the dispatch will use, when one is pinned or defaulted. */
   modelId?: string;
-  /** The model's measured task strategy: the gezel's override, else the catalog's. */
+  /**
+   * The model's measured task strategy: the gezel's override, else the
+   * catalog's, else for a hosted model `HOSTED_MODEL_TASK_STRATEGIES`, read
+   * for the provider's own default model when nothing names one.
+   */
   affinity?: ModelTaskStrategy;
 }
 
@@ -89,7 +95,15 @@ export async function resolveExecutionModelFor(args: {
     ? ((await resolveCatalogIdFromModelId(args.catalog, effectiveModel)) ?? effectiveModel)
     : effectiveModel;
   const manifest = catalogId ? await chatModelManifest(args.catalog, catalogId) : undefined;
-  const affinity = gezel?.parsed.frontmatter.tuning?.taskStrategy ?? manifest?.tuning?.taskStrategy;
+  const affinity =
+    gezel?.parsed.frontmatter.tuning?.taskStrategy ??
+    manifest?.tuning?.taskStrategy ??
+    (local
+      ? undefined
+      : hostedModelTaskStrategy(
+          args.providerName,
+          effectiveModel ?? hostedProviderDefaultModel(args.providerName),
+        ));
   const tier: LocalModelTier = local
     ? classifyLocalModelTier({
         providerName: args.providerName,

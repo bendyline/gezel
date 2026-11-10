@@ -101,6 +101,9 @@ describe('declarative per-item fanout (invoice-run)', () => {
       craftbookId: 'invoice-run',
       assignee: { kind: 'user' },
       createdBy: { kind: 'user' },
+      // The mock provider stands in for copilot, whose unmeasured models now
+      // run invoice-run as one outcome step; this test needs the recipe's steps.
+      strategy: 'generalist',
     });
 
     // Invoker builds a spawn host: spawnsCraftbook present AND the main

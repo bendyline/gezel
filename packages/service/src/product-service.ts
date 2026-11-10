@@ -29,6 +29,7 @@ import {
   resolveSocialMode,
   startSuspendMonitor,
   stopSuspendMonitor,
+  taskEffectiveStatus,
   taskPausedCardText,
 } from '@bendyline/gezel';
 import { type ExternalFolders, KeyedLock, resolveDistributionProfile } from '@bendyline/gezel';
@@ -252,6 +253,8 @@ import { SystemStatusBus } from './system-toolsets/status-bus.js';
 import { reapOrphanedGezelEngineProcesses } from './system/gezel-process-cleanup.js';
 import { SystemIdleState } from './system/idle-state.js';
 import { SPAWN_DENIED_MESSAGE, probeChildProcessSpawn } from './system/spawn-capability.js';
+import { followCurrentTurnReactivation } from './tasks/current-turn-reactivation.js';
+import { checkFanoutBarrier, pausesForPausedCrew } from './tasks/fanout-barrier.js';
 import { withdrawFinishedPassQuestions } from './tasks/finished-pass-questions.js';
 import { TaskLauncher } from './tasks/launcher.js';
 import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
@@ -941,7 +944,7 @@ export async function startProductService(
     pauseAfterFailedDispatch: pauseTaskAfterFailedHandoff,
     dispatcher: {
       startHandoffSession: (args) => chat.startHandoffSession(args),
-      cancelHandoffSession: (sessionId) => chat.cancelInflight(sessionId, 'task-superseded'),
+      cancelHandoffSession: (sessionId, pass) => chat.cancelSupersededHandoff(sessionId, pass),
       isHandoffSessionActive: (sessionId) => chat.isSessionTurnPending(sessionId),
       resolveProviderName: (gezelId, opts) => chat.providerForGezel(gezelId, opts),
       getProvider: (name) => chat.getProviderIfReady(name),
@@ -978,10 +981,24 @@ export async function startProductService(
       log.warn(`[tasks] ${task.ref}: card withdrawal failed: ${String(err)}`),
     );
   };
-  tasks.setTaskStatusChangedHook(async ({ task }) => {
+  const pauseHostIfCrewStopped = async (hostRef: string): Promise<void> => {
+    const host = await tasks.getByRef(hostRef);
+    if (!host || taskEffectiveStatus(host) !== 'active') return;
+    const step = host.craftbook.steps.find((candidate) => candidate.id === host.activeStepId);
+    if (!pausesForPausedCrew(host, step)) return;
+    await checkFanoutBarrier(tasks, host, step);
+  };
+  tasks.setTaskStatusChangedHook(async ({ task, previousStatus }) => {
     await taskRunner.reconcileStatusChange(task);
     // A finished or canceled task has no step pass left to answer for.
     await withdrawPassedQuestions(task);
+    // A pause is not a settle, so the last child to stop by pausing never
+    // reaches the barrier release in the settle hook below.
+    if (task.status === 'paused' && previousStatus === 'active' && task.parentTaskRef) {
+      await pauseHostIfCrewStopped(task.parentTaskRef).catch((err: unknown) =>
+        log.warn(`[fanout] barrier check after ${task.ref} paused failed: ${String(err)}`),
+      );
+    }
   });
   nightShift.setOnActivated(async () => {
     // Index first, tasks second: the catch-up flag is raised synchronously,
@@ -1005,30 +1022,9 @@ export async function startProductService(
   // turn; TaskManager therefore does not enqueue a replacement handoff. Move
   // TaskRunner's live dispatch to the new activation timestamp immediately so
   // its stale-dispatch pruning does not cancel that same recovery turn.
-  tasks.setCurrentTurnStepReactivatedHook(({ task, newStep, gatedStep, previousActivationAt }) => {
-    // The turn's session follows too. Only a self-loop stays with this turn;
-    // a route to another step gets its own dispatch, which binds its session.
-    if (newStep.id === gatedStep.id && newStep.lastActivatedAt) {
-      chat.adoptStepActivation({
-        taskRef: task.ref,
-        stepId: newStep.id,
-        previousActivationAt,
-        activationAt: newStep.lastActivatedAt,
-      });
-    }
-    const gezelId = isOwnerStep(newStep)
-      ? undefined
-      : newStep.assignee?.kind === 'gezel'
-        ? newStep.assignee.gezelId
-        : newStep.suggestedGezelId;
-    if (!gezelId || !newStep.lastActivatedAt) return;
-    taskRunner.adoptActiveDispatchActivation({
-      taskRef: task.ref,
-      stepId: newStep.id,
-      gezelId,
-      activationAt: newStep.lastActivatedAt,
-    });
-  });
+  tasks.setCurrentTurnStepReactivatedHook((ctx) =>
+    followCurrentTurnReactivation({ chat, runner: taskRunner }, ctx),
+  );
 
   // Script runner: executes project-scoped TypeScript scripts in the
   // sandbox with fd-3 RPC back to the service. Wired into TaskManager
@@ -1314,18 +1310,17 @@ export async function startProductService(
     // The barrier lifts in the settle hook, which re-dispatches this step
     // once the last active child settles. Held only while children are
     // genuinely outstanding, so a re-activation after they finish proceeds
-    // normally, and a task whose children all failed still gets its turn.
-    if (task.spawnsCraftbook && !newStep.spawnFanout) {
-      const activeChildren = await tasks
-        .listChildren(task.ref, { status: 'active' })
-        .catch(() => []);
-      if (activeChildren.length > 0) {
-        log.info(
-          `[fanout] ${task.ref} step "${newStep.id}": holding dispatch — ${activeChildren.length} child(ren) still active; will re-dispatch when the last one settles`,
-        );
-        return;
-      }
+    // normally, and a task whose children all failed (canceled) still gets
+    // its turn. A child paused for help has not failed: the host pauses for
+    // help naming it (tasks/fanout-barrier.ts).
+    const barrier = await checkFanoutBarrier(tasks, task, newStep);
+    if (barrier.kind === 'held') {
+      log.info(
+        `[fanout] ${task.ref} step "${newStep.id}": holding dispatch — ${barrier.active} child(ren) still active; will re-dispatch when the last one settles`,
+      );
+      return;
     }
+    if (barrier.kind === 'paused-crew') return;
 
     // An owner step waits for the owner: nobody is dispatched, and a card
     // tells them it is their turn.

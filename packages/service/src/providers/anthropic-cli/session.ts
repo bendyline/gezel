@@ -17,6 +17,7 @@ import type {
 } from '@bendyline/gezel-inference/internal/providers/types';
 import type { ClaudePermissionMode } from './provider.js';
 import type { ClaudeReasoningEffort } from './reasoning.js';
+import { withClaudeToolGuide } from './tool-guide.js';
 import type { ClaudeWorkerPool, ClaudeWorkerSpec } from './worker-pool.js';
 import type { WorkerTurnHooks } from './worker.js';
 
@@ -32,6 +33,7 @@ export interface SessionDeps {
   queue: ProviderQueue;
   pool: ClaudeWorkerPool;
   mcpServer?: SessionOpts['mcpServer'];
+  toolAllowlist?: SessionOpts['toolAllowlist'];
   extraMcpServers?: SessionOpts['extraMcpServers'];
   onToolCall?: SessionOpts['onToolCall'];
   knownSecretValues?: SessionOpts['knownSecretValues'];
@@ -65,10 +67,22 @@ export class AnthropicCliSession extends StreamingSessionBase implements LLMSess
    * this on exactly that path to salvage the partial trace.
    */
   private lastTurnReasoning = '';
+  /** `deps.systemMessage` plus the tool guide when Gezel's MCP server is wired. */
+  private readonly systemMessage: string;
 
   constructor(private readonly deps: SessionDeps) {
     super();
     this.claudeSessionIdCache = deps.initialResumeId ?? null;
+    this.systemMessage = deps.mcpServer
+      ? withClaudeToolGuide(deps.systemMessage, {
+          permissionMode: deps.permissionMode,
+          ...(deps.context.disallowedBuiltinTools
+            ? { disallowedBuiltinTools: deps.context.disallowedBuiltinTools }
+            : {}),
+          ...(deps.toolAllowlist ? { toolAllowlist: deps.toolAllowlist } : {}),
+          drafting: Boolean(deps.mcpServer.env.GEZEL_DIFFPACK_ID),
+        })
+      : deps.systemMessage;
   }
 
   async sendAndWait(prompt: string, opts?: SendAndWaitOpts): Promise<string> {
@@ -119,7 +133,7 @@ export class AnthropicCliSession extends StreamingSessionBase implements LLMSess
       model: this.deps.model,
       ...(this.deps.reasoningEffort ? { reasoningEffort: this.deps.reasoningEffort } : {}),
       permissionMode: this.deps.permissionMode,
-      systemMessage: this.deps.systemMessage,
+      systemMessage: this.systemMessage,
       context: this.deps.context,
       runtimeDir: this.deps.runtimeDir,
       manageRuntimeFiles: this.deps.manageRuntimeFiles,

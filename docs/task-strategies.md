@@ -42,16 +42,21 @@ Precedence, highest first:
    about task execution, so it outranks any model's measurement.
 4. The model's measured strategy: `tuning.taskStrategy` on the chat-model
    catalog entry (`{ strategy, procedure?, basis? }`), or a gezel's own
-   `tuning.taskStrategy` override. It is read for the model the owner will
+   `tuning.taskStrategy` override. Hosted models have no catalog entry, so
+   theirs live in `HOSTED_MODEL_TASK_STRATEGIES` (core `task-strategy.ts`),
+   keyed by provider and model: a measurement covers the model through that
+   provider's tool loop only. It is read for the model the owner will
    actually run: the assignee's model, or for an auto-assigned single-owner
    task the Generalist gezel's model. An outcome pick that cannot render for
    this book (no contract, owner steps, branches) falls back to
    `generalistMode`'s task rule, with a warning naming the reason.
 5. The default for a model nobody measured: outcome without the recipe on
    device (`llama-cpp`, `mlx`, `ds4`, `ollama`, and a paired device's
-   `remote`), falling back to stepwise for a book that cannot render.
-   Elsewhere it is `generalistMode`'s task rule: generalist for hosted
-   frontier providers, stepwise for the rest (`mock` among them).
+   `remote`) and on a hosted frontier provider (`copilot`, `anthropic`,
+   `anthropic-cli`, `openai`, `codex-cli`). A book that cannot render falls
+   back to `generalistMode`'s task rule: stepwise on device, generalist on a
+   hosted provider. Any other provider (`mock` among them) gets that rule
+   directly.
 
 The pick ships as a gilde patch (the catalog read is tolerant, so older builds
 ignore the field), and live gilde updates carry a new measurement to users
@@ -65,6 +70,31 @@ re-judged (judge v3, 2026-11-07), round 1 picks outcome without the recipe
 for both. Every
 measured on-device model beat stepwise at a third of the wall time or less,
 which is why an unmeasured one starts there.
+
+A hosted model's pick ships with the app, in that table. Claude Sonnet 5.5
+through `anthropic` runs outcome with the recipe as advice: on all 18 books it
+matched generalist's quality at about a third of the wall time and a quarter
+of the cost (2026-11-09, `evals/runs/frontier-2026-11-09/PREREG.md`).
+GPT-6.1 Sol through `codex-cli` runs outcome with no recipe: both goal-based
+strategies qualified against generalist, and goal only scored higher than
+the recipe as advice, at 0.42x the wall time and a quarter of the cost
+(2026-11-10, `evals/runs/frontier-sol-2026-11-09/PREREG.md`). The lookup
+uses the model the task will run on, so a Codex session nobody pinned a
+model for gets Sol's pick through the provider's own default.
+
+Every other hosted model, including these two through another provider
+(Copilot, the Claude CLI, the OpenAI API) and Claude Opus 5.5, is unmeasured
+and runs outcome without the recipe (since 2026-11-10). The Sonnet
+pre-registration required a second frontier model before the hosted default
+could change; with Sol, both measured frontier models preferred a goal-based
+strategy to generalist. Goal only is the default because it was Sol's
+registered pick, cost less than the recipe as advice on both models, was
+faster on Sol and as fast on Sonnet, and matched it on Sonnet's judged
+quality. It is not the only reading:
+on Sonnet, goal only missed the registered pass-rate bar (44 of 54 against 51),
+though all but one of its failures were checks misreading correct work, while
+the recipe as advice cleared the registered rule on both models. Sonnet keeps
+its own measured pick.
 
 A new model gets its own pick when it differs from a measured one in more than
 quantization. Another quant of the same weights inherits the pick (Q3 and

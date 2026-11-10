@@ -17,11 +17,15 @@ A task in gezel is a recipe — a craftbook — walked one step at a time, with 
 
 Settings → Artificial intelligence → **Run in generalist mode** has three keys:
 
-- **Automatic** (the default): on for hosted frontier models — Claude, ChatGPT and Codex, GitHub Copilot — and off for models running on this device.
+- **Automatic** (the default): when the recipe states its goal, one gezel works from that goal (see below). Otherwise generalist mode is on for hosted frontier models — Claude, ChatGPT and Codex, GitHub Copilot — and off for models running on this device.
 - **On**: every task runs in generalist mode, whatever the model. Useful for trying a capable local model on a whole task.
 - **Off**: every task runs stepwise, even on a frontier model.
 
 The choice is made once, when a task is created, so changing the setting never disturbs a task that is already under way.
+
+## Working from the goal
+
+Some recipes state their goal outright: what to deliver, and the bar it has to clear. For those, Automatic hands one gezel the goal, the files to deliver and the checks they must pass, and lets it decide the steps itself. The checks run on the finished work instead of after each step. In our tests this did about as well as walking the recipe step by step, in well under half the time. A few models we measured also get the recipe alongside, as advice they may follow or skip. Choosing **On** or **Off** brings back the step-by-step walk.
 
 ## What stays the same
 

@@ -40,8 +40,9 @@ migrated once by `Store.ensureLayout` and is never written by current code.
 - **One continuous session.** Adjacent steps already shared a session when the
   same gezel owned them; a generalist task extends that to every step,
   including when a send is queued behind the current turn (the re-pin waits
-  for the queue to drain) and when the caller did not label the handoff as a
-  self-handoff. A fresh session is opened only when the provider or model
+  for the queue to drain), when the caller did not label the handoff as a
+  self-handoff, and when a gate loop-back starts a later pass of the step the
+  session is already on. A fresh session is opened only when the provider or model
   changed under the task (logged as `generalist continuity broken`), or on a
   retry whose prior transcript ended in a context overflow or a
   compaction-loop halt — resuming that transcript would replay the failure.
@@ -341,6 +342,29 @@ re-pin for the same owner, a handoff otherwise), the guard tells a session
 that also owns the new step to end its turn and wait for the re-pin, and
 the claim-check nudge counts `write_artifact` as a deliverable write, which
 it did not before.
+
+**Found by the GPT-6.1 Sol frontier run through codex-cli (fixed
+2026-11-10):** three review books paused while the model was working
+normally. A review gate routed the task back to the writer while the
+owner's turn was still open, and that turn's end-of-turn auto-advance, pinned
+to the review step, approved the re-activated writer step on the report its
+earlier pass had left; the next turn re-judged the untouched verdict, so
+research-report reached the plateau pause on one real rejection. The
+handoff for the earlier review pass then saw its step "still active" (it was
+active again, on a newer pass) and spent its retries until content-accuracy-review
+and corpus-synthesis paused with `step_stalled`, and the newer pass's dispatch
+opened a second session because the owner's one session was already pinned
+to that step id. Now a session pinned to another step never auto-advances the
+active one (when that step has a procedure, and so a dispatch of its own), a
+handoff judges its outcome by the pass it was dispatched for
+(`ChatManager.ownsHandoffPass`; a gate self-loop its own turn adopted stays
+its pass), a re-pin whose pass ended while the session was busy is dropped,
+a later pass of the same step reuses the owner's session, and the
+current-turn reactivation hook adopts the runner's dispatch only for a
+self-loop (`tasks/current-turn-reactivation.ts`), so the routed-to step's own
+dispatch is no longer dropped as a duplicate. The runner's cancel of a
+superseded dispatch now names its pass, and the chat side leaves alone a turn
+the shared session has since started for another step or pass.
 
 **Found by the reference run's generalist `refactor-module` cell (fixed
 2026-09-19 in the evals source):** the owner shipped a passing refactor (29

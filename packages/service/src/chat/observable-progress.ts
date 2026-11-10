@@ -41,7 +41,7 @@ import {
   evaluateDeliverableGate,
   hookOwnedAdvanceHasModelOutput,
 } from './deliverable-gate.js';
-import { servesEarlierActivation } from './session-step-activation.js';
+import { servesAnotherStep, servesEarlierActivation } from './session-step-activation.js';
 
 const log = createLogger('chat');
 
@@ -235,6 +235,22 @@ export async function maybeAutoAdvanceOnObservableProgress(
       log.info(
         `skip observable advance: session ${sessionId} belongs to an earlier activation of ` +
           `${task.ref}/${step.id} (bound ${state.record.stepActivationId}, current ${step.lastActivatedAt})`,
+      );
+      continue;
+    }
+    // The same holds for a turn pinned to ANOTHER step: a gate that routed the
+    // task back re-activated this one while the gated step's turn was still
+    // open. Advancing here approved the writer's step on the report its earlier
+    // pass left and re-ran the review on an untouched verdict, so one real
+    // rejection counted toward the plateau several times (research-report,
+    // GPT-6.1 Sol, 2026-11-10). The scope guard refuses this session's
+    // explicit moves for the same reason; the step's own dispatch re-pins.
+    // A step without a procedure gets no dispatch of its own (its owner
+    // carries on in the predecessor's session), so it keeps advancing here.
+    if (step.prompt && servesAnotherStep(state.record, task.ref, step)) {
+      log.info(
+        `skip observable advance: session ${sessionId} is pinned to ${task.ref}/${state.record.stepId}, ` +
+          `not the active step "${step.id}"`,
       );
       continue;
     }

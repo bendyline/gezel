@@ -1731,6 +1731,49 @@ describe('TaskScheduler — idle step supervisor (sweepStuckSteps)', () => {
     expect(chat.delivered.filter((d) => d.taskRef === parent.ref)).toHaveLength(1);
   });
 
+  it('pauses a spawn host for help when the child it waits on paused, instead of re-driving it', async () => {
+    // A pause is not a settle. With no child left active, the sweep used to
+    // read the host's step as stalled and re-drive it into a gate only the
+    // paused child could satisfy, then pause it half an hour later with a
+    // card that never named the child.
+    const now = new Date('2026-05-01T12:00:00Z');
+    await setProjectVoorman('leo');
+    const parent = await tasks.create('cron', {
+      title: 'Monthly Invoice Run',
+      assignee: { kind: 'gezel', gezelId: 'freja' },
+      steps: [{ id: 'collect', name: 'Collect', prompt: 'Collect the shards.', terminal: true }],
+      entryStepId: 'collect',
+      spawnsSteps: [{ id: 'write', name: 'Write', prompt: 'Write one shard.', terminal: true }],
+    });
+    const done = await tasks.spawnChild(parent.ref, { title: 'Invoice 2026-043' });
+    const stuck = await tasks.spawnChild(parent.ref, { title: 'Invoice 2026-044' });
+    const rec = await store.readTask('cron', parent.num);
+    await store.writeTask({
+      ...rec!,
+      craftbook: {
+        ...rec!.craftbook,
+        steps: rec!.craftbook.steps.map((s) => ({
+          ...s,
+          lastActivatedAt: new Date(now.getTime() - 30 * 60_000).toISOString(),
+        })),
+      },
+    });
+    await tasks.setStatus('cron', done.num, 'complete');
+    await tasks.setStatus('cron', stuck.num, 'paused');
+
+    const chat = fakeChat();
+    await makeScheduler(chat, now).sweepStuckSteps();
+
+    expect(chat.delivered.filter((d) => d.taskRef === parent.ref)).toHaveLength(0);
+    expect(chat.nudged.filter((n) => n.taskRef === parent.ref)).toHaveLength(0);
+    const host = await store.readTask('cron', parent.num);
+    expect(host?.status).toBe('paused');
+    expect(host?.craftbook.steps[0]?.redriveCount).toBeUndefined();
+    const notes = await tasks.listNotes('cron', parent.num);
+    expect(notes.at(-1)?.text).toContain(`\`${stuck.ref}\` "Invoice 2026-044"`);
+    expect(notes.at(-1)?.text).not.toContain(done.ref);
+  });
+
   it('nudges the step itself when the voorman IS the assignee under a different spelling', async () => {
     const now = new Date('2026-05-01T12:00:00Z');
     // Wild-caught on `space-invaders-clone/2`: the project's voorman was

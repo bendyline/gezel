@@ -35,6 +35,11 @@ import {
   type CodexRuntimeConfig,
   writeRuntimeCodexHome,
 } from './runtime-files.js';
+import {
+  type CodexThreadTotal,
+  readCodexThreadTotal,
+  turnUsageFromThreadTotal,
+} from './thread-usage.js';
 import { withCodexToolGuide } from './tool-guide.js';
 
 /**
@@ -85,6 +90,7 @@ const CODEX_HTTP_HEADER_ENV_PREFIX = 'GEZEL_CODEX_MCP_HEADER_';
  */
 export class CodexCliSession extends StreamingSessionBase implements LLMSession {
   private codexThreadIdCache: string | null;
+  private threadTotal: CodexThreadTotal | null = null;
   private aborted = false;
 
   constructor(private readonly deps: CodexSessionDeps) {
@@ -127,6 +133,19 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
    * this returns `[]` — the same signal other providers give and the
    * debug renderer surfaces as "Registered tools: none."
    */
+  /**
+   * Whether the tool guide may send this session to Codex's own editor. A
+   * drafting task's writes belong in its change proposal, which only Gezel's
+   * hidden writers reach, and a role Gezel gave no `write_file` was not meant
+   * to edit at all.
+   */
+  private mayEditWithBuiltins(): boolean {
+    if (normalizeCodexPermissionMode(this.deps.permissionMode) === 'plan') return false;
+    if (this.deps.mcpServer?.env.GEZEL_DIFFPACK_ID) return false;
+    const allow = this.deps.toolAllowlist;
+    return !allow || allow.has('write_file');
+  }
+
   getRegisteredToolNames(): string[] {
     if (!this.deps.mcpServer) return [];
     const excluded = new Set<string>(CODEX_CLI_EXCLUDED_MCP_TOOLS);
@@ -168,6 +187,10 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
     const turnTimeoutMs = opts?.timeoutMs ?? TURN_TIMEOUT_DEFAULT_MS;
 
     const runtime = await this.ensureCodexHome();
+    const resumeId = this.codexThreadIdCache;
+    if (resumeId && this.threadTotal?.threadId !== resumeId) {
+      this.threadTotal = await readCodexThreadTotal(runtime.codexHome, resumeId);
+    }
     const hooks = this.buildTurnHooks();
     const imagePaths = await writeCodexImageAttachments(runtime.codexHome, opts?.attachments);
 
@@ -309,7 +332,9 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       }
     }
     const config: CodexRuntimeConfig = {
-      instructions: withCodexToolGuide(this.deps.systemMessage, this.getRegisteredToolNames()),
+      instructions: withCodexToolGuide(this.deps.systemMessage, this.getRegisteredToolNames(), {
+        canEdit: this.mayEditWithBuiltins(),
+      }),
       model: this.deps.model,
       mcpServers,
       // Default codex's built-in rollout compactor + per-tool-output
@@ -349,7 +374,11 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       emitDelta: (text: string) => this.emitDelta(text),
       emitIntent: (label: string) => this.emitIntent(label),
       emitHeartbeat: (label?: string) => this.emitHeartbeat(label),
-      emitUsage: (usage: TurnUsage) => this.emitUsage(usage),
+      emitUsage: (usage: TurnUsage) => {
+        const turn = turnUsageFromThreadTotal(usage, this.codexThreadIdCache, this.threadTotal);
+        this.threadTotal = turn.total;
+        this.emitUsage(turn.usage);
+      },
       emitWarning: (message: string) => this.emitWarning(message),
       ...(this.deps.knownSecretValues ? { knownSecretValues: this.deps.knownSecretValues } : {}),
       onThreadStarted: (threadId: string) => {

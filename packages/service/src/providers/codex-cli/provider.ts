@@ -15,12 +15,13 @@ import type {
   ProviderName,
   SessionOpts,
 } from '@bendyline/gezel-inference/internal/providers/types';
+import { HOSTED_PROVIDER_DEFAULT_MODELS } from '../hosted-default-models.js';
 import { type CodexBinary, resolveCodexBinary } from './binary.js';
 import type { CodexPermissionMode } from './invoker.js';
 import { RUNTIME_SWEEP_INTERVAL_MS, sweepCodexHomes } from './runtime-sweep.js';
 import { CodexCliSession, type CodexSessionDeps } from './session.js';
 
-const DEFAULT_MODEL = 'gpt-6.1-sol';
+const DEFAULT_MODEL = HOSTED_PROVIDER_DEFAULT_MODELS['codex-cli'];
 
 const log = createLogger('codex-cli');
 
