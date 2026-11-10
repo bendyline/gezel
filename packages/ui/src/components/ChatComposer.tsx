@@ -77,6 +77,7 @@ import { COMPACT_LAYOUT_THRESHOLD_PX, useCompactLayout } from './useCompactLayou
 import { useComposerImageSettings } from './useComposerImageSettings.js';
 import { useComposerPromptAssist } from './useComposerPromptAssist.js';
 import { useComposerTaskLaunch } from './useComposerTaskLaunch.js';
+import { useModelDownloadStatus } from './useModelDownloadStatus.js';
 import { usePromptDraft } from './usePromptDraft.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useWaitingForModel } from './useWaitingForModel.js';
@@ -604,6 +605,37 @@ export function ChatComposer({
   // when it mounts. Bump this revision whenever the host needs to seed or
   // clear the editor; draftRef supplies the content for the fresh mount.
   const [editorRevision, setEditorRevision] = useState(0);
+  // A prefill the person is meant to finish ("Plan a trip to") leaves the
+  // caret after its words, so typing carries on the sentence.
+  const [caretAtEndRequest, setCaretAtEndRequest] = useState(0);
+  useEffect(() => {
+    if (!caretAtEndRequest) return;
+    let frame = 0;
+    let tries = 0;
+    const place = () => {
+      const editor = composerRef.current?.querySelector<HTMLElement>('.squisq-wysiwyg-editor');
+      // The remounted editor fills in a frame or two after it appears.
+      if (!editor?.textContent?.trim()) {
+        if (tries++ < 30) frame = window.requestAnimationFrame(place);
+        return;
+      }
+      editor.focus({ preventScroll: true });
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      // Markdown drops a paragraph's trailing space, so "Plan a trip to "
+      // arrived as "Plan a trip to" and the next word ran into it. Type the
+      // space as the person would, so the editor keeps it.
+      if (/\s$/.test(draftRef.current) && !/\s$/.test(editor.textContent ?? '')) {
+        document.execCommand('insertText', false, ' ');
+      }
+    };
+    frame = window.requestAnimationFrame(place);
+    return () => window.cancelAnimationFrame(frame);
+  }, [caretAtEndRequest]);
   // Drain a queued prefill into the editor. Runs on mount (covers the
   // navigate-to-chat-then-mount case) AND on `COMPOSER_PREFILL_EVENT` (covers an
   // already-mounted composer — the Output pane camera button while the
@@ -634,6 +666,7 @@ export function ChatComposer({
     setIntentPreviewText(merged);
     setOpenCommandQuery(parseOpenChatQuery(merged));
     setEditorRevision((revision) => revision + 1);
+    if (queued.focus) setCaretAtEndRequest((request) => request + 1);
   }, [projectId, cancelQueuedForReady]);
   useEffect(() => {
     consumePrefill();
@@ -795,7 +828,9 @@ export function ChatComposer({
   const engagementOff = engagementMode === 'off';
   // The draft can still be written; it just can't go anywhere yet.
   const waitingForModel = useWaitingForModel(gezelId, recipientGezels);
-  const waitingDetail = waitingStatus ?? 'no AI model is downloaded';
+  // Away from Home, a running first download still names itself, in Home's words.
+  const downloadStatus = useModelDownloadStatus(waitingForModel && waitingStatus === undefined);
+  const waitingDetail = waitingStatus ?? downloadStatus ?? 'no AI model is downloaded';
   const queuedDetail = `sends when the AI model is ready · ${waitingDetail}`;
   const localTurnRef = useRef<LocalTurnStream | null>(null);
   const localTurnSequenceRef = useRef(0);
@@ -2176,8 +2211,10 @@ export function ChatComposer({
           // Expanded, the shell fills the frame the CSS handed it rather
           // than growing with the text: a tall empty box that only fills
           // as you type would put the caret somewhere different on every
-          // keystroke. Collapsed, it auto-grows from three lines.
-          minHeight={expanded ? '100%' : '120px'}
+          // keystroke. Collapsed, it rests at about two lines and grows with
+          // the draft: at three (120px) a 1280x720 window kept ten lines of
+          // conversation above a mostly empty box.
+          minHeight={expanded ? '100%' : '104px'}
           maxHeight={expanded ? '100%' : '50vh'}
           colorScheme={editorTheme}
           uxFont="var(--font-ui)"

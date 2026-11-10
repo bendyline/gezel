@@ -13,6 +13,7 @@ import { setDefaultAutoSelectFamilyAttemptTimeout } from 'node:net';
 import { basename, join } from 'node:path';
 import {
   type GezelConfig,
+  containerPublicBase,
   createLogger,
   formatSuspension,
   isOwnerLaunchedCompletion,
@@ -517,10 +518,9 @@ export async function startProductService(
     history,
     tokenStore,
     publicBase: () =>
-      process.env.GEZEL_PUBLIC_URL?.replace(/\/+$/, '') ??
-      (containerListener.enabled
-        ? `http://localhost:${containerBoundPort ?? containerListener.port}`
-        : `http://127.0.0.1:${boundPort}`),
+      containerListener.enabled
+        ? containerPublicBase(process.env, containerBoundPort ?? containerListener.port)
+        : (process.env.GEZEL_PUBLIC_URL?.replace(/\/+$/, '') ?? `http://127.0.0.1:${boundPort}`),
   });
   // GrantManager owns the `/v1/apps/register` consent state machine.
   // GEZEL_AUTOAPPROVE_APPS=appId1,appId2 is a CI/scripting bypass —

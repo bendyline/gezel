@@ -867,6 +867,11 @@ export function SessionSwitcher({
         : '';
   const isFreshThread = activeValue === '';
   const hasThreadChoices = showUnsent || hasSent;
+  // An unsent thread starter is not a thread. Its row reads like one ("Plan
+  // a trip to Kyoto… · 1m ago"), and in the trigger it passed for a
+  // conversation already had. The next message still opens a new thread, so
+  // the trigger names that; the words themselves are in the box below.
+  const triggerText = activeDraftId && !sessionId ? NEW_THREAD_LABEL : undefined;
 
   // Context meter for the thread the composer posts into. The persisted
   // summary is the reload seed; live events win field by field so a running
@@ -955,10 +960,10 @@ export function SessionSwitcher({
               and reading as a control they forgot to set. */}
           {inToolbar ? (
             <span className="sr-only">
-              <Select.Value placeholder={NEW_THREAD_LABEL} />
+              <Select.Value placeholder={NEW_THREAD_LABEL}>{triggerText}</Select.Value>
             </span>
           ) : (
-            <Select.Value placeholder={NEW_THREAD_LABEL} />
+            <Select.Value placeholder={NEW_THREAD_LABEL}>{triggerText}</Select.Value>
           )}
         </Select.Trigger>
         <Select.Content className="gezel-chat-session-menu" openAtTop={inToolbar}>

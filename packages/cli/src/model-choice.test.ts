@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   type ModelChoiceClient,
+  availableChatModels,
   formatAvailableChatModels,
   pinPulledModel,
   useChatModel,
@@ -84,6 +85,57 @@ describe('formatAvailableChatModels', () => {
     });
     expect(text).toContain('`gezel model pull <id> --provider llama-cpp`');
     expect(text).toContain('`gezel model use <id> --provider llama-cpp`');
+  });
+
+  it('recommends nothing while the graphics card is unmeasured, and says how to measure it', () => {
+    const text = formatAvailableChatModels({
+      engine: 'llama-cpp',
+      platformDefault: 'llama-cpp',
+      ranked: [model('gemma4-e2b-q4', 2.6), model('qwen3.8-27b-q4', 16.5)],
+      installed: new Set(),
+      gpuUnmeasured: true,
+    });
+    expect(text).not.toContain('recommended first download');
+    expect(text).not.toContain('(recommended');
+    expect(text).toContain('its graphics card is not measured yet');
+    expect(text).toContain('Run `gezel native install`, then list again');
+  });
+});
+
+describe('availableChatModels', () => {
+  const profile = (source: string) => ({
+    platform: 'win32',
+    totalRamBytes: 64e9,
+    gpuVramBytes: null,
+    gpuMemoryKind: 'none',
+    source,
+    usableBytes: 32e9,
+  });
+  const client = (source: string, llamaInstalled: boolean) =>
+    ({
+      getMemoryProfile: async () => profile(source),
+      listCatalogItems: async () => ({ items: [] }),
+      listLlamaCppModels: async () => ({ models: [] }),
+      getConfig: async () => ({}),
+      getNativeEngineStatus: async () => ({
+        platformKey: 'win32-x64',
+        engines: [{ name: 'llama-server', installed: llamaInstalled }],
+      }),
+    }) as never;
+
+  it('flags a ranking made before the engine could read the graphics card', async () => {
+    expect(
+      (await availableChatModels(client('system-ram-fallback', false), 'llama-cpp')).gpuUnmeasured,
+    ).toBe(true);
+  });
+
+  it('trusts a ranking made with the engine installed, card or no card', async () => {
+    expect(
+      (await availableChatModels(client('system-ram-fallback', true), 'llama-cpp')).gpuUnmeasured,
+    ).toBeUndefined();
+    expect(
+      (await availableChatModels(client('gpu-vulkan', false), 'llama-cpp')).gpuUnmeasured,
+    ).toBeUndefined();
   });
 });
 

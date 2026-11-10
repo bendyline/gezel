@@ -38,6 +38,36 @@ describe('first projects against the pinned catalog', () => {
   });
 });
 
+// A card with an ask gives the composer its opening words and the person
+// finishes the sentence, so routing must not hang on the example.
+describe('first projects that ask, against the pinned catalog', () => {
+  const finishes: Record<string, string> = {
+    trip: 'Kyoto in April for the two of us, ten days.',
+    invoice: 'I run a bakery, and Cafe Luna owes me $840 for pastries, due Friday.',
+    posts: 'my bakery.',
+  };
+
+  it('routes the opening words to the type, with the details read from what follows', async () => {
+    const items = await new CatalogService().list('project-type');
+    const types = items.map((item) => item.manifest as unknown as BriefRoutableType);
+    for (const first of FIRST_PROJECTS) {
+      if (first.kind !== 'type' || !first.ask) continue;
+      const finish = finishes[first.id];
+      expect(finish, `${first.id} needs a finish in this test`).toBeTruthy();
+      const sentence = `${first.ask.opening} ${finish}`;
+      expect(briefAsksForBuild(sentence), first.id).toBe(false);
+      const match = matchProjectTypeForBrief(sentence, types);
+      expect(match?.typeId, first.id).toBe(first.typeId);
+      const type = types.find((t) => t.id === first.typeId)!;
+      for (const key of type.params?.required ?? []) {
+        const value = match?.params[key];
+        expect(value, `${first.id}.${key}`).toBeTruthy();
+        expect(sentence.toLowerCase(), `${first.id}.${key}`).toContain(String(value).toLowerCase());
+      }
+    }
+  });
+});
+
 describe('craftbook first projects against the pinned catalog', () => {
   it('names books the catalog carries, with the sample each one launches on', async () => {
     const catalog = new CatalogService();

@@ -82,7 +82,10 @@ test('local Home matches the live chrome and preserves reading across service na
     expect(native).toEqual({ resizable: true, minimizable: true, maximizable: true });
     await expect(page.locator('.home-workshop-figure svg')).toBeVisible();
     await expect(page.locator('.startup-home textarea, .startup-search')).toHaveCount(0);
-    await expect(page.locator('.startup-sidebar .app-sidebar-item')).toHaveCount(1);
+    // The rail holds the live rail's places: Home, Knowledge and Settings
+    // rows, with the groups between them.
+    await expect(page.locator('.startup-sidebar .app-sidebar-item')).toHaveCount(3);
+    await expect(page.locator('.startup-header .app-history-key')).toHaveCount(3);
     await page.evaluate(() => document.fonts.ready);
     const chrome = async () =>
       page.evaluate(() =>

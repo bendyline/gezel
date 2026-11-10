@@ -79,6 +79,8 @@ interface Entry extends EvidenceItem {
   kind: 'retrieval' | 'tool';
   tool?: string;
   ref?: string;
+  /** The SQL behind a table query's result. */
+  query?: string;
 }
 
 /** `[3]`, `[1, 4]`, `[2-5]` with the space before them; the line structure is kept. */
@@ -159,8 +161,21 @@ export function mentionedSourceFiles(text: string): string[] {
 function describeToolEvidence(
   tool: string,
   args: Record<string, unknown>,
-): { title?: string; ref?: string } {
+): { title?: string; ref?: string; query?: string } {
   switch (tool) {
+    case 'query_table': {
+      const sql = str(args.sql);
+      const tables = queriedTables(sql ?? '');
+      return {
+        title:
+          tables.length > 0 ? `Calculated from ${tables.join(', ')}` : 'Calculated with a query',
+        ...(sql ? { query: sql.slice(0, 2000) } : {}),
+      };
+    }
+    case 'describe_table': {
+      const table = str(args.table) ?? str(args.name);
+      return table ? { title: `The table ${table}` } : {};
+    }
     case 'wikipedia_read': {
       const title = str(args.title) ?? str(args.page);
       return {
@@ -202,6 +217,16 @@ function describeToolEvidence(
       return query ? { title: `${tool} "${query}"` } : {};
     }
   }
+}
+
+/** The tables a query reads, by the names it used: `FROM sales JOIN days d` → sales, days. */
+export function queriedTables(sql: string): string[] {
+  const names = new Set<string>();
+  for (const match of sql.matchAll(/\b(?:from|join)\s+(?:"([^"]+)"|([A-Za-z_][\w.]*))/gi)) {
+    const name = match[1] ?? match[2];
+    if (name && !/^(?:select|lateral|unnest|read_\w+)$/i.test(name)) names.add(name);
+  }
+  return [...names];
 }
 
 interface StructuredToolEvidence {
@@ -385,7 +410,7 @@ export class EvidenceLedger {
   add(
     kind: Entry['kind'],
     text: string,
-    meta: { title?: string; ref?: string; tool?: string } = {},
+    meta: { title?: string; ref?: string; tool?: string; query?: string } = {},
   ): number {
     const key = `${kind}\u0000${meta.tool ?? ''}\u0000${meta.ref ?? meta.title ?? ''}\u0000${text.length}\u0000${text.slice(0, 400)}`;
     const existing = this.byKey.get(key);
@@ -761,6 +786,7 @@ export class EvidenceLedger {
         ...(e.title ? { title: e.title.slice(0, 300) } : {}),
         ...(e.ref ? { ref: e.ref.slice(0, 1000) } : {}),
         ...(e.tool ? { tool: e.tool } : {}),
+        ...(e.query ? { query: e.query } : {}),
         excerpt: e.text.slice(0, EXCERPT_CHARS),
       }));
     const problems = [...unverifiedWrites, ...groundingProblems(result)].slice(0, 20);

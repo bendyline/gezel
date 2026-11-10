@@ -74,7 +74,7 @@ describe('ChatManager — crew introduction', () => {
     const intro = (await store.getSession('ada', thread.id))?.messages.at(-1);
     expect(intro).toMatchObject({ role: 'assistant', synthetic: 'crew-introduction' });
     expect(intro?.content).toBe(
-      'I\'ve brought **Kylian** onto the crew as your Copywriter for **Bakery weekly admin**. Kylian starts with "Draft posts and quotes".',
+      "I've brought **Kylian** onto the crew as your Copywriter for **Bakery weekly admin**.",
     );
     // The thread's own gezel needs no introduction.
     await expect(manager.postCrewIntroduction(task, 'ada', step)).resolves.toBeNull();
@@ -88,7 +88,7 @@ describe('ChatManager — crew introduction', () => {
       name: 'Record it',
     } as never);
     expect((await store.getSession('ada', thread.id))?.messages.at(-1)?.content).toBe(
-      '**Dejan** asked **Noor** (Social Media Writer) to help with **Bakery weekly admin**. Noor starts with "Record it".',
+      '**Dejan** asked **Noor** (Social Media Writer) to help with **Bakery weekly admin**.',
     );
   });
 
@@ -125,7 +125,7 @@ describe('ChatManager — crew introduction', () => {
       ],
     });
     expect(intro?.content).toBe(
-      'Your crew for **Trip: Portugal**: **Mira** (Trip Planner) starts with "First draft", and **Anastasia** (Crew Lead) leads it.',
+      'Your crew for **Trip: Portugal**: **Mira** (Trip Planner) and **Anastasia** (Crew Lead), who leads it.',
     );
     // Introduced once: a later step does not introduce Mira again.
     await expect(manager.postCrewIntroduction(task, guide.id, step, 'joined')).resolves.toBeNull();

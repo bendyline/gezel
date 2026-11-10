@@ -1,0 +1,28 @@
+/* An empty place: what it is for, and one key to start it (EmptyPlace.tsx).
+   Set in the upper part of the pane, where the eye lands, not in its middle:
+   a line centered in a tall window read as a pane that had failed to load. */
+.empty-place {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  max-width: 30rem;
+  margin: clamp(2rem, 14vh, 7rem) auto 2rem;
+  padding: 0 1rem;
+  text-align: center;
+}
+.empty-place-purpose {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  line-height: 1.5;
+}
+.empty-place-action {
+  font-size: var(--text-md);
+}
+.empty-place-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}

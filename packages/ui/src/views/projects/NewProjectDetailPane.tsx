@@ -174,7 +174,7 @@ export function NewProjectBrief({ selection }: { selection: PaneSelection }) {
                     </span>
                     <figcaption>
                       {memberTitle}
-                      {member.voorman && <span className="gz-npd-crew-voorman">crew lead</span>}
+                      {member.voorman && <span className="gz-npd-crew-voorman">Crew lead</span>}
                     </figcaption>
                   </figure>
                 );

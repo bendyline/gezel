@@ -100,6 +100,7 @@ export function GreetingBand({
   nightReview,
   morning,
   makeSomething,
+  invite,
   onNavigate,
 }: {
   chips: HomeChip[];
@@ -125,6 +126,12 @@ export function GreetingBand({
     onAnswered?: (q: Question) => void;
   } | null;
   makeSomething?: ReactNode;
+  /**
+   * A question for the greeting itself (which folders to look after), asked
+   * under the headline. Home, not the conversation, is where it waits: in
+   * the thread it was appended under the first result and scrolled it away.
+   */
+  invite?: ReactNode;
   onNavigate?: (view: HomeNavView) => void;
 }) {
   // Keep the current panel in place while its sheet rolls up. The timeout
@@ -337,9 +344,10 @@ export function GreetingBand({
                         running={statusRunning ?? false}
                         {...(onRunStatusReport ? { onRefresh: onRunStatusReport } : {})}
                       />
-                    ) : (
+                    ) : invite ? null : (
                       <TipOfDay onNavigate={onNavigate} />
                     )}
+                    {invite}
                   </>
                 )}
                 {/* An empty row's margin would shorten the Handboek reader

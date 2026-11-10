@@ -8,6 +8,7 @@ export * from './code-block-salvage.js';
 export * from './condense-presented-output.js';
 export * from './constrained-turn.js';
 export * from './standalone-turn.js';
+export * from './degenerate-output.js';
 export * from './deliverable-read-pacing.js';
 export * from './direct-file-work-prompt.js';
 export * from './duplicate-tool-calls.js';

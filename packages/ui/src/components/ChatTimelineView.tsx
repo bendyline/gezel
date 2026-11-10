@@ -955,21 +955,23 @@ export function ChatTimelineView({
     void refetchGezels();
   }, [refetchGezels]);
 
-  // A crew introduction names gezels hired moments ago, after the roster was
-  // read. Look again once per unknown id, so a portrait fills in rather than
-  // a letter, and a gezel deleted since never sets off a refetch loop.
+  // A crew introduction or a request's tracker names gezels hired moments
+  // ago, after the roster was read. Look again once per unknown id, so a
+  // portrait fills in rather than a letter, and a gezel deleted since never
+  // sets off a refetch loop.
   const crewLookedUpRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const unknown = messages.flatMap(
-      (m) =>
-        m.crewIntroduction?.members
-          .map((member) => member.gezelId)
-          .filter((id) => !gezels.has(id) && !crewLookedUpRef.current.has(id)) ?? [],
+    const named = [
+      ...messages.flatMap((m) => m.crewIntroduction?.members.map((member) => member.gezelId) ?? []),
+      ...[...requestTracks.values()].flatMap((t) => [t.leadGezelId, t.line?.gezelId, ...t.crew]),
+    ];
+    const unknown = named.filter(
+      (id): id is string => !!id && !gezels.has(id) && !crewLookedUpRef.current.has(id),
     );
     if (unknown.length === 0) return;
     for (const id of unknown) crewLookedUpRef.current.add(id);
     void refetchGezels();
-  }, [messages, gezels, refetchGezels]);
+  }, [messages, requestTracks, gezels, refetchGezels]);
 
   // Keep cached gezels live so identity changes made elsewhere (font,
   // name, model, icon) reflect in already-rendered bubbles without a

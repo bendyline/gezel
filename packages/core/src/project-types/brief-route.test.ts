@@ -344,6 +344,11 @@ describe('fillProjectTypeParams — first-project readers', () => {
       ),
     ).toBe('freelance illustrator');
     expect(
+      one('business', 'What do you do?', 'I run a small bakery, and Cafe Luna owes me $840.'),
+    ).toBe('small bakery');
+    expect(one('business', 'What do you do?', 'I own a hair salon in town.')).toBe('hair salon');
+    expect(one('business', 'What do you do?', 'I run a marathon every spring.')).toBeUndefined();
+    expect(
       one(
         'brand',
         'Who does this feed speak for?',

@@ -242,7 +242,7 @@ function VideoGeneratorInstallDialog({
                 title="Pick a random name"
                 aria-label="Pick a random name"
               >
-                🎲
+                <span className="fa-solid fa-dice" aria-hidden="true" />
               </button>
               <button type="submit" className="primary" disabled={busy || !name.trim()}>
                 {busy ? 'Creating…' : 'Create'}

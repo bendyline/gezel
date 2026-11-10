@@ -5,6 +5,7 @@ import {
   type RequestTrack,
   displayName,
   parseTaskRef,
+  plainRoleTitle,
   taskPausedReasonText,
 } from '@bendyline/gezel';
 import { useState } from 'react';
@@ -33,6 +34,23 @@ function stopStatus(track: RequestTrack, index: number): 'done' | 'active' | 'pe
   const at = STOPS.findIndex((s) => s.stop === track.stop);
   if (index < at || (index === at && track.stop === 'ready')) return 'done';
   return index === at ? 'active' : 'pending';
+}
+
+/**
+ * Who joined the crew for this request, in the lead's words: "Ngoc brought
+ * Elettra (Researcher) and Shanti (Copywriter) onto your crew for this."
+ * Their introductions fold into the tracker, so without this line a new crew
+ * member arrived unannounced.
+ */
+function joinedSentence(names: readonly string[], leadName: string | undefined) {
+  if (names.length === 0) return undefined;
+  const list =
+    names.length === 1
+      ? names[0]!
+      : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return leadName
+    ? `${leadName} brought ${list} onto your crew for this.`
+    : `${list} joined your crew for this.`;
 }
 
 /**
@@ -85,6 +103,15 @@ export function RequestTracker({
   const maker = makerId ? gezels.get(makerId) : undefined;
   const deliverable = track.deliverable;
   const home = deliverable?.projectId ?? track.projectId;
+  const joined = joinedSentence(
+    (track.joined ?? []).flatMap((id) => {
+      const name = nameOf(id);
+      if (!name) return [];
+      const role = gezels.get(id)?.role?.trim();
+      return [role && !roleBasedNameOnlyMode ? `${name} (${plainRoleTitle(role)})` : name];
+    }),
+    lead ? leadName : undefined,
+  );
 
   const openDeliverable = (file: ReferencedFile) => {
     if (deliverable?.view === 'output-page') {
@@ -160,12 +187,15 @@ export function RequestTracker({
       </ol>
       {track.line && (
         <p className="request-tracker-line">
+          {/* A lead hired moments ago is not in the roster yet: no letter in
+              place of the figure that is about to load. */}
           <GezelIcon
             svg={lead?.icon ?? null}
             poppetje={lead?.poppetje ?? null}
             iconOverride={lead?.iconOverride === true}
             name={leadName}
             size={20}
+            {...(lead ? {} : { pending: true })}
           />
           <span>
             <strong>{nameOf(track.line.gezelId) ?? leadName}</strong> {track.line.doing}
@@ -189,6 +219,11 @@ export function RequestTracker({
           </button>
           {retryNote && <span className="request-tracker-paused-note">{retryNote}</span>}
         </div>
+      )}
+      {!compact && joined && (
+        <p className="request-tracker-joined" data-testid="request-tracker-joined">
+          {joined}
+        </p>
       )}
       {debugMode && track.actual && (
         <p className="request-tracker-actual">

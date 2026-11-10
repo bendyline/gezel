@@ -33,7 +33,7 @@ test.describe('dialogs', () => {
   test('create-project dialog', async ({ page }) => {
     await gotoHome(page);
     await openAreaView(page, 'projects');
-    const dialog = await openDialog(page, '+ New Project', 'New Project');
+    const dialog = await openDialog(page, '+ New project', 'New project');
     await shot(page, 'create-project', {
       area: 'dialogs',
       clip: dialog,

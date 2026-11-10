@@ -289,6 +289,7 @@ import {
   staleTaskStepRefusal,
   taskStepMutationRejection,
 } from './task-step-authority.js';
+import { threadWorkProject } from './thread-work-project.js';
 import {
   ExecutionToolOutputSchema,
   GitToolOutputSchema,
@@ -5460,6 +5461,22 @@ server.tool(
   async (args) => runInvokeCraftbook(args),
 );
 
+/**
+ * Where work goes when the call names no project: this session's project,
+ * except that a Default thread which already set up work in one project
+ * carries on there (thread-work-project.ts). Only a coordinator can list every
+ * project's tasks; anyone else, or a failed read, keeps this project.
+ */
+async function unnamedWorkProject(): Promise<string> {
+  if (projectId !== 'default' || !sessionId || sessionTaskRef) return projectId;
+  try {
+    const [{ tasks }, { projects }] = await Promise.all([api.listTasks(), api.listProjects()]);
+    return threadWorkProject({ sessionId, tasks, projects }) ?? projectId;
+  } catch {
+    return projectId;
+  }
+}
+
 /** invoke_craftbook's body; start_work's craftbook and task-here options run it too. */
 async function runInvokeCraftbook({
   craftbookId,
@@ -5482,7 +5499,7 @@ async function runInvokeCraftbook({
   outputPath?: string;
   tonight?: boolean;
 }) {
-  const resolvedProject = project ? await resolveProjectId(project) : projectId;
+  const resolvedProject = project ? await resolveProjectId(project) : await unnamedWorkProject();
   try {
     const rootTurn = await currentRootTurnContext();
     const effectiveDescription = description?.trim() || rootTurn?.userText;
@@ -8525,6 +8542,9 @@ server.tool(
     }
     const extra = details?.trim();
     const brief = extra && extra !== said ? `${said}\n\n${extra}` : said;
+    // A task with no project named or bound runs where invoke_craftbook would.
+    const taskProject = async () =>
+      project || resolvedProject !== projectId ? resolvedProject : await unnamedWorkProject();
     switch (parsed.kind) {
       case 'craftbook': {
         // An id no book has would reach the task API and come back as a bare
@@ -8557,7 +8577,7 @@ server.tool(
         const params = await boundCraftbookParams(resolvedProject, parsed.craftbookId, said);
         return runInvokeCraftbook({
           craftbookId: parsed.craftbookId,
-          project: resolvedProject,
+          project: await taskProject(),
           description: brief,
           ...(params ? { params } : {}),
         });
@@ -8565,7 +8585,7 @@ server.tool(
       case 'task-here':
         return runInvokeCraftbook({
           craftbookId: 'build-loop',
-          project: resolvedProject,
+          project: await taskProject(),
           description: brief,
         });
       case 'new-project':

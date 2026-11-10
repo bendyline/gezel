@@ -67,6 +67,7 @@ import { tabKey, toRecentTab } from './recent-tabs.js';
 import { useDebugMode } from './useDebugMode.js';
 import { useHasKnowledgeCatalogs } from './useHasKnowledgeCatalogs.js';
 import { useInterests } from './useInterests.js';
+import { useNarrowWindow } from './useNarrowWindow.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
@@ -306,7 +307,13 @@ export function Sidebar({
   const [storedCollapsed, setCollapsed] = useState<boolean>(() => readStoredCollapsed());
   const [stayOpen, setStayOpen] = useState<boolean>(() => readStoredStayOpen());
   const inListArea = selection?.kind === 'area' && LIST_AREAS.has(selection.area);
-  const collapsed = !compact && (storedCollapsed || (inListArea && !stayOpen));
+  // A narrow window folds the rail too, until the person opens it for this
+  // visit. Nothing is stored, so a wider window brings back the rail they had.
+  const narrowWindow = useNarrowWindow();
+  const [openedWhileNarrow, setOpenedWhileNarrow] = useState(false);
+  const collapsed =
+    !compact &&
+    (storedCollapsed || (inListArea && !stayOpen) || (narrowWindow && !openedWhileNarrow));
   const roleBasedNameOnly = useRoleBasedNameOnlyMode();
   const showAdvancedFeatures = useShowAdvancedFeatures();
   const debugMode = useDebugMode();
@@ -580,15 +587,19 @@ export function Sidebar({
         setMeesterGezelId(detail.meesterGezelId);
       }
     };
+    const refreshAll = () => {
+      refreshProjects();
+      refreshGezels();
+      refreshMeesterConfig();
+      refreshDocs();
+    };
     const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        refreshProjects();
-        refreshGezels();
-        refreshMeesterConfig();
-        refreshDocs();
-      }
+      if (document.visibilityState === 'visible') refreshAll();
     };
     window.addEventListener('gezel:gezel-updated', onGezel);
+    // App's event bridge opened again after a stall; anything announced
+    // while it was down never arrived, so re-read every list.
+    window.addEventListener('gezel:events-reconnected', refreshAll);
     window.addEventListener('gezel:gezel-deleted', onGezelDeleted);
     window.addEventListener('gezel:config-updated', onConfig);
     window.addEventListener('gezel:project-opened', onProject);
@@ -608,6 +619,7 @@ export function Sidebar({
     document.addEventListener('visibilitychange', onVisible);
     return () => {
       window.removeEventListener('gezel:gezel-updated', onGezel);
+      window.removeEventListener('gezel:events-reconnected', refreshAll);
       window.removeEventListener('gezel:gezel-deleted', onGezelDeleted);
       window.removeEventListener('gezel:config-updated', onConfig);
       window.removeEventListener('gezel:project-opened', onProject);
@@ -652,6 +664,11 @@ export function Sidebar({
   // restores the rail they had; elsewhere it is the ordinary collapsed state.
   const setRailCollapsed = useCallback(
     (v: boolean) => {
+      if (narrowWindow) {
+        setOpenedWhileNarrow(!v);
+        // The width folded it; folding it again is not a preference to keep.
+        if (v) return;
+      }
       if (!inListArea) {
         commitCollapsed(v);
         return;
@@ -659,7 +676,7 @@ export function Sidebar({
       commitStayOpen(!v);
       if (!v && storedCollapsed) commitCollapsed(false);
     },
-    [inListArea, storedCollapsed, commitCollapsed, commitStayOpen],
+    [narrowWindow, inListArea, storedCollapsed, commitCollapsed, commitStayOpen],
   );
   const commitGroups = useCallback((next: StoredGroups) => {
     setGroups(next);
@@ -1072,8 +1089,17 @@ export function Sidebar({
         >
           {visibleProjects.length === 0 ? (
             // "No projects yet." sat beside a Projects area that listed
-            // Default and the Shared Library, and read as a contradiction.
-            <li className="app-sidebar-empty">No projects created yet.</li>
+            // Default and the Shared Library, and read as a contradiction;
+            // "No projects created yet." then said so without a way to start.
+            <li className="app-sidebar-empty">
+              <button
+                type="button"
+                className="gz-link-button app-sidebar-empty-action"
+                onClick={addFor('projects', 'project', 'gezel:new-project')}
+              >
+                Start your first project
+              </button>
+            </li>
           ) : (
             visibleProjects.map((p) => {
               const projectTab = toRecentTab({ kind: 'project', id: p.id });
@@ -1162,8 +1188,10 @@ export function Sidebar({
                             }),
                           );
                         }}
-                        title={`Last turn failed: ${poisoned.error} — go to it in the chat`}
-                        aria-label={`${p.name}: last turn failed — go to it in the chat`}
+                        // The chat's banner explains the failure; a raw engine
+                        // error with a model id does not belong under the pointer.
+                        title="A reply didn't finish. Go to it in the chat."
+                        aria-label={`${p.name}: a reply didn't finish. Go to it in the chat`}
                       >
                         <span className="project-row-poisoned-glyph" aria-hidden="true">
                           !

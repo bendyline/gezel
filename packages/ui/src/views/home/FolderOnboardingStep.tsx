@@ -28,11 +28,12 @@ const CLOUD_NAMES: Record<string, string> = {
 };
 
 /**
- * Which folders should the crew look after, and may it work at night. The
- * meester asks once the person's first piece of work is finished, at the
- * foot of their conversation, until they answer or skip it. Every folder is
- * added read-only with its crew and its night work, which is why the card
- * says what will happen before anything is added.
+ * Which folders should the crew look after, and may it work at night. Asked
+ * on Home's greeting once the person has opened the first thing the crew
+ * made, until they answer or skip it; never in a conversation, where it
+ * pushed that result off the screen. Every folder is added read-only with
+ * its crew and its night work, which is why the card says what will happen
+ * before anything is added.
  *
  * Nothing is chosen for the person: no folder starts ticked and neither
  * overnight key starts latched. Pre-ticking Pictures and Documents made a
@@ -262,11 +263,15 @@ export function choicesFrom(res: WellKnownFoldersResponse): FolderChoice[] {
   return out;
 }
 
-/** Whether Home should offer the folder step: not yet done, and no folder added yet. */
+/**
+ * Whether Home should offer the folder step: the person has opened a
+ * finished result (`firstResultOpenedAt`), has not answered or skipped the
+ * step, and has added no folder yet.
+ */
 export function shouldOfferFolderStep(
   config: ConfigResponse | null,
   projects: Array<{ workingDir?: string; properties?: Record<string, string> }>,
 ): boolean {
-  if (!config || config.onboarding?.foldersStepDoneAt) return false;
+  if (!config?.onboarding?.firstResultOpenedAt || config.onboarding.foldersStepDoneAt) return false;
   return !projects.some((p) => Boolean(p.workingDir) && !isSharedLibraryProject(p));
 }

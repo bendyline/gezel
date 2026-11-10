@@ -33,6 +33,12 @@ interface GezelIconProps {
   /** Optional semantic colors for the letter-avatar fallback. */
   fallbackBackground?: string;
   fallbackForeground?: string;
+  /**
+   * The gezel is not in the roster yet (hired moments ago). Draws the quiet
+   * empty tile instead of the letter avatar, so a crew card does not show
+   * "M" and then swap it for a figure once the roster is read again.
+   */
+  pending?: boolean;
 }
 
 // Derive a stable hue from the name so fallback avatars look distinct per gezel.
@@ -62,6 +68,7 @@ export function GezelIcon({
   variant,
   fallbackBackground,
   fallbackForeground,
+  pending = false,
 }: GezelIconProps) {
   const showPoppetjes = useShowPoppetjes();
   const legacyIconUrl = useMemo(() => safeSvgImageUrl(svg), [svg]);
@@ -95,6 +102,8 @@ export function GezelIcon({
     </div>
   ) : legacyIconUrl ? (
     <img className="gezel-icon-svg" src={legacyIconUrl} alt="" draggable={false} />
+  ) : pending ? (
+    <div className="gezel-icon-fallback gezel-icon-pending" data-testid="gezel-icon-pending" />
   ) : (
     <FallbackAvatar name={name} background={fallbackBackground} foreground={fallbackForeground} />
   );

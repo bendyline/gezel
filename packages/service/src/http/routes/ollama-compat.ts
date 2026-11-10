@@ -119,6 +119,13 @@ const OllamaOptionsSchema = z.object({
 /** Ollama structured output: `'json'` or a bare JSON schema object. */
 const OllamaFormatSchema = z.union([z.literal('json'), z.record(z.string(), z.unknown())]);
 
+/**
+ * Ollama's `think`: a boolean, or an effort word on models that take one.
+ * `false` answers without the reasoning phase; anything else keeps the
+ * model's own setting.
+ */
+const OllamaThinkSchema = z.union([z.boolean(), z.string().max(32)]);
+
 const OllamaChatRequestSchema = z.object({
   model: z.string().min(1),
   messages: z.array(OllamaMessageSchema).min(1),
@@ -126,6 +133,7 @@ const OllamaChatRequestSchema = z.object({
   tools: z.array(OllamaToolSchema).optional(),
   options: OllamaOptionsSchema.optional(),
   format: OllamaFormatSchema.optional(),
+  think: OllamaThinkSchema.optional(),
 });
 
 const OllamaGenerateRequestSchema = z.object({
@@ -136,6 +144,7 @@ const OllamaGenerateRequestSchema = z.object({
   stream: z.boolean().optional(),
   options: OllamaOptionsSchema.optional(),
   format: OllamaFormatSchema.optional(),
+  think: OllamaThinkSchema.optional(),
 });
 
 const OllamaEmbedRequestSchema = z.object({
@@ -570,7 +579,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})
       .catch(() => null);
     const tuning = defaults
-      ? overlayOllamaRequestTuning(defaults.tuning, parsed.options, parsed.format)
+      ? overlayOllamaRequestTuning(defaults.tuning, parsed.options, parsed.format, parsed.think)
       : null;
     const lengthCap = tuning?.sampling.maxTokens;
 
@@ -743,7 +752,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})
       .catch(() => null);
     const tuning = defaults
-      ? overlayOllamaRequestTuning(defaults.tuning, parsed.options, parsed.format)
+      ? overlayOllamaRequestTuning(defaults.tuning, parsed.options, parsed.format, parsed.think)
       : null;
     const lengthCap = tuning?.sampling.maxTokens;
 

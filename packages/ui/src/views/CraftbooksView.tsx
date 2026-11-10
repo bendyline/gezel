@@ -59,15 +59,17 @@ export function CraftbooksView() {
     setShowCompactDetail(true);
   }, []);
 
-  // Land on a craftbook instead of an empty editor pane: prefer the user's
-  // own books, then the catalog, in list order. Never stomps an existing
-  // selection.
+  // Land on the person's own plan when they have one. Otherwise nothing is
+  // selected and the pane says what plans are: opening on the catalog's
+  // alphabetical first ("A/B Ad Copy Variations") in its step editor told a
+  // new owner nothing (2026-11-09). Never stomps an existing selection, and
+  // runs once, so closing a book is not undone by the next refresh.
+  const landed = useRef(false);
   useEffect(() => {
-    if (selected || craftbooks.length === 0) return;
-    const first =
-      SOURCE_GROUPS.map((g) => craftbooks.find((c) => c.source === g.source)).find(Boolean) ??
-      craftbooks[0];
-    if (first) setSelected({ id: first.id, source: first.source });
+    if (landed.current || selected || craftbooks.length === 0) return;
+    landed.current = true;
+    const own = craftbooks.find((c) => c.source === 'local');
+    if (own) setSelected({ id: own.id, source: own.source });
   }, [selected, craftbooks]);
 
   const onCreated = useCallback(
@@ -160,7 +162,7 @@ export function CraftbooksView() {
             })}
             {filtered.length === 0 && (
               <p className="muted craftbooks-empty">
-                No craftbooks{query ? ' match your search' : ' yet'}.
+                No plans{query ? ' match your search' : ' yet'}.
               </p>
             )}
           </div>
@@ -179,10 +181,16 @@ export function CraftbooksView() {
               onChanged={() => void refresh()}
             />
           ) : (
-            <p className="placeholder">
-              Select a plan to edit it, or start a new one. Catalog plans open read-only — make a
-              copy to edit them.
-            </p>
+            <div className="placeholder craftbooks-intro">
+              <p>
+                A plan is a recipe your crew follows step by step, such as an invoice run or a
+                newsletter issue. Pick one on the left to read its steps and start a task with it.
+              </p>
+              <p className="muted">
+                Plans from the catalog are read-only. Copy one to change it, or make your own with
+                New plan.
+              </p>
+            </div>
           )}
         </section>
       </div>
@@ -326,11 +334,7 @@ function NewCraftbookDialog({
             <h3>New plan</h3>
           </Dialog.Title>
 
-          <div
-            className="new-craftbook-modes"
-            role="radiogroup"
-            aria-label="How to start the plan"
-          >
+          <div className="new-craftbook-modes" role="radiogroup" aria-label="How to start the plan">
             <button
               type="button"
               // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of card buttons; a native <input type="radio"> can't host the strong+span card layout

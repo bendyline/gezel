@@ -123,7 +123,7 @@ export function DraftPlanCard({
       <div className="pending-question-context-row">
         <span className="muted">Plan · draft</span>
         <span className="pending-question-context-title">{task.title}</span>
-        <span className="pending-question-context-status status-draft">draft</span>
+        <span className="pending-question-context-status status-draft">Draft</span>
       </div>
       <div className="pending-question-document-preview">
         <RenderedMarkdown markdown={renderPlanDocument(task)} register="report" />

@@ -12,16 +12,13 @@ import {
   catalogGroundFor,
   composeCraftbookLaunch,
   craftbookInputParams,
-  interestAreasForCraftbook,
   mainContentParamKey,
-  orderByInterests,
   plainRoleTitle,
   planBriefLabel,
   planDisplayName,
   planLaunchFormSchema,
   planOutputSummary,
   prioritizePullsForCurrentBranch,
-  servesInterests,
   spanWords,
   starterCraftbookIds,
   unmetParamAlternatives,
@@ -60,6 +57,7 @@ import {
   composeCraftbookDescription,
   craftbookGlyph,
   craftbookHasParams,
+  orderForYou,
   seedParamDefaults,
   stringifyParamValues,
   taskLensGroupLabel,
@@ -91,7 +89,7 @@ const MODE_COPY: Record<
   }
 > = {
   'one-time': {
-    title: 'New Task',
+    title: 'New task',
     subtitle: 'Choose what to make, add a few details, and Gezel gets to work.',
     generalLabel: GENERAL_TASK_CARD.label,
     generalDescription: GENERAL_TASK_CARD.description,
@@ -102,7 +100,7 @@ const MODE_COPY: Record<
     footnote: 'Lands ready to fire — nothing runs until you fire it.',
   },
   scheduled: {
-    title: 'New Scheduled Task',
+    title: 'New scheduled task',
     subtitle: 'Choose what should repeat, then set when each fresh run should begin.',
     generalLabel: 'Blank scheduled task',
     generalDescription: 'Define a repeatable job from scratch and run a fresh copy on a cadence.',
@@ -113,7 +111,7 @@ const MODE_COPY: Record<
     footnote: 'Starts active and creates a fresh task on each scheduled run.',
   },
   'night-shift': {
-    title: 'New Night Shift Task',
+    title: 'New Night Shift task',
     subtitle: 'Choose work Gezel can pick up unattended during the Night Shift window.',
     generalLabel: 'Blank Night Shift task',
     generalDescription: 'Define a one-off job that waits for Night Shift before it begins.',
@@ -447,23 +445,20 @@ export function NewTaskDialog({
   // The person's interest areas order the gallery: their shelf comes first
   // and the dialog lands on it. Nothing leaves All plans because of it.
   const interests = useInterests();
-  const forYouBooks = useMemo(() => {
-    if (interests.areas.length === 0) return [];
-    const ordered = orderByInterests(
-      books.filter(
-        (b) =>
-          !b.item.unavailableReason &&
-          servesInterests(interestAreasForCraftbook(b.manifest), interests.areas),
+  // Ordered for someone starting out, never by the alphabet: the welcome's
+  // first projects, then books ready to try, and what needs setup last.
+  const forYouBooks = useMemo(
+    () =>
+      orderForYou(
+        books.filter((b) => !b.item.unavailableReason),
+        interests.areas,
+        {
+          starterIds,
+          needsSetup: (b) => (missingToolsets[b.manifest.id]?.length ?? 0) > 0,
+        },
       ),
-      (b) => interestAreasForCraftbook(b.manifest),
-      interests.areas,
-    );
-    // A book with a sample starts with nothing of the person's own, so it
-    // leads: alphabetical put "Answer a Question with SQL" ahead of the
-    // spreadsheet books written for a newcomer (2026-10-12).
-    const sampled = (b: BookItem) => (b.manifest.samples?.length ?? 0) > 0;
-    return [...ordered.filter(sampled), ...ordered.filter((b) => !sampled(b))];
-  }, [books, interests.areas]);
+    [books, interests.areas, starterIds, missingToolsets],
+  );
   // Land on the project's recommended shelf when it has one (once per
   // open/project — user shelf picks stick after that).
   useEffect(() => {

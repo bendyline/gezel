@@ -53,6 +53,15 @@ describe('RequestTracker', () => {
     expect(screen.getByText('Open the task')).toBeInTheDocument();
   });
 
+  // A lead hired for this request showed as a letter "Y" beside "Your gezel"
+  // until the roster was read again (2026-11-09).
+  it('draws no letter for a lead the roster does not know yet', () => {
+    render(<RequestTracker track={{ ...working, leadGezelId: 'minji' }} gezels={new Map()} />);
+    const line = document.querySelector('.request-tracker-line');
+    expect(line?.querySelector('[data-testid="gezel-icon-pending"]')).not.toBeNull();
+    expect(line?.querySelector('.gezel-icon-fallback:not(.gezel-icon-pending)')).toBeNull();
+  });
+
   it('names the real step and task in debug mode', () => {
     render(<RequestTracker track={working} gezels={gezels} debugMode />);
     expect(screen.getByText('Aditya · Draft · bakery/1')).toBeInTheDocument();
@@ -177,5 +186,31 @@ describe('RequestTracker', () => {
     // The person stopped this one, so the key carries on instead of retrying.
     fireEvent.click(screen.getByRole('button', { name: 'Carry on' }));
     await screen.findByText(/nothing could pick it up/);
+  });
+
+  // Crew hired mid-request were introduced only inside the closed "Who's
+  // helping?", so a bakery owner met seven crew members nobody announced.
+  it('names who joined the crew for the request without opening anything', () => {
+    const roster = new Map(gezels).set('noor', {
+      id: 'noor',
+      name: 'Noor',
+      role: 'Researcher',
+    } as GezelSummary);
+    const { rerender } = render(
+      <RequestTracker track={{ ...working, joined: ['aditya', 'noor'] }} gezels={roster} />,
+    );
+    expect(screen.getByTestId('request-tracker-joined')).toHaveTextContent(
+      'Dejan brought Aditya (Bookkeeper) and Noor (Researcher) onto your crew for this.',
+    );
+    rerender(
+      <RequestTracker
+        track={{ ...working, joined: ['aditya'] }}
+        gezels={roster}
+        variant="compact"
+      />,
+    );
+    expect(screen.queryByTestId('request-tracker-joined')).not.toBeInTheDocument();
+    rerender(<RequestTracker track={working} gezels={roster} />);
+    expect(screen.queryByTestId('request-tracker-joined')).not.toBeInTheDocument();
   });
 });

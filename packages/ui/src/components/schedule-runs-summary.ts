@@ -1,4 +1,5 @@
 import type { ScheduleNextRun, Task } from '@bendyline/gezel';
+import { formatClockTime } from '../relative-time.js';
 
 /**
  * Everything a schedule's runs view says, decided in one place: the stop at
@@ -110,7 +111,7 @@ export function dayWord(at: Date, now: Date): string {
 
 /** Local wall-clock time: "10:00 PM". */
 export function clock(at: Date): string {
-  return at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return formatClockTime(at);
 }
 
 /** "Sun, Nov 9". */

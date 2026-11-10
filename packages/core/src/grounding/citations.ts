@@ -339,8 +339,11 @@ export function extractClaims(text: string): Claim[] {
   for (const m of unquoted.matchAll(CLOCK_TIME)) add('number', m[1] ?? '', { clock: true });
   // Blanked to the same length, so match offsets still index `unquoted`.
   const numeric = unquoted.replace(CLOCK_TIME, (time) => ' '.repeat(time.length));
+  // A grouped amount keeps its cents: "15,279.50" read as "15" and "279.50",
+  // so no figure with both a thousands comma and decimals could ever be
+  // found in a source that held it (2026-11-09, a bakery's weekday sales).
   for (const m of numeric.matchAll(
-    /(?<![\w.])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)(?:st|nd|rd|th|s)?(?![\w.]*\d)/g,
+    /(?<![\w.])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(?:st|nd|rd|th|s)?(?![\w.]*\d)/g,
   )) {
     const digits = (m[1] ?? '').replace(/,/g, '');
     const value = Number(digits);

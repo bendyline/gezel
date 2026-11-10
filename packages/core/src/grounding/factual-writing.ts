@@ -69,6 +69,12 @@ export const EVIDENCE_TOOLS: ReadonlySet<string> = new Set([
   'sheet_read_selection',
   'sheet_read_range',
   'sheet_describe_table',
+  // A table query's result is what a calculated number is checked against.
+  // Left out, a sum the engine computed read as "not found in any source"
+  // while a sum the model added up by hand from read_file was never checked
+  // at all (2026-11-09).
+  'query_table',
+  'describe_table',
 ]);
 
 const LOOKUP_VERBS = new Set([

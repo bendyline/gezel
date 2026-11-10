@@ -43,8 +43,11 @@ test('bundled Handboek opens in Knowledge with its articles and images', async (
   const view = page.getByTestId('knowledge-view');
   await expect(view).toBeVisible();
 
-  // Topics and the auto-opened welcome article come from the .gezk.
+  // Topics come from the .gezk. Knowledge opens on the catalog's overview, so
+  // open the first article, the welcome, from the list.
   await expect(view.locator('.knowledge-doc-row').first()).toBeVisible();
+  await expect(view.locator('.knowledge-reader-body')).toHaveCount(0);
+  await view.locator('.knowledge-doc-row').first().click();
   await expect(view.locator('.knowledge-reader-body')).toBeVisible({ timeout: 15_000 });
   await expect(view.locator('.knowledge-reader-header h2')).toBeVisible();
 

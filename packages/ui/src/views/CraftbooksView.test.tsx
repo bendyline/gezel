@@ -81,6 +81,21 @@ describe('CraftbooksView', () => {
     });
   });
 
+  // A new owner landed on the catalog's alphabetical first, "A/B Ad Copy
+  // Variations", open in its step editor (2026-11-09).
+  it('opens on an explanation, not the catalog’s first plan, when the person has none', async () => {
+    vi.mocked(api.listCraftbooks).mockResolvedValue({
+      craftbooks: CRAFTBOOKS.filter((c) => c.source === 'bundled'),
+    } as never);
+    render(<CraftbooksView />);
+
+    await screen.findByRole('button', { name: /Historical battle report/ });
+    expect(screen.queryByTestId('mock-craftbook-editor')).toBeNull();
+    expect(screen.getByRole('region', { name: 'Plan editor' })).toHaveTextContent(
+      /A plan is a recipe your crew follows step by step/,
+    );
+  });
+
   it('filters the grouped list from the rail search', async () => {
     render(<CraftbooksView />);
     const user = userEvent.setup();

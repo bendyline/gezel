@@ -473,7 +473,7 @@ window.installGezelComponents(api,{
     return enqueue('chat',{__gezelPage:1,kind:'chat-mount',id:id,options:options},D.readTimeoutMs).then(function(){
       return {
         update:function(next){post({__gezelPage:1,kind:'chat-update',id:id,options:next});},
-        position:function(rect){post({__gezelPage:1,kind:'chat-position',id:id,rect:rect});},
+        position:function(rect,modal){var m={__gezelPage:1,kind:'chat-position',id:id,rect:rect};if(modal)m.modal=modal;post(m);},
         destroy:function(){post({__gezelPage:1,kind:'chat-destroy',id:id});}
       };
     },function(error){post({__gezelPage:1,kind:'chat-destroy',id:id});throw error;});

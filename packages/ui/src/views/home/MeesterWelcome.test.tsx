@@ -125,14 +125,30 @@ describe('MeesterWelcome', () => {
       ).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Practice a language/ })).toBeInTheDocument();
       fireEvent.click(trip);
-      // Prefill, not send — the person makes the sentence theirs first.
+      // Prefill, not send. A trip needs the person's own place and dates, so
+      // the box gets the opening words and the meester asks for the rest.
       // A pick replaces the draft, so a second pick never sends both sentences.
-      expect(prefill).toHaveBeenCalledWith(
+      expect(prefill).toHaveBeenCalledWith('alpha', 'Plan a trip to ', undefined, {
+        replace: true,
+        focus: true,
+      });
+      expect(trip).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByText('Where to, when, and who is going?')).toBeInTheDocument();
+      expect(screen.getByText(/For example: Lisbon next spring/)).toBeInTheDocument();
+      expect(screen.queryByText('Or tell me in your own words, below.')).toBeNull();
+
+      // A card that brings its own sample needs nothing, so it fills the box
+      // whole and asks no question.
+      fireEvent.click(screen.getByRole('button', { name: /Turn meeting notes into actions/ }));
+      expect(prefill).toHaveBeenLastCalledWith(
         'alpha',
-        expect.stringContaining('Plan a trip to'),
-        undefined,
-        { replace: true },
+        'Turn these meeting notes into a list of who does what by when.',
+        expect.objectContaining({ craftbookId: 'meeting-notes-to-actions' }),
+        { replace: true, focus: false },
       );
+      expect(trip).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.queryByText('Where to, when, and who is going?')).toBeNull();
+      expect(screen.getByText('Or tell me in your own words, below.')).toBeInTheDocument();
     });
 
     it('asks a new install what it wants help with, and saves each box ticked', async () => {

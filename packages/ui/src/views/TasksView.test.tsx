@@ -96,15 +96,20 @@ describe('TasksView', () => {
   it('renders the empty-state when no tasks exist', async () => {
     render(<TasksView />);
     await waitFor(() => {
-      expect(screen.getByText('No one-time tasks have been created yet.')).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          'A task is work the crew does for you, step by step. You hear when it is done.',
+        ),
+      ).toBeInTheDocument();
     });
+    expect(screen.getByRole('button', { name: 'Give the crew a task' })).toBeInTheDocument();
     expect(screen.getByText(/Click a task to view it here\./)).not.toBeVisible();
   });
 
   it('uses a filtered empty-state when no tasks match the active filters', async () => {
     render(<TasksView />);
     await waitFor(() => {
-      expect(screen.getByText('No one-time tasks have been created yet.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Give the crew a task' })).toBeInTheDocument();
     });
 
     const statusSelect = screen

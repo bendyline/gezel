@@ -13,6 +13,11 @@ export const StartupHomeSnapshotSchema = z.object({
     })
     .nullable(),
   showPoppetjes: z.boolean().optional(),
+  /**
+   * Nobody has used this home yet (no session, no project of their own), so
+   * Home opens on the Meester's welcome; the start screen draws that shape.
+   */
+  welcome: z.boolean().optional(),
   theme: z.enum(['system', 'light', 'dark']).default('system'),
   sidebar: z.enum(['left', 'right']).default('right'),
   status: z

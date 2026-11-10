@@ -646,6 +646,47 @@ describe('LlamaCppCacheAdapter — slot persistence + prefix sharing', () => {
     expect(new Set(saveFilenames)).toEqual(new Set(['sess-a.bin', 'sess-b.bin', 'sess-c.bin']));
   });
 
+  it('after degenerate output, deletes what the session restores from and saves nothing more', async () => {
+    const { calls, fetchImpl } = makeFetchSpy();
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:0',
+      slotCount: 2,
+      slotSavePath: tmp,
+      fetchImpl,
+    });
+    const systemPrompt = 'You are gezel-Z.';
+    const prefixId = llamaPrefixId(systemPrompt);
+    await writeFile(join(tmp, 'sess-sick.bin'), 'snapshot from the broken engine');
+    await writeFile(join(tmp, `${prefixId}.bin`), 'prefix');
+    await writeFile(join(tmp, 'sess-other.bin'), 'another session');
+    await a.prepareForSend('sick', systemPrompt);
+    await a.prepareForSend('bystander');
+
+    const removed = await a.discardSessionSnapshots('sick');
+
+    expect(removed.sort()).toEqual([`${prefixId}.bin`, 'sess-sick.bin'].sort());
+    expect((await readdir(tmp)).sort()).toEqual(['sess-other.bin']);
+    const savesBefore = calls.filter((c) => c.url.includes('action=save')).length;
+    expect(await a.flushAll()).toBe(0);
+    await a.evict(['sick', 'bystander']);
+    expect(calls.filter((c) => c.url.includes('action=save')).length).toBe(savesBefore);
+  });
+
+  it('discarding with no session id only stops saves', async () => {
+    const { fetchImpl } = makeFetchSpy();
+    const a = new LlamaCppCacheAdapter({
+      resolveBaseUrl: async () => 'http://127.0.0.1:0',
+      slotCount: 1,
+      slotSavePath: tmp,
+      fetchImpl,
+    });
+    await writeFile(join(tmp, 'sess-keep.bin'), 'x');
+    await a.prepareForSend('keep');
+    expect(await a.discardSessionSnapshots()).toEqual([]);
+    expect(await readdir(tmp)).toEqual(['sess-keep.bin']);
+    expect(await a.flushAll()).toBe(0);
+  });
+
   it('llamaPrefixId is stable for identical system prompts', () => {
     expect(llamaPrefixId('hello world')).toBe(llamaPrefixId('hello world'));
     expect(llamaPrefixId('a')).not.toBe(llamaPrefixId('b'));

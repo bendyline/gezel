@@ -39,6 +39,7 @@ export interface RequestThread {
       | 'hidden'
       | 'nudge'
       | 'origin'
+      | 'crewIntroduction'
     >
   >;
 }
@@ -120,6 +121,23 @@ function stepGezels(task: Task): string[] {
   );
   if (task.assignee.kind === 'gezel') ids.push(task.assignee.gezelId);
   return ids;
+}
+
+/**
+ * Who the thread introduced as joining the crew for one of `refs`, in order.
+ * Seven of a bakery owner's ten crew members arrived unannounced in one
+ * session; the ones hired mid-request had been introduced, but only inside
+ * the tracker's closed "Who's helping?" (2026-11-09).
+ */
+function joinedCrewFor(thread: RequestThread | undefined, refs: ReadonlySet<string>): string[] {
+  const ids = new Set<string>();
+  for (const m of thread?.messages ?? []) {
+    const intro = m.crewIntroduction;
+    if (m.synthetic !== 'crew-introduction' || intro?.moment !== 'joined') continue;
+    if (!refs.has(intro.taskRef)) continue;
+    for (const member of intro.members) ids.add(member.gezelId);
+  }
+  return [...ids];
 }
 
 /** The newest wrap-up in `thread` for one of `refs`: the file the person gets, and who made it. */
@@ -256,6 +274,7 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
     const deliverable = wrapUp?.deliverable ?? fallback;
     const assignee = active ? taskActiveAssignee(current) : undefined;
     const crew = [...new Set(tasks.flatMap(stepGezels))].filter((id) => id !== lead);
+    const joined = joinedCrewFor(thread, refs).filter((id) => id !== lead);
     const liveSessionIds = [
       ...new Set([
         ...turns.map((t) => t.sessionId),
@@ -293,6 +312,7 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
         : {}),
       liveSessionIds,
       crew,
+      ...(joined.length > 0 ? { joined } : {}),
       ...(deliverable ? { deliverable } : {}),
       ...(wrapUp?.makerGezelId ? { makerGezelId: wrapUp.makerGezelId } : {}),
       ...(trailing ? { trailing: true } : {}),

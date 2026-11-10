@@ -7,6 +7,7 @@ import {
   type NightShiftReviewResponse,
   type StartupHomeSnapshot,
   StartupHomeSnapshotSchema,
+  isUserCreatedProject,
 } from '@bendyline/gezel';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import type { Store } from './store.js';
@@ -18,7 +19,8 @@ type StartupHomeSource = Pick<
   | 'readMeesterStatus'
   | 'statProjectArtifactPath'
   | 'readProjectArtifact'
->;
+> &
+  Partial<Pick<Store, 'hasAnySession' | 'listProjects'>>;
 
 function readingStatus(report: MeesterStatusReport | null): StartupHomeSnapshot['status'] {
   return report
@@ -36,11 +38,25 @@ export class StartupHomeCache {
   private messageAt = '';
   constructor(private readonly home: string) {}
 
+  /**
+   * Whether Home will open on the welcome: the same rule as `/api/system/home`'s
+   * `everUsed`, a saved session or a project of the person's own. Once used,
+   * always used, so the directory scan runs only until then.
+   */
+  private async unused(source: StartupHomeSource): Promise<boolean | undefined> {
+    if ((await this.read())?.welcome === false) return false;
+    if (!source.hasAnySession || !source.listProjects) return undefined;
+    const [sessions, projects] = await Promise.all([source.hasAnySession(), source.listProjects()]);
+    return !sessions && !projects.some(isUserCreatedProject);
+  }
+
   async refresh(source: StartupHomeSource): Promise<void> {
     const config = await source.readConfig();
     const meester = config.meesterGezelId ? await source.getGezel(config.meesterGezelId) : null;
     const status = await source.readMeesterStatus();
+    const welcome = await this.unused(source).catch(() => undefined);
     await this.update({
+      ...(welcome !== undefined ? { welcome } : {}),
       meester: meester
         ? { id: meester.id, name: meester.name.slice(0, 200), poppetje: meester.poppetje }
         : null,
@@ -95,6 +111,7 @@ export class StartupHomeCache {
       if (message.at > this.messageAt) {
         this.messageAt = message.at;
         await this.update({
+          welcome: false,
           lastMessage: {
             content: message.content.slice(0, 8_000),
             at: message.at,

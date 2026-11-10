@@ -160,3 +160,69 @@ describe('the sheet rail', () => {
     expect(rolledUp()).toBe(false);
   });
 });
+
+// The start screen showed a brand, a status pill and one Home row, then the
+// live bar and rail arrived with six more keys and rows (2026-11-09 review).
+describe('the frame it draws', () => {
+  it('holds the places of the live title bar and navigation', () => {
+    mountStartup(bridge());
+    const header = document.querySelector('.startup-header')!;
+    expect(header.querySelectorAll('.app-history-key')).toHaveLength(3);
+    for (const key of header.querySelectorAll<HTMLButtonElement>('.app-history-key')) {
+      expect(key.disabled).toBe(true);
+    }
+    expect(header.querySelector('.app-header-brand')).not.toBeNull();
+    expect(header.querySelector<HTMLInputElement>('.titlebar-search-input')?.disabled).toBe(true);
+    const rail = document.querySelector('.startup-sidebar')!;
+    expect(
+      [...rail.querySelectorAll('.app-sidebar-item-label')].map((label) => label.textContent),
+    ).toEqual(['Home ', 'Projects', 'Documents', 'Crew', 'Workshop', 'Knowledge', 'Settings']);
+    expect(rail.querySelector('.startup-navigation-rest')?.hasAttribute('inert')).toBe(true);
+    expect(document.querySelector('.startup-loading-line')).toHaveTextContent(
+      'Opening your workshop',
+    );
+    expect(document.querySelector('.startup-composer')).not.toBeNull();
+  });
+
+  it('shows the live tabs: Night shift only with a night to read about, and Create', () => {
+    mountStartup(bridge());
+    const tabs = () =>
+      [...document.querySelectorAll('.home-workshop-tab')].map((tab) => tab.textContent);
+    expect(tabs().slice(1)).toEqual(['Create', 'Handboek']);
+    document.body.replaceChildren();
+    const host = bridge();
+    host.snapshot = {
+      version: 1,
+      savedAt: '2026-11-10T08:00:00Z',
+      meester: { id: 'vanya', name: 'Vanya' },
+      theme: 'system',
+      sidebar: 'right',
+      status: null,
+      lastMessage: null,
+      night: { windowEnd: '2026-11-10T06:00:00Z', completed: 2, reports: [] },
+    };
+    mountStartup(host);
+    expect(tabs().slice(1)).toEqual(['Night shift', 'Create', 'Handboek']);
+  });
+
+  it('draws the welcome for a home nobody has used yet, with no greeting sheet', () => {
+    const host = bridge();
+    host.snapshot = {
+      version: 1,
+      savedAt: '2026-11-10T08:00:00Z',
+      meester: { id: 'vanya', name: 'Vanya' },
+      welcome: true,
+      theme: 'system',
+      sidebar: 'right',
+      status: null,
+      lastMessage: null,
+      night: null,
+    };
+    mountStartup(host);
+    expect(document.getElementById('startup-home')?.dataset.shape).toBe('welcome');
+    expect(document.querySelector<HTMLElement>('.home-workshop-greeting')?.hidden).toBe(true);
+    expect(document.querySelector('.startup-welcome .meester-welcome-title')).toHaveTextContent(
+      "I'm Vanya — I run this workshop.",
+    );
+  });
+});

@@ -43,6 +43,7 @@ import {
   categorizeCatalogType,
 } from './new-project-meta.js';
 import { loadOfferedProjectTypes } from './offered-project-types.js';
+import { projectTypeParamForm, projectTypeParamsForSubmit } from './project-type-params.js';
 
 function TypeCard({
   label,
@@ -126,22 +127,6 @@ function emailProjectCopy(address: string): { about: string; mission: string } {
 }
 
 const looksLikeEmail = (s: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
-
-/**
- * Seed a project type's param object from its schema `default`s so an
- * untouched form still submits sensible values (e.g. language defaults to
- * "Spanish"). Mirrors the craftbook launcher's seeding — without it, an
- * unedited param stays `undefined` and its `{{placeholder}}` would render
- * literally into the type's about/seed files.
- */
-function seedParamDefaults(schema: SquisqAnnotatedSchema | undefined): Record<string, unknown> {
-  const props = (schema?.properties ?? {}) as Record<string, { default?: unknown } | undefined>;
-  const out: Record<string, unknown> = {};
-  for (const [key, def] of Object.entries(props)) {
-    if (def && def.default !== undefined) out[key] = def.default;
-  }
-  return out;
-}
 
 function projectNameParamText(value: unknown): string | null {
   if (typeof value === 'string') return value.trim() || null;
@@ -359,7 +344,7 @@ export function NewProjectDialog({
   // Builder instead of a coordination-only Voorman, regardless of which
   // create button opened the dialog.
   const isSolo = mode === 'solo' || kind === 'folder';
-  const titleText = isSolo ? 'New Job' : 'New Project';
+  const titleText = isSolo ? 'New job' : 'New project';
   const aboutPlaceholder = isSolo
     ? "Describe the job. What do you want done? What's in scope, what's out? The Builder lands on this with no other context."
     : "Who's this project for, what's in scope, what's out. The first thing anyone joining the project reads.";
@@ -400,9 +385,13 @@ export function NewProjectDialog({
         item.manifest.kind === 'project-type'
           ? (item.manifest.params as SquisqAnnotatedSchema | undefined)
           : undefined;
-      const defaults = seedParamDefaults(schema);
-      setTypeParams(defaults);
-      if (!nameManuallyEdited) setName(suggestProjectName(item, defaults));
+      // A typed answer's default shows as a hint, not as a value; the name
+      // is still suggested from what the project would be created with.
+      const { initial } = projectTypeParamForm(schema);
+      setTypeParams(initial);
+      if (!nameManuallyEdited) {
+        setName(suggestProjectName(item, projectTypeParamsForSubmit(schema, initial)));
+      }
       setError('');
       setStep('configure');
     },
@@ -567,6 +556,10 @@ export function NewProjectDialog({
     selectedType?.manifest.kind === 'project-type'
       ? (selectedType.manifest.params as SquisqAnnotatedSchema | undefined)
       : undefined;
+  const selectedTypeForm = useMemo(
+    () => projectTypeParamForm(selectedTypeParams).schema,
+    [selectedTypeParams],
+  );
   const availableProjectKinds = useMemo(
     () =>
       PROJECT_KINDS.filter((item) => {
@@ -691,10 +684,10 @@ export function NewProjectDialog({
         }
         setBusy(true);
         try {
-          // Merge schema defaults UNDER the user's edits so an untouched
-          // param still submits its default — the squisq JsonEditor doesn't
-          // seed defaults into its value on mount, so `typeParams` alone can
-          // be missing them (which would leave `{{placeholder}}` unrendered).
+          // Merge schema defaults UNDER the user's edits so an untouched or
+          // blank param still submits its default. Typed answers start empty
+          // (their default is only a hint), so `typeParams` alone would leave
+          // `{{placeholder}}` unrendered in the type's files.
           const schema =
             selectedType.manifest.kind === 'project-type'
               ? (selectedType.manifest.params as SquisqAnnotatedSchema | undefined)
@@ -710,7 +703,7 @@ export function NewProjectDialog({
             ...(isSolo ? { mode: 'solo' as const } : {}),
             projectType: {
               typeId: selectedTypeId,
-              params: { ...seedParamDefaults(schema), ...typeParams },
+              params: projectTypeParamsForSubmit(schema, typeParams),
             },
           });
           // Refresh the global roster only after the atomic operation commits.
@@ -1017,16 +1010,21 @@ export function NewProjectDialog({
                   </div>
                   <div className="gz-npd-setup">
                     <div className="gz-npd-pane-form">
-                      {selectedType && selectedTypeParams && (
+                      {selectedType && selectedTypeForm && (
                         <div className="gz-npd-params">
                           <GezelJsonEditor
-                            schema={selectedTypeParams}
+                            schema={selectedTypeForm}
                             value={typeParams}
                             onChange={(next) => {
                               const nextParams = (next ?? {}) as Record<string, unknown>;
                               setTypeParams(nextParams);
                               if (!nameManuallyEdited) {
-                                setName(suggestProjectName(selectedType, nextParams));
+                                setName(
+                                  suggestProjectName(
+                                    selectedType,
+                                    projectTypeParamsForSubmit(selectedTypeParams, nextParams),
+                                  ),
+                                );
                               }
                             }}
                             density="compact"

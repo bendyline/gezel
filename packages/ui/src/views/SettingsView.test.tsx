@@ -77,7 +77,7 @@ vi.mock('../components/ModelPicker.js', async () => {
 });
 vi.mock('../components/ProviderModelSelect.js', () => ({ ProviderModelSelect: () => null }));
 
-const { SettingsView } = await import('./SettingsView.js');
+const { SettingsView, copilotIsInUse } = await import('./SettingsView.js');
 const { peekPendingSettingsSection, requestSettingsSection } = await import('../settings-nav.js');
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
@@ -1586,6 +1586,48 @@ describe('SettingsView', () => {
     expect(card).toHaveTextContent('<Stored GitHub token>');
     expect(card).not.toHaveTextContent('KzTe');
     expect(within(card as HTMLElement).getByPlaceholderText('Replace GitHub token…')).toBeVisible();
+  });
+
+  // A bakery owner on This PC opened the Copilot page and read "copilot
+  // provider failed to start: Pending response rejected since connection got
+  // disposed" for a provider they never chose (2026-11-09).
+  it('does not probe Copilot on open when nobody uses it, and says a failure plainly', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: false,
+    } as never);
+    vi.mocked(api.testProvider).mockResolvedValue({
+      ok: false,
+      error:
+        'copilot provider failed to start: Pending response rejected since connection got disposed. Go to Settings and check your credentials.',
+    } as never);
+
+    render(<SettingsView />);
+    await openSection('copilot', 'ai');
+
+    expect(await screen.findByText('Not set up. Sign in below to use Copilot.')).toBeVisible();
+    expect(vi.mocked(api.testProvider).mock.calls.map(([p]) => p)).not.toContain('copilot');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
+    const failure = await screen.findByText(/Not connected\. Sign in below/);
+    expect(failure).not.toHaveTextContent('Pending response');
+    expect(failure).toHaveAttribute('title', expect.stringContaining('Pending response'));
+  });
+
+  it('copilotIsInUse counts the default, the Night Shift, a crew member and a token', () => {
+    expect(copilotIsInUse({ provider: 'llama-cpp' } as never, [])).toBe(false);
+    expect(copilotIsInUse({ provider: 'copilot' } as never, [])).toBe(true);
+    expect(
+      copilotIsInUse(
+        { provider: 'llama-cpp', nightShift: { modelOverride: { provider: 'copilot' } } } as never,
+        [],
+      ),
+    ).toBe(true);
+    expect(copilotIsInUse({ provider: 'llama-cpp' } as never, [{ provider: 'copilot' }])).toBe(
+      true,
+    );
+    expect(copilotIsInUse({ provider: 'llama-cpp', hasGithubToken: true } as never, [])).toBe(true);
   });
 
   it('offers the expanded Codex CLI reasoning levels', async () => {

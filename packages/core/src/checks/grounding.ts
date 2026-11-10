@@ -1,5 +1,5 @@
 import type { CheckResult, WorkspaceLike } from './types.js';
-import { createCitedPathChecker } from './workspace-exists.js';
+import { cleanCitedPath, createCitedPathChecker } from './workspace-exists.js';
 
 /**
  * Grounding + citation checks — the anti-fabrication vocabulary.
@@ -218,15 +218,45 @@ function isTemplateSlot(cap: string): boolean {
   );
 }
 
+/**
+ * A spreadsheet formula (`=//1`, `=SUM(A1/B1)`) is backticked and may hold a
+ * slash, but no path starts with `=`. Wild-caught on squisq/37 (2026-11-10):
+ * a test-coverage report quoting the parser's own error case `=//1` read as a
+ * fabricated source.
+ */
+const FORMULA_RE = /^=/;
+
 function extractCitations(text: string, re: RegExp): string[] {
   const flags = re.flags.includes('g') ? re.flags : `${re.flags}g`;
   const global = new RegExp(re.source, flags);
   const out: string[] = [];
   for (const m of stripFencedBlocks(text).matchAll(global)) {
     const cap = m.slice(1).find((x) => x !== undefined) ?? m[0];
-    if (cap && !TASK_REF_RE.test(cap) && !isTemplateSlot(cap)) out.push(cap);
+    if (cap && !TASK_REF_RE.test(cap) && !isTemplateSlot(cap) && !FORMULA_RE.test(cap)) {
+      out.push(cap);
+    }
   }
   return out;
+}
+
+/**
+ * An npm package specifier (`@bendyline/squisq-calc`, with an optional
+ * subpath or version) names a package, not a file, so the inline-path form's
+ * slash makes it look like a citation. The same report cited all twelve of the
+ * repo's package names this way and was called fabricated twelve times.
+ * Forgiven only when it does not resolve, so a real folder whose name starts
+ * with `@` is still an ordinary citation.
+ */
+const PACKAGE_SPECIFIER_RE =
+  /^@[a-z0-9][\w.~-]*\/[a-z0-9][\w.~-]*(?:\/[\w.~/-]*)?(?:@[\w.^~<>=*-]+)?$/i;
+
+/**
+ * Comparison key for "the same file, named shorter": the cited-path decoration
+ * `cleanCitedPath` strips (`:line`, `#anchor`, `./`), then the known-path
+ * normalization.
+ */
+function citedFileKey(cite: string): string {
+  return normalizeForKnownMatch(cleanCitedPath(cite));
 }
 
 function cleanCitation(raw: string): string {
@@ -409,10 +439,30 @@ export async function citationsResolve(
     else if (
       known.has(normalizeForKnownMatch(c)) ||
       globMatchesKnown(c, known) ||
-      proposed.has(normalizeForKnownMatch(c))
+      proposed.has(normalizeForKnownMatch(c)) ||
+      PACKAGE_SPECIFIER_RE.test(c)
     ) {
       forgiven.push(c);
     } else unresolved.push(c);
+  }
+
+  // A shortened path names a file the document already cited in full:
+  // `registry/errors.ts` after `packages/formats/src/registry/errors.ts`.
+  // squisq/37 lost its last gate attempt to exactly this (2026-11-10). Only a
+  // whole-segment suffix of a citation that RESOLVED counts, so a shortened
+  // name can never vouch for a file the document did not prove exists.
+  if (!corpus && unresolved.length > 0 && resolved.length > 0) {
+    const resolvedKeys = resolved.map(citedFileKey);
+    for (let i = unresolved.length - 1; i >= 0; i--) {
+      const cite = unresolved[i]!;
+      if (/^[a-z][\w+.-]*:\/\//i.test(cite)) continue;
+      const key = citedFileKey(cite);
+      if (!key) continue;
+      if (resolvedKeys.some((full) => full === key || full.endsWith(`/${key}`))) {
+        unresolved.splice(i, 1);
+        resolved.push(cite);
+      }
+    }
   }
 
   if (cites.length - forgiven.length < min) {

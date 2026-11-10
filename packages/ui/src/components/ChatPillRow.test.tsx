@@ -132,12 +132,30 @@ beforeEach(() => {
 });
 
 describe('ChatPillRow', () => {
-  it('keeps the status band blank when there is no recent work', async () => {
+  // A new project's chat opened under an empty tray: a blank stripe the
+  // height of a row of tiles, above the timeline's own guidance.
+  it('leaves the status band out when there is no recent work', async () => {
     renderRow();
-    await act(async () => {});
-    expect(screen.getByRole('toolbar')).toHaveTextContent(/^$/);
+    await waitFor(() => expect(screen.queryByRole('toolbar')).toBeNull());
     expect(screen.queryByText('No recent threads')).toBeNull();
     expect(screen.queryByRole('button', { name: 'New task' })).toBeNull();
+  });
+
+  it('brings the band back when the first thread arrives', async () => {
+    const { rerender } = renderRow();
+    await waitFor(() => expect(screen.queryByRole('toolbar')).toBeNull());
+    vi.mocked(api.listChatSessions).mockResolvedValue({ sessions: [session('s1', 'g1')] });
+    rerender(
+      <ChatPillRow
+        projectId="p1"
+        gezels={GEZELS}
+        activeSessionId="s1"
+        onFocusThread={vi.fn()}
+        onFocusTask={vi.fn()}
+        onFocusTerminal={vi.fn()}
+      />,
+    );
+    expect(await screen.findByRole('toolbar')).toHaveTextContent('Thread s1');
   });
 
   it('shows a rounded three-line summary with bounded title and message previews', async () => {
@@ -300,7 +318,9 @@ describe('ChatPillRow', () => {
     const failed = await screen.findByRole('button', {
       name: /^Esra: Thread s1\..*Needs attention$/,
     });
-    expect(failed).toHaveAttribute('title', expect.stringContaining('provider timeout'));
+    // The status says so; the raw error stays in the chat's banner, not under the pointer.
+    expect(failed).toHaveAttribute('title', expect.stringContaining('Needs attention'));
+    expect(failed.getAttribute('title')).not.toContain('provider timeout');
   });
 
   it('seeds streaming state from the in-flight snapshot at mount', async () => {

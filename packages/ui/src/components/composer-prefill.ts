@@ -12,6 +12,7 @@ const pendingPrefills = new Map<string, string>();
 /** A queued launch, or null: detach whatever task the draft has attached. */
 const pendingLaunches = new Map<string, PromptDraftTaskLaunch | null>();
 const replacing = new Set<string>();
+const focusing = new Set<string>();
 
 /**
  * Fired right after a prefill is queued so a composer that is already mounted
@@ -26,12 +27,14 @@ export const COMPOSER_PREFILL_EVENT = 'gezel:composer-prefill';
  * so Send starts it with no meester turn. `replace` makes the sentence the
  * whole draft and its launch (or none) the only attached task, so picking a
  * second first project never sends the first one's book with both sentences.
+ * `focus` puts the caret after the queued words, for an opening the person
+ * is meant to finish ("Plan a trip to").
  */
 export function queueComposerPrefill(
   projectId: string,
   markdown: string,
   launch?: PromptDraftTaskLaunch,
-  options: { replace?: boolean } = {},
+  options: { replace?: boolean; focus?: boolean } = {},
 ): void {
   pendingPrefills.set(projectId, markdown);
   if (launch) pendingLaunches.set(projectId, launch);
@@ -39,6 +42,8 @@ export function queueComposerPrefill(
   else pendingLaunches.delete(projectId);
   if (options.replace) replacing.add(projectId);
   else replacing.delete(projectId);
+  if (options.focus) focusing.add(projectId);
+  else focusing.delete(projectId);
   window.dispatchEvent(
     new CustomEvent(COMPOSER_PREFILL_EVENT, {
       detail: { projectId },
@@ -57,11 +62,12 @@ export function takeComposerTaskLaunch(
 
 export function takeComposerPrefill(
   projectId: string,
-): { markdown: string; replace: boolean } | undefined {
+): { markdown: string; replace: boolean; focus: boolean } | undefined {
   const queued = pendingPrefills.get(projectId);
   pendingPrefills.delete(projectId);
   const replace = replacing.delete(projectId);
-  return queued === undefined ? undefined : { markdown: queued, replace };
+  const focus = focusing.delete(projectId);
+  return queued === undefined ? undefined : { markdown: queued, replace, focus };
 }
 
 /**

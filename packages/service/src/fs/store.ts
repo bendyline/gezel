@@ -5852,6 +5852,18 @@ export class Store {
     }
   }
 
+  /**
+   * Whether any chat session was ever saved. Reads directory names only, so
+   * the start screen can ask it on every boot of a home nobody has used yet.
+   */
+  async hasAnySession(): Promise<boolean> {
+    for (const gezelId of await safeReaddir(gezelPaths(this.home, this.external).gezels)) {
+      const files = await readdirIfReadable(gezelSessionsDir(this.home, gezelId, this.external));
+      if (files?.some((file) => file.endsWith('.json'))) return true;
+    }
+    return false;
+  }
+
   async listSessions(opts?: {
     gezelId?: string;
     projectId?: string;

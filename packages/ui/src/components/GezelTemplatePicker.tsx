@@ -112,7 +112,7 @@ export function GezelTemplatePicker({
         title="Replace this crew member's about.md with a gilde template"
         aria-label="Use a template"
       >
-        📇
+        <span className="fa-regular fa-id-card" aria-hidden="true" />
       </button>
       <Dialog.Root
         open={open}

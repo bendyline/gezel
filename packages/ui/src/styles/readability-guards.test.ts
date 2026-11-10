@@ -19,8 +19,9 @@ describe('readability guards', () => {
   });
 
   // Squisq's own rules load later, from inside the view, and size a reply's
-  // heading 1.6em (32px in its page register) with numerals a size up.
-  it('keeps a chat reply at chat scale: no heading past 1.25em, numerals at text size', () => {
+  // heading 1.6em (32px in its page register) with numerals a size up. A
+  // heading in a bubble is one step of the type scale over its text: 17/15.
+  it('keeps a chat reply at chat scale: headings one step up, numerals at text size', () => {
     const stylesheet = css('shared-content.css').replace(/\s+/g, ' ');
     const scope = '.msg-body-rendered .squisq-linear-content.squisq-page';
     const sizes = [...stylesheet.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
@@ -31,11 +32,15 @@ describe('readability guards', () => {
       }));
     const sizeOf = (part: string) => sizes.find((rule) => rule.selector.includes(part))?.size;
 
-    expect(sizeOf('.squisq-page-prose :is(h1, h2)')).toBe('1.25');
-    expect(sizeOf('.squisq-page-banner-title')).toBe('1.25');
-    expect(sizeOf('.squisq-page-items-title')).toBe('1.25');
+    const oneStep = '1.1333';
+    // --text-lg over --text-md, the scale's step above body text.
+    expect(Number(oneStep)).toBeCloseTo(17 / 15, 3);
+    expect(sizeOf('.squisq-page-prose :is(h1, h2, h3)')).toBe(oneStep);
+    expect(sizeOf('.squisq-page-banner-title')).toBe(oneStep);
+    expect(sizeOf('.squisq-page-items-title')).toBe(oneStep);
+    expect(sizeOf('.squisq-page-prose :is(h4, h5, h6)')).toBe('1');
     expect(sizeOf('.squisq-page-items li::before')).toBe('1');
-    for (const rule of sizes) expect(Number(rule.size)).toBeLessThanOrEqual(1.25);
+    for (const rule of sizes) expect(Number(rule.size)).toBeLessThanOrEqual(Number(oneStep));
   });
 
   it('claims the media plan rows from the generic dialog label rules', () => {

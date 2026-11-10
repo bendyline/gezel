@@ -61,6 +61,69 @@ afterEach(() => {
   globalThis.fetch = originalFetch;
 });
 
+describe('LlamaCppProvider after degenerate output (2026-11-10)', () => {
+  function supervised(pid: { current: number }) {
+    const stop = vi.fn(async () => {});
+    const supervisor = {
+      async ensureRunning() {
+        return { command: 'fake', args: [], baseUrl: 'http://llama.test' };
+      },
+      markUsed() {},
+      currentChildPid: () => pid.current,
+      stop,
+    } as unknown as NativeEngineSupervisor;
+    return { provider: new LlamaCppProvider({ supervisor }), stop };
+  }
+
+  it('discards the session snapshots, then stops the engine as a health restart', async () => {
+    const { provider, stop } = supervised({ current: 48300 });
+    const order: string[] = [];
+    const discardSessionSnapshots = vi.fn(async () => {
+      order.push('discard');
+      return ['sess-s1.bin'];
+    });
+    stop.mockImplementation(async () => {
+      order.push('stop');
+    });
+    provider.setCacheAdapter({ discardSessionSnapshots } as never);
+
+    const restarted = await provider.recoverFromDegenerateOutput({
+      kind: 'repeated-output',
+      channel: 'reasoning',
+      unit: '/',
+      length: 1024,
+      sessionId: 's1',
+    });
+
+    expect(restarted).toBe(true);
+    expect(discardSessionSnapshots).toHaveBeenCalledWith('s1');
+    expect(stop).toHaveBeenCalledWith('health-restart');
+    expect(order).toEqual(['discard', 'stop']);
+  });
+
+  it('cannot restart an external engine', async () => {
+    const provider = new LlamaCppProvider({ baseUrl: 'http://llama.test' });
+    expect(
+      await provider.recoverFromDegenerateOutput({
+        kind: 'draft-collapse',
+        drafted: 5000,
+        accepted: 0,
+        baseline: 0.8,
+      }),
+    ).toBe(false);
+    expect(provider.judgeDraftAcceptance({ drafted: 5000, accepted: 0 })).toEqual({ sick: false });
+  });
+
+  it('judges acceptance against the same engine process only', () => {
+    const pid = { current: 1 };
+    const { provider } = supervised(pid);
+    expect(provider.judgeDraftAcceptance({ drafted: 7572, accepted: 6322 }).sick).toBe(false);
+    expect(provider.judgeDraftAcceptance({ drafted: 49143, accepted: 0 }).sick).toBe(true);
+    pid.current = 2;
+    expect(provider.judgeDraftAcceptance({ drafted: 49143, accepted: 0 }).sick).toBe(false);
+  });
+});
+
 describe('LlamaCppProvider physical request gate', () => {
   it('uses every supervised launch slot for interactive batching by default', () => {
     const supervisor = {

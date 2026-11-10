@@ -149,6 +149,50 @@ describe('ProjectTimeline — task scoping', () => {
     await screen.findByText('general project check-in');
   });
 
+  // A page's companion chat opened on the kickoff task's "Step complete"
+  // card: the same crew member had worked the project's first draft.
+  it('keeps only the ordinary conversation when asked to', async () => {
+    vi.mocked(api.listProjectTimeline).mockResolvedValue({
+      messages: [
+        message({ content: 'first draft step' }),
+        message({
+          sessionId: 'chat-session',
+          taskRef: undefined,
+          content: 'can you nudge Harbor Books?',
+          at: '2026-07-25T10:05:00.000Z',
+        }),
+      ],
+      hasMore: false,
+    } as ListTimelineResponse);
+    vi.mocked(api.listChatSessions).mockResolvedValue({
+      sessions: [
+        { id: 'chat-session', gezelId: 'tomas', archived: false },
+        { id: 'task-session', gezelId: 'tomas', taskRef: 'molen-internal/1', archived: false },
+      ],
+    } as never);
+    render(
+      <ProjectTimeline
+        projectId="molen-internal"
+        gezelId="tomas"
+        ordinaryThreadsOnly
+        activeSessionId={undefined}
+      />,
+    );
+    await screen.findByText('can you nudge Harbor Books?');
+    expect(screen.queryByText('first draft step')).toBeNull();
+    await waitFor(() =>
+      expect(api.listChatSessions).toHaveBeenCalledWith({
+        projectId: 'molen-internal',
+        gezelId: 'tomas',
+      }),
+    );
+
+    stream.push(envelope('task-session', 'second draft step'));
+    stream.push(envelope('chat-session', 'done, sent it'));
+    await screen.findByText('done, sent it');
+    expect(screen.queryByText('second draft step')).toBeNull();
+  });
+
   it("scopes to a document's threads the same way — the Office pane's chat", async () => {
     vi.mocked(api.listChatSessions).mockResolvedValue({
       sessions: [{ id: 'task-session', gezelId: 'tomas', archived: false }],

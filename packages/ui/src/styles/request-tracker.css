@@ -95,6 +95,12 @@
 .request-tracker-actual {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
+/* Who joined the crew for this request; their cards are under "Who's helping?". */
+.request-tracker-joined {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
 .request-tracker-overdue,
 .request-tracker-paused {
   display: flex;

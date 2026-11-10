@@ -42,6 +42,17 @@ import {
   fileRepairTargetPath as scenarioRepairTargetPath,
   writeFileOnlyTools,
 } from './constrained-turn.js';
+import {
+  DEGENERATE_CONTENT_RUN_CHARS,
+  DEGENERATE_REASONING_RUN_CHARS,
+  type DegenerateEngineReport,
+  type DegenerateRun,
+  DegenerateRunDetector,
+  type DraftAcceptanceSample,
+  buildDegenerateModelMessage,
+  buildDegenerateUserMessage,
+  describeDegenerateReport,
+} from './degenerate-output.js';
 import { DeliverableReadPaceTracker } from './deliverable-read-pacing.js';
 import {
   extractDirectFileWorkPrerequisiteReadPaths,
@@ -171,6 +182,7 @@ import {
   stripJsonSchemaPatternsForLlamaCpp,
 } from './tool-grammar.js';
 import { ToolRepeatTracker } from './tool-repeat-tracker.js';
+import { TurnAbortError } from './turn-abort-error.js';
 import { buildTurnUsage } from './usage-builder.js';
 
 const log = createLogger('llama-cpp');
@@ -1974,6 +1986,32 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
       this.sendAndWaitInner(prompt, opts, lease),
     );
   }
+
+  /**
+   * End the turn on output the engine should never produce, after asking the
+   * host to restart the engine. The restart is awaited so the retry the
+   * caller makes cannot land on the process that produced it.
+   */
+  private async degenerateEngineOutputError(
+    report: DegenerateEngineReport,
+  ): Promise<TurnAbortError> {
+    let restarted = false;
+    try {
+      restarted = (await this.deps.provider.recoverFromDegenerateOutput?.(report)) ?? false;
+    } catch (err) {
+      log.warn(
+        `[llama-cpp] engine restart after degenerate output failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    log.error(
+      `[llama-cpp] degenerate output model=${this.deps.model} (${describeDegenerateReport(report)}) — engine ${restarted ? 'restarted' : 'not restarted'}`,
+    );
+    return new TurnAbortError(
+      buildDegenerateModelMessage('[llama-cpp]', report, restarted),
+      buildDegenerateUserMessage(report, restarted),
+    );
+  }
+
   private async maybeCompactMidLoop(opts?: { force?: boolean }): Promise<boolean> {
     return compactLocalTurn(
       this.turnPolicy,
@@ -4001,6 +4039,24 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
               // against a runaway repetition loop. See RambleDetector.
               new RambleDetector({ threshold: 6000, enabled: false, repetitionGuardEnabled: true });
         let rambleAborted = false;
+        // One character (or a short cycle) repeated past anything a real
+        // reply contains, on either channel. Unlike the ramble detector this
+        // reads the thinking channel too, and it is not gated on the model
+        // family: no healthy model emits it. See degenerate-output.ts.
+        const reasoningRunDetector = new DegenerateRunDetector(
+          'reasoning',
+          DEGENERATE_REASONING_RUN_CHARS,
+        );
+        const contentRunDetector = new DegenerateRunDetector(
+          'content',
+          DEGENERATE_CONTENT_RUN_CHARS,
+        );
+        let degenerateRun: DegenerateRun | null = null;
+        // This reply's speculative-decoding counts, from the final chunk's
+        // `timings` (llama-server adds `draft_n` / `draft_n_accepted` when
+        // it drafted). Judged against the engine's own record after the
+        // stream ends.
+        let iterationDraft: DraftAcceptanceSample | null = null;
         // Tool name for the live tool-args channel — only the first
         // fragment of a streamed tool call carries `function.name`.
         let liveToolArgsName = '';
@@ -4113,6 +4169,15 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
               // long hidden-reasoning stretch, so it never false-trips the
               // "looks stalled" banner.
               this.emitReasoningDelta(reasoningChunk);
+              const reasoningRun = reasoningRunDetector.observe(reasoningChunk);
+              if (reasoningRun) {
+                degenerateRun = reasoningRun;
+                log.error(
+                  `[llama-cpp] ABORT-FIRED reason=degenerate-output channel=reasoning unit=${JSON.stringify(reasoningRun.unit)} run=${reasoningRun.length} afterMs=${Date.now() - start}`,
+                );
+                ctrl.abort();
+                break;
+              }
               // DS4 cannot take a request budget, so nothing else bounds its
               // thinking: deepseek-v4-flash-284b-q2 (thinkingBudget 4096)
               // twice spent the whole 16,384-token cap reasoning — ~18 min
@@ -4162,6 +4227,15 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             if (hasContent) {
               turnContent += delta!.content!;
               this.emitDelta(delta!.content!);
+              const contentRun = contentRunDetector.observe(delta!.content!);
+              if (contentRun) {
+                degenerateRun = contentRun;
+                log.error(
+                  `[llama-cpp] ABORT-FIRED reason=degenerate-output channel=content unit=${JSON.stringify(contentRun.unit)} run=${contentRun.length} afterMs=${Date.now() - start}`,
+                );
+                ctrl.abort();
+                break;
+              }
               if (!rambleAborted && ramble.observeContent(turnContent)) {
                 rambleAborted = true;
                 log.error(
@@ -4310,6 +4384,9 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
                   : extendedUsage.prompt_tps;
               const cacheN =
                 typeof t?.cache_n === 'number' ? t.cache_n : extendedUsage.cached_tokens;
+              if (typeof t?.draft_n === 'number' && typeof t.draft_n_accepted === 'number') {
+                iterationDraft = { drafted: t.draft_n, accepted: t.draft_n_accepted };
+              }
               iterationUsage = {
                 prompt_tokens: chunk.usage.prompt_tokens,
                 completion_tokens: chunk.usage.completion_tokens,
@@ -4600,6 +4677,25 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         }
 
         thinkingOffRetryPending = false;
+        if (degenerateRun !== null) {
+          throw await this.degenerateEngineOutputError({
+            kind: 'repeated-output',
+            ...degenerateRun,
+            ...(opts?.queue?.sessionId ? { sessionId: opts.queue.sessionId } : {}),
+          });
+        }
+        if (iterationDraft !== null && this.deps.provider.judgeDraftAcceptance) {
+          const verdict = this.deps.provider.judgeDraftAcceptance(iterationDraft);
+          if (verdict.sick) {
+            throw await this.degenerateEngineOutputError({
+              kind: 'draft-collapse',
+              drafted: verdict.drafted,
+              accepted: verdict.accepted,
+              baseline: verdict.baseline,
+              ...(opts?.queue?.sessionId ? { sessionId: opts.queue.sessionId } : {}),
+            });
+          }
+        }
         if (thinkingBudgetOverrunTokens !== null) {
           log.info(
             `[llama-cpp] thinking budget enforced client-side model=${this.deps.model ?? 'unknown'} budget=${clientThinkingBudget} reasoningTokens≈${thinkingBudgetOverrunTokens} → retrying iteration ${turn} with thinking off`,

@@ -64,11 +64,14 @@ import {
   withTransientConnection,
 } from '../connection.js';
 import {
-  blockedTaskReason,
+  blockedTaskDetails,
   craftbookDoLaunch,
+  describeCraftbook,
+  ensureProjectEdits,
   filterCraftbooks,
   parseCraftbookArguments,
   resolveCraftbookInvocation,
+  taskInputFailure,
   waitForTask,
 } from '../craftbook-command.js';
 import { ensureCraftbookSetup, ensureModelEngines, terminalPrompter } from '../craftbook-setup.js';
@@ -947,7 +950,11 @@ program
     `
 Bare values fill the craftbook's required parameters in order; key=value sets any
 parameter; every other word is your request, which becomes the task description.
-\`gezel craftbook list\` shows the craftbooks you can start here.
+\`gezel craftbook list\` shows the craftbooks you can start here, and
+\`gezel craftbook show <craftbook>\` what one takes and where it saves.
+
+A folder Gezel was pointed at starts read-only. A craftbook that saves into the
+folder asks first at a terminal; in a script, add --allow-edits.
 
 Examples:
   gezel do summarize-long "Summarize notes.txt for the board"
@@ -965,6 +972,10 @@ Examples:
   .option('--out <dir>', 'wait, then copy what the task made into this folder')
   .option('--json', 'emit one JSON result on stdout')
   .option(
+    '--allow-edits',
+    "let Gezel change files in this project's folder, when the craftbook saves into it",
+  )
+  .option(
     '--strict-sandbox',
     'require OS network isolation for custom scripts (CLI launches otherwise trust this recipe snapshot)',
   )
@@ -978,6 +989,7 @@ Examples:
         timeout: string;
         out?: string;
         json?: boolean;
+        allowEdits?: boolean;
         strictSandbox?: boolean;
         viaCraftbookShorthand?: boolean;
       },
@@ -1070,12 +1082,23 @@ Examples:
         return;
       }
       await setUp();
-      const created = await client.createTask(projectId, {
-        ...craftbookStartRequest(book),
-        ...craftbookDoLaunch(craftbook, parsed),
-        trustScripts: !opts.strictSandbox,
-        roleBasedNameOnlyMode: true,
+      await ensureProjectEdits(client, {
+        projectId,
+        craftbook,
+        allow: opts.allowEdits === true,
+        prompter: terminalPrompter(),
+        write: stderrProgress(),
       });
+      const created = await client
+        .createTask(projectId, {
+          ...craftbookStartRequest(book),
+          ...craftbookDoLaunch(craftbook, parsed),
+          trustScripts: !opts.strictSandbox,
+          roleBasedNameOnlyMode: true,
+        })
+        .catch((err: unknown) => {
+          throw taskInputFailure(err, book, parsed.params) ?? err;
+        });
       if (opts.wait || opts.out) {
         console.error(`started ${created.ref} — ${created.title}`);
         const waited = await printTaskWait(client, created.ref, { ...opts, timeoutMs });
@@ -1137,14 +1160,15 @@ async function printTaskWait(
         `${task.ref}: ${task.status}${task.activeStepId ? ` (${task.activeStepId})` : ''}`,
       ),
   });
-  const reason = await blockedTaskReason(client, result);
+  const { reason, hint } = await blockedTaskDetails(client, result);
   console.log(
     opts.json
-      ? JSON.stringify({ ...result, ...(reason ? { reason } : {}) })
+      ? JSON.stringify({ ...result, ...(reason ? { reason } : {}), ...(hint ? { hint } : {}) })
       : `${result.task.ref}: ${result.outcome}`,
   );
   if (!opts.json && result.outcome === 'blocked') {
     if (reason) console.error(reason);
+    if (hint) console.error(hint);
     console.error(`See its notes with \`gezel task notes ${result.task.ref}\`.`);
   }
   process.exitCode = result.exitCode;
@@ -1200,7 +1224,35 @@ craftbook
     }
     const width = Math.min(32, Math.max(...books.map((book) => book.command.length)) + 2);
     for (const book of books) console.log(`${book.command.padEnd(width)}${book.name}`);
-    console.error(`\nStart one with \`gezel do <command> "<your request>"\`.`);
+    // Some books need a file or a branch before the request, which the start
+    // line alone gets wrong: it used to end in a 422 naming the sentence.
+    console.error(
+      `\nStart one with \`gezel do <command> "<your request>"\`. \`gezel craftbook show <command>\` says what it takes first.`,
+    );
+  });
+
+craftbook
+  .command('show <command...>')
+  .description('Show what a craftbook does, what it takes, and the command that starts it')
+  .option('--json', 'emit the craftbook as JSON')
+  .option('--no-start', 'Use a running service only; never start one')
+  .action(async (words: string[], opts: { json?: boolean; start?: boolean }) => {
+    const client = await connectForInspection(opts);
+    const preview = await previewRunProject(client, cliGlobals());
+    const projectId = preview.projectId ?? 'default';
+    const [config, result] = await Promise.all([
+      client.getConfig(),
+      client.listProjectCraftbooks(projectId),
+    ]);
+    const books = normalizeCraftbooks(result.items, config.showWorkInProgressFeatures === true);
+    const { book, args } = resolveCraftbookInvocation(books, words);
+    if (args.length > 0) throw new CliError(`craftbook not found: ${words.join(' ')}`);
+    const { craftbook: full } = await client.getCraftbook(book.id, {
+      projectId,
+      source: book.source,
+      version: book.version,
+    });
+    console.log(opts.json ? JSON.stringify(full) : describeCraftbook(book, full));
   });
 
 const agent = program.command('agent').description('Manage your crew (your AI companions)');

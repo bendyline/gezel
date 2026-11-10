@@ -69,12 +69,16 @@ Run `gezel --help`, or `--help` on any command, for every option.
 | `gezel do <craftbook…>` | Start a craftbook as a task in this folder's project: its name, then required values, `key=value` parameters, and your request. `--wait` follows it to the end |
 | `gezel <craftbook> …` | Shorthand for `gezel do <craftbook> …`, matched exactly on the craftbook's command name; built-in commands always win |
 | `gezel craftbook list [words…]` | List the craftbooks `gezel do` can start in this folder's project (command name, title, category); words filter by command, title, and tags. `--json` for scripts |
+| `gezel craftbook show <craftbook>` | What one craftbook does, what it takes before your request, and where it saves |
 | `gezel workflow <name-or-file> [args…]` | Run a repository workflow from `.gezel/workflows/<name>.mjs` or a module path |
 | `gezel task list\|show\|create` | Tasks across every project |
 | `gezel task wait\|resume\|pause <ref>` | Follow a task to the end, retry a paused task and follow it, or pause one task |
 | `gezel task notes <ref>` | A task's notes, including pause reasons and failed checks (`--warnings` adds runtime warnings) |
 | `gezel agent list\|create\|show\|output-limit` | Manage your crew (the command name is historical) |
-| `gezel project list\|create\|install\|indexing` | Manage projects, their npm packages, and background indexing (`gezel env` is the same command) |
+| `gezel project list\|create\|install\|indexing\|edits` | Manage projects, their npm packages, background indexing, and whether Gezel may change files in the folder (`gezel env` is the same command) |
+| `gezel integrations list\|approve\|deny\|token` | The apps connected to this Gezel: answer one that asked to connect, or make and revoke app keys |
+| `gezel integrations address` | Where other programs reach this Gezel's models |
+| `gezel integrations ollama [on\|off]` | A plain-HTTP port on this computer that needs no key (`http://127.0.0.1:11434/v1`, and Ollama's own paths); off until you turn it on |
 | `gezel skills list\|import\|convert` | Find SKILL.md skills and turn them into craftbooks |
 | `gezel app …` | Build, install, apply, and serve AI Apps (`.gezapp`): `new`, `validate`, `pack`, `add`, `update`, `list`, `show`, `apply`, `status`, `serve`, `enable`, `disable`, `remove`, `schemas` |
 | `gezel model list\|pull\|use\|export` | On-device chat models. `list --available` shows the catalog models that fit this machine, with sizes; `pull <id>` downloads one, plus the engine it runs on if that is missing; `use <id>` makes chats use a downloaded model (a pull does this itself when no working default is set); `export <id> [file]` writes a portable, checksum-verified `.gezmodel` |
@@ -214,6 +218,19 @@ timeout leaves the task running. When a task is blocked, `--wait` prints why
 (its latest note) and points to `gezel task notes <ref>`. Progress goes to
 stderr; `--json` writes the result to stdout. `resume` retries a paused task
 with its saved recipe. Answer pending questions in Gezel before waiting again.
+
+A folder's project starts read-only. Most craftbooks keep what they make in
+the task's own folder, which `--out <dir>` copies out when the task finishes.
+Some save into the folder itself, such as a deck or a web page;
+`gezel craftbook show <craftbook>` says which. At a terminal `gezel do` asks
+before it starts one of those. In a script, add `--allow-edits`, or run
+`gezel project edits on` once in the folder. A task that stops because the
+folder is read-only prints that command and the `gezel task resume` that
+continues it.
+
+Some craftbooks need a file or a branch before the request.
+`gezel craftbook show <craftbook>` prints the start line with those in place,
+for example `gezel do meeting-notes-to-actions <source> "your request"`.
 
 ### Repository workflows
 

@@ -80,6 +80,18 @@ export function downloadPercent(progress: InstallProgress | null): number | null
   return Math.min(100, Math.round((progress.bytesWritten / progress.totalBytes) * 100));
 }
 
+/**
+ * Where a model download stands, for a held composer's "Can't send yet:"
+ * line. One wording, so Home and every other chat say the same thing while
+ * the first model arrives.
+ */
+export function modelInstallStatus(progress: InstallProgress | null): string {
+  if (progress?.phase === 'verifying') return 'checking the AI model';
+  if (progress?.phase === 'extracting-metadata') return 'unpacking the AI model';
+  const pct = downloadPercent(progress);
+  return pct === null ? 'downloading the AI model' : `downloading the AI model · ${pct}%`;
+}
+
 export function modelDisplay(id: string): string {
   // Friendly labels for the recommended models the first-run picker can
   // pin (any model carrying a `recoScore`). Pre-suffix entries (e.g.

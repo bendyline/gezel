@@ -22,6 +22,37 @@ describe('readCoverText', () => {
       lines: ['Lisbon first, then the Algarve.', '• Pack sunscreen', 'Book the train'],
     });
   });
+
+  // A kitchen checklist's cover showed a row of dashes and a table's pipes.
+  it('reads rules, tables and checkboxes as words, not markup', () => {
+    expect(
+      readCoverText(
+        [
+          '# Bakery Kitchen Weekly Cleaning Checklist',
+          'A weekly checklist for the **bakery** kitchen.',
+          '---',
+          '## Weekly schedule',
+          '| Day | Focus |',
+          '|-----|:------|',
+          '| Monday | Ovens and proofers |',
+          '<!-- generated -->',
+          '- [ ] Wipe the mixer',
+          '```',
+          'code',
+          '```',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      title: 'Bakery Kitchen Weekly Cleaning Checklist',
+      lines: [
+        'A weekly checklist for the bakery kitchen.',
+        'Weekly schedule',
+        'Day · Focus',
+        'Monday · Ovens and proofers',
+        '• Wipe the mixer',
+      ],
+    });
+  });
 });
 
 describe('the finished-work card', () => {
@@ -58,6 +89,35 @@ describe('the finished-work card', () => {
     expect(openKeys).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Make changes' }));
     expect(onMakeChanges).toHaveBeenCalled();
+  });
+
+  // Home's folder question waits until the person has opened what was made.
+  it('notes the first finished result the person opens, keeping other stamps', async () => {
+    const { resetResultOpenedNote } = await import('./result-opened.js');
+    resetResultOpenedNote();
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      onboarding: { firstProjectDoneAt: '2026-11-09T10:00:00.000Z' },
+    } as never);
+    vi.mocked(api.updateConfig).mockResolvedValue({ provider: 'mock' } as never);
+    const onOpen = vi.fn();
+    render(
+      <DeliverableCard
+        deliverable={{ kind: 'artifact', path: 'tasks/2/report.docx' }}
+        projectId="default"
+        onOpen={onOpen}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(onOpen).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        onboarding: {
+          firstProjectDoneAt: '2026-11-09T10:00:00.000Z',
+          firstResultOpenedAt: expect.any(String),
+        },
+      }),
+    );
   });
 
   it('opens a project board as the board, not as its JSON', () => {

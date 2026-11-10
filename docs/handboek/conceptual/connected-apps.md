@@ -15,7 +15,7 @@ Everything described here lives in **Settings → Integrations**.
 
 Apps speak to gezel using the same "OpenAI-style" language most AI tools already know. Two things make it work:
 
-1. **An address.** The address panel in **Settings → Integrations** shows where gezel is listening on your machine. On most personal installs that is `https://127.0.0.1:6228/v1`; when the Gezel machine service is installed, the app API moves to a per-launch port (shown in the panel) because the machine service holds 6228. For apps that need an address that never changes, turn on **Ollama emulation** — it always answers at `http://127.0.0.1:11434`.
+1. **An address.** The address panel in **Settings → Integrations** shows where gezel is listening on your machine. On most personal installs that is `https://127.0.0.1:6228/v1`; when the Gezel machine service is installed, the app API moves to a per-launch port (shown in the panel) because the machine service holds 6228. For apps that need an address that never changes, turn on **Ollama emulation** — it always answers at `http://127.0.0.1:11434`, over plain HTTP and without a key, so any program on this computer can use your models while it is on. From a terminal, `gezel integrations address` prints every address and `gezel integrations ollama on` turns the emulation on.
 2. **Permission.** The first time an app asks for access, gezel shows you an approval request — who is asking, and for what. Nothing gets through until you approve, and you can revoke any app later from the same panel. Gezel's own add-ins for Word, Excel, PowerPoint, LibreOffice, and VS Code are the exception: they can prove they run as you on this computer, so they connect without asking. Revoking one of them only resets it; to disconnect it for good, remove the add-in.
 
 ## Gezel's tools in other AI apps
@@ -181,4 +181,4 @@ One honest caveat, spelled out next to the switch: Ollama's convention is no pas
 
 Every chat an app completes through these endpoints is recorded in the **History** tab (look for "App chat" entries), and the tokens they consume count in the **Usage** view — so you can always see who has been using your models, and how much.
 
-If you are developing one of these applications, continue with the technical guide [Building connected apps with gezel-app-sdk](../technical/building-connected-apps-with-gezel-app-sdk.md).
+If you are developing one of these applications, continue with the technical guide [Building connected apps with gezel-app-sdk](../technical/building-connected-apps-with-gezel-app-sdk.md). It opens with a [quick start](../technical/building-connected-apps-with-gezel-app-sdk.md#quick-start-with-curl): three commands, ending in one `curl` call that gets a reply from a local model.

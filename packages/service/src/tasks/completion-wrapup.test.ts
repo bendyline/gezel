@@ -116,7 +116,9 @@ describe('composeTaskWrapUp', () => {
     ]);
     expect(text).toContain('**Weekly posts and catering quote** is finished');
     expect(text).toContain('- `tasks/2/quote.md`');
-    expect(text).toContain('- `social/final/week.md` (in the project folder)');
+    expect(text).toContain('- `social/final/week.md`');
+    // Both are in the project; which drawer is the model's business.
+    expect(text).not.toMatch(/project folder|artifacts drawer/);
     expect(text).not.toMatch(/Active step|terminal step|default\/2\. /);
   });
 
@@ -153,17 +155,18 @@ describe("a board and the maker's question", () => {
 
   // Day one of a seven-day trip was announced "All done … finished", and the
   // Reisleider's "shall I go on?" never reached the person (2026-10-12).
-  it('calls a board ready to look at and passes the question on', () => {
+  it('leaves a board to its card and passes the question on', () => {
     const text = composeTaskWrapUp(task({ title: 'Lisbon Trip Planning' }), [board], null, board, {
       name: 'Camila',
       question,
     });
-    expect(text).toContain(
-      "**Lisbon Trip Planning** is ready to look at on the project's Output page.",
+    // The card says what it is and that it is ready; the message does not.
+    expect(text).not.toMatch(/All done|is finished|ready|Output page|trip\.json/);
+    expect(text.split('\n')[0]).toBe(`Camila asks: “${question}”`);
+    expect(text).toContain('Answer Camila with **Make changes**, or open the project first.');
+    expect(composeTaskWrapUp(task(), [board], null, board)).toBe(
+      'Open the project to see it, or tell me what you would like changed.',
     );
-    expect(text).not.toMatch(/All done|is finished/);
-    expect(text).toContain(`Camila asks: “${question}”`);
-    expect(text).toContain('Answer Camila with **Make changes**');
   });
 
   it('keeps the data file out of the Updates card for a board', () => {
@@ -174,9 +177,7 @@ describe("a board and the maker's question", () => {
       at: '2026-10-12T10:00:00.000Z',
       deliverable: board,
     });
-    expect(card.prompt).toBe(
-      "**Lisbon Trip Planning** is ready to look at on the project's Output page.",
-    );
+    expect(card.prompt).toBe('**Lisbon Trip Planning** is ready to look at in the project.');
     expect(card.prompt).not.toContain('trip.json');
   });
 });
@@ -205,20 +206,18 @@ describe('the deliverable', () => {
   // The bakery's wrap-up read "All done — **Formatted Report** is finished.
   // Here's your PDF: `tasks/2/report.pdf`. Along the way it also made: …"
   // (2026-10-23): the book's name, three paths and a list of working papers.
-  it('names the deliverable by what it is and leaves its path to the card', () => {
+  // Then, with the card in the tracker, "Ready" read three times over one
+  // result: the tracker, the card, and "Your Word document is ready: …"
+  // (2026-11-09). The card announces it; the message says what to do next.
+  it('leaves the deliverable to its card and says what to do next', () => {
     const text = composeTaskWrapUp(task(), made, null, deck);
-    expect(text.split('\n')[0]).toBe(
-      'Your PowerPoint deck is ready: **Weekly posts and catering quote**.',
+    expect(text).toBe(
+      'Open your PowerPoint deck to review, or tell me what you would like changed.',
     );
-    expect(text).not.toMatch(/deck\.pptx|outline\.md|Along the way|default\/2/);
-    expect(text).toContain('Open it to review');
-  });
-
-  // A title cut short ends in an ellipsis; the sentence read "holiday….".
-  it('adds no period after a name that was cut short', () => {
-    const long = task({ title: 'One-page catering proposal for the Harbor Books holiday…' });
-    expect(composeTaskWrapUp(long, made, null, deck).split('\n')[0]).toBe(
-      'Your PowerPoint deck is ready: **One-page catering proposal for the Harbor Books holiday…**',
+    expect(text).not.toMatch(/ready|deck\.pptx|outline\.md|Along the way|default\/2/);
+    const checked = composeTaskWrapUp(task(), made, { checked: ['sums'], problems: [] }, deck);
+    expect(checked).toBe(
+      'I checked the sums in these files, and they hold up.\n\nOpen your PowerPoint deck to review, or tell me what you would like changed.',
     );
   });
 
@@ -228,7 +227,7 @@ describe('the deliverable', () => {
       title: 'Formatted Report',
       craftbook: { id: 'report-pdf', name: 'Formatted Report', steps: [] },
     } as unknown as Partial<Task>);
-    expect(composeTaskWrapUp(named, [pdf], null, pdf).split('\n')[0]).toBe('Your PDF is ready.');
+    expect(composeTaskWrapUp(named, [pdf], null, pdf)).not.toContain('Formatted Report');
     expect(composeTaskWrapUp(named, []).split('\n')[0]).toBe('All done — the work is finished.');
   });
 

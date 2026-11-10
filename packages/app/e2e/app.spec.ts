@@ -208,12 +208,12 @@ test('06 - settings area loads', async () => {
 test('07 - projects group hides the built-in default project', async () => {
   // The "Default" project is an always-present scratchpad, not a user-created
   // project, so the sidebar hides it (HIDDEN_PROJECT_IDS in Sidebar.tsx). With
-  // no user projects in a fresh home dir, the group shows its empty state.
+  // no user projects in a fresh home dir, the group offers a way to start one.
   await expandGroup('projects');
   await captureScreenshot(page, { path: join(screenshotDir, '07-projects.png'), fullPage: true });
 
   const sidebar = page.locator('[data-testid="app-sidebar"]');
-  await expect(sidebar).toContainText('No projects created yet.');
+  await expect(sidebar).toContainText('Start your first project');
   // The empty state names Default in its prose; what must be absent is a row.
   await expect(sidebar.locator('.app-sidebar-proj-row', { hasText: 'Default' })).toHaveCount(0);
 });

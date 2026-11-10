@@ -6,9 +6,18 @@ function crewRoleLabel(member: CrewMember): string {
   return member.gloss ? `${member.role} — ${member.gloss}` : member.role;
 }
 
+/** "a", "a and b", "a, b and c". */
+function joinNames(parts: readonly string[]): string {
+  if (parts.length <= 1) return parts[0] ?? '';
+  return `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
+}
+
 /**
  * The words a crew introduction says, for the model and for any surface
- * that shows text rather than cards.
+ * that shows text rather than cards. Who joined and as what, never the step
+ * they start on: `Minji (Office Administrator) starts with "First draft"`
+ * read as a schedule in the plan's own words, and a small model repeated it
+ * to the person word for word (2026-11-09).
  */
 export function crewIntroductionText(
   task: Pick<Task, 'title'> & { craftbook?: Pick<Task['craftbook'], 'id' | 'name'> },
@@ -25,15 +34,12 @@ export function crewIntroductionText(
   if (moment === 'joined') {
     const m = members[0]!;
     const label = crewRoleLabel(m);
-    const starts = m.stepName ? ` ${m.name} starts with "${m.stepName}".` : '';
     // The lead speaks for the crew: the person hears who asked for help,
     // not a roster change.
-    if (opts.leadName)
-      return `**${opts.leadName}** asked ${describe(m)} to help with ${what}.${starts}`;
-    return `I've brought **${m.name}** onto the crew${label ? ` as your ${label}` : ''} for ${what}.${starts}`;
+    if (opts.leadName) return `**${opts.leadName}** asked ${describe(m)} to help with ${what}.`;
+    return `I've brought **${m.name}** onto the crew${label ? ` as your ${label}` : ''} for ${what}.`;
   }
-  const parts = members.map((m) =>
-    m.stepName ? `${describe(m)} starts with "${m.stepName}"` : `${describe(m)} leads it`,
-  );
-  return `Your crew for ${what}: ${parts.join(', and ')}.`;
+  // At kickoff the one without a step to start is the task's lead.
+  const parts = members.map((m) => (m.stepName ? describe(m) : `${describe(m)}, who leads it`));
+  return `Your crew for ${what}: ${joinNames(parts)}.`;
 }

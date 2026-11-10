@@ -336,12 +336,15 @@ None of these layers needs a network, a credential, or even the real engine:
 
 ### Which files, and why that line
 
-- **CSV/TSV: exactly when the indexer would otherwise mark it `trivial`** —
-  above `MAX_INDEXABLE_BYTES` or `isDenseBlob`. Below that line the file is
-  already chunked, searchable, and readable with `read_file`, and a table adds
-  noise; above it, the file is invisible to search *and* too big to read, which
-  is a dead end. Reusing the existing constant makes the rule principled rather
-  than a new magic number.
+- **CSV/TSV: every one with rows, except in a code folder.** Readable was
+  not enough: asked which weekday a bakery's October sales peaked on, a model
+  read a 189-row CSV with `read_file`, added it up by hand, and gave wrong
+  totals that the fact check let through (2026-11-09). A table lets the engine
+  do the sum and the reply show the query. In a code folder
+  (`projectHoldsCode`) the line stays where the indexer marks a file
+  `trivial` — above `MAX_INDEXABLE_BYTES` or `isDenseBlob` — because a small
+  CSV there is a test fixture, and a table of it is noise
+  (`workspaceTableMinBytes`).
 - **XLSX: always.** A gezel cannot read the binary at any size, so the table is
   the only access it will ever have.
 - Nothing `discoverWorkspaceFiles` already excludes (`.gitignore`), nothing

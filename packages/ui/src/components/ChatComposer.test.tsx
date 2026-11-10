@@ -1952,7 +1952,7 @@ describe('ChatComposer expand toggle', () => {
     const composer = screen.getByTestId('chat-composer');
     const toggle = screen.getByTestId('chat-composer-expand');
     expect(composer.getAttribute('data-composer-expanded')).toBeNull();
-    expect(screen.getByTestId('editor-heights').textContent).toBe('120px/50vh');
+    expect(screen.getByTestId('editor-heights').textContent).toBe('104px/50vh');
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
 
     fireEvent.click(toggle);
@@ -1965,7 +1965,7 @@ describe('ChatComposer expand toggle', () => {
     fireEvent.click(screen.getByTestId('chat-composer-expand'));
 
     expect(composer.getAttribute('data-composer-expanded')).toBeNull();
-    expect(screen.getByTestId('editor-heights').textContent).toBe('120px/50vh');
+    expect(screen.getByTestId('editor-heights').textContent).toBe('104px/50vh');
   });
 
   it('stays reachable while a turn is running', () => {
@@ -2023,6 +2023,50 @@ describe('ChatComposer before a model arrives', () => {
       expect(navigate).toHaveBeenCalledWith({ view: 'home' });
     } finally {
       window.removeEventListener('gezel:navigate', onNavigate);
+    }
+  });
+
+  // Home said "downloading the AI model · 0%" while a crew member's chat
+  // said "no AI model is downloaded", about the same download.
+  it("names the first model's download the way Home does", async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      defaultModel: { 'llama-cpp': 'gemma4-e4b-q4' },
+    } as never);
+    vi.mocked(api.listLlamaCppActiveInstalls).mockResolvedValue({
+      installs: [
+        {
+          catalogId: 'gemma4-e4b-q4',
+          bytesWritten: 42,
+          totalBytes: 100,
+          phase: 'downloading',
+        },
+      ],
+    } as never);
+    try {
+      render(
+        <FirstRunProvider value={true}>
+          <ChatComposer
+            gezelId="tomas"
+            gezelName="Tomas"
+            projectId="default"
+            sessionId="session-1"
+            recipientGezels={[tomas]}
+          />
+        </FirstRunProvider>,
+      );
+
+      await waitFor(() =>
+        expect(screen.getByTestId('chat-waiting-for-model')).toHaveTextContent(
+          "Can't send yet: downloading the AI model · 42%",
+        ),
+      );
+      expect(screen.getByRole('button', { name: /^send$/i })).toBeDisabled();
+      // The download's progress lives on Home, so the way there stays.
+      expect(screen.getByRole('button', { name: 'Get started' })).toBeInTheDocument();
+    } finally {
+      vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
+      vi.mocked(api.listLlamaCppActiveInstalls).mockResolvedValue({ installs: [] } as never);
     }
   });
 

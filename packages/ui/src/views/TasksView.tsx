@@ -15,6 +15,7 @@ import {
   useState,
 } from 'react';
 import { api } from '../api.js';
+import { EmptyPlace } from '../components/EmptyPlace.js';
 import { TASK_STATUS_KEY_ORDER, TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
 import {
@@ -42,6 +43,23 @@ const TASK_KIND_OPTIONS: Array<{ value: TaskKindFilter; label: string }> = [
   { value: 'scheduled', label: 'Scheduled tasks' },
   { value: 'night-shift', label: 'Night Shift tasks' },
 ];
+
+/** What each kind of task is for, and the one key that starts one (EmptyPlace). */
+const TASK_KIND_EMPTY: Record<TaskKindFilter, { purpose: string; action: string }> = {
+  'one-time': {
+    purpose: 'A task is work the crew does for you, step by step. You hear when it is done.',
+    action: 'Give the crew a task',
+  },
+  scheduled: {
+    purpose: 'A scheduled task runs again on a timetable you set, like a report every Monday.',
+    action: 'Schedule a task',
+  },
+  'night-shift': {
+    purpose:
+      'Night Shift tasks run overnight while you are away. Their results wait for the morning.',
+    action: 'Plan work for tonight',
+  },
+};
 
 function taskKind(task: Task): TaskKindFilter {
   if (task.nightShift?.enabled) return 'night-shift';
@@ -672,13 +690,28 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
       <div className="tasks-layout" aria-busy={!hasLoadedTasks}>
         {showEmptyState && (
           <div className="tasks-empty-state">
-            {!error && (
-              <p>
-                {statusFilter || assigneeFilter
-                  ? 'No tasks match these filters.'
-                  : `No ${TASK_KIND_OPTIONS.find((option) => option.value === kindFilter)?.label.toLowerCase()} have been created yet.`}
-              </p>
-            )}
+            {!error &&
+              (statusFilter || assigneeFilter ? (
+                <EmptyPlace
+                  purpose="No tasks match these filters."
+                  action={{
+                    label: 'Show every task',
+                    onClick: () => {
+                      setStatusFilter('');
+                      setAssigneeFilter('');
+                    },
+                  }}
+                />
+              ) : (
+                <EmptyPlace
+                  purpose={TASK_KIND_EMPTY[kindFilter].purpose}
+                  action={{
+                    label: TASK_KIND_EMPTY[kindFilter].action,
+                    onClick: () => openCreate(kindFilter),
+                    disabled: !(projectFilter || projects[0]),
+                  }}
+                />
+              ))}
           </div>
         )}
         <aside className="tasks-list" hidden={hideTaskPanes || (compact && showCompactDetail)}>

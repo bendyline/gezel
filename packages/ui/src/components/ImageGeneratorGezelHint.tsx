@@ -137,7 +137,7 @@ export function ImageGeneratorGezelHint() {
  * Skips the gilde browser — the user has already implicitly chosen the
  * template by clicking "Add an image-generator gezel" in the image-
  * settings panel. Collects a name (seeded from the same shared random
- * pool the regular `New Gezel` dialog uses, with a 🎲 to re-roll) and
+ * pool the regular `New Gezel` dialog uses, with a dice key to re-roll) and
  * shows the template description.
  */
 function ImageGeneratorInstallDialog({
@@ -264,7 +264,7 @@ function ImageGeneratorInstallDialog({
                 title="Pick a random name"
                 aria-label="Pick a random name"
               >
-                🎲
+                <span className="fa-solid fa-dice" aria-hidden="true" />
               </button>
               <button type="submit" className="primary" disabled={busy || !name.trim()}>
                 {busy ? 'Creating…' : 'Create'}

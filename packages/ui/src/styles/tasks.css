@@ -134,7 +134,10 @@
 
 .tasks-empty-state {
   display: grid;
-  place-items: center;
+  /* Up where the eye lands (EmptyPlace sets the top margin); centered in a
+     tall window it read as a pane that had failed to load. */
+  align-content: start;
+  justify-items: center;
   grid-column: 1 / -1;
   color: var(--text-muted);
   font-size: var(--text-md);

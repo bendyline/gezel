@@ -451,7 +451,7 @@ function ScratchTab({
             title="Pick a random name"
             aria-label="Pick a random name"
           >
-            🎲
+            <span className="fa-solid fa-dice" aria-hidden="true" />
           </button>
         </div>
       </label>

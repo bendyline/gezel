@@ -173,6 +173,18 @@ export function sourceRelPathFromCorpusDir(corpusDir: string): string | null {
 }
 
 /** Table slug for a single-table source: the file stem. */
+/** A CSV that small holds a header at most. */
+export const SMALL_CSV_MIN_BYTES = 16;
+
+/**
+ * The CSV size a table starts at for this project: every CSV with rows in it,
+ * except in a code folder, where a small CSV is a fixture (see
+ * `shouldMaterialize`).
+ */
+export function workspaceTableMinBytes(holdsCode: boolean, indexableBytes: number): number {
+  return holdsCode ? indexableBytes : SMALL_CSV_MIN_BYTES;
+}
+
 export function tableNameForSource(relPath: string): string {
   const stem = basename(relPath, extname(relPath));
   return slug(stem) || 'rows';
@@ -181,9 +193,12 @@ export function tableNameForSource(relPath: string): string {
 /**
  * Should this workspace file become a table?
  *
- * The CSV threshold is deliberately the indexer's own `trivial` line: below it
- * the file is already chunked, searchable and readable with `read_file`, and a
- * table would be noise; above it the file is invisible today.
+ * In a code folder the CSV threshold is the indexer's own `trivial` line:
+ * below it a file is a test fixture or a sample, readable with `read_file`,
+ * and a table would be noise. Everywhere else every CSV becomes a table
+ * (`workspaceTableMinBytes`). Readable was not enough: asked which weekday
+ * a bakery's October sales peaked on, a model read a 189-row CSV and added
+ * it up by hand, and the totals it gave were wrong (2026-11-09).
  */
 export function shouldMaterialize(
   relPath: string,

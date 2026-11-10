@@ -36,15 +36,18 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     initialMarkdown,
     fileName,
     readOnly,
+    showFormattingControls,
   }: {
     initialMarkdown: string;
     fileName?: string;
     readOnly?: boolean;
+    showFormattingControls?: boolean;
   }) => (
     <pre
       data-testid="reference-code-preview"
       data-file={fileName}
       data-readonly={String(Boolean(readOnly))}
+      data-formatting={String(showFormattingControls ?? true)}
     >
       {initialMarkdown}
     </pre>
@@ -779,10 +782,66 @@ describe('ChatReferences reference picker', () => {
     const source = screen.getByTestId('reference-code-preview');
     expect(source).toHaveAttribute('data-file', 'remote.html');
     expect(source).toHaveAttribute('data-readonly', 'true');
+    expect(source).toHaveAttribute('data-formatting', 'false');
     expect(source).toHaveTextContent(
       '<meta http-equiv="refresh" content="0;url=https://attacker.test">',
     );
     expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it('shows a .txt file as typed, with its line breaks and no editor keys', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    const policy = 'Catering policy\n\nMinimum order: $150.\nDeposit: 30%.';
+    apiMocks.previewReference.mockResolvedValue({ mode: 'text', content: policy });
+
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onWorkspaceReference }) => (
+          <button
+            type="button"
+            onClick={() => onWorkspaceReference('Catering/Catering policy.txt')}
+          >
+            Open policy
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open policy' }));
+    await waitFor(() => expect(container.querySelector('.plain-text-file')).not.toBeNull());
+    expect(container.querySelector('.plain-text-file')?.textContent).toBe(policy);
+    expect(screen.queryByTestId('reference-code-preview')).toBeNull();
+  });
+
+  it('keeps the file name whole in the viewer header, the full path on hover', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockRejectedValue(new Error('Preview unavailable in header test'));
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactReference }) => (
+          <button
+            type="button"
+            onClick={() => onArtifactReference('drafts/harbor-books-reminder-nov12.md')}
+          >
+            Open draft
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open draft' }));
+    const path = await waitFor(() => {
+      const found = container.querySelector('.chat-rail-viewer-path');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(path).toHaveAttribute('title', 'drafts/harbor-books-reminder-nov12.md');
+    expect(path.querySelector('.chat-rail-viewer-path-folder')).toHaveTextContent(/^drafts\/$/);
+    expect(path.querySelector('.chat-rail-viewer-path-name')).toHaveTextContent(
+      /^harbor-books-reminder-nov12\.md$/,
+    );
   });
 
   it('offers native save-copy and containing-folder actions for the active file', async () => {

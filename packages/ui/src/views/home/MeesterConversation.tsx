@@ -44,7 +44,6 @@ export function MeesterConversation({
   setup = null,
   justReady = false,
   helperGezelIds = [],
-  invite,
   onTurnStarted,
   onIntroductionShown,
   onAttentionChange,
@@ -63,8 +62,6 @@ export function MeesterConversation({
   justReady?: boolean;
   /** The install-wide helpers (Klerk, Boekwachter) the welcome introduces. */
   helperGezelIds?: ReadonlyArray<string | undefined>;
-  /** Asked at the foot of the conversation once the crew has finished something. */
-  invite?: import('react').ReactNode;
   /** The person sent a message from here. */
   onTurnStarted?: () => void;
   /** The meester's introduction fills the empty conversation. */
@@ -178,7 +175,6 @@ export function MeesterConversation({
       pickChatPlaceholder({
         role: activeGezelId === meesterGezelId ? 'meester' : 'other',
         gezelName: activeGezelName,
-        gezelGender: selectedGezel?.gender,
         fixedFunctionTool: selectedGezel?.fixedFunction?.tool,
         fixedFunctionEdits: selectedGezel?.fixedFunction?.requiresInputImage,
       }),
@@ -186,7 +182,6 @@ export function MeesterConversation({
       activeGezelId,
       activeGezelName,
       meesterGezelId,
-      selectedGezel?.gender,
       selectedGezel?.fixedFunction?.tool,
       selectedGezel?.fixedFunction?.requiresInputImage,
     ],
@@ -249,6 +244,8 @@ export function MeesterConversation({
                   />
                 ) : undefined
               }
+              // The folder question is asked on Home's greeting, never here:
+              // appended under the first result, it scrolled that result away.
               trailingContent={
                 setup ? (
                   <MeesterSetupNote
@@ -258,11 +255,8 @@ export function MeesterConversation({
                     meesterIconOverride={meesterIconOverride}
                     setup={setup}
                   />
-                ) : (
-                  invite
-                )
+                ) : undefined
               }
-              {...(!setup && invite ? { trailingContentAfterWrapUp: true } : {})}
             />
             <ChatComposer
               gezelId={activeGezelId}

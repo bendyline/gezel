@@ -603,6 +603,11 @@ export const GroundingEvidenceSchema = z.object({
   tool: z.string().optional(),
   /** The start of what the model saw, for a hover card. */
   excerpt: z.string().max(800).optional(),
+  /**
+   * The query that calculated it, for a table query: the person sees the
+   * working behind a number instead of taking a sum on trust.
+   */
+  query: z.string().max(2000).optional(),
 });
 export type GroundingEvidence = z.infer<typeof GroundingEvidenceSchema>;
 

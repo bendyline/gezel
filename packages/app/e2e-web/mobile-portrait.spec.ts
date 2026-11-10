@@ -156,7 +156,7 @@ for (const profile of [
       await capture('document-detail');
       for (const [area, trigger] of [
         ['gezels', '+ New crew member'],
-        ['projects', '+ New Project'],
+        ['projects', '+ New project'],
         ['tasks', '+ New task'],
       ]) {
         await openAreaView(page, area!);
@@ -244,7 +244,7 @@ test('small portrait create and edit workflows', async ({ page, daemon, world })
   await expect(page.getByTestId('gezel-detail')).toContainText('Portrait companion');
 
   await openAreaView(page, 'projects');
-  await page.getByRole('button', { name: '+ New Project', exact: true }).click();
+  await page.getByRole('button', { name: '+ New project', exact: true }).click();
   await page.getByRole('dialog').getByRole('radio', { name: 'General', exact: true }).click();
   const newProject = page.getByRole('dialog', { name: 'General', exact: true });
   await newProject.getByRole('textbox', { name: 'Name', exact: true }).fill('Portrait workspace');

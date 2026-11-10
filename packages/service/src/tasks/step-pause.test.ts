@@ -73,6 +73,25 @@ describe('pauseTaskAfterFailedHandoff', () => {
     expect(notes.at(-1)?.text).toContain('Handoff failed');
   });
 
+  // default/2, 2026-11-09: the note the pause card points to quoted the pool.
+  it('says in plain words that the step never started when the engine refused it', async () => {
+    const ref = await reviewTask();
+    await pauseTaskAfterFailedHandoff(
+      tasks,
+      {
+        ...ref,
+        stepId: 'review',
+        detail:
+          'Not enough graphics memory to load qwen3.5-9b-q4 (about 6.3 GB on the card). The graphics card has 2.2 GB free of 31.9 GB.',
+      },
+      () => false,
+    );
+    expect((await store.readTask('p1', ref.num))?.status).toBe('paused');
+    const text = (await tasks.listNotes('p1', ref.num)).at(-1)?.text ?? '';
+    expect(text).toContain('never started');
+    expect(text).not.toMatch(/qwen|GB|graphics|handoff/i);
+  });
+
   it('never pauses while the service is stopping, so the task rehydrates on the next boot', async () => {
     const ref = await reviewTask();
     await pauseTaskAfterFailedHandoff(

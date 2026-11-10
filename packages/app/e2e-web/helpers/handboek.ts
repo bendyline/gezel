@@ -1,5 +1,15 @@
 import { type Page, expect } from '@playwright/test';
 
+/**
+ * Knowledge opens on a catalog's overview, not inside an article, so a spec
+ * about the Handboek's articles opens the first one (the welcome) itself.
+ */
+export async function openFirstHandboekArticle(page: Page): Promise<void> {
+  const view = page.getByTestId('knowledge-view');
+  await expect(view.locator('.knowledge-catalog-name')).toHaveText('Gezel Handboek');
+  await view.locator('.knowledge-doc-row').first().click();
+}
+
 /** The bundled catalog, selected article, parsed prose, and inline assets are ready. */
 export async function expectHandboekArticle(
   page: Page,

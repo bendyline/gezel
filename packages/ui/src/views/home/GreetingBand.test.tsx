@@ -136,6 +136,15 @@ describe('GreetingBand', () => {
     expect(screen.queryByRole('tab', { name: 'Status report' })).not.toBeInTheDocument();
   });
 
+  // Appended in the thread, the folder question scrolled the first result
+  // off the screen (2026-11-09). It is asked here instead, in place of the tip.
+  it('asks the folder question in the greeting tab, in place of the tip', () => {
+    renderBand({ invite: <section data-testid="folder-invite">Which folders?</section> });
+    const panel = screen.getByRole('tabpanel', { name: GREETING });
+    expect(panel).toContainElement(screen.getByTestId('folder-invite'));
+    expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
+  });
+
   it('keeps tabs and actionable chips visible when collapsed, hiding the content', () => {
     renderBand({
       statusReport: REPORT,

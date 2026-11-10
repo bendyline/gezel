@@ -29,11 +29,37 @@ import { useEffectiveTheme } from '../theme.js';
 import { inlineBundledAssets } from './handboek/HandboekMediaProvider.js';
 import { KnowledgeDocumentListing } from './knowledge/KnowledgeDocumentListing.js';
 import { createKnowledgeMediaProvider } from './knowledge/KnowledgeMediaProvider.js';
+import { withoutRepeatedTitle } from './knowledge/article-title.js';
 import '../styles/knowledge.css';
 
 const CATALOG_KEY = 'gezel:knowledge:catalog';
 const DOCUMENT_KEY = 'gezel:knowledge:document';
 const EXPANDED_KEY_PREFIX = 'gezel:knowledge:expanded:';
+/** The bundled Handboek, which has its own area; Knowledge leads with the person's catalogs. */
+const HANDBOEK_CATALOG_ID = 'handboek';
+
+/**
+ * Where the Knowledge door last stood, from this browser's storage. A stored
+ * Handboek place is not reused here: the Handboek area shares this view, and
+ * reading it there made Knowledge open on "What is gezel?" (2026-11-09).
+ */
+function storedKnowledgeLocation(): KnowledgeLocation | null {
+  try {
+    const catalogId = window.localStorage.getItem(CATALOG_KEY);
+    if (!catalogId || catalogId === HANDBOEK_CATALOG_ID) return null;
+    return { catalogId, documentId: window.localStorage.getItem(DOCUMENT_KEY) };
+  } catch {
+    return null;
+  }
+}
+
+/** The catalog Knowledge opens on: the person's own first, the Handboek only when it is all there is. */
+export function preferredKnowledgeCatalog(
+  catalogs: readonly { ref: { catalogId: string } }[],
+): string | null {
+  const own = catalogs.find((catalog) => catalog.ref.catalogId !== HANDBOEK_CATALOG_ID);
+  return (own ?? catalogs[0])?.ref.catalogId ?? null;
+}
 
 interface TopicTreeNode extends KnowledgeTopicNode {
   children: TopicTreeNode[];
@@ -99,14 +125,14 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   // Back to Knowledge reopens the article it was left on.
   const restoredPart = useRestoredViewPart('knowledge');
   const restored = knowledgeLocationOf(restoredPart);
+  // The Handboek area is this view opened on the Handboek. It neither reads
+  // nor writes the Knowledge door's remembered place.
+  const handboekArea = initialCatalogId === HANDBOEK_CATALOG_ID;
+  const [stored] = useState(() => (initialCatalogId ? null : storedKnowledgeLocation()));
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | null>(() => {
     if (restored) return restored.catalogId;
     if (initialCatalogId) return initialCatalogId;
-    try {
-      return window.localStorage.getItem(CATALOG_KEY);
-    } catch {
-      return null;
-    }
+    return stored?.catalogId ?? null;
   });
   const [topics, setTopics] = useState<KnowledgeTopicNode[]>([]);
   const [selectedTopicId, setSelectedTopicId] = useState<string | null>(null);
@@ -114,12 +140,8 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   const topicIdPrefix = useId();
   const [selectedDocId, setSelectedDocId] = useState<string | null>(() => {
     if (restored) return restored.documentId;
-    if (initialCatalogId === 'handboek') return 'welcome';
-    try {
-      return window.localStorage.getItem(DOCUMENT_KEY);
-    } catch {
-      return null;
-    }
+    if (handboekArea) return 'welcome';
+    return stored?.documentId ?? null;
   });
   const [mobilePane, setMobilePane] = useState<'topics' | 'list' | 'reader'>(
     selectedDocId ? 'reader' : 'topics',
@@ -221,7 +243,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   useEffect(() => {
     if (!catalogs || catalogs.some((catalog) => catalog.ref.catalogId === selectedCatalogId))
       return;
-    const next = catalogs[0]?.ref.catalogId ?? null;
+    const next = preferredKnowledgeCatalog(catalogs);
     if (next === selectedCatalogId) return;
     if (next) replaceNextLocation(`${next}:`);
     setSelectedCatalogId(next);
@@ -230,22 +252,26 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   }, [catalogs, selectedCatalogId, replaceNextLocation]);
 
   useEffect(() => {
+    if (handboekArea) return;
     try {
       if (selectedCatalogId) window.localStorage.setItem(CATALOG_KEY, selectedCatalogId);
     } catch {
       /* private mode */
     }
-  }, [selectedCatalogId]);
+  }, [selectedCatalogId, handboekArea]);
 
+  // Only the Handboek area opens the Handboek on its welcome article. The
+  // Knowledge door lands on a catalog's overview, its list beside an empty
+  // reader, rather than in the middle of an article nobody asked for.
   useEffect(() => {
     if (selectedCatalogId === lastCatalogRef.current) return;
     lastCatalogRef.current = selectedCatalogId;
-    if (selectedCatalogId === 'handboek' && !selectedDocId) {
+    if (handboekArea && selectedCatalogId === HANDBOEK_CATALOG_ID && !selectedDocId) {
       replaceNextLocation('handboek:welcome');
       setSelectedDocId('welcome');
       setMobilePane('reader');
     }
-  }, [selectedCatalogId, selectedDocId, replaceNextLocation]);
+  }, [handboekArea, selectedCatalogId, selectedDocId, replaceNextLocation]);
 
   // Topic tree per catalog.
   useEffect(() => {
@@ -285,15 +311,17 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
       .finally(() => {
         if (alive) setDocLoading(false);
       });
-    try {
-      window.localStorage.setItem(DOCUMENT_KEY, selectedDocId);
-    } catch {
-      /* private mode */
+    if (!handboekArea) {
+      try {
+        window.localStorage.setItem(DOCUMENT_KEY, selectedDocId);
+      } catch {
+        /* private mode */
+      }
     }
     return () => {
       alive = false;
     };
-  }, [selectedCatalogId, selectedDocId]);
+  }, [selectedCatalogId, selectedDocId, handboekArea]);
 
   // Search answers the keystroke: the results phase mounts on the debounced
   // query, showing "Searching…" until the daemon responds.
@@ -392,8 +420,8 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   );
   const renderedDoc = useMemo(() => {
     if (!doc) return null;
-    const markdown =
-      selectedCatalogId === 'handboek' ? inlineBundledAssets(doc.markdown) : doc.markdown;
+    const body = withoutRepeatedTitle(doc.markdown, doc.title);
+    const markdown = selectedCatalogId === HANDBOEK_CATALOG_ID ? inlineBundledAssets(body) : body;
     try {
       return markdownToDoc(parseMarkdown(markdown), { articleId: doc.id });
     } catch {
@@ -792,7 +820,26 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
             {docLoading ? null : docError ? (
               <p className="error">{docError}</p>
             ) : (
-              <p className="placeholder">Pick a document on the left to read it here.</p>
+              <div className="knowledge-overview">
+                <p className="placeholder">
+                  Search {selectedCatalog?.name ?? 'this catalog'}, or pick a topic or a document on
+                  the left to read it here. Gezel can look things up in it and cite what it read.
+                </p>
+                {!handboekArea &&
+                  catalogs?.every((catalog) => catalog.ref.catalogId === HANDBOEK_CATALOG_ID) && (
+                    <p className="placeholder">
+                      Only the Gezel Handboek is here so far. Add a reference catalog, such as a
+                      cookbook or a field guide, to look things up in your own subjects.{' '}
+                      <button
+                        type="button"
+                        className="secondary"
+                        onClick={() => setManagingCatalogs(true)}
+                      >
+                        Browse knowledge catalogs
+                      </button>
+                    </p>
+                  )}
+              </div>
             )}
           </div>
         )}

@@ -3,7 +3,8 @@
  * desktop's and the phone's mid-turn "deliverable is ready" checks.
  */
 
-import type { GateCheck } from '../schemas/gate.js';
+import type { AdvanceWhen } from '../schemas/craftbook.js';
+import { type GateCheck, type StepGateUnion, normalizeStepGate } from '../schemas/gate.js';
 
 /**
  * Normalize a workspace-relative path for comparison: forward slashes,
@@ -18,6 +19,29 @@ export function normalizeWorkspacePath(p: string): string {
     .replace(/^\.\//, '')
     .replace(/^workspace\//, '')
     .replace(/^\/+/, '');
+}
+
+/**
+ * The files a step must leave in the project folder itself: its `advanceWhen`
+ * file and every file its gate checks read, outside the artifacts drawer.
+ * A project whose folder Gezel may not change cannot satisfy these, so the
+ * service pauses on them at activation and `gezel do` asks about them before
+ * it starts. One function, so the question and the pause name the same files.
+ */
+export function stepWorkspaceDeliverableFiles(step: {
+  advanceWhen?: Pick<AdvanceWhen, 'file' | 'artifact'> | null | undefined;
+  gate?: StepGateUnion | null | undefined;
+}): string[] {
+  const files = new Set<string>();
+  if (step.advanceWhen?.file && step.advanceWhen.artifact !== true) {
+    files.add(step.advanceWhen.file);
+  }
+  for (const check of step.gate ? normalizeStepGate(step.gate).checks : []) {
+    if ((check as { artifact?: boolean }).artifact === true) continue;
+    const file = (check as { file?: string }).file;
+    if (file) files.add(file);
+  }
+  return [...files];
 }
 
 /** Completion-gate checks that fail outright when their `file` is absent. */

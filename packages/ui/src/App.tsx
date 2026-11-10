@@ -75,8 +75,10 @@ import { useBackNavigation } from './hooks/useBackNavigation.js';
 import { useResponsiveLayout } from './hooks/useResponsiveLayout.js';
 import { beginNavigation } from './nav-timing.js';
 import { DropdownMenu } from './primitives/index.js';
+import { reconnectingStream } from './reconnecting-stream.js';
 import { runtimeCapabilities } from './runtime-capabilities.js';
 import { requestSettingsSection } from './settings-nav.js';
+import { invalidateApiReads } from './shared-api-reads.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
 import { connectStartupHome, saveStartupDraft } from './startup/handoff.js';
@@ -669,12 +671,27 @@ function FullApp() {
     const ctrl = new AbortController();
     void (async () => {
       try {
-        for await (const env of streamSharedAllChatEvents({
-          url: api.allEventsUrl(),
-          headers: api.authHeader(),
-          signal: ctrl.signal,
-          fetch: api.getFetch(),
-        })) {
+        // The bridge lives as long as the window, so it opens again after a
+        // daemon stall ends the stream. Whatever was announced while it was
+        // down is re-read: the rail missed a project the Meester created.
+        for await (const env of reconnectingStream(
+          (signal) =>
+            streamSharedAllChatEvents({
+              url: api.allEventsUrl(),
+              headers: api.authHeader(),
+              signal,
+              fetch: api.getFetch(),
+            }),
+          {
+            signal: ctrl.signal,
+            onReconnect: () => {
+              invalidateApiReads();
+              window.dispatchEvent(new CustomEvent('gezel:events-reconnected'));
+              reconcileActiveProjects();
+              refreshPoisoned();
+            },
+          },
+        )) {
           const ev = (env as ChatEventEnvelope).event;
           // Keep the sidebar "thinking" set live: a turn opens on user_message
           // and closes on done/error/cancelled. Mount seed + 20s reconcile cover turns we
@@ -761,7 +778,7 @@ function FullApp() {
       }
     })();
     return () => ctrl.abort();
-  }, [recomputeActiveTurns, refreshPoisoned]);
+  }, [recomputeActiveTurns, reconcileActiveProjects, refreshPoisoned]);
 
   useEffect(() => {
     const platform = window.__GEZEL__?.platform;

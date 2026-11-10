@@ -59,6 +59,8 @@ describe('native page chat', () => {
       showAddress: false,
       features: { mentions: false, attachments: false },
     });
+    // The companion's conversation, not the kickoff task's working thread.
+    expect(timeline.mock.lastCall?.[0]).toMatchObject({ ordinaryThreadsOnly: true });
     fireEvent.click(screen.getByText('Send to mira'));
     expect(screen.getByText('Timeline mira created')).toBeInTheDocument();
     rerender(

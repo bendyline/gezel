@@ -1,4 +1,5 @@
 import type { MeesterStatusReport } from '@bendyline/gezel';
+import { formatClockTime } from '../../relative-time.js';
 /**
  * The meester-written status headline when a fresh report exists (the
  * parent already applied the staleness decay), falling back to the
@@ -36,11 +37,7 @@ export function HomeIntroDate({ now = new Date() }: { now?: Date }) {
   const hour = now.getHours();
   const weekday = now.toLocaleDateString(undefined, { weekday: 'long' });
   const part = hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening';
-  const time = now.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  });
+  const time = formatClockTime(now);
   return (
     <div className="home-workshop-eyebrow home-workshop-dateline">
       {weekday} {part} · {time}

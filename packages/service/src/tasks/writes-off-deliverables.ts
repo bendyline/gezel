@@ -7,8 +7,8 @@ import {
   type NormalizedStepGate,
   type Task,
   type TaskCraftbookStep,
-  normalizeStepGate,
   projectManagedWorkspaceWritable,
+  stepWorkspaceDeliverableFiles,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import { gateCheckLabel } from './gate-eval.js';
@@ -42,15 +42,7 @@ export async function unsatisfiableStepWorkspaceFiles(
   if (task.diffpackId) return null;
   const project = await store.getProject(projectId).catch(() => null);
   if (!project || projectManagedWorkspaceWritable(project)) return null;
-  const files = new Set<string>();
-  if (step.advanceWhen?.file && step.advanceWhen.artifact !== true) {
-    files.add(step.advanceWhen.file);
-  }
-  for (const check of step.gate ? normalizeStepGate(step.gate).checks : []) {
-    if ((check as { artifact?: boolean }).artifact === true) continue;
-    const file = (check as { file?: string }).file;
-    if (file) files.add(file);
-  }
+  const files = new Set(stepWorkspaceDeliverableFiles(step));
   if (files.size === 0) return null;
   // Only a deliverable that must be WRITTEN is unwinnable. A gate over
   // a file that already exists may pass on its contents alone (a

@@ -1034,7 +1034,12 @@
 
 /* First-run folder step (FolderOnboardingStep): folder cards over the
    overnight question. The cards are checkboxes, not keys — several may be
-   chosen at once — so they carry a border and an accent wash when picked. */
+   chosen at once — so they carry a border and an accent wash when picked.
+   It is asked on the greeting, under the headline, once a finished result
+   has been opened; never in the conversation. */
+.home-workshop-folder-invite {
+  margin-top: 1rem;
+}
 .folder-onboarding {
   margin: 0 0 1.25rem;
   padding: 1rem 1.25rem 1.1rem;
@@ -1081,7 +1086,7 @@
   margin-top: 0.75rem;
 }
 
-/* Add a folder (AddFolderSheet): the folder's preview, then the night shift
+/* Add a folder (AddFolderSheet): the folder's preview, then the Night Shift
    checkbox and, when enabled, what the crew will do. */
 .add-folder-sheet {
   width: min(520px, calc(100vw - 2rem));

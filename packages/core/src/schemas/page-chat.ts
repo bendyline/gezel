@@ -27,6 +27,22 @@ export const PageChatRectSchema = z
   })
   .strict();
 
+/**
+ * A page modal is open: the host dims the conversation to the page's
+ * backdrop and leaves the modal's areas uncovered, instead of emptying it.
+ */
+export const PageChatModalSchema = z
+  .object({
+    areas: z.array(PageChatRectSchema).max(8),
+    scrim: z
+      .string()
+      .max(64)
+      .regex(/^rgba?\([0-9.,\s%/]+\)$/)
+      .optional(),
+  })
+  .strict();
+export type PageChatModal = z.infer<typeof PageChatModalSchema>;
+
 export const PageChatMessageSchema = z.discriminatedUnion('kind', [
   z
     .object({
@@ -50,6 +66,7 @@ export const PageChatMessageSchema = z.discriminatedUnion('kind', [
       kind: z.literal('chat-position'),
       id: z.string().min(1).max(64),
       rect: PageChatRectSchema,
+      modal: PageChatModalSchema.optional(),
     })
     .strict(),
   z

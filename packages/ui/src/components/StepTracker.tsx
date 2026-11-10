@@ -1,6 +1,7 @@
 import type { DragEvent, KeyboardEvent, ReactNode, PointerEvent as ReactPointerEvent } from 'react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { PersonLabel } from './PersonLabel.js';
+import { snapRouteScroll } from './step-route-scroll.js';
 
 export type StepStatus = 'done' | 'active' | 'pending';
 
@@ -139,8 +140,14 @@ function TrackerScroll({
         // The browser clamps this to the route's ends, so a step near either
         // end sits at that edge. Padding the ends so every step could reach
         // the middle opened a task with step 1 pushed halfway across an
-        // empty rail.
-        vp.scrollLeft = offset - vp.clientWidth / 2;
+        // empty rail. The left edge then snaps to a column boundary, so the
+        // first visible caption is never cut at its start.
+        const columns = Array.from(stops ?? []).map((stop) => {
+          const box = stop.getBoundingClientRect();
+          const left = box.left - vpRect.left + vp.scrollLeft;
+          return { left, right: left + box.width };
+        });
+        vp.scrollLeft = snapRouteScroll(offset - vp.clientWidth / 2, columns);
         centeredLayout.current = layout;
       }
     } else {

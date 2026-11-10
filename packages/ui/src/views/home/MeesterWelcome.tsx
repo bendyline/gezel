@@ -2,6 +2,7 @@ import {
   type FirstProject,
   type GezelSummary,
   type Poppetje as PoppetjeStruct,
+  firstProjectDraft,
   firstProjectsFor,
   interestArea,
 } from '@bendyline/gezel';
@@ -16,6 +17,7 @@ import {
   formatDownloadSize,
   formatDownloadTime,
   modelDisplay,
+  modelInstallStatus,
 } from '../../components/first-run-model-text.js';
 import {
   formatTimeLeft,
@@ -202,6 +204,10 @@ export function MeesterWelcome({
   // to leave the same trip, language and party cards (2026-10-12).
   const served = new Set(firsts.map((first) => first.area));
   const unserved = interests.areas.filter((area) => !served.has(area));
+  // A first project that needs the person's own details asks for them here,
+  // and the composer holds only its opening words.
+  const [askedId, setAskedId] = useState<string | null>(null);
+  const asked = firsts.find((first) => first.id === askedId && first.ask);
 
   return (
     <div
@@ -296,11 +302,12 @@ export function MeesterWelcome({
               <p className="meester-welcome-line">{IDEAS_WHILE_FETCHING}</p>
             )}
 
-            {/* First projects prefill the composer rather than sending, so the
-                person makes the sentence theirs first. A typed one ends on a
-                board the crew fills in; a craftbook one arrives with its book
-                (and its sample) attached. See FIRST_PROJECTS and
-                firstProjectsFor. */}
+            {/* First projects prefill the composer rather than sending. One
+                that needs the person's details asks for them and puts only its
+                opening words in the box; "Send an invoice" used to write an
+                illustrator's two clients there. A typed one ends on a board the
+                crew fills in; a craftbook one arrives with its book (and its
+                sample) attached. See FIRST_PROJECTS and firstProjectsFor. */}
             <fieldset
               className="meester-welcome-openers gz-tray"
               aria-label="Something to start with"
@@ -310,7 +317,11 @@ export function MeesterWelcome({
                   key={first.id}
                   type="button"
                   className="gz-key gz-key--stacked meester-welcome-opener"
-                  onClick={() => startFirstProject(projectId, first)}
+                  aria-pressed={first.ask ? askedId === first.id : undefined}
+                  onClick={() => {
+                    setAskedId(first.ask ? first.id : null);
+                    startFirstProject(projectId, first);
+                  }}
                 >
                   <span className="gz-key-label">{first.title}</span>
                   <span className="gz-key-hint">{first.hint}</span>
@@ -330,11 +341,21 @@ export function MeesterWelcome({
                 </button>
               </p>
             )}
-            <p className="meester-welcome-alternatives">
-              {canQueue
-                ? "Write your first request below and press Send. I'll start on it the moment my tools arrive."
-                : 'Or tell me in your own words, below.'}
-            </p>
+            {asked?.ask ? (
+              <div className="meester-welcome-ask" aria-live="polite">
+                <p className="meester-welcome-line">
+                  <strong>{asked.ask.question}</strong> Finish the sentence below
+                  {canQueue ? ", and I'll start on it the moment my tools arrive." : '.'}
+                </p>
+                <p className="meester-welcome-alternatives">For example: {asked.ask.example}</p>
+              </div>
+            ) : (
+              <p className="meester-welcome-alternatives">
+                {canQueue
+                  ? "Write your first request below and press Send. I'll start on it the moment my tools arrive."
+                  : 'Or tell me in your own words, below.'}
+              </p>
+            )}
 
             {showIntro && (
               <section
@@ -373,15 +394,21 @@ export function MeesterWelcome({
   );
 }
 
-/** Put a first project's sentence in the composer, with its craftbook attached when it has one. */
+/**
+ * Put a first project's sentence in the composer, with its craftbook attached
+ * when it has one. A first project that asks gets only its opening words, with
+ * the caret after them.
+ */
 function startFirstProject(projectId: string, first: FirstProject): void {
+  const draft = firstProjectDraft(first);
+  const options = { replace: true, focus: Boolean(first.ask) };
   if (first.kind === 'type') {
-    queueComposerPrefill(projectId, first.prompt, undefined, { replace: true });
+    queueComposerPrefill(projectId, draft, undefined, options);
     return;
   }
   queueComposerPrefill(
     projectId,
-    first.prompt,
+    draft,
     {
       origin: 'user',
       craftbookId: first.craftbookId,
@@ -391,7 +418,7 @@ function startFirstProject(projectId: string, first: FirstProject): void {
         ? { inputs: { [first.sample.param]: { from: 'sample', sampleId: first.sample.sampleId } } }
         : {}),
     },
-    { replace: true },
+    options,
   );
 }
 
@@ -471,12 +498,9 @@ export function composerWaitingStatus(setup: WelcomeSetup): string {
       return 'looking for an AI model on this computer';
     case 'needs-download':
       return 'download tools (an AI model) first';
-    case 'installing': {
-      if (state.progress?.phase === 'verifying') return 'checking the AI model';
-      if (state.progress?.phase === 'extracting-metadata') return 'unpacking the AI model';
-      const pct = downloadPercent(state.progress);
-      return pct === null ? 'downloading the AI model' : `downloading the AI model · ${pct}%`;
-    }
+    case 'installing':
+      // The same words every other chat shows while this download runs.
+      return modelInstallStatus(state.progress);
     case 'engine': {
       if (state.error) return "the AI model couldn't be set up";
       const { progress } = state;

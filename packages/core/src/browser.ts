@@ -39,6 +39,7 @@ export * from './inferred-project.js';
 export * from './growth-cosmetics.js';
 export * from './growth/index.js';
 export * from './security/policy.js';
+export * from './app-endpoints.js';
 export * from './security/package-scripts.js';
 export * from './security/egress-indicators.js';
 export * from './gezel-display.js';

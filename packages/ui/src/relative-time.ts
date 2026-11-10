@@ -79,6 +79,17 @@ export function formatRelativeTime(at: TimeInput, opts: RelativeTimeOptions = {}
 }
 
 /**
+ * A time of day ("1:01 PM", or "13:01" where the locale reads a 24-hour
+ * clock), in the locale's own clock. The one way a bare clock time is shown:
+ * Home forced a 24-hour "13:01" while History printed "12:31 PM" beside it.
+ */
+export function formatClockTime(at: TimeInput, fallback = ''): string {
+  const then = toEpochMs(at);
+  if (then === null) return fallback;
+  return new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(then));
+}
+
+/**
  * The exact instant, for the `title` beside a relative label. Locale-aware
  * so a European install doesn't read an American month/day ordering.
  */

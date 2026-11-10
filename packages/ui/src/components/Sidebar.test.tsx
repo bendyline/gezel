@@ -453,7 +453,10 @@ describe('Sidebar', () => {
       projects: [{ id: 'default', name: 'Default' } as Project],
     } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
-    expect(await screen.findByText('No projects created yet.')).toBeInTheDocument();
+    // An empty group offers the way to start rather than only saying so.
+    expect(
+      await screen.findByRole('button', { name: 'Start your first project' }),
+    ).toBeInTheDocument();
   });
 
   it('keeps the current Default project visible and selected after restore', async () => {
@@ -467,7 +470,7 @@ describe('Sidebar', () => {
     expect(currentProject).toHaveClass('active');
     expect(currentProject).toHaveAttribute('aria-current', 'page');
     expect(currentProject.closest('li')).toHaveClass('app-sidebar-proj-row', 'active');
-    expect(screen.queryByText('No projects created yet.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Start your first project')).not.toBeInTheDocument();
   });
 
   /**
@@ -618,7 +621,7 @@ describe('Sidebar', () => {
     ).toBeInTheDocument();
     // p4 is poisoned + active → poisoned beats working.
     expect(
-      screen.getByRole('button', { name: /Delta: last turn failed — go to it in the chat/ }),
+      screen.getByRole('button', { name: /Delta: a reply didn't finish\. Go to it in the chat/ }),
     ).toBeInTheDocument();
     // p2 is only working → animated thinking indicator.
     expect(screen.getByRole('button', { name: /Beta: Gezel is working/ })).toBeInTheDocument();
@@ -699,7 +702,7 @@ describe('Sidebar', () => {
     );
     await screen.findByText('Alpha');
 
-    fireEvent.click(screen.getByRole('button', { name: /Alpha: last turn failed/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Alpha: a reply didn't finish/ }));
 
     // Selects the project, flips it to the Chat tab, and points the
     // timeline at the session whose turn failed.
@@ -945,6 +948,19 @@ describe('Sidebar', () => {
       window,
       new CustomEvent('gezel:project-created', { detail: { id: 'p3', name: 'Gamma' } }),
     );
+
+    expect(await screen.findByText('Gamma')).toBeInTheDocument();
+  });
+
+  it('re-reads its projects when the event stream opens again after a stall', async () => {
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    await screen.findByText('Alpha');
+    // The project was announced while the stream was down, so no
+    // gezel:project-created event ever arrives for it.
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [...PROJECTS, { id: 'p3', name: 'Gamma' } as Project],
+    } as never);
+    fireEvent(window, new CustomEvent('gezel:events-reconnected'));
 
     expect(await screen.findByText('Gamma')).toBeInTheDocument();
   });

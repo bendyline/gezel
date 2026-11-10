@@ -419,8 +419,6 @@
 
 .pending-question-context-status {
   font-size: var(--text-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   padding: 0 6px;
   border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
@@ -2028,8 +2026,6 @@
 .gz-npd-crew-voorman {
   color: var(--accent-text);
   font-size: var(--text-2xs);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .gz-npd-give-rows {

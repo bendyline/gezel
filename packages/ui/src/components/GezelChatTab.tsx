@@ -3,7 +3,6 @@ import {
   type GezelDetail,
   type ProjectForGezel,
   displayName,
-  pronounFormsForGender,
 } from '@bendyline/gezel';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -365,24 +364,18 @@ function GezelChatBody({
   // needed.
 
   // Empty-state copy shown above the timeline when the pair has no
-  // messages yet. Keeps the per-gezel-tab framing ("what they're up to
-  // in this project") since the composer pill already surfaces who the
-  // user is talking to.
-  const emptyPlaceholder = useMemo(() => {
-    const pronouns = pronounFormsForGender(gezel.gender);
-    return `Talk to ${gezelDisplayName} about what ${pronouns.subject} ${pronouns.presentBe} working on in this project.`;
-  }, [gezelDisplayName, gezel.gender]);
+  // messages yet. Keeps the per-gezel-tab framing (their work in this
+  // project) since the composer pill already surfaces who the user is
+  // talking to. Like the composer's hint, it names them: no pronoun.
+  const emptyPlaceholder = `Talk with ${gezelDisplayName} about the work in this project.`;
 
-  // Composer placeholder picks from the role-aware pool so the copy
-  // nudges the user toward the right kind of conversation. Voorman
-  // picks get the project-scoped variants; everyone else gets the
-  // generic worker prompt.
+  // The composer's hint for this kind of conversation: a crew lead gets
+  // the project-scoped sentence, everyone else the worker one.
   const composerPlaceholder = useMemo(
     () =>
       pickChatPlaceholder({
         role: project.precedence === 'voorman' ? 'voorman' : 'other',
         gezelName: gezelDisplayName,
-        gezelGender: gezel.gender,
         projectName: project.projectName,
         fixedFunctionTool: gezel.fixedFunction?.tool,
         fixedFunctionEdits: gezel.fixedFunction?.requiresInputImage,
@@ -391,7 +384,6 @@ function GezelChatBody({
       project.precedence,
       project.projectName,
       gezelDisplayName,
-      gezel.gender,
       gezel.fixedFunction?.tool,
       gezel.fixedFunction?.requiresInputImage,
     ],
@@ -549,18 +541,11 @@ function GezelChatAllProjectsBody({ gezel }: { gezel: GezelDetail }) {
       pickChatPlaceholder({
         role: 'other',
         gezelName: gezelDisplayName,
-        gezelGender: gezel.gender,
         projectName: focused ? undefined : 'default',
         fixedFunctionTool: gezel.fixedFunction?.tool,
         fixedFunctionEdits: gezel.fixedFunction?.requiresInputImage,
       }),
-    [
-      gezelDisplayName,
-      gezel.gender,
-      focused,
-      gezel.fixedFunction?.tool,
-      gezel.fixedFunction?.requiresInputImage,
-    ],
+    [gezelDisplayName, focused, gezel.fixedFunction?.tool, gezel.fixedFunction?.requiresInputImage],
   );
 
   const composerProjectId = focused?.projectId ?? 'default';

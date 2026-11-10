@@ -134,7 +134,7 @@ export function AddFolderSheet() {
               {ready.folder && ready.folder.census.cloudOnly > 0 && (
                 <p className="add-folder-note">
                   Files stored only in the cloud are listed by name and date and left in the cloud,
-                  so gezel never downloads them. Download them to have them read too.
+                  so Gezel never downloads them. Download them to have them read too.
                 </p>
               )}
               <label className="add-folder-switch">
@@ -144,11 +144,11 @@ export function AddFolderSheet() {
                   onChange={(e) => setOvernight(e.target.checked)}
                   disabled={adding}
                 />
-                <span>Work on this folder during the night shift</span>
+                <span>Work on this folder during the Night Shift</span>
               </label>
               {overnight && kind && (
                 <>
-                  <div className="add-folder-eyebrow">During the nightshift, Gezel will</div>
+                  <div className="add-folder-eyebrow">During the Night Shift, Gezel will</div>
                   <ul className="add-folder-night">
                     {describeFolderNightWork(kind).map((line) => (
                       <li key={line}>{line}</li>
@@ -175,9 +175,12 @@ export function AddFolderSheet() {
                 {preview.state === 'idle' ? 'Choose a folder…' : 'Choose another…'}
               </button>
             )}
+            {/* The one filled key: the dialog's own `.gz-dialog-actions button`
+              face is the outlined secondary, so the commit must say `primary`. */}
             {existing ? (
               <button
                 type="button"
+                className="primary"
                 onClick={() => {
                   setOpen(false);
                   navigateToTab({ kind: 'project', id: existing.id });
@@ -188,6 +191,7 @@ export function AddFolderSheet() {
             ) : (
               <button
                 type="button"
+                className="primary"
                 onClick={() => void add()}
                 disabled={adding || preview.state !== 'ready'}
               >

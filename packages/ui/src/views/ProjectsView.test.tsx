@@ -63,6 +63,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     initialView,
     fileName,
     readOnly,
+    showFormattingControls,
   }: {
     initialMarkdown?: string;
     onChange?: (source: string) => void;
@@ -72,6 +73,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     initialView?: string;
     fileName?: string;
     readOnly?: boolean;
+    showFormattingControls?: boolean;
   }) => (
     <div
       data-testid="editor"
@@ -80,6 +82,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
       data-initial-view={initialView}
       data-file={fileName}
       data-readonly={String(Boolean(readOnly))}
+      data-formatting={String(showFormattingControls ?? true)}
     >
       <div data-testid="editor-toolbar-right">{toolbarSlotRight}</div>
       {onChange && (
@@ -433,8 +436,8 @@ describe('ProjectsView', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse project list' }));
 
-    expect(screen.getByRole('button', { name: 'New Project' })).toHaveTextContent('+Project');
-    expect(screen.queryByRole('button', { name: /New Job/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New project' })).toHaveTextContent('+Project');
+    expect(screen.queryByRole('button', { name: /New job/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Expand project list' })).toBeInTheDocument();
   });
 
@@ -1641,6 +1644,34 @@ describe('ProjectsView', () => {
     expect(api.toolFileReview).toHaveBeenCalledWith('pj-alpha', { path: 'notes/audit.md' });
   });
 
+  it('opens a file in a read-only workspace without formatting keys, a .txt in Source', async () => {
+    vi.mocked(api.listProjectWorkspace).mockResolvedValue({
+      files: [{ name: 'policy.txt', path: 'Catering/policy.txt', isDirectory: false }],
+      truncated: false,
+    } as never);
+    vi.mocked(api.readProjectWorkspaceFile).mockResolvedValue({
+      path: 'Catering/policy.txt',
+      content: 'Minimum order: $150.\nDeposit: 30%.',
+    } as never);
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      ...CODE_TYPE,
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'policy.txt' }));
+
+    const editor = await screen.findByTestId('editor');
+    expect(editor).toHaveAttribute('data-readonly', 'true');
+    expect(editor).toHaveAttribute('data-formatting', 'false');
+    expect(editor).toHaveAttribute('data-initial-view', 'raw');
+  });
+
   it('offers workspace file mutations only when the write policy allows them', async () => {
     vi.mocked(api.listProjectWorkspace).mockResolvedValue({
       files: [{ name: 'note.md', path: 'notes/note.md', isDirectory: false }],
@@ -2318,7 +2349,7 @@ describe('ProjectsView', () => {
     } as never);
 
     render(<ProjectsView />);
-    fireEvent.click(screen.getByRole('button', { name: '+ New Project' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ New project' }));
 
     const gallery = await screen.findByRole('radiogroup', { name: 'Project type' });
     // The picker opens with nothing chosen — step 1 is the catalog alone.
@@ -2369,7 +2400,7 @@ describe('ProjectsView', () => {
     } as never);
 
     render(<ProjectsView />);
-    fireEvent.click(screen.getByRole('button', { name: '+ New Project' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ New project' }));
 
     const gallery = await screen.findByRole('radiogroup', { name: 'Project type' });
     await within(gallery).findByRole('radio', { name: 'Language Trainer' });
@@ -2409,7 +2440,7 @@ describe('ProjectsView', () => {
     } as never);
 
     render(<ProjectsView />);
-    fireEvent.click(screen.getByRole('button', { name: '+ New Project' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ New project' }));
     fireEvent.click(await screen.findByRole('radio', { name: 'Language Trainer' }));
 
     const nameInput = screen.getByLabelText(/^Name/);
@@ -2479,7 +2510,7 @@ describe('ProjectsView', () => {
     window.addEventListener('gezel:gezel-updated', rosterChanged);
     try {
       render(<ProjectsView />);
-      fireEvent.click(screen.getByRole('button', { name: '+ New Project' }));
+      fireEvent.click(screen.getByRole('button', { name: '+ New project' }));
       fireEvent.click(await screen.findByRole('radio', { name: 'Language Trainer' }));
       fireEvent.change(screen.getByLabelText(/^Name/), {
         target: { value: 'Spanish practice' },

@@ -5,6 +5,7 @@ import { resolveTuning } from '../tuning-resolve.js';
 import { turnCancelledMessage } from '../turn-cancel.js';
 import {
   ToolCallAccumulator,
+  TurnAbortError,
   compactSuccessfulWriteToolCallForTranscript,
   completeWorkspaceReadPaths,
   constrainedToolNoSignalMsForModel,
@@ -5432,8 +5433,17 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
         [
           // LFM2.5 always reasons: 2,720 characters must reach the write,
           // while the ordinary-model case stays below its tighter budget.
-          ...Array.from({ length: 40 }, () => ({
-            choices: [{ index: 0, delta: { reasoning_content: 'hm. '.repeat(reasoningRepeats) } }],
+          // Each chunk opens with a different letter: one unit repeated for
+          // 2,720 chars is degenerate output, which ends the turn by itself.
+          ...Array.from({ length: 40 }, (_, i) => ({
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  reasoning_content: `${String.fromCharCode(97 + (i % 26))}${'hm. '.repeat(reasoningRepeats).slice(1)}`,
+                },
+              },
+            ],
           })),
           {
             choices: [
@@ -10137,5 +10147,108 @@ describe('standalone turns', () => {
     } finally {
       await provider.shutdown();
     }
+  });
+});
+
+describe('degenerate engine output (2026-11-10, squisq/37)', () => {
+  it('stops a thinking stream that repeats one character and asks the host to restart the engine', async () => {
+    let requestSignal: AbortSignal | undefined;
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      requestSignal = init?.signal as AbortSignal | undefined;
+      return abortableSseResponse(requestSignal, [
+        { choices: [{ index: 0, delta: { reasoning_content: 'Reading the audit notes. ' } }] },
+        ...Array.from({ length: 60 }, () => ({
+          choices: [{ index: 0, delta: { reasoning_content: '/'.repeat(64) } }],
+        })),
+        { choices: [{ index: 0, finish_reason: 'length' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+    const reports: unknown[] = [];
+    Object.assign(provider.host, {
+      recoverFromDegenerateOutput: async (report: unknown) => {
+        reports.push(report);
+        return true;
+      },
+    });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'qwen' });
+
+    const err = await session.sendAndWait('write the report').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TurnAbortError);
+    expect((err as TurnAbortError).userMessage).toBe(
+      'The on-device model got stuck repeating "/" and produced nothing usable. Gezel restarted it. Try again.',
+    );
+    expect(reports).toEqual([
+      { kind: 'repeated-output', channel: 'reasoning', unit: '/', length: 1024 },
+    ]);
+    // The request was cut off at the run, not left to stream to the cap.
+    expect(requestSignal?.aborted).toBe(true);
+  });
+
+  it('says to restart the engine when the host cannot', async () => {
+    globalThis.fetch = (async () =>
+      sseResponse([
+        { choices: [{ index: 0, delta: { content: 'x'.repeat(5000) } }] },
+        '[DONE]',
+      ])) as typeof fetch;
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'qwen' });
+    const err = await session.sendAndWait('hello').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TurnAbortError);
+    expect((err as TurnAbortError).userMessage).toMatch(/Restart the on-device engine/);
+  });
+
+  it('ends a reply whose draft acceptance collapsed when the host judges the engine sick', async () => {
+    globalThis.fetch = (async () =>
+      sseResponse([
+        { choices: [{ index: 0, delta: { content: 'Done.' } }] },
+        {
+          choices: [{ index: 0, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 10, completion_tokens: 5000 },
+          timings: { predicted_per_second: 16, draft_n: 15000, draft_n_accepted: 0 },
+        },
+        '[DONE]',
+      ])) as typeof fetch;
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+    const samples: unknown[] = [];
+    const reports: unknown[] = [];
+    Object.assign(provider.host, {
+      judgeDraftAcceptance: (sample: { drafted: number; accepted: number }) => {
+        samples.push(sample);
+        return { sick: true, acceptance: 0, baseline: 0.83, ...sample };
+      },
+      recoverFromDegenerateOutput: async (report: unknown) => {
+        reports.push(report);
+        return true;
+      },
+    });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'qwen' });
+    const err = await session.sendAndWait('hello').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(TurnAbortError);
+    expect(samples).toEqual([{ drafted: 15000, accepted: 0 }]);
+    expect(reports).toEqual([
+      { kind: 'draft-collapse', drafted: 15000, accepted: 0, baseline: 0.83 },
+    ]);
+  });
+
+  it('leaves a healthy reply alone', async () => {
+    globalThis.fetch = (async () =>
+      sseResponse([
+        { choices: [{ index: 0, delta: { content: 'All good.' } }] },
+        {
+          choices: [{ index: 0, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 10, completion_tokens: 3 },
+          timings: { draft_n: 3, draft_n_accepted: 2 },
+        },
+        '[DONE]',
+      ])) as typeof fetch;
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+    Object.assign(provider.host, {
+      judgeDraftAcceptance: () => ({ sick: false }),
+    });
+    const session = await provider.createSession({ systemMessage: 'sys', model: 'qwen' });
+    await expect(session.sendAndWait('hello')).resolves.toBe('All good.');
   });
 });

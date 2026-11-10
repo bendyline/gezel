@@ -182,6 +182,21 @@ describe('ProjectGitStatusBar', () => {
     expect(api.refreshProjectIndex).not.toHaveBeenCalled();
   });
 
+  it('shows a first scan that has not run as a quiet state, not an error', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({ state: 'never' } as never);
+
+    render(<ProjectGitStatusBar projectId="pj-1" />);
+    const trigger = await screen.findByRole('button', { name: /Not scanned yet/ });
+    expect(trigger).toHaveClass('project-index-chip-waiting');
+    expect(trigger).not.toHaveClass('project-index-chip-stale');
+    expect(trigger).toHaveTextContent('Not scanned yet');
+    expect(screen.queryByText('Not indexed')).toBeNull();
+
+    await userEvent.click(trigger);
+    const panel = await screen.findByRole('dialog', { name: 'Indexing status' });
+    expect(panel).toHaveTextContent('Your crew can still open these files.');
+  });
+
   it('starts a full-intensity drive from the panel and shows it running', async () => {
     vi.mocked(api.driveIndexEnrichment).mockResolvedValue({
       paused: false,

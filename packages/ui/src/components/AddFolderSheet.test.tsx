@@ -42,8 +42,12 @@ describe('AddFolderSheet', () => {
     expect(
       screen.getByText('Describe your photos, so you can find one by what is in it'),
     ).toBeInTheDocument();
+    // One spelling of Night Shift, and one filled key (2026-11-09).
+    expect(screen.getByText('During the Night Shift, Gezel will')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add folder' })).toHaveClass('primary');
+    expect(screen.getByRole('button', { name: 'Cancel' })).not.toHaveClass('primary');
     fireEvent.click(
-      screen.getByRole('checkbox', { name: 'Work on this folder during the night shift' }),
+      screen.getByRole('checkbox', { name: 'Work on this folder during the Night Shift' }),
     );
     fireEvent.click(screen.getByRole('button', { name: 'Add folder' }));
 

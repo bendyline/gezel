@@ -668,27 +668,24 @@
 
 /* A reply stays at chat scale. It renders in Squisq's document register
    (em-based, see RenderedMarkdown), whose top heading is still 1.6em and
-   opens under a hairline, like a report's. In a bubble no heading is larger
-   than 1.25em of the reply's own text, list numerals are the size of that
-   text, and a heading keeps the bubble's spacing with no rule above it. The
-   doubled `.squisq-linear-content.squisq-page` outranks Squisq's own rules,
-   which load later from inside the view, in either of its registers: the
-   page register sized a reply's heading 32px over 15px prose. */
+   opens under a hairline, like a report's. In a bubble a heading is one
+   step of the type scale above the reply's own text, 17px over 15px prose
+   (`--text-lg` over `--text-md`, written in em so a gezel's font scale still
+   applies), and the deepest levels are text-sized. List numerals are the
+   size of that text, and a heading keeps the bubble's spacing with no rule
+   above it. The doubled `.squisq-linear-content.squisq-page` outranks
+   Squisq's own rules, which load later from inside the view, in either of
+   its registers: the page register sized a reply's heading 32px over 15px
+   prose, and 1.25em still read as a document title inside a bubble. */
 .msg-body-rendered
   .squisq-linear-content.squisq-page
   :is(
     .squisq-page-section-title,
     .squisq-page-banner-title,
     .squisq-page-items-title,
-    .squisq-page-prose :is(h1, h2)
+    .squisq-page-prose :is(h1, h2, h3)
   ) {
-  font-size: 1.25em;
-}
-
-.msg-body-rendered
-  .squisq-linear-content.squisq-page
-  :is([data-heading-level="3"] .squisq-page-section-title, .squisq-page-prose h3) {
-  font-size: 1.1em;
+  font-size: 1.1333em;
 }
 
 .msg-body-rendered
@@ -787,6 +784,42 @@
 .msg-from-gezel .msg-body {
   background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
   border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
+}
+
+/* A narrow conversation (a page's companion chat, the Office pane, about
+   320px) gives its width to the words. An indented reply under the 92% cap,
+   inside the timeline's gutter and the bubble's own padding, wrapped at about
+   22 characters a line. Here a reply takes the whole column, and the message
+   actions sit in the flow as they do on a narrow window, since the gutter
+   they float in is gone. Container query, not viewport: the pane is narrow
+   inside a wide window. */
+@container chat-timeline (max-width: 420px) {
+  .chat-timeline-viewport > .chat-timeline {
+    --thread-indent: 0.75rem;
+    padding-inline: 0.5rem;
+  }
+  .chat-timeline :is(.msg-assistant, .msg-from-gezel) {
+    max-width: 100%;
+  }
+  .chat-timeline :is(.msg-body, .msg-body-rendered) {
+    padding-inline: 0.55rem;
+  }
+  .chat-timeline .msg-actions-anchor {
+    position: static;
+    height: auto;
+    padding: 0.5rem 0 0;
+  }
+  .chat-timeline .msg-actions {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .chat-timeline .msg-action-button:not(.msg-action-button-debug),
+  .chat-timeline .msg-actions-anchor:not(:has(.msg-action-button-debug)) {
+    display: none;
+  }
 }
 
 .msg-role-handoff {
@@ -993,6 +1026,32 @@
 
 .msg-grounding-missing {
   color: var(--muted, #888);
+}
+
+/* The same sentences, marked where they stand in the reply (grounding-flags.ts):
+   a wavy ochre underline on a faint wash, the attention color. A gray count
+   under the reply was the only sign before, and a wrong table read as settled. */
+::highlight(gezel-unconfirmed) {
+  background-color: color-mix(in srgb, var(--warning) 16%, transparent);
+  text-decoration: underline wavy var(--warning);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* The count of those sentences, in the attention color rather than the
+   footer's gray. */
+.msg-grounding-flagged {
+  color: var(--warning-text);
+}
+
+/* A calculated number's working: the query, then what it returned. */
+.msg-grounding-query-label {
+  margin: 0.35rem 0 0.15rem;
+  color: var(--muted, #888);
+  font-size: var(--text-xs);
+}
+.msg-grounding-query-label:first-child {
+  margin-top: 0;
 }
 
 .msg-refs-label {

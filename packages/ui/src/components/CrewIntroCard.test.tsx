@@ -32,7 +32,8 @@ describe('CrewIntroCard', () => {
     ]);
     expect(screen.getByText('Trip Planner')).toBeInTheDocument();
     expect(screen.getByText('Crew Lead')).toBeInTheDocument();
-    expect(screen.getByText('Starts with “First draft”')).toBeInTheDocument();
+    // The plan's step name is not a schedule to read out.
+    expect(screen.queryByText(/Starts with|First draft/)).not.toBeInTheDocument();
   });
 
   it('opens a chat with the gezel from Say hello', () => {

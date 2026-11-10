@@ -177,7 +177,10 @@ pacing of a transition. If a first-time user can't quite put a finger on
   its dark contrast. Monaco themes and Squisq reading surfaces cannot read CSS
   variables and repeat the panel and inset hexes (`monaco-base.ts`,
   `terminal-monaco-setup.ts`, `transform/surfaces.ts`); the chat reading
-  surface repeats the reading papers (`chat-theme.ts`).
+  surface repeats the reading papers (`chat-theme.ts`). The app pages'
+  component kit cannot read them either: its `--action` / `--on-action` pair
+  repeats the deep terracotta and cream for primary keys and the demo Send
+  (core `page-components.ts`), while its `--accent` lifts for rings and tints.
 
   **Spend the accent once per view.** One filled primary per view, reserved
   for create or commit. The bare `button` face is that filled primary, so a
@@ -216,6 +219,11 @@ pacing of a transition. If a first-time user can't quite put a finger on
   cards (`.gz-npd-card-badge`) is the one deliberate exception, and only for
   something not yet available. Keyword tags (a model card's `agentic`,
   `tools`) are metadata, not status: small-radius chips (`--radius-sm`).
+  Sentence case means the text itself reads "Paused", "Crew lead" or
+  "Role default", with no `text-transform` on the badge. The chat rail's
+  task status, the New Project crew's lead marker, the toolset tile captions
+  and the Copilot page's Active badge were all drawn in capitals until
+  2026-11-09.
 - **Typography** is a two-font system — **Hanken Grotesk** (sans) for all
   UI chrome and **PT Serif** (serif) for the editorial register. Both are
   bundled woff2 (no CDN). The rules and the shared size scale live in
@@ -758,6 +766,20 @@ Don't restyle a settings page per surface; extend the recipe and this section.
   at the row's end.
 - **Save messages are sentences.** "Generalist mode is Automatic. On for
   cloud providers…", never "generalist mode ON".
+- **Check only what the person uses.** A provider page probes its
+  connection on open only when that provider runs something: the default,
+  the Night Shift's model, a crew member's own provider, or a stored key
+  (`copilotIsInUse`). Otherwise it reads "Not set up" and Test connection
+  probes on demand. A failure is one plain sentence that names the fix; the
+  provider's own error stays in the tooltip. Any Copilot CLI on the machine
+  made Copilot look installed, and an owner on This PC opened the page to
+  "copilot provider failed to start: Pending response rejected since
+  connection got disposed".
+- **Words a person reads are English.** The tempo keys are Relaxed, Steady,
+  Brisk and Hectic, each explained as how often check-ins come while a
+  project is busy and once it goes quiet. The stored ids (`gezellig`,
+  `bedrijvig`, `druk`, `dolle-boel`) do not change; the Meester is the only
+  Dutch title on screen.
 
 ## Typography
 
@@ -871,6 +893,11 @@ rail's group headers, the category headers in the New Task and New Project
 rails, and the one dateline that opens Home (`.home-workshop-dateline`).
 When nine kinds of label all whispered in capitals, none of them marked a
 section, and a long one wrapped to leave one word alone on a line.
+
+**Create keys and their dialogs are sentence case, in the owner's words.**
+The area keys read **+ New project**, **+ New task**, **+ New crew member**
+and **+ New plan**, and the dialogs they open are titled "New project" and
+"New task". "+ New Project" sat beside "+ New gezel" and "+ New craftbook".
 
 **Names and roles are written one way.** A crew member and their role
 always render through `PersonLabel`
@@ -1123,13 +1150,21 @@ height and 30px keys, which centres them on the traffic lights (a trackpad
 needs no 44px target). The phone preview keeps phone sizes. Compact layouts spend no row on a heading that only repeats a name: a
 single-project tab has no project title row. The Projects area keeps its row
 for the back button. The chat's thread-and-task strip shrinks to one-line
-tiles, 60px wide and 24px tall (WCAG's minimum target), that show the status
-dot and the start of the title. This is a deliberate exception to the 44px
+tiles, 24px tall (WCAG's minimum target), that show the status dot and the
+title, each as wide as its title needs up to 12rem or two fifths of the
+strip. A fixed 60px cut "Write a short, friendly reminder…" to "Writ…" beside
+a strip that was otherwise empty. This is a deliberate exception to the 44px
 rule. The strip stays a glance at the state of the work, not a second pane,
-and each tile's accessible name still carries the full summary.
-On touch screens and windows up to 600px, where a message's action row sits
-in the flow instead of floating in the gutter, it shows only the debug-bundle
-key, and only while debug mode is on; Copy and Save stay desktop affordances.
+and each tile's accessible name still carries the full summary. With no
+recent work there is no strip at all, at any width: a new project's chat
+opened under an empty tray the height of a row of tiles.
+On touch screens and windows up to 600px, and in a conversation narrower than
+420px inside a wide window (a page's companion chat), a message's action row
+sits in the flow instead of floating in the gutter; it shows only the
+debug-bundle key, and only while debug mode is on; Copy and Save stay desktop
+affordances. A conversation that narrow also gives its replies the whole
+column, with a tighter thread indent and bubble padding: under the usual 92%
+cap a reply there wrapped at about 22 characters a line.
 Wider than that, the thread bar rides the To line: who and which
 conversation are one line of context ("To · Ada Lovelace · Engineer", then the
 thread picker taking what the recipient leaves), and it wraps to a full-width
@@ -1163,6 +1198,39 @@ as do portaled dialogs. Menus, selects, popovers, and tooltips use that same
 safe app rectangle for collision detection. Replies render as text without privileged HTML or external
 navigation inside the native web view.
 
+**A narrow window gives the work the room.** Below 1,200 px
+(`NARROW_WINDOW_PX`, [useNarrowWindow.ts](../packages/ui/src/components/useNarrowWindow.ts))
+the navigation rail folds to its icons, and a project's docked board steps
+aside on the Tasks and Settings tabs, the two that need the width. Neither
+changes a saved choice: opening the rail, or pressing the board's toggle,
+holds it open for the visit, and a wider window brings back what the person
+had. At 1024 x 700 the open rail took 23% of the window while a task's
+detail was 120 px wide, its title wrapped to three lines and its status keys
+were cut off. A board's own tiles are its page's CSS, so making them wrap is
+the app's to do.
+
+**An empty place says what it is for and how to start.** One sentence on what
+the place holds, and one key worded as what the person gets: "Give the crew
+a task", "Start a project", never "New task"
+([EmptyPlace.tsx](../packages/ui/src/components/EmptyPlace.tsx)). It sits in
+the upper part of the pane, where the eye lands; a line centered in a tall
+window read as a pane that had failed to load. An empty group in the rail
+offers the same start as a quiet link ("Start your first project"), not a
+statement that nothing is there. A filtered list that matches nothing offers
+the way back ("Show every task"). New owners met "Pick a project on the left
+to view it here" over a blank page and "No one-time tasks have been created
+yet" in the middle of another; neither said what the place was for.
+
+**A doubted sentence is marked where it stands.** When the fact check could
+not find a statement in any source, the reply marks that sentence with a
+wavy ochre underline on a faint wash (`::highlight(gezel-unconfirmed)`,
+[grounding-flags.ts](../packages/ui/src/components/grounding-flags.ts)), and
+the line under the reply says how many are marked, in the attention color.
+The count in gray footer text was the only sign before, so a wrong weekday
+table read as settled. A number the engine calculated shows its working:
+its source reads "Calculated from …", and opening it shows the query and
+what it returned.
+
 The UI is React + Vite with **plain CSS + CSS variables** — no Tailwind, no
 CSS-in-JS. All complex interactive controls (dialog, select, tabs, popover,
 tooltip, dropdown, alert-dialog) come from **Radix UI Primitives**,
@@ -1194,9 +1262,22 @@ activity and report actions wait for the service. The Home Handboek introduction
 ships with this reader and works on a first launch too.
 
 The local screen uses the live app's logo, navigation tab, Home typography,
-Meester figure, greeting, and tip components and styles. It deliberately omits
-search, the project/crew lists, and the chat composer. A quiet loading indicator
-occupies the space below the intro sheet. The saved character is the Meester's
+Meester figure, greeting, and tip components and styles. **It is the running
+window's frame, waiting** ([startup/Chrome.tsx](../packages/ui/src/startup/Chrome.tsx)):
+the title bar holds Back, Forward and the trail, the brand and the search well,
+disabled; the rail holds Home and, inert, the same groups and rows the live
+rail will show; the Home tabs are the live set (Night shift only when there
+is a night to read about, Create disabled until the workshop opens). A home
+nobody has used yet (`StartupHomeSnapshot.welcome`, the service's own
+`everUsed` rule) opens on the Meester's welcome, so the screen draws the
+welcome's shape instead of the greeting sheet. The composer's frame stands
+where the composer will, and its draft area says "Opening your workshop…" with
+moving dots, the one place an open sheet never covers; placeholder lines
+breathe where text is on its way. The screen once showed a brand, a status
+pill and one Home row, then swapped to a different page with six more keys and
+rows about ten seconds in. Breathing placeholders are an exception to "No
+shimmer and no spinner": that rule is for a pane swapped in under a second,
+and starting the workshop takes ten. The saved character is the Meester's
 persisted poppetje, not a generated stand-in.
 
 The entry includes React and the small Home components (a 400 KB script budget).
@@ -1290,8 +1371,10 @@ and the meester's lines in the chat register (serif body). Rules:
   `--warning` dot and line on the toolbar beside it (`.chat-composer-held`),
   "**Can't send yet:**" plus where setup stands. In the meester's thread
   that is the welcome's own state ("download tools (an AI model) first",
-  `composerWaitingStatus`); elsewhere it is "no AI model is downloaded" with
-  a **Get started** key to Home. A dimmed arrow alone read as broken. A
+  `composerWaitingStatus`); elsewhere it is the running download in the same
+  words ("downloading the AI model · 42%", `modelInstallStatus`), else "no AI
+  model is downloaded", with a **Get started** key to Home. A dimmed arrow
+  alone read as broken. A
   failure is one plain sentence with **Try again** and quiet escape links; a
   report link only for real failures.
 - **The first request does not wait for the person to come back.** Once
@@ -1347,7 +1430,15 @@ and the meester's lines in the chat register (serif body). Rules:
   arrives in the composer with its book attached, and with the book's
   bundled sample when it has one, so Send starts it with no meester turn
   and nothing of the person's own. A key prefills an editable sentence and
-  never sends it. "Or tell me in your own words" sits beneath. They are
+  never sends it. A first project that needs the person's own details
+  (a trip's place and dates, who owes them money, this month's news) carries
+  an `ask`: the meester asks its question under the cards, the composer gets
+  only the opening words with the caret after them ("Plan a trip to "), and
+  one way to finish the sentence shows as "For example: …". "Send an
+  invoice" once wrote an illustrator's two clients into a baker's box. The
+  opening alone must route the request to its project type
+  (`first-projects.test.ts` in core and the catalog). "Or tell me in your own
+  words" sits beneath when no question is asked. They are
   held back while the welcome asks for tools. A first
   project joins the pool only after it passes its evals (`first-project-*`
   scenarios: 2 of 3 on Gemma 4 E4B, 3 of 3 on Gemma 4 12B, Lockdown); a
@@ -1397,11 +1488,20 @@ What the meester's thread shows after the person asks for something:
   gezel's replies remain visible in both modes.
 - **The crew arrives as cards** (`CrewIntroCard`, a `crew-introduction`
   message carrying `crewIntroduction`): a headshot, the name in the serif,
-  their role in plain words ("Trip Planner", "Crew Lead"), what they start
-  with, and **Say hello**, which opens their chat. The lead and
+  their role in plain words ("Trip Planner", "Crew Lead"), what they do
+  (the first sentence of their description), and **Say hello**, which opens
+  their chat. The lead and
   whoever starts the work are introduced as the task begins; a gezel hired
   for a later step is introduced when they start. Each gezel is introduced
-  once per thread.
+  once per thread. Neither the card nor the introduction's text names the
+  step they start on: `Minji (Office Administrator) starts with "First
+  draft"` read as a schedule in the plan's own words, and a small model
+  repeated it to the person. The text says who joined and as what ("Your
+  crew for this: **Minji** (Office Administrator)."). A crew member hired
+  moments ago is not in the roster the thread read, so the thread reads it
+  again; until it answers, the portrait is a quiet empty tile
+  (`GezelIcon` `pending`), never a letter that turns into a figure a moment
+  later. The tracker's line does the same for its lead.
 - **The crew's work folds into one line** (`WorkingNotes`) in every
   conversation, not only the meester's Home thread: "Mira is working…" with a
   breathing dot, then "Mira's working notes". The worker's transcript,
@@ -1464,15 +1564,17 @@ What the meester's thread shows after the person asks for something:
   so a lead running in the default posture is not handed hotels, dining and
   a budget it cannot research. The lead makes what was asked and offers the
   extras in its reply.
-- **Then, on a later visit, the folder question.** The meester asks at the
-  foot of the thread whether to look after a folder
-  (`FolderOnboardingStep`), but only in a thread that already held a
-  finished task when it opened (`trailingContentAfterWrapUp`,
-  `hadWrapUpAtLoad`). A wrap-up that lands while the person watches never
-  reveals it, and it never appears during first run. It asks about folders
-  and night work, which have nothing to do with the result just made, so it
-  waits until that result has had the screen to itself. Nothing is ticked
-  and neither overnight key is latched: the person chooses, or skips.
+- **Then, on Home, the folder question.** Which folders to look after and
+  whether to work at night (`FolderOnboardingStep`) is asked on Home's
+  greeting, under the headline and in place of the tip, and never in a
+  conversation. In the thread it was appended under the first result and
+  scrolled it off the screen. It waits until the person has opened a
+  finished result from its card (Open, Show in folder or Save a copy…,
+  stamped once as `onboarding.firstResultOpenedAt` by `result-opened.ts`),
+  so it never competes with the first thing the crew made, and it never
+  appears during first run. The greeting is rolled up while the person is
+  talking, so the question is seen on the next visit to Home. Nothing is
+  ticked and neither overnight key is latched: the person chooses, or skips.
 - **A request with work behind it gets one tracker** (next section). Outside
   debug mode it stands for the cards, introductions and finished card above;
   the crew still arrives as cards once, at kickoff.
@@ -1519,14 +1621,23 @@ key as `Task.requestRef`.
 - **Ready is the file.** The finished card moves from the wrap-up into the
   tracker, credited to the lead and named for the request
   (`RequestTrack.title`, the task's title unless that is only the plan's
-  name); the wrap-up's words stay. A request that is
+  name). The tracker's last stop and the card say the work is ready, so the
+  wrap-up does not say it again: "Ready" read three times over one result
+  when the wrap-up also opened "Your Word document is ready: …". A wrap-up
+  with a deliverable keeps only what the card cannot say: what was checked,
+  the maker's open question, and what to do next ("Open your Word document
+  to review, or tell me what you would like changed.", named by kind so the
+  thread's preview line still says what it is about). A request that is
   Ready while the meester still writes says "is wrapping up" and never flips
   back to working.
 - **What it stands for stays out of the thread** outside debug mode:
   launch cards, joined-crew introductions, queued-task receipts and rail
   cards for its tasks. **Open the task** under the disclosure is the way in.
   Debug mode shows all of it again, and the tracker adds who really holds
-  which step and the task id.
+  which step and the task id. A folded introduction still introduces: the
+  tracker names whoever joined the crew for the request, in the lead's words
+  ("Dejan brought Noor (Researcher) onto your crew for this.",
+  `RequestTrack.joined`), with their cards under **Who's helping?**.
 - **Not tracked**: task-scoped sessions and plain replies with no work.
   Activity folds a request's tasks, shards, sessions and receipt into one
   `request:<key>` row, drawn as the compact tracker, whose key opens the
@@ -1684,7 +1795,10 @@ beams and upright pegs. The active halo breathes gently, with no animation under
 reduced motion; size, glyph, ring, and an explicit Active label also carry state.
 
 Opening a task centres its current step, and advancing or resizing recentres
-it. Manual scrolling remains free until one of those changes. Selecting a step
+it. The left edge then snaps to a column boundary (`snapRouteScroll`), so no
+caption is cut at its start: a long name is ellipsized at its end, never
+read as "rite the Markdown docu…". Manual scrolling remains free until one of
+those changes. Selecting a step
 to inspect is separate from progress: underline its label and, on the full
 bench, dock its caption into the panel. Assignees remain above the full route;
 step names and status stay below. Both sizes use the shared semantic palette.
@@ -1979,6 +2093,16 @@ only the kinds it lists. Picking a kind shows that kind whatever it is, and
 debug mode shows everything. The bakery's Overview had opened on eight rows
 of tool calls and prompt sizes.
 
+**Activity lines read as sentences.** The log's summaries are written for the
+History view and the crew's `search_history`, so they carry task refs,
+catalog versions and full folder paths. The Overview words them for a person
+outside debug mode ([project-activity-line.ts](../packages/ui/src/views/project-activity-line.ts)):
+"Finished "First draft"", "Set up as Freelance Office", "Project created for
+the folder "Bakery"". The log keeps its own wording. An Overview promises the
+map, folder notes and architecture summary only to a codebase (core's
+`projectHoldsCode`): the bakery's invoice office was told they would appear
+once indexing ran.
+
 **Settings shows the developer areas an install uses.** Ollama, the OpenAI
 Codex and Anthropic Claude CLIs, Remote servers and Shared Toolsets are listed
 in debug mode, or once this install uses them: the provider is the default,
@@ -2258,7 +2382,7 @@ embedder had. Those two claims are not the same promise, and the reader
 cannot tell them apart from the snippet — a semantic hit's excerpt is
 usually the file's *generated summary*, so an unrelated document arrives
 wearing a confident description of itself. Any surface listing mixed-arm
-results marks the semantic ones with a small uppercase `related` badge
+results marks the semantic ones with a small sentence-case **Related** badge
 (`--text-2xs`, `--radius-sm`, `--border` — the neutral badge recipe shared
 with chat's `automatic`), and never marks a keyword hit. Presenting the two
 identically is how document search came to read as "it just lists my
@@ -2320,13 +2444,36 @@ intro (all `.gezel-article-view`).
 register) renders in the document register too. The page register sizes in
 `rem`, so the bubble's 15px base never reached it: a heading in a reply came
 out near 32px, and a numbered list as a typed section with "01 / 02"
-numerals. In a bubble no heading is larger than 1.25em of the reply's own
-text, list numerals are the size of that text, a list the gezel wrote is a
-list, and a top-level heading keeps the bubble's spacing with no rule above
-it (`.msg-body-rendered` in
+numerals. In a bubble a heading (levels 1 to 3) is one step of the type scale
+above the reply's own text, 17px over 15px (`--text-lg` over `--text-md`,
+written as 1.1333em so a gezel's font scale still applies), and deeper levels
+are text-sized; 1.25em still read as a document title inside a bubble. List
+numerals are the size of that text, a list the gezel wrote is a list, and a
+top-level heading keeps the bubble's spacing with no rule above it
+(`.msg-body-rendered` in
 [styles/shared-content.css](../packages/ui/src/styles/shared-content.css),
 pinned by `readability-guards.test.ts`). `RenderedMarkdown`'s `report`
 register is unchanged.
+
+**The pinned header covers what scrolls under it.** The sticky header at the
+top of a conversation (the prompt being answered and who is answering) is
+opaque, on the bubble's own paper. At 96% with a blur, the reply underneath
+still read through it as a second, fainter sentence.
+
+**A page's companion chat is that conversation only.** The chat a page
+places beside its board (`PageChat`) shows the crew
+member's ordinary threads and leaves out their task and plan threads
+(`ProjectTimeline`'s `ordinaryThreadsOnly`). The project's kickoff task is
+worked by the same crew member, and its thread opened the companion chat on a
+"Step complete" card and a link to the page's data file.
+
+**A board's dialog dims the companion chat; it never empties it.** The chat
+is drawn by the shell above the page's frame, so a page dialog's backdrop
+cannot reach it. The page reports the open dialog (`chat-position`'s `modal`),
+and `PageChatSlots` lays the page's own backdrop color over the chat, cuts the
+dialog's area out of it so the dialog is never covered, and lets clicks fall
+through to the page until it closes. Hiding the chat instead left an empty
+panel beside a dimmed board, which read as the conversation being lost.
 
 **Forms.** Raw `<input>`, `<textarea>`, `<fieldset>` are fine — Radix
 doesn't ship form primitives and we don't need them. Schema-driven Squisq
@@ -2401,6 +2548,15 @@ all (`data-blank`); a full-width column beside either leaves two-thirds of
 the dialog standing empty. Both stack into one centered column instead, at
 the same dialog size.
 
+**A project type's questions never answer themselves.** A typed answer's
+schema default is the stand-in the type's text falls back to ("the
+business", "our home"), so the field starts empty with that default as its
+hint, and a field left blank still creates the project with it
+(`project-type-params.ts`). Prefilled, "the business" read as the person's
+own answer. A currency is a list of codes with their names, starting on the
+type's default, never a three-letter code typed from memory. Choices,
+numbers and dates keep their defaults as values.
+
 **A craftbook's input is a source picker, not a text field.** When a book
 works *on* files (see [craftbook-inputs.md](craftbook-inputs.md)), its input
 params come out of the generic parameter form and render above it, under a
@@ -2446,9 +2602,15 @@ rail turns into a horizontal scroller — a stacked heading has no row to head.
 first wherever work is offered, and every item stays reachable:
 
 - New Task leads its rail with **For you** (the books serving the person's
-  areas, in the order the areas were picked, books that carry a sample first)
-  and opens on it, except inside a project whose type recommends its own
-  shelf. All plans stays one click away.
+  areas) and opens on it, except inside a project whose type recommends its
+  own shelf. All plans stays one click away. The shelf is ordered for
+  someone starting out, never by the alphabet (`orderForYou`): the welcome's
+  first projects for those areas, then books ready to try (a starter, a
+  sample), then the rest, and last what needs setup (a toolset to install, a
+  connector to bind). Inside each group the first-picked area leads, and a
+  book written for that area alone beats one that serves it through its
+  category. Alphabetical opened a bakery owner's shelf on "A/B Ad Copy
+  Variations" and "Audit Evidence Pack".
 - A book's input picker adds a third key, **Try a sample**, when the book
   carries a sample for that input, with one muted line saying it is made-up
   example data. Never preselected, and never offered to a recurring run.
@@ -2471,6 +2633,15 @@ first wherever work is offered, and every item stays reachable:
 - The navigation rail's Workshop group starts open when the areas include
   `software`. That is a default only: the group is on the rail either way,
   and the person's own open or closed choice replaces it.
+
+**The Plans area is for using plans first.** It lands on the person's own
+plan when they have one; otherwise nothing is selected and the pane says what
+a plan is and how to start one. An open plan's primary key is **Start a
+task**, which opens the same launch form New Task does on that plan; **Copy
+to edit** is secondary. A project's own plan runs only inside its project, so
+it starts from that project's New task, not from here. The area used to open
+on the catalog's alphabetical first plan in its step editor, with Copy to
+edit as the only key.
 
 **A plan this host cannot run is shown with its reason.** New Task lists a
 craftbook the phone cannot run as a disabled card whose description is the
@@ -2657,7 +2828,7 @@ lets Shift+Enter reach the normal paragraph-break behavior.
 **The draft can take the window.** An icon key at the right end of the To
 line — past the recipient picker and immediately before the compose-mode
 tabs, so the frame's size control sits with the frame's other keys rather
-than crowding Send — toggles the composer between its three-line strip and
+than crowding Send — toggles the composer between its two-line strip and
 the top ~80% of the chat column, because a brief or a PRD is unreadable
 through a slot and scrolling it inside the slot loses the shape of the thing
 being written. The size belongs to the frame, not to the mode: terminal mode
@@ -2675,6 +2846,33 @@ chevrons pushing apart, closing back together once expanded, and carries
 recipient picker's **+** are flat keys, like the tools beside Send: no fill
 or border at rest, a wash on hover, and the wash stays while the picker is
 open or the draft is expanded.
+
+**At rest the draft is two lines.** Collapsed, the editor rests at about two
+lines (`minHeight` 104px with its toolbar, and the terminal's command entry
+matches it through `--compose-entry-height`) and grows with the text up to
+half the window. At three lines a 1280x720 window gave the composer about
+200px and the conversation about ten lines.
+
+**One hint per place, and it names the crew member.** The empty draft's
+placeholder is one fixed sentence for each kind of conversation
+(`pickChatPlaceholder`): the meester's front door, a project's crew lead, any
+other crew member, and a direct generator's directive copy. It is never a
+random pick: re-rolled each time the recipient's details loaded, one Home
+visit showed five different hints. Hints and empty-thread lines use the
+crew member's name and no pronoun, because a gender that had not loaded yet
+made the same meester "them" in one hint and "her" in the next.
+
+**An unsent starter is not a thread.** While the composer holds a draft that
+no thread owns yet (a welcome starter, say), the thread picker's trigger says
+**New thread**, where the message will go. It used to show the draft's row,
+"Plan a trip to Kyoto… · 1m ago", which read as a conversation already had.
+The draft keeps its row under *Not sent yet* in the menu.
+
+**A held composer says the same thing everywhere.** While the first model
+downloads, a crew member's chat reads the daemon's install list and says
+"Can't send yet: downloading the AI model · 42%" in Home's words
+(`modelInstallStatus`), with **Get started** still leading to Home. It used
+to say "no AI model is downloaded" while Home said the download was running.
 
 **Take photo is the camera's one door.** The composer toolbar's camera key
 sits between Insert image and Attach file and inserts `![Photo](…)` into the
@@ -2734,8 +2932,8 @@ mid-turn means Nudge, Escape means Stop. Queued nudges render in the timeline as
 existing dashed ghost bubbles ("⋯ nudge") with Edit / Discard / Cancel
 current turn actions — editing swaps the preview for an inline textarea in
 the same dashed not-yet-sent vocabulary and never opens a dialog. A user
-message that was delivered from the queue carries a small uppercase
-`nudged` badge (`--text-2xs`, `--radius-sm`) after "You". Stop never
+message that was delivered from the queue carries a small **Nudged** badge
+(`--text-2xs`, `--radius-sm`, sentence case) after "You". Stop never
 discards queued nudges; each ghost keeps its own Discard so the user
 decides.
 
@@ -2747,7 +2945,7 @@ never typed them, and a transcript that opens with "YOU · call
 warm-companion framing. Any such turn carries `origin: 'system'`
 ([`ChatMessage`](../packages/core/src/schemas/gezel.ts)), and every surface
 that names an author must honour it: the bubble reads **System** with a
-small uppercase `automatic` badge (the neutral sibling of `nudged` — same
+small **Automatic** badge (the neutral sibling of Nudged — same
 `--text-2xs` / `--radius-sm` recipe, `--border` instead of terracotta) and
 drops to the panel tone, because the terracotta fill *is* the signal that
 words came from the user. The rule travels to every author label, not just
@@ -2818,8 +3016,8 @@ which the daemon records as a synthetic `craftbook-launch` assistant turn
 shaped like that tool call — the transcript renders an inline card under the tool
 row ([`ToolCraftbookCard`](../packages/ui/src/components/ToolCraftbookCard.tsx),
 `msg-tool-card-*` block in [styles/chat.css](../packages/ui/src/styles/chat.css)):
-the craftbook's workshop-mark artwork in a small `--radius-md` tile, an
-uppercase eyebrow (Plan started / Step complete), **one sentence**, the
+the craftbook's workshop-mark artwork in a small `--radius-md` tile, a
+sentence-case eyebrow in the accent ink (Plan started / Step complete), **one sentence**, the
 compact step tracker, and the task chip. The generic pill row stays — it is
 the factual record with duration and provenance — and on completed bubbles
 the card is promoted above the collapsed "N steps" disclosure exactly like
@@ -2880,16 +3078,15 @@ accessible names. On a receipt that finished its task, it shrinks to a one-line
 chip beside the task chip. The task page's overview lists every other file the
 task made under **Other files** (**Files** when there is no deliverable), one
 row each that opens it, folded after eight: the Ready card's "…and 3 more"
-sends the person there. The wrap-up above the card names the deliverable by
-what it is ("Your PDF is ready: **October invoices**.") and leaves its path,
-and every working file, to the card and the task page; a bakery's read "All
-done — **Formatted Report** is finished" followed by three paths. The name
-follows the announcement because it is the person's own request: a task
+sends the person there. The wrap-up beside the card leaves the deliverable,
+its path and every working file to the card and the task page; it says only
+what was checked, what the maker asked, and what to do next (see "Ready is
+the file"). A bakery's wrap-up once read "All done — **Formatted Report** is
+finished" followed by three paths. The card's main line is the person's own request: a task
 started from chat is titled with it (core's `deriveTaskTitle`, "Write a
 one-page catering proposal for Harbor Books…" is the task "One-page catering
-proposal for Harbor Books"), where it used to carry its plan's name, and
-"Your Word document for **One-page catering proposal…** is ready" does not
-read. The title is the thing asked for: it ends at the first colon or comma,
+proposal for Harbor Books"), where it used to carry its plan's name. The
+title is the thing asked for: it ends at the first colon or comma,
 loses a closing date ("on December 12") before any word of its subject, and
 is cut with an ellipsis only past 72 characters. A task title
 that is only the craftbook's name is never said (core's `taskPersonName`): the
@@ -2913,18 +3110,37 @@ kind or "It is complete." Three rules keep it honest:
   meester's thread lists the task's files), and a host floating over the app,
   Activity or the project questions dialog, closes so the file is in view.
 
+**Finished work is "in the project".** One result was "in the artifacts
+drawer, tasks/2", "in the project folder" and "on the project's Output page"
+in three places a person read it. Where a person reads about finished work
+(the card, the wrap-up, the Updates card, a review card's file list) it lives
+in the project, and nothing names the drawer: a board's card reads "Opens in
+the project", its Updates card "is ready to look at in the project", and a
+listed path is a link that opens the file wherever it is. Which drawer holds
+a file is the model's business, so the note a wrap-up leaves for the model
+still says "(in the project folder)". A written document's cover shows its
+words, not its markup: a table row reads as its cells ("Monday · Ovens"), and
+rules, table dividers, comments, code and pictures are left out.
+
 **A cited fact shows its source; an unsourced one is said out loud.** A
 gezel writing in factual mode (see [factual-writing.md](factual-writing.md))
 cites its evidence as `[n]`. In the bubble each marker is a small raised
 link, like a footnote mark, so a cited paragraph still reads as prose.
 Clicking a marker opens what it names: a knowledge passage in the Knowledge
 area, a web page in the browser, anything else in the reply's **Sources**
-row. That row is one collapsed line under the reply ("4 sources · 1 statement
-not found in any source") and opens to the numbered sources with their
-excerpts. Statements no source showed sit at the top of it in a quiet
-warning tray with the missing detail named, never in red. They are a
-reason to check, not an error. A marker whose number is not a source stays
-plain text, because a link to nothing is worse than no link.
+row. That row is one collapsed line under the reply ("2 sources · 1
+statement to check, marked above") and opens to the numbered sources with
+their excerpts. A reply's sources are counted and numbered from what that
+reply cites (`replySources` in `citation-linkify.ts`): the first source it
+cites reads [1], one file is one source however many of its passages were
+cited, and what the turn read but the reply never cited is not listed. The
+daemon numbers evidence across the whole session, so a first answer about
+one file read "[13]" under "13 sources". A reply that cites nothing lists
+what its turn read. Statements no source showed sit at the top of it in a
+quiet warning tray, as plain words without markdown or `[n]` marks, with the
+missing detail named, never in red. They are a reason to check, not an
+error. A marker whose number is not a source stays plain text, because a
+link to nothing is worse than no link.
 
 **A reply's machinery waits behind Details.** Outside debug mode, the step
 count, step timings, thinking and attempted-call expanders do not head a
@@ -2939,9 +3155,10 @@ at once rather than when they are next opened. A task's id (`lisbon-trip-plannin
 debug-mode text too: the hand-off, craftbook and queued-task cards' keys
 read **Open task**, the chat rail's task card leads with its title, a
 session divider leaves off "· task …", and no reply carries a "Tasks:" row
-outside debug mode. A wrap-up whose finished card is showing drops its
-"Files:" row too. The card already opens the deliverable, and the row only
-added the drafts that went into it. Status chips that remain (a task's
+outside debug mode. A wrap-up never carries a "Files:" row either. Its
+finished card, in the bubble or in the request's tracker, already opens the
+deliverable, and the row only added the drafts that went into it; a wrap-up
+without a deliverable links what was made in its own words. Status chips that remain (a task's
 **Complete**, **Draft**) take their colour from `--success` / `--warning`
 mixed into the surface, never a pale grey that reads as disabled.
 
@@ -3050,6 +3267,17 @@ Knowledge rail shows the 56 px mark beside the catalog's name and the 24 px
 mark in each picker row, which is why that picker is the Radix `Select` and
 not a native `<select>`.
 
+**Knowledge opens on the person's catalogs; the Handboek has its own door.**
+The Knowledge area lands on a catalog the person added before the bundled
+Handboek (`preferredKnowledgeCatalog`), and on its overview: the topic rail
+and list beside a reader that says how to search and read it. Only the
+Handboek area opens the Handboek on its welcome article, and that area never
+writes the Knowledge door's remembered place; they share `KnowledgeView`,
+and reading the Handboek used to make Knowledge open on "What is gezel?".
+With only the Handboek installed, the overview offers **Browse knowledge
+catalogs**. An article's title is shown once, in the reader's header: a first
+`#` heading that repeats it is dropped (`withoutRepeatedTitle`).
+
 **Catalog management opens over the Knowledge browser, not in Settings.** The
 rail's add key opens `KnowledgeCatalogsDialog`, which hosts the same
 `KnowledgeCatalogManager` that Settings → Knowledge shows. Changing what is on
@@ -3085,9 +3313,9 @@ person to find.
 **Unreviewed catalog entries say so.** The toolset catalog mixes a handful of
 entries Gezel ships and reviews with thousands imported automatically from
 the public MCP registry, and the two must never look like more of the same.
-A community-tier item (`sourceId === 'community'`) carries a small uppercase
-`community` badge after its name — the neutral badge recipe shared with
-search's `related` and chat's `automatic`, never a warning colour, because
+A community-tier item (`sourceId === 'community'`) carries a small
+**Community** badge after its name — the neutral badge recipe shared with
+search's Related and chat's Automatic, never a warning colour, because
 an unvetted entry is usually fine and the badge is provenance, not alarm —
 plus a "Shared by *maintainer*" line, since "install only what you trust"
 is meaningless without a name to trust. Three rules travel with it. Reviewed
@@ -3171,6 +3399,16 @@ fast half is what produced a 41-second silent box. And **"No results" is a
 claim about the user's data**, so a lookup that *failed* must say that
 instead; the two are different answers and only one of them means "stop
 looking".
+
+**One row per thing, and a place for what it holds.** A bakery owner's
+"invoice" listed each invoicing plan twice (the plan and its generated
+Handboek article), offered "Investor Pitch Deck", and left out the project
+that held the invoices. So the name catalog drops a plan's Handboek article
+when the plan itself is listed; a scattered match may skip letters inside a
+word or jump to the start of a later word, never into the middle of one
+(`fuzzyScore`); a project matches on what it is for (its description and
+type) as well as its name; and a project whose files, tasks or mail matched
+is listed below them as "Holds invoices.json".
 
 **The theme reaches everything on screen, including what we don't style.**
 A project-type Output page renders in a null-origin sandboxed iframe, so our
@@ -3291,6 +3529,10 @@ yesterday → 4d ago → 2w ago → 3mo ago → 2y ago`; `{ style: 'long' }` spe
 the units out for prose lines and `{ seconds: true }` counts seconds under
 the first minute for rows that tick while you watch them (file mtimes,
 worker pools). Standalone labels use a `<time>` element with `dateTime` set.
+A bare time of day (Home's dateline, "tonight at 10:00 PM") goes through
+`formatClockTime`, the locale's own short clock, so it matches the time in
+`formatAbsoluteTime`. Never force a 12- or 24-hour clock: Home's "13:01" sat
+one click from History's "12:31 PM".
 
 **Sage is chrome; `--success` is an event.** The workshop's green is sage —
 `--sage`, `--sage-deep`, `--sage-ink`, `--sage-soft` on `:root` in
@@ -3321,6 +3563,13 @@ is the reference. When a project's active provider is Codex, its access key is
 the compact four-state `Plan / Edit / Reviewed / Full` control: this is an
 ambient project posture, so changing it belongs here rather than in the chat
 composer or a modal.
+
+**A first scan that has not run yet is not an error.** The index chip shows
+red only for an index that exists and is out of date. A new project, or a
+new install whose background indexing is still holding, reads "Not scanned
+yet" beside a neutral dot, and its panel says the crew can still open the
+files. The bakery saw a red "Not indexed" under an answer drawn from those
+very files.
 
 **A project's settings fold into one compact status key.** The project
 status bar shows the current lifecycle label followed by its colored light
@@ -3661,6 +3910,16 @@ summary's first prose paragraph as one muted line above the file
 (`FileAboutLine`): "About this file · …", truncated to the line, the whole
 summary on hover. A file not yet read, or edited since, shows nothing rather
 than a stale description.
+
+**A file shows as it is, and a viewer that only reads offers no pen.** A
+`.txt` file keeps its line breaks: a pane that only reads it (the chat
+rail's file pane, the file inspector) sets it as typed in the reading font,
+and the project's file editor opens it in Source, because the document
+editor would join its lines into one paragraph (`isPlainTextFile`). Those
+panes, and the file editor on a file Gezel may not change, show no
+formatting or Insert keys. A file pane's header keeps its path on one line
+and never breaks inside a word or an extension: the folder gives way to an
+ellipsis first, then the name, with the whole path on hover.
 
 **A proposal that moves files reads as where things go.** Moves, copies and
 new folders in a change proposal have no diff, so the review lists them after

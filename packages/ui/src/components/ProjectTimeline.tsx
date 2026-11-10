@@ -1,4 +1,4 @@
-import { parseTaskRef } from '@bendyline/gezel';
+import { isTaskOrCraftbookSession, parseTaskRef } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
@@ -29,6 +29,7 @@ export function ProjectTimeline({
   taskRef,
   subjectKeys,
   craftbookRef,
+  ordinaryThreadsOnly = false,
   activeSessionId,
   onFocusSession,
   onToolActivity,
@@ -48,6 +49,15 @@ export function ProjectTimeline({
   projectId: string;
   gezelId?: string;
   taskRef?: string;
+  /**
+   * Leave out task and craftbook threads: only the ordinary conversation.
+   * A page's companion chat is a talk with that crew member, and the
+   * project's kickoff task, worked by the same crew member, opened it on a
+   * "Step complete" card and a link to the page's own data file. History is
+   * filtered on each message's `taskRef`; the live stream through the same
+   * session allowlist the task scope uses.
+   */
+  ordinaryThreadsOnly?: boolean;
   /**
    * Narrows the timeline to the threads about these app items — the Office
    * pane's document chat. Scoped the same way as `taskRef`: server-side on
@@ -82,15 +92,19 @@ export function ProjectTimeline({
   // A string, so a parent passing a fresh array each render does not reload.
   const subjectScope = subjectKeys?.join('\n') ?? '';
   const loadTimeline = useCallback(
-    (opts: { limit: number; before?: string }) =>
-      api.listProjectTimeline(projectId, {
+    async (opts: { limit: number; before?: string }) => {
+      const res = await api.listProjectTimeline(projectId, {
         ...opts,
         ...(gezelId ? { gezelId } : {}),
         ...(taskRef ? { taskRef } : {}),
         ...(subjectScope ? { subjectKeys: subjectScope.split('\n') } : {}),
         ...(craftbookRef ? { craftbookRef } : {}),
-      }),
-    [projectId, gezelId, taskRef, subjectScope, craftbookRef],
+      });
+      return ordinaryThreadsOnly
+        ? { ...res, messages: res.messages.filter((message) => !message.taskRef) }
+        : res;
+    },
+    [projectId, gezelId, taskRef, subjectScope, craftbookRef, ordinaryThreadsOnly],
   );
   // When `gezelId` is set we subscribe to the per-gezel stream rather
   // than the project stream and rely on the inflight-scope guard to
@@ -129,9 +143,15 @@ export function ProjectTimeline({
   // to the timeline as an allowlist.
   const [taskSessionIds, setTaskSessionIds] = useState<ReadonlySet<string>>(EMPTY_SET);
   const [sessionsRefreshKey, setSessionsRefreshKey] = useState(0);
+  // Task and craftbook threads the ordinary-only scope left out on purpose.
+  // Their live turns miss the allowlist like any unknown session, and asking
+  // for a refetch on each would re-list sessions twice a second while one
+  // streams.
+  const leftOutSessionIdsRef = useRef<ReadonlySet<string>>(EMPTY_SET);
+  const allowlisted = Boolean(taskRef || subjectScope || craftbookRef || ordinaryThreadsOnly);
   // biome-ignore lint/correctness/useExhaustiveDependencies: sessionsRefreshKey is the refetch trigger — it appears nowhere in the body by design.
   useEffect(() => {
-    if (!taskRef && !subjectScope && !craftbookRef) {
+    if (!allowlisted) {
       setTaskSessionIds(EMPTY_SET);
       return;
     }
@@ -141,10 +161,18 @@ export function ProjectTimeline({
       return;
     }
     let cancelled = false;
-    const inScope: Promise<{ sessions: ReadonlyArray<{ id: string; archived?: boolean }> }> = parsed
+    const inScope: Promise<{
+      sessions: ReadonlyArray<{
+        id: string;
+        archived?: boolean;
+        taskRef?: string;
+        craftbookRef?: string;
+      }>;
+    }> = parsed
       ? api.listTaskSessions(parsed.projectId, parsed.num)
       : api.listChatSessions({
           projectId,
+          ...(ordinaryThreadsOnly && gezelId ? { gezelId } : {}),
           ...(subjectScope ? { subjectKeys: subjectScope.split('\n') } : {}),
           ...(craftbookRef ? { craftbookRef } : {}),
         });
@@ -156,7 +184,12 @@ export function ProjectTimeline({
         // bubble that the next reload silently drops. An archived session
         // the user deliberately opened still gets through as
         // `activeSessionId` below.
-        setTaskSessionIds(new Set(res.sessions.filter((s) => !s.archived).map((s) => s.id)));
+        const live = res.sessions.filter((s) => !s.archived);
+        const kept = ordinaryThreadsOnly ? live.filter((s) => !isTaskOrCraftbookSession(s)) : live;
+        leftOutSessionIdsRef.current = ordinaryThreadsOnly
+          ? new Set(live.filter((s) => isTaskOrCraftbookSession(s)).map((s) => s.id))
+          : EMPTY_SET;
+        setTaskSessionIds(new Set(kept.map((s) => s.id)));
       })
       .catch(() => {
         // Non-fatal: the fetched history is already task-filtered
@@ -166,18 +199,27 @@ export function ProjectTimeline({
     return () => {
       cancelled = true;
     };
-  }, [taskRef, projectId, subjectScope, craftbookRef, sessionsRefreshKey]);
+  }, [
+    allowlisted,
+    taskRef,
+    projectId,
+    gezelId,
+    subjectScope,
+    craftbookRef,
+    ordinaryThreadsOnly,
+    sessionsRefreshKey,
+  ]);
 
   // A session created by this pane's composer, or one the timeline just
   // focused, is in scope by construction — union it in so the user's own
   // first message in a brand-new task thread isn't held back for the
   // round trip the refetch below costs.
   const scopedSessionIds = useMemo(() => {
-    if (!taskRef && !subjectScope && !craftbookRef) return undefined;
+    if (!allowlisted) return undefined;
     if (!activeSessionId) return taskSessionIds;
     if (taskSessionIds.has(activeSessionId)) return taskSessionIds;
     return new Set([...taskSessionIds, activeSessionId]);
-  }, [taskRef, subjectScope, craftbookRef, taskSessionIds, activeSessionId]);
+  }, [allowlisted, taskSessionIds, activeSessionId]);
 
   // Debounce the refetch: a handoff session mid-turn emits a delta per
   // token, and every one of them misses the allowlist until the refetch
@@ -192,7 +234,8 @@ export function ProjectTimeline({
     },
     [],
   );
-  const onUnknownSession = useCallback(() => {
+  const onUnknownSession = useCallback((sessionId: string) => {
+    if (leftOutSessionIdsRef.current.has(sessionId)) return;
     if (refetchTimerRef.current !== null) return;
     refetchTimerRef.current = window.setTimeout(() => {
       refetchTimerRef.current = null;
@@ -221,8 +264,8 @@ export function ProjectTimeline({
             : craftbookRef
               ? `project:${projectId}:craftbook:${craftbookRef}`
               : gezelId
-                ? `project:${projectId}:gezel:${gezelId}`
-                : `project:${projectId}`
+                ? `project:${projectId}:gezel:${gezelId}${ordinaryThreadsOnly ? ':ordinary' : ''}`
+                : `project:${projectId}${ordinaryThreadsOnly ? ':ordinary' : ''}`
       }
       activeSessionId={activeSessionId}
       onFocusSession={onFocusSession}

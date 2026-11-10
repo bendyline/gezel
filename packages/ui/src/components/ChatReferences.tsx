@@ -34,6 +34,7 @@ import type { ToolActivity } from './chat-bubbles.js';
 import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-command.js';
 import { gezelReportThemeForMode } from './chat-theme.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
+import { isPlainTextFile } from './plain-text-file.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 import { type ResultStage, ResultStageContext } from './result-stage.js';
 import { GEZEL_DARK_SURFACE, GEZEL_LIGHT_SURFACE } from './transform/surfaces.js';
@@ -1265,7 +1266,7 @@ function TaskRailCard({
               {taskStatusLabel(effectiveStatus)} · follows parent
             </span>
           ) : task.status === 'draft' ? (
-            <span className="chat-rail-task-status chat-rail-task-status-draft">draft</span>
+            <span className="chat-rail-task-status chat-rail-task-status-draft">Draft</span>
           ) : (
             <DropdownMenu.Root>
               <DropdownMenu.Trigger asChild>
@@ -1767,7 +1768,7 @@ function ReferenceViewer({
               (resolved from {reference.kind})
             </span>
           )}
-          <code className="chat-rail-viewer-path">{reference.path}</code>
+          <ViewerPath path={reference.path} />
         </div>
         <div className="chat-rail-viewer-actions">
           {onToggleWide && (
@@ -1889,8 +1890,26 @@ function ReferenceViewer({
   );
 }
 
+/**
+ * One line, never split inside a word: the folder gives way to an ellipsis
+ * first, then the file name, and the whole path is on hover.
+ */
+function ViewerPath({ path }: { path: string }) {
+  const slash = path.lastIndexOf('/');
+  const folder = slash >= 0 ? path.slice(0, slash + 1) : '';
+  const name = slash >= 0 ? path.slice(slash + 1) : path;
+  return (
+    <code className="chat-rail-viewer-path" title={path}>
+      {folder && <span className="chat-rail-viewer-path-folder">{folder}</span>}
+      <span className="chat-rail-viewer-path-name">{name}</span>
+    </code>
+  );
+}
+
 function ReferenceCodePreview({ path, content }: { path: string; content: string }) {
   const editorTheme = useEffectiveTheme();
+  // The pane only reads, so it shows no formatting keys.
+  if (isPlainTextFile(path)) return <pre className="plain-text-file">{content}</pre>;
   return (
     <div className="chat-rail-viewer-code">
       <EditorShell
@@ -1901,6 +1920,8 @@ function ReferenceCodePreview({ path, content }: { path: string; content: string
         height="100%"
         colorScheme={editorTheme}
         showPlayTab={false}
+        showFormattingControls={false}
+        showInsertControls={false}
         fullWidth
         readOnly
       />

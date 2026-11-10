@@ -38,6 +38,7 @@ import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
+import { EmptyPlace } from '../components/EmptyPlace.js';
 import { FileAboutLine } from '../components/FileAboutLine.js';
 import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
@@ -125,6 +126,7 @@ import { navigateToTab, openUpdates } from '../components/nav-actions.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
 import { consumeProjectSection } from '../components/pending-project-section.js';
+import { isPlainTextFile } from '../components/plain-text-file.js';
 import {
   type AiProviderEditabilityConfig,
   projectUsesClaude,
@@ -136,6 +138,7 @@ import { makeReportActionFenceRenderers } from '../components/report-actions/Rep
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
 import { useDebugMode } from '../components/useDebugMode.js';
+import { useNarrowWindow } from '../components/useNarrowWindow.js';
 import {
   ViewLocationScope,
   useRestoredViewPart,
@@ -264,6 +267,9 @@ type ProjectTab =
   // Compact-only: when the project area is too narrow for the output
   // pane to sit beside the content, it becomes its own tab instead.
   | 'output';
+
+/** Tabs whose content needs the width more than a docked board does, in a narrow window. */
+const BOARD_STEPS_ASIDE_ON: ReadonlySet<ProjectTab> = new Set(['tasks', 'settings']);
 
 /** Each tab's name as its key shows it, for the history menu. */
 const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
@@ -2155,9 +2161,23 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     },
     [selected],
   );
+  // In a narrow window the board steps aside on the tabs that need the
+  // width, without changing the saved choice; its toggle brings it back for
+  // this visit. At 1024 x 700 a docked board left a task's detail 120 px wide.
+  const narrowWindow = useNarrowWindow();
+  const [boardKeptOpen, setBoardKeptOpen] = useState<string | null>(null);
+  const boardStepsAside =
+    narrowWindow &&
+    outputVisible &&
+    BOARD_STEPS_ASIDE_ON.has(tab) &&
+    boardKeptOpen !== selected?.id;
   const toggleOutput = useCallback(() => {
+    if (boardStepsAside) {
+      setBoardKeptOpen(selected?.id ?? null);
+      return;
+    }
     saveOutputChoice({ visible: !outputVisible });
-  }, [saveOutputChoice, outputVisible]);
+  }, [saveOutputChoice, outputVisible, boardStepsAside, selected?.id]);
   const saveOutputMaximized = useCallback(
     (maximized: boolean) => saveOutputChoice({ maximized }),
     [saveOutputChoice],
@@ -2246,7 +2266,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // Wide: output pane sits beside the content (resizable). Compact: it
   // takes over the body as the active 'output' tab. The tab content is
   // hidden only in the compact-output case.
-  const showOutputBeside = !effectiveCompact && outputVisible;
+  const showOutputBeside = !effectiveCompact && outputVisible && !boardStepsAside;
   const showOutputAsTab =
     (compactOutputAvailable && tab === 'output') ||
     (effectiveCompact && outputVisible && outputMaximized);
@@ -2403,7 +2423,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 className="area-toolbar-btn"
                 onClick={() => setCreateMode('crew')}
               >
-                + New Project
+                + New project
               </button>
             )}
             <button
@@ -2422,8 +2442,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 type="button"
                 className="collapsed-create-btn"
                 onClick={() => setCreateMode('crew')}
-                title="New Project"
-                aria-label="New Project"
+                title="New project"
+                aria-label="New project"
               >
                 <span className="collapsed-create-symbol" aria-hidden="true">
                   +
@@ -2447,7 +2467,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       )}
       <section className="main" hidden={showProjectList}>
         {!detailOnly && !selected ? (
-          <p className="placeholder">Pick a project on the left to view it here.</p>
+          <EmptyPlace
+            purpose="A project keeps one piece of your work together: its files, its crew, and what they make."
+            action={{ label: 'Start a project', onClick: () => setCreateMode('crew') }}
+            note="Or open one on the left."
+          />
         ) : selected ? (
           <>
             {error && (detailOnly || sidebarIsCollapsed) && (
@@ -2476,11 +2500,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               {!effectiveCompact && runtimeCapabilities().htmlPreview && (
                 <button
                   type="button"
-                  className={`output-toggle${outputVisible ? ' is-active' : ''}`}
+                  className={`output-toggle${showOutputBeside ? ' is-active' : ''}`}
                   onClick={toggleOutput}
-                  title={outputVisible ? 'Hide output pane' : 'Show output pane'}
-                  aria-label={outputVisible ? 'Hide output pane' : 'Show output pane'}
-                  aria-pressed={outputVisible}
+                  title={showOutputBeside ? 'Hide output pane' : 'Show output pane'}
+                  aria-label={showOutputBeside ? 'Hide output pane' : 'Show output pane'}
+                  aria-pressed={showOutputBeside}
                 >
                   <svg
                     width="16"
@@ -2823,7 +2847,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           {runtimeCapabilities().background && (
                             <SettingCheck
                               label="Fix problems overnight"
-                              hint="When this project has both a Librarian and a developer, the developer works through open issues during the night shift. Your files aren’t touched — fixes arrive as change proposals in the Proposals tab for you to review and apply."
+                              hint="When this project has both a Librarian and a developer, the developer works through open issues during the Night Shift. Your files aren’t touched — fixes arrive as change proposals in the Proposals tab for you to review and apply."
                               checked={selected.nightlyFixesEnabled !== false}
                               onChange={(checked) => void saveNightlyFixesEnabled(checked)}
                             />
@@ -3291,7 +3315,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                       : workspaceIndexStatus.state === 'stale'
                                         ? 'Index is out of date.'
                                         : workspaceIndexStatus.state === 'never'
-                                          ? 'Not indexed yet — showing files from the folder walk.'
+                                          ? 'Not scanned yet — showing files from the folder walk.'
                                           : 'Indexing is disabled — showing files from the folder walk.'}
                                   </span>
                                   {(workspaceIndexStatus.state === 'stale' ||
@@ -3765,6 +3789,10 @@ function ProjectFileEditor({
         fileName={file.path}
         readOnly={isReadOnly}
         onChange={isReadOnly ? undefined : handleChange}
+        // A file Gezel may not change shows no formatting keys, and a .txt
+        // opens in Source, where its line breaks are kept.
+        {...(isReadOnly ? { showFormattingControls: false, showInsertControls: false } : {})}
+        {...(isPlainTextFile(file.path) ? { initialView: 'raw' as const } : {})}
         height="100%"
         colorScheme={editorTheme}
         fullWidth

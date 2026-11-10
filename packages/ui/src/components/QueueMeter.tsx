@@ -24,6 +24,7 @@ import type {
 } from '@bendyline/gezel-client';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { formatClockTime } from '../relative-time.js';
 import { GezelIcon } from './GezelIcon.js';
 import { useHeaderDensity } from './header-density.js';
 import { NightShiftMoonGlyph } from './night-shift-glyph.js';
@@ -167,9 +168,7 @@ function handoffHoldNote(state: TaskRunnerState): string | undefined {
 }
 
 function formatClock(iso: string): string | undefined {
-  const at = new Date(iso);
-  if (Number.isNaN(at.getTime())) return undefined;
-  return at.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  return formatClockTime(iso) || undefined;
 }
 
 /**

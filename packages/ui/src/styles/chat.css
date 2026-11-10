@@ -735,8 +735,7 @@
 }
 
 .msg-tool-card-kind {
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  font-weight: 600;
   color: var(--accent-text);
 }
 
@@ -1326,8 +1325,6 @@
 .msg-nudge-chip {
   margin-left: 0.35rem;
   font-size: var(--text-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   padding: 0 0.3rem;
   border: 1px solid rgba(176, 114, 76, 0.35);
   border-radius: var(--radius-sm);
@@ -1350,8 +1347,6 @@
 .msg-system-chip {
   margin-left: 0.35rem;
   font-size: var(--text-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   padding: 0 0.3rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -2382,14 +2377,17 @@ body.chat-rail-resizing webview {
    the compact body rather than the container query above. The status dot
    leads; participants, preview, and timestamp drop out, and the tile's
    accessible name and tooltip still carry all of it. The band no longer
-   matches the output toolbar's height, because that pane is a tab here. */
+   matches the output toolbar's height, because that pane is a tab here.
+   A tile takes the width its title needs, up to 12rem or two fifths of the
+   strip: a fixed 60px cut "Write a short, friendly reminder…" to "Writ…"
+   beside a strip that was otherwise empty. */
 .chat-rail-body-compact .chat-pill-row {
   min-height: 0;
   padding-block: 0.25rem;
 }
 .chat-rail-body-compact .chat-pill {
   min-height: 1.5rem;
-  max-width: 60px;
+  max-width: min(12rem, 40%);
   padding: 0.15rem 0.4rem;
   white-space: nowrap;
 }
@@ -2505,19 +2503,16 @@ body.chat-rail-resizing webview {
      bubble's own border still give the "sticky above, content below"
      depth cue without a hard line cutting between them. */
   border-radius: 0;
-  /* Mostly opaque so bubble text scrolling underneath doesn't read
-     through the header. Reuse the bubble surface for the same cool
+  /* Opaque. At 96% with a blur, the reply scrolling underneath still read
+     through the pinned lines as a second, fainter sentence (project and
+     crew chats, 2026-11-09). Reuse the bubble surface for the same cool
      paper tone in light mode; dark mode resolves it to the panel. */
-  background: color-mix(in srgb, var(--chat-bubble-bg, var(--panel)) 96%, transparent);
+  background: var(--chat-bubble-bg, var(--panel));
   border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
   border-top: none;
   box-shadow: none;
   font-size: var(--text-xs);
   line-height: 1.3;
-  /* Backdrop so anything leaking through the 4% transparent edge
-     is blurred rather than razor-sharp. */
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
 }
 .chat-sticky-header-user,
 .chat-sticky-header-assistant {
@@ -4092,8 +4087,6 @@ button.timeline-session-divider-child::before {
   align-items: center;
   gap: 0.2rem;
   font-size: var(--text-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   padding: 0.05rem 0.4rem;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
@@ -4330,15 +4323,37 @@ button.timeline-session-divider-child::before {
 }
 
 .chat-rail-viewer-header > :first-child {
+  display: flex;
+  align-items: center;
   min-width: 0;
 }
 
+/* One line, never broken inside a word ("checklist.m" / "d"): the folder
+   gives way to an ellipsis long before the file name does, and the whole
+   path is the title. */
 .chat-rail-viewer-path {
+  display: flex;
+  min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--text-xs);
   color: var(--muted);
   margin-left: 0.5rem;
-  word-break: break-all;
+  white-space: nowrap;
+}
+
+.chat-rail-viewer-path-folder,
+.chat-rail-viewer-path-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-rail-viewer-path-folder {
+  flex: 0 1000 auto;
+}
+
+.chat-rail-viewer-path-name {
+  flex: 0 1 auto;
 }
 
 .chat-rail-viewer-actions {
@@ -4409,6 +4424,19 @@ button.timeline-session-divider-child::before {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text);
+}
+
+/* A .txt file read as typed: its line breaks are its layout, set in the
+   reading font rather than as code (`isPlainTextFile`). */
+.plain-text-file {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-family: inherit;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
 }
 
 .chat-rail-viewer-iframe {

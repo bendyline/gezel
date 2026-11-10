@@ -82,6 +82,73 @@ it('passes an optional existing folder when creating a seedless catalog type', a
   );
 });
 
+it('leaves a typed question empty with its default as a hint, and picks the currency from a list', async () => {
+  vi.mocked(api.listCatalogItems).mockImplementation(
+    async (kind) =>
+      ({
+        items:
+          kind === 'project-type'
+            ? [
+                catalogItem({
+                  kind: 'project-type',
+                  id: 'cash-flow-planner',
+                  name: 'Cash Flow Planner',
+                  category: 'money',
+                  nameTemplate: 'Cash Flow Planner',
+                  params: {
+                    type: 'object',
+                    properties: {
+                      business: {
+                        type: 'string',
+                        title: 'What kind of business is this?',
+                        default: 'the business',
+                      },
+                      currency: {
+                        type: 'string',
+                        title: 'Which currency is the cash in?',
+                        description: 'A three-letter code, e.g. USD, EUR or GBP.',
+                        default: 'USD',
+                      },
+                    },
+                    required: ['business', 'currency'],
+                  },
+                }),
+              ]
+            : [],
+      }) as never,
+  );
+  vi.mocked(api.createTypedProject).mockResolvedValue({
+    project: { id: 'cash-flow-planner' },
+    applied: { gezelsCreated: [], warnings: [] },
+  } as never);
+  render(
+    <NewProjectDialog
+      open
+      mode="crew"
+      initialTypeId="cash-flow-planner"
+      onClose={() => undefined}
+      onCreated={() => undefined}
+    />,
+  );
+  const business = await screen.findByPlaceholderText('the business');
+  expect(business).toHaveValue('');
+  const currency = screen.getByRole('combobox');
+  expect(currency).toHaveValue('USD');
+  expect(screen.queryByText(/three-letter code/)).not.toBeInTheDocument();
+  fireEvent.change(currency, { target: { value: 'EUR' } });
+  fireEvent.click(screen.getByRole('button', { name: /^Create/ }));
+  await waitFor(() =>
+    expect(api.createTypedProject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectType: {
+          typeId: 'cash-flow-planner',
+          params: { business: 'the business', currency: 'EUR' },
+        },
+      }),
+    ),
+  );
+});
+
 it('opens straight on a named type’s form, and on the gallery once the type is gone', async () => {
   vi.mocked(api.listCatalogItems).mockImplementation(
     async (kind) =>

@@ -91,6 +91,9 @@ function PageConversation({
         <ProjectTimeline
           projectId={projectId}
           gezelId={gezel.id}
+          // The page's companion, not the crew's working threads: the
+          // kickoff task left a "Step complete" card and a data-file link here.
+          ordinaryThreadsOnly
           activeSessionId={sessionId}
           onFocusSession={(id, recipient) => {
             if (recipient === gezel.id) {

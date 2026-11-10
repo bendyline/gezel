@@ -383,8 +383,6 @@ button.danger {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: var(--text-2xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 /* Transient result of the last create / delete / import, under the header. */
@@ -1284,7 +1282,8 @@ button.danger {
 }
 
 .workspace-index-state-disabled > span,
-.workspace-index-state-checking > span {
+.workspace-index-state-checking > span,
+.workspace-index-state-waiting > span {
   background: var(--text-muted);
 }
 
@@ -1488,6 +1487,11 @@ button.danger {
 .msg-role-glyph {
   font-size: var(--text-sm);
   line-height: 1;
+}
+
+.msg-role-glyph-hat {
+  display: inline-flex;
+  color: var(--text-muted);
 }
 
 .msg-role-project {

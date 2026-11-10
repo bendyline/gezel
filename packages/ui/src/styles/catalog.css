@@ -767,8 +767,6 @@
   color: var(--text-muted);
   font-size: var(--text-2xs);
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   white-space: nowrap;
   cursor: help;
 }
@@ -1298,8 +1296,6 @@ a.license-button:hover {
 .toolsets-tile-caption {
   font-size: var(--text-2xs);
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .toolsets-tile-actions {
@@ -1640,8 +1636,6 @@ a.license-button:hover {
 .gezel-template-badge {
   font-size: var(--text-2xs);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--accent-text);
   border: 1px solid var(--accent);
   border-radius: 3px;

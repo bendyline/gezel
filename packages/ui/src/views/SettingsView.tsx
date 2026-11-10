@@ -596,11 +596,16 @@ function DaemonSettingsView() {
     return () => clearInterval(interval);
   }, [refreshUsage, refreshConfig]);
 
+  // Probe Copilot on open only where the person uses it. Any Copilot CLI on
+  // the machine makes it look installed, so opening this page on an install
+  // that never chose it showed a red start failure for a provider nobody set
+  // up (2026-11-09). Test connection still probes on demand.
+  const copilotInUse = copilotIsInUse(config, gezels);
   useEffect(() => {
-    if (section === 'copilot' && copilotProbe.kind === 'idle') {
+    if (section === 'copilot' && copilotInUse && copilotProbe.kind === 'idle') {
       void runCopilotProbe();
     }
-  }, [section, copilotProbe.kind, runCopilotProbe]);
+  }, [section, copilotInUse, copilotProbe.kind, runCopilotProbe]);
 
   // Channels sits in the work-in-progress bucket, so a deep link or a
   // still-open Channels panel can outlive the opt-in it depends on. Wait for
@@ -2954,6 +2959,7 @@ function DaemonSettingsView() {
                 <CopilotConnectionStatus
                   probe={copilotProbe}
                   mode={hasGithubToken ? 'pat' : 'cli'}
+                  inUse={copilotInUse}
                   onRetest={() => void runCopilotProbe()}
                 />
 
@@ -2972,7 +2978,7 @@ function DaemonSettingsView() {
                       )}
                     </span>
                     {!hasGithubToken && copilotProbe.kind === 'ok' && (
-                      <span className="home-copilot-recommended">active</span>
+                      <span className="home-copilot-recommended">Active</span>
                     )}
                     {copilotSignedInViaCli && (
                       <button
@@ -3021,7 +3027,7 @@ function DaemonSettingsView() {
                 }
                 actions={
                   hasGithubToken && copilotProbe.kind === 'ok' ? (
-                    <span className="home-copilot-recommended">active</span>
+                    <span className="home-copilot-recommended">Active</span>
                   ) : undefined
                 }
               >
@@ -4219,13 +4225,31 @@ function OllamaReasoningToggle({
  * time the probe succeeded, and offers a retest button so the user can
  * re-verify after running `copilot login` without leaving the page.
  */
+/**
+ * Whether Copilot runs anything here: the default provider, the Night Shift's
+ * override, a crew member's own provider, or a stored GitHub token.
+ */
+export function copilotIsInUse(
+  config: Pick<ConfigResponse, 'provider' | 'nightShift' | 'hasGithubToken'> | null | undefined,
+  gezels: readonly Pick<GezelSummary, 'provider'>[],
+): boolean {
+  return (
+    config?.provider === 'copilot' ||
+    config?.nightShift?.modelOverride?.provider === 'copilot' ||
+    config?.hasGithubToken === true ||
+    gezels.some((g) => g.provider === 'copilot')
+  );
+}
+
 function CopilotConnectionStatus({
   probe,
   mode,
+  inUse,
   onRetest,
 }: {
   probe: { kind: 'idle' } | { kind: 'probing' } | { kind: 'ok' } | { kind: 'fail'; error: string };
   mode: 'cli' | 'pat';
+  inUse: boolean;
   onRetest: () => void;
 }) {
   const label = mode === 'pat' ? 'via GitHub token' : 'via Copilot CLI';
@@ -4238,12 +4262,18 @@ function CopilotConnectionStatus({
             ● Connected {label}
           </span>
         )}
+        {/* The provider's own error ("Pending response rejected since
+          connection got disposed") stays in the tooltip for whoever needs it. */}
         {probe.kind === 'fail' && (
           <span className="provider-connection-state" data-tone="danger" title={probe.error}>
-            ● Not connected — {probe.error}
+            ● Not connected. Sign in below, then test the connection again.
           </span>
         )}
-        {probe.kind === 'idle' && <span className="gz-setting-hint">Not checked yet</span>}
+        {probe.kind === 'idle' && (
+          <span className="gz-setting-hint">
+            {inUse ? 'Not checked yet' : 'Not set up. Sign in below to use Copilot.'}
+          </span>
+        )}
         <button type="button" onClick={onRetest} disabled={probe.kind === 'probing'}>
           Test connection
         </button>

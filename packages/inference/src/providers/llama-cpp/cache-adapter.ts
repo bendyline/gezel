@@ -54,7 +54,7 @@
 
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { copyFile, stat, statfs, utimes } from 'node:fs/promises';
+import { copyFile, rm, stat, statfs, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   DEFAULT_LLAMA_DISK_CACHE_MB,
@@ -247,6 +247,44 @@ export class LlamaCppCacheAdapter implements EngineCacheAdapter {
   setSlotCount(slotCount: number): void {
     this.slotCount = Math.max(1, Math.floor(slotCount));
     this.resetEngineState();
+  }
+
+  /**
+   * The engine produced output no healthy model emits. Nothing it holds may
+   * reach disk: resetting the engine state advances the generation, which
+   * every save checks, and forgets every slot binding, so no flush or
+   * eviction has anything left to write. Then delete the snapshots this
+   * session restores from (its own file and its prefix files), because a
+   * corrupted snapshot restored into a fresh engine fails exactly the same
+   * way. They are caches; the cost is one cold prefill. Returns the names of
+   * the files removed.
+   */
+  async discardSessionSnapshots(sessionId?: string): Promise<string[]> {
+    const prefixIds = sessionId
+      ? [
+          ...new Set(
+            [
+              this.sessionPrefix.get(sessionId),
+              ...(this.sessionLayerPrefixes.get(sessionId) ?? []),
+            ].filter((id): id is string => Boolean(id)),
+          ),
+        ]
+      : [];
+    this.resetEngineState();
+    for (const prefixId of prefixIds) this.seededPrefixes.delete(prefixId);
+    if (!sessionId || !this.slotSavePath || !this.diskCacheRoot) return [];
+    const slotSavePath = this.slotSavePath;
+    const names = [sessFilename(sessionId), ...prefixIds.map(prefixFilename)];
+    return withLlamaDiskCache(this.diskCacheRoot, async () => {
+      const removed: string[] = [];
+      for (const name of names) {
+        const path = join(slotSavePath, name);
+        if (!(await stat(path).catch(() => null))) continue;
+        await rm(path, { force: true });
+        removed.push(name);
+      }
+      return removed;
+    });
   }
 
   /** The provider survives engine restarts, but its resident slot contents do not. */

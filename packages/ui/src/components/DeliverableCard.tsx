@@ -11,6 +11,7 @@ import { DeliverableCover, hasTextCover } from './DeliverableCover.js';
 import { FileTypeIcon } from './FileTypeIcon.js';
 import { GezelIcon } from './GezelIcon.js';
 import { formatFileSize } from './file-view-modes.js';
+import { noteResultOpened } from './result-opened.js';
 import { ResultStageContext } from './result-stage.js';
 
 /**
@@ -98,8 +99,16 @@ export function DeliverableCard({
   const file: ReferencedFile = { kind: deliverable.kind, path: deliverable.path };
   // Finished work gets the stage in the pane beside its conversation.
   const resultStage = state === 'final' ? stage : null;
+  // Opening finished work is what lets Home ask about folders (result-opened.ts).
+  const opened = () => {
+    if (state === 'final') void noteResultOpened();
+  };
   const open = onOpen
-    ? () => (resultStage ? resultStage.openFromCard(() => onOpen(file)) : onOpen(file))
+    ? () => {
+        opened();
+        if (resultStage) resultStage.openFromCard(() => onOpen(file));
+        else onOpen(file);
+      }
     : undefined;
 
   // A board opens in its project, and a receipt's chip is one file among many.
@@ -122,6 +131,7 @@ export function DeliverableCard({
 
   const runBridge = async (action: BridgeAction | undefined, suggestedName?: string) => {
     if (!action) return;
+    opened();
     setError(null);
     try {
       const result = await action({

@@ -553,7 +553,13 @@ export class SearchService {
         subtitle: `Plan · ${c.source === 'bundled' ? 'Gilde' : c.source}`,
       });
     }
+    // Every plan has a generated Handboek article under the same name, so
+    // "invoice" listed each invoicing plan twice: once to open it, once to
+    // read about it. The plan's own row opens the plan, which is what the
+    // person was looking for; its article stays one link away from there.
+    const planIds = new Set(craftbooks.map((c) => c.id));
     for (const h of handboek) {
+      if (h.id.startsWith('craftbook/') && planIds.has(h.id.slice('craftbook/'.length))) continue;
       entries.push({
         kind: 'handboek',
         id: `handboek:${h.id}`,
@@ -580,7 +586,18 @@ export class SearchService {
     }
 
     for (const p of projects) {
-      entries.push({ kind: 'project', id: `project:${p.id}`, title: p.name, projectId: p.id });
+      // What the project is for, not only what it is called: a bakery's
+      // "Willow & Rye Bakery Office" is the place its invoices live.
+      const keywords = [p.description, p.projectType?.id.replaceAll('-', ' ')].filter(
+        (k): k is string => typeof k === 'string' && k.trim().length > 0,
+      );
+      entries.push({
+        kind: 'project',
+        id: `project:${p.id}`,
+        title: p.name,
+        projectId: p.id,
+        ...(keywords.length > 0 ? { keywords } : {}),
+      });
     }
     for (const g of gezels) {
       // A renamed role is found by both titles: "librarian" and "boekwachter".
@@ -696,6 +713,7 @@ export class SearchService {
         ...scoreResult(e.kind, rel),
       });
     }
+    scored.push(...projectsHoldingMatches(catalog, scored));
     return pageSearchResults(scored, { limit: maxResults }).results;
   }
 
@@ -1259,6 +1277,47 @@ export class SearchService {
 
 // ── helpers ──────────────────────────────────────────────────────────────
 
+/** Discount on a project listed for what it holds rather than for its name. */
+const HOLDS_MATCH_DISCOUNT = 0.6;
+
+/**
+ * Projects whose own name missed the query but whose files, tasks or mail
+ * matched it. "invoice" found a bakery's invoices.json and its invoice tasks
+ * but not "Willow & Rye Bakery Office", the place all of them live. Listed
+ * below what they hold, and never twice: a project its name already matched
+ * is left alone.
+ */
+function projectsHoldingMatches(
+  catalog: readonly CatalogEntry[],
+  scored: readonly UnifiedSearchResult[],
+): UnifiedSearchResult[] {
+  const matchedProjects = new Set(
+    scored.filter((r) => r.kind === 'project').map((r) => r.projectId),
+  );
+  const best = new Map<string, UnifiedSearchResult>();
+  for (const r of scored) {
+    if (r.kind !== 'file' && r.kind !== 'task' && r.kind !== 'mail') continue;
+    if (!r.projectId || matchedProjects.has(r.projectId)) continue;
+    const held = best.get(r.projectId);
+    if (!held || (r.relevance ?? 0) > (held.relevance ?? 0)) best.set(r.projectId, r);
+  }
+  const out: UnifiedSearchResult[] = [];
+  for (const e of catalog) {
+    if (e.kind !== 'project' || !e.projectId) continue;
+    const held = best.get(e.projectId);
+    if (!held) continue;
+    out.push({
+      kind: 'project',
+      id: e.id,
+      title: e.title,
+      subtitle: `Holds ${held.title}`,
+      projectId: e.projectId,
+      ...scoreResult('project', (held.relevance ?? 0) * HOLDS_MATCH_DISCOUNT),
+    });
+  }
+  return out;
+}
+
 function basename(path: string): string {
   const i = path.lastIndexOf('/');
   return i < 0 ? path : path.slice(i + 1);
@@ -1292,27 +1351,10 @@ export function fuzzyScore(query: string, target: string): number | null {
   }
 
   // Scattered subsequence.
-  let ti = 0;
-  let matched = 0;
-  let firstPos = -1;
-  let lastPos = -1;
-  for (let qi = 0; qi < q.length; qi++) {
-    const ch = q[qi]!;
-    let found = -1;
-    while (ti < t.length) {
-      if (t[ti] === ch) {
-        found = ti;
-        ti++;
-        break;
-      }
-      ti++;
-    }
-    if (found === -1) return null;
-    if (firstPos === -1) firstPos = found;
-    lastPos = found;
-    matched++;
-  }
-  if (matched < q.length) return null;
+  const positions = scatteredMatch(q, t, target);
+  if (!positions) return null;
+  const firstPos = positions[0]!;
+  const lastPos = positions[positions.length - 1]!;
   const span = lastPos - firstPos + 1;
   const compactness = q.length / span; // 1 = contiguous
   const earliness = 1 - firstPos / (t.length + 1);
@@ -1323,6 +1365,63 @@ export function fuzzyScore(query: string, target: string): number | null {
   // fixtures to tie and bury the library document that actually said Kim.
   const evidence = Math.min(1, q.length / 4);
   return Math.max(0.05, (0.55 * compactness * compactness + 0.15 * earliness) * evidence);
+}
+
+/**
+ * Where a scattered query lands in `t` (lowercased `original`), or null. A
+ * jump may skip letters inside a word ("kim" in "kinematics") or move to the
+ * start of a later word ("srcidx" in "src/index"), but never into the middle
+ * of a later word: "invoice" read "Investor Pitch Deck" as
+ * inv-(est)-o-(r Pitch)-i-c-(h D)-e, and the palette offered a pitch deck to a
+ * person looking for their invoices.
+ */
+function scatteredMatch(q: string, t: string, cased: string): number[] | null {
+  // Lowercasing can change a string's length; without a matching original
+  // the camelCase humps are simply not seen.
+  const original = cased.length === t.length ? cased : t;
+  // A plain subsequence check first: most targets fail here, cheaply.
+  let ti = 0;
+  for (const ch of q) {
+    ti = t.indexOf(ch, ti);
+    if (ti === -1) return null;
+    ti++;
+  }
+  const alnum = /[\p{L}\p{N}]/u;
+  const starts: boolean[] = [];
+  const word: number[] = [];
+  let current = 0;
+  for (let i = 0; i < t.length; i++) {
+    const prev = original[i - 1] ?? '';
+    const here = original[i]!;
+    const start =
+      i === 0 ||
+      (alnum.test(here) &&
+        (!alnum.test(prev) ||
+          (here !== here.toLowerCase() &&
+            prev === prev.toLowerCase() &&
+            prev !== prev.toUpperCase()) ||
+          (/\d/.test(here) && !/\d/.test(prev))));
+    if (start && i > 0) current++;
+    starts.push(start);
+    word.push(current);
+  }
+  const failed = new Set<number>();
+  const out: number[] = [];
+  const place = (qi: number, prev: number): boolean => {
+    if (qi === q.length) return true;
+    const key = qi * (t.length + 1) + prev + 1;
+    if (failed.has(key)) return false;
+    for (let i = prev + 1; t.length - i >= q.length - qi; i++) {
+      if (t[i] !== q[qi]) continue;
+      if (prev >= 0 && i > prev + 1 && word[i] !== word[prev] && !starts[i]) continue;
+      out.push(i);
+      if (place(qi + 1, i)) return true;
+      out.pop();
+    }
+    failed.add(key);
+    return false;
+  };
+  return place(0, -1) ? out : null;
 }
 
 /** Tiny non-cryptographic hash for stable ids over snippet text. */

@@ -308,7 +308,8 @@ test.describe('Knowledge catalogs', () => {
     });
 
     // Browse: TOC → topic → document → provenance actions. The view opens on
-    // the bundled Handboek, so switch to the catalog just installed.
+    // the person's own catalog ahead of the bundled Handboek; picking it in
+    // the switcher keeps that explicit.
     await page.getByTestId('sidebar-area-knowledge').click();
     await expect(page.getByTestId('knowledge-view')).toBeVisible({ timeout: 10_000 });
     const catalogPicker = page.getByRole('combobox', { name: 'Catalog' });

@@ -77,6 +77,13 @@ export function overlayOllamaRequestTuning(
   tuning: ResolvedTuning,
   options: OllamaRequestOptions | undefined,
   format: 'json' | Record<string, unknown> | undefined,
+  /**
+   * Ollama's top-level `think`. Only `false` is mapped, for the reason
+   * `overlayOpenAiRequestTuning` maps only the off direction. Without it an
+   * Ollama client had no way to skip the reasoning phase: a three-word answer
+   * took 5 to 15 seconds and 164 to 400 unseen tokens (qwen3.5-9b, 2026-11-10).
+   */
+  think?: boolean | string,
 ): ResolvedTuning {
   const sampling = { ...tuning.sampling };
   if (options) {
@@ -103,5 +110,8 @@ export function overlayOllamaRequestTuning(
     output.jsonSchema = format;
   }
 
-  return { ...tuning, sampling, output };
+  const reasoning =
+    think === false ? { ...tuning.reasoning, enableThinking: false } : tuning.reasoning;
+
+  return { ...tuning, sampling, reasoning, output };
 }

@@ -1239,8 +1239,6 @@ label.gz-setting-inline {
 .connected-apps-kind {
   padding: 0.1rem 0.35rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .connected-apps-scopes {
@@ -1536,8 +1534,6 @@ label.gz-setting-inline {
   padding: 0.1rem 0.45rem;
   border-radius: var(--radius-sm);
   font-size: 0.75em;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
 .gz-badge-passthrough {
@@ -2074,7 +2070,12 @@ label.gz-setting-inline {
   box-shadow: 0 0 0 2px rgba(220, 170, 60, 0.18);
 }
 
-/* red — index is out of date (stale or never built). */
+/* neutral — a new project's first scan has not run yet. Not an error. */
+.project-index-chip-waiting .project-index-dot {
+  background: var(--text-muted);
+}
+
+/* red — an index that exists is out of date. */
 .project-index-chip-stale .project-index-dot {
   background: rgba(214, 90, 80, 0.95);
   box-shadow: 0 0 0 2px rgba(214, 90, 80, 0.16);
@@ -2137,7 +2138,8 @@ label.gz-setting-inline {
   animation: project-index-pulse 1.2s ease-in-out infinite;
 }
 
-.project-index-panel-dot-disabled {
+.project-index-panel-dot-disabled,
+.project-index-panel-dot-waiting {
   background: var(--text-muted);
 }
 

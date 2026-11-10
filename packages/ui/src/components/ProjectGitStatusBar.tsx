@@ -758,7 +758,10 @@ export function ProjectGitStatusBar({
   //   fresh + scan todo → amber ('scan')    — index fresh, AI scan still pending
   //                        (semantic search down also lands here: the amber
   //                        pill means "search not ready", which it is)
-  //   stale / never     → red   ('stale')   — index out of date
+  //   stale             → red   ('stale')   — index out of date
+  //   never             → neutral ('waiting') — a new project's first scan has
+  //                        not run yet; that is not an error, and the crew can
+  //                        still open its files
   //   indexing          → blue pulse ('indexing', transient)
   //   disabled          → neutral ('disabled')
   const indexDotState =
@@ -766,11 +769,13 @@ export function ProjectGitStatusBar({
       ? 'disabled'
       : indexState === 'indexing'
         ? 'indexing'
-        : indexState === 'fresh'
-          ? aiScanPending || semanticSearchDown
-            ? 'scan'
-            : 'fresh'
-          : 'stale';
+        : indexState === 'never'
+          ? 'waiting'
+          : indexState === 'fresh'
+            ? aiScanPending || semanticSearchDown
+              ? 'scan'
+              : 'fresh'
+            : 'stale';
   const enrichment = indexStatus?.enrichment;
   // "Searchable" counts vectors from EITHER embed gate (the always-on
   // embed-only tier or the full enrichment pass) — `embedded` alone reads
@@ -803,7 +808,7 @@ export function ProjectGitStatusBar({
         : indexState === 'indexing'
           ? 'Scanning workspace'
           : indexState === 'never'
-            ? 'Workspace not indexed'
+            ? 'Not scanned yet'
             : indexState === 'stale'
               ? 'Workspace scan is out of date'
               : aiScanPending
@@ -818,7 +823,7 @@ export function ProjectGitStatusBar({
     indexStatus === null || indexDotState === 'fresh'
       ? null
       : indexState === 'never'
-        ? 'Not indexed'
+        ? 'Not scanned yet'
         : indexDotState === 'indexing'
           ? 'Scanning'
           : indexDotState === 'disabled'
@@ -1242,6 +1247,8 @@ export function ProjectGitStatusBar({
                     </>
                   ) : aiScanPending ? (
                     'AI indexing continues while the app is idle.'
+                  ) : indexState === 'never' ? (
+                    'Your crew can still open these files. Search and file summaries arrive after the first scan.'
                   ) : (
                     'Refresh the index whenever you need the latest workspace state.'
                   )}

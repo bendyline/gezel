@@ -144,6 +144,15 @@ describe('fuzzyScore', () => {
     // Compactness dominates: the same letters closer together score higher.
     expect(fuzzyScore('kim', 'kinematics.ts')!).toBeGreaterThan(accident);
   });
+
+  it('never jumps into the middle of a later word', () => {
+    expect(fuzzyScore('invoice', 'Investor Pitch Deck')).toBeNull();
+    // Inside one word, and onto the start of a later one, both still match.
+    expect(fuzzyScore('srcidx', 'src/index.html')).not.toBeNull();
+    expect(fuzzyScore('ntd', 'NewTaskDialog.tsx')).not.toBeNull();
+    // The greedy first alignment fails here; a later word start rescues it.
+    expect(fuzzyScore('comptsx', 'components/Foo.tsx')).not.toBeNull();
+  });
 });
 
 describe('SearchService.quickOpen', () => {
@@ -273,6 +282,74 @@ describe('SearchService.quickOpen', () => {
     svc.invalidateCatalog();
     const after = await svc.quickOpen('shop');
     expect(after[0]?.title).toBe('Pet Shop');
+  });
+
+  // A bakery owner's "invoice" (2026-11-09): every invoicing plan listed twice
+  // (the plan and its generated Handboek article), "Investor Pitch Deck"
+  // matched, and the project that holds the invoices was missing.
+  it('lists a plan once, not again as its Handboek article', async () => {
+    const svc = makeService();
+    svc.setExtraCatalogs({
+      craftbookEntries: async () => [
+        { id: 'invoice-generator', name: 'Invoice Generator', source: 'bundled' },
+      ],
+      handboekEntries: async () => [
+        { id: 'craftbook/invoice-generator', title: 'Invoice Generator' },
+        { id: 'invoices-explained', title: 'Invoices, explained' },
+      ],
+    });
+    const results = await svc.quickOpen('invoice');
+    expect(results.filter((r) => r.title === 'Invoice Generator').map((r) => r.kind)).toEqual([
+      'craftbook',
+    ]);
+    expect(results.some((r) => r.id === 'handboek:invoices-explained')).toBe(true);
+  });
+
+  it('does not read a pitch deck as invoices', async () => {
+    const svc = makeService();
+    svc.setExtraCatalogs({
+      craftbookEntries: async () => [
+        { id: 'pitch-deck', name: 'Investor Pitch Deck', source: 'bundled' },
+        { id: 'invoice-run', name: 'Monthly Invoice Run', source: 'bundled' },
+      ],
+    });
+    const titles = (await svc.quickOpen('invoice')).map((r) => r.title);
+    expect(titles).toEqual(['Monthly Invoice Run']);
+  });
+
+  it('lists the project that holds the matches, below them', async () => {
+    const svc = makeService({
+      projects: [
+        { id: 'bakery', name: 'Willow & Rye Bakery Office' },
+        { id: 'p2', name: 'Space Shooter' },
+      ],
+      tasks: [{ projectId: 'bakery', num: 1, title: 'Draft the October invoices', status: 'done' }],
+      files: { bakery: [{ path: 'invoices.json', size: 1, mtimeMs: 0 }] },
+    });
+    const results = await svc.quickOpen('invoice');
+    const project = results.find((r) => r.kind === 'project');
+    expect(project).toMatchObject({
+      id: 'project:bakery',
+      title: 'Willow & Rye Bakery Office',
+      subtitle: 'Holds invoices.json',
+    });
+    const file = results.find((r) => r.kind === 'file')!;
+    expect(project!.score).toBeLessThan(file.score);
+    expect(results.filter((r) => r.kind === 'project')).toHaveLength(1);
+  });
+
+  it('finds a project by what it is for', async () => {
+    const svc = makeService({
+      projects: [
+        {
+          id: 'bakery',
+          name: 'Willow & Rye Bakery Office',
+          description: 'Invoices and clients for the bakery',
+        } as { id: string; name: string },
+      ],
+    });
+    const results = await svc.quickOpen('invoices');
+    expect(results[0]).toMatchObject({ kind: 'project', title: 'Willow & Rye Bakery Office' });
   });
 });
 

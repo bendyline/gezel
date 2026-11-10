@@ -169,6 +169,39 @@ describe('explicit settings commands', () => {
     }
   });
 
+  it('reports a folder project as read-only until edits are switched on', async () => {
+    const folder = { id: 'notes', workingDir: '/home/ada/notes' };
+    const client = {
+      getProject: vi.fn().mockResolvedValue(folder),
+      updateProject: vi.fn().mockResolvedValue({ ...folder, managedWorkspaceWritePolicy: 'allow' }),
+    };
+    const connect = vi.fn().mockResolvedValue(client);
+    const projectFor = vi.fn().mockResolvedValue('notes');
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const read = program();
+      registerProjectSettingsCommands(read, connect as () => Promise<GezelClient>, projectFor);
+      await read.parseAsync(['edits', '--json'], { from: 'user' });
+      expect(JSON.parse(String(output.mock.calls[0]?.[0]))).toEqual({
+        projectId: 'notes',
+        editsAllowed: false,
+      });
+
+      output.mockClear();
+      const update = program();
+      registerProjectSettingsCommands(update, connect as () => Promise<GezelClient>, projectFor);
+      await update.parseAsync(['edits', 'on'], { from: 'user' });
+      expect(client.updateProject).toHaveBeenCalledWith('notes', {
+        managedWorkspaceWritePolicy: 'allow',
+      });
+      expect(String(output.mock.calls[0]?.[0])).toBe(
+        'notes: Gezel may change files in this project',
+      );
+    } finally {
+      output.mockRestore();
+    }
+  });
+
   it('shows growth as on by default and switches it off for the home', async () => {
     const client = {
       getConfig: vi.fn().mockResolvedValue({}),

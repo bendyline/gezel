@@ -12,6 +12,11 @@ vi.mock('../components/CraftbookStepPanel.js', () => ({
 vi.mock('../components/MarkdownField.js', () => ({
   MarkdownField: () => <div>Description field</div>,
 }));
+vi.mock('../components/DeepLinkDialogs.js', () => ({
+  DeepLinkDialogs: ({ target }: { target: { kind: string; id: string } }) => (
+    <div data-testid="plan-launch">{`${target.kind}:${target.id}`}</div>
+  ),
+}));
 vi.mock('../components/StepTracker.js', () => ({
   StepTracker: (props: { onAddStep?: () => void; variant?: string }) => (
     <div data-testid="step-tracker" data-variant={props.variant}>
@@ -137,5 +142,23 @@ describe('CraftbookEditor', () => {
       source: 'local',
     });
     window.removeEventListener('gezel:open-tab', openTab);
+  });
+
+  // The Plans area offered "Copy to edit" as its only key, and no way to use
+  // a plan (2026-11-09).
+  it('leads with starting a task and keeps copying secondary', async () => {
+    render(<CraftbookEditor craftbookId="review" source="bundled" />);
+    const start = await screen.findByRole('button', { name: 'Start a task' });
+    expect(start).toHaveClass('primary');
+    expect(screen.getByRole('button', { name: 'Copy to edit' })).toHaveClass('secondary');
+
+    fireEvent.click(start);
+    expect(screen.getByTestId('plan-launch')).toHaveTextContent('craftbook:review');
+  });
+
+  it('offers no start for a project’s own plan, which runs only in its project', async () => {
+    render(<CraftbookEditor craftbookId="review" source="project" />);
+    await screen.findByRole('heading', { name: 'Review changes' });
+    expect(screen.queryByRole('button', { name: 'Start a task' })).toBeNull();
   });
 });

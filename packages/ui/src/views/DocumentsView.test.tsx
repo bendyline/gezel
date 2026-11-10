@@ -790,7 +790,7 @@ describe('DocumentsView', () => {
       expect(screen.getByText('Explains how returned goods are processed.')).toBeInTheDocument();
     });
     // Exactly one badge: the keyword hit is a match, not a suggestion.
-    expect(screen.getAllByText('related')).toHaveLength(1);
+    expect(screen.getAllByText('Related')).toHaveLength(1);
   });
 
   it('says so plainly when nothing in the library matches', async () => {

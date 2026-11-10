@@ -7,12 +7,18 @@ import { setTimeout as delay } from 'node:timers/promises';
 import type { Craftbook, Task } from '@bendyline/gezel';
 import {
   type AwakeBudget,
+  PROJECT_EDITS_CLI_COMMAND,
   composeCraftbookLaunch,
   createAwakeTimeout,
+  isRuntimeTemplateDefault,
   paramAsksUser,
+  paramInputSpec,
+  projectManagedWorkspaceWritable,
+  stepWorkspaceDeliverableFiles,
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
 import { CliError } from './connection.js';
+import type { SetupPrompter } from './craftbook-setup.js';
 import { type StartCraftbook, findCraftbook } from './tui/craftbook-start.js';
 
 /** Longest matching name preserves `do Code Review` while permitting trailing arguments. */
@@ -51,6 +57,23 @@ function checkParamValue(key: string, def: Record<string, unknown>, value: strin
     throw new CliError(`${key} is too short`);
 }
 
+/**
+ * The parameters bare words fill, in order: required, without a default, and
+ * asked of a person. `gezel craftbook show` prints the same list, so the
+ * usage line it shows is the one the parser accepts.
+ */
+export function craftbookBareSlots(book: Pick<Craftbook, 'paramSchema'>): string[] {
+  const schema = book.paramSchema ?? {};
+  const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  return Object.keys(properties).filter(
+    (key) =>
+      required.has(key) &&
+      properties[key]!.default === undefined &&
+      paramAsksUser(properties[key], key),
+  );
+}
+
 export interface CraftbookArguments {
   params: Record<string, string>;
   /**
@@ -82,12 +105,7 @@ export function parseCraftbookArguments(
   const schema = book.paramSchema ?? {};
   const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
   const required = new Set(Array.isArray(schema.required) ? schema.required : []);
-  const slots = Object.keys(properties).filter(
-    (key) =>
-      required.has(key) &&
-      properties[key]!.default === undefined &&
-      paramAsksUser(properties[key], key),
-  );
+  const slots = craftbookBareSlots(book);
   const params: Record<string, string> = {};
   const requestWords: string[] = [];
   const set = (key: string, value: string, token: string) => {
@@ -142,6 +160,188 @@ export function craftbookDoLaunch(
     params,
   });
   return { description: launch.description, craftbookParams: launch.params };
+}
+
+/** Every file the book's steps save into the project folder itself, in step order. */
+export function craftbookFolderFiles(craftbook: Pick<Craftbook, 'steps'>): string[] {
+  const files = new Set<string>();
+  for (const step of craftbook.steps ?? []) {
+    for (const file of stepWorkspaceDeliverableFiles(step)) files.add(file);
+  }
+  return [...files];
+}
+
+/** `summary.md`, `index.html and 2 more files`, or `its results` when every name is a template. */
+function nameFolderFiles(files: readonly string[]): string {
+  const named = files.filter((file) => !isRuntimeTemplateDefault(file));
+  if (named.length === 0) return 'its results';
+  const rest = files.length - 1;
+  return rest === 0 ? named[0]! : `${named[0]} and ${rest} more file${rest === 1 ? '' : 's'}`;
+}
+
+export type ProjectEditsClient = Pick<GezelClient, 'getProject' | 'updateProject'>;
+
+/**
+ * Before a book that saves into the project folder starts in a folder Gezel
+ * may not change, say so, and let the person allow it: `--allow-edits` in a
+ * script, a question at a terminal. The desktop asks the same thing in its
+ * confirmation dialog; the command line used to start the task and let it
+ * pause a minute later with a fix that named a desktop setting (2026-11-10).
+ *
+ * Never refuses. A book whose files already exist can pass on their contents
+ * alone, and only the service can tell, so a "no" starts the task anyway and
+ * the pause, if it comes, names the command.
+ */
+export async function ensureProjectEdits(
+  client: ProjectEditsClient,
+  options: {
+    projectId: string;
+    craftbook: Pick<Craftbook, 'name' | 'steps'>;
+    /** `--allow-edits`: the person already said yes on the command line. */
+    allow: boolean;
+    prompter: SetupPrompter | null;
+    write: (text: string) => void;
+  },
+): Promise<void> {
+  const files = craftbookFolderFiles(options.craftbook);
+  if (files.length === 0) return;
+  const project = await client.getProject(options.projectId);
+  if (projectManagedWorkspaceWritable(project)) return;
+  const what = nameFolderFiles(files);
+  const where = project.workingDir ?? 'this project';
+  const turnOn = async () => {
+    await client.updateProject(options.projectId, { managedWorkspaceWritePolicy: 'allow' });
+  };
+  if (options.allow) {
+    await turnOn();
+    options.write(`Gezel may now change files in ${where} (--allow-edits).\n`);
+    return;
+  }
+  const saves = `${options.craftbook.name} saves ${what} into ${where}, and Gezel may not change files there yet.`;
+  if (options.prompter) {
+    if (await options.prompter.confirm(`${saves} Allow it? [y/N] `)) {
+      await turnOn();
+      options.write('Project edits: on\n');
+      return;
+    }
+  }
+  options.write(
+    `${saves} If it stops for that, run \`${PROJECT_EDITS_CLI_COMMAND}\` here, or start it with --allow-edits.\n`,
+  );
+}
+
+/**
+ * A launch the service refused because an input parameter names nothing in
+ * the project, as advice. The usual cause is a request sentence landing in
+ * the input's slot: `gezel do meeting-notes-to-actions "Turn notes.txt into
+ * actions"` answered `"Turn notes.txt into actions" does not exist in this
+ * project` and a line about a 422. Returns null for any other failure.
+ */
+export function taskInputFailure(
+  err: unknown,
+  book: Pick<StartCraftbook, 'command' | 'name'>,
+  params: Readonly<Record<string, string>>,
+): CliError | null {
+  if (!(err instanceof Error) || err.name !== 'GezelApiError') return null;
+  const details = (err as Error & { details?: unknown }).details;
+  if (!details || typeof details !== 'object') return null;
+  const { code, param, error } = details as { code?: unknown; param?: unknown; error?: unknown };
+  if (code !== 'task-input' || typeof param !== 'string') return null;
+  const value = params[param];
+  const lines = [
+    `${book.name} did not start: ${typeof error === 'string' ? error : `${param} is not usable.`}`,
+  ];
+  if (value && /\s/.test(value.trim())) {
+    lines.push(
+      `It read "${value}" as ${param}, which comes before your request:`,
+      `  gezel do ${book.command} <${param}> "your request"`,
+    );
+  }
+  lines.push(`\`gezel craftbook show ${book.command}\` lists what it takes.`);
+  return new CliError(lines.join('\n'));
+}
+
+function firstParagraph(text: string | undefined): string {
+  return (
+    (text ?? '')
+      .split(/\n\s*\n/)[0]
+      ?.replace(/\s+/g, ' ')
+      .trim() ?? ''
+  );
+}
+
+/** What one parameter accepts, in a few words: `a folder in this project`, `one of: a, b`, `a number`. */
+function paramAccepts(property: Record<string, unknown>): string {
+  const input = paramInputSpec(property);
+  if (input) {
+    const kinds = input.accept ? ` (${input.accept.join(', ')})` : '';
+    return input.kind === 'folder'
+      ? 'a folder or file in this project'
+      : `a file in this project${kinds}`;
+  }
+  if (Array.isArray(property.enum)) return `one of: ${property.enum.map(String).join(', ')}`;
+  if (property.type === 'boolean') return 'true or false';
+  if (property.type === 'number' || property.type === 'integer') return 'a number';
+  return 'text';
+}
+
+/**
+ * `gezel craftbook show <command>`: what a book does, what it takes, and the
+ * command that starts it. Parameters Gezel fills itself (the task folder)
+ * are left out, like every launch form does.
+ */
+export function describeCraftbook(
+  book: Pick<StartCraftbook, 'command' | 'name'>,
+  craftbook: Pick<Craftbook, 'description' | 'paramSchema' | 'steps'>,
+): string {
+  const schema = craftbook.paramSchema ?? {};
+  const properties = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  const slots = craftbookBareSlots(craftbook);
+  const asked = Object.keys(properties).filter((key) => paramAsksUser(properties[key], key));
+  const lines = [`${book.command} — ${book.name}`];
+  const about = firstParagraph(craftbook.description);
+  if (about) lines.push(about);
+
+  lines.push('', 'Start it:');
+  lines.push(
+    `  gezel do ${[book.command, ...slots.map((key) => `<${key}>`)].join(' ')} "your request"`,
+  );
+
+  if (asked.length > 0) {
+    const width = Math.max(...asked.map((key) => key.length));
+    lines.push('', 'Takes:');
+    for (const key of asked) {
+      const property = properties[key]!;
+      const need = required.has(key) && property.default === undefined ? 'required' : 'optional';
+      const fallback =
+        property.default !== undefined && !isRuntimeTemplateDefault(property.default)
+          ? `, default ${String(property.default)}`
+          : '';
+      const note = firstParagraph(
+        typeof property.title === 'string'
+          ? property.title
+          : typeof property.description === 'string'
+            ? property.description
+            : '',
+      );
+      lines.push(
+        `  ${key.padEnd(width)}  ${need}, ${paramAccepts(property)}${fallback}${note ? ` — ${note}` : ''}`,
+      );
+    }
+    const named = asked.filter((key) => !slots.includes(key));
+    if (named.length > 0)
+      lines.push(`Set the optional ones by name, for example ${named[0]}=value.`);
+  }
+
+  const files = craftbookFolderFiles(craftbook);
+  lines.push(
+    '',
+    files.length > 0
+      ? `Saves ${nameFolderFiles(files)} into the project folder, so the project must allow edits (\`${PROJECT_EDITS_CLI_COMMAND}\`, or --allow-edits).`
+      : "Saves its results in the task's own folder; add --out <dir> to copy them out.",
+  );
+  return lines.join('\n');
 }
 
 export interface TaskWaitResult {
@@ -334,16 +534,40 @@ export async function blockedTaskReason(
   client: Pick<GezelClient, 'listTaskNotes'>,
   result: TaskWaitResult,
 ): Promise<string | undefined> {
-  if (result.outcome !== 'blocked') return undefined;
+  return (await blockedTaskDetails(client, result)).reason;
+}
+
+/**
+ * Why a waited-on task stopped, and the command that gets it going again
+ * when the stop has one. A folder Gezel may not change is the common case:
+ * the pause note carries `gezel project edits on`, and the hint repeats it
+ * with the resume command, so nobody has to open the notes to find a fix
+ * that used to name a desktop setting.
+ */
+export async function blockedTaskDetails(
+  client: Pick<GezelClient, 'listTaskNotes'>,
+  result: TaskWaitResult,
+): Promise<{ reason?: string; hint?: string }> {
+  if (result.outcome !== 'blocked') return {};
   if (result.questionIds?.length) {
-    return 'Gezel is waiting for your answer to a question. Answer it in the Gezel app or the interactive `gezel` terminal.';
+    return {
+      reason:
+        'Gezel is waiting for your answer to a question. Answer it in the Gezel app or the interactive `gezel` terminal.',
+    };
   }
-  if (result.task.status === 'draft') return 'The task is still a draft and has not started.';
+  if (result.task.status === 'draft') {
+    return { reason: 'The task is still a draft and has not started.' };
+  }
   const { notes } = await client
     .listTaskNotes(result.task.projectId, result.task.num)
     .catch(() => ({ notes: [] }));
   const latest = [...notes].sort((a, b) => a.at.localeCompare(b.at)).at(-1);
-  return latest ? summarizeTaskNote(latest.text) || undefined : undefined;
+  if (!latest) return {};
+  const reason = summarizeTaskNote(latest.text) || undefined;
+  const hint = latest.text.includes(PROJECT_EDITS_CLI_COMMAND)
+    ? `Allow it with \`${PROJECT_EDITS_CLI_COMMAND}\` in the project's folder, then continue with \`gezel task resume ${result.task.ref}\`.`
+    : undefined;
+  return { ...(reason ? { reason } : {}), ...(hint ? { hint } : {}) };
 }
 
 /**

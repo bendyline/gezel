@@ -151,13 +151,13 @@ describe('MessageBubble nudge chip', () => {
         nudge
       />,
     );
-    expect(screen.getByText('nudged')).toBeInTheDocument();
+    expect(screen.getByText('Nudged')).toBeInTheDocument();
   });
 
   it('renders no chip on plain user messages', () => {
     // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
     render(<MessageBubble role="user" content="hello" authorLabel="You" authorIcon={null} />);
-    expect(screen.queryByText('nudged')).toBeNull();
+    expect(screen.queryByText('Nudged')).toBeNull();
   });
 });
 
@@ -183,7 +183,7 @@ describe('MessageBubble system attribution', () => {
     );
     expect(screen.getByText('System')).toBeInTheDocument();
     expect(screen.queryByText('You')).toBeNull();
-    expect(screen.getByText('automatic')).toBeInTheDocument();
+    expect(screen.getByText('Automatic')).toBeInTheDocument();
     // Drops the terracotta "these are your words" treatment.
     expect(container.querySelector('.msg-system')).not.toBeNull();
   });

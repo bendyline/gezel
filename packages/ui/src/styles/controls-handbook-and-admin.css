@@ -109,7 +109,8 @@
 
 /* A latched key takes the accent fill, so a muted hint on top of it loses
    contrast. Inherit the pressed ink and lean on opacity for the hierarchy. */
-.gz-key-active .gz-key-hint {
+.gz-key-active .gz-key-hint,
+.gz-key[aria-pressed="true"] .gz-key-hint {
   color: inherit;
   opacity: 0.75;
 }
@@ -790,6 +791,14 @@
   white-space: normal;
 }
 
+/* A first project that needs the person's details: the meester's question,
+   then one way to answer it, under the cards. */
+.meester-welcome-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
 /* Interest areas are checkbox cards (several can be ticked, none is
    required). Without hints they are bare labels, so the welcome's narrow
    column still fits two to a row. */
@@ -872,14 +881,4 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--panel);
-}
-
-/* The folder invitation, asked at the foot of the meester's conversation
-   once the crew has finished something. */
-.meester-folder-invite {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  max-width: 68ch;
-  margin: 1rem 1rem 1.5rem;
 }

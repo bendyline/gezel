@@ -1,10 +1,5 @@
 import type { GezelSummary, ProjectDetail, Task } from '@bendyline/gezel';
-import {
-  displayName,
-  isCodingProject,
-  isTaskOrCraftbookSession,
-  pronounFormsForGender,
-} from '@bendyline/gezel';
+import { displayName, isCodingProject, isTaskOrCraftbookSession } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
@@ -497,16 +492,14 @@ function ProjectChatBody({
     writeChatThreadSelection(projectThreadKey(project.id, selectedGezel.id), { sessionId });
   }, [project.id, selectedGezel.id, sessionId]);
 
-  // Pick a role-aware empty-composer prompt once per (gezel, project)
-  // pairing. `isVoorman` is passed from the outer roster derivation —
-  // voormen get project-scoped hints, everyone else gets a generic
-  // worker nudge.
+  // The composer's hint for this (gezel, project) pairing. `isVoorman` is
+  // passed from the outer roster derivation — voormen get the
+  // project-scoped sentence, everyone else the worker one.
   const placeholder = useMemo(
     () =>
       pickChatPlaceholder({
         role: isVoorman ? 'voorman' : 'other',
         gezelName: selectedName,
-        gezelGender: selectedGezel.gender,
         projectName: project.name,
         fixedFunctionTool: selectedGezel.fixedFunction?.tool,
         fixedFunctionEdits: selectedGezel.fixedFunction?.requiresInputImage,
@@ -514,14 +507,11 @@ function ProjectChatBody({
     [
       isVoorman,
       selectedName,
-      selectedGezel.gender,
       project.name,
       selectedGezel.fixedFunction?.tool,
       selectedGezel.fixedFunction?.requiresInputImage,
     ],
   );
-
-  const selectedGezelPronouns = pronounFormsForGender(selectedGezel.gender);
 
   // The compose-surface switch, rendered into the top row of whichever
   // composer is mounted — the chat composer's "To:" line, the terminal
@@ -667,7 +657,7 @@ function ProjectChatBody({
             emptyPlaceholder={
               isVoorman
                 ? `Talk to ${selectedName} about running "${project.name}" — planning tasks, delegating, or checking progress.`
-                : `Chat with ${selectedName} about what ${selectedGezelPronouns.subject} ${selectedGezelPronouns.presentBe} working on in "${project.name}".`
+                : `Chat with ${selectedName} about the work on "${project.name}".`
             }
           />
           <div className="project-chat-compose-shell">

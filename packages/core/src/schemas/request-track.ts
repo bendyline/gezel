@@ -68,6 +68,12 @@ export const RequestTrackSchema = z.object({
   liveSessionIds: z.array(z.string()),
   /** Everyone besides the lead who worked on it. */
   crew: z.array(z.string()),
+  /**
+   * Crew members hired for it after it started, in the order they joined:
+   * the thread's `joined` introductions for its tasks. The tracker folds
+   * those introductions away, so it names the newcomers itself.
+   */
+  joined: z.array(z.string()).optional(),
   deliverable: TaskDeliverableSchema.optional(),
   makerGezelId: z.string().optional(),
   /** Ready, with the thread's gezel still writing its closing reply. */

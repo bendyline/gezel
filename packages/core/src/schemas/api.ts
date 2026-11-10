@@ -2732,6 +2732,12 @@ const GezelConfigObject = z.object({
       overnightStepDoneAt: z.string().optional(),
       /** When the first project the person asked for finished. */
       firstProjectDoneAt: z.string().optional(),
+      /**
+       * When the person first opened a finished result from its card. The
+       * folder and night-work question waits for it, so it never competes
+       * with the first thing the crew made.
+       */
+      firstResultOpenedAt: z.string().optional(),
       /** When the downloads first run deferred (the image reader) started; once per install. */
       optionalDownloadsAt: z.string().optional(),
     })

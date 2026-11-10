@@ -82,9 +82,15 @@ import {
   gezelReportThemeForMode,
 } from './chat-theme.js';
 import { ToolAudioRow, ToolImageRow, ToolVideoRow } from './chat-tool-media.js';
-import { citationFromHref, evidenceTitle, linkifyCitations } from './citation-linkify.js';
+import {
+  citationFromHref,
+  evidenceTitle,
+  linkifyCitations,
+  replySources,
+} from './citation-linkify.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
+import { useFlaggedSentences } from './grounding-flags.js';
 import { shouldDisplayIntent } from './intent-display.js';
 import { knowledgeRefFromHref, linkifyKnowledgeRefs } from './knowledge-linkify.js';
 import {
@@ -100,6 +106,7 @@ import {
   formatPendingArgsPreview,
   parsePendingToolCalls,
 } from './pending-tool-calls.js';
+import { plainStatement } from './plain-markdown.js';
 import { type MarkdownWalkNode, isRawHtmlDump, toHtmlCodeFence } from './raw-html-dump.js';
 import { stripVisibleToolCallMarkup } from './strip-tool-call-markup.js';
 import { renderToolArgsFragment } from './tool-args-fragment.js';
@@ -581,15 +588,27 @@ export function authorTitle(role: string | undefined, tooltip: string | undefine
  * get one — the meester (the front-door figure) a top hat, the crew lead a
  * star matching the sidebar — and every other role reads as text alone, so
  * there is no glyph to invent for each "Reviewer" or "Designer". It rides
- * with the name, so it stays when a narrow timeline drops the role.
+ * with the name, so it stays when a narrow timeline drops the role. The hat
+ * is drawn, not an emoji: the 🎩 broke the no-emoji rule (2026-11-09).
  */
 export function roleGlyph(role: string | undefined): ReactNode {
   if (!role) return null;
   const key = roleForMatching(role).toLowerCase().trim();
-  const glyph = key === 'meester' ? '🎩' : key === 'voorman' ? '⭐' : null;
-  return glyph ? (
+  if (key === 'meester') {
+    return (
+      <span className="msg-role-glyph msg-role-glyph-hat" aria-hidden>
+        <svg viewBox="0 0 16 16" width="1em" height="1em" focusable="false" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M4.5 2.5h7l-.6 7.5H5.1zM1.5 11.2c0-.5.4-.7.9-.7h11.2c.5 0 .9.2.9.7 0 1-2.9 1.8-6.5 1.8s-6.5-.8-6.5-1.8z"
+          />
+        </svg>
+      </span>
+    );
+  }
+  return key === 'voorman' ? (
     <span className="msg-role-glyph" aria-hidden>
-      {glyph}
+      ⭐
     </span>
   ) : null;
 }
@@ -733,14 +752,21 @@ export function MessageBubble({
   // a message saved before that behavior shipped) get cleaned up at
   // render time. Idempotent — text that's already been promoted is a
   // no-op.
+  // The sources this reply cites, numbered from 1 as its reader counts them;
+  // the ledger's numbers run across the whole session.
+  const citedSources = useMemo(
+    () => replySources(content, grounding?.evidence),
+    [content, grounding],
+  );
   const displayContent = useMemo(() => {
     const scrubbed = linkifyCitations(
       linkifyKnowledgeRefs(promoteBareChannelNames(stripVisibleToolCallMarkup(content))),
       grounding?.evidence,
+      citedSources.shownAs,
     );
     if (!referencedFiles || referencedFiles.length === 0) return scrubbed;
     return linkifyFileRefs(scrubbed, referencedFiles);
-  }, [content, referencedFiles, grounding]);
+  }, [content, referencedFiles, grounding, citedSources]);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [focusedCitation, setFocusedCitation] = useState<number | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -832,11 +858,13 @@ export function MessageBubble({
   // A wrap-up's finished card opens the work; its task id would be a second,
   // rawer way to say the same thing.
   const hasTasks = referencedTasks && referencedTasks.length > 0 && synthetic !== 'task-wrapup';
-  // Outside debug mode the finished card is the file list too: "Files:
-  // report.pdf report.md outline.md" under it named the drafts beside the
-  // deliverable. And a task's id is debug-mode text; the cards and the chat
+  // Outside debug mode a wrap-up never adds a file list: its finished card
+  // (here, or in the request's tracker) opens the work, and without one the
+  // wrap-up's own words link what was made. "Files: report.docx report.md
+  // sources.md" sat under a wrap-up whose card had moved to the tracker
+  // (2026-11-09). And a task's id is debug-mode text; the cards and the chat
   // rail open the task by name.
-  const showFiles = hasFiles && (debugMode || !(synthetic === 'task-wrapup' && deliverable));
+  const showFiles = hasFiles && (debugMode || synthetic !== 'task-wrapup');
   const showTaskChips = hasTasks && debugMode;
   const chips =
     showFiles || showTaskChips ? (
@@ -968,8 +996,15 @@ export function MessageBubble({
 
   // A factual-mode reply's sources: the evidence its [n] markers name, and
   // any statement no source showed. Collapsed until a citation is clicked.
-  const groundingEvidence = grounding?.evidence ?? [];
+  const groundingEvidence = citedSources.sources;
   const groundingIssues = grounding?.problems ?? [];
+  // The check's doubts sit on the sentence they are about, not only in the
+  // line under the reply.
+  const replyBodyRef = useRef<HTMLDivElement>(null);
+  useFlaggedSentences(
+    replyBodyRef,
+    role === 'user' ? [] : groundingIssues.map((issue) => issue.text),
+  );
   const groundingSources =
     role !== 'user' && (groundingEvidence.length > 0 || groundingIssues.length > 0) ? (
       <details
@@ -979,14 +1014,19 @@ export function MessageBubble({
       >
         <summary className="msg-retrieval-summary">
           {groundingEvidence.length} source{groundingEvidence.length === 1 ? '' : 's'}
-          {groundingIssues.length > 0 &&
-            ` · ${groundingIssues.length} statement${groundingIssues.length === 1 ? '' : 's'} not found in any source`}
+          {groundingIssues.length > 0 && (
+            <span className="msg-grounding-flagged">
+              {' · '}
+              {groundingIssues.length} statement{groundingIssues.length === 1 ? '' : 's'} to check,
+              marked above
+            </span>
+          )}
         </summary>
         {groundingIssues.length > 0 && (
           <ul className="msg-grounding-issues">
             {groundingIssues.map((issue) => (
               <li key={issue.text} className="msg-grounding-issue">
-                {issue.text}
+                {plainStatement(issue.text)}
                 <span className="msg-grounding-missing">
                   {issue.status === 'bad-citation'
                     ? ` — cites ${issue.missing.join(', ')}, which is not one of the sources`
@@ -999,20 +1039,36 @@ export function MessageBubble({
           </ul>
         )}
         <ul className="msg-retrieval-list">
-          {groundingEvidence.map((item) => (
-            <li key={item.n} className="msg-retrieval-item">
-              <details className="msg-retrieval-source" open={focusedCitation === item.n}>
+          {groundingEvidence.map((source) => (
+            <li key={source.n} className="msg-retrieval-item">
+              <details
+                className="msg-retrieval-source"
+                open={source.items.some((item) => item.n === focusedCitation)}
+              >
                 <summary className="msg-retrieval-source-summary">
                   <span className="msg-retrieval-source-label">
-                    [{item.n}] {evidenceTitle(item)}
+                    [{source.n}] {evidenceTitle(source.items[0]!)}
                   </span>
                 </summary>
                 <div className="msg-retrieval-source-body">
-                  {item.excerpt ? (
-                    <pre className="msg-retrieval-excerpt">{item.excerpt}</pre>
-                  ) : (
-                    <p className="msg-retrieval-empty">No excerpt was kept for this source.</p>
-                  )}
+                  {source.items.map((item) => (
+                    <Fragment key={item.n}>
+                      {item.query && (
+                        <>
+                          <p className="msg-grounding-query-label">How it was calculated</p>
+                          <pre className="msg-retrieval-excerpt msg-grounding-query">
+                            {item.query}
+                          </pre>
+                          <p className="msg-grounding-query-label">What it returned</p>
+                        </>
+                      )}
+                      {item.excerpt ? (
+                        <pre className="msg-retrieval-excerpt">{item.excerpt}</pre>
+                      ) : (
+                        <p className="msg-retrieval-empty">No excerpt was kept for this source.</p>
+                      )}
+                    </Fragment>
+                  ))}
                 </div>
               </details>
             </li>
@@ -1175,12 +1231,12 @@ export function MessageBubble({
                   className="msg-system-chip"
                   title="Sent by gezel itself to move the task along — you didn't write this"
                 >
-                  automatic
+                  Automatic
                 </span>
               )}
               {nudge && (
                 <span className="msg-nudge-chip" title="Sent while the previous turn was running">
-                  nudged
+                  Nudged
                 </span>
               )}
             </>
@@ -1281,6 +1337,7 @@ export function MessageBubble({
       ) : (
         // biome-ignore lint/a11y/useKeyWithClickEvents: event delegation to child <a>
         <div
+          ref={replyBodyRef}
           className="msg-body msg-body-rendered"
           onClick={handleBodyClick}
           style={isUser ? undefined : bodyStyle}

@@ -1,4 +1,4 @@
-import { createLogger } from '@bendyline/gezel';
+import { OLLAMA_EMULATION_PORT, createLogger } from '@bendyline/gezel';
 import type { GezelConfig } from '@bendyline/gezel';
 import { v1ChatRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-chat';
 import { v1EmbeddingsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-embeddings';
@@ -13,8 +13,8 @@ import { opaqueServerErrors } from './server.js';
 const log = createLogger('ollama-emulation');
 type ServeFetch = Parameters<typeof serve>[0]['fetch'];
 
-/** Ollama's well-known port — the whole point of the emulation. */
-export const OLLAMA_EMULATION_PORT = 11434;
+/** Ollama's well-known port — the whole point of the emulation. Defined in core for the command line. */
+export { OLLAMA_EMULATION_PORT };
 
 /**
  * The app served on the emulation listener. **Unauthenticated by
