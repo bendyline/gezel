@@ -1233,9 +1233,7 @@ function stuckStepNudgeText(
       ? ` The deliverable \`${step.advanceWhen.file}\`${step.advanceWhen.artifact ? ' (in the artifacts drawer)' : ''} exists, but it has not cleared this step's progress gate yet. Continue from the existing file; do not claim it is missing.`
       : ` The deliverable \`${step.advanceWhen.file}\`${step.advanceWhen.artifact ? ' (in the artifacts drawer)' : ''} isn't there yet.`
     : '';
-  const howTo =
-    'Pick up where you left off: follow the step procedure in your prompt, write the deliverable with the tool it names, then call `advance_task_step` to hand off. ' +
-    'If you are genuinely blocked, say exactly what you need (or ask the user with `ask_user_question`) instead of going quiet.';
+  const howTo = `Pick up where you left off: follow the step procedure in your prompt, write the deliverable with the tool it names, then call \`advance_task_step({ ref: "${task.ref}", stepId: "${step.id}" })\` to hand off. If you are genuinely blocked, say exactly what you need (or ask the user with \`ask_user_question\`) instead of going quiet.`;
   return `You're still assigned step \`${step.id}\` ("${step.name}") of task ${task.ref}, and it hasn't progressed.${deliverable} ${howTo}`;
 }
 

@@ -132,9 +132,14 @@ export function buildStepDispatchSeed(input: StepDispatchSeedInput): StepDispatc
     dispatchStep.advanceWhen?.artifact === true &&
     dispatchGate?.at === 'completion';
   const requiresExactOutcome = fixedEvidenceOutcome || artifactCheckpointOutcome;
+  // Spell out the call. Told only "call `advance_task_step`", a model that
+  // insists on supplied arguments finishes the work, says it was never given
+  // `ref` and `stepId`, and ends its turn; the step then idles until the
+  // stall sweep re-drives it (~6% of Codex media-review turns, 2026-11-10).
+  const advanceCall = `\`advance_task_step({ ref: ${JSON.stringify(taskRef)}, stepId: ${JSON.stringify(dispatchStepId)} })\``;
   const completionClause = exactStepAutoAdvances
     ? ' The runtime evaluates the declared evidence after your required action and advances the step when it passes; `advance_task_step` is intentionally unavailable.'
-    : " When the step is done, call `advance_task_step` to hand off to whoever's next.";
+    : ` When the step is done, call ${advanceCall} to hand off to whoever's next.`;
   const fixedEntryProcedure =
     input.kind === 'entry' &&
     explicitOutputMedium === 'none' &&
@@ -145,7 +150,7 @@ export function buildStepDispatchSeed(input: StepDispatchSeedInput): StepDispatc
   const retrySeed =
     exactStepAutoAdvances && dispatchStep?.prompt?.trim()
       ? `Task ${taskRef} is still active on fixed-action step \`${dispatchStepId}\`. The previous provider turn failed before its required action completed. Call the procedure's named tool now; the runtime will evaluate its durable evidence and advance automatically. Do not call \`read_task_notes\` or \`advance_task_step\` — neither is available on this exact step:\n\n${dispatchStep.prompt.trim()}`
-      : `You paused on step \`${dispatchStepId}\` of task ${taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call \`advance_task_step\` when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`;
+      : `You paused on step \`${dispatchStepId}\` of task ${taskRef}, and the user has asked you to try again. Call \`read_task_notes\` first — the newest note says why it stopped. Then take a DIFFERENT approach to the same deliverable instead of repeating the attempt that failed, and call ${advanceCall} when it is done. If it still cannot work, say exactly what you need with \`ask_user_question\` rather than going quiet.`;
   const generalistClause = generalistTask
     ? " The Task outline in your prompt shows where this step sits in the whole task; only the active step's procedure is in force now."
     : '';

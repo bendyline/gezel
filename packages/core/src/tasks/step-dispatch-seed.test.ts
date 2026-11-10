@@ -44,13 +44,13 @@ describe('buildStepDispatchSeed', () => {
   it('orients a fresh launch with the craftbook arc', () => {
     expect(buildStepDispatchSeed({ ...base, kind: 'entry' }).seed).toBe(
       'Task repair-day/3 ("Prepare repair handover") was just created from the **Handover** craftbook. Hand a job to the next volunteer.\n\nIts steps:\n1. Gather — Collect the facts\n2. Write the note ← your step\n3. Route\n\n' +
-        "You've been assigned task repair-day/3 (step `write`). Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure. Persist the primary result to the artifacts-drawer path named by the procedure. When the step is done, call `advance_task_step` to hand off to whoever's next.",
+        'You\'ve been assigned task repair-day/3 (step `write`). Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure. Persist the primary result to the artifacts-drawer path named by the procedure. When the step is done, call `advance_task_step({ ref: "repair-day/3", stepId: "write" })` to hand off to whoever\'s next.',
     );
   });
 
   it('names who handed the step over', () => {
     expect(buildStepDispatchSeed({ ...base, fromGezelDisplayName: 'Noor' }).seed).toBe(
-      "Noor has handed step `write` of task repair-day/3 to you. Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure. Persist the primary result to the artifacts-drawer path named by the procedure. When the step is done, call `advance_task_step` to hand off to whoever's next.",
+      'Noor has handed step `write` of task repair-day/3 to you. Follow the step instructions already in your prompt — start with the first tool call they name, then keep working through the procedure. Persist the primary result to the artifacts-drawer path named by the procedure. When the step is done, call `advance_task_step({ ref: "repair-day/3", stepId: "write" })` to hand off to whoever\'s next.',
     );
   });
 
@@ -88,5 +88,19 @@ describe('buildStepDispatchSeed', () => {
     expect(seed).toContain(
       'You have already written these artifacts for this task: `tasks/3/draft.md`.',
     );
+  });
+
+  // Told only "call `advance_task_step`", Codex models finished the work and
+  // then ended the turn because nobody had supplied `ref` and `stepId`.
+  it('spells out the advance call on every seed that asks for it', () => {
+    const call = '`advance_task_step({ ref: "repair-day/3", stepId: "write" })`';
+    for (const input of [
+      { ...base, kind: 'entry' as const },
+      { ...base, kind: 'retry' as const },
+      { ...base, selfHandoff: true },
+      { ...base, resumedExisting: true },
+    ]) {
+      expect(buildStepDispatchSeed(input).seed).toContain(call);
+    }
   });
 });
