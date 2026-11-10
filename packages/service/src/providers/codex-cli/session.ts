@@ -24,6 +24,7 @@ import type {
   TurnUsage,
 } from '@bendyline/gezel-inference/internal/providers/types';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
+import type { RateLimitGovernor } from '@bendyline/gezel/runtime';
 import { scriptToolNamesFromEnv } from '../../project-type/script-tools.js';
 import { providerCanReachHostedMcp } from '../hosted-mcp-transports.js';
 import { type McpServerSpec, isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
@@ -65,6 +66,8 @@ export interface CodexSessionDeps {
   runtimeDir: string;
   manageRuntimeFiles: boolean;
   queue: ProviderQueue;
+  /** Told of every 429 Codex reports and of each turn that ran without one. */
+  rateLimits?: Pick<RateLimitGovernor, 'rateLimited' | 'succeeded'>;
   extraConfigOverrides?: Record<string, string>;
   mcpServer?: SessionOpts['mcpServer'];
   extraMcpServers?: SessionOpts['extraMcpServers'];
@@ -192,6 +195,13 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       this.threadTotal = await readCodexThreadTotal(runtime.codexHome, resumeId);
     }
     const hooks = this.buildTurnHooks();
+    let refused = false;
+    hooks.onRateLimited = (signal) => {
+      refused = true;
+      this.deps.rateLimits?.rateLimited({
+        detail: `Codex: model service rate limit (${signal.retrying ? `retry ${signal.attempt ?? '?'}/${signal.maxAttempts ?? '?'}` : 'gave up'})`,
+      });
+    };
     const imagePaths = await writeCodexImageAttachments(runtime.codexHome, opts?.attachments);
 
     try {
@@ -224,7 +234,9 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       if (opts?.queue?.signal) {
         invokerOpts.signal = opts.queue.signal;
       }
-      return await runCodexTurn(invokerOpts);
+      const text = await runCodexTurn(invokerOpts);
+      if (!refused) this.deps.rateLimits?.succeeded();
+      return text;
     } catch (err) {
       // Resume failure: clear the cached id so the next sendAndWait
       // starts a fresh thread without `--resume`. ChatManager's

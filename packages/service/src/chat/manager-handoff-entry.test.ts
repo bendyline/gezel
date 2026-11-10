@@ -360,6 +360,78 @@ describe('handoff seed wording', () => {
     ).toBe(true);
   });
 
+  // A provider that says "slower" (HTTP 429) did not fail the step: Codex
+  // turned 40 throttled media reviews into paused tasks this way (2026-11-10).
+  it('re-sends rate-limited handoff turns without spending bounded recovery', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Review through a throttled provider',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [{ id: 'review', name: 'Review', prompt: 'Review the assigned patch record.' }],
+      createdBy: { kind: 'user' },
+    });
+    const rateLimited = { name: 'ProviderRateLimitError' };
+    for (let i = 0; i < 4; i++)
+      mock.scriptSendFailure('[codex-cli] 429 Too Many Requests', rateLimited);
+    mock.scriptSendFailure('transient required-tool envelope failure');
+    mock.scriptSendFailure('second transient required-tool envelope failure');
+    mock.script('Recovered review result.');
+    const exhausted = vi.fn(async () => {});
+    manager.setHandoffExhaustedHandler(exhausted);
+
+    const { sessionId } = await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'review',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(7);
+    expect(exhausted).not.toHaveBeenCalled();
+    const full = await store.getSession('worker', sessionId);
+    expect(full?.messages.some((message) => message.content === 'Recovered review result.')).toBe(
+      true,
+    );
+    expect(
+      full?.messages.some((message) =>
+        message.content.includes('The model service rate limited your previous turn (HTTP 429)'),
+      ),
+    ).toBe(true);
+  });
+
+  it('still pauses a handoff whose provider never stops rate limiting', async () => {
+    const task = await tasks.create('p1', {
+      title: 'Review through a provider that never relents',
+      assignee: { kind: 'gezel', gezelId: 'worker' },
+      steps: [{ id: 'review', name: 'Review', prompt: 'Review the assigned patch record.' }],
+      createdBy: { kind: 'user' },
+    });
+    for (let i = 0; i < 11; i++) {
+      mock.scriptSendFailure('[codex-cli] 429 Too Many Requests', {
+        name: 'ProviderRateLimitError',
+      });
+    }
+    const exhausted = vi.fn(async () => {});
+    manager.setHandoffExhaustedHandler(exhausted);
+
+    await manager.startHandoffSession({
+      gezelId: 'worker',
+      projectId: 'p1',
+      taskRef: task.ref,
+      stepId: 'review',
+      kind: 'entry',
+    });
+    await manager.drainBackground();
+
+    // Eight free re-sends, then the three bounded sends.
+    expect(mock.calls.filter((call) => call.kind === 'send')).toHaveLength(11);
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    expect(exhausted).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: expect.stringContaining('429 Too Many Requests') }),
+    );
+  });
+
   it('reports a handoff that spent its bounded sends so the task can be paused for help', async () => {
     const task = await tasks.create('p1', {
       title: 'Review a patch that keeps aborting',

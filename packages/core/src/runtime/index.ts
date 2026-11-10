@@ -16,6 +16,7 @@ export {
 } from './project-types.js';
 export * from './chat-events.js';
 export * from './provider-queue.js';
+export * from './provider-rate-limit.js';
 export * from './session-send-queue.js';
 
 export * from './script-host.js';

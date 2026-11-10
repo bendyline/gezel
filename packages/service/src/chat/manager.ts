@@ -182,7 +182,7 @@ import {
 import { SCRIPT_DENY_NET_BOUNDARY_ENV, SCRIPT_NETWORK_ALLOWED_ENV } from '@bendyline/gezel-mcp';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import type { SessionQueueState } from '@bendyline/gezel/queue-status';
-import { SessionSendQueue } from '@bendyline/gezel/runtime';
+import { SessionSendQueue, isProviderRateLimitError } from '@bendyline/gezel/runtime';
 import { createAppToolRelayTransport } from '../app-tools/relay-mcp-transport.js';
 import {
   type AppToolBinding,
@@ -478,6 +478,7 @@ import {
   checkpointGapForStep,
   classifyExecutionTierFor,
   isContextOverflowError,
+  renderRateLimitRetry,
   renderWriteBailContinuation,
   resolveExecutionModelFor,
   sessionContextPoisoned,
@@ -4630,6 +4631,14 @@ export class ChatManager extends LocalEngineRuntime {
         // bad child across dozens of batches far less likely to strand the
         // host after the provider has already spent its own corrective turns.
         const maxHandoffSendAttempts = 3;
+        // A turn the model service refused for rate (HTTP 429) did not fail
+        // the step; the provider only said "slower". It is re-sent without
+        // spending bounded recovery, and the provider queue's throttle makes
+        // the re-send wait for capacity. Bounded too, so a service that never
+        // relents still ends in the normal pause for help.
+        const maxRateLimitRetries = 8;
+        let rateLimitRetries = 0;
+        let rateLimitRetryPending = false;
         let shardLeftStepOpen = false;
         for (let attempt = 1; attempt <= maxHandoffSendAttempts; attempt += 1) {
           const gap = await checkpointGapForStep(
@@ -4639,8 +4648,9 @@ export class ChatManager extends LocalEngineRuntime {
             attempt,
             artifactCheckpointOutcome,
           );
-          const message =
-            attempt === 1
+          const message = rateLimitRetryPending
+            ? renderRateLimitRetry(args.taskRef, dispatchStepId)
+            : attempt === 1
               ? seed
               : requiresExactOutcome && dispatchStep?.prompt?.trim()
                 ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.${gap ? ` Right now ${gap}.` : ''}` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
@@ -4655,6 +4665,7 @@ export class ChatManager extends LocalEngineRuntime {
                     })
                   : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
           shardLeftStepOpen = false;
+          rateLimitRetryPending = false;
           try {
             const sendStartedAt = nowIso();
             await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
@@ -4766,6 +4777,25 @@ export class ChatManager extends LocalEngineRuntime {
                 `[chat] handoff turn for ${args.taskRef}/${dispatchStepId} failed after a newer pass of the step began; not retried`,
               );
               return;
+            }
+            if (
+              isProviderRateLimitError(error) &&
+              rateLimitRetries < maxRateLimitRetries &&
+              currentTask &&
+              taskEffectiveStatus(currentTask) === 'active' &&
+              currentTask.activeStepId === dispatchStepId
+            ) {
+              rateLimitRetries += 1;
+              rateLimitRetryPending = true;
+              // Not a failed attempt. The provider thread is intact, so no
+              // reset: the re-send continues it once the queue admits it.
+              attempt -= 1;
+              log.warn(
+                `[chat] handoff turn for ${args.taskRef}/${dispatchStepId} was rate limited by the model service; ` +
+                  `re-sending when the provider has capacity (${rateLimitRetries}/${maxRateLimitRetries}, bounded recovery unspent): ` +
+                  `${error instanceof Error ? error.message : String(error)}`,
+              );
+              continue;
             }
             if (attempt === maxHandoffSendAttempts) throw error;
             if (

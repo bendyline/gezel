@@ -15,6 +15,7 @@ import type {
   ProviderName,
   SessionOpts,
 } from '@bendyline/gezel-inference/internal/providers/types';
+import { RateLimitGovernor } from '@bendyline/gezel/runtime';
 import { HOSTED_PROVIDER_DEFAULT_MODELS } from '../hosted-default-models.js';
 import { type CodexBinary, resolveCodexBinary } from './binary.js';
 import type { CodexPermissionMode } from './invoker.js';
@@ -166,6 +167,12 @@ export class CodexCliProvider implements LLMProvider {
    * for tool-bearing requests routed here.
    */
   readonly queue: ProviderQueue;
+  /**
+   * Narrows {@link queue} while the model service answers 429 and widens it
+   * back as turns run clean. Codex retries a 429 quietly, so without this a
+   * throttled account kept every slot busy waiting and the turns timed out.
+   */
+  readonly rateLimits: RateLimitGovernor;
 
   private resolved: CodexBinary | null = null;
   private readonly binaryPathOverride?: string;
@@ -194,6 +201,15 @@ export class CodexCliProvider implements LLMProvider {
     this.queue = new ProviderQueue({
       concurrency,
       ...(opts.affinity !== undefined ? { affinity: opts.affinity } : {}),
+    });
+    this.rateLimits = new RateLimitGovernor(this.queue, {
+      onChange: ({ limit, change, detail }) => {
+        const width =
+          limit === undefined ? `${concurrency} (configured)` : `${limit}/${concurrency}`;
+        const message = `[codex-cli] rate limit: ${change}, admitting ${width}${detail ? ` — ${detail}` : ''}`;
+        if (change === 'held') log.debug(message);
+        else log.info(message);
+      },
     });
   }
 
@@ -258,6 +274,7 @@ export class CodexCliProvider implements LLMProvider {
       runtimeDir: this.runtimeDir,
       manageRuntimeFiles: this.manageRuntimeFiles,
       queue: this.queue,
+      rateLimits: this.rateLimits,
       ...(reasoningEffort ? { reasoningEffort } : {}),
       ...(this.extraConfigOverrides ? { extraConfigOverrides: this.extraConfigOverrides } : {}),
       ...(opts.mcpServer ? { mcpServer: opts.mcpServer } : {}),

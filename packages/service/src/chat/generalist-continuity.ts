@@ -38,6 +38,16 @@ export function renderWriteBailContinuation(stepId: string): string {
   return `Your file write landed and the runtime closed that turn early. Step \`${stepId}\` is still active: it is not complete until its gate passes. Finish anything the step procedure in your prompt still requires, then call \`advance_task_step\` once.`;
 }
 
+/**
+ * Re-send after the model service refused a turn for rate (HTTP 429). The
+ * seed or retry text already sits in the transcript, so repeating it would
+ * read as a second request; this says only that the turn was cut short and
+ * where to pick up. Names no tool, so it fits fixed-action steps too.
+ */
+export function renderRateLimitRetry(taskRef: string, stepId: string): string {
+  return `The model service rate limited your previous turn (HTTP 429) before it finished; nothing about the task changed. Continue step \`${stepId}\` of task ${taskRef} from where you stopped: anything you already saved still counts, so do not redo it. Follow the step procedure in your prompt and finish the step as it says.`;
+}
+
 export { isContextOverflowError, sessionContextPoisoned } from '@bendyline/gezel';
 
 // Shared with every host that runs craftbook steps.

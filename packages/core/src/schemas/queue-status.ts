@@ -94,6 +94,18 @@ export const ProviderQueueDescriptionSchema = z.object({
    * inference policy.
    */
   backgroundConcurrency: z.number(),
+  /**
+   * Present while the provider is pushing back (HTTP 429) and the queue
+   * admits fewer turns than its caps: at most `limit` run at once, and
+   * nothing new starts before `heldUntil`. Absent at the configured caps.
+   */
+  throttle: z
+    .object({
+      limit: z.number(),
+      heldUntil: z.string().optional(),
+      reason: z.string().optional(),
+    })
+    .optional(),
   active: z.array(ProviderQueueActiveItemSchema),
   pending: z.array(ProviderQueuePendingItemSchema),
 });

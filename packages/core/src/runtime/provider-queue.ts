@@ -61,6 +61,15 @@
  * exempt from the anti-starvation guard while gated. The gate never touches
  * non-ambient work, so mid-turn compaction (which a foreground turn awaits)
  * and user-facing background turns are unaffected.
+ *
+ * ## Backpressure
+ *
+ * A cloud provider that answers HTTP 429 will keep refusing a full-width
+ * burst, and a CLI that retries quietly makes every refused turn look like a
+ * hang. {@link ProviderQueue.throttle} lowers the admission limit below the
+ * caps and can hold new dispatch for a while; {@link RateLimitGovernor}
+ * (provider-rate-limit.ts) drives it from 429s and clean turns, halving and
+ * then widening back to the configured caps.
  */
 
 import type { ProviderQueueDescription, QueueLane } from '../schemas/queue-status.js';
@@ -378,6 +387,12 @@ export class ProviderQueue {
   private running = 0;
   /** See {@link pause}. */
   private paused = false;
+  /** See {@link throttle}: a temporary cap below `concurrency`, or none. */
+  private admissionLimit: number | undefined;
+  /** See {@link throttle}: queue-clock ms before which nothing new dispatches. */
+  private dispatchHeldUntil = 0;
+  private throttleReason: string | undefined;
+  private throttleTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pending: PendingEntry[] = [];
   /** Bounded list of recently-completed runs used for affinity tiebreaks. */
   private readonly recent: RecentRun[] = [];
@@ -518,11 +533,77 @@ export class ProviderQueue {
    */
   hasCapacity(lane: Lane, additionalReservations = 0): boolean {
     const reserved = Math.max(0, additionalReservations);
-    if (this.running + reserved >= this.concurrency) return false;
+    if (this.dispatchHeld(this.now())) return false;
+    const admission = this.admissionConcurrency;
+    if (this.running + reserved >= admission) return false;
     const runningInLane = lane === 'interactive' ? this.runningInteractive : this.runningBackground;
     const laneCap =
       lane === 'interactive' ? this.interactiveConcurrency : this.backgroundConcurrency;
-    return runningInLane + reserved < laneCap;
+    return runningInLane + reserved < Math.min(laneCap, admission);
+  }
+
+  /**
+   * How many turns may run at once right now: `concurrency`, or less while
+   * {@link throttle} applies.
+   */
+  get admissionConcurrency(): number {
+    return Math.min(this.concurrencyCap, this.admissionLimit ?? this.concurrencyCap);
+  }
+
+  /**
+   * Admit fewer turns than the caps allow, for a while, because the provider
+   * is pushing back (an HTTP 429, say). `limit` caps running work below
+   * `concurrency`; `holdUntil` (this queue's clock, ms) starts nothing new
+   * before then. A field left out keeps its current value, and a hold only
+   * ever moves later. Running work is untouched, pending work keeps its
+   * place, and producers that ask {@link hasCapacity} see the narrower cap,
+   * so a throttled provider's backlog waits in their own queues. Unlike
+   * {@link narrow} this is meant to be lifted: {@link clearThrottle} returns
+   * to the configured caps. {@link RateLimitGovernor} drives it.
+   */
+  throttle(opts: { limit?: number; holdUntil?: number; reason?: string }): void {
+    if (opts.limit !== undefined) {
+      this.admissionLimit = Math.max(1, Math.min(this.concurrencyCap, Math.floor(opts.limit)));
+    }
+    if (opts.holdUntil !== undefined && opts.holdUntil > this.dispatchHeldUntil) {
+      this.dispatchHeldUntil = opts.holdUntil;
+      this.scheduleThrottleWake();
+    }
+    if (opts.reason !== undefined) this.throttleReason = opts.reason;
+    // A raised limit can admit waiting work at once.
+    this.drain();
+  }
+
+  /** Lift {@link throttle}: back to the configured caps, no hold. */
+  clearThrottle(): void {
+    if (this.admissionLimit === undefined && this.dispatchHeldUntil === 0) return;
+    this.admissionLimit = undefined;
+    this.dispatchHeldUntil = 0;
+    this.throttleReason = undefined;
+    if (this.throttleTimer) {
+      clearTimeout(this.throttleTimer);
+      this.throttleTimer = null;
+    }
+    this.drain();
+  }
+
+  get isThrottled(): boolean {
+    return this.admissionLimit !== undefined || this.dispatchHeld(this.now());
+  }
+
+  private dispatchHeld(now: number): boolean {
+    return now < this.dispatchHeldUntil;
+  }
+
+  /** Drain once the hold ends: nothing else would wake waiting work. */
+  private scheduleThrottleWake(): void {
+    if (this.throttleTimer) clearTimeout(this.throttleTimer);
+    const delay = Math.max(0, this.dispatchHeldUntil - this.now());
+    this.throttleTimer = setTimeout(() => {
+      this.throttleTimer = null;
+      this.drain();
+    }, delay);
+    this.throttleTimer.unref?.();
   }
 
   /**
@@ -566,6 +647,17 @@ export class ProviderQueue {
       concurrency: this.concurrency,
       interactiveConcurrency: this.interactiveConcurrency,
       backgroundConcurrency: this.backgroundConcurrency,
+      ...(this.isThrottled
+        ? {
+            throttle: {
+              limit: this.admissionConcurrency,
+              ...(this.dispatchHeld(now)
+                ? { heldUntil: new Date(this.dispatchHeldUntil).toISOString() }
+                : {}),
+              ...(this.throttleReason !== undefined ? { reason: this.throttleReason } : {}),
+            },
+          }
+        : {}),
       active,
       pending,
     };
@@ -662,8 +754,8 @@ export class ProviderQueue {
   }
 
   private drain(): void {
-    while (!this.paused) {
-      let next = this.running < this.concurrency ? this.pickNext() : null;
+    while (!this.paused && !this.dispatchHeld(this.now())) {
+      let next = this.running < this.admissionConcurrency ? this.pickNext() : null;
       let overflow = false;
       if (!next) {
         next = this.pickOverflow();
