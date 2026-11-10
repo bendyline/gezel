@@ -1,27 +1,44 @@
 import { randomUUID } from 'node:crypto';
 import {
+  type ImageAspectRatio,
   type Question,
   type QuestionIntent,
+  type VideoArchitecture,
   VideoGenerationRequestSchema,
   type VideoInputSource,
+  type VideoModelFamily,
+  chooseVideoModel,
   createLogger,
   nowIso,
+  resolveVideoFrames,
+  resolveVideoSize,
+  videoGeometry,
+  videoModelAnimates,
 } from '@bendyline/gezel';
+import { readImageMeta } from '@bendyline/gezel-inference/internal/utils/image-meta';
 import { Hono } from 'hono';
-
-import { RemoteVideoProvider } from '../../providers/video/remote-video.js';
-import type { VideoInputBytes, VideoProvider } from '../../providers/video/types.js';
 import {
-  CAMERA_PIXELS_PAIRED_VIDEO_ENGINE,
-  CAMERA_PIXELS_WITHHELD,
-  callerMaySeeFilePixels,
-  cameraKeepsFileLocal,
-} from '../caller-location.js';
+  type DeliveredFile,
+  type DeliveredVideo,
+  deliverVideo,
+} from '../../media/video-delivery.js';
+import { RemoteVideoProvider } from '../../providers/video/remote-video.js';
+import {
+  type InstalledVideoModelInfo,
+  VideoCapacityError,
+  VideoGenerationCancelledError,
+  type VideoInputBytes,
+  type VideoProvider,
+  VideoRenderTimedOutError,
+} from '../../providers/video/types.js';
+import { cameraInputWithheld } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
-
 import { videoModelRoutes } from './video-models.js';
 
 const log = createLogger('video-gen');
+
+/** Providers that render on this computer, so a render takes over its graphics memory. */
+const LOCAL_VIDEO_ENGINES = new Set(['local', 'diffusers', 'sd-cpp']);
 
 /**
  * Video-generation endpoints. Mounted at `/api/video-gen`. The video
@@ -57,45 +74,88 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
     }
 
-    // Resolve an artifact-path input image to bytes before forwarding.
+    const placement = videoEnginePlacement(provider);
+    // Resolve an artifact-path input image to bytes before forwarding. A
+    // camera keyframe as the first frame passes the same check as editing it.
     let resolvedInput: VideoInputBytes | undefined;
+    let sourceSize: { width: number; height: number } | undefined;
     if (req.inputImage) {
-      // The clip and its poster frame go back to the caller, so a camera
-      // keyframe as the first frame passes the same check as reading it.
-      // A paired server renders on another computer with whatever engine it
-      // has picked, so it never gets one; the machine broker runs here.
-      if ('artifactPath' in req.inputImage) {
-        const project = await ctx.store.getProject(projectId).catch(() => null);
-        const file = await ctx.store.resolveProjectArtifactReadPath(
-          projectId,
-          req.inputImage.artifactPath.replace(/^artifacts\//, ''),
-        );
-        if (project && file && (await cameraKeepsFileLocal(ctx, project, file))) {
-          if (provider instanceof RemoteVideoProvider && !provider.onThisComputer) {
-            return c.json({ error: CAMERA_PIXELS_PAIRED_VIDEO_ENGINE }, 403);
-          }
-          if (!(await callerMaySeeFilePixels(ctx, c, project, file))) {
-            return c.json({ error: CAMERA_PIXELS_WITHHELD }, 403);
-          }
-        }
-      }
+      const withheld = await cameraInputWithheld(
+        ctx,
+        c,
+        projectId,
+        [req.inputImage],
+        placement,
+        'video',
+      );
+      if (withheld) return c.json({ error: withheld }, 403);
       try {
         resolvedInput = await resolveInputImage(ctx, projectId, req.inputImage);
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
       }
+      const picture = readImageMeta(resolvedInput.data);
+      if (!picture) {
+        return c.json(
+          {
+            error: 'The picture to animate is not a PNG, JPEG, GIF or WebP image.',
+            code: 'video_source_unreadable',
+          },
+          400,
+        );
+      }
+      sourceSize = { width: picture.width, height: picture.height };
+    }
+    if (req.requireImageToVideo && !resolvedInput) {
+      return c.json(
+        { error: 'Attach the picture to animate.', code: 'video_source_required' },
+        400,
+      );
     }
 
-    // Resolve per-model defaults (native resolution / frame count / fps /
-    // steps) from the catalog so an omitted field uses the value the
-    // model was tuned for — LTX at 704×480, WAN 2.2 TI2V-5B at 1280×704.
-    // Generating WAN at LTX's default would produce a wrong-aspect,
-    // degraded clip. The caller's explicit value always wins.
-    const effectiveModelId = await resolveEffectiveVideoModelId(ctx, provider, req.model);
+    // The model: the one asked for, else the person's default when it can
+    // do the job, else one that can (core `chooseVideoModel`).
+    const installed = await provider.listInstalledModels().catch(() => []);
+    const effectiveModelId = await resolveEffectiveVideoModelId(
+      ctx,
+      provider,
+      req.model,
+      Boolean(resolvedInput),
+      installed,
+    );
+    const chosen = installed.find((m) => m.id === effectiveModelId);
+    let i2vSkippedReason: string | undefined;
+    if (chosen && resolvedInput && !videoModelAnimates(chosen)) {
+      if (req.requireImageToVideo) {
+        return c.json(
+          {
+            error: `${chosen.name} makes clips from words only, and no installed video model animates a picture. Download one that does in Settings → Video generation.`,
+            code: 'video_i2v_unavailable',
+          },
+          409,
+        );
+      }
+      i2vSkippedReason = `${chosen.name} makes clips from words only; the picture was not used.`;
+      resolvedInput = undefined;
+    }
+    if (chosen?.imageToVideoOnly && !resolvedInput) {
+      return c.json(
+        {
+          error: `${chosen.name} only animates pictures. Attach the picture to animate.`,
+          code: 'video_source_required',
+        },
+        400,
+      );
+    }
+
+    // Per-model defaults (native resolution / frame count / fps / steps)
+    // from the catalog, so an omitted field uses what the model was tuned
+    // for; sizes land on the model's grid, and a picture sets the shape.
     const defaults = await resolveVideoDefaults(ctx, effectiveModelId);
-    const effWidth = req.width ?? defaults.width;
-    const effHeight = req.height ?? defaults.height;
-    const effNumFrames = req.numFrames ?? defaults.numFrames;
+    const sizing = resolveRenderSize(req, defaults, sourceSize);
+    const effWidth = sizing.width;
+    const effHeight = sizing.height;
+    const effNumFrames = sizing.numFrames;
     const effFps = req.fps ?? defaults.fps;
     const effSteps = req.steps ?? defaults.steps;
     // No request-level override yet — the per-model catalog default (low
@@ -114,9 +174,7 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
         // reading `diffusers-default`. Resolve the effective installed model
         // and prefer its friendly catalog name ("LTX-2.3 …"); fall back to the
         // requested id, then the provider placeholder.
-        const installed = await provider.listInstalledModels().catch(() => []);
-        const effectiveModel = installed.find((m) => m.id === effectiveModelId);
-        const modelLabel = effectiveModel?.name ?? req.model?.trim() ?? `${provider.name}-default`;
+        const modelLabel = chosen?.name ?? req.model?.trim() ?? `${provider.name}-default`;
         const verdict = await awaitVideoApproval(ctx, {
           projectId,
           gezelId: req.gezelId,
@@ -128,6 +186,7 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
           height: effHeight,
           numFrames: effNumFrames,
           fps: effFps,
+          animating: Boolean(resolvedInput),
         });
         if (verdict === 'declined') {
           return c.json({ error: 'User declined this video generation.' }, 403);
@@ -154,7 +213,8 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
     // the ids ride along when present so the per-session bubble status
     // works too, but their absence no longer hides the pill.
     const swapScope =
-      provider.name === 'diffusers'
+      LOCAL_VIDEO_ENGINES.has(provider.name) ||
+      (provider instanceof RemoteVideoProvider && provider.onThisComputer)
         ? { sessionId: req.sessionId ?? '', gezelId: req.gezelId ?? '', projectId }
         : undefined;
     // Diagnostic: surfaces WHY the chat bubble may not show phase status.
@@ -179,7 +239,7 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
       const out = await provider.generate({
         prompt: req.prompt,
         ...(req.negativePrompt ? { negativePrompt: req.negativePrompt } : {}),
-        ...(req.model ? { model: req.model } : {}),
+        ...(effectiveModelId ? { model: effectiveModelId } : {}),
         ...(effWidth ? { width: effWidth } : {}),
         ...(effHeight ? { height: effHeight } : {}),
         ...(effNumFrames ? { numFrames: effNumFrames } : {}),
@@ -188,6 +248,8 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
         ...(effGuidanceScale !== undefined ? { guidanceScale: effGuidanceScale } : {}),
         ...(req.seed !== undefined ? { seed: req.seed } : {}),
         ...(resolvedInput ? { inputImage: resolvedInput } : {}),
+        // A caller that hangs up stops the render; the sd.cpp engine cancels its job.
+        signal: c.req.raw.signal,
         ...(swapScope
           ? {
               onProgress: (p) => {
@@ -218,35 +280,90 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
             }
           : {}),
       });
-      const ext = out.meta.mimeType.includes('webm') ? 'webm' : 'mp4';
-      const relPath = `generated/${artifactFilename(out.meta.seed, ext)}`;
-      const writtenPath = await ctx.store.writeProjectArtifactBinary(projectId, relPath, out.video);
+      // sd.cpp writes WebM; this daemon adds an MP4 and a poster when it can.
+      const delivered = await deliverVideo({
+        video: out.video,
+        mimeType: out.meta.mimeType,
+        ...(out.poster ? { poster: out.poster } : {}),
+      });
+      const notes = [...sizing.notes, ...(out.meta.settingsNotes ?? []), ...delivered.notes];
+      const stem = artifactStem(out.meta.seed);
+      const writtenPath = await ctx.store.writeProjectArtifactBinary(
+        projectId,
+        `generated/${stem}.${delivered.primary.ext}`,
+        delivered.primary.data,
+      );
+      const alternates: Array<{ artifactPath: string; mimeType: string }> = [];
+      for (const alt of delivered.alternates) {
+        alternates.push({
+          artifactPath: await ctx.store.writeProjectArtifactBinary(
+            projectId,
+            `generated/${stem}.${alt.ext}`,
+            alt.data,
+          ),
+          mimeType: alt.mimeType,
+        });
+      }
+      const posterPath = delivered.poster
+        ? await ctx.store.writeProjectArtifactBinary(
+            projectId,
+            `generated/${stem}-poster.${delivered.poster.ext}`,
+            delivered.poster.data,
+          )
+        : undefined;
 
       // Workspace copy with a short, predictable name so HTML the model
       // writes can reference it via `<video src="assets/generated/video-<seed>.<ext>">`.
-      const workspaceRel = saveAs ?? `assets/generated/video-${out.meta.seed}.${ext}`;
+      const workspace = workspaceCopy(saveAs, out.meta.seed, delivered);
+      if (workspace.note) notes.push(workspace.note);
       let workspacePath: string | null = null;
       try {
-        await ctx.store.writeProjectWorkspaceBinary(projectId, workspaceRel, out.video);
-        workspacePath = workspaceRel;
+        await ctx.store.writeProjectWorkspaceBinary(projectId, workspace.path, workspace.file.data);
+        workspacePath = workspace.path;
       } catch (err) {
         log.warn(`workspace copy skipped: ${err instanceof Error ? err.message : String(err)}`);
       }
 
+      const meta = {
+        ...out.meta,
+        mimeType: delivered.primary.mimeType,
+        ...(notes.length ? { settingsNotes: notes } : {}),
+        ...(i2vSkippedReason ? { i2vSkippedReason } : {}),
+      };
       const respBody: {
         artifactPath: string;
         workspacePath: string | null;
-        meta: typeof out.meta;
+        meta: typeof meta;
         b64Poster?: string;
+        posterPath?: string;
+        posterMimeType?: string;
+        alternates?: typeof alternates;
       } = {
         artifactPath: writtenPath,
         workspacePath,
-        meta: out.meta,
+        meta,
+        ...(posterPath && delivered.poster
+          ? { posterPath, posterMimeType: delivered.poster.mimeType }
+          : {}),
+        ...(alternates.length ? { alternates } : {}),
       };
-      if (req.inline && out.poster) respBody.b64Poster = out.poster.toString('base64');
+      if (req.inline && delivered.poster) {
+        respBody.b64Poster = delivered.poster.data.toString('base64');
+      }
       return c.json(respBody);
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+      const message = err instanceof Error ? err.message : String(err);
+      // Expected outcomes carry our own sentence on a 4xx: a 5xx body is
+      // replaced with an opaque error (http/errors.ts), and the person needs
+      // to hear that a smaller clip would work.
+      if (err instanceof VideoCapacityError || err instanceof VideoRenderTimedOutError) {
+        return c.json({ error: message, code: err.code }, 409);
+      }
+      // A caller that hung up never reads this.
+      if (err instanceof VideoGenerationCancelledError) {
+        return c.json({ error: message, code: err.code }, 504);
+      }
+      return c.json({ error: message }, 500);
     } finally {
       if (swapScope) {
         ctx.chatEvents.publish(swapScope, {
@@ -262,9 +379,36 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
   return app;
 }
 
-function artifactFilename(seed: number, ext: string): string {
+function artifactStem(seed: number): string {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  return `video-${stamp}-${seed}.${ext}`;
+  return `video-${stamp}-${seed}`;
+}
+
+/**
+ * Where the workspace copy goes and which file it is. A `saveAs` names a
+ * container; when the clip exists in it, that file is copied, otherwise the
+ * primary is copied under the right extension and a note says so.
+ */
+function workspaceCopy(
+  saveAs: string | undefined,
+  seed: number,
+  delivered: DeliveredVideo,
+): { path: string; file: DeliveredFile; note?: string } {
+  if (!saveAs) {
+    return {
+      path: `assets/generated/video-${seed}.${delivered.primary.ext}`,
+      file: delivered.primary,
+    };
+  }
+  const wanted = /\.([a-z0-9]+)$/i.exec(saveAs)?.[1]?.toLowerCase();
+  const match = [delivered.primary, ...delivered.alternates].find((f) => f.ext === wanted);
+  if (match) return { path: saveAs, file: match };
+  const path = `${saveAs.replace(/\.[a-z0-9]+$/i, '')}.${delivered.primary.ext}`;
+  return {
+    path,
+    file: delivered.primary,
+    note: `Saved as ${path}: no ${wanted ?? 'requested'} version of this clip could be made.`,
+  };
 }
 
 interface VideoDefaults {
@@ -274,6 +418,13 @@ interface VideoDefaults {
   fps?: number;
   steps?: number;
   guidanceScale?: number;
+  /** Catalog geometry: present for catalog models, absent for a paired server's. */
+  family?: VideoModelFamily;
+  architecture?: VideoArchitecture;
+  widthRange?: { min: number; max: number };
+  heightRange?: { min: number; max: number };
+  numFramesRange?: { min: number; max: number };
+  maxDurationSeconds?: number;
 }
 
 /**
@@ -288,12 +439,82 @@ export async function resolveEffectiveVideoModelId(
   ctx: Pick<ServiceContext, 'store'>,
   provider: Pick<VideoProvider, 'listInstalledModels'>,
   requestedModel: string | undefined,
+  hasSource = false,
+  installed?: readonly InstalledVideoModelInfo[],
 ): Promise<string | undefined> {
   if (requestedModel) return requestedModel;
-  const installed = await provider.listInstalledModels().catch(() => []);
+  const models = installed ?? (await provider.listInstalledModels().catch(() => []));
   const configured = (await ctx.store.readConfig().catch(() => null))?.defaultVideoModel;
-  const preferred = configured ? installed.find((m) => m.id === configured) : undefined;
-  return (preferred ?? installed[0])?.id;
+  return chooseVideoModel(models, { defaultModelId: configured, hasSource }) ?? models[0]?.id;
+}
+
+/** Where a render runs: an engine on this computer (the machine broker counts), or a paired server. */
+function videoEnginePlacement(provider: VideoProvider): 'this-computer' | 'paired' {
+  return provider instanceof RemoteVideoProvider && !provider.onThisComputer
+    ? 'paired'
+    : 'this-computer';
+}
+
+/**
+ * The size and length a request renders at. With the model's catalog facts,
+ * sides land on its token grid and frames on its VAE's grid, and a picture
+ * to animate sets the shape; a requested value that had to move is noted.
+ * Without them (a paired server's model) the request passes through.
+ */
+function resolveRenderSize(
+  req: {
+    width?: number;
+    height?: number;
+    numFrames?: number;
+    fps?: number;
+    aspectRatio?: ImageAspectRatio;
+  },
+  defaults: VideoDefaults,
+  sourceSize: { width: number; height: number } | undefined,
+): { width?: number; height?: number; numFrames?: number; notes: string[] } {
+  if (!defaults.family) {
+    const width = req.width ?? defaults.width;
+    const height = req.height ?? defaults.height;
+    const numFrames = req.numFrames ?? defaults.numFrames;
+    return {
+      ...(width ? { width } : {}),
+      ...(height ? { height } : {}),
+      ...(numFrames ? { numFrames } : {}),
+      notes: [],
+    };
+  }
+  const geo = videoGeometry({ family: defaults.family, architecture: defaults.architecture });
+  const size = resolveVideoSize(
+    { width: req.width, height: req.height, aspectRatio: req.aspectRatio, sourceSize },
+    {
+      defaultWidth: defaults.width,
+      defaultHeight: defaults.height,
+      widthRange: defaults.widthRange,
+      heightRange: defaults.heightRange,
+    },
+    geo,
+  );
+  const numFrames = resolveVideoFrames(
+    req.numFrames,
+    {
+      defaultNumFrames: defaults.numFrames,
+      numFramesRange: defaults.numFramesRange,
+      maxDurationSeconds: defaults.maxDurationSeconds,
+    },
+    req.fps ?? defaults.fps ?? 24,
+    geo,
+  );
+  const notes: string[] = [];
+  if (
+    (req.width !== undefined && req.width !== size.width) ||
+    (req.height !== undefined && req.height !== size.height)
+  ) {
+    notes.push(`Rendered at ${size.width}×${size.height}, the nearest size this model makes.`);
+  }
+  if (req.numFrames !== undefined && req.numFrames !== numFrames) {
+    notes.push(`Rendered ${numFrames} frames, the nearest length this model makes.`);
+  }
+  return { ...size, numFrames, notes };
 }
 
 /**
@@ -318,6 +539,12 @@ async function resolveVideoDefaults(
     ...(m.defaultFps !== undefined ? { fps: m.defaultFps } : {}),
     ...(m.recommendedSteps !== undefined ? { steps: m.recommendedSteps } : {}),
     ...(m.guidanceScale !== undefined ? { guidanceScale: m.guidanceScale } : {}),
+    family: m.family,
+    ...(m.architecture ? { architecture: m.architecture } : {}),
+    ...(m.widthRange ? { widthRange: m.widthRange } : {}),
+    ...(m.heightRange ? { heightRange: m.heightRange } : {}),
+    ...(m.numFramesRange ? { numFramesRange: m.numFramesRange } : {}),
+    ...(m.maxDurationSeconds !== undefined ? { maxDurationSeconds: m.maxDurationSeconds } : {}),
   };
 }
 
@@ -351,6 +578,8 @@ async function awaitVideoApproval(
     height?: number;
     numFrames?: number;
     fps?: number;
+    /** The clip animates a picture the caller sent. */
+    animating?: boolean;
   },
 ): Promise<'allow' | 'always' | 'declined' | 'timeout'> {
   const sizeBits: string[] = [];
@@ -369,7 +598,7 @@ async function awaitVideoApproval(
     projectId: args.projectId,
     gezelId: args.gezelId,
     sessionId: args.sessionId,
-    prompt: buildPrompt(args.model, args.prompt, sizeBits.join(' · ')),
+    prompt: buildPrompt(args.model, args.prompt, sizeBits.join(' · '), args.animating === true),
     choices: ['Allow once', 'Always allow', 'Decline'],
     allowWriteIn: false,
     multiSelect: false,
@@ -401,10 +630,11 @@ async function awaitVideoApproval(
   return 'timeout';
 }
 
-function buildPrompt(model: string, prompt: string, size: string): string {
+function buildPrompt(model: string, prompt: string, size: string, animating: boolean): string {
   const trimmed = truncate(prompt, 200);
   const sizeNote = size ? ` (${size})` : '';
-  return `Generate a video with \`${model}\`${sizeNote}? This is a long, GPU-intensive job that pauses the chat model.\n\n> ${trimmed}`;
+  const what = animating ? 'Animate a picture into a video' : 'Generate a video';
+  return `${what} with \`${model}\`${sizeNote}? This is a long, GPU-intensive job that pauses the chat model.\n\n> ${trimmed}`;
 }
 
 async function resolveInputImage(

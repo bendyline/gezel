@@ -5,7 +5,9 @@ import { createMockApi } from '../test-utils/mockApi.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 
-const { VideoModelManager } = await import('./VideoModelManager.js');
+const { VideoModelManager, videoDefaultClip, videoModelAbilities } = await import(
+  './VideoModelManager.js'
+);
 const { api } = await import('../api.js');
 
 const TWO_MODELS = {
@@ -218,5 +220,73 @@ describe('VideoModelManager downloads', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Downloading/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+  });
+});
+
+describe('what a video model does', () => {
+  it('names picture animation and sound in plain words', () => {
+    expect(videoModelAbilities({ supportsImageToVideo: true, hasAudio: true })).toEqual([
+      'Animates pictures',
+      'With sound',
+    ]);
+    expect(videoModelAbilities({ supportsImageToVideo: true, imageToVideoOnly: true })).toEqual([
+      'Animates pictures only',
+    ]);
+    expect(videoModelAbilities({})).toEqual([]);
+  });
+
+  it('reads the default clip as size and seconds', () => {
+    expect(
+      videoDefaultClip({
+        defaultWidth: 1280,
+        defaultHeight: 704,
+        defaultNumFrames: 121,
+        defaultFps: 24,
+      }),
+    ).toBe('1280×704, 5 s');
+    expect(videoDefaultClip({ defaultWidth: 832, defaultHeight: 480 })).toBe('832×480');
+    expect(videoDefaultClip({})).toBeNull();
+  });
+
+  it('shows abilities on the catalog row and disables a model whose engine is missing', async () => {
+    vi.mocked(api.listInstalledVideoModels).mockResolvedValue({ models: [] } as never);
+    vi.mocked(api.listActiveVideoPulls).mockResolvedValue({ pulls: [] } as never);
+    vi.mocked(api.getVideoModelFit).mockResolvedValue(fitResponse([]) as never);
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [
+        {
+          ...VIDEO_MODEL,
+          manifest: {
+            ...VIDEO_MODEL.manifest,
+            engine: 'sd-cpp',
+            supportsImageToVideo: true,
+            defaultWidth: 1280,
+            defaultHeight: 704,
+            defaultNumFrames: 121,
+            defaultFps: 24,
+            source: {
+              huggingfaceRepo: 'x/y',
+              files: [{ name: 'a.gguf', role: 'diffusion_model' }],
+            },
+          },
+        },
+      ],
+    } as never);
+    render(
+      <VideoModelManager
+        engineUnavailable={{
+          'sd-cpp': "This model needs a video engine this install doesn't include.",
+        }}
+      />,
+    );
+
+    expect(await screen.findByText('· Animates pictures')).toBeInTheDocument();
+    expect(screen.getByText('1280×704, 5 s')).toBeInTheDocument();
+    const download = screen.getByRole('button', { name: 'Download' });
+    expect(download).toBeDisabled();
+    expect(download).toHaveAttribute(
+      'title',
+      "This model needs a video engine this install doesn't include.",
+    );
   });
 });

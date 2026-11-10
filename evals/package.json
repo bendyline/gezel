@@ -43,7 +43,9 @@
     "thinking-report": "tsx src/bin/thinking-report.ts",
     "report:engine-context": "tsx src/bin/report-engine-context.ts",
     "scorecard": "tsx src/bin/scorecard.ts",
-    "judge-sweep": "tsx src/bin/judge-sweep.ts"
+    "judge-sweep": "tsx src/bin/judge-sweep.ts",
+    "video-bench": "tsx src/bin/video-bench.ts",
+    "fit-media-memory": "tsx src/bin/fit-media-memory.ts"
   },
   "dependencies": {
     "@bendyline/gezel": "workspace:*",

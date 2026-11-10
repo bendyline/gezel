@@ -17,7 +17,7 @@
  *     `NativeEngineSupervisor`.
  */
 
-import type { VideoAccelerator } from '@bendyline/gezel';
+import type { MediaBackend, VideoAccelerator } from '@bendyline/gezel';
 
 /**
  * Source image for image-to-video, after the route has resolved any
@@ -43,6 +43,33 @@ export interface VideoGenerationProgress {
   secondsPerStep?: number;
 }
 
+/** The engine could not fit the render in memory; it was stopped so the next one starts clean. */
+export class VideoCapacityError extends Error {
+  readonly code = 'video_capacity';
+  constructor(message: string) {
+    super(message);
+    this.name = 'VideoCapacityError';
+  }
+}
+
+/** The render ran past the time a clip is allowed and was stopped. */
+export class VideoRenderTimedOutError extends Error {
+  readonly code = 'video_render_timed_out';
+  constructor(message: string) {
+    super(message);
+    this.name = 'VideoRenderTimedOutError';
+  }
+}
+
+/** The caller stopped the render. */
+export class VideoGenerationCancelledError extends Error {
+  readonly code = 'video_generation_cancelled';
+  constructor(message: string) {
+    super(message);
+    this.name = 'VideoGenerationCancelledError';
+  }
+}
+
 export interface VideoGenerationInput {
   prompt: string;
   negativePrompt?: string;
@@ -60,6 +87,8 @@ export interface VideoGenerationInput {
   seed?: number;
   /** Optional source image for image-to-video (I2V-capable models only). */
   inputImage?: VideoInputBytes;
+  /** The caller gave up: the engine stops the render. */
+  signal?: AbortSignal;
   /**
    * Fired as the engine advances through sampling steps. Errors thrown
    * from the callback are swallowed so a buggy listener can't take down
@@ -88,6 +117,12 @@ export interface VideoGenerationMeta {
   durationMs: number;
   /** Container of the encoded clip, e.g. `video/mp4`. */
   mimeType: string;
+  /** The engine that rendered it. */
+  engine?: string;
+  /** The clip carries a soundtrack. */
+  hasAudio?: boolean;
+  /** Plain sentences about what was changed or left out. */
+  settingsNotes?: string[];
 }
 
 export interface VideoGenerationOutput {
@@ -112,6 +147,17 @@ export interface InstalledVideoModelInfo {
    * `deleteModel` would refuse it and the UI must not offer Delete.
    */
   readOnly?: boolean;
+  /** The engine that renders it. Absent from an engine that predates the field. */
+  engine?: string;
+  family?: string;
+  /** Animates a picture it is given. Absent: clips from words only. */
+  supportsImageToVideo?: boolean;
+  imageToVideoOnly?: boolean;
+  hasAudio?: boolean;
+  defaultWidth?: number;
+  defaultHeight?: number;
+  defaultNumFrames?: number;
+  defaultFps?: number;
 }
 
 /**
@@ -157,6 +203,8 @@ export interface VideoEngineHealth {
    * Absent for cloud providers.
    */
   accelerator?: VideoAccelerator;
+  /** sd.cpp: the ggml backend its sd-server build computes on. */
+  backend?: MediaBackend;
 }
 
 export interface VideoProvider {

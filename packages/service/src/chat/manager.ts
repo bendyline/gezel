@@ -466,6 +466,8 @@ import { fileHandoffIntentKey, staleWorkspaceFileRequest } from './file-handoff-
 import {
   IMAGE_EDITOR_NEEDS_INSTRUCTION,
   IMAGE_EDITOR_NEEDS_PICTURE,
+  VIDEO_ANIMATE_DEFAULT_PROMPT,
+  VIDEO_ANIMATOR_NEEDS_PICTURE,
   cleanGenerativePrompt,
   expandVideoPrompt,
   fixedFunctionEditSources,
@@ -10415,6 +10417,18 @@ export class ChatManager extends LocalEngineRuntime {
     if (editor && editSources.length === 0) {
       return endWithNotice(IMAGE_EDITOR_NEEDS_PICTURE, IMAGE_EDITOR_NEEDS_PICTURE);
     }
+    // A video gezel animates the first picture attached to the message. One
+    // that only animates turns away a message without a picture rather than
+    // making a clip from the words alone.
+    const animatePictures =
+      ff.tool === 'generate_video' ? fixedFunctionEditSources(userText, sessionId) : [];
+    if (
+      ff.tool === 'generate_video' &&
+      ff.requiresInputImage === true &&
+      animatePictures.length === 0
+    ) {
+      return endWithNotice(VIDEO_ANIMATOR_NEEDS_PICTURE, VIDEO_ANIMATOR_NEEDS_PICTURE);
+    }
 
     let pool: McpBridgePool;
     try {
@@ -10448,6 +10462,8 @@ export class ChatManager extends LocalEngineRuntime {
         ? await resolveFixedFunctionTaskImageArgs(this.store, record, userText)
         : null;
     let promptValue = taskImageArgs?.prompt ?? stripGezelMentions(userText);
+    // A picture's markdown is not words for the model to render.
+    if (ff.tool === 'generate_video') promptValue = stripMarkdownImages(promptValue);
     if (editor) {
       promptValue = stripMarkdownImages(promptValue);
       if (!promptValue) {
@@ -10555,12 +10571,18 @@ export class ChatManager extends LocalEngineRuntime {
     // prompt into a detailed shot using the gezel's own model. Long prompts
     // pass through untouched, and any failure falls back to the stripped
     // text — so this only ever helps, never blocks a generation.
-    if (ff.tool === 'generate_video') {
-      promptValue = await expandVideoPrompt(promptValue, (input, timeoutMs) =>
-        this.oneShotCompletion(input, timeoutMs, {
-          gezelId: record.gezelId,
-          jobLabel: `video prompt · ${gezel.name}`,
-        }),
+    if (ff.tool === 'generate_video' && animatePictures.length > 0 && !promptValue.trim()) {
+      // A picture with no words: animate it gently rather than invent a scene.
+      promptValue = VIDEO_ANIMATE_DEFAULT_PROMPT;
+    } else if (ff.tool === 'generate_video') {
+      promptValue = await expandVideoPrompt(
+        promptValue,
+        (input, timeoutMs) =>
+          this.oneShotCompletion(input, timeoutMs, {
+            gezelId: record.gezelId,
+            jobLabel: `video prompt · ${gezel.name}`,
+          }),
+        { mode: animatePictures.length > 0 ? 'animate' : 'text' },
       );
     }
     const callArgs: Record<string, unknown> =
@@ -10593,6 +10615,11 @@ export class ChatManager extends LocalEngineRuntime {
             ...refinementArgs,
             [promptKey]: promptValue,
             ...(taskImageArgs?.saveAs ? { saveAs: taskImageArgs.saveAs } : {}),
+            // An attached picture is what the person asked to animate: the
+            // route refuses rather than quietly make a clip from words.
+            ...(animatePictures[0]
+              ? { inputImage: { artifactPath: animatePictures[0] }, requireImageToVideo: true }
+              : {}),
           };
 
     let assistantText: string;
@@ -16417,7 +16444,11 @@ export class ChatManager extends LocalEngineRuntime {
       // plays inline. Same pattern as the surgical-edit `diff` above.
       const gv =
         info.name === 'generate_video' && sc && typeof sc === 'object'
-          ? (sc as { gezelVideo?: { artifactPath?: unknown; mimeType?: unknown } }).gezelVideo
+          ? (
+              sc as {
+                gezelVideo?: { artifactPath?: unknown; mimeType?: unknown; posterPath?: unknown };
+              }
+            ).gezelVideo
           : undefined;
       const videos: ChatMessageToolCall['videos'] =
         gv && typeof gv.artifactPath === 'string' && gv.artifactPath.length > 0
@@ -16428,6 +16459,9 @@ export class ChatManager extends LocalEngineRuntime {
                   typeof gv.mimeType === 'string' && gv.mimeType.length > 0
                     ? gv.mimeType
                     : 'video/mp4',
+                ...(typeof gv.posterPath === 'string' && gv.posterPath.length > 0
+                  ? { posterPath: gv.posterPath }
+                  : {}),
               },
             ]
           : undefined;

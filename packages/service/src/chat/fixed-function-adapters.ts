@@ -61,6 +61,13 @@ export const IMAGE_EDITOR_NEEDS_PICTURE =
   'Nothing to edit yet. Attach a picture, then say what to change.';
 export const IMAGE_EDITOR_NEEDS_INSTRUCTION = 'Say what to change in the picture.';
 
+/** What a video gezel that only animates pictures says when a message carries none. */
+export const VIDEO_ANIMATOR_NEEDS_PICTURE =
+  'Nothing to animate yet. Attach a picture, then say how it should move.';
+
+/** How a picture moves when the message says nothing about it. */
+export const VIDEO_ANIMATE_DEFAULT_PROMPT = 'Gentle, natural motion; the camera slowly pushes in.';
+
 /**
  * The pictures a message to an image editor carries, as artifact paths the
  * image route resolves, in the order attached. The composer's uploads arrive
@@ -276,7 +283,13 @@ export const VIDEO_PROMPT_EXPANSION_WORD_CEILING = 16;
  * setting → light → camera) mirrors what the Lightricks prompt guide asks
  * for.
  */
-export function buildVideoPromptExpansionInput(idea: string): string {
+export function buildVideoPromptExpansionInput(
+  idea: string,
+  mode: 'text' | 'animate' = 'text',
+): string {
+  if (mode === 'animate') {
+    return `You write prompts for an image-to-video model. The clip starts from a picture the person supplied, which you cannot see, so describe how it moves rather than what it shows. Expand the short idea below into ONE present-tense description as flowing prose — not a list — covering the motion of the subject, what changes over the clip, and the camera movement. Do not introduce a new subject or setting. 1 to 3 sentences, about 25 to 50 words. Output ONLY the description: no title, quotes, preamble, options, lists, or commentary.\n\nIdea: ${idea}`;
+  }
   return `You write prompts for a text-to-video model (LTX). Expand the short idea below into ONE vivid, present-tense shot description written as flowing prose — not a list. In one natural flow, cover: the main subject and its appearance; the single action or motion it performs; the setting and background; the lighting, time of day, and mood; and the camera framing and movement. Keep it concrete and filmable — 2 to 4 sentences, about 40 to 70 words. Stay faithful to the idea; do not invent a different subject. Output ONLY the description: no title, quotes, preamble, options, lists, or commentary.\n\nIdea: ${idea}`;
 }
 
@@ -337,7 +350,7 @@ export function sanitizeExpandedVideoPrompt(raw: string): string {
 export async function expandVideoPrompt(
   prompt: string,
   complete: (input: string, timeoutMs: number) => Promise<string>,
-  opts: { timeoutMs?: number; wordCeiling?: number } = {},
+  opts: { timeoutMs?: number; wordCeiling?: number; mode?: 'text' | 'animate' } = {},
 ): Promise<string> {
   const cleaned = prompt.trim();
   if (!cleaned) return prompt;
@@ -345,7 +358,10 @@ export async function expandVideoPrompt(
   if (countWords(cleaned) >= ceiling) return cleaned; // already detailed
   let raw: string;
   try {
-    raw = await complete(buildVideoPromptExpansionInput(cleaned), opts.timeoutMs ?? 30_000);
+    raw = await complete(
+      buildVideoPromptExpansionInput(cleaned, opts.mode),
+      opts.timeoutMs ?? 30_000,
+    );
   } catch {
     return cleaned;
   }
@@ -429,16 +445,23 @@ const ADAPTERS: Record<string, FixedFunctionAdapter> = {
      * fixed-function video gezel feeding a builder keeps the embeddable
      * path. Mirrors the `generate_image` adapter.
      */
-    formatResult(rawText) {
+    formatResult(rawText, toolArgs) {
       const match = /Generated\s+(?:a\s+)?(\d+\s*[×x]\s*\d+)\s+video\s+with\s+(\S+)/i.exec(rawText);
       if (match) {
         const dims = match[1]!.replace(/\s+/g, '');
         const model = match[2]!.replace(/[.,]$/, '');
+        // A picture the model could not animate is said so, never passed off
+        // as an animation of it.
+        const skipped = /picture was not used/i.test(rawText);
+        const verb = toolArgs.inputImage && !skipped ? 'Animated your picture into a' : 'Generated';
+        const skipSuffix = skipped
+          ? ' (This model makes clips from words only, so the picture was not used.)'
+          : '';
         const videoTag = /<video\s+src="([^"]+)"[^>]*>/i.exec(rawText);
         if (videoTag) {
-          return `Generated ${dims} video with ${model}. Use \`<video src="${videoTag[1]!}" controls></video>\` in workspace HTML.`;
+          return `${verb} ${dims} video with ${model}. Use \`<video src="${videoTag[1]!}" controls></video>\` in workspace HTML.${skipSuffix}`;
         }
-        return `Generated ${dims} video with ${model}.`;
+        return `${verb} ${dims} video with ${model}.${skipSuffix}`;
       }
       return firstSentence(rawText);
     },

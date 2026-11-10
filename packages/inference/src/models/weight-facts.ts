@@ -74,10 +74,14 @@ function diffusersComponent(name: string): string {
   return slash < 0 ? '' : name.slice(0, slash);
 }
 
+/**
+ * A video entry's weight files as the engine holds them: each diffusers file
+ * under its folder, each sd.cpp file under the sd-server slot it fills.
+ */
 export function videoCatalogWeightFiles(manifest: VideoModelManifest): MediaWeightFile[] {
   return manifest.source.files.flatMap((file) => {
     const priced = catalogFile(
-      diffusersComponent(file.name),
+      file.role ?? diffusersComponent(file.name),
       file.name,
       file.sizeBytes,
       file.tensors,

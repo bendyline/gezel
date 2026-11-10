@@ -1,9 +1,10 @@
-import type {
-  ActiveVideoPull,
-  CatalogItemSummary,
-  InstalledVideoModel,
-  VideoModelManifest,
-  VideoModelPullEvent,
+import {
+  type ActiveVideoPull,
+  type CatalogItemSummary,
+  type InstalledVideoModel,
+  type VideoModelManifest,
+  type VideoModelPullEvent,
+  videoManifestHasAudio,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
@@ -32,6 +33,33 @@ function formatSize(bytes: number): string {
   return `${bytes} B`;
 }
 
+/** What a model does beyond making clips from words, in a person's terms. */
+export function videoModelAbilities(m: {
+  supportsImageToVideo?: boolean | undefined;
+  imageToVideoOnly?: boolean | undefined;
+  hasAudio?: boolean | undefined;
+}): string[] {
+  const out: string[] = [];
+  if (m.imageToVideoOnly) out.push('Animates pictures only');
+  else if (m.supportsImageToVideo) out.push('Animates pictures');
+  if (m.hasAudio) out.push('With sound');
+  return out;
+}
+
+/** The clip a model makes when asked for nothing in particular: `1280×704, 5 s`. */
+export function videoDefaultClip(m: {
+  defaultWidth?: number | undefined;
+  defaultHeight?: number | undefined;
+  defaultNumFrames?: number | undefined;
+  defaultFps?: number | undefined;
+}): string | null {
+  if (!m.defaultWidth || !m.defaultHeight) return null;
+  const size = `${m.defaultWidth}×${m.defaultHeight}`;
+  if (!m.defaultNumFrames || !m.defaultFps) return size;
+  const seconds = Math.round((m.defaultNumFrames / m.defaultFps) * 10) / 10;
+  return `${size}, ${seconds} s`;
+}
+
 interface ActivePull {
   id: string;
   bytesWritten: number;
@@ -57,6 +85,11 @@ interface ActivePull {
 interface Props {
   /** When true, the Install button is disabled — e.g. no engine configured. */
   disabledReason?: string;
+  /**
+   * Why a catalog entry's engine cannot run here, keyed by engine (`sd-cpp`,
+   * `diffusers`). Its Download key is disabled with this as the reason.
+   */
+  engineUnavailable?: Readonly<Record<string, string>>;
   /** Fired after an install / delete so the parent can refresh status pills. */
   onModelsChanged?: () => void;
   /**
@@ -71,6 +104,7 @@ interface Props {
 
 export function VideoModelManager({
   disabledReason,
+  engineUnavailable,
   onModelsChanged,
   configuredDefaultModelId,
   onSetActiveModel,
@@ -362,7 +396,12 @@ export function VideoModelManager({
                         />
                       </td>
                     )}
-                    <td>{m.name}</td>
+                    <td>
+                      {m.name}
+                      {videoModelAbilities(m).length > 0 && (
+                        <span className="muted small"> · {videoModelAbilities(m).join(' · ')}</span>
+                      )}
+                    </td>
                     <td>{formatSize(m.approxSizeBytes)}</td>
                     <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
                     <td>
@@ -418,6 +457,14 @@ export function VideoModelManager({
                 : null;
             const modelFit = fit.byId?.get(m.id);
             const tooLarge = !already && hiddenByFit(modelFit);
+            const engineReason = engineUnavailable?.[m.engine ?? 'diffusers'];
+            const unavailableReason = disabledReason ?? engineReason;
+            const clip = videoDefaultClip(m);
+            const abilities = videoModelAbilities({
+              supportsImageToVideo: m.supportsImageToVideo,
+              imageToVideoOnly: m.imageToVideoOnly,
+              hasAudio: videoManifestHasAudio(m),
+            });
             return (
               <div className="catalog-ollama-action">
                 <div className="catalog-ollama-meta">
@@ -427,6 +474,15 @@ export function VideoModelManager({
                     <span>{formatSize(m.approxSizeBytes)}</span>
                     <span>·</span>
                     <span>{m.family.toUpperCase()}</span>
+                    {clip && (
+                      <>
+                        <span>·</span>
+                        <span>{clip}</span>
+                      </>
+                    )}
+                    {abilities.map((label) => (
+                      <span key={label}>· {label}</span>
+                    ))}
                     <MediaFitNote fit={modelFit} />
                   </div>
                   <div className="catalog-ollama-pills">
@@ -435,8 +491,8 @@ export function VideoModelManager({
                 </div>
                 <button
                   type="button"
-                  disabled={already || pulling || tooLarge || Boolean(disabledReason)}
-                  title={(tooLarge ? modelFit?.reason : disabledReason) ?? undefined}
+                  disabled={already || pulling || tooLarge || Boolean(unavailableReason)}
+                  title={(tooLarge ? modelFit?.reason : unavailableReason) ?? undefined}
                   onClick={() => {
                     const message = fitConfirmMessage(m.name, modelFit, m.approxSizeBytes);
                     if (message) setFitConfirm({ id: m.id, message });

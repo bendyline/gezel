@@ -121,6 +121,22 @@ describe('pickChatPlaceholder', () => {
     }
   });
 
+  it('tells a video gezel that only animates to attach a picture and say how it moves', () => {
+    for (const r of [0.01, 0.99]) {
+      const spy = vi.spyOn(Math, 'random').mockReturnValue(r);
+      const text = pickChatPlaceholder({
+        role: 'other',
+        gezelName: 'Vesna',
+        fixedFunctionTool: 'generate_video',
+        fixedFunctionEdits: true,
+      });
+      expect(text).toContain('Vesna');
+      expect(text).toMatch(/attach/i);
+      expect(text).not.toMatch(/change/i);
+      spy.mockRestore();
+    }
+  });
+
   it('gives video generators video-specific directive copy', () => {
     const spy = vi.spyOn(Math, 'random').mockReturnValue(0.2);
     const text = pickChatPlaceholder({

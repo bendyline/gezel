@@ -112,10 +112,12 @@ export const FixedFunctionConfigSchema = z.object({
   /** Defaults merged into every call; user text on `promptKey` always wins. */
   defaults: z.record(z.string(), z.unknown()).optional(),
   /**
-   * `generate_image` only: the gezel changes a picture it is given. The
-   * pictures attached to the message, else the one it made last in the
-   * thread, go to the tool as `inputImages`; a message with neither is
-   * refused rather than drawn from the words alone.
+   * The gezel works on a picture it is given. For `generate_image` it
+   * changes it: the pictures attached to the message, else the one it made
+   * last in the thread, go to the tool as `inputImages`. For
+   * `generate_video` it animates the first picture attached. A message
+   * without one is refused rather than drawn from the words alone. (A video
+   * gezel without the flag still animates a picture it is sent.)
    */
   requiresInputImage: z.boolean().optional(),
 });

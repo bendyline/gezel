@@ -939,6 +939,26 @@ don't set a section's top margin inline. A page built from
 `SettingsSection` takes its spacing from the recipe in
 [Settings pages](#settings-pages) instead.
 
+**A media model row says what the model does, in plain words.** A video
+model's catalog row reads its size, the clip it makes when asked for
+nothing in particular (`1280×704, 5 s`), and what it does beyond words:
+"Animates pictures", "Animates pictures only", "With sound". Installed rows
+repeat those after the name. Never name the engine (sd.cpp, diffusers) or
+the quantization as the reason to pick a model; say what it needs or makes.
+A model this install cannot run keeps its row with a disabled Download key
+whose title says why ("This model needs a video engine this install doesn't
+include."), like a model that is too large. The CPU warning on the Video
+generation page appears only when no engine reaches a graphics card; when
+the larger models fall back to the processor but the smaller ones run on
+the card, a muted line says so instead.
+
+**A picture can become a video from where it appears.** A picture an image
+gezel made carries "Make a video" in its chat menu, beside Download, only
+when a video gezel is set up and an installed model can animate a picture:
+the menu never offers what the next message would turn away. It fills the
+composer with the video gezel's mention and the picture and leaves the
+words to the person, who says how it should move.
+
 ## Foundation
 
 Gezel has one responsive product UX. Window width determines its layout; the

@@ -10688,7 +10688,7 @@ server.tool(
           ? ` Styles this model has: ${styles.map((s) => s.name).join(', ')}.`
           : '';
       if (styles?.length) imageStylesShown.add(meta.model);
-      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${styleLine}${settingsLine}${skippedLine}${guideLine}${stylesLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
+      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${styleLine}${settingsLine}${skippedLine}${guideLine}${stylesLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call.${(await installedVideoAnimates()) ? ` To animate it, pass \`{ inputImage: { artifactPath: "${artifactPath}" } }\` to generate_video.` : ''} To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];
@@ -10730,9 +10730,28 @@ server.tool(
   },
 );
 
+/**
+ * Whether an installed video model animates pictures, so an image result
+ * only offers what this computer can do. Checked at most once a minute.
+ */
+let videoAnimatesCache: { at: number; value: Promise<boolean> } | undefined;
+function installedVideoAnimates(): Promise<boolean> {
+  const now = Date.now();
+  if (!videoAnimatesCache || now - videoAnimatesCache.at > 60_000) {
+    videoAnimatesCache = {
+      at: now,
+      value: api
+        .listInstalledVideoModels()
+        .then((res) => res.defaultImageToVideoModel !== undefined)
+        .catch(() => false),
+    };
+  }
+  return videoAnimatesCache.value;
+}
+
 server.tool(
   'generate_video',
-  "Generate a short video clip from a text prompt (and optionally a starting image for image-to-video). Routes through the local bundled diffusers engine (LTX by default). The encoded MP4 is written to the project's `artifacts/generated/` folder and a workspace copy is dropped at `assets/generated/` for HTML `<video src>` references. Video generation is slow and GPU-intensive — it pauses the chat model while it runs — so the user may see a one-time confirmation card before each call (they can choose Always allow to silence it). Omit width, height, numFrames, fps, and steps unless the user explicitly asked for specific values. On error the tool returns a message directing the user to the Video generation settings.",
+  "Generate a short video clip from a text prompt, or animate a picture: pass it as `inputImage` and it becomes the first frame, so the prompt should describe how it moves. Renders on this computer's video engine. The clip is written to the project's `artifacts/generated/` folder (MP4, or WebM when MP4 cannot be made) and a workspace copy is dropped at `assets/generated/` for HTML `<video src>` references. Video generation is slow and GPU-intensive — it pauses the chat model while it runs — so the user may see a one-time confirmation card before each call (they can choose Always allow to silence it). Omit width, height, numFrames, fps, and steps unless the user explicitly asked for specific values. On error the tool returns a message directing the user to the Video generation settings.",
   {
     prompt: z.string().min(1).describe('What the video should depict.'),
     negativePrompt: z.string().optional().describe('Concepts to avoid.'),
@@ -10774,7 +10793,19 @@ server.tool(
         }),
       ])
       .optional()
-      .describe('Optional starting image for image-to-video (I2V-capable models only).'),
+      .describe(
+        "A picture to animate: it becomes the clip's first frame and sets its shape. To animate a picture you made with generate_image, pass its artifactPath.",
+      ),
+    requireImageToVideo: z
+      .boolean()
+      .optional()
+      .describe(
+        'Set when animating the picture is the point: the call fails rather than make a clip from the words alone if no installed model animates pictures.',
+      ),
+    aspectRatio: z
+      .enum(IMAGE_ASPECT_RATIOS)
+      .optional()
+      .describe("The clip's shape. Omit to use the picture's shape, or the model's default."),
     saveAs: z
       .string()
       .optional()
@@ -10795,6 +10826,8 @@ server.tool(
         ...(args.steps ? { steps: args.steps } : {}),
         ...(args.seed !== undefined ? { seed: args.seed } : {}),
         ...(args.inputImage ? { inputImage: args.inputImage } : {}),
+        ...(args.requireImageToVideo ? { requireImageToVideo: true } : {}),
+        ...(args.aspectRatio ? { aspectRatio: args.aspectRatio } : {}),
         ...(args.saveAs ? { saveAs: args.saveAs } : {}),
         projectId,
         ...(gezelId ? { gezelId } : {}),
@@ -10803,18 +10836,26 @@ server.tool(
         // the tool call (chat can't embed the clip itself).
         inline: true,
       });
-      const { meta, artifactPath, workspacePath, b64Poster } = res;
+      const { meta, artifactPath, workspacePath, b64Poster, posterPath, posterMimeType } = res;
       const workspaceLine = workspacePath
         ? `\n\nTo display this video in HTML, copy this exact tag verbatim — do not add any prefix, do not change the filename:\n\`<video src="${workspacePath}" controls></video>\``
         : '\n\nNOTE: workspace copy was skipped (project has an external workingDir not approved for writes).';
-      const summary = `Generated a ${meta.widthPx}×${meta.heightPx} video with ${meta.model} (${meta.numFrames} frames @ ${meta.fps}fps, seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms). The user sees the clip in an inline player below the tool call. The clip is at \`${artifactPath}\` — read its bytes with \`read_artifact\` if needed.${workspaceLine}`;
+      const skipped = meta.i2vSkippedReason
+        ? `\n\nThe picture was not used: ${meta.i2vSkippedReason}`
+        : '';
+      const notes = `${skipped}${meta.settingsNotes?.length ? `\n\n${meta.settingsNotes.join(' ')}` : ''}`;
+      const summary = `Generated a ${meta.widthPx}×${meta.heightPx} video with ${meta.model} (${meta.numFrames} frames @ ${meta.fps}fps, seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms). The user sees the clip in an inline player below the tool call. The clip is at \`${artifactPath}\` — read its bytes with \`read_artifact\` if needed.${workspaceLine}${notes}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];
       // A poster image block lets vision-capable agents "see" the result
       // on the next turn; the chat UI renders the player (below) instead.
       if (b64Poster) {
-        content.push({ type: 'image' as const, data: b64Poster, mimeType: 'image/png' });
+        content.push({
+          type: 'image' as const,
+          data: b64Poster,
+          mimeType: posterMimeType ?? 'image/png',
+        });
       }
       // Report the already-written mp4 by PATH (never base64 — a multi-MB
       // clip in the transcript would be ruinous). The bridge forwards
@@ -10822,7 +10863,13 @@ server.tool(
       // `gezelVideo` to the persisted `videos[]` the UI plays inline.
       return {
         content,
-        structuredContent: { gezelVideo: { artifactPath, mimeType: meta.mimeType } },
+        structuredContent: {
+          gezelVideo: {
+            artifactPath,
+            mimeType: meta.mimeType,
+            ...(posterPath ? { posterPath } : {}),
+          },
+        },
       };
     } catch (err) {
       let msg = err instanceof Error ? err.message : String(err);

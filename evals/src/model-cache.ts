@@ -125,7 +125,7 @@ async function purgeStalePartials(dir: string, log: (line: string) => void): Pro
   }
 }
 
-export type EngineKey = 'llama-cpp' | 'sd-cpp' | 'mlx' | 'ds4';
+export type EngineKey = 'llama-cpp' | 'sd-cpp' | 'sd-cpp-video' | 'video' | 'mlx' | 'ds4';
 
 /**
  * Default warm-cache root. Lives outside `~/.gezel` so a clean install of
@@ -136,7 +136,7 @@ export function defaultCacheRoot(): string {
   return join(homedir(), '.gezel-eval-cache');
 }
 
-function modelDirInHome(home: string, engine: EngineKey, modelId: string): string {
+export function modelDirInHome(home: string, engine: EngineKey, modelId: string): string {
   return join(home, 'engines', engine, 'models', modelId);
 }
 
@@ -323,8 +323,10 @@ export async function staleInstall(opts: {
   /** Inspect this exact directory instead of the home layout under `cacheRoot`. */
   modelDir?: string;
 }): Promise<StaleInstall | null> {
-  // sd-cpp image models aren't in the chat-model index; nothing to check.
-  if (opts.engine === 'sd-cpp') return null;
+  // Image and video models aren't in the chat-model index; nothing to check.
+  if (opts.engine === 'sd-cpp' || opts.engine === 'sd-cpp-video' || opts.engine === 'video') {
+    return null;
+  }
   const expected = chatModelInstallIdentity(opts.expectedId ?? opts.modelId, opts.engine);
   if (!expected) return null;
 

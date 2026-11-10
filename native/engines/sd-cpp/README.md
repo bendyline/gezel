@@ -16,13 +16,39 @@ interrupt, and a render keeps running after its client disconnects, so
 cancelling a render stops the process. The job API (`/sdcpp/v1/img_gen`,
 `POST /sdcpp/v1/jobs/<id>/cancel`) stops a running render at a step boundary
 at `master-1050` (it cancelled only queued jobs at `master-975`), which would
-keep the weights loaded; Gezel does not use it yet. See `packages/inference/src/providers/image/sd-cpp.ts` for the client
-side.
+keep the weights loaded; Gezel's image engine does not use it yet. See
+`packages/inference/src/providers/image/sd-cpp.ts` for the client side.
 
 `master-1050` also adds model management (`/sdcpp/v1/models/load`, `unload`,
 `refresh`) and a startup scan of `./models` relative to the working
 directory. Gezel always starts the server with a model on the command line,
 so the scan finds nothing to use and generation behaves as before.
+
+The same binary is Gezel's second video engine. Video uses only the job
+API: `POST /sdcpp/v1/vid_gen`, polled at `GET /sdcpp/v1/jobs/<id>` and
+stopped with `POST /sdcpp/v1/jobs/<id>/cancel`
+(`packages/service/src/providers/video/sd-cpp-video-jobs.ts`). A video
+engine is a separate process from the image engine, launched with one
+model's components as startup flags (`--diffusion-model`, `--t5xxl`/`--llm`,
+`--vae` or `--tae`, ...), and checked once per launch against
+`GET /sdcpp/v1/capabilities` for the `vid_gen` mode and the `webm` format.
+It writes WebM, WebP or AVI, never MP4; the daemon transcodes with a system
+ffmpeg when one is installed. Three behaviors measured at `master-1050` on
+Metal shape the launch (`buildSdVideoServerArgs` in
+`packages/service/src/providers/video/sd-cpp-video.ts`):
+
+- `--flash-attn auto` decides from a short speed probe that ignores memory,
+  and on Metal it chose off on one launch of two. A 1280x704x121 Wan clip
+  then asked for a 70 GB attention buffer, where flash needs a few GB.
+  Video launches force `diffusion=on`; sd.cpp falls back to plain attention
+  for an op its backend cannot run as flash.
+- Wan's full VAE decodes at about 80 s per million pixel-frames on Metal,
+  hours for a default clip, against under a second for the tiny decoder
+  (`--tae`, TAEHV). Metal loads only the tiny decoder when an entry ships
+  both.
+- A cancel does not interrupt the VAE decode, and `/` keeps answering while
+  a job runs, so the health watch never kills a long render. A cancel the
+  server has not honored within its grace period stops the process.
 
 ## Platform backends
 

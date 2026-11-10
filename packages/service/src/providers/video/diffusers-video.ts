@@ -92,7 +92,7 @@ export class DiffusersVideoProvider implements VideoProvider {
     this.configured = opts.configured ?? true;
     if (opts.arbiter && opts.supervisor) {
       this.arbiter = opts.arbiter;
-      this.arbiter.registerEvictor('video', () => opts.supervisor!.stop());
+      this.arbiter.registerEvictor('video', () => opts.supervisor!.stop(), 'diffusers');
     }
   }
 
@@ -109,7 +109,8 @@ export class DiffusersVideoProvider implements VideoProvider {
     const fps = input.fps ?? DEFAULT_FPS;
     const steps = input.steps ?? DEFAULT_STEPS;
     const seed = input.seed ?? Math.floor(Math.random() * 2_147_483_647);
-    const modelId = input.model ?? (await this.models.resolveDefaultModel())?.id ?? 'default';
+    const modelId =
+      input.model ?? (await this.models.resolveDefaultModel('diffusers'))?.id ?? 'default';
     const started = Date.now();
     log.info(
       `[video] generate model=${modelId} steps=${steps} frames=${numFrames} fps=${fps} size=${width}x${height} i2v=${Boolean(input.inputImage)}`,

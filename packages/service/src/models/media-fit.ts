@@ -13,19 +13,23 @@
  */
 
 import {
+  type MediaBackend,
   type MediaFitAssessment,
   type MediaMemoryPool,
   type MediaModelFitResponse,
   type VideoAccelerator,
   type VideoModelManifest,
   assessMediaFit,
+  sdCppVideoModelRequirement,
   videoMemoryRequirement,
 } from '@bendyline/gezel';
 import {
   type FitPlan,
   type MediaFitContext,
+  imageMediaPool,
   mediaCapacity,
   mediaFitResponse,
+  sdServerBackend,
 } from '@bendyline/gezel-inference/internal/models/image-fit';
 import type { CapacityBudgetKind } from '@bendyline/gezel-inference/internal/providers/native/capacity-budget';
 import { measuredCapacityBudget } from '@bendyline/gezel-inference/internal/providers/native/measured-budget';
@@ -56,6 +60,8 @@ export function videoMediaPool(
 
 interface VideoFitPlan extends FitPlan {
   accelerator: VideoAccelerator;
+  /** The sd.cpp engine runs where the image engine does, with its own pool and backend. */
+  sdCpp: FitPlan & { backend: MediaBackend; fastBytes: number };
 }
 
 async function videoPlan(ctx: MediaFitContext): Promise<VideoFitPlan> {
@@ -64,13 +70,42 @@ async function videoPlan(ctx: MediaFitContext): Promise<VideoFitPlan> {
     measuredCapacityBudget(),
   ]);
   const pool = videoMediaPool(accelerator, budget.kind);
-  return { pool, accelerator, capacity: await mediaCapacity(pool, ctx.readConfig) };
+  const sdPool = imageMediaPool(budget.kind);
+  const [capacity, sdCapacity] = await Promise.all([
+    mediaCapacity(pool, ctx.readConfig),
+    sdPool === pool ? undefined : mediaCapacity(sdPool, ctx.readConfig),
+  ]);
+  return {
+    pool,
+    accelerator,
+    capacity,
+    sdCpp: {
+      pool: sdPool,
+      capacity: sdCapacity ?? capacity,
+      backend: sdServerBackend(),
+      fastBytes: budget.fastBytes,
+    },
+  };
 }
 
 function assessVideoManifest(plan: VideoFitPlan, manifest: VideoModelManifest): MediaFitAssessment {
+  const files = videoCatalogWeightFiles(manifest);
+  if (manifest.engine === 'sd-cpp') {
+    const sd = plan.sdCpp;
+    return assessMediaFit(
+      sdCppVideoModelRequirement({
+        files,
+        model: manifest,
+        pool: sd.pool,
+        backend: sd.backend,
+        ...(sd.pool === 'discrete' ? { gpuLimitBytes: sd.fastBytes } : {}),
+      }),
+      sd.capacity,
+    );
+  }
   return assessMediaFit(
     videoMemoryRequirement({
-      files: videoCatalogWeightFiles(manifest),
+      files,
       family: manifest.family,
       accelerator: plan.accelerator,
       pool: plan.pool,

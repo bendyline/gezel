@@ -45,9 +45,21 @@ import {
   type RemoteModelDescriptor,
   RemoteSynthesizeRequestSchema,
   RemoteTranscribeRequestSchema,
+  type RemoteVideoGenRequest,
   RemoteVideoGenRequestSchema,
   type WireQueueHints,
 } from '../../providers/remote/wire.js';
+import type {
+  RemoteVideoGenFrame,
+  RemoteVideoGenResult,
+} from '../../providers/video/remote-video.js';
+import {
+  VideoCapacityError,
+  VideoGenerationCancelledError,
+  type VideoGenerationInput,
+  type VideoGenerationOutput,
+  VideoRenderTimedOutError,
+} from '../../providers/video/types.js';
 import type { EngineContext } from '../engine-context.js';
 import { serializeSseWrites } from './chat-events.js';
 
@@ -283,33 +295,55 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
   });
 
   // --- Video generation ----------------------------------------------------
+  // Both routes stop the render when A hangs up. The stream is what A reads:
+  // a render runs for minutes to an hour, much of it a decode that reports
+  // nothing, so the status lines, the step bar, and the keep-alives come back
+  // as they happen. The one-shot route stays for clients from before it.
   app.post('/video/generate', async (c) => {
     const body = RemoteVideoGenRequestSchema.parse(await c.req.json());
     const provider = await ctx.videoProvider.current();
-    const out = await provider.generate({
-      prompt: body.prompt,
-      ...(body.negativePrompt ? { negativePrompt: body.negativePrompt } : {}),
-      ...(body.model ? { model: body.model } : {}),
-      ...(body.width ? { width: body.width } : {}),
-      ...(body.height ? { height: body.height } : {}),
-      ...(body.numFrames ? { numFrames: body.numFrames } : {}),
-      ...(body.fps ? { fps: body.fps } : {}),
-      ...(body.steps ? { steps: body.steps } : {}),
-      ...(body.guidanceScale !== undefined ? { guidanceScale: body.guidanceScale } : {}),
-      ...(body.seed !== undefined ? { seed: body.seed } : {}),
-      ...(body.inputImage
-        ? {
-            inputImage: {
-              data: Buffer.from(body.inputImage.data, 'base64'),
-              mimeType: body.inputImage.mimeType,
-            },
-          }
-        : {}),
-    });
-    return c.json({
-      meta: out.meta,
-      video: out.video.toString('base64'),
-      ...(out.poster ? { poster: out.poster.toString('base64') } : {}),
+    try {
+      const out = await provider.generate(remoteVideoInput(body, c.req.raw.signal));
+      return c.json(remoteVideoResult(out));
+    } catch (err) {
+      const expected = expectedVideoFailure(err);
+      // A 5xx body is replaced with an opaque error (http/errors.ts); these
+      // carry the sentence A shows the person.
+      if (expected) return c.json(expected, 409);
+      throw err;
+    }
+  });
+
+  app.post('/video/generate-stream', async (c) => {
+    const body = RemoteVideoGenRequestSchema.parse(await c.req.json());
+    const provider = await ctx.videoProvider.current();
+    return streamSSE(c, async (stream) => {
+      const write = serializeSseWrites((frame: RemoteVideoGenFrame) =>
+        stream.writeSSE({ data: JSON.stringify(frame) }),
+      );
+      const send = (frame: RemoteVideoGenFrame) => void write(frame).catch(() => {});
+      const heartbeat = setInterval(() => {
+        void stream.write(': keepalive\n\n').catch(() => {});
+      }, REMOTE_STREAM_HEARTBEAT_MS);
+      heartbeat.unref?.();
+      try {
+        const out = await provider.generate({
+          ...remoteVideoInput(body, c.req.raw.signal),
+          onStatus: (message) => send({ type: 'status', message }),
+          onProgress: (progress) => send({ type: 'progress', progress }),
+        });
+        await write({ type: 'done', result: remoteVideoResult(out) });
+      } catch (err) {
+        if (c.req.raw.signal.aborted) return;
+        const expected = expectedVideoFailure(err);
+        await write(
+          expected
+            ? { type: 'error', ...expected }
+            : { type: 'error', error: err instanceof Error ? err.message : String(err) },
+        ).catch(() => {});
+      } finally {
+        clearInterval(heartbeat);
+      }
     });
   });
 
@@ -750,3 +784,47 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
 
 /** B-side ceiling per forward-pass — generous for big-model prefill. */
 const REMOTE_INFER_TIMEOUT_MS = 20 * 60 * 1000;
+
+function remoteVideoInput(body: RemoteVideoGenRequest, signal: AbortSignal): VideoGenerationInput {
+  return {
+    prompt: body.prompt,
+    ...(body.negativePrompt ? { negativePrompt: body.negativePrompt } : {}),
+    ...(body.model ? { model: body.model } : {}),
+    ...(body.width ? { width: body.width } : {}),
+    ...(body.height ? { height: body.height } : {}),
+    ...(body.numFrames ? { numFrames: body.numFrames } : {}),
+    ...(body.fps ? { fps: body.fps } : {}),
+    ...(body.steps ? { steps: body.steps } : {}),
+    ...(body.guidanceScale !== undefined ? { guidanceScale: body.guidanceScale } : {}),
+    ...(body.seed !== undefined ? { seed: body.seed } : {}),
+    ...(body.inputImage
+      ? {
+          inputImage: {
+            data: Buffer.from(body.inputImage.data, 'base64'),
+            mimeType: body.inputImage.mimeType,
+          },
+        }
+      : {}),
+    signal,
+  };
+}
+
+function remoteVideoResult(out: VideoGenerationOutput): RemoteVideoGenResult {
+  return {
+    meta: out.meta,
+    video: out.video.toString('base64'),
+    ...(out.poster ? { poster: out.poster.toString('base64') } : {}),
+  };
+}
+
+/** A render that could not fit, ran out of time, or was stopped: the engine's own sentence and code. */
+function expectedVideoFailure(err: unknown): { error: string; code: string } | undefined {
+  if (
+    err instanceof VideoCapacityError ||
+    err instanceof VideoRenderTimedOutError ||
+    err instanceof VideoGenerationCancelledError
+  ) {
+    return { error: err.message, code: err.code };
+  }
+  return undefined;
+}

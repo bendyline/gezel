@@ -31,7 +31,10 @@ interface Args {
    * tool. Overrides `role`.
    */
   fixedFunctionTool?: string;
-  /** The fixed-function gezel edits an attached picture (`requiresInputImage`). */
+  /**
+   * The fixed-function gezel needs an attached picture (`requiresInputImage`):
+   * an image gezel edits it, a video gezel animates it.
+   */
   fixedFunctionEdits?: boolean;
 }
 
@@ -87,6 +90,14 @@ const GENERATOR_VARIANTS: Record<string, ReadonlyArray<(name: string) => string>
       `${name} only generates video. Describe the shot you want exactly — e.g. "drone flyover of a snowy forest." No need for full sentences.`,
     (name) =>
       `${name} turns a description into a clip. Just list what you want to see — "waves crashing on rocks at sunset" — keywords are fine.`,
+    (name) =>
+      `Describe a shot for ${name}, or attach a picture and say how it should move — e.g. "the waves roll in, the camera drifts closer."`,
+  ],
+  // A video gezel set to animate only: a picture plus how it should move.
+  animate_video: [
+    (name) =>
+      `Attach a picture and tell ${name} how it should move — e.g. "the camera drifts closer."`,
+    (name) => `${name} animates the picture you attach. Say what moves: "leaves blow in the wind."`,
   ],
   // An image editor's message is a picture plus what to change about it.
   edit_image: [
@@ -120,7 +131,11 @@ export function pickChatPlaceholder(args: Args): string {
   // conversational pools entirely — "ask them anything" is misleading
   // for a gezel that only forwards text to one tool.
   if (args.fixedFunctionTool) {
-    const key = args.fixedFunctionEdits ? 'edit_image' : args.fixedFunctionTool;
+    const key = !args.fixedFunctionEdits
+      ? args.fixedFunctionTool
+      : args.fixedFunctionTool === 'generate_video'
+        ? 'animate_video'
+        : 'edit_image';
     const pool = GENERATOR_VARIANTS[key] ?? GENERATOR_GENERIC;
     const pick = pool[Math.floor(Math.random() * pool.length)];
     return sentenceCase(pick ? pick(gezelName) : GENERATOR_GENERIC[0]!(gezelName));

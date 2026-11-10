@@ -126,6 +126,12 @@ describe('buildVideoServerArgs', () => {
     });
     expect(args).not.toContain('--sigmas');
   });
+
+  it('asks for the memory trace only when the bench does', () => {
+    const model = { modelDir: '/models/wan', family: 'wan' as const };
+    expect(buildVideoServerArgs({ ...base, model })).not.toContain('--memory-trace');
+    expect(buildVideoServerArgs({ ...base, model, memoryTrace: true })).toContain('--memory-trace');
+  });
 });
 
 describe('detectVideoAccelerator', () => {

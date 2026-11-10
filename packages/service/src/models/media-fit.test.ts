@@ -3,6 +3,7 @@ import {
   MEDIA_MODEL_WONT_RUN_CODE,
   type MediaFitAssessment,
   type VideoModelManifest,
+  sdCppVideoModelRequirement,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { describe, expect, it } from 'vitest';
@@ -123,6 +124,59 @@ describe('sdServerRequirement', () => {
     const standard = sdServerRequirement({ ...base, pool: 'unified' });
     const high = sdServerRequirement({ ...base, pool: 'unified', megapixels: 2.25 });
     expect(high.bytes - standard.bytes).toBe(1.25 * 1.5 * GiB);
+  });
+});
+
+describe('sd.cpp video pricing', () => {
+  const manifest = {
+    engine: 'sd-cpp',
+    family: 'wan',
+    architecture: 'wan2.2-ti2v-5b',
+    defaultWidth: 1280,
+    defaultHeight: 704,
+    defaultNumFrames: 121,
+    source: {
+      files: [
+        { name: 'Wan2.2-TI2V-5B-Q4_K_M.gguf', sizeBytes: 3.43e9, role: 'diffusion_model' },
+        { name: 'umt5-xxl-encoder-Q4_K_M.gguf', sizeBytes: 3.66e9, role: 't5xxl' },
+        {
+          name: 'wan2.2_vae.safetensors',
+          sizeBytes: 1.4e9,
+          role: 'vae',
+          tensors: { floatElements: { F32: 0.35e9 }, otherBytes: 0 },
+        },
+      ],
+    },
+  } as unknown as VideoModelManifest;
+
+  it('prices each file as the sd-server slot it fills, at its stored precision', () => {
+    const files = videoCatalogWeightFiles(manifest);
+    expect(files.map((f) => [f.component, f.format])).toEqual([
+      ['diffusion_model', 'gguf'],
+      ['t5xxl', 'gguf'],
+      ['vae', 'safetensors'],
+    ]);
+    const req = sdCppVideoModelRequirement({
+      files,
+      model: manifest,
+      pool: 'unified',
+      backend: 'metal',
+    });
+    // GGUF at its size; the float32 VAE stays float32 in sd.cpp.
+    expect(req.weightBytes).toBe(Math.ceil(3.43e9 + 3.66e9 + 1.4e9));
+    expect(req).toMatchObject({ engine: 'sd-cpp', backend: 'metal', exact: true });
+    expect(req.size).toEqual({ width: 1280, height: 704, numFrames: 121 });
+  });
+
+  it('holds only what --max-vram allows on a discrete card', () => {
+    const req = sdCppVideoModelRequirement({
+      files: videoCatalogWeightFiles(manifest),
+      model: manifest,
+      pool: 'discrete',
+      backend: 'vulkan',
+      gpuLimitBytes: 6 * GiB,
+    });
+    expect(req.gpuBytes).toBe(6 * GiB);
   });
 });
 

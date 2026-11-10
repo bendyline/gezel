@@ -23,6 +23,11 @@ import { videoGenRoutes } from './routes/video-gen.js';
 
 const KEYFRAME = 'data/mud-room/events/2026-10-27/15/attachments/001/keyframe-1.jpg';
 const CHART = 'reports/chart.png';
+/** A real 1x1 PNG: the video route refuses a picture it cannot read before any engine sees it. */
+const ONE_PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+  'base64',
+);
 
 let artifacts: string;
 
@@ -30,7 +35,7 @@ beforeAll(async () => {
   artifacts = await mkdtemp(join(tmpdir(), 'gezel-camera-routes-'));
   for (const rel of [KEYFRAME, CHART]) {
     await mkdir(join(artifacts, rel, '..'), { recursive: true });
-    await writeFile(join(artifacts, rel), 'pixels');
+    await writeFile(join(artifacts, rel), ONE_PIXEL_PNG);
   }
 });
 
@@ -75,8 +80,8 @@ function harness(opts: {
         fuzzy: false,
       }),
       readProjectArtifactBinary: async () => ({
-        data: Buffer.from('pixels'),
-        mimeType: 'image/jpeg',
+        data: ONE_PIXEL_PNG,
+        mimeType: 'image/png',
       }),
       writeProjectArtifactBinary: async (_id: string, p: string) => p,
       readConfig: async () => ({}),
@@ -258,7 +263,7 @@ describe('camera keyframes in the image tools', () => {
     const h = harness({ session: 'llama-cpp', engine: 'unused', provider: broker.provider });
     expect(await h.video(KEYFRAME)).toEqual({ status: 500, error: 'reached the engine' });
     expect(broker.fetch.mock.calls.map(([url]) => String(url))).toContain(
-      'https://192.168.1.20:6229/v1/remote/video/generate',
+      'https://192.168.1.20:6229/v1/remote/video/generate-stream',
     );
   });
 

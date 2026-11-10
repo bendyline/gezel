@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { AudioPlayer } from './AudioPlayer.js';
 import { ImagePreview } from './ImagePreview.js';
+import { queueComposerPrefill } from './composer-prefill.js';
 
 /**
  * Inline playback rows for audio artifacts a tool returned
@@ -195,8 +196,47 @@ async function downloadProjectArtifact(projectId: string, path: string): Promise
  * Copy path; future entries (regenerate, send to gezel, etc.) plug
  * in here without touching the thumbnail layout.
  */
+/** A picture an image gezel made, which a video gezel can animate. */
+export function isGeneratedPicture(path: string): boolean {
+  return /(^|\/)generated\/image-[^/]+\.(png|jpe?g|webp)$/i.test(path);
+}
+
+/**
+ * The video gezel to animate a picture with: only when one is set up and an
+ * installed video model can animate a picture, so the menu never offers
+ * something the next message would turn away.
+ */
+export async function findPictureAnimator(): Promise<{ id: string; name: string } | null> {
+  const [models, gezels] = await Promise.all([api.listInstalledVideoModels(), api.listGezels()]);
+  if (!models.defaultImageToVideoModel) return null;
+  const gezel = gezels.gezels.find((g) => g.fixedFunction?.tool === 'generate_video');
+  return gezel ? { id: gezel.id, name: gezel.name } : null;
+}
+
+/** The composer text that hands a picture to the video gezel: its mention, then the picture. */
+export function animatePicturePrefill(
+  animator: { id: string; name: string },
+  path: string,
+): string {
+  return `@[${animator.name}](gezel:${animator.id}) ![picture](artifacts/${path.replace(/^artifacts\//, '')}) `;
+}
+
 function ImageActionsMenu({ projectId, path }: { projectId: string; path: string }) {
   const [open, setOpen] = useState(false);
+  // Looked up the first time the menu opens; null when nothing can animate it.
+  const [animator, setAnimator] = useState<{ id: string; name: string } | null | undefined>(
+    undefined,
+  );
+  const generated = isGeneratedPicture(path);
+  const onOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (next && generated && animator === undefined) {
+      setAnimator(null);
+      void findPictureAnimator()
+        .then(setAnimator)
+        .catch(() => setAnimator(null));
+    }
+  };
   const handleDownload = async () => {
     try {
       await downloadProjectArtifact(projectId, path);
@@ -212,7 +252,7 @@ function ImageActionsMenu({ projectId, path }: { projectId: string; path: string
     }
   };
   return (
-    <DropdownMenu.Root open={open} onOpenChange={setOpen}>
+    <DropdownMenu.Root open={open} onOpenChange={onOpenChange}>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
@@ -254,6 +294,16 @@ function ImageActionsMenu({ projectId, path }: { projectId: string; path: string
           >
             <span>Copy artifact path</span>
           </DropdownMenu.Item>
+          {animator && (
+            <DropdownMenu.Item
+              className="app-nav-menu-item"
+              onSelect={() =>
+                queueComposerPrefill(projectId, animatePicturePrefill(animator, path))
+              }
+            >
+              <span>Make a video</span>
+            </DropdownMenu.Item>
+          )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

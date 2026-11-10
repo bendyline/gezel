@@ -13,7 +13,9 @@ vi.mock('../components/VideoGeneratorGezelHint.js', () => ({
   VideoGeneratorGezelHint: () => <div data-testid="gezel-hint">hint</div>,
 }));
 
-const { VideoEngineSettings, cpuFallbackCause } = await import('./VideoEngineSettings.js');
+const { VideoEngineSettings, cpuFallbackCause, videoEngineUnavailable } = await import(
+  './VideoEngineSettings.js'
+);
 const { api } = await import('../api.js');
 
 /** A Windows/Radeon profile — the shape that exposed the misleading copy. */
@@ -114,6 +116,30 @@ describe('VideoEngineSettings', () => {
       expect(await screen.findByText(/No GPU detected/)).toBeInTheDocument();
     });
 
+    it('says the smaller models use the graphics card when the compact engine has one', async () => {
+      vi.mocked(api.getVideoEngineStatus).mockResolvedValue({
+        engine: {
+          status: 'ok',
+          kind: 'local',
+          baseUrl: 'http://127.0.0.1:9101',
+          accelerator: 'cpu',
+          engines: [
+            { engine: 'diffusers', status: 'ok', backend: 'cpu', modelCount: 0 },
+            { engine: 'sd-cpp', status: 'ok', backend: 'vulkan', modelCount: 1 },
+          ],
+        },
+        modelCount: 1,
+      } as never);
+      vi.mocked(api.getMemoryProfile).mockResolvedValue(RADEON_PROFILE);
+
+      render(<VideoEngineSettings />);
+
+      expect(
+        await screen.findByText(/smaller models in the list run on your graphics card/),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/can't be used for video generation/)).not.toBeInTheDocument();
+    });
+
     it('says nothing about the accelerator when the GPU is usable', async () => {
       vi.mocked(api.getMemoryProfile).mockResolvedValue(RADEON_PROFILE);
 
@@ -149,5 +175,17 @@ describe('VideoEngineSettings', () => {
         cpuFallbackCause({ source: 'gpu-nvidia', gpuVendor: 'nvidia' } as never, 'no-gpu-build'),
       ).toEqual({ kind: 'no-gpu-build' });
     });
+  });
+});
+
+describe('videoEngineUnavailable', () => {
+  it('names only engines this install does not have', () => {
+    expect(
+      videoEngineUnavailable([
+        { engine: 'diffusers', status: 'ok' },
+        { engine: 'sd-cpp', status: 'not-configured' },
+      ]),
+    ).toEqual({ 'sd-cpp': "This model needs a video engine this install doesn't include." });
+    expect(videoEngineUnavailable([])).toEqual({});
   });
 });

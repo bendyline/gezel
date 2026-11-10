@@ -2203,12 +2203,16 @@ program
 
 program
   .command('create-video [prompt...]')
-  .description('Generate a video from a prompt (or --file) via the configured video engine')
+  .description(
+    'Generate a video from a prompt (or --file), or animate a picture (--image), via the configured video engine',
+  )
   .option('-f, --file <path>', 'read the prompt from a text file instead of the argument')
   .option('-m, --model <id>', 'video model catalog id (default: the engine default)')
   .option('-n, --negative <text>', 'negative prompt')
   .option('-W, --width <px>', 'width in pixels')
   .option('-H, --height <px>', 'height in pixels')
+  .option('-i, --image <path>', 'a picture to animate; it becomes the first frame')
+  .option('-a, --aspect <ratio>', `aspect ratio: ${IMAGE_ASPECT_RATIOS.join(', ')}`)
   .option('--frames <n>', 'number of frames')
   .option('--fps <n>', 'frames per second')
   .option('-s, --steps <n>', 'sampler steps')
@@ -2222,6 +2226,8 @@ program
         negative?: string;
         width?: string;
         height?: string;
+        image?: string;
+        aspect?: string;
         frames?: string;
         fps?: string;
         steps?: string;
@@ -2229,6 +2235,8 @@ program
       },
     ) => {
       const prompt = await resolvePromptText(promptParts, opts.file, 'prompt');
+      const aspect = enumOpt('aspect', opts.aspect, ImageAspectRatioSchema);
+      const picture = opts.image ? await readPictureOpt(opts.image) : undefined;
       const client = await connectOwned(cliGlobals());
       const projectId = opts.project ?? 'default';
       const width = intOpt('width', opts.width);
@@ -2249,6 +2257,8 @@ program
           ...(opts.negative ? { negativePrompt: opts.negative } : {}),
           ...(width !== undefined ? { width } : {}),
           ...(height !== undefined ? { height } : {}),
+          ...(aspect ? { aspectRatio: aspect } : {}),
+          ...(picture ? { inputImage: picture, requireImageToVideo: true } : {}),
           ...(numFrames !== undefined ? { numFrames } : {}),
           ...(fps !== undefined ? { fps } : {}),
           ...(steps !== undefined ? { steps } : {}),
@@ -2265,8 +2275,32 @@ program
       console.error(
         `  model=${m.model} seed=${m.seed} ${m.widthPx}x${m.heightPx} frames=${m.numFrames} fps=${m.fps} time=${(m.durationMs / 1000).toFixed(1)}s`,
       );
+      for (const note of m.settingsNotes ?? []) console.error(`  note: ${note}`);
     },
   );
+
+/** A local picture file as the base64 a generate request carries. */
+async function readPictureOpt(path: string): Promise<{ data: string; mimeType: string }> {
+  const { readFile } = await import('node:fs/promises');
+  let data: Buffer;
+  try {
+    data = await readFile(path);
+  } catch (err) {
+    throw new CliError(
+      `could not read --image ${path}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const ext = path.toLowerCase().split('.').pop();
+  const mimeType =
+    ext === 'jpg' || ext === 'jpeg'
+      ? 'image/jpeg'
+      : ext === 'webp'
+        ? 'image/webp'
+        : ext === 'gif'
+          ? 'image/gif'
+          : 'image/png';
+  return { data: data.toString('base64'), mimeType };
+}
 
 program
   .command('create-audio [text...]')

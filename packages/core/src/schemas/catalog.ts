@@ -1947,14 +1947,120 @@ export type ImageLoraManifest = z.infer<typeof ImageLoraManifestSchema>;
  *   - `ltx2` → LTX-2 / LTX-2.3 (`LTX2Pipeline` / `LTX2ConditionPipeline`),
  *              Gemma3 text encoder, emits a synchronized audio track.
  *   - `wan`  → WAN 2.x (`WanPipeline`), float32 VAE.
+ *   - `lingbot` → LingBot-Video (sd.cpp only): Wan2.1 VAE, a Qwen3-VL text
+ *              encoder, and a structured JSON caption for a prompt.
  * The exact pipeline class within a family can be pinned per-model via
  * {@link VideoModelLoadSchema.pipelineClass} — two `ltx` models can want
  * different classes (the 2B base wants `LTXPipeline`, the 0.9.7 models
  * `LTXConditionPipeline`). Kept small and explicit — a new family is a
- * code change in the engine, not just catalog data.
+ * code change in the engine, not just catalog data. `family` is required,
+ * so a build that does not know a family fails the item rather than
+ * guessing at it.
  */
-export const VideoModelFamilySchema = z.enum(['ltx', 'ltx2', 'wan']);
+export const VideoModelFamilySchema = z.enum(['ltx', 'ltx2', 'wan', 'lingbot']);
 export type VideoModelFamily = z.infer<typeof VideoModelFamilySchema>;
+
+/**
+ * The engine that renders a video model. `diffusers` is the Python server
+ * (`gezel_video_server.py`); `sd-cpp` is stable-diffusion.cpp's sd-server,
+ * the image engine's binary, driven through its video job API. An entry
+ * that names an engine an older build lacks must set `minGezelVersion`:
+ * the field is dropped as not understood and would read as `diffusers`.
+ */
+export const VideoEngineSchema = z.enum(['diffusers', 'sd-cpp']);
+export type VideoEngine = z.infer<typeof VideoEngineSchema>;
+
+/**
+ * What a file is to sd-server, for an `sd-cpp` entry. Each value is one of
+ * sd-server's model slots (`--diffusion-model`, `--t5xxl`, `--audio-vae`,
+ * ...), so the engine passes the file under that flag. Diffusers entries
+ * leave it off: their components are the repo's folders.
+ */
+export const VideoModelComponentRoleSchema = z.enum([
+  'diffusion_model',
+  'high_noise_diffusion_model',
+  'vae',
+  'tae',
+  't5xxl',
+  'llm',
+  'llm_vision',
+  'clip_vision',
+  'audio_vae',
+  'audio_encoder',
+  'embeddings_connectors',
+]);
+export type VideoModelComponentRole = z.infer<typeof VideoModelComponentRoleSchema>;
+
+/**
+ * The network a video model is built on, keyed into core's geometry table
+ * (`VIDEO_ARCHITECTURES`): how far its VAE compresses each frame and the
+ * clip's length, its patch size, and so the grid sizes and frame counts it
+ * accepts and how its memory grows with them. Absent → its family's
+ * default; a value this build does not know is dropped the same way.
+ */
+export const VideoArchitectureSchema = z.enum([
+  'ltx-video-0.9',
+  'ltx-2',
+  'wan2.2-ti2v-5b',
+  'wan2.1-1.3b',
+  'lingbot-video-1.3b',
+]);
+export type VideoArchitecture = z.infer<typeof VideoArchitectureSchema>;
+
+/**
+ * How the engine writes a prompt for the model. `text` passes the words
+ * through; `lingbot-caption` wraps them in the structured caption object
+ * LingBot-Video was trained on.
+ */
+export const VideoPromptFormatSchema = z.enum(['text', 'lingbot-caption']);
+export type VideoPromptFormat = z.infer<typeof VideoPromptFormatSchema>;
+
+const SdCppSampleShape = {
+  sampler: z.enum(SD_CPP_SAMPLERS).optional(),
+  scheduler: z.enum(SD_CPP_SCHEDULERS).optional(),
+  /** Flow-matching shift; Wan and LTX each have their own. */
+  flowShift: z.number().positive().optional(),
+};
+
+/**
+ * Render settings an `sd-cpp` video entry needs beyond the shared ones
+ * (`recommendedSteps` is the step count, `guidanceScale` the text CFG).
+ * Typed fields only: sd-server reads generation parameters from untrusted
+ * text too, so nothing here is passed through as free-form arguments.
+ */
+export const SdCppVideoRenderSchema = z.object({
+  ...SdCppSampleShape,
+  /** A distilled model's fixed schedule, highest sigma first, ending at 0. */
+  customSigmas: z.array(z.number().min(0).max(1)).min(2).max(1001).optional(),
+  /** Wan2.2 A14B's second, high-noise expert. */
+  highNoise: z
+    .object({
+      steps: z.number().int().positive().optional(),
+      cfg: z.number().nonnegative().optional(),
+      ...SdCppSampleShape,
+    })
+    .optional(),
+  /** Where a two-expert model hands over from the high-noise expert. */
+  moeBoundary: z.number().min(0).max(1).optional(),
+  vaeTiling: z
+    .object({
+      /** Decode each frame in tiles. */
+      spatial: z.boolean().default(true),
+      /** Decode the clip a few latent frames at a time. */
+      temporal: z.boolean().default(false),
+      tileSizePx: z.number().int().min(64).max(2048).optional(),
+      temporalTileFrames: z.number().int().positive().optional(),
+      /** Wan2.2 TI2V-5B only: latent frames decoded together. */
+      temporalDecodeFrames: z.number().int().positive().optional(),
+    })
+    .optional(),
+  cacheMode: z.enum(['easycache', 'dbcache', 'taylorseer', 'cache-dit']).optional(),
+  /** Used when the caller sends none (LingBot's is a JSON caption). */
+  negativePrompt: z.string().optional(),
+  /** WebM encoder quality, 0-100. */
+  outputCompression: z.number().int().min(0).max(100).optional(),
+});
+export type SdCppVideoRender = z.infer<typeof SdCppVideoRenderSchema>;
 
 /**
  * How the engine assembles the diffusers pipeline for a model. Lets the
@@ -2041,6 +2147,8 @@ export const VideoModelSourceSchema = z.object({
         sizeBytes: z.number().int().positive(),
         /** Present on a safetensors file. See {@link WeightTensorsSchema}. */
         tensors: WeightTensorsSchema.optional(),
+        /** The sd-server slot this file fills; required on every file of an `sd-cpp` entry. */
+        role: VideoModelComponentRoleSchema.optional(),
         /**
          * Override the source-level `huggingfaceRepo`/`revision` for this
          * one file. Lets a single install assemble files from more than one
@@ -2069,11 +2177,33 @@ const FrameRangeSchema = z.object({
   max: z.number().int().positive(),
 });
 
+const VideoModelEngineShape = {
+  /** Which engine renders it; see {@link VideoEngineSchema}. */
+  engine: VideoEngineSchema.default('diffusers'),
+  /** The network it is built on; see {@link VideoArchitectureSchema}. */
+  architecture: VideoArchitectureSchema.optional(),
+  /** `sd-cpp` only: render settings beyond the shared ones. */
+  sdCpp: SdCppVideoRenderSchema.optional(),
+  /** `sd-cpp` only: how the prompt is written for the model. Absent → `text`. */
+  promptFormat: VideoPromptFormatSchema.optional(),
+};
+
+const VideoModelImageInputShape = {
+  /** Whether this model accepts an input image for image-to-video. */
+  supportsImageToVideo: z.boolean().default(false),
+  /**
+   * The model only animates a picture: given none, it has nothing to start
+   * from. Implies `supportsImageToVideo`.
+   */
+  imageToVideoOnly: z.boolean().optional(),
+};
+
 export const VideoModelIdentitySchema = IdentityCommonSchema.extend({
   kind: z.literal('video-model'),
   /** Pipeline family the engine builds for this model. */
   family: VideoModelFamilySchema,
-  /** How the engine assembles the pipeline (tree vs single-file, class, etc.). */
+  ...VideoModelEngineShape,
+  /** `diffusers` only: how the engine assembles the pipeline (tree vs single-file, class, etc.). */
   load: VideoModelLoadSchema.optional(),
   /** Recommended sampler steps; the generate endpoint falls back to this. */
   recommendedSteps: z.number().int().positive().default(40),
@@ -2103,8 +2233,7 @@ export const VideoModelIdentitySchema = IdentityCommonSchema.extend({
    */
   defaultWidth: z.number().int().positive().optional(),
   defaultHeight: z.number().int().positive().optional(),
-  /** Whether this model accepts an input image for image-to-video. */
-  supportsImageToVideo: z.boolean().default(false),
+  ...VideoModelImageInputShape,
   upstream: z.string().url().optional(),
   /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
   hardwareTier: ImageModelHardwareTierSchema.optional(),
@@ -2144,7 +2273,8 @@ export const VideoModelManifestSchema = z.object({
   version: z.string(),
   releasedAt: z.string(),
   family: VideoModelFamilySchema,
-  /** How the engine assembles the pipeline (tree vs single-file, class, etc.). */
+  ...VideoModelEngineShape,
+  /** `diffusers` only: how the engine assembles the pipeline (tree vs single-file, class, etc.). */
   load: VideoModelLoadSchema.optional(),
   source: VideoModelSourceSchema,
   approxSizeBytes: z.number().int().positive(),
@@ -2160,7 +2290,7 @@ export const VideoModelManifestSchema = z.object({
   heightRange: FrameRangeSchema.optional(),
   defaultWidth: z.number().int().positive().optional(),
   defaultHeight: z.number().int().positive().optional(),
-  supportsImageToVideo: z.boolean().default(false),
+  ...VideoModelImageInputShape,
   upstream: z.string().url().optional(),
   /** @deprecated See {@link ImageModelIdentitySchema} `hardwareTier`. */
   hardwareTier: ImageModelHardwareTierSchema.optional(),

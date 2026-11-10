@@ -1,0 +1,2654 @@
+{
+  "clips": [
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 512,
+        "height": 512,
+        "numFrames": 17
+      },
+      "measuredPeakBytes": 9088802184,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3433116000,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 235017338,
+        "decode": 566472212
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 640,
+        "height": 512,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 8884968840,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3433116000,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 507804385,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 9299615040,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3433116000,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q8",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 640,
+        "height": 512,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 14395468672,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 5400179040,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 6043068256,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 11463305462,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 507804385,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q8",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 13827255168,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 5400179040,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 6043068256,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 11463305462,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.1-t2v-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 480,
+        "height": 480,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 11877786624,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2838303560,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 99840,
+              "F16": 1418896960
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 6043068256,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22642902,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11315539
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.1-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false,
+            "tileSizePx": 128
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 6,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "engineParamsBytes": 8899851715,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 916717568,
+        "decode": 1019362673
+      }
+    },
+    {
+      "model": "wan2.1-t2v-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 832,
+        "height": 480,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 11752792656,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2838303560,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 99840,
+              "F16": 1418896960
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 6043068256,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22642902,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11315539
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.1-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false,
+            "tileSizePx": 128
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 6,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "engineParamsBytes": 8899851715,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1576680817,
+        "decode": 1019362673
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 10514816752,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3433116000,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "animatesPicture": true,
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "ltx-2.3-22b-distilled-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 512,
+        "height": 512,
+        "numFrames": 49
+      },
+      "measuredPeakBytes": 38987346504,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 14194441248,
+          "format": "gguf"
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 7300778336,
+          "format": "gguf"
+        },
+        {
+          "component": "embeddings_connectors",
+          "sizeBytes": 2312144712,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 1156061184
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1452256522,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 726106225
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "audio_vae",
+          "sizeBytes": 364853140,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 182333434
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "ltx2",
+        "architecture": "ltx-2",
+        "sdCpp": {
+          "sampler": "euler",
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": true
+          },
+          "negativePrompt": "worst quality, inconsistent motion, blurry, jittery, distorted, static"
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 768,
+        "defaultHeight": 512,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 26463698944,
+      "enginePhases": {
+        "encode": 2313179628,
+        "sample": 9716210074,
+        "decode": 396005212
+      }
+    },
+    {
+      "model": "lingbot-video-dense-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 480,
+        "height": 480,
+        "numFrames": 17
+      },
+      "measuredPeakBytes": 10239335240,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2791967328,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 38793728,
+              "BF16": 1318377536
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 4280406144,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "lingbot",
+        "architecture": "lingbot-video-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "{\"universal_negative\":{\"visual_quality\":[\"low quality\",\"worst quality\",\"blurry\",\"pixelated\",\"jpeg artifacts\",\"low resolution\",\"unstable color\",\"color flicker\",\"underexposed\",\"overexposed\",\"invisible subject\",\"subject hidden in darkness\"],\"artistic_style\":[\"painting\",\"illustration\",\"drawing\",\"cartoon\",\"3d render\",\"cgi\",\"sketch\",\"digital art\"],\"composition_and_content\":[\"text\",\"watermark\",\"signature\",\"logo\",\"subtitles\",\"pillarboxed\",\"side bars\",\"portrait image in landscape frame\"],\"temporal_and_motion_stability\":[\"flickering\",\"jittery\",\"motion blur\",\"temporal inconsistency\",\"warping\",\"morphing\",\"incoherent motion\",\"unnatural movement\",\"static object with sudden jump\",\"frame-to-frame inconsistency\"],\"material_and_structure\":[\"plastic-like glass\",\"unrealistic texture\",\"deformed bottle\",\"liquid freezing improperly\",\"distorted reflections\"]}}"
+        },
+        "guidanceScale": 3,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "engineParamsBytes": 7320350228,
+      "enginePhases": {
+        "encode": 45592084,
+        "sample": 1485014302,
+        "decode": 2286346568
+      }
+    },
+    {
+      "model": "lingbot-video-dense-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 480,
+        "height": 480,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 10583235712,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2791967328,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 38793728,
+              "BF16": 1318377536
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 4280406144,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "lingbot",
+        "architecture": "lingbot-video-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "{\"universal_negative\":{\"visual_quality\":[\"low quality\",\"worst quality\",\"blurry\",\"pixelated\",\"jpeg artifacts\",\"low resolution\",\"unstable color\",\"color flicker\",\"underexposed\",\"overexposed\",\"invisible subject\",\"subject hidden in darkness\"],\"artistic_style\":[\"painting\",\"illustration\",\"drawing\",\"cartoon\",\"3d render\",\"cgi\",\"sketch\",\"digital art\"],\"composition_and_content\":[\"text\",\"watermark\",\"signature\",\"logo\",\"subtitles\",\"pillarboxed\",\"side bars\",\"portrait image in landscape frame\"],\"temporal_and_motion_stability\":[\"flickering\",\"jittery\",\"motion blur\",\"temporal inconsistency\",\"warping\",\"morphing\",\"incoherent motion\",\"unnatural movement\",\"static object with sudden jump\",\"frame-to-frame inconsistency\"],\"material_and_structure\":[\"plastic-like glass\",\"unrealistic texture\",\"deformed bottle\",\"liquid freezing improperly\",\"distorted reflections\"]}}"
+        },
+        "guidanceScale": 3,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "engineParamsBytes": 7320350228,
+      "enginePhases": {
+        "encode": 45592084,
+        "sample": 2613376451,
+        "decode": 2306007368
+      }
+    },
+    {
+      "model": "wan2.1-t2v-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 480,
+        "height": 480,
+        "numFrames": 81
+      },
+      "measuredPeakBytes": 19081077040,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2838303560,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 99840,
+              "F16": 1418896960
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 6043068256,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22642902,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11315539
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.1-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 6,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "engineParamsBytes": 8899851715,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 2116645028,
+        "decode": 9514055107
+      }
+    },
+    {
+      "model": "wan2.1-t2v-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 480,
+        "height": 480,
+        "numFrames": 81
+      },
+      "measuredPeakBytes": 12908242448,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2838303560,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 99840,
+              "F16": 1418896960
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 6043068256,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22642902,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11315539
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.1-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false,
+            "tileSizePx": 128
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 6,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "engineParamsBytes": 8899851715,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 2116645028,
+        "decode": 2378516398
+      }
+    },
+    {
+      "model": "wan2.1-t2v-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 832,
+        "height": 480,
+        "numFrames": 81
+      },
+      "measuredPeakBytes": 14518642888,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2838303560,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 99840,
+              "F16": 1418896960
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 6043068256,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22642902,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11315539
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.1-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false,
+            "tileSizePx": 128
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 6,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "engineParamsBytes": 8899851715,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 3656541798,
+        "decode": 2378516398
+      }
+    },
+    {
+      "model": "lingbot-video-dense-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 832,
+        "height": 480,
+        "numFrames": 81
+      },
+      "measuredPeakBytes": 20062871472,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2791967328,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 38793728,
+              "BF16": 1318377536
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 4280406144,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "lingbot",
+        "architecture": "lingbot-video-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "{\"universal_negative\":{\"visual_quality\":[\"low quality\",\"worst quality\",\"blurry\",\"pixelated\",\"jpeg artifacts\",\"low resolution\",\"unstable color\",\"color flicker\",\"underexposed\",\"overexposed\",\"invisible subject\",\"subject hidden in darkness\"],\"artistic_style\":[\"painting\",\"illustration\",\"drawing\",\"cartoon\",\"3d render\",\"cgi\",\"sketch\",\"digital art\"],\"composition_and_content\":[\"text\",\"watermark\",\"signature\",\"logo\",\"subtitles\",\"pillarboxed\",\"side bars\",\"portrait image in landscape frame\"],\"temporal_and_motion_stability\":[\"flickering\",\"jittery\",\"motion blur\",\"temporal inconsistency\",\"warping\",\"morphing\",\"incoherent motion\",\"unnatural movement\",\"static object with sudden jump\",\"frame-to-frame inconsistency\"],\"material_and_structure\":[\"plastic-like glass\",\"unrealistic texture\",\"deformed bottle\",\"liquid freezing improperly\",\"distorted reflections\"]}}"
+        },
+        "guidanceScale": 3,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "engineParamsBytes": 7320350228,
+      "enginePhases": {
+        "encode": 45592084,
+        "sample": 10184378286,
+        "decode": 2355552584
+      }
+    },
+    {
+      "model": "ltx-2.3-22b-distilled-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 768,
+        "height": 512,
+        "numFrames": 121
+      },
+      "measuredPeakBytes": 58545940672,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 14194441248,
+          "format": "gguf"
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 7300778336,
+          "format": "gguf"
+        },
+        {
+          "component": "embeddings_connectors",
+          "sizeBytes": 2312144712,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 1156061184
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1452256522,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 726106225
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "audio_vae",
+          "sizeBytes": 364853140,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 182333434
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "ltx2",
+        "architecture": "ltx-2",
+        "sdCpp": {
+          "sampler": "euler",
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": true
+          },
+          "negativePrompt": "worst quality, inconsistent motion, blurry, jittery, distorted, static"
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 768,
+        "defaultHeight": 512,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 26463698944,
+      "enginePhases": {
+        "encode": 2313179628,
+        "sample": 31067104871,
+        "decode": 396005212
+      }
+    },
+    {
+      "model": "lingbot-video-dense-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 832,
+        "height": 480,
+        "numFrames": 17
+      },
+      "measuredPeakBytes": 10472004544,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2791967328,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 38793728,
+              "BF16": 1318377536
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 4280406144,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "lingbot",
+        "architecture": "lingbot-video-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "{\"universal_negative\":{\"visual_quality\":[\"low quality\",\"worst quality\",\"blurry\",\"pixelated\",\"jpeg artifacts\",\"low resolution\",\"unstable color\",\"color flicker\",\"underexposed\",\"overexposed\",\"invisible subject\",\"subject hidden in darkness\"],\"artistic_style\":[\"painting\",\"illustration\",\"drawing\",\"cartoon\",\"3d render\",\"cgi\",\"sketch\",\"digital art\"],\"composition_and_content\":[\"text\",\"watermark\",\"signature\",\"logo\",\"subtitles\",\"pillarboxed\",\"side bars\",\"portrait image in landscape frame\"],\"temporal_and_motion_stability\":[\"flickering\",\"jittery\",\"motion blur\",\"temporal inconsistency\",\"warping\",\"morphing\",\"incoherent motion\",\"unnatural movement\",\"static object with sudden jump\",\"frame-to-frame inconsistency\"],\"material_and_structure\":[\"plastic-like glass\",\"unrealistic texture\",\"deformed bottle\",\"liquid freezing improperly\",\"distorted reflections\"]}}"
+        },
+        "guidanceScale": 3,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "animatesPicture": true,
+      "engineParamsBytes": 7320350228,
+      "enginePhases": {
+        "encode": 45592084,
+        "sample": 2519214326,
+        "decode": 2286346568
+      }
+    },
+    {
+      "model": "ltx-2.3-22b-distilled-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 768,
+        "height": 512,
+        "numFrames": 25
+      },
+      "measuredPeakBytes": 39693857208,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 14194441248,
+          "format": "gguf"
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 7300778336,
+          "format": "gguf"
+        },
+        {
+          "component": "embeddings_connectors",
+          "sizeBytes": 2312144712,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 1156061184
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1452256522,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 726106225
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "audio_vae",
+          "sizeBytes": 364853140,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 182333434
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "ltx2",
+        "architecture": "ltx-2",
+        "sdCpp": {
+          "sampler": "euler",
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": true
+          },
+          "negativePrompt": "worst quality, inconsistent motion, blurry, jittery, distorted, static"
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 768,
+        "defaultHeight": 512,
+        "defaultNumFrames": 121
+      },
+      "animatesPicture": true,
+      "engineParamsBytes": 26463698944,
+      "enginePhases": {
+        "encode": 2313179628,
+        "sample": 9119129928,
+        "decode": 322604892
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q8",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 121
+      },
+      "measuredPeakBytes": 18476150880,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 5400179040,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 6043068256,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 11463305462,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 4332695060,
+        "decode": 3512152883
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 121
+      },
+      "measuredPeakBytes": 14206804032,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3433116000,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 4332695060,
+        "decode": 3512152883
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-turbo-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 9727549144,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3437927136,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          }
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-turbo-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 10369114272,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3437927136,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          }
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-turbo-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 9795739832,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3437927136,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          }
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 9749323528,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3433116000,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 9356091144,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3433116000,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-turbo-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 11531968312,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3437927136,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          }
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "animatesPicture": true,
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-turbo-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 121
+      },
+      "measuredPeakBytes": 13620797984,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3437927136,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          }
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 4332695060,
+        "decode": 3512152883
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-turbo-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 9786924760,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3437927136,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          }
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 10213940256,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3433116000,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+        },
+        "guidanceScale": 5,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 121
+      },
+      "measuredPeakBytes": 13766894256,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3437927136,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          }
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "animatesPicture": true,
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 4332695060,
+        "decode": 3512152883
+      }
+    },
+    {
+      "model": "lingbot-video-dense-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 480,
+        "height": 480,
+        "numFrames": 17
+      },
+      "measuredPeakBytes": 14169105912,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2791967328,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 38793728,
+              "BF16": 1318377536
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 8875719384,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 4437815808
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "lingbot",
+        "architecture": "lingbot-video-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "{\"universal_negative\":{\"visual_quality\":[\"low quality\",\"worst quality\",\"blurry\",\"pixelated\",\"jpeg artifacts\",\"low resolution\",\"unstable color\",\"color flicker\",\"underexposed\",\"overexposed\",\"invisible subject\",\"subject hidden in darkness\"],\"artistic_style\":[\"painting\",\"illustration\",\"drawing\",\"cartoon\",\"3d render\",\"cgi\",\"sketch\",\"digital art\"],\"composition_and_content\":[\"text\",\"watermark\",\"signature\",\"logo\",\"subtitles\",\"pillarboxed\",\"side bars\",\"portrait image in landscape frame\"],\"temporal_and_motion_stability\":[\"flickering\",\"jittery\",\"motion blur\",\"temporal inconsistency\",\"warping\",\"morphing\",\"incoherent motion\",\"unnatural movement\",\"static object with sudden jump\",\"frame-to-frame inconsistency\"],\"material_and_structure\":[\"plastic-like glass\",\"unrealistic texture\",\"deformed bottle\",\"liquid freezing improperly\",\"distorted reflections\"]}}"
+        },
+        "guidanceScale": 3,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "engineParamsBytes": 11922665636,
+      "enginePhases": {
+        "encode": 45592084,
+        "sample": 1485014302,
+        "decode": 2286346568
+      }
+    },
+    {
+      "model": "lingbot-video-dense-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 480,
+        "height": 480,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 14767482624,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2791967328,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 38793728,
+              "BF16": 1318377536
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 8875719384,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 4437815808
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "lingbot",
+        "architecture": "lingbot-video-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "{\"universal_negative\":{\"visual_quality\":[\"low quality\",\"worst quality\",\"blurry\",\"pixelated\",\"jpeg artifacts\",\"low resolution\",\"unstable color\",\"color flicker\",\"underexposed\",\"overexposed\",\"invisible subject\",\"subject hidden in darkness\"],\"artistic_style\":[\"painting\",\"illustration\",\"drawing\",\"cartoon\",\"3d render\",\"cgi\",\"sketch\",\"digital art\"],\"composition_and_content\":[\"text\",\"watermark\",\"signature\",\"logo\",\"subtitles\",\"pillarboxed\",\"side bars\",\"portrait image in landscape frame\"],\"temporal_and_motion_stability\":[\"flickering\",\"jittery\",\"motion blur\",\"temporal inconsistency\",\"warping\",\"morphing\",\"incoherent motion\",\"unnatural movement\",\"static object with sudden jump\",\"frame-to-frame inconsistency\"],\"material_and_structure\":[\"plastic-like glass\",\"unrealistic texture\",\"deformed bottle\",\"liquid freezing improperly\",\"distorted reflections\"]}}"
+        },
+        "guidanceScale": 3,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "engineParamsBytes": 11922665636,
+      "enginePhases": {
+        "encode": 45592084,
+        "sample": 2613376451,
+        "decode": 2306007368
+      }
+    },
+    {
+      "model": "lingbot-video-dense-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 832,
+        "height": 480,
+        "numFrames": 17
+      },
+      "measuredPeakBytes": 16202918088,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2791967328,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 38793728,
+              "BF16": 1318377536
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 8875719384,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 4437815808
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "lingbot",
+        "architecture": "lingbot-video-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "{\"universal_negative\":{\"visual_quality\":[\"low quality\",\"worst quality\",\"blurry\",\"pixelated\",\"jpeg artifacts\",\"low resolution\",\"unstable color\",\"color flicker\",\"underexposed\",\"overexposed\",\"invisible subject\",\"subject hidden in darkness\"],\"artistic_style\":[\"painting\",\"illustration\",\"drawing\",\"cartoon\",\"3d render\",\"cgi\",\"sketch\",\"digital art\"],\"composition_and_content\":[\"text\",\"watermark\",\"signature\",\"logo\",\"subtitles\",\"pillarboxed\",\"side bars\",\"portrait image in landscape frame\"],\"temporal_and_motion_stability\":[\"flickering\",\"jittery\",\"motion blur\",\"temporal inconsistency\",\"warping\",\"morphing\",\"incoherent motion\",\"unnatural movement\",\"static object with sudden jump\",\"frame-to-frame inconsistency\"],\"material_and_structure\":[\"plastic-like glass\",\"unrealistic texture\",\"deformed bottle\",\"liquid freezing improperly\",\"distorted reflections\"]}}"
+        },
+        "guidanceScale": 3,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "animatesPicture": true,
+      "engineParamsBytes": 11922665636,
+      "enginePhases": {
+        "encode": 236946719,
+        "sample": 2653253795,
+        "decode": 2286346568
+      }
+    },
+    {
+      "model": "lingbot-video-dense-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 832,
+        "height": 480,
+        "numFrames": 81
+      },
+      "measuredPeakBytes": 23130271024,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2791967328,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 38793728,
+              "BF16": 1318377536
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 8875719384,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 4437815808
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "lingbot",
+        "architecture": "lingbot-video-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "{\"universal_negative\":{\"visual_quality\":[\"low quality\",\"worst quality\",\"blurry\",\"pixelated\",\"jpeg artifacts\",\"low resolution\",\"unstable color\",\"color flicker\",\"underexposed\",\"overexposed\",\"invisible subject\",\"subject hidden in darkness\"],\"artistic_style\":[\"painting\",\"illustration\",\"drawing\",\"cartoon\",\"3d render\",\"cgi\",\"sketch\",\"digital art\"],\"composition_and_content\":[\"text\",\"watermark\",\"signature\",\"logo\",\"subtitles\",\"pillarboxed\",\"side bars\",\"portrait image in landscape frame\"],\"temporal_and_motion_stability\":[\"flickering\",\"jittery\",\"motion blur\",\"temporal inconsistency\",\"warping\",\"morphing\",\"incoherent motion\",\"unnatural movement\",\"static object with sudden jump\",\"frame-to-frame inconsistency\"],\"material_and_structure\":[\"plastic-like glass\",\"unrealistic texture\",\"deformed bottle\",\"liquid freezing improperly\",\"distorted reflections\"]}}"
+        },
+        "guidanceScale": 3,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "animatesPicture": true,
+      "engineParamsBytes": 11922665636,
+      "enginePhases": {
+        "encode": 236946719,
+        "sample": 10313227305,
+        "decode": 2355552584
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 9991167848,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3437927136,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          }
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "animatesPicture": true,
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "wan2.2-ti2v-5b-q4",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 1280,
+        "height": 704,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 10252050136,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 3437927136,
+          "format": "gguf"
+        },
+        {
+          "component": "t5xxl",
+          "sizeBytes": 3655145312,
+          "format": "gguf"
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 1409400960,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 704688668
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "tae",
+          "sizeBytes": 22848048,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F16": 11418108
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "wan",
+        "architecture": "wan2.2-ti2v-5b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 5,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          }
+        },
+        "guidanceScale": 1,
+        "defaultWidth": 1280,
+        "defaultHeight": 704,
+        "defaultNumFrames": 121
+      },
+      "engineParamsBytes": 7108328161,
+      "enginePhases": {
+        "encode": 378535936,
+        "sample": 1269794079,
+        "decode": 1019656274
+      }
+    },
+    {
+      "model": "lingbot-video-dense-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 832,
+        "height": 480,
+        "numFrames": 33
+      },
+      "measuredPeakBytes": 16839862640,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2791967328,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 38793728,
+              "BF16": 1318377536
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 8875719384,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 4437815808
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "lingbot",
+        "architecture": "lingbot-video-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "{\"universal_negative\":{\"visual_quality\":[\"low quality\",\"worst quality\",\"blurry\",\"pixelated\",\"jpeg artifacts\",\"low resolution\",\"unstable color\",\"color flicker\",\"underexposed\",\"overexposed\",\"invisible subject\",\"subject hidden in darkness\"],\"artistic_style\":[\"painting\",\"illustration\",\"drawing\",\"cartoon\",\"3d render\",\"cgi\",\"sketch\",\"digital art\"],\"composition_and_content\":[\"text\",\"watermark\",\"signature\",\"logo\",\"subtitles\",\"pillarboxed\",\"side bars\",\"portrait image in landscape frame\"],\"temporal_and_motion_stability\":[\"flickering\",\"jittery\",\"motion blur\",\"temporal inconsistency\",\"warping\",\"morphing\",\"incoherent motion\",\"unnatural movement\",\"static object with sudden jump\",\"frame-to-frame inconsistency\"],\"material_and_structure\":[\"plastic-like glass\",\"unrealistic texture\",\"deformed bottle\",\"liquid freezing improperly\",\"distorted reflections\"]}}"
+        },
+        "guidanceScale": 3,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "animatesPicture": true,
+      "engineParamsBytes": 11922665636,
+      "enginePhases": {
+        "encode": 236946719,
+        "sample": 4538467615,
+        "decode": 2306007368
+      }
+    },
+    {
+      "model": "lingbot-video-dense-1.3b",
+      "backend": "metal",
+      "pool": "unified",
+      "size": {
+        "width": 832,
+        "height": 480,
+        "numFrames": 49
+      },
+      "measuredPeakBytes": 18664368856,
+      "files": [
+        {
+          "component": "diffusion_model",
+          "sizeBytes": 2791967328,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "F32": 38793728,
+              "BF16": 1318377536
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "llm",
+          "sizeBytes": 8875719384,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 4437815808
+            },
+            "otherBytes": 0
+          }
+        },
+        {
+          "component": "vae",
+          "sizeBytes": 253815318,
+          "format": "safetensors",
+          "tensors": {
+            "floatElements": {
+              "BF16": 126892531
+            },
+            "otherBytes": 0
+          }
+        }
+      ],
+      "priced": {
+        "family": "lingbot",
+        "architecture": "lingbot-video-1.3b",
+        "sdCpp": {
+          "sampler": "euler",
+          "flowShift": 3,
+          "vaeTiling": {
+            "spatial": true,
+            "temporal": false
+          },
+          "negativePrompt": "{\"universal_negative\":{\"visual_quality\":[\"low quality\",\"worst quality\",\"blurry\",\"pixelated\",\"jpeg artifacts\",\"low resolution\",\"unstable color\",\"color flicker\",\"underexposed\",\"overexposed\",\"invisible subject\",\"subject hidden in darkness\"],\"artistic_style\":[\"painting\",\"illustration\",\"drawing\",\"cartoon\",\"3d render\",\"cgi\",\"sketch\",\"digital art\"],\"composition_and_content\":[\"text\",\"watermark\",\"signature\",\"logo\",\"subtitles\",\"pillarboxed\",\"side bars\",\"portrait image in landscape frame\"],\"temporal_and_motion_stability\":[\"flickering\",\"jittery\",\"motion blur\",\"temporal inconsistency\",\"warping\",\"morphing\",\"incoherent motion\",\"unnatural movement\",\"static object with sudden jump\",\"frame-to-frame inconsistency\"],\"material_and_structure\":[\"plastic-like glass\",\"unrealistic texture\",\"deformed bottle\",\"liquid freezing improperly\",\"distorted reflections\"]}}"
+        },
+        "guidanceScale": 3,
+        "defaultWidth": 832,
+        "defaultHeight": 480,
+        "defaultNumFrames": 81
+      },
+      "animatesPicture": true,
+      "engineParamsBytes": 11922665636,
+      "enginePhases": {
+        "encode": 236946719,
+        "sample": 6466568192,
+        "decode": 2306793800
+      }
+    }
+  ]
+}

@@ -19,7 +19,7 @@ import {
   resolveImageSize,
 } from '@bendyline/gezel';
 import { readImageMeta } from '@bendyline/gezel-inference/internal/utils/image-meta';
-import { type Context, Hono } from 'hono';
+import { Hono } from 'hono';
 
 import { capAgentImageSize } from '../../providers/image/agent-size.js';
 import { NoLocalImageModelError } from '../../providers/image/factory.js';
@@ -31,13 +31,7 @@ import {
   ImageSourceRequiredError,
 } from '../../providers/image/types.js';
 import { parseRemoteModelId } from '../../providers/remote/model-id.js';
-import {
-  CAMERA_PIXELS_CLOUD_ENGINE,
-  CAMERA_PIXELS_PAIRED_ENGINE,
-  CAMERA_PIXELS_WITHHELD,
-  callerMaySeeFilePixels,
-  cameraKeepsFileLocal,
-} from '../caller-location.js';
+import { cameraInputWithheld } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 import { imageModelEditFacts, imageModelRoutes, providerKind } from './image-models.js';
 
@@ -123,6 +117,7 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         projectId,
         req.inputImages,
         imageEnginePlacement(provider),
+        'image',
       );
       if (withheld) return c.json({ error: withheld }, 403);
       try {
@@ -510,13 +505,6 @@ function buildPrompt(
 }
 
 /**
- * Why a camera keyframe among `inputs` may not be used here, or null. A
- * cloud engine receives the keyframe itself, whoever is asking, and the
- * edited image goes back to the caller, so both the engine and the caller
- * must be allowed to see the camera's pictures. Base64 inputs carry no path,
- * so only the routes that hand out a keyframe's bytes guard them.
- */
-/**
  * Where an engine renders, for a camera's pictures. A paired server's provider
  * names itself local, but it renders on another computer with whatever engine
  * that server has picked, a cloud one included, and it can change that at any
@@ -526,27 +514,6 @@ function buildPrompt(
 function imageEnginePlacement(provider: ImageProvider): 'this-computer' | 'paired' | 'cloud' {
   if (provider instanceof RemoteImageProvider && !provider.onThisComputer) return 'paired';
   return providerKind(provider.name) === 'cloud' ? 'cloud' : 'this-computer';
-}
-
-async function cameraInputWithheld(
-  ctx: ServiceContext,
-  c: Context,
-  projectId: string,
-  inputs: ImageInputSource[],
-  engine: 'this-computer' | 'paired' | 'cloud',
-): Promise<string | null> {
-  const project = await ctx.store.getProject(projectId).catch(() => null);
-  if (!project) return null;
-  for (const entry of inputs) {
-    if (!('artifactPath' in entry)) continue;
-    const stripped = entry.artifactPath.replace(/^artifacts\//, '');
-    const file = await ctx.store.resolveProjectArtifactReadPath(projectId, stripped);
-    if (!file || !(await cameraKeepsFileLocal(ctx, project, file))) continue;
-    if (engine === 'cloud') return CAMERA_PIXELS_CLOUD_ENGINE;
-    if (engine === 'paired') return CAMERA_PIXELS_PAIRED_ENGINE;
-    if (!(await callerMaySeeFilePixels(ctx, c, project, file))) return CAMERA_PIXELS_WITHHELD;
-  }
-  return null;
 }
 
 async function resolveInputImages(
