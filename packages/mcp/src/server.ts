@@ -214,6 +214,7 @@ import {
   craftbookRequiredInputs,
   craftbookSuggestionGuidance,
   normalizeCraftbookInvocationParams,
+  requestedTaskTitle,
   suggestedCraftbookInvocation,
 } from './craftbook-routing.js';
 import { resolveCraftbookVersionArg } from './craftbook-version-arg.js';
@@ -5032,6 +5033,8 @@ const invokeCraftbookRootTurnCache = new RootTurnInvocationCache<CraftbookLaunch
 async function currentRootTurnContext(): Promise<{
   rootTurnId: string;
   userText?: string;
+  /** What the person asked for in this turn, as a task title. */
+  requestTitle?: string;
 } | null> {
   if (!sessionId) return null;
   try {
@@ -5047,9 +5050,11 @@ async function currentRootTurnContext(): Promise<{
       return null;
     }
     const latestUser = [...session.messages].reverse().find((message) => message.role === 'user');
+    const requestTitle = requestedTaskTitle(undefined, session.messages);
     return {
       rootTurnId,
       ...(latestUser?.content.trim() ? { userText: latestUser.content.trim() } : {}),
+      ...(requestTitle ? { requestTitle } : {}),
     };
   } catch (err) {
     // Fail open: inability to read the transcript must not block a legitimate
@@ -5426,7 +5431,10 @@ server.tool(
       .describe(
         'Existing project id or name. Defaults to the current project; this tool does not create a new project. Use start_project when the user requests a new project.',
       ),
-    title: z.string().optional().describe('Optional task title. Defaults to the craftbook name.'),
+    title: z
+      .string()
+      .optional()
+      .describe("Optional task title. Defaults to the person's request, else the craftbook name."),
     description: z
       .string()
       .optional()
@@ -5490,12 +5498,17 @@ async function runInvokeCraftbook({
       ...(tonight ? { tonight: true } : {}),
     };
     const rootTurnId = rootTurn?.rootTurnId ?? null;
-    const launchInvocation = rootTurnId
-      ? {
-          ...invocation,
-          craftbookInvocationKey: rootTurnInvocationKey(rootTurnId, invocation),
-        }
-      : invocation;
+    // The dedupe key is made from what the model sent. The title the task
+    // carries is the person's request when the model gave none; the plan's
+    // name is the last resort.
+    const taskTitle = title?.trim() || rootTurn?.requestTitle;
+    const launchInvocation = {
+      ...invocation,
+      ...(taskTitle ? { title: taskTitle } : {}),
+      ...(rootTurnId
+        ? { craftbookInvocationKey: rootTurnInvocationKey(rootTurnId, invocation) }
+        : {}),
+    };
     const launched = rootTurnId
       ? await invokeCraftbookRootTurnCache.run({
           rootTurnId,

@@ -66,7 +66,7 @@ export function counterTiles(signals: GrowthSignals): CounterTile[] {
     {
       label: 'Consults',
       value: signals.consultXp,
-      hint: 'Delivered gezel-to-gezel consultations (daily-capped).',
+      hint: 'Consultations delivered to others on the crew (daily-capped).',
     },
   ];
 }

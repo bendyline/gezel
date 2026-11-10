@@ -35,7 +35,7 @@ This is a `pages` block inside a project type's **version** manifest:
 
 The entry is relative to `pages/`. Reads are project-relative; `workspace` and `artifacts` are different trees. An exact-file grant does not grant the surrounding directory. A folder explorer can deliberately grant `{"source":"workspace","path":".","subtree":true}` for the whole selected project folder. The host checks the grants and path containment. It binds the project; a page never supplies its own project id to escape that boundary.
 
-Every `pages.tools` name must also be declared in the type's `tools` array. Those names are page-only: they are removed from the model's tool roster. If both the page and a gezel need an action, declare two tool names sharing the same script and bound operation. A declared action still needs the script's capabilities and the user's project policy to permit it.
+Every `pages.tools` name must also be declared in the type's `tools` array. Those names are page-only: they are removed from the model's tool roster. If both the page and the model need an action, declare two tool names sharing the same script and bound operation. A declared action still needs the script's capabilities and the user's project policy to permit it.
 
 ## Choose the smallest API that does the job
 
@@ -161,7 +161,7 @@ visitors, and standalone demos show an explicit unavailable message; demos
 never call a model. The parent owns the native chat and composer, including
 their theme, accessibility, sessions, and ordinary permission prompts. Page
 scripts receive no transcript, input text, credentials, or programmatic send
-method. Options change presentation, not the gezel's tool authority.
+method. Options change presentation, not the recipient's tool authority.
 
 The slot follows layout, scrolling, and hidden containers. Keep it rectangular
 and untransformed; the host clips it to the page viewport. Page CSS cannot

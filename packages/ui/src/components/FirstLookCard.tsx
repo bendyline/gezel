@@ -56,7 +56,7 @@ export function firstNightEstimate(overview: ProjectIndexOverview): string | nul
   const photos = (overview.byModality.image ?? 0) - overview.cloudOnly;
   const hours = (photos * SECONDS_PER_PHOTO) / 3600;
   if (hours < 1) return null;
-  return `Describing ${n(photos)} photos takes about ${Math.round(hours)} hours on this computer. Your crew picks up where it left off each night.`;
+  return `Describing ${n(photos)} photos takes about ${Math.round(hours)} hours on this computer. Gezel picks up where it left off each night.`;
 }
 
 /**
@@ -137,7 +137,7 @@ export function FirstLookCard({
       )}
       {overnight && kind && (
         <>
-          <div className="first-look-eyebrow">Tonight your crew will</div>
+          <div className="first-look-eyebrow">Tonight Gezel will</div>
           <ul className="first-look-night">
             {describeFolderNightWork(kind).map((line) => (
               <li key={line}>{line}</li>

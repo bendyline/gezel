@@ -96,7 +96,7 @@ export function issueVerdictActorLabel(
       return parsed.success ? HARNESS_CLIENT_LABELS[parsed.data] : by.client;
     }
     case 'gezel':
-      return gezelName?.(by.gezelId) ?? 'A gezel';
+      return gezelName?.(by.gezelId) ?? 'Gezel';
     case 'import':
       return by.declaredApp ? `Imported (${by.declaredApp})` : 'Imported';
     case 'system':

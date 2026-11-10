@@ -61,13 +61,13 @@ const SECURITY_SWITCHES: ReadonlyArray<{
     key: 'allowPackageScriptExecution',
     label: 'Run package scripts',
     description:
-      'Show or set on/off for gezels running package scripts and installed package binaries (outside the sandbox, with network access)',
+      'Show or set on/off for Gezel running package scripts and installed package binaries (outside the sandbox, with network access)',
   },
   {
     command: 'edit-package-scripts',
     key: 'allowPackageScriptEdits',
     label: 'Edit package scripts',
-    description: 'Show or set on/off for gezels adding or changing the scripts in package.json',
+    description: 'Show or set on/off for Gezel adding or changing the scripts in package.json',
   },
 ];
 
@@ -204,7 +204,7 @@ export function registerGrowthCommand(
 ): void {
   program
     .command('growth [state]')
-    .description('Show or set on/off for gezel growth: XP and the level-ups it offers')
+    .description('Show or set on/off for crew growth: XP and the level-ups it offers')
     .option('--json', 'Output the setting as JSON')
     .action(async (state: string | undefined, options: { json?: boolean }) => {
       const enabled = enabledValue(state);

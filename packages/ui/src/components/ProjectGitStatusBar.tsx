@@ -67,7 +67,7 @@ interface Props {
 
 const STATUS_TOOLTIP =
   'Active — the Meester nudges the crew lead, phase handoffs auto-start, and scheduled tasks tick. ' +
-  'Read-only or Inactive — ambient gezel work pauses. Chat still works.';
+  'Read-only or Inactive — background work pauses. Chat still works.';
 
 const WRITES_TOOLTIP =
   "Whether Gezel-managed tools and background work may create, edit, and delete files in this project's workspace. " +

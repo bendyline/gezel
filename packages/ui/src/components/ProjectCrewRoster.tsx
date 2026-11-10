@@ -107,7 +107,7 @@ export function ProjectCrewRoster({
             className="primary project-crew-add"
             onClick={() => setShowAddGezel(true)}
           >
-            Add Gezel
+            Add crew member
           </button>
         )
       }

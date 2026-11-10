@@ -39,7 +39,7 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
       const list = await client.listGezels();
       if (list.gezels.length === 0) {
         void vscode.window.showInformationMessage(
-          'No gezels available. Create one in the gezel desktop app.',
+          'No crew members available. Create one in the gezel desktop app.',
         );
         return;
       }
@@ -51,7 +51,7 @@ export function registerCommands(ctx: CommandContext): vscode.Disposable[] {
         gezel: g,
       }));
       const pick = await vscode.window.showQuickPick(items, {
-        placeHolder: 'Select a gezel to chat with',
+        placeHolder: 'Select a crew member to chat with',
       });
       if (pick) ctx.setActiveGezel({ id: pick.gezel.id, name: pick.gezel.name });
     }),

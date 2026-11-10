@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
 import { ChatComposer } from './ChatComposer.js';
+import { queueComposerPrefill } from './composer-prefill.js';
 import { FirstRunProvider } from './first-run-context.js';
 
 function deferred<T>() {
@@ -356,7 +357,7 @@ describe('ChatComposer attached task', () => {
     display: {
       label: 'Planned: PowerPoint (.pptx)',
       detail: 'PowerPoint from Content',
-      badges: ['PPTX', 'Craftbook'],
+      badges: ['PPTX', 'Plan'],
     },
     output: { format: 'pptx', label: 'PowerPoint (.pptx)' },
     craftbook: {
@@ -2061,5 +2062,221 @@ describe('ChatComposer before a model arrives', () => {
 
     expect(screen.queryByTestId('chat-waiting-for-model')).toBeNull();
     expect(screen.getByRole('button', { name: /^send$/i })).not.toBeDisabled();
+  });
+});
+
+// The welcome asks for a first request while the model downloads. Send used
+// to be dead until it landed, so the person had to come back and press it.
+describe('ChatComposer holding a first request until the model is ready', () => {
+  const tomas = { id: 'tomas', name: 'Tomas' } as GezelSummary;
+  const FLAG = 'gezel:home:send-when-ready';
+
+  function Composer({
+    firstRun,
+    sendWhenReady = true,
+    gezels = [tomas],
+    sessionId = 'session-1',
+  }: {
+    firstRun: boolean;
+    sendWhenReady?: boolean;
+    gezels?: GezelSummary[];
+    sessionId?: string;
+  }) {
+    return (
+      <FirstRunProvider value={firstRun}>
+        <ChatComposer
+          gezelId="tomas"
+          gezelName="Tomas"
+          projectId="default"
+          sessionId={sessionId}
+          recipientGezels={gezels}
+          waitingStatus="downloading the AI model · 42%"
+          sendWhenReady={sendWhenReady}
+        />
+      </FirstRunProvider>
+    );
+  }
+
+  const held = () => screen.getByTestId('chat-waiting-for-model');
+  const sendKey = () => screen.getByRole('button', { name: /^send$/i });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+    vi.mocked(api.getChatSessionInflight).mockResolvedValue({ inflight: null });
+    vi.mocked(api.sendToChatSession).mockResolvedValue(undefined as never);
+  });
+
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('queues the request on Send rather than refusing it', async () => {
+    render(<Composer firstRun />);
+
+    // Send is live, so the line beside it cannot say "can't send".
+    expect(held()).toHaveTextContent('Sends when ready: downloading the AI model · 42%');
+    expect(sendKey()).toBeEnabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(sendKey());
+    await act(async () => {});
+
+    expect(held()).toHaveTextContent(
+      'Queued: sends when the AI model is ready · downloading the AI model · 42%',
+    );
+    expect(screen.getByRole('button', { name: "Don't send" })).toBeInTheDocument();
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(FLAG)).toBe('1');
+    // Still a draft the person can change.
+    expect(screen.getByTestId('editor-draft')).toHaveTextContent('Hello from the test');
+  });
+
+  it('queues on Enter as well', async () => {
+    render(<Composer firstRun />);
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    pressSendShortcut();
+    await act(async () => {});
+
+    expect(held()).toHaveTextContent('Queued: sends when the AI model is ready');
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+  });
+
+  it('has nothing to queue while the draft is empty', async () => {
+    render(<Composer firstRun />);
+    fireEvent.click(sendKey());
+    await act(async () => {});
+
+    expect(held()).toHaveTextContent('Sends when ready:');
+    expect(window.localStorage.getItem(FLAG)).toBeNull();
+  });
+
+  it("takes the request back with Don't send", async () => {
+    const { rerender } = render(<Composer firstRun />);
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(sendKey());
+
+    fireEvent.click(screen.getByRole('button', { name: "Don't send" }));
+
+    expect(held()).toHaveTextContent('Sends when ready: downloading the AI model · 42%');
+    expect(screen.queryByRole('button', { name: "Don't send" })).toBeNull();
+    expect(window.localStorage.getItem(FLAG)).toBeNull();
+    // The words stay; only the promise to send them is withdrawn.
+    expect(screen.getByTestId('editor-draft')).toHaveTextContent('Hello from the test');
+
+    rerender(<Composer firstRun={false} sendWhenReady={false} />);
+    await act(async () => {});
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+  });
+
+  it('withdraws a queued request the person erased', async () => {
+    render(<Composer firstRun />);
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(sendKey());
+    expect(held()).toHaveTextContent('Queued:');
+
+    fireEvent.change(screen.getByLabelText('Message'), { target: { value: '' } });
+
+    expect(held()).toHaveTextContent('Sends when ready:');
+    expect(window.localStorage.getItem(FLAG)).toBeNull();
+  });
+
+  it('sends the queued request once, the moment the model becomes ready', async () => {
+    const { rerender } = render(<Composer firstRun />);
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(sendKey());
+    expect(held()).toHaveTextContent('Queued:');
+
+    // The surface stops offering to queue a beat before the wait ends; the
+    // request it already holds must survive that.
+    rerender(<Composer firstRun sendWhenReady={false} />);
+    expect(held()).toHaveTextContent('Queued:');
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+
+    rerender(<Composer firstRun={false} sendWhenReady={false} />);
+
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(api.sendToChatSession).mock.calls[0]?.[0]).toBe('session-1');
+    expect(vi.mocked(api.sendToChatSession).mock.calls[0]?.[1]).toMatchObject({
+      message: 'Hello from the test',
+    });
+    expect(window.localStorage.getItem(FLAG)).toBeNull();
+    expect(screen.queryByTestId('chat-waiting-for-model')).toBeNull();
+
+    rerender(<Composer firstRun={false} sendWhenReady={false} />);
+    await act(async () => {});
+    expect(api.sendToChatSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends nothing when the model becomes ready and nothing was queued', async () => {
+    const { rerender } = render(<Composer firstRun />);
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+
+    rerender(<Composer firstRun={false} sendWhenReady={false} />);
+    await act(async () => {});
+
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId('editor-draft')).toHaveTextContent('Hello from the test');
+  });
+
+  it('picks the queue back up after a reload during the download', async () => {
+    window.localStorage.setItem(FLAG, '1');
+    // A reloaded window first reads "not waiting", before the first-run
+    // answer is in. That must not send, or the turn would only fail.
+    const { rerender } = render(<Composer firstRun={false} sendWhenReady={false} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    await act(async () => {});
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+
+    rerender(<Composer firstRun />);
+    expect(held()).toHaveTextContent('Queued: sends when the AI model is ready');
+
+    rerender(<Composer firstRun={false} sendWhenReady={false} />);
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalledTimes(1));
+    expect(window.localStorage.getItem(FLAG)).toBeNull();
+  });
+
+  // The queue is for one request in one thread; nobody pressed Send on the
+  // draft another thread brings up.
+  it('drops the queue when the person moves to another thread', async () => {
+    const { rerender } = render(<Composer firstRun />);
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(sendKey());
+    expect(held()).toHaveTextContent('Queued:');
+
+    rerender(<Composer firstRun sessionId="session-2" />);
+    expect(held()).toHaveTextContent('Sends when ready:');
+    expect(window.localStorage.getItem(FLAG)).toBeNull();
+
+    rerender(<Composer firstRun={false} sendWhenReady={false} sessionId="session-2" />);
+    await act(async () => {});
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+  });
+
+  it('does not let a starter ride out on a Send pressed for other words', async () => {
+    const { rerender } = render(<Composer firstRun />);
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(sendKey());
+    expect(held()).toHaveTextContent('Queued:');
+
+    // A first-project key replaces the draft with a sentence to edit.
+    act(() => queueComposerPrefill('default', 'Plan a trip to…', undefined, { replace: true }));
+    expect(held()).toHaveTextContent('Sends when ready:');
+
+    rerender(<Composer firstRun={false} sendWhenReady={false} />);
+    await act(async () => {});
+    expect(api.sendToChatSession).not.toHaveBeenCalled();
+  });
+
+  it('leaves a helper with a provider of its own alone', async () => {
+    render(<Composer firstRun gezels={[{ ...tomas, provider: 'anthropic' }]} />);
+
+    expect(screen.queryByTestId('chat-waiting-for-model')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Fill draft' }));
+    fireEvent.click(sendKey());
+
+    // It can answer now, so Send sends.
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalledTimes(1));
+    expect(window.localStorage.getItem(FLAG)).toBeNull();
   });
 });

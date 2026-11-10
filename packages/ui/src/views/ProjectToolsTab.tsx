@@ -121,8 +121,8 @@ export function ProjectToolsTab({ project, onProjectChange }: ProjectToolsTabPro
   return (
     <div className="project-tools">
       <p className="project-tools-lede">
-        The packages and scripts your crew can use in this project. A gezel asks before it installs
-        a package or runs a script for the first time, and your answer is remembered here.
+        The packages and scripts Gezel can use in this project. It asks before it installs a package
+        or runs a script for the first time, and your answer is remembered here.
       </p>
 
       <section className="project-tools-section" aria-labelledby="project-tools-packages">
@@ -168,7 +168,7 @@ export function ProjectToolsTab({ project, onProjectChange }: ProjectToolsTabPro
           Scripts
         </h3>
         <p className="project-tools-hint">
-          Defined in the workspace's <code>package.json</code>. A gezel can ask to run any of these.
+          Defined in the workspace's <code>package.json</code>. Gezel can ask to run any of these.
         </p>
         {scripts.length > 0 ? (
           <ul className="project-tools-list">
@@ -189,7 +189,7 @@ export function ProjectToolsTab({ project, onProjectChange }: ProjectToolsTabPro
           Approvals
         </h3>
         <p className="project-tools-hint">
-          What you answered when a gezel asked. Anything approved runs without asking again.
+          What you answered when Gezel asked. Anything approved runs without asking again.
         </p>
         <h4 className="project-tools-subtitle">npm packages</h4>
         <DecisionList rows={npmRows} empty="No npm packages approved for this project yet." />

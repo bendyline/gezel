@@ -20,6 +20,7 @@ import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { captureScreenshot } from './helpers/screenshot.js';
+import { openSettingsSection, revealSettingsNavItem } from './helpers/settings-nav.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -285,7 +286,9 @@ test.describe('Knowledge catalogs', () => {
     // Install through Settings → Knowledge (typed path — no native dialog
     // in a driven session).
     await page.getByTestId('sidebar-area-settings').click();
+    // Knowledge sits under "More settings", which starts folded.
     const navItem = page.getByTestId('settings-nav-knowledge');
+    await revealSettingsNavItem(page, navItem);
     await expect(navItem).toBeVisible({ timeout: 10_000 });
     await navItem.click();
     await expect(page.getByRole('heading', { name: 'Knowledge', exact: true })).toBeVisible();
@@ -341,7 +344,7 @@ test.describe('Knowledge catalogs', () => {
 
     // Disable: the catalog stays registered, and so does its row.
     await page.getByTestId('sidebar-area-settings').click();
-    await page.getByTestId('settings-nav-knowledge').click();
+    await openSettingsSection(page, 'knowledge');
     // The checkbox is controlled: its state lands after the daemon round
     // trip, so click + polled assertion rather than uncheck()'s immediate
     // post-click verification.
@@ -360,7 +363,7 @@ test.describe('Knowledge catalogs', () => {
 
   test('download from the catalog → installed → remove', async () => {
     await page.getByTestId('sidebar-area-settings').click();
-    await page.getByTestId('settings-nav-knowledge').click();
+    await openSettingsSection(page, 'knowledge');
     await expect(page.getByRole('heading', { name: 'Knowledge', exact: true })).toBeVisible();
 
     // The gilde entry renders as a catalog card. It names no license page,

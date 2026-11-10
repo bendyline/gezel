@@ -421,11 +421,11 @@
 
 .ollama-pull {
   padding: 0.5rem 0.65rem;
-  border: 1px solid color-mix(in srgb, var(--titlebar) 35%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sage-deep) 35%, transparent);
   border-radius: var(--radius-md);
   /* Tint matches the sage titlebar so active downloads read as part of the
      gezel theme instead of a random blue highlight. */
-  background: color-mix(in srgb, var(--titlebar) 15%, transparent);
+  background: color-mix(in srgb, var(--sage-deep) 15%, transparent);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -1192,7 +1192,7 @@ a.license-button:hover {
   align-items: center;
   gap: 0.35rem;
   padding: 0.2rem 0.5rem;
-  background: rgba(79, 125, 255, 0.08);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   border-radius: 12px;
   font-size: var(--text-xs);
 }
@@ -1480,7 +1480,7 @@ a.license-button:hover {
 
 .new-gezel-template-form {
   padding: 0.6rem;
-  background: rgba(79, 125, 255, 0.06);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
@@ -1758,7 +1758,7 @@ a.license-button:hover {
 
 .ambient-theme-select-menu .gz-select-item[data-state="checked"] {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  background: var(--selected-bg);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 

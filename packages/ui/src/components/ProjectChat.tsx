@@ -544,7 +544,7 @@ function ProjectChatBody({
         aria-label="AI chat"
         className="compose-mode-tab"
         onClick={switchToChat}
-        title="AI chat (@-mention to talk to a gezel)"
+        title="AI chat (@-mention to talk to someone on the crew)"
       >
         <span className="compose-mode-tab-glyph" aria-hidden="true">
           @

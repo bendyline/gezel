@@ -28,6 +28,10 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   document.documentElement.dataset.sidebarSide = snapshot?.sidebar || 'right';
   if (snapshot?.theme && snapshot.theme !== 'system')
     document.documentElement.dataset.theme = snapshot.theme;
+  // This screen draws the title bar before the app does, so main has to hear
+  // the theme from here too: at night the bar is a deeper sage, and the
+  // window controls main paints beside it must match from the first frame.
+  window.__GEZEL__?.setNativeTheme?.(snapshot?.theme ?? 'system');
   const view: StartupHomeView = {
     ...bridge.state,
     tab: bridge.state.tab === 'chat' ? ('greeting' as const) : bridge.state.tab,

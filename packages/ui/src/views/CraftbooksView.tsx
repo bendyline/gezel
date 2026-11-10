@@ -12,7 +12,7 @@ interface Selection {
 }
 
 const SOURCE_GROUPS: Array<{ source: Source; label: string; hint: string }> = [
-  { source: 'local', label: 'My craftbooks', hint: 'editable' },
+  { source: 'local', label: 'My plans', hint: 'editable' },
   { source: 'project', label: 'Project', hint: 'read-only' },
   { source: 'bundled', label: 'Gilde catalog', hint: 'read-only' },
 ];
@@ -94,28 +94,28 @@ export function CraftbooksView() {
     >
       {compact && showCompactDetail && (
         <button type="button" className="secondary" onClick={() => setShowCompactDetail(false)}>
-          Back to craftbooks
+          Back to plans
         </button>
       )}
       <div className="tasks-layout craftbooks-layout">
         <aside
           className="craftbooks-sidebar"
-          aria-label="Craftbook library"
+          aria-label="Plan library"
           hidden={compact && showCompactDetail}
         >
           <div className="craftbooks-toolbar">
             <label className="craftbooks-search-field">
-              <span className="sr-only">Search craftbooks</span>
+              <span className="sr-only">Search plans</span>
               <input
                 type="search"
                 className="craftbook-search"
-                placeholder="Search craftbooks…"
+                placeholder="Search plans…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
             </label>
             <button type="button" className="primary" onClick={() => setCreating(true)}>
-              + New craftbook
+              + New plan
             </button>
           </div>
 
@@ -168,7 +168,7 @@ export function CraftbooksView() {
 
         <section
           className="task-detail-panel craftbooks-detail"
-          aria-label="Craftbook editor"
+          aria-label="Plan editor"
           hidden={compact && !showCompactDetail}
         >
           {selected ? (
@@ -180,7 +180,7 @@ export function CraftbooksView() {
             />
           ) : (
             <p className="placeholder">
-              Select a craftbook to edit it, or start a new one. Gilde books open read-only — make a
+              Select a plan to edit it, or start a new one. Catalog plans open read-only — make a
               copy to edit them.
             </p>
           )}
@@ -261,7 +261,7 @@ function NewCraftbookDialog({
       let body: Parameters<typeof api.createCraftbook>[0];
       if (mode === 'existing') {
         if (!base) {
-          setError('Pick a craftbook to base this on.');
+          setError('Pick a plan to base this on.');
           setBusy(false);
           return;
         }
@@ -293,7 +293,7 @@ function NewCraftbookDialog({
           .filter(Boolean)
           .map((n) => ({ name: n }));
         if (steps.length === 0) {
-          setError('A craftbook needs at least one step.');
+          setError('A plan needs at least one step.');
           setBusy(false);
           return;
         }
@@ -323,13 +323,13 @@ function NewCraftbookDialog({
         <Dialog.Overlay />
         <Dialog.Content className="new-craftbook-dialog">
           <Dialog.Title asChild>
-            <h3>New craftbook</h3>
+            <h3>New plan</h3>
           </Dialog.Title>
 
           <div
             className="new-craftbook-modes"
             role="radiogroup"
-            aria-label="How to start the craftbook"
+            aria-label="How to start the plan"
           >
             <button
               type="button"
@@ -353,23 +353,23 @@ function NewCraftbookDialog({
               disabled={busy}
             >
               <strong>Based on existing</strong>
-              <span className="muted small">Copy another craftbook's steps, then edit.</span>
+              <span className="muted small">Copy another plan's steps, then edit.</span>
             </button>
           </div>
 
           {mode === 'existing' && (
             <div className="new-craftbook-picker">
-              <span className="new-craftbook-field-label">Base craftbook</span>
+              <span className="new-craftbook-field-label">Base plan</span>
               <input
                 type="text"
                 className="craftbook-search"
-                placeholder="Search craftbooks…"
-                aria-label="Search base craftbooks"
+                placeholder="Search plans…"
+                aria-label="Search base plans"
                 value={baseQuery}
                 onChange={(e) => setBaseQuery(e.target.value)}
                 disabled={busy}
               />
-              <ul className="new-craftbook-picker-list" aria-label="Pick a craftbook to copy">
+              <ul className="new-craftbook-picker-list" aria-label="Pick a plan to copy">
                 {filteredBases.map((c) => (
                   <li key={`${c.source}:${c.id}`}>
                     <button
@@ -389,7 +389,7 @@ function NewCraftbookDialog({
                   </li>
                 ))}
                 {filteredBases.length === 0 && (
-                  <li className="muted small new-craftbook-picker-empty">No craftbooks match.</li>
+                  <li className="muted small new-craftbook-picker-empty">No plans match.</li>
                 )}
               </ul>
             </div>
@@ -416,7 +416,7 @@ function NewCraftbookDialog({
               placeholder={
                 mode === 'existing'
                   ? "Leave blank to keep the original's description."
-                  : 'What this craftbook is for.'
+                  : 'What this plan is for.'
               }
               disabled={busy}
             />

@@ -111,7 +111,7 @@ export function triggerPhrasePlan(
     display: {
       label: `Planned: ${match.candidate.name}`,
       detail: `Matched “${match.trigger}”`,
-      badges: ['Craftbook'],
+      badges: ['Plan'],
     },
     craftbook: {
       id: match.candidate.id,

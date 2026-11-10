@@ -29,6 +29,6 @@ Copywriters do their best work when the library gives them something to stand on
 
 ::handboek-role-tools{role=copywriter scope=tiers}
 
-## Craftbooks they run well
+## Plans they run well
 
 ::handboek-craftbook-list{role=copywriter}

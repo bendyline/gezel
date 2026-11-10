@@ -105,7 +105,7 @@ export function CraftbookToolsetSetup({ missing, paramSchema, onAllInstalled, on
 
   return (
     <div className="craftbook-toolset-setup">
-      <h4 className="small">This craftbook needs:</h4>
+      <h4 className="small">This plan needs:</h4>
       <ul className="commands-panel-list">
         {missing.map((m) => {
           const done = installed.has(m.toolsetId);

@@ -47,7 +47,7 @@ An explicit `--connect <url>` uses a separate CLI-scoped grant for that service.
 
 Rolling-upgrade compatibility may also select an older `legacy-full` machine service, which uses that approval path. Use `--standalone` to skip this compatibility choice; `--home <path>` or an explicit `GEZEL_HOME` also implies standalone operation. A modern machine service is an engine broker; your per-user daemon handles product data and connects to that broker for inference.
 
-A home you name with `--home` is also kept separate from what the Gezel desktop app's machine install publishes: its shared gezels and projects, and the models it downloaded. Set `GEZEL_DISABLE_MACHINE_SHARED=0` to include them anyway. Your default home, `~/.gezel`, still sees them.
+A home you name with `--home` is also kept separate from what the Gezel desktop app's machine install publishes: its shared crew and projects, and the models it downloaded. Set `GEZEL_DISABLE_MACHINE_SHARED=0` to include them anyway. Your default home, `~/.gezel`, still sees them.
 
 To run Gezel headless on a machine of its own, see [Gezel on a server](gezel-on-a-server.md).
 
@@ -70,7 +70,7 @@ gezel stop --keep-running   emergency brake: cancel AI work, unload engines,
                             switch to Reactive — the service keeps running
 gezel mode [mode]           show or set how active the AI may be
                             (read-only, reactive, reactive+tasks, full-play)
-gezel growth [on|off]       show or set gezel growth (XP and level-ups); off
+gezel growth [on|off]       show or set crew growth (XP and level-ups); off
                             computes no XP, for homes that run bulk workflows
 gezel run "..."             one-shot: send a prompt, print the reply
 gezel doctor                check the installation
@@ -90,10 +90,10 @@ If the desktop app's machine-wide service is in use, `gezel stop` applies the em
 
 Gezel never makes a project of your home folder, the temp folder, or the top of a drive. Run a command from one of those and it uses the Default project instead, with a note saying so. Naming one of those folders with `--project` stops the command, so it never quietly uses a different project than the one you asked for.
 
-## Working with the crew
+## Crew, projects, and tasks
 
 ```
-gezel agent list            your gezels
+gezel agent list            your crew
 gezel project list          your projects (gezel env is the same command)
 gezel task list             tasks across every project (--status to filter)
 gezel task show <ref>       one task, such as default/12
@@ -230,7 +230,7 @@ gezel security level        the security level and what it allows
 gezel security level set <super-lockdown|lockdown|free>
                             switch to a preset (free is Unrestricted in Settings)
 gezel security external-services [on|off]
-                            let gezels use web search and other outside services
+                            let your crew use web search and other outside services
 gezel env indexing [on|off] pause or resume background indexing for this project
 ```
 
@@ -240,7 +240,7 @@ gezel env indexing [on|off] pause or resume background indexing for this project
 gezel cleanup               see how much space Gezel is using
 gezel cleanup --redownloadable
                             reclaim everything Gezel can download again
-gezel backup <file>         write your gezels, projects, and documents to a file
+gezel backup <file>         write your crew, projects, and documents to a file
 gezel restore <file>        bring them back (--list to look first)
 ```
 

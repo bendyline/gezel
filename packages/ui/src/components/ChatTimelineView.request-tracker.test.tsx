@@ -75,7 +75,7 @@ const MESSAGES = [
   {
     ...BASE,
     role: 'assistant',
-    content: 'Your PDF for **October invoices** is ready.',
+    content: 'Your PDF is ready: **October invoices**.',
     at: '2026-10-23T09:28:00.000Z',
     synthetic: 'task-wrapup',
     referencedTasks: ['bakery/1'],
@@ -91,6 +91,7 @@ const TRACK: RequestTrack = {
   at: ASKED_AT,
   messageId: 'm1',
   summary: 'Make my October invoices',
+  title: 'October invoices',
   kind: 'work',
   leadGezelId: 'dejan',
   stop: 'ready',
@@ -104,12 +105,39 @@ const TRACK: RequestTrack = {
   questionIds: [],
 };
 
-function renderTimeline() {
+// A worker's session nested under the request, whose last turn failed.
+const WORKER = {
+  ...BASE,
+  sessionId: 'worker',
+  gezelId: 'aditya',
+  taskRef: 'bakery/1',
+  parentSession: { sessionId: 'mees-thread', gezelId: 'mees', kind: 'task-entry' },
+  sessionLastTurnError: 'Not enough graphics memory to load qwen3.5-9b-q4.',
+};
+const WITH_FAILED_WORKER = [
+  ...MESSAGES.slice(0, 2),
+  {
+    ...WORKER,
+    role: 'user',
+    origin: 'system',
+    content: "You've been assigned task bakery/1",
+    at: '2026-10-23T09:03:00.000Z',
+  },
+  {
+    ...WORKER,
+    role: 'assistant',
+    content: 'Drafted two of three invoices.',
+    at: '2026-10-23T09:04:00.000Z',
+  },
+  ...MESSAGES.slice(2),
+] as TimelineMessage[];
+
+function renderTimeline(messages: TimelineMessage[] = MESSAGES) {
   return render(
     <ChatTimelineView
       scopeKey="gezel:mees"
       activeSessionId={undefined}
-      loadTimeline={async () => ({ messages: MESSAGES, hasMore: false }) as ListTimelineResponse}
+      loadTimeline={async () => ({ messages, hasMore: false }) as ListTimelineResponse}
       streamUrl={() => 'https://example.invalid/events'}
     />,
   );
@@ -140,12 +168,49 @@ describe('ChatTimelineView — one request, one tracker', () => {
     // The finished card lives in the tracker, credited to the lead.
     expect(container.querySelectorAll('.deliverable-card')).toHaveLength(1);
     expect(tracker.querySelector('.deliverable-card')).not.toBeNull();
+    // The card is named for the request; the file name is the small line.
+    expect(tracker.querySelector('.deliverable-card-name')).toHaveTextContent('October invoices');
+    expect(within(tracker).getByText('invoices.pdf')).toHaveAttribute(
+      'title',
+      'tasks/1/invoices.pdf',
+    );
     expect(within(tracker).getByText("Who's helping?")).toBeInTheDocument();
     // The wrap-up's words stay; only its card moved.
-    expect(container.textContent).toContain('Your PDF for');
+    expect(container.textContent).toContain('Your PDF is ready');
     // The thread's order: the ask, the replies, then its tracker.
     const ask = screen.getByText('Make my October invoices');
     expect(ask.compareDocumentPosition(tracker) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  // A worker's failed turn that was retried left "stopped before finishing"
+  // under a Ready card (default/2, 2026-11-09).
+  it('does not say the crew stopped under work that finished', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
+    renderTimeline(WITH_FAILED_WORKER);
+    await screen.findByTestId('request-tracker');
+    const fold = await screen.findByTestId('working-notes');
+    expect(fold).toHaveAttribute('data-working-notes-state', 'done');
+    expect(fold).toHaveTextContent("Dejan's working notes");
+    expect(fold).not.toHaveTextContent('stopped');
+  });
+
+  it('says the crew stopped, without the engine error, when the request did', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
+    const paused: RequestTrack = {
+      ...TRACK,
+      stop: 'making',
+      state: 'needs-you',
+      line: { gezelId: 'dejan', doing: 'stopped before this was finished' },
+      paused: { taskRef: 'bakery/1', reason: 'step_stalled' },
+    };
+    delete (paused as Partial<RequestTrack>).deliverable;
+    vi.mocked(api.listRequests).mockResolvedValue({ requests: [paused], at: ASKED_AT } as never);
+    renderTimeline(WITH_FAILED_WORKER.filter((m) => m.synthetic !== 'task-wrapup'));
+    const tracker = await screen.findByTestId('request-tracker');
+    expect(within(tracker).getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+    const fold = await screen.findByTestId('working-notes');
+    expect(fold).toHaveAttribute('data-working-notes-state', 'stopped');
+    expect(within(fold).getByText('Dejan stopped before finishing')).toBeInTheDocument();
   });
 
   it('shows everything in debug mode, the tracker with who really did it', async () => {

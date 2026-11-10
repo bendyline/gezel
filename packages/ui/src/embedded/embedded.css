@@ -62,7 +62,7 @@ body,
 
 .embedded-chat-status {
   padding: 16px;
-  font-size: 13px;
+  font-size: var(--text-xs);
   color: var(--text);
   opacity: 0.85;
 }

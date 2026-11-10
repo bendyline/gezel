@@ -90,7 +90,7 @@ gezel knowledge search ./team-guide/team-guide-1.0.0.gezk "How do I claim travel
 
 The default output is `<dir>/<id>-<version>.gezk`. The build reports document, chunk, shard, and archive-size counts. Search prints document and passage references as `knowledge://` URIs.
 
-Once the checks pass, install it for your crew:
+Once the checks pass, install it:
 
 ```bash
 gezel knowledge install ./team-guide/team-guide-1.0.0.gezk
@@ -202,7 +202,7 @@ The digest is the archive's hash, not a manifest file hash. Obtain it through a 
 
 To update a catalog, install its catalog id again or install the replacement archive. There is currently no separate `knowledge update` command. `available` and `list` report newer catalog versions known to Gilde. The current CLI has no `knowledge enable` or `knowledge disable` subcommands; use Knowledge settings or the HTTP patch endpoint below.
 
-`find` searches your installed catalogs directly. It does not select the project for the current directory or apply that project's catalog policy. For the session-scoped search used by a gezel, use its `search` tool.
+`find` searches your installed catalogs directly. It does not select the project for the current directory or apply that project's catalog policy. For the session-scoped search a chat uses, see the `search` tool.
 
 Removing a private catalog deletes the daemon's installed copy, not the original `.gezk` archive you supplied. Removing a shared catalog removes your reference; public shared bytes have a separate reclamation lifecycle. The bundled Handboek is managed by Gezel and cannot be removed through this command; disable it in Knowledge settings if needed.
 
@@ -226,7 +226,7 @@ The command needs the DuckDB CLI installed by Gezel, a discoverable DuckDB execu
 
 ## Manipulate knowledge through tools and APIs
 
-Gezels use `search` to retrieve admitted project and reference material, `read_document` to open `knowledge://` citations, and `knowledge_nearby` for subject-location discovery. `save_memory`, `search_memory`, and `list_memories` manage the mutable memory sources. These tool names are distinct from CLI subcommands; there is no `gezel knowledge save-memory` command.
+In a chat, Gezel uses `search` to retrieve admitted project and reference material, `read_document` to open `knowledge://` citations, and `knowledge_nearby` for subject-location discovery. `save_memory`, `search_memory`, and `list_memories` manage the mutable memory sources. These tool names are distinct from CLI subcommands; there is no `gezel knowledge save-memory` command.
 
 For your editable shared library, `list_documents`, `read_document`, `write_document`, and `delete_document` operate on the library's original files, subject to the tool and security policy. Installed catalog documents remain read-only; change their source and build a new archive to publish a revision.
 

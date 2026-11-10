@@ -84,7 +84,7 @@ describe('MessageBubble tool-only endings', () => {
     );
 
     expect(
-      screen.getByText('Last action: Ask a gezel — Maya about the rendering bug.'),
+      screen.getByText('Last action: Ask someone on the crew — Maya about the rendering bug.'),
     ).toBeInTheDocument();
     expect(
       screen.queryByText('(model produced reasoning but no visible reply — see Thinking above)'),

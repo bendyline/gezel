@@ -181,8 +181,8 @@ export function VSCodeSetupCard({
         message={
           <>
             Gezel will add or update one provider in <code>{selectedProfile?.configPath}</code>. VS
-            Code will show every eligible gezel and raw local model in its native model picker and
-            keep control of agent tools and permissions. Other custom endpoint providers are
+            Code will show every eligible crew member and raw local model in its native model picker
+            and keep control of agent tools and permissions. Other custom endpoint providers are
             preserved.
             <br />
             <br />

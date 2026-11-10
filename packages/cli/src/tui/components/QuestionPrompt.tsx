@@ -315,8 +315,8 @@ function NpmInstallApprovalPrompt(props: QuestionPromptProps): JSX.Element {
       {currentPackage ? (
         <>
           <Text wrap="wrap">
-            A gezel wants to install {packages.length === 1 ? 'this package' : 'packages'} outside
-            the pre-vetted list.
+            Gezel wants to install {packages.length === 1 ? 'this package' : 'packages'} outside the
+            pre-vetted list.
           </Text>
           <Text>
             <Text bold>

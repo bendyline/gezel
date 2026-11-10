@@ -117,16 +117,16 @@
 }
 
 .settings-nav-item:hover {
-  background: rgba(176, 114, 76, 0.08);
+  background: var(--hover-bg);
 }
 
 .settings-nav-item-active {
-  background: rgba(176, 114, 76, 0.14);
+  background: var(--selected-bg);
   border-color: rgba(176, 114, 76, 0.28);
   color: var(--fg);
 }
 
-/* Visual grouping for collapsible nav groups (AI providers, Workloads) —
+/* Visual grouping for collapsible nav groups (AI providers, More settings) —
    a thin vertical rail on the left connects the children back to their
    parent header. The rail is painted on each <li> so that as the number
    of children changes (e.g. MLX-only on Mac, +llama.cpp when advanced) the
@@ -439,7 +439,7 @@ legend.gz-setting-label {
 .gz-setting-hint {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -863,7 +863,7 @@ label.gz-setting-inline {
 }
 
 .machine-health-temperature-value-number {
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -1525,7 +1525,7 @@ label.gz-setting-inline {
   padding: 0.1rem 0.45rem;
   border: 1px dashed var(--border);
   border-radius: var(--radius-md);
-  background: rgba(79, 125, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
 /* "No LLM — passthrough" pill on fixed-function templates in the
@@ -1541,9 +1541,9 @@ label.gz-setting-inline {
 }
 
 .gz-badge-passthrough {
-  background: rgba(79, 125, 255, 0.12);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--accent-text);
-  border: 1px solid rgba(79, 125, 255, 0.3);
+  border: 1px solid var(--border);
 }
 
 /* Wraps the install button + optional badge in the catalog grid. */
@@ -1668,11 +1668,11 @@ label.gz-setting-inline {
 }
 
 .name-chip:hover:not(:disabled) {
-  background: rgba(79, 125, 255, 0.08);
+  background: var(--hover-bg);
 }
 
 .name-chip-active {
-  background: rgba(79, 125, 255, 0.15);
+  background: var(--selected-bg);
   border-color: var(--accent);
   color: var(--accent-text);
 }
@@ -2064,7 +2064,7 @@ label.gz-setting-inline {
 
 /* green — index fresh and the AI scan has caught up. */
 .project-index-chip-fresh .project-index-dot {
-  background: rgba(80, 180, 100, 0.95);
+  background: var(--status-ready);
   box-shadow: 0 0 0 2px rgba(80, 180, 100, 0.18);
 }
 
@@ -2434,7 +2434,7 @@ label.gz-setting-inline {
 
 /* Green when the project is actively driven; muted when ambient work pauses. */
 .project-status-select-active .project-status-select-dot {
-  background: rgba(80, 180, 100, 0.95);
+  background: var(--status-ready);
   box-shadow: 0 0 0 2px rgba(80, 180, 100, 0.18);
 }
 .project-status-select-stable .project-status-select-dot {
@@ -2553,7 +2553,7 @@ label.gz-setting-inline {
 
 .project-controls-overflow-item:hover,
 .project-controls-overflow-item[aria-pressed="true"] {
-  background: rgba(127, 127, 127, 0.12);
+  background: var(--hover-bg);
 }
 
 .project-controls-overflow-item[disabled] {

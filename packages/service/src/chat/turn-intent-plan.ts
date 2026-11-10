@@ -174,7 +174,7 @@ export function resolveTurnIntentPlan(input: ResolveTurnIntentPlanInput): TurnIn
       display: {
         label: `Planned: ${artifact.outputLabel}`,
         detail: artifact.craftbookName,
-        badges: [artifact.format.toUpperCase(), 'Craftbook'],
+        badges: [artifact.format.toUpperCase(), 'Plan'],
       },
       output: { format: artifact.format, label: artifact.outputLabel },
       craftbook: {
@@ -199,7 +199,7 @@ export function resolveTurnIntentPlan(input: ResolveTurnIntentPlanInput): TurnIn
       visible: true,
       display: {
         label: 'Planned: Developer',
-        detail: 'Route implementation work to a developer gezel',
+        detail: 'Route implementation work to a developer',
         badges: ['Developer'],
       },
       specialist: { role: 'developer', label: 'Developer' },

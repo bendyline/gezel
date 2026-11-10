@@ -252,7 +252,7 @@ export function CommandsPanel({
   const stageCraftbook = useCallback(
     (cb: CraftbookTemplateManifest, values: Record<string, string>) => {
       if (!onStageCommand) {
-        setToast('Open this from a project chat to run craftbooks.');
+        setToast('Open this from a project chat to run plans.');
         window.setTimeout(() => setToast(null), 2400);
         return;
       }
@@ -318,7 +318,9 @@ export function CommandsPanel({
         if (action === 'approve') await api.approveProjectImport(projectId, skillSource);
         else await api.rejectProjectImport(projectId, skillSource);
         setPendingImports((p) => p.filter((it) => it.skillSource !== skillSource));
-        setToast(action === 'approve' ? 'Imported craftbook + script' : 'Kept as prose-only');
+        setToast(
+          action === 'approve' ? 'Imported as a plan with its script' : 'Kept as prose-only',
+        );
       } catch (err) {
         setToast(`Review failed: ${err instanceof Error ? err.message : String(err)}`);
       }
@@ -676,8 +678,8 @@ export function CommandsPanel({
           </p>
         ) : section === 'tasks' ? (
           <p className="commands-panel-empty muted small">
-            No tasks are available for this project yet. Craftbooks show up here once one applies to
-            this workspace.
+            No tasks are available for this project yet. Plans show up here once one applies to this
+            workspace.
           </p>
         ) : (
           <p className="commands-panel-empty muted small">
@@ -770,8 +772,8 @@ export function CommandsPanel({
                     onClick={() => setShowAllCraftbooks((v) => !v)}
                   >
                     {showAllCraftbooks
-                      ? 'Show fewer craftbooks'
-                      : `Show all ${filteredCraftbooks.length} craftbooks`}
+                      ? 'Show fewer plans'
+                      : `Show all ${filteredCraftbooks.length} plans`}
                   </button>
                   {showAllCraftbooks && (
                     <ul className="commands-panel-list">{restBooks.map(renderCraftbookItem)}</ul>
@@ -783,7 +785,7 @@ export function CommandsPanel({
             showCraftbooks &&
             filteredCraftbooks.length > 0 && (
               <section className="commands-panel-group">
-                <h4 className="commands-panel-group-title muted small">Craftbooks</h4>
+                <h4 className="commands-panel-group-title muted small">Plans</h4>
                 <ul className="commands-panel-list">
                   {filteredCraftbooks.map(renderCraftbookItem)}
                 </ul>

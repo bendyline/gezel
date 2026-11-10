@@ -161,7 +161,7 @@ export function HarnessSetupShell({
                 <Select.Content>
                   {gezelOptions.length > 0 && (
                     <Select.Group>
-                      <Select.Label>Gezels</Select.Label>
+                      <Select.Label>Crew</Select.Label>
                       {gezelOptions.map((candidate) => (
                         <Select.Item key={candidate.id} value={candidate.id}>
                           {optionLabel(candidate)}

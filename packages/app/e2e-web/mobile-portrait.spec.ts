@@ -155,7 +155,7 @@ for (const profile of [
       await expect(page.getByTestId('document-detail')).toBeVisible();
       await capture('document-detail');
       for (const [area, trigger] of [
-        ['gezels', '+ New gezel'],
+        ['gezels', '+ New crew member'],
         ['projects', '+ New Project'],
         ['tasks', '+ New task'],
       ]) {
@@ -235,8 +235,8 @@ test('small portrait create and edit workflows', async ({ page, daemon, world })
   await page.goto('/');
   await expect(page.getByTestId('app-sidebar')).toBeVisible();
   await openAreaView(page, 'gezels');
-  await page.getByRole('button', { name: '+ New gezel', exact: true }).click();
-  const newGezel = page.getByRole('dialog', { name: 'New gezel', exact: true });
+  await page.getByRole('button', { name: '+ New crew member', exact: true }).click();
+  const newGezel = page.getByRole('dialog', { name: 'New crew member', exact: true });
   await newGezel.getByRole('textbox', { name: 'Name', exact: true }).fill('Portrait companion');
   await newGezel.getByRole('textbox', { name: 'Role', exact: true }).fill('Editor');
   await newGezel.getByRole('button', { name: 'Create', exact: true }).click();
@@ -267,7 +267,7 @@ test('small portrait create and edit workflows', async ({ page, daemon, world })
     .fill('Create a useful checklist with drafting and review steps from a small portrait screen.');
   await newTask.getByRole('textbox', { name: /^Steps/ }).fill('Draft\nReview');
   await newTask.getByRole('combobox', { name: 'Assign to', exact: true }).click();
-  await page.getByRole('option', { name: 'Me (no gezel)', exact: true }).click();
+  await page.getByRole('option', { name: 'Me', exact: true }).click();
   await newTask.getByRole('button', { name: 'Create task', exact: true }).click();
   await expect(newTask).not.toBeVisible();
   await expect(page.getByTestId('task-detail')).toContainText('Portrait checklist');

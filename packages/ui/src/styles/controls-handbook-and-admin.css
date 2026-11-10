@@ -27,7 +27,7 @@
   --squisq-jsonform-text: var(--text) !important;
   --squisq-jsonform-muted: var(--text-muted) !important;
   --squisq-jsonform-primary: var(--accent) !important;
-  --squisq-jsonform-accent: var(--titlebar) !important;
+  --squisq-jsonform-accent: var(--sage-deep) !important;
   --squisq-jsonform-warning: var(--danger) !important;
   --squisq-jsonform-border: var(--border) !important;
   --squisq-jsonform-input-bg: var(--surface) !important;
@@ -641,7 +641,7 @@
 .meester-welcome-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 1.45rem;
+  font-size: var(--text-title);
   font-weight: 700;
   line-height: 1.3;
   color: var(--text);

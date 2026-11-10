@@ -404,6 +404,29 @@ describe('ProjectsView', () => {
     expect(screen.getByRole('button', { name: 'Archive project' })).toBeInTheDocument();
   });
 
+  // "Turn it on in Project Settings" set a tab no pane renders, leaving the
+  // project blank (1.26313.105 audit).
+  it('opens Project Settings from a "Turn it on in Project Settings" link', async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      ...CODE_TYPE,
+      name: 'Alpha',
+      packages: [],
+      status: 'active',
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('gezel:open-project-settings', { detail: { projectId: 'pj-alpha' } }),
+      );
+    });
+
+    expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('button', { name: 'Archive project' })).toBeInTheDocument();
+  });
+
   it('shows labeled creation keys when the project list is collapsed', async () => {
     render(<ProjectsView />);
     await screen.findByText('Alpha');
@@ -496,7 +519,7 @@ describe('ProjectsView', () => {
     await screen.findByTestId('project-chat');
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Gezel' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add crew member' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByText('Tomas')).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: /Amira/ }));
@@ -586,7 +609,7 @@ describe('ProjectsView', () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Gezel' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add crew member' }));
 
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByRole('button', { name: /Meester/ })).not.toBeInTheDocument();
@@ -680,7 +703,7 @@ describe('ProjectsView', () => {
     // The crew roster and the voorman picker both render the role-based name
     // here, so there is deliberately more than one match.
     await screen.findAllByText('developer');
-    fireEvent.click(screen.getByRole('button', { name: 'Add Gezel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add crew member' }));
     fireEvent.click(
       await screen.findByRole('button', { name: /Researcher.*Finds and checks evidence/ }),
     );

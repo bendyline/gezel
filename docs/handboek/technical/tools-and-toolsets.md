@@ -2,7 +2,7 @@
 id: tools-and-toolsets
 title: Tools and toolsets
 order: 4
-summary: Every built-in tool group and what it lets a gezel do.
+summary: Every built-in tool group and what it lets Gezel do.
 subcategory:
   id: how-gezel-works
   title: How Gezel works
@@ -11,11 +11,11 @@ subcategory:
 
 # Tools and toolsets
 
-Tools are a gezel's hands: without them, an AI model can only talk. Gezel's
+Tools are Gezel's hands: without them, an AI model can only talk. Gezel's
 tools are bundled into named **groups**, and each role carries the groups that
 fit its trade — a reviewer gets file reading, a developer gets file writing and
 code execution, a coordinator gets team management. You can add or remove groups
-per gezel, and third-party toolsets from the catalog extend the set
+for each crew member, and third-party toolsets from the catalog extend the set
 further.
 
 [Add-on toolsets and connectors](https://gezel.com/docs/toolset-catalog/) on gezel.com lists what you can add beyond the built-in groups, and [every project type](https://gezel.com/docs/project-types-index/) shows the ready-made project setups.
@@ -41,7 +41,7 @@ except Codex CLI, which reaches a hosted server only over Streamable HTTP and
 leaves SSE entries out of its sessions. A Claude CLI session gets only the
 servers Gezel gives it, never your own Claude settings or claude.ai connectors.
 
-For third-party options, the toolset browser also lists thousands of community MCP servers, marked **Community**. Review a community server before adding it to a crew; these entries are outside Gezel's first-party toolsets.
+For third-party options, the toolset browser also lists thousands of community MCP servers, marked **Community**. Review a community server before adding it; these entries are outside Gezel's first-party toolsets.
 
 A project can also declare its approved MCP toolsets as files in its working
 folder. Gezel discovers `.gezel/mcp.json`, `.vscode/mcp.json`, and the common

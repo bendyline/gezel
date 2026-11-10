@@ -215,7 +215,7 @@ export function createPiSetupManager(opts: CreatePiSetupManagerOptions): PiSetup
     } else if (state) {
       if (!endpointsEnabled) reasons.push('Connected-app model serving is turned off.');
       if (!findHarnessModel(models, state.model, state.gezelId)) {
-        reasons.push('The configured gezel or local model is no longer available.');
+        reasons.push('The configured crew member or local model is no longer available.');
       }
       if (managedRoster === null) reasons.push('The managed pi model list is missing.');
       if (!tokenRecord || !isExactHarnessToken(tokenRecord, PI_SETUP_APP_NAME)) {
@@ -344,7 +344,7 @@ export function createPiSetupManager(opts: CreatePiSetupManagerOptions): PiSetup
       if (!selected) {
         throw new PiSetupError(
           'model_not_available',
-          `The selected gezel or local model is not available for pi: ${input.model}`,
+          `The selected crew member or local model is not available for pi: ${input.model}`,
           404,
         );
       }

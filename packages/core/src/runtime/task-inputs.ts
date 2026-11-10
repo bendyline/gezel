@@ -96,13 +96,10 @@ async function enumerateInPlace(
   const skipped: TaskInputManifest['skipped'] = [];
   if (stat && !stat.isDirectory) {
     if (!inputAccepts(input.spec, path)) {
-      throw new PortableTaskInputError(
-        param,
-        `"${path}" is not a kind of file this craftbook reads.`,
-      );
+      throw new PortableTaskInputError(param, `"${path}" is not a kind of file this plan reads.`);
     }
     if (stat.size > limits.maxFileBytes) {
-      throw new PortableTaskInputError(param, `"${path}" is too large for this craftbook.`);
+      throw new PortableTaskInputError(param, `"${path}" is too large for this plan.`);
     }
     files.push({ path, name: labelFor(path, path), bytes: stat.size });
   } else {
@@ -124,16 +121,13 @@ async function enumerateInPlace(
         continue;
       }
       if (files.length >= limits.maxFiles || total + size > limits.maxBytes) {
-        throw new PortableTaskInputError(
-          param,
-          'That folder holds more than this craftbook takes.',
-        );
+        throw new PortableTaskInputError(param, 'That folder holds more than this plan takes.');
       }
       total += size;
       files.push({ path: entry.path, name: entry.name, bytes: size });
     }
     if (files.length === 0) {
-      throw new PortableTaskInputError(param, 'That folder has no files this craftbook reads.');
+      throw new PortableTaskInputError(param, 'That folder has no files this plan reads.');
     }
   }
   return {
@@ -159,7 +153,7 @@ async function enumerateSample(
   const sample = book.samples?.find((s) => s.id === sampleId && s.param === param);
   const read = sample && samples ? await samples.read(book.id, sample) : null;
   if (!sample || !read || read.length === 0) {
-    throw new PortableTaskInputError(param, 'That sample is not available for this craftbook.');
+    throw new PortableTaskInputError(param, 'That sample is not available for this plan.');
   }
   if (input.spec.kind === 'file' && read.length !== 1) {
     throw new PortableTaskInputError(param, 'This input takes exactly one file.');
@@ -222,7 +216,7 @@ export async function planPortableTaskInputs(args: {
   const declared = new Set(inputs.map((i) => i.key));
   for (const key of Object.keys(args.sources ?? {})) {
     if (!declared.has(key)) {
-      throw new PortableTaskInputError(key, `"${key}" is not an input this craftbook takes.`);
+      throw new PortableTaskInputError(key, `"${key}" is not an input this plan takes.`);
     }
   }
   if (inputs.length === 0) return null;
@@ -236,7 +230,7 @@ export async function planPortableTaskInputs(args: {
       if (input.required) {
         throw new PortableTaskInputError(
           input.key,
-          `Choose the ${input.title.toLowerCase()} this craftbook works on.`,
+          `Choose the ${input.title.toLowerCase()} this plan works on.`,
         );
       }
       continue;
@@ -300,7 +294,7 @@ export async function previewPortableTaskInput(args: {
   if (!input) {
     throw new PortableTaskInputError(
       args.param,
-      `"${args.param}" is not an input this craftbook takes.`,
+      `"${args.param}" is not an input this plan takes.`,
     );
   }
   try {

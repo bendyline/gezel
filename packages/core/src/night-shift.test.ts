@@ -222,7 +222,7 @@ describe('formatNightShiftSummary', () => {
 
   it('explains a quiet night by its reason', () => {
     expect(formatNightShiftSummary({ tasks: 0, reports: 0, quiet: { reason: 'asleep' } })).toBe(
-      "Your crew couldn't work last night: the computer was asleep or gezel wasn't running.",
+      "Gezel couldn't work last night: it wasn't running, or the computer was asleep.",
     );
     expect(formatNightShiftSummary({ tasks: 0, reports: 0, quiet: { reason: 'stopped' } })).toBe(
       'The night shift was stopped last night, so nothing ran.',
@@ -255,7 +255,7 @@ describe('formatNightShiftSummary', () => {
     const indexing = { filesIndexed: 1204, filesReviewed: 0, mediaDescribed: 312 };
     expect(
       formatNightShiftSummary({ tasks: 0, reports: 0, quiet: { reason: 'no-work' }, indexing }),
-    ).toBe('Overnight your crew read 1,204 files and described 312 photos and recordings.');
+    ).toBe('Overnight Gezel read 1,204 files and described 312 photos and recordings.');
     expect(formatNightShiftSummary({ tasks: 1, reports: 0, indexing })).toBe(
       'The night shift finished 1 task. Along the way it read 1,204 files and described 312 photos and recordings.',
     );

@@ -157,7 +157,7 @@ export function Ds4Settings({ config, onConfigChanged, health, title }: Props) {
           <section style={{ marginBottom: '2rem' }}>
             <h4>Default model</h4>
             <p className="muted small" style={{ marginTop: 0 }}>
-              Which DwarfStar model new chat sessions use when a gezel doesn't pin one.
+              Which DwarfStar model new chat sessions use when a crew member doesn't pin one.
             </p>
             <div className="new-row" style={{ marginTop: '0.5rem' }}>
               <select
@@ -301,7 +301,7 @@ function Ds4EngineLogViewer() {
               borderRadius: 4,
               maxHeight: '18rem',
               overflow: 'auto',
-              fontSize: '0.75rem',
+              fontSize: 'var(--text-2xs)',
               fontFamily:
                 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
               whiteSpace: 'pre-wrap',

@@ -71,7 +71,7 @@ export async function validatePortableDraftRecipient(
   if (input.sessionId) {
     const session = await getSession(repo, input.gezelId, input.sessionId);
     if (!session || session.projectId !== projectId)
-      throw new Error('This conversation does not belong to the selected project and gezel');
+      throw new Error('This conversation does not belong to the selected project and crew member');
     if (
       (input.taskRef && input.taskRef !== session.taskRef) ||
       (input.craftbookRef && input.craftbookRef !== session.craftbookRef)

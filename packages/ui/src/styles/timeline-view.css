@@ -94,7 +94,7 @@
 
 .timeline-bar:hover,
 .timeline-bar[aria-current="true"] {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: var(--selected-bg);
 }
 
 .timeline-bar:focus-visible {

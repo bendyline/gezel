@@ -51,7 +51,7 @@ export const PageChat = memo(function PageChat({
   const recipient =
     (!locked && picked?.scope === selectionScope && crew.find((gezel) => gezel.id === picked.id)) ||
     configured;
-  if (!recipient) return <output>The requested gezel is not in this project’s crew.</output>;
+  if (!recipient) return <output>The requested crew member is not in this project’s crew.</output>;
   return (
     <PageConversation
       key={`${projectId}:${recipient.id}`}

@@ -688,7 +688,7 @@ export function TaskDetail({
           {isSystemJob ? (
             <div
               className="task-system-owner"
-              title="This gezel manages a service-run job. It does not open a duplicate chat turn."
+              title={`${systemOwner?.name ?? 'The Librarian'} manages a service-run job. It does not open a duplicate chat turn.`}
             >
               {systemOwner && (
                 <GezelIcon

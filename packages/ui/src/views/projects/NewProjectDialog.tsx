@@ -120,7 +120,7 @@ const EMAIL_PROVIDERS: { id: EmailProviderId; label: string }[] = [
 function emailProjectCopy(address: string): { about: string; mission: string } {
   const who = address || 'this mailbox';
   return {
-    about: `Email workspace for ${who}. Messages are synced here as searchable markdown files so gezellen can triage the inbox, answer questions over your mail, and draft replies for your review.`,
+    about: `Email workspace for ${who}. Messages are synced here as searchable markdown files so Gezel can triage the inbox, answer questions over your mail, and draft replies for your review.`,
     mission: `Keep ${who} triaged and responsive: surface threads needing a reply, draft responses for approval, and never send without explicit consent.`,
   };
 }
@@ -362,7 +362,7 @@ export function NewProjectDialog({
   const titleText = isSolo ? 'New Job' : 'New Project';
   const aboutPlaceholder = isSolo
     ? "Describe the job. What do you want done? What's in scope, what's out? The Builder lands on this with no other context."
-    : "Who's this project for, what's in scope, what's out. The first thing any gezel joining the project reads.";
+    : "Who's this project for, what's in scope, what's out. The first thing anyone joining the project reads.";
   const missionPlaceholder = isSolo
     ? 'Concrete success criteria. What does the finished job look like?'
     : 'Concrete success criteria, usually a bullet list. What does "done" look like?';
@@ -1109,7 +1109,7 @@ export function NewProjectDialog({
                             {selectedType
                               ? 'Choose an existing folder to browse its files in place. Leave blank to use a new project workspace. '
                               : ''}
-                            Crew members change nothing in this folder unless you allow it in the
+                            Gezel changes nothing in this folder unless you allow it in the
                             project's settings.
                           </small>
                         </label>

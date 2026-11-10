@@ -579,7 +579,7 @@ export function ProjectConnectionsTab({
         <div className="settings-subsection">
           <h4>Pending actions</h4>
           <p className="muted small">
-            Drafted by a gezel — review, then commit (the live write). You commit; the gezel can't.
+            Drafted by Gezel — review, then commit (the live write). You commit; Gezel can't.
           </p>
           <ul className="settings-list">
             {pending.map((a) => (

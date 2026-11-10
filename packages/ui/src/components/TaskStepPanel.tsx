@@ -222,7 +222,7 @@ export function TaskStepPanel({
             key={`prompt-${phaseKey}`}
             value={phase.prompt ?? ''}
             readOnly={!runtimeCapabilities().taskStructureEditing}
-            placeholder="Step-specific guidance the team can lean on."
+            placeholder="Step-specific guidance for whoever takes this step."
             onCommit={(md) => {
               promptDraft.current = md;
               savePrompt();

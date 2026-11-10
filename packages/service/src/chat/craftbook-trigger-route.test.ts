@@ -100,7 +100,7 @@ describe('triggerPhrasePlan', () => {
       confidence: 'medium',
       reason: 'trigger-phrase',
       visible: true,
-      display: { label: 'Planned: Draft a Social Post', badges: ['Craftbook'] },
+      display: { label: 'Planned: Draft a Social Post', badges: ['Plan'] },
       craftbook: {
         id: 'draft-social-post',
         invocation: {

@@ -159,8 +159,8 @@ export function ImageModelManager({
           {installedError && <p className="error">{installedError}</p>}
           {showActivePicker && installed.length > 1 && (
             <p className="muted small">
-              The <strong>active</strong> model is what the image-generator gezel and the{' '}
-              <code>render_image</code> tool use by default. A gezel can still ask for a specific
+              The <strong>active</strong> model is what an image generator and the{' '}
+              <code>render_image</code> tool use by default. Gezel can still ask for a specific
               model per image; switching reloads the engine, which takes a moment.
             </p>
           )}

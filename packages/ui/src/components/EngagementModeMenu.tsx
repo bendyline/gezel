@@ -29,7 +29,7 @@ export function EngagementModeMenu({
   return (
     <>
       <DropdownMenu.Label className="app-engagement-heading">Crew activity</DropdownMenu.Label>
-      <p className="app-engagement-intro">How much your crew does on its own.</p>
+      <p className="app-engagement-intro">How much Gezel does on its own.</p>
       <Tooltip.Provider delayDuration={200}>
         <DropdownMenu.RadioGroup
           className={`gz-tray gz-tray--described app-engagement-tray engagement-mode-${mode}`}

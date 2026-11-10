@@ -139,7 +139,7 @@ import { unsupportedNodeMessage } from './node-version.js';
 const program = new Command();
 program
   .name('gezel')
-  .description('Gezel — assemble a team of AI companions (gezels) and put them to work.')
+  .description('Gezel — put AI to work on your files and projects, from your own computer.')
   .addHelpText(
     'after',
     '\nAny craftbook also runs by name: `gezel <craftbook> …` is `gezel do <craftbook> …`.',
@@ -829,8 +829,8 @@ program
 
 program
   .command('run [prompt...]')
-  .description('Run a prompt through a gezel and print the reply (use - to read stdin)')
-  .option('-g, --gezel <ref>', "gezel id or name (default: this project's crew lead)")
+  .description('Send a prompt to Gezel and print the reply (use - to read stdin)')
+  .option('-g, --gezel <ref>', "crew member id or name (default: this project's crew lead)")
   .addHelpText(
     'after',
     '\nExamples:\n  gezel run "Summarize this project"\n  printf \'Summarize these notes:\\nThe launch is Friday.\\n\' | gezel run -\n  gezel run - < prompt.txt\n\nA sole - reads UTF-8 stdin to EOF. Empty input is rejected.\nReplies go to stdout; diagnostics go to stderr.\nWith no model set up yet, a run in a terminal first offers to download one,\nthen runs the prompt.',
@@ -1203,14 +1203,14 @@ craftbook
     console.error(`\nStart one with \`gezel do <command> "<your request>"\`.`);
   });
 
-const agent = program.command('agent').description('Manage your gezels (your AI companions)');
+const agent = program.command('agent').description('Manage your crew (your AI companions)');
 
 agent
   .command('output-limit <id> [tokens]')
   .description(
-    "Show or set one gezel's output-token limit, including reasoning; auto clears its override",
+    "Show or set one crew member's output-token limit, including reasoning; auto clears its override",
   )
-  .option('--json', 'Output the per-gezel override as JSON')
+  .option('--json', 'Output the override as JSON')
   .action(async (id: string, tokens: string | undefined, opts: { json?: boolean }) => {
     if (
       tokens !== undefined &&
@@ -1240,7 +1240,7 @@ agent
 
 agent
   .command('list')
-  .description('List your gezels')
+  .description('List your crew')
   .action(async () => {
     const client = await connectOwned(cliGlobals());
     const res = await client.listGezels();
@@ -1251,23 +1251,23 @@ agent
 
 agent
   .command('create <name>')
-  .description('Create a new gezel')
+  .description('Add a crew member')
   .option('-d, --description <text>', 'description')
   .option('-m, --model <model>', 'model identifier')
   .action(async (name: string, opts: { description?: string; model?: string }) => {
     const client = await connectOwned(cliGlobals());
     const created = await client.createGezel({ name, ...opts });
-    console.log(`created gezel ${created.id}`);
+    console.log(`created crew member ${created.id}`);
   });
 
 agent
   .command('show <id>')
-  .description('Show one gezel')
+  .description('Show one crew member')
   .action(async (id: string) => {
     const client = await connectOwned(cliGlobals());
     const a = await client.getGezel(id).catch((err: unknown) => {
       throw isNotFound(err)
-        ? new CliError(`No gezel with id "${id}". Run \`gezel agent list\` to see your gezels.`)
+        ? new CliError(`No crew member with id "${id}". Run \`gezel agent list\` to see your crew.`)
         : err;
     });
     console.log(a.parsed.source);
@@ -2054,7 +2054,7 @@ task
 task
   .command('create <projectId> <title>')
   .description('Create a task with a single phase')
-  .option('-a, --assignee <gezelId>', 'gezel id to assign (default: user)')
+  .option('-a, --assignee <gezelId>', 'crew member id to assign (default: user)')
   .option('-p, --phase <name>', 'first phase name', 'Main')
   .option('-d, --description <text>', 'task description — what done looks like (min 40 chars)')
   .action(
@@ -2273,7 +2273,7 @@ program
   .description('Synthesize speech from text (or --file) via the configured TTS engine')
   .option('-f, --file <path>', 'read the text from a file instead of the argument')
   .option('-m, --model <id>', 'TTS model catalog id (default: the engine default)')
-  .option('--voice <id>', 'voice id (default: the model/gezel default)')
+  .option('--voice <id>', 'voice id (default: the model or crew member default)')
   .option('--speed <x>', 'speed multiplier, 0.25-4 (default: 1.0)')
   .option('-p, --project <id>', 'project to write the artifact under', 'default')
   .option('-o, --output <path>', 'write the audio here (default: ./<artifact name>)')
@@ -2826,7 +2826,7 @@ program
 
 program
   .command('backup <file>')
-  .description('Write your gezels, projects, and documents to a backup file')
+  .description('Write your crew, projects, and documents to a backup file')
   .option('--no-workspaces', 'Leave project working files out of the backup')
   .option('--dry-run', 'Show what would be included without writing the file')
   .action(async (file: string, opts: { workspaces?: boolean; dryRun?: boolean }) => {
@@ -2852,7 +2852,7 @@ program
 
 program
   .command('restore <file>')
-  .description('Restore gezels, projects, and documents from a backup file')
+  .description('Restore your crew, projects, and documents from a backup file')
   .option('--list', 'Show what the backup holds without restoring anything')
   .option(
     '--only <item...>',
@@ -2861,7 +2861,7 @@ program
   .option('--replace', 'Overwrite items that already exist here')
   .option(
     '--settings',
-    'Also restore which gezels hold roles such as the meester (never providers, folders or security)',
+    'Also restore which crew members hold roles such as the Meester (never providers, folders or security)',
   )
   .action(
     async (

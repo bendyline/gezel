@@ -1296,7 +1296,7 @@ export class Store {
     const project = await this.createProject(
       {
         name: 'Shared Library',
-        description: 'Shared knowledge every gezel can reach, from any project.',
+        description: 'Shared knowledge Gezel can reach from any project.',
         about: SHARED_PROJECT_ABOUT_MD,
         missionObjectives: SHARED_PROJECT_MISSION_MD,
         workingDir: documentsRoot,
@@ -1885,7 +1885,7 @@ export class Store {
     if (!existing) throw new Error(`agent ${id} not found`);
     if (existing.storageScope === 'machine-shared') {
       throw new Error(
-        'Machine-shared gezellen cannot be removed from an individual account. Shared removal is not available yet.',
+        'Machine-shared crew members cannot be removed from an individual account. Shared removal is not available yet.',
       );
     }
 
@@ -1923,7 +1923,7 @@ export class Store {
     await this.history?.log({
       kind: 'gezel.deleted',
       gezelId: id,
-      summary: `Deleted gezel "${existing.name}"`,
+      summary: `Removed ${existing.name} from the crew`,
       details: { id, name: existing.name },
     });
 
@@ -2703,7 +2703,7 @@ export class Store {
     await this.history?.log({
       kind: 'gezel.created',
       gezelId: encodedId,
-      summary: `Created project gezel ${detail.name}${detail.role ? ` · ${detail.role}` : ''}`,
+      summary: `Created ${detail.name}${detail.role ? ` · ${detail.role}` : ''} for this project`,
       details: { projectId, localId, canonical: input.canonical === true },
     });
     return detail;
@@ -2733,7 +2733,7 @@ export class Store {
   ): Promise<GezelDetail> {
     if (localId === PROJECT_GEZEL_LOCAL_ID) {
       throw new Error(
-        'the @project gezel prompt is the workspace instruction file (AGENTS.md/CLAUDE.md); edit that file instead',
+        'the @project prompt is the workspace instruction file (AGENTS.md/CLAUDE.md); edit that file instead',
       );
     }
     const gate = await this.assertWorkspaceWritable(projectId);

@@ -277,7 +277,7 @@ export class PortableStore {
       const gezel = await gezels.requireGezel(repo, id);
       const config = await projects.readConfig(repo);
       if (config.meesterGezelId === id)
-        throw new Error('Choose another Meester in Settings before removing this gezel');
+        throw new Error(`Choose another Meester in Settings before removing ${gezel.name}`);
       const writes = new Map<string, Uint8Array>();
       for (const project of await projects.listProjects(repo))
         if (project.voormanGezelId === id || project.gezelIds?.includes(id)) {

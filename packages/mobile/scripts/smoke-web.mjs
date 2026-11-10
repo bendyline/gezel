@@ -209,6 +209,8 @@ try {
 
   await page.goto(url);
   const nav = await navigation();
+  // Tasks sits in the Workshop group, which starts closed.
+  await nav.getByRole('button', { name: 'Workshop', exact: true }).click();
   for (const name of ['Projects', 'Documents', 'Crew', 'Tasks', 'Settings']) {
     assert.equal(await nav.getByRole('button', { name, exact: true }).isEnabled(), true);
   }

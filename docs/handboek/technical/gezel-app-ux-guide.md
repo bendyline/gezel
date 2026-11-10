@@ -69,7 +69,7 @@ Most apps fall into one of five shapes. Pick the shape first; it decides the str
 
 **C5. Search only long lists.** Show a search box from about eight items, inside the list's section, with a placeholder that says what to type ("Name or role"). Do not count the empty-state row as an item.
 
-**C6. Everything the companion can change has a place on the page.** If the crew can edit sessions, past visits, or a voice guide, the person can see them somewhere.
+**C6. Everything the companion can change has a place on the page.** If it can edit sessions, past visits, or a voice guide, the person can see them somewhere.
 
 ## D. Color and type
 

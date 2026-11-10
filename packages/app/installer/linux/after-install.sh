@@ -168,6 +168,33 @@ if password_status=$(LC_ALL=C passwd -S "$GEZEL_USER" 2>/dev/null); then
   esac
 fi
 
+# The engine broker runs models on AMD GPUs through /dev/kfd and the DRM render
+# nodes. Debian, Ubuntu and Fedora give those to the `render` group (older
+# releases to `video`), mode 0660, and a system account is in neither, so the
+# broker could never use ROCm (1.26313.105 audit). Name exactly the groups that
+# own those nodes, plus `render` where it exists for a GPU added later. `video`
+# joins only where it owns a node: it also opens every webcam (/dev/video*).
+gpu_device_groups() (
+  groups=""
+  if getent group render >/dev/null 2>&1; then groups="render"; fi
+  for node in /dev/kfd /dev/dri/renderD*; do
+    [ -e "$node" ] || continue
+    owner=$(stat -c %G "$node" 2>/dev/null || true)
+    case "$owner" in ''|root|UNKNOWN) continue ;; esac
+    case " $groups " in *" $owner "*) ;; *) groups="$groups $owner" ;; esac
+  done
+  printf '%s\n' $groups
+)
+
+for gpu_group in $(gpu_device_groups); do
+  if id -nG "$GEZEL_USER" 2>/dev/null | tr ' ' '\n' | grep -qx "$gpu_group"; then continue; fi
+  if usermod -a -G "$gpu_group" "$GEZEL_USER"; then
+    echo "[gezel after-install] added $GEZEL_USER to the $gpu_group group for GPU access"
+  else
+    echo "[gezel after-install] WARNING: could not add $GEZEL_USER to the $gpu_group group; the shared engine will not use AMD GPUs through ROCm" >&2
+  fi
+done
+
 # Stop the old daemon before migrating modes or replacing its executable tree.
 # Otherwise it can recreate a legacy-readable file while the upgrade runs.
 if command -v systemctl >/dev/null 2>&1; then

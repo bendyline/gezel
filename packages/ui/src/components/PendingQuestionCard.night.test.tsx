@@ -41,6 +41,9 @@ vi.mock('../api.js', () => ({
 
 const { PendingQuestionCard } = await import('./PendingQuestionCard.js');
 const { api } = await import('../api.js');
+const { clearPendingSettingsSection, peekPendingSettingsSection } = await import(
+  '../settings-nav.js'
+);
 
 function nightCard(over: Partial<Question> = {}): Question {
   return {
@@ -185,10 +188,44 @@ describe('night-shift review card', () => {
     );
 
     await screen.findByText('The night shift ran, but nothing came of it.');
-    expect(screen.getByText("Your crew's week")).toBeInTheDocument();
+    expect(screen.getByText("Gezel's week")).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Add a folder' }));
     expect(handler).toHaveBeenCalled();
     window.removeEventListener('gezel:add-folder', handler);
+  });
+
+  // The quota reserve has its own Settings page; the link used to open
+  // Settings on General and leave the person to find it.
+  it('opens the Night shift settings page from a night held for quota', async () => {
+    const base = nightCard();
+    const navigations: unknown[] = [];
+    const onNavigate = (e: Event) => navigations.push((e as CustomEvent).detail);
+    window.addEventListener('gezel:navigate', onNavigate);
+    try {
+      render(
+        <PendingQuestionCard
+          question={nightCard({
+            intent: {
+              ...(base.intent as object),
+              windowKey: '2026-08-24',
+              tasksCompleted: 0,
+              reports: [],
+              quiet: { reason: 'quota-held' },
+            } as unknown as Question['intent'],
+          })}
+        />,
+      );
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Night Shift settings' }));
+
+      await waitFor(() =>
+        expect(navigations).toContainEqual({ view: 'settings', section: 'nightShift' }),
+      );
+      expect(peekPendingSettingsSection()).toBe('nightShift');
+    } finally {
+      window.removeEventListener('gezel:navigate', onNavigate);
+      clearPendingSettingsSection();
+    }
   });
 });
 
@@ -245,7 +282,7 @@ describe('night-shift review card for a night spent asleep', () => {
     fireEvent.click(await screen.findByRole('button', { name: KEEP_RUNNING }));
 
     await screen.findByText(
-      'Gezel now starts when you sign in and keeps the computer awake while your crew works.',
+      'Gezel now starts when you sign in and keeps the computer awake while it works.',
     );
     expect(set).toHaveBeenCalledWith(true);
     expect(vi.mocked(api.updateConfig)).toHaveBeenCalledWith({
@@ -258,7 +295,7 @@ describe('night-shift review card for a night spent asleep', () => {
     withLoginItem({ supported: false, enabled: false });
     render(<PendingQuestionCard question={asleepCard()} />);
 
-    await screen.findByText(/the computer was asleep or gezel wasn't running/);
+    await screen.findByText(/it wasn't running, or the computer was asleep/);
     await settle();
     expect(screen.queryByRole('button', { name: KEEP_RUNNING })).toBeNull();
   });

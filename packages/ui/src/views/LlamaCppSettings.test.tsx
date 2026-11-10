@@ -445,6 +445,27 @@ describe('LlamaCppSettings', () => {
       expect(screen.queryByText(/Restart the app to apply/)).not.toBeInTheDocument();
     });
 
+    // A Linux package install's shared engine runs as `gezel`; telling the
+    // person to add "your account" sent them to the wrong one.
+    it('names the account that cannot open the AMD compute device', async () => {
+      vi.mocked(api.getLlamaCppBackendHealth).mockResolvedValue({
+        running: 'vulkan',
+        rocmBlocker: {
+          kind: 'no-device-access',
+          detail: '/dev/kfd is not readable and writable by the "gezel" account',
+          account: 'gezel',
+        },
+      });
+      render(
+        <LlamaCppSettings config={BASE_CONFIG} onConfigChanged={vi.fn()} health={BASE_HEALTH} />,
+      );
+
+      await openAdvanced();
+      expect(
+        await screen.findByText(/the "gezel" account cannot open the AMD compute device/),
+      ).toBeVisible();
+    });
+
     it('says a GPU build is running without its GPU', async () => {
       vi.mocked(api.getLlamaCppBackendHealth).mockResolvedValue({
         running: 'cuda',

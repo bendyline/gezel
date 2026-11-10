@@ -30,8 +30,8 @@ export function DiffpackConfirmApply({
         <>
           <p>
             {paths.length === 1
-              ? 'This file has been edited since the gezel drafted its change:'
-              : 'These files have been edited since the gezel drafted its change:'}
+              ? 'This file has been edited since the change was drafted:'
+              : 'These files have been edited since the change was drafted:'}
           </p>
           <ul>
             {paths.map((path) => (

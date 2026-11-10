@@ -65,11 +65,11 @@ export function CodexSetupCard({
       emptyModelsNote="No crew members or inference models compatible with the Codex tool loop are available yet."
       intro={
         <>
-          Codex keeps its coding tools, sandbox, approvals, and conversation loop while a gezel
-          supplies the character, model, and tuning. Your whole eligible crew is offered to Codex —
-          the gezel you pick here is the one it starts with, and you can switch to any other from
-          Codex's own model picker. Raw local models remain available when you want inference
-          without a gezel persona.
+          Codex keeps its coding tools, sandbox, approvals, and conversation loop while a crew
+          member supplies the character, model, and tuning. Your whole eligible crew is offered to
+          Codex — the one you pick here is the one it starts with, and you can switch to any other
+          from Codex's own model picker. Raw local models remain available when you want inference
+          without a persona.
         </>
       }
       {...(status
@@ -116,7 +116,7 @@ export function CodexSetupCard({
           }
         : {})}
       modelRow={{
-        label: 'Default gezel',
+        label: 'Default crew member',
         value: card.model,
         onChange: card.setModel,
         disabled: card.selectionDisabled,
@@ -167,11 +167,11 @@ export function CodexSetupCard({
             profile for <strong>{selectedOption?.label ?? card.model}</strong>.{' '}
             {selectedOption && isGezelOption(selectedOption) ? (
               <>
-                This gezel&apos;s character, {selectedOption.modelLabel ?? 'model'}, and tuning will
-                guide Codex.{' '}
+                Their character, {selectedOption.modelLabel ?? 'model'}, and tuning will guide
+                Codex.{' '}
               </>
             ) : (
-              <>Codex will use it as a raw inference model without a gezel persona. </>
+              <>Codex will use it as a raw inference model without a persona. </>
             )}
             The profile includes the local connection and app-scoped credential
             {status?.profilePath ? (

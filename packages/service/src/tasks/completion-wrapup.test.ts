@@ -208,10 +208,18 @@ describe('the deliverable', () => {
   it('names the deliverable by what it is and leaves its path to the card', () => {
     const text = composeTaskWrapUp(task(), made, null, deck);
     expect(text.split('\n')[0]).toBe(
-      'Your PowerPoint deck for **Weekly posts and catering quote** is ready.',
+      'Your PowerPoint deck is ready: **Weekly posts and catering quote**.',
     );
     expect(text).not.toMatch(/deck\.pptx|outline\.md|Along the way|default\/2/);
     expect(text).toContain('Open it to review');
+  });
+
+  // A title cut short ends in an ellipsis; the sentence read "holiday….".
+  it('adds no period after a name that was cut short', () => {
+    const long = task({ title: 'One-page catering proposal for the Harbor Books holiday…' });
+    expect(composeTaskWrapUp(long, made, null, deck).split('\n')[0]).toBe(
+      'Your PowerPoint deck is ready: **One-page catering proposal for the Harbor Books holiday…**',
+    );
   });
 
   it("never names the task by the craftbook's own name", () => {

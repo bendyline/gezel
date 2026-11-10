@@ -337,8 +337,8 @@ export const STORAGE_CATEGORIES: StorageCategoryDef[] = [
   {
     id: 'gezels',
     class: 'user-content',
-    label: 'Gezels',
-    description: 'Your gezellen, their instructions, chat history, and memories.',
+    label: 'Crew',
+    description: 'Your crew, their instructions, chat history, and memories.',
     deletable: true,
     inBackup: true,
     itemGranular: true,

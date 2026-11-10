@@ -90,11 +90,11 @@ export function PiSetupCard({
       emptyModelsNote="No crew members or inference models compatible with the pi tool loop are available yet."
       intro={
         <>
-          pi keeps its own tools, permissions, and conversation loop while a gezel supplies the
-          character, model, and tuning. Gezel writes an extension of its own and hands you a command
-          that loads it for that run. You can also let Gezel add that same file to pi, so the gezel
-          provider is simply there in every session. Either way, your own pi settings, sessions, and
-          models are never edited.
+          pi keeps its own tools, permissions, and conversation loop while a crew member supplies
+          the character, model, and tuning. Gezel writes an extension of its own and hands you a
+          command that loads it for that run. You can also let Gezel add that same file to pi, so
+          Gezel's provider is simply there in every session. Either way, your own pi settings,
+          sessions, and models are never edited.
         </>
       }
       repairExplainer="Repair writes a fresh model list for this Gezel and keeps a copy of the existing one next to it."
@@ -133,7 +133,7 @@ export function PiSetupCard({
           }
         : {})}
       modelRow={{
-        label: 'Default gezel',
+        label: 'Default crew member',
         value: card.model,
         onChange: card.setModel,
         disabled: card.selectionDisabled,
@@ -231,11 +231,10 @@ export function PiSetupCard({
             extension and model list for <strong>{selectedOption?.label ?? card.model}</strong>.{' '}
             {selectedOption && isGezelOption(selectedOption) ? (
               <>
-                This gezel&apos;s character, {selectedOption.modelLabel ?? 'model'}, and tuning will
-                guide pi.{' '}
+                Their character, {selectedOption.modelLabel ?? 'model'}, and tuning will guide pi.{' '}
               </>
             ) : (
-              <>pi will use it as a raw inference model without a gezel persona. </>
+              <>pi will use it as a raw inference model without a persona. </>
             )}
             Both files live in Gezel&apos;s own folder
             {status?.extensionPath ? (
@@ -317,8 +316,9 @@ export function PiSetupCard({
             , so every pi session on this computer offers the <strong>gezel</strong> provider
             without the command above. It holds no password — it reads Gezel's own model list when
             pi starts, and does nothing at all when Gezel is not running. It does not change which
-            model pi starts with; pick a gezel from pi's own model picker. Your own pi settings,
-            sessions, and models stay untouched, and <code>pi -ne</code> always starts without it.
+            model pi starts with; pick a crew member from pi's own model picker. Your own pi
+            settings, sessions, and models stay untouched, and <code>pi -ne</code> always starts
+            without it.
             {status?.extension.agentDirSource === 'default' ? (
               <>
                 {' '}

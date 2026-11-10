@@ -204,6 +204,27 @@ export function latestWrapUpKey(
   return null;
 }
 
+/** The timestamp of the newest message in a page, or '' for an empty one. */
+export function newestMessageAt(messages: readonly Pick<TimelineMessage, 'at'>[]): string {
+  let newest = '';
+  for (const m of messages) if (m.at > newest) newest = m.at;
+  return newest;
+}
+
+/**
+ * Whether a task wrap-up was already in the thread when it first loaded.
+ * `loadedThroughAt` is the newest message that load returned (null until it
+ * answers). A wrap-up after it landed while the person was watching, and one
+ * on an older page was there all along.
+ */
+export function hadWrapUpAtLoad(
+  messages: readonly Pick<TimelineMessage, 'at' | 'synthetic'>[],
+  loadedThroughAt: string | null,
+): boolean {
+  if (!loadedThroughAt) return false;
+  return messages.some((m) => m.synthetic === 'task-wrapup' && m.at <= loadedThroughAt);
+}
+
 /** Opens a referenced file in `projectId`'s drawer, or nothing when the timeline cannot. */
 export function projectFileOpener(
   projectId: string,

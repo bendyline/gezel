@@ -11,7 +11,7 @@ export function fallbackTitle(selection: RecentTab | null): string {
     case 'project':
       return 'Project';
     case 'gezel':
-      return 'Gezel';
+      return 'Crew member';
     case 'document':
       return selection.path.split('/').filter(Boolean).pop() ?? 'Document';
     case 'task': {

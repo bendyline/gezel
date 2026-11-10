@@ -160,7 +160,7 @@ function handoffHoldNote(state: TaskRunnerState): string | undefined {
     return 'AI engagement is off — turn it back on in Settings to start these.';
   }
   if (state.holdReason === 'engagement-paused') {
-    return 'Activity is set to reactive — crew members answer you, but nothing starts on its own.';
+    return 'Activity is set to reactive — Gezel answers you, but nothing starts on its own.';
   }
   if (state.holdReason === 'provider-busy') return 'Waiting for a free slot.';
   return undefined;
@@ -489,6 +489,7 @@ function QueueItemIdentity({
   job,
   phase,
   extra,
+  workFirst,
 }: {
   gezelId: string | undefined;
   actorLabel: string | undefined;
@@ -501,12 +502,38 @@ function QueueItemIdentity({
   job?: string | undefined;
   phase?: string | undefined;
   extra?: string | undefined;
+  workFirst?: boolean | undefined;
 }) {
   const actor = resolveQueueActor(gezelId, actorLabel, gezels);
   const role = queueActorRole(actor);
   const project = queueProjectLabel(projectId, projects);
   const visibleJob = queueJobContext(job, projectId, project);
   const heading = title?.trim() && title.trim() !== visibleJob ? title.trim() : undefined;
+  if (workFirst) {
+    // Activity's row: the work leads and who is on it follows, like every
+    // other row in the panel. The job label (a task ref and a step id) is
+    // shown only when nothing better names the work.
+    const who = actor.gezel ? displayName(actor.gezel, boringMode) : actor.label;
+    const work = heading ?? visibleJob;
+    const quiet = [work ? who : undefined, project, phase, extra].filter((value): value is string =>
+      Boolean(value),
+    );
+    return (
+      <span
+        className="queue-meter-panel-gezel"
+        title={queueActorTooltip(actor, projectId, projects, undefined, job)}
+      >
+        <span className="queue-meter-panel-gezel-name">{work ?? who}</span>
+        {quiet.length > 0 && (
+          <span className="queue-meter-panel-context muted activity-row-sub">
+            {quiet.map((part) => (
+              <span key={part}>{part}</span>
+            ))}
+          </span>
+        )}
+      </span>
+    );
+  }
   const context = [heading, role, project, visibleJob, phase, extra].filter(
     (value): value is string => Boolean(value),
   );
@@ -897,7 +924,7 @@ function providerQueueSummary(state: ProviderQueueState) {
   return { queued, deferred, readyQueued, inFlightLabel, laneNote };
 }
 
-function useStopActiveChat(onItemChanged: () => void) {
+export function useStopActiveChat(onItemChanged: () => void) {
   const [stopping, setStopping] = useState<Set<string>>(() => new Set());
   const release = useCallback((sessionId: string) => {
     setStopping((current) => {
@@ -937,6 +964,8 @@ interface QueueRowShared {
   boringMode: boolean;
   onClose: () => void;
   rowContext?: QueueRowContext | undefined;
+  /** Lead each row with its work instead of the gezel's name (Activity). */
+  workFirst?: boolean | undefined;
 }
 
 function QueuePreparingRow({
@@ -948,6 +977,7 @@ function QueuePreparingRow({
   boringMode,
   onClose,
   rowContext,
+  workFirst,
 }: QueueRowShared & {
   sessionId: string;
   turn: LiveTurnState;
@@ -977,6 +1007,7 @@ function QueuePreparingRow({
         gezels={gezels}
         projects={projects}
         boringMode={boringMode}
+        workFirst={workFirst}
         title={context?.title}
         phase={queuePhaseLabel(turn)}
       />
@@ -1019,6 +1050,7 @@ function QueueActiveRow({
   boringMode,
   onClose,
   rowContext,
+  workFirst,
 }: QueueRowShared & {
   provider: QueueProviderName;
   row: ProviderQueueState['active'][number];
@@ -1072,6 +1104,7 @@ function QueueActiveRow({
         gezels={gezels}
         projects={projects}
         boringMode={boringMode}
+        workFirst={workFirst}
         title={context?.title}
         job={row.job}
         phase={queuePhaseLabel(phase)}
@@ -1124,6 +1157,7 @@ function QueuePendingRow({
   boringMode,
   onClose,
   rowContext,
+  workFirst,
 }: QueueRowShared & {
   provider: QueueProviderName;
   row: ProviderQueueState['pending'][number];
@@ -1167,9 +1201,16 @@ function QueuePendingRow({
         gezels={gezels}
         projects={projects}
         boringMode={boringMode}
+        workFirst={workFirst}
         title={context?.title}
         job={row.job}
-        extra={row.ambient && deferred > 0 ? 'deferred until idle' : undefined}
+        extra={
+          row.ambient && deferred > 0
+            ? workFirst
+              ? 'waits until nothing else is running'
+              : 'deferred until idle'
+            : undefined
+        }
       />
       <span
         className="queue-meter-panel-time muted"
@@ -1463,10 +1504,16 @@ export function selectQueueRows(
   part: QueueRowsPart,
   preparingTurns: Array<[string, LiveTurnState]>,
   projectId?: string,
+  /** Sessions another row already stands for (a request's tracker). */
+  represented?: ReadonlySet<string>,
 ): QueueRowSelection {
-  const inScope = (row: { projectId?: string | undefined }) =>
-    !projectId || row.projectId === projectId;
-  const preparing = part === 'running' ? preparingTurns.filter(([, turn]) => inScope(turn)) : [];
+  const inScope = (row: { projectId?: string | undefined; sessionId?: string | undefined }) =>
+    (!projectId || row.projectId === projectId) &&
+    !(row.sessionId && represented?.has(row.sessionId));
+  const preparing =
+    part === 'running'
+      ? preparingTurns.filter(([sessionId, turn]) => inScope(turn) && !represented?.has(sessionId))
+      : [];
   const providers = PROVIDER_ORDER.flatMap((name) => {
     const state = status.providers[name];
     if (!state) return [];
@@ -1516,10 +1563,20 @@ export function QueueSessionRows({
 }) {
   const { stopping, stop } = useStopActiveChat(onItemChanged);
   if (!selection.count) return null;
-  const shared: QueueRowShared = { gezels, projects, boringMode, onClose, rowContext };
+  const shared: QueueRowShared = {
+    gezels,
+    projects,
+    boringMode,
+    onClose,
+    rowContext,
+    workFirst: true,
+  };
+  // One engine needs no heading: the title bar's engine key names it.
+  const engines = selection.providers.length + (selection.preparing.length > 0 ? 1 : 0);
   return (
     <div
       className="queue-meter-panel activity-queue"
+      data-engines={engines > 1 ? 'many' : 'one'}
       aria-label={selection.part === 'running' ? 'Crew working now' : 'Crew waiting to work'}
     >
       {selection.preparing.length > 0 && onDeviceProvider && (

@@ -313,7 +313,7 @@ export class ReportActionManager {
     const rationale = (action.reason ?? manifest.description ?? '').trim();
     const task = await this.deps.tasks.create(projectId, {
       title: action.title.slice(0, 200),
-      description: `Run the "${manifest.name}" craftbook, recommended by a report action. ${rationale}`,
+      description: `Run the "${manifest.name}" plan, recommended by a report action. ${rationale}`,
       ...(gezel ? { assignee: { kind: 'gezel' as const, gezelId: gezel.gezelId } } : {}),
       craftbookId: action.craftbookId,
       ...(Object.keys(params).length > 0 ? { craftbookParams: params } : {}),

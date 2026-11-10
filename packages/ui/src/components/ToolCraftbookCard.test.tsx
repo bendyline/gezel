@@ -61,7 +61,7 @@ describe('ToolCraftbookCard — craftbook start', () => {
     const onFocusTask = vi.fn();
     render(<ToolCraftbookCard card={startCard()} onFocusTask={onFocusTask} />);
 
-    expect(screen.getByText('Craftbook started')).toBeInTheDocument();
+    expect(screen.getByText('Plan started')).toBeInTheDocument();
     expect(screen.getByText('PowerPoint from Content is underway — 2 steps.')).toBeInTheDocument();
     expect(screen.getByText('Acquire and verify sources')).toBeInTheDocument();
     expect(screen.getByText('Lock the slide outline')).toBeInTheDocument();
@@ -93,7 +93,7 @@ describe('ToolCraftbookCard — craftbook start', () => {
 
   it('marks an idempotent re-invocation', () => {
     render(<ToolCraftbookCard card={startCard({ reused: true })} />);
-    expect(screen.getByText('Craftbook already running')).toBeInTheDocument();
+    expect(screen.getByText('Plan already running')).toBeInTheDocument();
   });
 
   it('nudges toward External services only while the policy disables it, and deep-links to Settings', async () => {

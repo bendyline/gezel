@@ -1565,7 +1565,7 @@ export function buildToolCapWarning(opts: {
   dropped: readonly string[];
 }): string {
   const tier = opts.tier ?? 'unknown';
-  const role = opts.role?.trim() || 'this gezel';
+  const role = opts.role?.trim() || 'chat';
   const visibleDropped = opts.dropped.slice(0, 8);
   const hiddenCount = opts.dropped.length - visibleDropped.length;
   const sample =
@@ -1574,7 +1574,7 @@ export function buildToolCapWarning(opts: {
           hiddenCount > 0 ? `, and ${hiddenCount} more` : ''
         }.`
       : '';
-  return `Tool cap trimmed this ${tier}-tier ${role} session from ${opts.before} to ${opts.after} tools.${sample} If the gezel seems confused or unable to use an expected tool, use a larger model or reduce the installed toolsets.`;
+  return `Tool cap trimmed this ${tier}-tier ${role} session from ${opts.before} to ${opts.after} tools.${sample} If Gezel seems confused or unable to use an expected tool, use a larger model or reduce the installed toolsets.`;
 }
 
 function shouldConstrainToProjectOrchestration(opts: {

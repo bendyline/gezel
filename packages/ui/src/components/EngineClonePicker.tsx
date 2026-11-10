@@ -55,7 +55,7 @@ export function EngineClonePicker({ provider, modelId, config, onConfigChanged }
 
   if (!modelId) {
     return (
-      <div style={{ fontSize: 12, color: 'var(--gz-color-muted, #888)' }}>
+      <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--gz-color-muted, #888)' }}>
         Pick a default model to enable clone control.
       </div>
     );
@@ -68,7 +68,7 @@ export function EngineClonePicker({ provider, modelId, config, onConfigChanged }
         alignItems: 'center',
         gap: '0.5rem',
         padding: '0.5rem 0',
-        fontSize: 13,
+        fontSize: 'var(--text-xs)',
       }}
     >
       <span style={{ minWidth: 220 }}>
@@ -93,8 +93,10 @@ export function EngineClonePicker({ provider, modelId, config, onConfigChanged }
       >
         +
       </button>
-      <span style={{ fontSize: 12, color: 'var(--gz-color-muted, #888)' }}>(max {max})</span>
-      {busy === 'saved' ? <span style={{ fontSize: 12 }}>saved ✓</span> : null}
+      <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--gz-color-muted, #888)' }}>
+        (max {max})
+      </span>
+      {busy === 'saved' ? <span style={{ fontSize: 'var(--text-2xs)' }}>saved ✓</span> : null}
     </div>
   );
 }

@@ -18,18 +18,18 @@ export const ENGAGEMENT_MODES: {
   {
     mode: 'reactive',
     label: 'Chat only',
-    description: 'Your crew answers when you ask. Tasks and schedules wait until you switch back.',
+    description: 'Gezel answers when you ask. Tasks and schedules wait until you switch back.',
   },
   {
     mode: 'scheduled',
     label: 'Tasks + chat',
     description:
-      'Your crew works through tasks and schedules and answers you in chat. Nobody starts anything unasked.',
+      'Gezel works through tasks and schedules and answers you in chat. Nothing starts unasked.',
   },
   {
     mode: 'proactive',
     label: 'Proactive',
     description:
-      'Your crew also takes initiative: members start work, check in on projects, and hand work to each other.',
+      'Gezel also takes initiative: it starts work and checks in on projects without being asked.',
   },
 ];

@@ -2602,7 +2602,7 @@ body.chat-rail-resizing webview {
   gap: 0.22rem 0.45rem;
   align-items: baseline;
   min-width: 0;
-  font-size: var(--text-xs, 0.78rem);
+  font-size: var(--text-xs);
 }
 .msg-context-compaction-copy strong {
   color: var(--text);
@@ -2610,7 +2610,7 @@ body.chat-rail-resizing webview {
 }
 .msg-context-compaction-details {
   margin: 0.45rem 0 0 1.16rem;
-  font-size: var(--text-xs, 0.78rem);
+  font-size: var(--text-xs);
 }
 .msg-context-compaction-details summary {
   width: fit-content;
@@ -3405,7 +3405,7 @@ button.timeline-session-divider-child::before {
 }
 
 .memories-tree-leaf-active {
-  background: rgba(176, 114, 76, 0.16);
+  background: var(--selected-bg);
   border-color: rgba(176, 114, 76, 0.3);
   color: var(--text);
 }
@@ -3947,7 +3947,7 @@ button.timeline-session-divider-child::before {
 
 .craftbook-param-form-title {
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: var(--text-md);
 }
 
 /* The command exactly as it'll be staged into the terminal. */
@@ -4018,68 +4018,25 @@ button.timeline-session-divider-child::before {
 }
 
 .chat-rail-ref:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--hover-bg);
 }
 
 .chat-rail-ref-active {
-  background: rgba(79, 125, 255, 0.15);
+  background: var(--selected-bg);
   border-color: var(--accent, #b0724c);
 }
 
+/* What a reference is (artifact, workspace, document) is one neutral badge
+   from the badge family: no hue per kind. The three used to be green, amber
+   and blue, each re-inked per theme. */
 .chat-rail-ref-kind {
-  font-size: 0.65rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.05rem 0.4rem;
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--muted);
+  font-size: var(--text-2xs);
+  font-weight: 500;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-muted);
   flex-shrink: 0;
-}
-
-.chat-rail-ref-kind-artifact {
-  background: rgba(106, 211, 143, 0.15);
-  color: #9cd9b2;
-}
-
-/* The mint ink above belongs to the dark rail. On parchment it falls below
-   readable small-text contrast, so light mode keeps the green identity but
-   uses the foundation palette's forest ink against the semantic success fill. */
-[data-theme="light"] .chat-rail-ref-kind-artifact {
-  background: var(--success-bg);
-  color: var(--gezel-sage-forest);
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .chat-rail-ref-kind-artifact {
-    background: var(--success-bg);
-    color: var(--gezel-sage-forest);
-  }
-}
-
-.chat-rail-ref-kind-document {
-  background: rgba(79, 125, 255, 0.15);
-  color: #a8bcff;
-}
-
-.chat-rail-ref-kind-workspace {
-  background: rgba(255, 199, 100, 0.12);
-  color: #d7b86b;
-}
-
-/* The amber above is tuned for the dark panel; on parchment it lands around
-   1.9:1 against the reference header and reads as disabled text. Re-ink to a
-   dark ochre (~5.4:1) and give the chip a fill that survives a light surface. */
-[data-theme="light"] .chat-rail-ref-kind-workspace {
-  background: rgba(176, 114, 40, 0.18);
-  color: #7a5410;
-}
-
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .chat-rail-ref-kind-workspace {
-    background: rgba(176, 114, 40, 0.18);
-    color: #7a5410;
-  }
 }
 
 .chat-rail-ref-path {
@@ -4134,7 +4091,7 @@ button.timeline-session-divider-child::before {
   display: inline-flex;
   align-items: center;
   gap: 0.2rem;
-  font-size: 0.62rem;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 0.05rem 0.4rem;
@@ -4170,9 +4127,9 @@ button.timeline-session-divider-child::before {
 }
 
 .chat-rail-task-status-active {
-  background: color-mix(in srgb, var(--success) 18%, transparent);
-  color: color-mix(in srgb, var(--success) 24%, var(--text));
-  border: 1px solid color-mix(in srgb, var(--success) 42%, transparent);
+  background: color-mix(in srgb, var(--status-working) 16%, transparent);
+  color: color-mix(in srgb, var(--status-working) 45%, var(--text));
+  border: 1px solid color-mix(in srgb, var(--status-working) 40%, transparent);
   font-weight: 600;
 }
 
@@ -4180,15 +4137,15 @@ button.timeline-session-divider-child::before {
    chip reads in both themes. The fixed pale blue and gold were tuned for a
    dark rail and all but vanished on the light one. */
 .chat-rail-task-status-draft {
-  background: color-mix(in srgb, var(--warning) 14%, transparent);
-  color: color-mix(in srgb, var(--warning) 45%, var(--text));
-  border-color: color-mix(in srgb, var(--warning) 32%, transparent);
+  background: color-mix(in srgb, var(--status-attention) 18%, transparent);
+  color: color-mix(in srgb, var(--status-attention) 40%, var(--text));
+  border-color: color-mix(in srgb, var(--status-attention) 34%, transparent);
 }
 
 .chat-rail-task-status-complete {
-  background: color-mix(in srgb, var(--success) 14%, transparent);
-  color: color-mix(in srgb, var(--success) 40%, var(--text));
-  border-color: color-mix(in srgb, var(--success) 32%, transparent);
+  background: color-mix(in srgb, var(--status-ready) 18%, transparent);
+  color: color-mix(in srgb, var(--status-ready) 40%, var(--text));
+  border-color: color-mix(in srgb, var(--status-ready) 34%, transparent);
 }
 
 .chat-rail-task-status-paused,
@@ -4222,7 +4179,7 @@ button.timeline-session-divider-child::before {
 
 .chat-rail-task-title {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: var(--text-md);
   line-height: 1.3;
 }
 

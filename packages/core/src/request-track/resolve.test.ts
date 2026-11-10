@@ -98,6 +98,48 @@ describe('resolveRequestTracks on the bakery', () => {
     });
   });
 
+  // The runtime's pause card is filed as a question, and the tracker used to
+  // say "has a question for you" over work that had simply stopped.
+  it('says the work stopped, not that it has a question, when the runtime paused it', () => {
+    const paused = { ...invoices, status: 'paused' } as Task;
+    const card = {
+      id: 'q2',
+      projectId: 'bakery',
+      gezelId: 'mees',
+      sessionId: '',
+      taskRef: 'bakery/1',
+      prompt: '"Invoices" stopped.',
+      createdAt: T(27),
+      intent: { kind: 'task-paused', taskRef: 'bakery/1', stepId: 'draft', reason: 'step_stalled' },
+    } as Question;
+    const work = resolveRequestTracks(
+      base({
+        tasks: [paused, invoiceShard, priceList],
+        inflight: [closingTurn],
+        questions: [card],
+      }),
+    )[1];
+    expect(work).toMatchObject({
+      state: 'needs-you',
+      line: { doing: 'stopped before this was finished' },
+      paused: { taskRef: 'bakery/1', reason: 'step_stalled' },
+      questionIds: ['q2'],
+    });
+  });
+
+  it('waits for the person to go on when they stopped it themselves', () => {
+    const paused = { ...invoices, status: 'paused' } as Task;
+    const work = resolveRequestTracks(
+      base({ tasks: [paused, invoiceShard, priceList], inflight: [closingTurn] }),
+    )[1];
+    expect(work).toMatchObject({
+      state: 'needs-you',
+      line: { doing: 'is waiting for you to go on' },
+      paused: { taskRef: 'bakery/1' },
+    });
+    expect(work?.paused?.reason).toBeUndefined();
+  });
+
   it('never moves back a stop when a review sends the work back', () => {
     const looped = structuredClone(invoices) as Task;
     looped.craftbook.steps[2]!.completedAt = T(25);

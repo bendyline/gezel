@@ -29,6 +29,6 @@ Like its sibling, it's fixed-function by design: no file editing, no workspace a
 
 ::handboek-role-tools{role=video-generator scope=tiers}
 
-## Craftbooks they run well
+## Plans they run well
 
 ::handboek-craftbook-list{role=video-generator}

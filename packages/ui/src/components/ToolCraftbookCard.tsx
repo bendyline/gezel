@@ -83,7 +83,7 @@ function openSecuritySettings(): void {
 
 function cardEyebrow(card: ToolCallCard): string {
   if (card.kind === 'craftbook-start') {
-    return card.reused ? 'Craftbook already running' : 'Craftbook started';
+    return card.reused ? 'Plan already running' : 'Plan started';
   }
   return 'Step complete';
 }
@@ -176,7 +176,7 @@ export function ToolCraftbookCard({
               scroll
               stepRole="button"
               onSelect={openTask}
-              ariaLabel={card.kind === 'craftbook-start' ? 'Craftbook roadmap' : 'Task progress'}
+              ariaLabel={card.kind === 'craftbook-start' ? 'Plan roadmap' : 'Task progress'}
             />
           </div>
         )}

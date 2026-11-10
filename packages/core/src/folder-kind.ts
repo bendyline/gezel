@@ -83,7 +83,7 @@ export function projectNightWorkEnabled(project: {
  * armed night books add their own lines.
  */
 export function describeFolderNightWork(kind: FolderKind): string[] {
-  const read = 'Read every file, so you and your crew can search it';
+  const read = 'Read every file, so you and Gezel can search it';
   switch (kind) {
     case 'pictures':
       return [read, 'Describe your photos, so you can find one by what is in it'];

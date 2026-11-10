@@ -76,9 +76,11 @@ import {
   cssAttrValue,
   findLastForSession,
   formatProviderLabel,
+  hadWrapUpAtLoad,
   latestWrapUpKey,
   mergeTerminalEntries,
   mergeTimelineMessages,
+  newestMessageAt,
   projectFileOpener,
   referencedFilesOf,
   turnFailureShownElsewhere,
@@ -644,6 +646,13 @@ export function ChatTimelineView({
    * load, so only one that arrives afterwards is scrolled to.
    */
   const wrapUpSeenRef = useRef<string | null | undefined>(undefined);
+  /**
+   * The newest message this scope's first load returned ('' when it was
+   * empty, null until it answers). Content held for a finished task shows
+   * only for a wrap-up at or before it: one that lands during the visit must
+   * leave the finished card alone on screen (see `hadWrapUpAtLoad`).
+   */
+  const [loadedThroughAt, setLoadedThroughAt] = useState<string | null>(null);
   /** Coalesces growth from multiple independently streaming bubbles. */
   const liveFollowRafRef = useRef<number | null>(null);
 
@@ -693,11 +702,13 @@ export function ChatTimelineView({
     lastRowCountRef.current = 0;
     lastScrollHeightRef.current = 0;
     wrapUpSeenRef.current = undefined;
+    setLoadedThroughAt(null);
     void (async () => {
       try {
         const res = await loadTimeline({ limit: PAGE_SIZE });
         if (cancelled) return;
         setMessages(res.messages);
+        setLoadedThroughAt(newestMessageAt(res.messages));
         setHasMore(res.hasMore);
         setOldestAt(res.nextCursor);
         // Project-scoped responses populate `terminalEntries`; other
@@ -2474,9 +2485,10 @@ export function ChatTimelineView({
     // from the top: pinned, a phone opened on the meester's openers with the
     // greeting that explains them scrolled away.
     if (rows.length === 0) return;
-    // A task that just finished lands its wrap-up, and on Home an invitation
-    // follows it. Pinned to the bottom, the thread scrolled past the finished
-    // card to the invitation (2026-10-11), so the card comes to the top.
+    // A task that just finished lands its wrap-up. Pinned to the bottom, the
+    // thread scrolled past the finished card to what followed it, then Home's
+    // folder invitation (2026-10-11), so the card comes to the top. The
+    // invitation itself now waits for a later visit (`hadWrapUpAtLoad`).
     const wrapUp = latestWrapUpKey(messages);
     const freshWrapUp =
       wrapUpSeenRef.current !== undefined && wrapUp !== null && wrapUp !== wrapUpSeenRef.current;
@@ -3333,8 +3345,14 @@ export function ChatTimelineView({
     /** The tracked request's lead, who speaks for the crew in the fold's title. */
     lead?: string;
     error?: string;
+    /** Its request finished, or is still going: a failed turn inside was retried. */
+    workWentOn?: boolean;
   } | null = null;
   let foldLead: string | undefined;
+  // A worker's failed turn that the runtime retried left "stopped before
+  // finishing" under a Ready card. The tracker says how the request stands;
+  // the fold says stopped only when the request did.
+  let foldWorkWentOn = false;
   const flushFold = () => {
     if (!fold) return;
     const done = fold;
@@ -3345,7 +3363,7 @@ export function ChatTimelineView({
         names={done.lead ? [done.lead] : done.names}
         live={done.sessions.some((sid) => liveRef.current.has(sid))}
         needsYou={done.sessions.some((sid) => openQuestionSessions.has(sid))}
-        {...(done.error ? { error: done.error } : {})}
+        {...(done.error && !done.workWentOn ? { error: done.error } : {})}
       >
         {done.nodes}
       </WorkingNotes>,
@@ -3883,7 +3901,10 @@ export function ChatTimelineView({
     }
     if (!nestedHere) flushFold();
     if (sessionDepth === 0) emitQueuedBefore(newestActivityMs(item));
-    if (sessionDepth === 0) foldLead = undefined;
+    if (sessionDepth === 0) {
+      foldLead = undefined;
+      foldWorkWentOn = false;
+    }
     if (nestedHere && !fold) {
       fold = {
         key: `working-notes:${sid}:${item.at}`,
@@ -3891,6 +3912,7 @@ export function ChatTimelineView({
         sessions: [],
         names: [],
         ...(foldLead ? { lead: foldLead } : {}),
+        ...(foldWorkWentOn ? { workWentOn: true } : {}),
       };
     }
     const out = nestedHere && fold ? fold.nodes : els;
@@ -4030,6 +4052,10 @@ export function ChatTimelineView({
           roleBasedNameOnlyMode,
         );
       }
+      if (sessionDepth === 0) {
+        foldWorkWentOn =
+          track.state === 'ready' || track.state === 'working' || track.state === 'waiting';
+      }
       children.push(
         <RequestTracker
           key={`request:${track.key}`}
@@ -4038,6 +4064,11 @@ export function ChatTimelineView({
           debugMode={debugMode}
           roleBasedNameOnlyMode={roleBasedNameOnlyMode}
           {...(openTrackedFile ? { onOpenFile: openTrackedFile } : {})}
+          {...(projects.get(track.deliverable?.projectId ?? track.projectId)
+            ? {
+                projectName: projects.get(track.deliverable?.projectId ?? track.projectId)!.name,
+              }
+            : {})}
         />,
       );
     }
@@ -4122,7 +4153,7 @@ export function ChatTimelineView({
           : els}
         {pendingQueued.length > 0 && renderQueuedTasks(pendingQueued, true)}
         {els.length > 0 &&
-          (!trailingContentAfterWrapUp || messages.some((m) => m.synthetic === 'task-wrapup')) &&
+          (!trailingContentAfterWrapUp || hadWrapUpAtLoad(messages, loadedThroughAt)) &&
           trailingContent}
         <div ref={responseRunwayRef} className="timeline-response-runway" aria-hidden="true" />
       </div>

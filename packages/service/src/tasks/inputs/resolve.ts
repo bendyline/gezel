@@ -92,7 +92,7 @@ async function enumerateSource(
   if (source.from === 'sample') {
     const sample = args.samples?.find((s) => s.id === source.sampleId && s.param === param);
     if (!sample || !deps.samples) {
-      throw new TaskInputError(param, 'That sample is not available for this craftbook.');
+      throw new TaskInputError(param, 'That sample is not available for this plan.');
     }
     const read = await deps.samples.read({
       craftbookId: args.craftbookId,
@@ -101,7 +101,7 @@ async function enumerateSource(
       sample,
     });
     if (!read || read.length === 0) {
-      throw new TaskInputError(param, 'The sample for this craftbook could not be read.');
+      throw new TaskInputError(param, 'The sample for this plan could not be read.');
     }
     if (input.spec.kind === 'file' && read.length !== 1) {
       throw new TaskInputError(param, 'This input takes exactly one file.');
@@ -235,7 +235,7 @@ export async function planTaskInputs(
   const declared = new Set(inputs.map((i) => i.key));
   for (const key of Object.keys(args.sources ?? {})) {
     if (!declared.has(key)) {
-      throw new TaskInputError(key, `"${key}" is not an input this craftbook takes.`);
+      throw new TaskInputError(key, `"${key}" is not an input this plan takes.`);
     }
   }
   if (inputs.length === 0) return null;
@@ -247,7 +247,7 @@ export async function planTaskInputs(
       if (input.required) {
         throw new TaskInputError(
           input.key,
-          `Choose the ${input.title.toLowerCase()} this craftbook works on.`,
+          `Choose the ${input.title.toLowerCase()} this plan works on.`,
         );
       }
       continue;
@@ -421,7 +421,7 @@ export async function previewTaskInput(
 ): Promise<TaskInputPreviewResponse> {
   const input = craftbookInputParams(args.paramSchema).find((i) => i.key === args.param);
   if (!input)
-    throw new TaskInputError(args.param, `"${args.param}" is not an input this craftbook takes.`);
+    throw new TaskInputError(args.param, `"${args.param}" is not an input this plan takes.`);
   try {
     const { enumerated } = await enumerateSource(deps, {
       projectId: args.projectId,

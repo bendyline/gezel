@@ -175,9 +175,9 @@ export function HomeWorkshop({
   // welcome. Hidden as soon as the person answers; the config stamp keeps it
   // hidden across launches.
   const [folderStepDone, setFolderStepDone] = useState(false);
-  // Not while the welcome still asks for tools; the invitation itself waits
-  // in the thread for the first wrap-up, so the visit that ends first run
-  // can still end on it.
+  // Not while the welcome still asks for tools. The invitation itself waits
+  // in the thread for a visit that opens on finished work: shown the moment
+  // a task wrapped up, it pushed the result it followed off the screen.
   const offerFolderStep =
     setup === null && !folderStepDone && shouldOfferFolderStep(config, projects);
   const [tab, setTab] = useState<HomeGreetingTab>('greeting');

@@ -741,7 +741,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                           <span className="task-assignee">
                             {g.parent.origin?.kind === 'system-job' &&
                             g.parent.origin.managedByGezelId
-                              ? `${gezelName(g.parent.origin.managedByGezelId) || 'gezel'} · system`
+                              ? `${gezelName(g.parent.origin.managedByGezelId) || 'Gezel'} · system`
                               : g.parent.assignee.kind === 'user'
                                 ? 'You'
                                 : gezelName(g.parent.assignee.gezelId) || 'gezel'}
@@ -774,7 +774,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
                                 </span>
                                 <span className="task-assignee">
                                   {c.origin?.kind === 'system-job' && c.origin.managedByGezelId
-                                    ? `${gezelName(c.origin.managedByGezelId) || 'gezel'} · system`
+                                    ? `${gezelName(c.origin.managedByGezelId) || 'Gezel'} · system`
                                     : c.assignee.kind === 'user'
                                       ? 'You'
                                       : gezelName(c.assignee.gezelId) || 'gezel'}

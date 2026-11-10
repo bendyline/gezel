@@ -266,7 +266,7 @@
 .primary-navigation-touch .app-sidebar-item.active,
 .primary-navigation-touch .app-sidebar-group-header.active {
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  background: var(--selected-bg);
   color: var(--text);
 }
 

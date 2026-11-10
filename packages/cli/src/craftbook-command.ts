@@ -336,7 +336,7 @@ export async function blockedTaskReason(
 ): Promise<string | undefined> {
   if (result.outcome !== 'blocked') return undefined;
   if (result.questionIds?.length) {
-    return 'A gezel is waiting for your answer to a question. Answer it in the Gezel app or the interactive `gezel` terminal.';
+    return 'Gezel is waiting for your answer to a question. Answer it in the Gezel app or the interactive `gezel` terminal.';
   }
   if (result.task.status === 'draft') return 'The task is still a draft and has not started.';
   const { notes } = await client

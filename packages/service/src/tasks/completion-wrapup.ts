@@ -360,7 +360,7 @@ export async function loadMakerQuestion(
 
 /**
  * The message itself: warm, short, and only true things. With a deliverable
- * it names that file by what it is ("Your PDF for **Invoices** is ready") and
+ * it names that file by what it is ("Your PDF is ready: **Invoices**.") and
  * leaves the path to the card that closes the bubble; the working files the
  * task made on the way stay on the task. The bakery's wrap-up had listed
  * `pdf/task-2/report.md` and two outlines under the book's name. A board is
@@ -425,7 +425,11 @@ function wrapUpHeadline(
   }
   if (deliverable) {
     const noun = deliverableFormatNoun(deliverable.path);
-    return name ? `Your ${noun} for **${name}** is ready.` : `Your ${noun} is ready.`;
+    // The name is the person's own request now ("One-page catering proposal
+    // for Harbor Books"), so it follows the announcement, not a "for".
+    // A name cut short already ends in "…"; a period after it read "holiday….".
+    const stop = name?.endsWith('…') ? '' : '.';
+    return name ? `Your ${noun} is ready: **${name}**${stop}` : `Your ${noun} is ready.`;
   }
   return name ? `All done — **${name}** is finished.` : 'All done — the work is finished.';
 }

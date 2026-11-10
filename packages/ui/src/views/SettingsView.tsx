@@ -225,9 +225,11 @@ type SectionId =
   | 'llamaCpp'
   | 'mlx'
   | 'ds4'
-  // Header-only id for the collapsible "Workloads" group — never the active
-  // section (it renders no panel), it just toggles its children's visibility.
-  | 'workloads'
+  | 'nightShift'
+  // Header-only id for the collapsible "More settings" group — never the
+  // active section (it renders no panel), it just toggles its children's
+  // visibility.
+  | 'more'
   | 'imageEngine'
   | 'videoEngine'
   | 'imageRecognition'
@@ -259,6 +261,7 @@ const SECTION_IDS: ReadonlySet<string> = new Set<SectionId>([
   'llamaCpp',
   'mlx',
   'ds4',
+  'nightShift',
   'imageEngine',
   'videoEngine',
   'imageRecognition',
@@ -275,7 +278,7 @@ const SECTION_IDS: ReadonlySet<string> = new Set<SectionId>([
   'benchmarks',
 ]);
 
-/** A section the view stack may restore. Never the Workloads heading, which opens no page. */
+/** A section that opens a page. Never the More settings heading, which opens none. */
 function isSectionId(value: unknown): value is SectionId {
   return typeof value === 'string' && SECTION_IDS.has(value);
 }
@@ -350,7 +353,7 @@ function preloadSettingsSection(section: SectionId): void {
 // A visual/collapsible nav group. `group` marks a child item (drawn with a
 // small vertical rail on the left so it reads as nested); `groupHeader` marks
 // the item that labels and expand/collapses that group.
-type SettingsGroup = 'ai' | 'workloads';
+type SettingsGroup = 'ai' | 'more';
 type SettingsNavEntry = {
   id: SectionId;
   label: string;
@@ -387,15 +390,17 @@ const EXTERNAL_CHAT_SECTIONS: ReadonlySet<SectionId> = new Set<SectionId>([
   'anthropicCli',
 ]);
 
+/**
+ * The nav, in order. What most people open sits at the top level; the pages a
+ * person sets up once, or that only some installs use, sit under "More
+ * settings" so the list reads as about eight rows (docs/ux.md, "Settings
+ * pages").
+ */
 function buildSections(platform: string | undefined): SettingsNavEntry[] {
   return [
     { id: 'general', label: 'General' },
-    { id: 'deviceIntegration', label: 'Device integration' },
-    { id: 'team', label: 'Your team' },
     { id: 'aboutYou', label: 'About you' },
-    { id: 'folders', label: 'Folders' },
     { id: 'securityCompliance', label: 'Security & compliance' },
-    { id: 'accounts', label: 'Accounts' },
     { id: 'defaults', label: 'Artificial intelligence', groupHeader: 'ai' },
     { id: 'mlx', label: localEngineSettingsLabel('mlx', platform), group: 'ai' },
     {
@@ -410,21 +415,38 @@ function buildSections(platform: string | undefined): SettingsNavEntry[] {
     { id: 'anthropic', label: 'Anthropic Claude', group: 'ai' },
     { id: 'anthropicCli', label: 'Anthropic Claude CLI', group: 'ai' },
     { id: 'ollama', label: 'Ollama', group: 'ai' },
-    { id: 'workloads', label: 'Workloads', groupHeader: 'workloads' },
-    { id: 'imageEngine', label: 'Image generation', group: 'workloads' },
-    { id: 'videoEngine', label: 'Video generation', group: 'workloads' },
-    { id: 'imageRecognition', label: 'Image recognition', group: 'workloads' },
-    { id: 'audio', label: 'Audio', group: 'workloads' },
-    { id: 'webSearch', label: 'Web search', group: 'workloads' },
-    { id: 'knowledge', label: 'Knowledge', group: 'workloads' },
-    { id: 'benchmarks', label: 'Benchmarks' },
-    { id: 'channels', label: 'Channels' },
+    { id: 'nightShift', label: 'Night Shift' },
     { id: 'connectedApps', label: 'Integrations' },
-    { id: 'remoteServers', label: 'Remote servers' },
-    { id: 'toolsets', label: 'Shared toolsets' },
     { id: 'about', label: 'About' },
+    { id: 'more', label: 'More settings', groupHeader: 'more' },
+    { id: 'deviceIntegration', label: 'Device integration', group: 'more' },
+    { id: 'team', label: 'Your team', group: 'more' },
+    { id: 'folders', label: 'Folders', group: 'more' },
+    { id: 'accounts', label: 'Accounts', group: 'more' },
+    { id: 'imageEngine', label: 'Image generation', group: 'more' },
+    { id: 'videoEngine', label: 'Video generation', group: 'more' },
+    { id: 'imageRecognition', label: 'Image recognition', group: 'more' },
+    { id: 'audio', label: 'Audio', group: 'more' },
+    { id: 'webSearch', label: 'Web search', group: 'more' },
+    { id: 'knowledge', label: 'Knowledge', group: 'more' },
+    { id: 'benchmarks', label: 'Benchmarks', group: 'more' },
+    { id: 'channels', label: 'Channels', group: 'more' },
+    { id: 'remoteServers', label: 'Remote servers', group: 'more' },
+    { id: 'toolsets', label: 'Shared toolsets', group: 'more' },
   ];
 }
+
+/**
+ * The group a section sits in. A header that opens a page of its own
+ * (Artificial intelligence) counts as inside its group, so opening that page
+ * shows the pages under it.
+ */
+const SECTION_GROUPS: ReadonlyMap<SectionId, SettingsGroup> = new Map(
+  buildSections(undefined).flatMap((s) => {
+    const group = s.group ?? s.groupHeader;
+    return group ? [[s.id, group] as const] : [];
+  }),
+);
 
 export function SettingsView() {
   if (window.__GEZEL__?.renderModelSettings) return <HostModelSettings />;
@@ -479,17 +501,30 @@ function DaemonSettingsView() {
     },
   });
   const replaceNextLocation = settingsLocation.replaceNext;
-  // Collapsed nav groups (expanded by default → empty set). The "Artificial
-  // Intelligence" and "Workloads" headers toggle membership here.
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<SettingsGroup>>(() => new Set());
+  // Open nav groups. Both start folded, so the list opens on about eight rows;
+  // the group holding the active section is opened, and the "Artificial
+  // intelligence" and "More settings" headers toggle membership here. Kept in
+  // memory: a group stays as the person left it for the life of the view.
+  const [expandedGroups, setExpandedGroups] = useState<Set<SettingsGroup>>(() => {
+    const group = SECTION_GROUPS.get(section);
+    return new Set(group ? [group] : []);
+  });
   const toggleGroup = useCallback((g: SettingsGroup) => {
-    setCollapsedGroups((prev) => {
+    setExpandedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(g)) next.delete(g);
       else next.add(g);
       return next;
     });
   }, []);
+  const revealGroupOf = useCallback((id: SectionId) => {
+    const group = SECTION_GROUPS.get(id);
+    if (!group) return;
+    setExpandedGroups((prev) => (prev.has(group) ? prev : new Set(prev).add(group)));
+  }, []);
+  // Every way of landing on a section passes through here: a click, a link
+  // from inside a page, a deep link, a redirect, and a section Back restores.
+  useEffect(() => revealGroupOf(section), [section, revealGroupOf]);
   // Copilot connection probe. Drives the connection-mode indicator and gates
   // the model + reasoning-effort pickers. `ok: true` means the provider can
   // list models right now — via either the CLI SDK or a stored PAT.
@@ -567,43 +602,6 @@ function DaemonSettingsView() {
     }
   }, [section, copilotProbe.kind, runCopilotProbe]);
 
-  // Cross-view deep links can jump straight to a Settings section via a
-  // `gezel:navigate` event carrying
-  // `{ view: 'settings', section: 'defaults' }`.
-  useEffect(() => {
-    const valid = new Set<SectionId>([
-      'general',
-      'deviceIntegration',
-      'team',
-      'folders',
-      'defaults',
-      'llamaCpp',
-      'mlx',
-      'ds4',
-      'copilot',
-      'openai',
-      'codexCli',
-      'anthropic',
-      'anthropicCli',
-      'ollama',
-      'imageEngine',
-      'webSearch',
-      'channels',
-      'toolsets',
-      'knowledge',
-      'securityCompliance',
-      'about',
-    ]);
-    const onNav = (e: Event) => {
-      const detail = (e as CustomEvent<{ view?: string; section?: string }>).detail;
-      if (detail?.view === 'settings' && detail.section && valid.has(detail.section as SectionId)) {
-        setSection(detail.section as SectionId);
-      }
-    };
-    window.addEventListener('gezel:navigate', onNav);
-    return () => window.removeEventListener('gezel:navigate', onNav);
-  }, []);
-
   // Channels sits in the work-in-progress bucket, so a deep link or a
   // still-open Channels panel can outlive the opt-in it depends on. Wait for
   // config to load before deciding, or the first paint bounces the user out.
@@ -623,6 +621,7 @@ function DaemonSettingsView() {
       setStatus('meester updated');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
+      throw err;
     }
   }, []);
 
@@ -649,6 +648,7 @@ function DaemonSettingsView() {
       setStatus(`created & activated meester "${res.gezel.name}"`);
     } catch (err) {
       setStatus(`create failed: ${(err as Error).message}`);
+      throw err;
     }
   }, []);
 
@@ -660,6 +660,7 @@ function DaemonSettingsView() {
       setStatus('scribe updated');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
+      throw err;
     }
   }, []);
 
@@ -683,6 +684,7 @@ function DaemonSettingsView() {
       setStatus(`created & activated scribe "${res.gezel.name}"`);
     } catch (err) {
       setStatus(`create failed: ${(err as Error).message}`);
+      throw err;
     }
   }, []);
 
@@ -695,6 +697,7 @@ function DaemonSettingsView() {
       setStatus('librarian updated');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
+      throw err;
     }
   }, []);
 
@@ -723,6 +726,7 @@ function DaemonSettingsView() {
       setStatus(`created & activated librarian "${res.gezel.name}"`);
     } catch (err) {
       setStatus(`create failed: ${(err as Error).message}`);
+      throw err;
     }
   }, []);
 
@@ -734,6 +738,7 @@ function DaemonSettingsView() {
       setStatus('inspector updated');
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
+      throw err;
     }
   }, []);
 
@@ -757,6 +762,7 @@ function DaemonSettingsView() {
       setStatus(`created & activated inspector "${res.gezel.name}"`);
     } catch (err) {
       setStatus(`create failed: ${(err as Error).message}`);
+      throw err;
     }
   }, []);
 
@@ -811,7 +817,7 @@ function DaemonSettingsView() {
       setConfig(res);
       setStatus(
         resetTemplatesOnStartup
-          ? 'gezel templates will reset to defaults on each startup'
+          ? 'template-based crew members will reset to defaults on each startup'
           : 'startup template reset off',
       );
     } catch (err) {
@@ -862,7 +868,7 @@ function DaemonSettingsView() {
     try {
       const res = await api.resetGezelTemplates();
       const n = res.reset.length;
-      setStatus(`reset ${n} ${n === 1 ? 'gezel' : 'crew members'} to template defaults`);
+      setStatus(`reset ${n} ${n === 1 ? 'crew member' : 'crew members'} to template defaults`);
     } catch (err) {
       setStatus(`reset failed: ${(err as Error).message}`);
     }
@@ -1007,8 +1013,8 @@ function DaemonSettingsView() {
       window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
       setStatus(
         show
-          ? 'crew members show their names and poppetjes'
-          : 'crew members show role-based names and plain letter avatars',
+          ? 'names and poppetjes are shown'
+          : 'role-based names and plain letter avatars are shown',
       );
     } catch (err) {
       setStatus(`save failed: ${(err as Error).message}`);
@@ -1764,6 +1770,34 @@ function DaemonSettingsView() {
     developerAreaKey,
   ]);
 
+  // Cross-view deep links can jump straight to a Settings section via a
+  // `gezel:navigate` event carrying
+  // `{ view: 'settings', section: 'defaults' }`. Every section the nav offers
+  // right now is accepted. The list used to be kept by hand and lagged the
+  // nav, so a link to About you or Integrations worked only while Settings
+  // was closed (the mount path reads the pending section instead).
+  //
+  // The cloud-provider pages are accepted even while the nav hides them.
+  // Under a posture with external chat off, the redirect below sends the link
+  // to the Artificial intelligence page, which says why the provider is gone.
+  // And the title bar's quota meters link to the Codex and Claude CLI pages,
+  // which the nav lists only once the install uses that provider by default.
+  useEffect(() => {
+    const offered = new Set<string>(sections.map((s) => s.id));
+    const onNav = (e: Event) => {
+      const detail = (e as CustomEvent<{ view?: string; section?: string }>).detail;
+      if (detail?.view !== 'settings' || !isSectionId(detail.section)) return;
+      if (!offered.has(detail.section) && !EXTERNAL_CHAT_SECTIONS.has(detail.section)) return;
+      setSection(detail.section);
+      // The effect on `section` opens the group when the section changes; a
+      // link to the section already open must also unfold a group the person
+      // folded over it.
+      revealGroupOf(detail.section);
+    };
+    window.addEventListener('gezel:navigate', onNav);
+    return () => window.removeEventListener('gezel:navigate', onNav);
+  }, [sections, revealGroupOf]);
+
   // Landing on a hidden tab is reachable two ways: the posture drops to Super
   // Lockdown while one is open, or a deep link (`peekPendingSettingsSection`)
   // points at one. Send those to the Artificial intelligence tab, where the
@@ -1796,9 +1830,10 @@ function DaemonSettingsView() {
       <aside className="settings-nav">
         <h2>Settings</h2>
         <SettingsSectionPicker
-          // The Workloads heading only groups its sections; it opens no page.
+          // The More settings heading only groups its sections; it opens no
+          // page. The dropdown reaches every section whatever is folded.
           sections={sections
-            .filter((s) => s.id !== 'workloads')
+            .filter((s) => s.id !== 'more')
             .map((s) => ({ id: s.id, label: s.label, child: Boolean(s.group) }))}
           value={section}
           onChange={(id) => {
@@ -1808,24 +1843,26 @@ function DaemonSettingsView() {
         />
         <ul>
           {sections.map((s) => {
-            // Hide children of a collapsed group.
-            if (s.group && collapsedGroups.has(s.group)) return null;
+            // Hide children of a folded group.
+            if (s.group && !expandedGroups.has(s.group)) return null;
 
             // Group header: a disclosure chevron that toggles the group, plus
             // the label. The AI header doubles as a real section ('defaults')
-            // so its label navigates; the header-only 'Workloads' label just
-            // toggles.
+            // so its label opens that page and unfolds the pages under it;
+            // the header-only 'More settings' label just toggles.
             if (s.groupHeader) {
-              const collapsed = collapsedGroups.has(s.groupHeader);
-              const navigates = s.id !== 'workloads';
+              const group = s.groupHeader;
+              const expanded = expandedGroups.has(group);
+              const navigates = s.id !== 'more';
               return (
                 <li key={s.id} className="settings-nav-li settings-nav-li-group">
                   <button
                     type="button"
+                    data-testid={`settings-nav-group-${group}`}
                     className="settings-nav-group-toggle"
-                    aria-expanded={!collapsed}
-                    aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${s.label}`}
-                    onClick={() => toggleGroup(s.groupHeader as SettingsGroup)}
+                    aria-expanded={expanded}
+                    aria-label={`${expanded ? 'Collapse' : 'Expand'} ${s.label}`}
+                    onClick={() => toggleGroup(group)}
                   >
                     <span className="settings-nav-caret" aria-hidden="true">
                       &rsaquo;
@@ -1836,12 +1873,18 @@ function DaemonSettingsView() {
                     data-testid={`settings-nav-${s.id}`}
                     className={`settings-nav-item settings-nav-group-label${section === s.id ? ' settings-nav-item-active' : ''}`}
                     title={s.groupHeader === 'ai' ? aiDefaultSubline : undefined}
+                    aria-expanded={navigates ? undefined : expanded}
                     onPointerEnter={() => preloadSettingsSection(s.id)}
                     onFocus={() => preloadSettingsSection(s.id)}
                     onPointerDown={() => preloadSettingsSection(s.id)}
-                    onClick={() =>
-                      navigates ? setSection(s.id) : toggleGroup(s.groupHeader as SettingsGroup)
-                    }
+                    onClick={() => {
+                      if (!navigates) {
+                        toggleGroup(group);
+                        return;
+                      }
+                      setSection(s.id);
+                      revealGroupOf(s.id);
+                    }}
                   >
                     <span className="settings-nav-group-title">{s.label}</span>
                     {s.groupHeader === 'ai' && (
@@ -1881,13 +1924,6 @@ function DaemonSettingsView() {
         <Suspense fallback={null}>
           {section === 'general' && (
             <>
-              <SettingsSection
-                id="settings-system-health"
-                title="System health"
-                hint="What's running under the hood — the local daemon, your Node runtime, the OS, and the system browser toolset used for web actions."
-              >
-                <HealthStrip />
-              </SettingsSection>
               <SettingsInterests />
               <SettingsSection id="settings-appearance" title="Appearance">
                 <SettingField label="Theme" hint="Light or dark mode, or follow the OS.">
@@ -1907,11 +1943,11 @@ function DaemonSettingsView() {
                 hint="How crew members look and talk to you."
               >
                 <SettingCheck
-                  label="Show gezel names and poppetjes"
+                  label="Show names and poppetjes"
                   hint={
                     <>
-                      Poppetjes are the little character figures shown beside each gezel. Turn this
-                      off and every gezel shows a role-based name (e.g. <code>visual-designer</code>{' '}
+                      Poppetjes are the little character figures shown beside each name. Turn this
+                      off and everyone shows a role-based name (e.g. <code>visual-designer</code>{' '}
                       instead of "Mira") with a plain letter avatar; the role-based name also flows
                       into system prompts and chat handoffs, so the model addresses itself by role.
                     </>
@@ -1988,6 +2024,31 @@ function DaemonSettingsView() {
                 </SettingField>
               </SettingsSection>
               <SettingsSection
+                id="settings-gezel-templates"
+                title="Role templates"
+                hint={
+                  <>
+                    Restore every crew member created from a template back to the{' '}
+                    <code>about.md</code> their template ships, discarding any edits you’ve made to
+                    their instructions. Crew members written from scratch are left untouched.
+                  </>
+                }
+                actions={
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => void resetTemplatesNow()}
+                  >
+                    Reset to defaults
+                  </button>
+                }
+              />
+            </>
+          )}
+
+          {section === 'nightShift' && (
+            <>
+              <SettingsSection
                 id="settings-night-shift"
                 title="Night Shift"
                 hint="During a nightly window, Gezel runs deferred batch work — content indexing and a daily Meester review of every active project, with suggestions waiting for you in the morning. Interactive and scheduled work always takes priority."
@@ -2058,7 +2119,7 @@ function DaemonSettingsView() {
               <SettingsSection
                 id="settings-night-shift-quota"
                 title="Night Shift cloud quota"
-                hint="For Claude, Codex, and Copilot plans with usage quotas; check that your plan allows automated use. Crew members on local models are never held."
+                hint="For Claude, Codex, and Copilot plans with usage quotas; check that your plan allows automated use. Work on local models is never held."
               >
                 <SettingField
                   label="Hold night work when"
@@ -2116,26 +2177,6 @@ function DaemonSettingsView() {
                   </label>
                 </SettingField>
               </SettingsSection>
-              <SettingsSection
-                id="settings-gezel-templates"
-                title="Gezel templates"
-                hint={
-                  <>
-                    Restore every gezel created from a template back to the <code>about.md</code>{' '}
-                    their template ships, discarding any edits you’ve made to their instructions.
-                    Crew members written from scratch are left untouched.
-                  </>
-                }
-                actions={
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => void resetTemplatesNow()}
-                  >
-                    Reset to defaults
-                  </button>
-                }
-              />
             </>
           )}
 
@@ -2197,33 +2238,33 @@ function DaemonSettingsView() {
               <SettingsSection
                 id="settings-crew-roles"
                 title="Crew roles"
-                hint="Which gezel holds each standing job. Changing who holds one leaves their own instructions as they are."
+                hint="Who holds each standing job. Changing who holds one leaves their own instructions as they are."
               >
                 <RoleAssignmentField
                   controlId="settings-role-meester"
                   label="Meester"
-                  hint="Your team concierge: they help you start new projects, answer questions, and check in on projects to keep them moving."
+                  hint="Your concierge: they help you start new projects, answer questions, and check in on projects to keep them moving."
                   value={config?.meesterGezelId}
                   gezels={gezels}
                   roleBasedNameOnly={boringMode}
                   placeholder="Select meester…"
-                  newItemLabel="New Meester gezel…"
+                  newItemLabel="New Meester…"
                   createLabel="Create Meester"
-                  createHint="A brand-new gezel is spun up with the curated Meester prompt and set as your active guide. You can rename or tune them later in the Crew tab."
+                  createHint="A new crew member is created with the curated Meester prompt and set as your active guide. You can rename or tune them later in the Crew tab."
                   onAssign={setMeester}
                   onCreate={createNewMeester}
                 />
                 <RoleAssignmentField
                   controlId="settings-role-scribe"
                   label="Scribe"
-                  hint="Handles your workshop's utility text work (about.md drafts, rewrites, end-of-thread summaries, memory consolidation), so you can route grunt tasks to a different model than your conversational crew members."
+                  hint="Handles your workshop's utility text work (about.md drafts, rewrites, end-of-thread summaries, memory consolidation), so you can route grunt tasks to a different model than the one your conversations use."
                   value={config?.klerkGezelId}
                   gezels={gezels}
                   roleBasedNameOnly={boringMode}
                   placeholder="Select Scribe…"
-                  newItemLabel="New Scribe gezel…"
+                  newItemLabel="New Scribe…"
                   createLabel="Create Scribe"
-                  createHint="A fresh gezel is spun up with the curated Scribe prompt and set as your active Scribe. Tune their model in the Crew tab to point utility work at Sonnet, a local model, or whatever fits."
+                  createHint="A new crew member is created with the curated Scribe prompt and set as your active Scribe. Tune their model in the Crew tab to point utility work at Sonnet, a local model, or whatever fits."
                   onAssign={setKlerk}
                   onCreate={createNewKlerk}
                 />
@@ -2231,14 +2272,14 @@ function DaemonSettingsView() {
                   <RoleAssignmentField
                     controlId="settings-role-librarian"
                     label="Librarian"
-                    hint="Your workshop's index-keeper. A project with a Librarian on its assigned crew gets background AI summaries, file reviews, folder rollups, and weekly digests. Remove the role from a project to keep fast structural search without those AI passes. Indexing stays local by default; a local provider and model selected on this gezel can tune the work."
+                    hint="Your workshop's index-keeper. A project with a Librarian on its assigned crew gets background AI summaries, file reviews, folder rollups, and weekly digests. Remove the role from a project to keep fast structural search without those AI passes. Indexing stays local by default; a local provider and model selected for the Librarian can tune the work."
                     value={config?.boekwachterGezelId}
                     gezels={gezels}
                     roleBasedNameOnly={boringMode}
                     placeholder="Select Librarian…"
-                    newItemLabel="New Librarian gezel…"
+                    newItemLabel="New Librarian…"
                     createLabel="Create Librarian"
-                    createHint="The new gezel uses the canonical gilde Librarian personality. Projects assigned to the current Librarian transfer to the new one."
+                    createHint="The new Librarian uses the canonical gilde Librarian personality. Projects assigned to the current Librarian transfer to the new one."
                     onAssign={setBoekwachter}
                     onCreate={createNewBoekwachter}
                   />
@@ -2355,15 +2396,15 @@ function DaemonSettingsView() {
                           hint={
                             config?.keurmeesterGezelId
                               ? 'Their interventions appear in chat and in the History tab.'
-                              : 'No Inspector gezel yet. One is created automatically on the first intervention, or choose or create one now.'
+                              : 'No Inspector yet. One is created automatically on the first intervention, or choose or create one now.'
                           }
                           value={config?.keurmeesterGezelId}
                           gezels={gezels}
                           roleBasedNameOnly={boringMode}
                           placeholder="Select Inspector…"
-                          newItemLabel="New Inspector gezel…"
+                          newItemLabel="New Inspector…"
                           createLabel="Create Inspector"
-                          createHint="A fresh gezel is spun up with the curated Inspector prompt and set as your active Inspector. Their interventions appear in chat and in the History tab."
+                          createHint="A new crew member is created with the curated Inspector prompt and set as your active Inspector. Their interventions appear in chat and in the History tab."
                           onAssign={setKeurmeester}
                           onCreate={createNewKeurmeester}
                         />
@@ -2507,8 +2548,8 @@ function DaemonSettingsView() {
                     {providerBlocked(provider) ? (
                       <>
                         <strong>{providerLabel(provider, uiPlatform)}</strong> is your default
-                        provider, but {securityLevelLabel} keeps every chat on this device — no
-                        gezel can use it until you pick an on-device engine above.{' '}
+                        provider, but {securityLevelLabel} keeps every chat on this device — no one
+                        can use it until you pick an on-device engine above.{' '}
                       </>
                     ) : (
                       <>
@@ -2746,7 +2787,7 @@ function DaemonSettingsView() {
               <SettingsSection
                 id="settings-night-shift-model"
                 title="Night Shift model"
-                hint="Night Shift uses the default provider and model unless you choose a separate, hands-off model here — a larger but slower model can think more carefully overnight. Individual gezel overrides still take priority."
+                hint="Night Shift uses the default provider and model unless you choose a separate, hands-off model here — a larger but slower model can think more carefully overnight. A crew member's own model choice still takes priority."
               >
                 <SettingCheck
                   label="Use a specific model by default during Night Shift"
@@ -2828,7 +2869,7 @@ function DaemonSettingsView() {
               <SettingsSection
                 id="settings-media-models"
                 title="Media models"
-                hint="Optional models that let crew members make images, read them, and speak and listen — the ones that fit this device."
+                hint="Optional models that let Gezel make images, read them, and speak and listen — the ones that fit this device."
               >
                 <RecommendedMediaDownloads />
               </SettingsSection>
@@ -2846,7 +2887,7 @@ function DaemonSettingsView() {
               <SettingsSection
                 id="settings-tool-filtering"
                 title="Tool filtering"
-                hint="Give each gezel only the tools their role actually needs. A smaller toolbox keeps them focused and makes every reply faster and cheaper — it matters most with small on-device models. Known roles (Meester, Crew Lead, Reviewer, Copywriter, Designer, Planner) start with a sensible set; each gezel's own Toolsets tab can override it."
+                hint="Give each crew member only the tools their role actually needs. A smaller toolbox keeps them focused and makes every reply faster and cheaper — it matters most with small on-device models. Known roles (Meester, Crew Lead, Reviewer, Copywriter, Designer, Planner) start with a sensible set; each crew member's own Toolsets tab can override it."
               >
                 <div className="provider-switch">
                   <button
@@ -3037,7 +3078,7 @@ function DaemonSettingsView() {
                       New Copilot threads deny the CLI&rsquo;s built-in tools (<code>bash</code>,{' '}
                       <code>web_fetch</code>, <code>view</code>, file ops, <code>grep</code>) and
                       work through gezel&rsquo;s tools instead, which gives you an audit trail for
-                      every action and the same behavior across providers. Each gezel&rsquo;s
+                      every action and the same behavior across providers. Each crew member&rsquo;s
                       Settings tab can override this.
                     </>
                   }
@@ -3054,8 +3095,8 @@ function DaemonSettingsView() {
                       The total wall-clock cap from when a turn gets its queue slot to when the
                       model finishes. If it fires before the model signals <code>session.idle</code>
                       , the turn ends with a &ldquo;Turn stopped before finishing&rdquo; banner.
-                      Raise it for crew members that run long shell or Playwright chains. Leave it
-                      empty for the default, 10 minutes.
+                      Raise it for work that runs long shell or Playwright chains. Leave it empty
+                      for the default, 10 minutes.
                     </>
                   }
                 >
@@ -3330,7 +3371,7 @@ function DaemonSettingsView() {
                   </SettingField>
                   <SettingField label="Gezel tools">
                     <SettingCheck
-                      label="Add Gezel tools like search, memories, tasks, and team coordination to Codex"
+                      label="Give Codex Gezel's tools, such as search, memories, and tasks"
                       hint="Disable to run Codex with only its built-in tools."
                       checked={config?.codexCli?.manageRuntimeFiles !== false}
                       onChange={(checked) => void saveCodexCli({ manageRuntimeFiles: checked })}
@@ -3569,7 +3610,7 @@ function DaemonSettingsView() {
                   </SettingField>
                   <SettingField label="Gezel tools">
                     <SettingCheck
-                      label="Add Gezel tools like search, memories, tasks, and team coordination to Claude"
+                      label="Give Claude Gezel's tools, such as search, memories, and tasks"
                       hint="Disable to run Claude with only its built-in tools."
                       checked={config?.anthropicCli?.manageRuntimeFiles !== false}
                       onChange={(checked) => void saveAnthropicCli({ manageRuntimeFiles: checked })}
@@ -3578,7 +3619,7 @@ function DaemonSettingsView() {
                   <SettingField
                     label="Pool size"
                     controlId="settings-claude-pool-size"
-                    hint="Each ready process stays with one chat thread, so later turns skip the start-up wait. More processes mean faster replies when several crew members work at once, and more memory (about 100–200 MB each). When the pool is full, the idle process that was used longest ago is closed."
+                    hint="Each ready process stays with one chat thread, so later turns skip the start-up wait. More processes mean faster replies when several chats run at once, and more memory (about 100–200 MB each). When the pool is full, the idle process that was used longest ago is closed."
                   >
                     <div className="gz-setting-inline">
                       <input
@@ -3601,7 +3642,7 @@ function DaemonSettingsView() {
                   <SettingField
                     label="Concurrency"
                     controlId="settings-claude-concurrency"
-                    hint="How many gezel turns can run through Claude at once. Defaults to the pool size. Lower it to keep some ready processes in reserve. Setting it higher still works, but extra processes are started temporarily."
+                    hint="How many turns can run through Claude at once. Defaults to the pool size. Lower it to keep some ready processes in reserve. Setting it higher still works, but extra processes are started temporarily."
                   >
                     <div className="gz-setting-inline">
                       <input
@@ -3722,7 +3763,7 @@ function DaemonSettingsView() {
               <SettingsSection
                 id="settings-web-search"
                 title="Web search"
-                hint="Powers the web search tools that crew members use to discover content on the internet. Pick one search backend; configure a key only for the providers you choose."
+                hint="Powers the web search tools Gezel uses to discover content on the internet. Pick one search backend; configure a key only for the providers you choose."
               >
                 <SettingField label="Provider" controlId="settings-web-search-provider">
                   <select
@@ -3831,9 +3872,9 @@ function DaemonSettingsView() {
             <SettingsSection
               id="settings-shared-toolsets"
               title="Shared toolsets"
-              hint="Toolsets here are available to every gezel in addition to their own."
+              hint="Toolsets here are available to every crew member in addition to their own."
             >
-              <ToolsetsEditor scope={{ kind: 'shared' }} subject="every gezel" />
+              <ToolsetsEditor scope={{ kind: 'shared' }} subject="every crew member" />
             </SettingsSection>
           )}
 
@@ -3865,6 +3906,13 @@ function DaemonSettingsView() {
                 </p>
               </SettingsSection>
               <SettingsSection
+                id="settings-system-health"
+                title="System health"
+                hint="What's running under the hood — the local daemon, your Node runtime, the OS, and the system browser toolset used for web actions."
+              >
+                <HealthStrip />
+              </SettingsSection>
+              <SettingsSection
                 id="settings-updates"
                 title="Updates"
                 hint="Gezel checks public GitHub release metadata when the desktop app launches. No personal data is sent. Turn this off to stop automatic checks; you can still choose “Check for updates” from the tray menu."
@@ -3887,7 +3935,7 @@ function DaemonSettingsView() {
                 />
                 <SettingCheck
                   label="Show preview features"
-                  hint="Preview features are usable but still changing shape. The current preview is Channels, which lets your crew send messages to a webhook, such as a Slack channel or a phone notification service."
+                  hint="Preview features are usable but still changing shape. The current preview is Channels, which lets Gezel send messages to a webhook, such as a Slack channel or a phone notification service."
                   checked={config?.showWorkInProgressFeatures === true}
                   onChange={(checked) => void saveShowWorkInProgressFeatures(checked)}
                 />
@@ -3903,7 +3951,7 @@ function DaemonSettingsView() {
                   onChange={(checked) => void saveDebugMode(checked)}
                 />
                 <SettingCheck
-                  label="On startup, reset all gezel templates back to defaults"
+                  label="On startup, reset all template-based crew members back to defaults"
                   checked={config?.resetTemplatesOnStartup === true}
                   onChange={(checked) => void saveResetTemplatesOnStartup(checked)}
                 />
@@ -3973,9 +4021,13 @@ function RoleAssignmentField({
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  // Settings shows no save notes, so a failure here would otherwise be silent:
+  // the form closed and no gezel appeared (1.26313.105 audit).
+  const [failure, setFailure] = useState<string | null>(null);
   const close = () => {
     setCreating(false);
     setName('');
+    setFailure(null);
   };
   return (
     <SettingField label={label} controlId={controlId} hint={hint}>
@@ -3985,9 +4037,13 @@ function RoleAssignmentField({
           if (next === '__new') {
             setCreating(true);
             setName('');
+            setFailure(null);
             return;
           }
-          void onAssign(next);
+          setFailure(null);
+          onAssign(next).catch((err: unknown) =>
+            setFailure(`Couldn't change the ${label}: ${(err as Error).message}`),
+          );
         }}
       >
         <Select.Trigger id={controlId} aria-describedby={settingHintId(controlId)}>
@@ -4008,9 +4064,12 @@ function RoleAssignmentField({
           onSubmit={async (event) => {
             event.preventDefault();
             setBusy(true);
+            setFailure(null);
             try {
               await onCreate(name);
               close();
+            } catch (err) {
+              setFailure(`Couldn't create the ${label}: ${(err as Error).message}`);
             } finally {
               setBusy(false);
             }
@@ -4033,6 +4092,11 @@ function RoleAssignmentField({
             </button>
           </div>
         </form>
+      )}
+      {failure && (
+        <p className="error" role="alert">
+          {failure}
+        </p>
       )}
     </SettingField>
   );

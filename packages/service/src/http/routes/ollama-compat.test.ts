@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { externalGezelModelId } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { MockProvider } from '../../providers/mock.js';
 import { type RunningService, startService } from '../../service.js';
 
@@ -65,6 +65,27 @@ describe('GET /ollama/v1/tags', () => {
     const names = body.models.map((m) => m.name);
     expect(names).toContain('copilot:mock-fast');
     expect(names).toContain('openai:mock-fast');
+  });
+
+  // The 1.26313.105 audit: /v1/models stopped running these, /tags did not.
+  it("never runs someone's Claude or Codex command line, or probes Ollama, unless they chose it", async () => {
+    const list = vi.spyOn(svc.context.chat, 'listModelsForProvider');
+    try {
+      list.mockClear();
+      expect((await call('GET', '/ollama/v1/tags', { token: rootToken })).status).toBe(200);
+      const asked = list.mock.calls.map(([provider]) => provider);
+      expect(asked).not.toContain('anthropic-cli');
+      expect(asked).not.toContain('codex-cli');
+      expect(asked).not.toContain('ollama');
+      expect(asked).toContain('openai');
+
+      await svc.context.store.writeConfig({ codexCli: {} });
+      list.mockClear();
+      expect((await call('GET', '/ollama/v1/tags', { token: rootToken })).status).toBe(200);
+      expect(list.mock.calls.map(([provider]) => provider)).toContain('codex-cli');
+    } finally {
+      list.mockRestore();
+    }
   });
 
   it('lists the serving gezel by role and name', async () => {

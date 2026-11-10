@@ -219,7 +219,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
         <section style={{ marginBottom: '2rem' }}>
           <h4>Default model</h4>
           <p className="muted small" style={{ marginTop: 0 }}>
-            Which local model new chat sessions use when a gezel doesn't pin one.
+            Which local model new chat sessions use when a crew member doesn't pin one.
           </p>
           <div className="new-row" style={{ marginTop: '0.5rem' }}>
             <select
@@ -338,7 +338,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
 
         <section style={{ marginTop: '1.25rem' }}>
           <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-            <label className="muted" style={{ fontSize: '0.9rem', minWidth: '12rem' }}>
+            <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '12rem' }}>
               External mlx_lm.server URL
             </label>
             <input
@@ -358,7 +358,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
           </div>
 
           <div className="new-row" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
-            <label className="muted" style={{ fontSize: '0.9rem', minWidth: '12rem' }}>
+            <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '12rem' }}>
               Override model directory
             </label>
             <input
@@ -378,7 +378,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
           </div>
 
           <div className="new-row" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
-            <label className="muted" style={{ fontSize: '0.9rem', minWidth: '12rem' }}>
+            <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '12rem' }}>
               mlx-lm package spec
             </label>
             <input
@@ -398,7 +398,7 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
           </div>
 
           <div className="new-row" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
-            <label className="muted" style={{ fontSize: '0.9rem', minWidth: '12rem' }}>
+            <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '12rem' }}>
               KV cache quantization
             </label>
             <select

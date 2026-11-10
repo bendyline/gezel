@@ -96,7 +96,7 @@ export function renderRecap(
     if (!ran && reason) quiet.set(reason, (quiet.get(reason) ?? 0) + 1);
   }
 
-  const lines = [`# Your crew's week · ${week}`, ''];
+  const lines = [`# Gezel's week · ${week}`, ''];
   lines.push(
     `The night shift worked ${plural(worked.length, 'night')} of ${plural(nights.length, 'recorded night')}.`,
   );

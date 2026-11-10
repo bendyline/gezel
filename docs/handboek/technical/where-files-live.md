@@ -20,7 +20,7 @@ Everything gezel knows lives in one folder — the **gezel home** — as plain f
   gezels/
     {gezel}/
       gezel.md        name, role, model choice
-      about.md        the gezel's character
+      about.md        that crew member's character
       poppetje.json   the carved-figure look
       sessions/       chat threads, one file each
       memories/       daily notes + lessons
@@ -30,13 +30,13 @@ Everything gezel knows lives in one folder — the **gezel home** — as plain f
       documents/      About + Mission Objectives
       index/          the project's search index: summaries, descriptions,
                       reviews (rebuildable; kept here, not in your folder)
-      artifacts/      everything the crew produces
+      artifacts/      everything Gezel produces
         shadow/       machine-made markdown twins of workspace documents,
                       pictures, and recordings (rebuilt automatically —
                       safe to delete, not a place to put your own files)
   documents/          the shared library
-  memories/           what your gezels have learned about you ("About you"),
-                      shared by all of them
+  memories/           what Gezel has learned about you ("About you"),
+                      shared by the whole crew
   ambient/            ambient dashboard images (dated PNGs + latest.png),
                       made to be shown as wallpaper or lock screen
   integrations/

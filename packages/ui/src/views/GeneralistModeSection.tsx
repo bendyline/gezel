@@ -16,7 +16,7 @@ const CHOICES: ReadonlyArray<{ id: GeneralistModeSetting; label: string; descrip
   {
     id: 'on',
     label: 'On',
-    description: 'Every task runs as one gezel in one conversation, whatever the model.',
+    description: 'One generalist runs every task in one conversation, whatever the model.',
   },
   {
     id: 'off',
@@ -64,7 +64,7 @@ export function GeneralistModeSection(props: {
     <SettingsSection
       id="settings-generalist-mode"
       title="Run in generalist mode"
-      hint="One gezel carries a task from first step to last in a single conversation, still passing every step's checks."
+      hint="One generalist carries a task from first step to last in a single conversation, still passing every step's checks."
     >
       <div>
         <div

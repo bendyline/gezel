@@ -61,7 +61,7 @@ export function formatRateLimitNotice(
         ? `Claude can't answer again until it resets ${reset}.`
         : `Claude can't answer again until it resets.`,
     );
-    sentences.push('Switch this gezel to another model to keep working in the meantime.');
+    sentences.push('Switch to another model to keep working in the meantime.');
   } else if (isNearLimit(status)) {
     sentences.push(`You're close to your ${window} Claude usage limit.`);
     const reset = resetPhrase(input.resetsAt, now, locale);

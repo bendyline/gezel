@@ -97,7 +97,7 @@ export async function handlePortableGrowthRoute(
       if (proposal.kind === 'trait') {
         const traits = fm.traits ?? [];
         if (traits.length >= 8)
-          throw new ProductError('This gezel already has 8 traits; retire one first.', 409);
+          throw new ProductError(`${gezel.name} already has 8 traits; retire one first.`, 409);
         adopted = levelUpTrait(proposal, now);
         await host.store.updateGezelSettings(gezelId, { traits: [...traits, adopted] });
       } else if (proposal.kind === 'tuning') {

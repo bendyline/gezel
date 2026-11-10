@@ -141,7 +141,7 @@ export function FolderOnboardingStep({
   const selectedCount = (choices ?? []).filter((c) => c.selected).length;
   return (
     <section className="folder-onboarding" aria-labelledby="folder-onboarding-title">
-      <h2 id="folder-onboarding-title">Which folders should your crew look after?</h2>
+      <h2 id="folder-onboarding-title">Which folders should Gezel look after?</h2>
       <p className="folder-onboarding-promise">
         Read-only. Gezel reads and indexes these folders. It never changes, moves or deletes a file
         unless you ask and approve.
@@ -185,7 +185,7 @@ export function FolderOnboardingStep({
         Add another folder…
       </button>
 
-      <h3>Let your crew work while you sleep?</h3>
+      <h3>Let Gezel work while you sleep?</h3>
       <p className="folder-onboarding-promise">
         Gezel starts when you log in and keeps this computer awake at night while it's plugged in.
       </p>

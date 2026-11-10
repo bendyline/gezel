@@ -446,7 +446,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
           <h2>Knowledge</h2>
           <p className="muted">
             No knowledge catalogs are installed yet. A catalog is a searchable, citable reference
-            library — install one and your crew can look things up and cite their sources.
+            library — install one and Gezel can look things up and cite its sources.
           </p>
           <button type="button" onClick={() => setManagingCatalogs(true)}>
             Browse knowledge catalogs
@@ -782,7 +782,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
                   </a>
                 )}
                 <button type="button" onClick={askAGezel}>
-                  Ask a gezel about this
+                  Ask about this
                 </button>
               </span>
             </footer>

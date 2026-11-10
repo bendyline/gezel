@@ -38,5 +38,11 @@ export const ActivityStatusResponseSchema = z.object({
   at: z.string(),
   /** Requests still under way, for the title bar and the rows that stand for them. */
   requests: z.array(RequestTrackSchema).optional(),
+  /**
+   * Requests that finished and hold no row any more (their result was looked
+   * at and put away), newest first: the panel's record of what was made.
+   * Bounded by `ACTIVITY_EARLIER_LIMIT`.
+   */
+  earlier: z.array(RequestTrackSchema).optional(),
 });
 export type ActivityStatusResponse = z.infer<typeof ActivityStatusResponseSchema>;

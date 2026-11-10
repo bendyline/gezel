@@ -84,7 +84,7 @@ describe('ChatTimelineView — one craftbook card per task', () => {
     const { container } = renderTimeline();
     await screen.findByText('On it! The invoice is underway.');
     await waitFor(() => expect(container.querySelectorAll('.msg-tool-card')).toHaveLength(1));
-    expect(screen.queryByText('Craftbook already running')).not.toBeInTheDocument();
+    expect(screen.queryByText('Plan already running')).not.toBeInTheDocument();
   });
 
   it('shows every card in debug mode', async () => {

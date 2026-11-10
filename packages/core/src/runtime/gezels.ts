@@ -95,7 +95,7 @@ export async function getGezel(repo: PortableRepository, id: string): Promise<Ge
 }
 export async function requireGezel(repo: PortableRepository, id: string): Promise<GezelDetail> {
   const gezel = await getGezel(repo, id);
-  if (!gezel) throw new Error(`Gezel ${id} could not be found`);
+  if (!gezel) throw new Error(`Crew member ${id} could not be found`);
   return gezel;
 }
 export async function listGezels(repo: PortableRepository): Promise<GezelSummary[]> {
@@ -120,7 +120,7 @@ export async function createGezel(
         ...(parsed.about ? { about: plainRoleProse(parsed.about, parsed.role) } : {}),
       }
     : parsed;
-  if (!input.name.trim()) throw new Error('A gezel name is required');
+  if (!input.name.trim()) throw new Error('A name is required');
   const id = await repo.uniqueId('gezels', slugifyEntityName(input.name) || repo.createId());
   const taken = new Set(
     (await listGezels(repo)).flatMap((gezel) => (gezel.roleBasedName ? [gezel.roleBasedName] : [])),
@@ -157,7 +157,7 @@ export async function updateGezelMarkdown(
   const parsed = parseGezelMarkdown(source);
   if (parsed.frontmatter.id && parsed.frontmatter.id !== id)
     throw new Error('Renaming the gezel id is not supported');
-  if (!parsed.frontmatter.name.trim()) throw new Error('A gezel name is required');
+  if (!parsed.frontmatter.name.trim()) throw new Error('A name is required');
   parsed.frontmatter.name = parsed.frontmatter.name.trim();
   parsed.frontmatter.id = id;
   if (parsed.frontmatter.role !== before.role || !parsed.frontmatter.roleBasedName) {

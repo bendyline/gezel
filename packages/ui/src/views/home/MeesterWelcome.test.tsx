@@ -25,10 +25,22 @@ const { api } = await import('../../api.js');
 const { queueComposerPrefill } = await import('../../components/composer-prefill.js');
 const { useFirstRunModel } = await import('../../components/useFirstRunModel.js');
 type FirstRunModel = import('../../components/useFirstRunModel.js').FirstRunModel;
-const { MeesterWelcome, composerWaitingStatus } = await import('./MeesterWelcome.js');
+type WelcomeHelper = import('./MeesterWelcome.js').WelcomeHelper;
+const { MeesterWelcome, canQueueFirstRequest, composerWaitingStatus } = await import(
+  './MeesterWelcome.js'
+);
 
 const prefill = vi.mocked(queueComposerPrefill);
 const GB = 1024 ** 3;
+// A speed counts toward "time left" once it has been watched for 20 seconds.
+const SETTLED = [
+  { at: 0, bytes: 0 },
+  { at: 30_000, bytes: 1 },
+];
+const UNSETTLED = [
+  { at: 0, bytes: 0 },
+  { at: 12_000, bytes: 1 },
+];
 
 function config(over: Partial<ConfigResponse> = {}): ConfigResponse {
   return {
@@ -51,10 +63,12 @@ function FirstRun({
   cfg,
   onConfigChanged = () => {},
   onModelInstalled,
+  helpers,
 }: {
   cfg: ConfigResponse;
   onConfigChanged?: (next: ConfigResponse) => void;
   onModelInstalled?: () => void;
+  helpers?: readonly WelcomeHelper[];
 }) {
   const model = useFirstRunModel({
     enabled: true,
@@ -62,7 +76,7 @@ function FirstRun({
     onConfigChanged,
     ...(onModelInstalled ? { onModelInstalled } : {}),
   });
-  return <MeesterWelcome {...figure} setup={{ model }} />;
+  return <MeesterWelcome {...figure} setup={{ model }} {...(helpers ? { helpers } : {})} />;
 }
 
 describe('MeesterWelcome', () => {
@@ -89,7 +103,9 @@ describe('MeesterWelcome', () => {
       expect(
         screen.getByRole('heading', { name: /I'm Florian — I run this workshop/ }),
       ).toBeInTheDocument();
-      expect(screen.getByText(/bring on the crew members it needs/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/I'll get it started and tell you when it's ready/),
+      ).toBeInTheDocument();
       expect(screen.queryByRole('button', { name: /Fetch my tools/ })).not.toBeInTheDocument();
       expect(screen.queryByText(/Change what I'm allowed to do/)).not.toBeInTheDocument();
       // Past first run the intro waits behind the tour link.
@@ -229,7 +245,7 @@ describe('MeesterWelcome', () => {
           ]}
         />,
       );
-      expect(screen.getByText('Two helpers already work here:')).toBeInTheDocument();
+      expect(screen.getByText('Two crew members already work here:')).toBeInTheDocument();
       expect(screen.getByText('Bram')).toBeInTheDocument();
       expect(screen.getByText('Armando')).toBeInTheDocument();
     });
@@ -264,9 +280,14 @@ describe('MeesterWelcome', () => {
       vi.mocked(api.installLlamaCppModel).mockReturnValue(new Promise(() => {}) as never);
       render(<FirstRun cfg={config()} />);
 
-      const key = await screen.findByRole('button', {
-        name: 'Fetch my tools · 16.0 GB · about 30 minutes',
-      });
+      // The key says how much; how long is a sentence, since it depends on
+      // the connection.
+      const key = await screen.findByRole('button', { name: 'Fetch my tools · 16.0 GB' });
+      expect(
+        screen.getByText(
+          "About 30 minutes on a fast connection, longer on a slow one. You can keep using this computer, and I'll pick up where I left off if it stops.",
+        ),
+      ).toBeInTheDocument();
       expect(screen.getByText(/I need my tools/)).toBeInTheDocument();
       expect(screen.getByText(/Change what I'm allowed to do/)).toBeInTheDocument();
       // No posture tray or preference switches: those are defaults now.
@@ -283,6 +304,125 @@ describe('MeesterWelcome', () => {
       ).toBeInTheDocument();
     });
 
+    // One thing at a time: six things to read stood beside the one to press.
+    it('shows only the ask until the tools are on their way', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue(
+        config({ firstUseAt: new Date().toISOString() } as Partial<ConfigResponse>),
+      );
+      vi.mocked(api.installLlamaCppModel).mockReturnValue(new Promise(() => {}) as never);
+      render(
+        <FirstRun
+          cfg={config()}
+          helpers={[{ gezel: { id: 'k', name: 'Bram' } as never, does: 'handles the paperwork' }]}
+        />,
+      );
+
+      const key = await screen.findByRole('button', { name: /^Fetch my tools/ });
+      await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+      expect(screen.getByRole('heading', { name: /I run this workshop/ })).toBeInTheDocument();
+      expect(screen.getByText(/Change what I'm allowed to do/)).toBeInTheDocument();
+      expect(screen.queryByRole('group', { name: 'What you would like help with' })).toBeNull();
+      expect(screen.queryByRole('group', { name: 'Something to start with' })).toBeNull();
+      expect(screen.queryByText(/Tell me what you want to get done/)).toBeNull();
+      expect(screen.queryByText(/in your own words/)).toBeNull();
+      expect(screen.queryByText(/Here are some ideas/)).toBeNull();
+      expect(screen.queryByTestId('home-intro-article')).toBeNull();
+      expect(screen.queryByText('Bram')).toBeNull();
+
+      // The tap is what opens the rest.
+      fireEvent.click(key);
+      expect(await screen.findByText('Fetching my tools')).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Something to start with' })).toBeInTheDocument();
+      expect(
+        await screen.findByRole('group', { name: 'What you would like help with' }),
+      ).toBeInTheDocument();
+      expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
+      expect(screen.getByText('Bram')).toBeInTheDocument();
+    });
+
+    it.each([
+      ['a cloud AI to connect', { kind: 'off' }, 'connect'],
+      [
+        'a download that failed',
+        { kind: 'failed', provider: 'llama-cpp', error: 'offline' },
+        'failed',
+      ],
+      ['the first look at this computer', { kind: 'checking' }, 'checking'],
+    ])('shows only the ask for %s', (_name, state, welcomeState) => {
+      const model = {
+        state,
+        rate: { samples: [], bytesPerSecond: null, lastMovedAt: null },
+        now: Date.now(),
+        busy: false,
+        copilotAvailable: null,
+      } as unknown as FirstRunModel;
+      render(<MeesterWelcome {...figure} setup={{ model }} />);
+      expect(screen.getByTestId('meester-welcome')).toHaveAttribute(
+        'data-welcome-state',
+        welcomeState,
+      );
+      expect(screen.queryByRole('group', { name: 'Something to start with' })).toBeNull();
+      expect(screen.queryByTestId('home-intro-article')).toBeNull();
+      expect(screen.getByText(/Change what I'm allowed to do/)).toBeInTheDocument();
+    });
+
+    // The inventory is read again between "downloading" and "ready". Folding
+    // the welcome away for that moment pulled the film from under a viewer.
+    it('holds what it shows through the check that follows a download', () => {
+      const installing = {
+        state: {
+          kind: 'installing',
+          provider: 'llama-cpp',
+          modelId: 'qwen3.8-27b-q4',
+          sizeBytes: 16 * GB,
+          progress: null,
+        },
+        rate: { samples: [], bytesPerSecond: null, lastMovedAt: null },
+        now: Date.now(),
+        busy: false,
+        copilotAvailable: null,
+      } as unknown as FirstRunModel;
+      const { rerender } = render(<MeesterWelcome {...figure} setup={{ model: installing }} />);
+      expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
+
+      rerender(
+        <MeesterWelcome
+          {...figure}
+          setup={{ model: { ...installing, state: { kind: 'checking' } } as FirstRunModel }}
+        />,
+      );
+      expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Something to start with' })).toBeInTheDocument();
+
+      // A download that stops is back to the one ask.
+      rerender(
+        <MeesterWelcome
+          {...figure}
+          setup={{
+            model: {
+              ...installing,
+              state: {
+                kind: 'needs-download',
+                provider: 'llama-cpp',
+                modelId: 'qwen3.8-27b-q4',
+                sizeBytes: 16 * GB,
+                resumeBytes: 3 * GB,
+                alternatives: [],
+              },
+            } as FirstRunModel,
+          }}
+        />,
+      );
+      expect(screen.queryByRole('group', { name: 'Something to start with' })).toBeNull();
+      expect(
+        screen.getByRole('button', {
+          name: 'Resume fetching my tools · 3.0 GB of 16.0 GB done',
+        }),
+      ).toBeInTheDocument();
+      // The time is for what is left: 13 GB, not 16.
+      expect(screen.getByText(/^About 25 minutes on a fast connection/)).toBeInTheDocument();
+    });
+
     it('puts the ideas line under the interest picker, and leads with it once the picker is put away', async () => {
       vi.mocked(api.getConfig).mockResolvedValue(
         config({ firstUseAt: new Date().toISOString() } as Partial<ConfigResponse>),
@@ -294,7 +434,7 @@ describe('MeesterWelcome', () => {
       expect(await screen.findByText('Fetching my tools')).toBeInTheDocument();
 
       const picker = await screen.findByRole('group', { name: 'What you would like help with' });
-      const ideas = screen.getByText(/Here are some ideas for things the crew can help you with/);
+      const ideas = screen.getByText(/Here are some ideas for things I can help you with/);
       const openers = screen.getByRole('group', { name: 'Something to start with' });
       expect(picker.compareDocumentPosition(ideas) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(
@@ -304,7 +444,7 @@ describe('MeesterWelcome', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
       expect(screen.queryByRole('group', { name: 'What you would like help with' })).toBeNull();
       expect(
-        screen.getAllByText(/Here are some ideas for things the crew can help you with/),
+        screen.getAllByText(/Here are some ideas for things I can help you with/),
       ).toHaveLength(1);
       expect(screen.queryByText(/what would you like help with/i)).toBeNull();
     });
@@ -379,10 +519,32 @@ describe('MeesterWelcome', () => {
       } as never);
       render(<FirstRun cfg={config()} />);
       expect(
-        await screen.findByRole('button', {
-          name: 'Fetch my tools · 18.0 GB · about 30 minutes',
-        }),
+        await screen.findByRole('button', { name: 'Fetch my tools · 18.0 GB' }),
       ).toBeInTheDocument();
+    });
+
+    it('offers to resume a download that stopped, saying how much is already here', async () => {
+      vi.mocked(api.listIncompleteLlamaCppModels).mockResolvedValue({
+        incomplete: [
+          {
+            id: 'qwen3.8-27b-q4',
+            bytes: 3.2 * GB,
+            updatedAt: '2026-11-09T10:00:00.000Z',
+            hasPartial: true,
+            resumable: true,
+          },
+        ],
+      } as never);
+      try {
+        render(<FirstRun cfg={config()} />);
+        expect(
+          await screen.findByRole('button', {
+            name: 'Resume fetching my tools · 3.2 GB of 16.0 GB done',
+          }),
+        ).toBeInTheDocument();
+      } finally {
+        vi.mocked(api.listIncompleteLlamaCppModels).mockResolvedValue({ incomplete: [] } as never);
+      }
     });
 
     it('fetches the engine beside the model when the person taps', async () => {
@@ -448,13 +610,17 @@ describe('MeesterWelcome', () => {
           sizeBytes: 16 * GB,
           progress: { bytesWritten: 4 * GB, totalBytes: 16 * GB, phase: 'downloading' },
         },
-        rate: { samples: [], bytesPerSecond: 20 * 1024 ** 2, lastMovedAt: Date.now() },
+        rate: { samples: SETTLED, bytesPerSecond: 20 * 1024 ** 2, lastMovedAt: Date.now() },
         now: Date.now(),
         busy: false,
         copilotAvailable: null,
       } as unknown as FirstRunModel;
       const { rerender } = render(<MeesterWelcome {...figure} setup={{ model }} />);
-      expect(screen.getByText(/^Fetching my tools · 25% · about 10 min left$/)).toBeInTheDocument();
+      // Amounts, not a percent: "25%" says nothing about how much is left.
+      expect(
+        screen.getByText(/^Fetching my tools · 4\.0 GB of 16\.0 GB · about 10 min left$/),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/This connection is slow/)).toBeNull();
 
       // Before a rate is measured, the line says only how far along it is.
       rerender(
@@ -465,7 +631,129 @@ describe('MeesterWelcome', () => {
           }}
         />,
       );
-      expect(screen.getByText(/^Fetching my tools · 25%$/)).toBeInTheDocument();
+      expect(screen.getByText(/^Fetching my tools · 4\.0 GB of 16\.0 GB$/)).toBeInTheDocument();
+
+      // The first seconds arrive in bursts: twelve seconds in, the line once
+      // said "about 10 h 20 min left" and warned of a slow connection.
+      rerender(
+        <MeesterWelcome
+          {...figure}
+          setup={{
+            model: {
+              ...model,
+              rate: { samples: UNSETTLED, bytesPerSecond: 400 * 1024, lastMovedAt: Date.now() },
+            },
+          }}
+        />,
+      );
+      expect(screen.getByText(/^Fetching my tools · 4\.0 GB of 16\.0 GB$/)).toBeInTheDocument();
+      expect(screen.queryByText(/This connection is slow/)).toBeNull();
+    });
+
+    it('says so when the connection will take hours, but not on top of a stall notice', () => {
+      const now = Date.now();
+      const model = {
+        state: {
+          kind: 'installing',
+          provider: 'llama-cpp',
+          modelId: 'qwen3.8-27b-q4',
+          sizeBytes: 16 * GB,
+          progress: { bytesWritten: 4 * GB, totalBytes: 16 * GB, phase: 'downloading' },
+        },
+        // 12 GB at 1 MB/s is over three hours.
+        rate: { samples: SETTLED, bytesPerSecond: 1024 ** 2, lastMovedAt: now },
+        now,
+        busy: false,
+        copilotAvailable: null,
+      } as unknown as FirstRunModel;
+      const { rerender } = render(<MeesterWelcome {...figure} setup={{ model }} />);
+      expect(
+        screen.getByText(
+          'This connection is slow, so this will take a while. You can leave it running.',
+        ),
+      ).toBeInTheDocument();
+
+      // Nothing has arrived for a minute: that notice stands alone.
+      rerender(
+        <MeesterWelcome
+          {...figure}
+          setup={{ model: { ...model, rate: { ...model.rate, lastMovedAt: now - 60_000 } } }}
+        />,
+      );
+      expect(screen.getByText(/Still coming/)).toBeInTheDocument();
+      expect(screen.queryByText(/This connection is slow/)).toBeNull();
+    });
+
+    it('pauses the download from a quiet link beside the progress line', () => {
+      const pause = vi.fn(() => new Promise<void>(() => {}));
+      const model = {
+        state: {
+          kind: 'installing',
+          provider: 'llama-cpp',
+          modelId: 'qwen3.8-27b-q4',
+          sizeBytes: 16 * GB,
+          progress: { bytesWritten: 4 * GB, totalBytes: 16 * GB, phase: 'downloading' },
+        },
+        rate: { samples: [], bytesPerSecond: null, lastMovedAt: null },
+        now: Date.now(),
+        // The tap that started the download holds `busy` until its last byte.
+        busy: true,
+        copilotAvailable: null,
+        pause,
+      } as unknown as FirstRunModel;
+      const { rerender } = render(<MeesterWelcome {...figure} setup={{ model }} />);
+      const link = screen.getByRole('button', { name: 'Pause' });
+      expect(link).toBeEnabled();
+      fireEvent.click(link);
+      expect(pause).toHaveBeenCalledTimes(1);
+      // One pause at a time.
+      expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
+
+      // Checking and unpacking cannot be paused; there is nothing left to stop.
+      rerender(
+        <MeesterWelcome
+          {...figure}
+          setup={{
+            model: {
+              ...model,
+              state: {
+                ...model.state,
+                progress: { bytesWritten: 16 * GB, totalBytes: 16 * GB, phase: 'verifying' },
+              },
+            } as FirstRunModel,
+          }}
+        />,
+      );
+      expect(screen.getByText('Checking my tools')).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Pause' })).toBeNull();
+    });
+
+    it('asks for the first request while the tools arrive, since Send will hold it', () => {
+      const model = {
+        state: {
+          kind: 'installing',
+          provider: 'llama-cpp',
+          modelId: 'qwen3.8-27b-q4',
+          sizeBytes: 16 * GB,
+          progress: null,
+        },
+        rate: { samples: [], bytesPerSecond: null, lastMovedAt: null },
+        now: Date.now(),
+        busy: false,
+        copilotAvailable: null,
+      } as unknown as FirstRunModel;
+      const { rerender } = render(<MeesterWelcome {...figure} setup={{ model }} />);
+      expect(
+        screen.getByText(
+          "Write your first request below and press Send. I'll start on it the moment my tools arrive.",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.queryByText(/in your own words/)).toBeNull();
+
+      // Once a model can answer there is nothing to hold.
+      rerender(<MeesterWelcome {...figure} justReady />);
+      expect(screen.getByText('Or tell me in your own words, below.')).toBeInTheDocument();
+      expect(screen.queryByText(/Write your first request below/)).toBeNull();
     });
 
     it('plays the intro under the first projects while the tools download, and keeps it once they land', () => {
@@ -483,39 +771,49 @@ describe('MeesterWelcome', () => {
         copilotAvailable: null,
       } as unknown as FirstRunModel;
       const { rerender } = render(<MeesterWelcome {...figure} setup={{ model }} />);
-      const lead = screen.getByText('Also, while we wait, here is a bit more info about gezel:');
+      const lead = screen.getByText('While we wait, here is a bit more about Gezel:');
       const intro = screen.getByTestId('home-intro-article');
       expect(intro).toHaveAttribute('data-variant', 'player');
       const openers = screen.getByRole('group', { name: 'Something to start with' });
       expect(openers.compareDocumentPosition(lead) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 
       // The download finishing must not pull the video from under a viewer,
-      // and the tour link would only open a second copy of it.
+      // and the tour link would only open a second copy of it. Nothing is
+      // being waited for any more, and the lead-in stops saying so.
       rerender(<MeesterWelcome {...figure} justReady />);
       expect(screen.getByTestId('home-intro-article')).toHaveAttribute('data-variant', 'player');
+      expect(screen.getByText('Here is a bit more about Gezel:')).toBeInTheDocument();
+      expect(screen.queryByText(/While we wait/)).toBeNull();
       expect(screen.queryByRole('button', { name: 'Take the 1-minute tour' })).toBeNull();
     });
 
     // Keyed to a running download, it was missing whenever the tools were
-    // already on disk or the page reloaded after they landed.
-    it('plays the intro in every first-run state, not only while downloading', async () => {
-      render(<FirstRun cfg={config()} />);
+    // already on disk or the page reloaded after they landed. The ask for
+    // tools is the one state that holds it back.
+    it('plays the intro in every first-run state past the ask, not only while downloading', async () => {
+      const { unmount: unmountAsk } = render(<FirstRun cfg={config()} />);
       await screen.findByRole('button', { name: /Fetch my tools/ });
-      expect(
-        screen.getByText('Also, while we wait, here is a bit more info about gezel:'),
-      ).toBeInTheDocument();
-      expect(screen.getByTestId('home-intro-article')).toHaveAttribute('data-variant', 'player');
+      expect(screen.queryByTestId('home-intro-article')).toBeNull();
+      unmountAsk();
 
-      const ready = {
-        state: { kind: 'ready' },
+      const quiet = {
         rate: { samples: [], bytesPerSecond: null, lastMovedAt: null },
         now: Date.now(),
         busy: false,
         copilotAvailable: null,
-      } as unknown as FirstRunModel;
-      const { unmount } = render(<MeesterWelcome {...figure} setup={{ model: ready }} />);
-      expect(screen.getAllByTestId('home-intro-article')).toHaveLength(2);
-      unmount();
+      };
+      for (const state of [
+        { kind: 'ready' },
+        { kind: 'engine', provider: 'llama-cpp', modelId: 'qwen3.8-27b-q4', progress: null },
+      ]) {
+        const model = { ...quiet, state } as unknown as FirstRunModel;
+        const { unmount } = render(<MeesterWelcome {...figure} setup={{ model }} />);
+        expect(
+          screen.getByText('While we wait, here is a bit more about Gezel:'),
+        ).toBeInTheDocument();
+        expect(screen.getByTestId('home-intro-article')).toHaveAttribute('data-variant', 'player');
+        unmount();
+      }
     });
 
     it('offers to fetch anyway when Hugging Face republished the file', async () => {
@@ -566,6 +864,31 @@ describe('MeesterWelcome', () => {
       render(<Phone />);
       expect(screen.getByText('Native model list')).toBeInTheDocument();
       expect(hostModels).toHaveBeenCalledWith({ setup: true });
+      // A phone picks a model from that list and keeps its welcome whole.
+      expect(screen.getByRole('group', { name: 'Something to start with' })).toBeInTheDocument();
+      expect(screen.getByText('Or tell me in your own words, below.')).toBeInTheDocument();
+    });
+  });
+
+  describe('canQueueFirstRequest', () => {
+    const withState = (state: unknown) =>
+      canQueueFirstRequest({ model: { state } as unknown as FirstRunModel });
+
+    it('holds a first request only once the tools are on their way', () => {
+      expect(withState({ kind: 'installing' })).toBe(true);
+      expect(withState({ kind: 'engine' })).toBe(true);
+      expect(withState({ kind: 'ready' })).toBe(true);
+      expect(withState({ kind: 'needs-download' })).toBe(false);
+      expect(withState({ kind: 'checking' })).toBe(false);
+      expect(withState({ kind: 'failed' })).toBe(false);
+      expect(withState({ kind: 'off' })).toBe(false);
+      expect(canQueueFirstRequest(null)).toBe(false);
+      expect(
+        canQueueFirstRequest({
+          model: { state: { kind: 'installing' } } as unknown as FirstRunModel,
+          hostModels: () => null,
+        }),
+      ).toBe(false);
     });
   });
 

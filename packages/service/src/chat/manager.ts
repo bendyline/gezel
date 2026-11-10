@@ -453,6 +453,7 @@ import {
   engineSwapWaitLabel,
   turnWaitsForEngineSwap,
 } from './engine-swap-wait.js';
+import { handoffRetryDelayMs } from './handoff-retry-delay.js';
 import type { ChatEventBus, PublishScope } from './events.js';
 import { EvidenceLedger, personGivenText } from './evidence-ledger.js';
 import {
@@ -4761,6 +4762,16 @@ export class ChatManager extends LocalEngineRuntime {
             // handoff, and re-sending it undoes the stop. Shutdown also
             // refuses every later send.
             if (this.shuttingDown || turnCancelReasonOf(error)) throw error;
+            // An engine that declined to start the turn needs time, not
+            // another send 40 ms later into the same refusal. The task is
+            // read after the wait, so a Stop pressed meanwhile still holds.
+            if (attempt < maxHandoffSendAttempts) {
+              const retryDelayMs = handoffRetryDelayMs(error, attempt);
+              if (retryDelayMs > 0) {
+                await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
+                if (this.shuttingDown) throw error;
+              }
+            }
             const parsed = parseTaskRef(args.taskRef);
             const currentTask = parsed
               ? await this.readEffectiveTask(parsed.projectId, parsed.num)
@@ -6473,7 +6484,7 @@ export class ChatManager extends LocalEngineRuntime {
           kind: 'chat.mention.fanout',
           projectId: primary.projectId,
           gezelId: primary.gezelId,
-          summary: `Mentioned ${historyTargets.length} gezel${
+          summary: `Mentioned ${historyTargets.length} crew member${
             historyTargets.length === 1 ? '' : 's'
           }`,
           details: {
@@ -10415,8 +10426,8 @@ export class ChatManager extends LocalEngineRuntime {
     if (!pool.hasTool(ff.tool)) {
       const stepBlock = await this.stepPolicyExcludingTool(record, ff.tool);
       const reason = stepBlock
-        ? `step "${stepBlock.stepId}" of task ${stepBlock.taskRef} does not allow ${ff.tool} (its tool policy excludes it), and this gezel can only call ${ff.tool}`
-        : `MCP tool "${ff.tool}" is not registered for this gezel — check the install or the tool's MCP server`;
+        ? `step "${stepBlock.stepId}" of task ${stepBlock.taskRef} does not allow ${ff.tool} (its tool policy excludes it), and ${gezel.name} can only call ${ff.tool}`
+        : `MCP tool "${ff.tool}" is not registered for ${gezel.name} — check the install or the tool's MCP server`;
       return endWithNotice(`${ff.tool} failed: ${reason}`, reason);
     }
 
@@ -14728,8 +14739,7 @@ export class ChatManager extends LocalEngineRuntime {
         };
         this.events.publish(scope, {
           type: 'warning',
-          message:
-            "MCP bridge to your tools failed to start — this gezel can't run any actions this turn (no write_file, read_file, run_installed_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.",
+          message: `MCP bridge to your tools failed to start — ${gezel.name} can't run any actions this turn (no write_file, read_file, run_installed_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.`,
         });
         return;
       }
@@ -14779,7 +14789,7 @@ export class ChatManager extends LocalEngineRuntime {
           };
           this.events.publish(scope, {
             type: 'warning',
-            message: `This gezel has ${liveToolNames.length} tools registered (${cappedSurfaceCount} count toward the selection limit), which is heavy for a ${tier} on-device model. Small models tend to lose track of tool selection past ~${tierToolCap} and may produce empty replies. Consider trimming the toolset roster, or pointing this gezel at a larger model in Settings.`,
+            message: `${gezel.name} has ${liveToolNames.length} tools registered (${cappedSurfaceCount} count toward the selection limit), which is heavy for a ${tier} on-device model. Small models tend to lose track of tool selection past ~${tierToolCap} and may produce empty replies. Consider trimming the toolset roster, or pointing ${gezel.name} at a larger model in Settings.`,
           });
         }
       }

@@ -100,11 +100,14 @@ function backendOptionLabel(b: ConcreteBackend): string {
 
 /** Why auto-detect runs Vulkan rather than ROCm on this AMD machine, in plain words. */
 function rocmBlockerText(
-  kind: NonNullable<LlamaCppBackendHealthResponse['rocmBlocker']>['kind'],
+  blocker: NonNullable<LlamaCppBackendHealthResponse['rocmBlocker']>,
 ): string {
-  if (kind === 'no-device-access') {
-    return 'ROCm is not used: your account cannot open the AMD compute device (/dev/kfd). Add it to the "render" and "video" groups and restart to use ROCm. Vulkan runs meanwhile.';
+  if (blocker.kind === 'no-device-access') {
+    // A Linux package install's shared engine runs as `gezel`, not as you.
+    const who = blocker.account ? `the "${blocker.account}" account` : 'your account';
+    return `ROCm is not used: ${who} cannot open the AMD compute device (/dev/kfd). Add it to the "render" and "video" groups and restart to use ROCm. Vulkan runs meanwhile.`;
   }
+  const kind = blocker.kind;
   if (kind === 'no-supported-gpu') {
     return 'ROCm is not used: this graphics card is not one the ROCm engine is built for, so the Vulkan engine runs it.';
   }
@@ -721,7 +724,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         <section style={{ marginBottom: '2rem' }}>
           <h4>Default model</h4>
           <p className="muted small" style={{ marginTop: 0 }}>
-            Which local model new chat sessions use when a gezel doesn't pin one.
+            Which local model new chat sessions use when a crew member doesn't pin one.
           </p>
           <div className="new-row" style={{ marginTop: '0.5rem' }}>
             <select
@@ -789,7 +792,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           <label
             htmlFor="llama-cpp-context-sizing"
             className="muted"
-            style={{ fontSize: '0.9rem', minWidth: '10rem' }}
+            style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}
           >
             Context sizing
           </label>
@@ -820,7 +823,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           <label
             htmlFor="llama-cpp-engine-backend"
             className="muted"
-            style={{ fontSize: '0.9rem', minWidth: '10rem' }}
+            style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}
           >
             Engine backend
           </label>
@@ -842,7 +845,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
               </option>
             ))}
           </select>
-          <span className="muted" style={{ fontSize: '0.85rem' }}>
+          <span className="muted" style={{ fontSize: 'var(--text-sm)' }}>
             {needsRestart(config, health, backendHealth) ? 'Restart the app to apply' : ''}
           </span>
         </div>
@@ -857,12 +860,12 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
             style={{ marginTop: '0.25rem', marginLeft: '10rem' }}
             title={backendHealth.rocmBlocker.detail}
           >
-            {rocmBlockerText(backendHealth.rocmBlocker.kind)}
+            {rocmBlockerText(backendHealth.rocmBlocker)}
           </p>
         ) : null}
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
             KV cache quantization
           </label>
           <select
@@ -884,7 +887,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
             Flash attention
           </label>
           <select
@@ -910,7 +913,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
             Speculative decoding
           </label>
           <select
@@ -963,7 +966,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
             Reasoning history
           </label>
           <select
@@ -986,7 +989,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           <label
             htmlFor="llama-cpp-n-cpu-ffn"
             className="muted"
-            style={{ fontSize: '0.9rem', minWidth: '10rem' }}
+            style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}
           >
             Dense FFN offload
           </label>
@@ -1022,7 +1025,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
             MoE expert offload
           </label>
           <select
@@ -1043,7 +1046,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           the next time the engine starts.
         </p>
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
             Full SWA cache
           </label>
           <select
@@ -1066,7 +1069,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
             Model loading
           </label>
           <select
@@ -1090,7 +1093,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
             Lazy tensor loading
           </label>
           <select
@@ -1118,7 +1121,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
             External engine URL
           </label>
           <input
@@ -1139,7 +1142,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </div>
 
         <div className="new-row" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: '0.9rem', minWidth: '10rem' }}>
+          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
             Override model path
           </label>
           <input
@@ -1232,7 +1235,7 @@ function EngineLogViewer() {
               borderRadius: 4,
               maxHeight: '18rem',
               overflow: 'auto',
-              fontSize: '0.75rem',
+              fontSize: 'var(--text-2xs)',
               fontFamily:
                 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
               whiteSpace: 'pre-wrap',
@@ -1244,7 +1247,7 @@ function EngineLogViewer() {
         )}
         {state.kind === 'loaded' && !state.tail && state.path && (
           <div className="muted small" style={{ marginTop: '0.5rem' }}>
-            Log is empty. (Engine may not have started yet — try chatting with an on-device gezel
+            Log is empty. (Engine may not have started yet — try chatting on an on-device model
             first.)
           </div>
         )}

@@ -491,7 +491,7 @@ describe('NewTaskDialog', () => {
     // No description/steps fields for a book — the recipe supplies them.
     expect(screen.queryByText(/^Description/)).not.toBeInTheDocument();
 
-    expect(screen.getByText(/Your crew can make this now/)).toBeInTheDocument();
+    expect(screen.getByText(/Gezel can make this now/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Start now' }));
 
     await waitFor(() => {
@@ -884,7 +884,7 @@ describe('NewTaskDialog', () => {
     expect(message.closest('.gz-npd-pane-footer')).not.toBeNull();
     expect(message.closest('.gz-npd-pane-scroll')).toBeNull();
     // The reason replaces the footnote rather than stacking under it.
-    expect(screen.queryByText(/Your crew can make this now/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Gezel can make this now/)).not.toBeInTheDocument();
   });
 
   it('warns before submit when no open pull request matches the checked-out branch', async () => {
@@ -950,7 +950,7 @@ describe('NewTaskDialog', () => {
     const user = userEvent.setup();
     await user.click(await screen.findByRole('radio', { name: 'Pull Request Review' }));
 
-    expect(await screen.findByText(/Your crew can make this now/)).toBeInTheDocument();
+    expect(await screen.findByText(/Gezel can make this now/)).toBeInTheDocument();
     expect(screen.queryByText(/No open pull request/)).not.toBeInTheDocument();
   });
 
@@ -1311,7 +1311,7 @@ describe('NewTaskDialog', () => {
       const { rerender } = render(<NewTaskDialog open {...launchProps} />);
       expect(await screen.findByRole('button', { name: 'Tonight' })).toBeInTheDocument();
       expect(
-        screen.getByText('Your crew can make this now or during the next Night Shift.'),
+        screen.getByText('Gezel can make this now or during the next Night Shift.'),
       ).toBeInTheDocument();
 
       vi.mocked(api.getConfig).mockResolvedValue({
@@ -1325,7 +1325,7 @@ describe('NewTaskDialog', () => {
       );
       expect(screen.queryByText(/during the next Night Shift/)).not.toBeInTheDocument();
       expect(
-        screen.getByText('Your crew starts on this as soon as you press Start now.'),
+        screen.getByText('Gezel starts on this as soon as you press Start now.'),
       ).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Start now' })).toBeInTheDocument();
     });

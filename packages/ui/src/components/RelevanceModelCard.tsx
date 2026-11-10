@@ -63,7 +63,7 @@ export function RelevanceModelCard() {
     <div className="gz-setting-stack">
       <SettingCheck
         label="Check that indexed context is on topic before using it"
-        hint="Before indexed material reaches a gezel, a small model on this device reads each passage beside the question and sets aside what is off-topic. It never makes a conversation wait: while it loads, material is chosen the usual way."
+        hint="Before indexed material is used in a chat, a small model on this device reads each passage beside the question and sets aside what is off-topic. It never makes a conversation wait: while it loads, material is chosen the usual way."
         checked={status?.enabled === true}
         disabled={!status || saving || overridden}
         onChange={(checked) => void save({ enabled: checked })}

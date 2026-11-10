@@ -59,6 +59,9 @@ describe('GET /api/requests', () => {
         taskRefs: [task.ref],
       }),
     ]);
+    // A task made from steps names its plan after itself, and a plan's name
+    // is never offered as what the person asked for.
+    expect(requests[0]).not.toHaveProperty('title');
     expect(requests[0]?.key).toBe(`${thread.id}@${task.requestRef?.at}`);
 
     const elsewhere = await get<ListRequestsResponse>('/api/requests?sessions=nobody');
@@ -67,5 +70,10 @@ describe('GET /api/requests', () => {
     const activity = await get<ActivityStatusResponse>('/api/activity');
     const rows = activity.items.filter((i) => i.taskRef === task.ref || i.requestKey);
     expect(rows.map((r) => r.id)).toEqual([`request:${requests[0]?.key}`]);
+
+    // With a title of its own, the request carries it for the finished card.
+    await ctx.tasks.update(project.id, task.num, { title: 'October invoices for the cafes' });
+    const renamed = await get<ListRequestsResponse>(`/api/requests?sessions=${thread.id}`);
+    expect(renamed.requests[0]?.title).toBe('October invoices for the cafes');
   });
 });

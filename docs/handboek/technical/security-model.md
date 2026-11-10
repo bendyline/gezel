@@ -2,7 +2,7 @@
 id: security-model
 title: "The security model: tokens, sandboxing, and consent"
 order: 5
-summary: The guardrails between your crew and your computer.
+summary: The guardrails between Gezel and your computer.
 subcategory:
   id: how-gezel-works
   title: How Gezel works
@@ -52,7 +52,7 @@ only people you trust with that computer.
 
 ### Workspaces have walls
 
-A gezel using Gezel's workspace tools sees that project's workspace — not your
+A model using Gezel's workspace tools sees that project's workspace — not your
 whole disk. Paths those tools receive are checked against the workspace
 boundary before a file is read or written, so "../" tricks and symlink hops
 end at the wall. Provider-native tools and explicitly approved full-trust
@@ -64,9 +64,9 @@ Gezel's **sandboxed standalone-script tools** run code in a separate process
 wrapped in several independent layers:
 
 - **Its own small world.** The script gets a fresh scratch area, and its writes are confined to that area and the project workspace — not your disk. Node's permission model checks the file boundary as one layer of the sandbox.
-- **No calling for backup.** The script can't launch other programs, spawn workers, or load native extensions. Where the operating system can enforce it (next point), a script also can't quietly open its own connection to the internet — when a gezel needs the web, it goes through gezel's named tools (search, fetch, the browser), which are policy-checked and show up in History. In most configurations, whatever a gezel does, it does alone, inside the fence of the project workspace.
+- **No calling for backup.** The script can't launch other programs, spawn workers, or load native extensions. Where the operating system can enforce it (next point), a script also can't quietly open its own connection to the internet — when a model needs the web, it goes through gezel's named tools (search, fetch, the browser), which are policy-checked and show up in History. In most configurations, whatever a script does, it does alone, inside the fence of the project workspace.
 - **The operating system holds the outer wall where it can.** Untrusted code that must run without network access starts only when Gezel can apply a supported OS boundary — macOS Seatbelt, the Windows sandbox (Microsoft's process container, on recent Windows 11), or a probed systemd boundary for compatible Linux jobs. Otherwise Gezel refuses to start it. On macOS and Windows that wall surrounds every script run, and on Windows it also holds the script to the same folders as the file limits above. Settings → Security & compliance shows whether the Windows sandbox is active on your PC, says why when it isn't, and has a switch to turn it off. One narrow compatibility path exists for byte-verified first-party scripts shipped in Gezel's standard library or catalog: where a job cannot use the OS boundary, those trusted bytes may run with the remaining filesystem limits, subprocess/worker/addon denial, environment scrubbing, and JavaScript network-denial layers. Edited, user-authored, and model-authored scripts do not receive that exception.
-- **Scripts a gezel writes follow your network setting where there is no wall.** On Windows when the Windows sandbox is off or not available, and on Linux without the systemd boundary, `run_nodejs_script` and `derive_file` are withheld unless your security level already lets gezels use external services (as Free does). When it does, these scripts run with the other layers but with ordinary network access. That access is direct: it skips the checks the named web tools apply, its requests do not appear in History, and it can reach addresses on your own machine and local network. On macOS, on Windows with the sandbox active, and on Linux with the boundary, they always run without network access.
+- **Scripts a model writes follow your network setting where there is no wall.** On Windows when the Windows sandbox is off or not available, and on Linux without the systemd boundary, `run_nodejs_script` and `derive_file` are withheld unless your security level already lets Gezel use external services (as Free does). When it does, these scripts run with the other layers but with ordinary network access. That access is direct: it skips the checks the named web tools apply, its requests do not appear in History, and it can reach addresses on your own machine and local network. On macOS, on Windows with the sandbox active, and on Linux with the boundary, they always run without network access.
 - **A time and memory leash.** Every run has a deadline and can be capped on memory, so a runaway script gets stopped instead of dragging your machine down.
 
 The layers deliberately overlap, but they are defense in depth rather than a
@@ -86,10 +86,10 @@ still discover files dynamically, load implicit configuration, resolve other
 programs through `PATH`, use outside-project or directory/glob inputs, or fetch
 code from the network, so this binding is not a complete dependency graph and
 does not turn package commands into a sandbox. A separate switch, **Edit
-package scripts**, decides whether gezels may add or change the scripts in a
+package scripts**, decides whether Gezel may add or change the scripts in a
 project's `package.json` at all. A script runs later with your whole account,
 from Gezel or from your own terminal, so planting one is treated as its own
-permission. With it off, gezels can still edit the rest of the file, and
+permission. With it off, Gezel can still edit the rest of the file, and
 removing a script is always allowed.
 
 One check runs on every tool call that executes or fetches, before it runs:
@@ -111,7 +111,7 @@ tools — project-file writes, git operations, and outward-facing actions — go
 through the policy and per-project consent you control in Settings. Approving a
 full-trust package command authorizes that command as a whole; Gezel cannot
 separately mediate every side effect produced inside it. Git itself stays
-yours in the default managed workflow: your crew works in your working copy while
+yours in the default managed workflow: Gezel works in your working copy while
 you control commits, branches, and pushes. A full-trust command can perform any
 of those operations if the command you approve includes them.
 

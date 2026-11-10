@@ -193,7 +193,7 @@
 }
 
 .task-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--hover-bg);
 }
 
 /* Tasks selection states use the gezel titlebar green instead of a generic
@@ -201,44 +201,51 @@
    as the header. */
 .task-row-active {
   --muted: var(--text);
-  background: color-mix(in srgb, var(--titlebar) 22%, transparent);
+  background: var(--selected-bg);
 }
 
 .task-row-selected {
   --muted: var(--text);
-  background: color-mix(in srgb, var(--titlebar) 32%, transparent);
+  background: var(--selected-bg);
 }
 
 .task-row-selected:hover {
-  background: color-mix(in srgb, var(--titlebar) 38%, transparent);
+  background: var(--selected-bg-hover);
 }
 
+/* A task's state wears the app's status colors (foundation.css → Status):
+   working is the accent, waiting on the person (draft, paused) is ochre,
+   finished is sage, and canceled carries no hue because nothing is wrong.
+   The badge is the badge family's capsule in sentence case; its inks mix
+   from the status color toward the text so they hold in both themes. The
+   five states used to be two greens, a yellow, an ember and a red, with
+   badge inks tuned for the dark theme only. */
 .task-status {
+  display: inline-block;
   font-size: var(--text-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 0.1rem 0.4rem;
-  border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.08);
-  color: var(--muted);
+  font-weight: 500;
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text-muted);
   text-align: center;
+}
+.task-status::first-letter {
+  text-transform: uppercase;
 }
 
 .task-status-active {
-  background: color-mix(in srgb, var(--titlebar) 42%, transparent);
-  color: #e2ecdf;
+  background: color-mix(in srgb, var(--status-working) 16%, transparent);
+  color: color-mix(in srgb, var(--status-working) 45%, var(--text));
 }
+.task-status-draft,
 .task-status-paused {
-  background: rgba(255, 200, 60, 0.2);
-  color: #ffeab0;
+  background: color-mix(in srgb, var(--status-attention) 18%, transparent);
+  color: color-mix(in srgb, var(--status-attention) 40%, var(--text));
 }
 .task-status-complete {
-  background: rgba(80, 200, 120, 0.2);
-  color: #bfe8cd;
-}
-.task-status-canceled {
-  background: rgba(255, 100, 100, 0.15);
-  color: #ffbcbc;
+  background: color-mix(in srgb, var(--status-ready) 18%, transparent);
+  color: color-mix(in srgb, var(--status-ready) 40%, var(--text));
 }
 
 /* Compact status indicator for list rows — a single colored dot in place
@@ -250,31 +257,27 @@
   border-radius: 50%;
   flex-shrink: 0;
   margin-top: 0.3rem;
-  background: var(--muted);
+  background: color-mix(in srgb, var(--text-muted) 55%, transparent);
 }
 .task-status-dot.task-status-active {
-  background: #7faa76;
+  background: var(--status-working);
 }
-/* Draft = "ready to fire" — the same ember the fire button carries. */
-.task-status-dot.task-status-draft {
-  background: var(--terra, #c9722e);
-}
+.task-status-dot.task-status-draft,
 .task-status-dot.task-status-paused {
-  background: #e8c34a;
+  background: var(--status-attention);
 }
 .task-status-dot.task-status-complete {
-  background: #5cc878;
-}
-.task-status-dot.task-status-canceled {
-  background: #e57373;
+  background: var(--status-ready);
 }
 
 /* Task status keys (docs/ux.md → "State groups latch in the state's color").
    The tray sets a lifecycle state rather than a preference, so the latched
-   key wears that state's own color and its glyph — go-green play, held-amber
-   pause, sealed-green check, struck-brick circle-slash. Only one key is ever
-   latched, so the tray still shows a single color at a time. Fixed inks, like
-   the engagement switch's emergency red: these fills hold on both themes. */
+   key wears that state's color, the same one its dot wears in the list, and
+   its glyph: play in the accent (working), pause in ochre (waiting on you),
+   check in sage (finished), circle-slash in plain ink (canceled). Only one
+   key is ever latched, so the tray still shows a single color at a time.
+   Fixed inks, like the engagement switch's emergency red: these fills hold
+   on both themes. */
 .task-status-tray {
   gap: 0.25rem;
 }
@@ -300,12 +303,6 @@
   opacity: 1;
 }
 
-.task-status-key.gz-key-active[data-status="active"] {
-  background: linear-gradient(to bottom, #587f46, #689154);
-  border-color: #446837;
-  color: #f1f7ea;
-}
-
 .task-status-key.gz-key-active[data-status="paused"] {
   background: linear-gradient(to bottom, #a87e22, #bb9132);
   border-color: #8a671b;
@@ -313,15 +310,15 @@
 }
 
 .task-status-key.gz-key-active[data-status="complete"] {
-  background: linear-gradient(to bottom, #446551, #4f785e);
-  border-color: #365343;
-  color: #ecf4ee;
+  background: linear-gradient(to bottom, #48603f, #55724c);
+  border-color: #3a4e33;
+  color: #f1f7ea;
 }
 
 .task-status-key.gz-key-active[data-status="canceled"] {
-  background: linear-gradient(to bottom, #8b463a, #9d5344);
-  border-color: #6c352b;
-  color: #fbeae6;
+  background: linear-gradient(to bottom, #554c41, #665c4f);
+  border-color: #453d34;
+  color: #f3ede0;
 }
 
 /* An id under each title is a quiet second line, not code: in monospace it
@@ -625,7 +622,7 @@
    browser's <h3> it was 18.72px, a size from no scale. */
 .task-detail-header h3 {
   margin: 0.15rem 0 0.75rem;
-  font-size: var(--text-title, 1.35rem);
+  font-size: var(--text-title);
 }
 
 /* The plan body is rendered as <pre> to preserve any intentional indent
@@ -1559,7 +1556,7 @@ button.bench-step-foot:disabled {
   background: transparent;
   color: var(--text-muted, var(--muted));
   font-weight: 600;
-  font-size: 0.95rem;
+  font-size: var(--text-md);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
@@ -1981,22 +1978,27 @@ button.bench-step-foot:disabled {
 /* ── Plan / draft task UI ─────────────────────────────────────────── */
 .draft-plan-card {
   margin-top: 0.5rem;
-  border-left: 3px solid var(--terra, #c9722e);
+  border-left: 3px solid var(--accent);
 }
 .draft-plan-card .pending-question-document-preview {
   max-height: 420px;
   overflow: auto;
 }
+/* A draft waits on the person, so its badge is the badge family's capsule
+   in the "needs you" status color, in sentence case. */
 .task-detail-status-badge,
 .pending-question-context-status.status-draft {
   display: inline-block;
-  padding: 0.05rem 0.4rem;
-  border-radius: var(--radius-md);
+  padding: 0.1rem 0.5rem;
+  border-radius: 999px;
   font-size: var(--text-2xs);
-  letter-spacing: 0.02em;
+  font-weight: 500;
+  background: color-mix(in srgb, var(--status-attention) 18%, transparent);
+  color: color-mix(in srgb, var(--status-attention) 40%, var(--text));
+}
+.task-detail-status-badge::first-letter,
+.pending-question-context-status.status-draft::first-letter {
   text-transform: uppercase;
-  background: color-mix(in srgb, var(--terra, #c9722e) 18%, transparent);
-  color: var(--terra, #c9722e);
 }
 .task-draft-activate {
   display: flex;
@@ -2020,7 +2022,7 @@ button.linklike {
   background: none;
   border: none;
   padding: 0;
-  color: var(--terra, #c9722e);
+  color: var(--accent-text);
   cursor: pointer;
   text-decoration: underline;
 }

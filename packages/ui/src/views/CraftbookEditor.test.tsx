@@ -56,7 +56,7 @@ describe('CraftbookEditor', () => {
 
   it('loads a local craftbook and persists a renamed title', async () => {
     render(<CraftbookEditor craftbookId="review" source="local" />);
-    const name = await screen.findByLabelText('Craftbook name');
+    const name = await screen.findByLabelText('Plan name');
 
     fireEvent.change(name, { target: { value: 'Release review' } });
     fireEvent.blur(name);
@@ -127,7 +127,7 @@ describe('CraftbookEditor', () => {
     render(<CraftbookEditor craftbookId="review" source="bundled" />);
 
     expect(await screen.findByRole('heading', { name: 'Review changes' })).toBeInTheDocument();
-    expect(screen.queryByLabelText('Craftbook name')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Plan name')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Copy to edit' }));
 
     await waitFor(() => expect(api.createCraftbook).toHaveBeenCalled());

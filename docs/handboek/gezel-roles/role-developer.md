@@ -29,6 +29,6 @@ Developers respect your boundaries: git stays yours (they work in your working c
 
 ::handboek-role-tools{role=developer scope=tiers}
 
-## Craftbooks they run well
+## Plans they run well
 
 ::handboek-craftbook-list{role=developer}

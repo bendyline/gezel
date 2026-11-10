@@ -44,6 +44,8 @@ export type FirstRunModelState =
       sizeBytes: number | null;
       /** The engine that comes down beside the model, when it is still needed. */
       engineBytes?: number;
+      /** Bytes of this model already on disk from a download that stopped. */
+      resumeBytes?: number;
       /** Chat models already on disk that could be used right away. */
       alternatives: Array<{ id: string; name: string }>;
     }
@@ -90,6 +92,8 @@ export interface FirstRunModel {
   /** Copilot's runtime is on disk; null while unknown. */
   copilotAvailable: boolean | null;
   start: () => Promise<void>;
+  /** Stop the download and keep what has arrived; `start` picks it up again. */
+  pause: () => Promise<void>;
   retry: () => Promise<void>;
   /** Fetch the engine again after it failed. */
   retryEngine: () => void;
@@ -144,6 +148,9 @@ export function useFirstRunModel({
   // a moment after the request starts, and a progress poll that lands in
   // that gap must not read "nothing in flight" as "the install ended".
   const installRequestOpenRef = useRef(false);
+  // Pausing ends the open install request with an abort, which must not read
+  // as "the download failed".
+  const pausedRef = useRef(false);
   const copilotAvailability = useCopilotAvailability();
   // One engine fetch at a time. The daemon's job is idempotent and outlives
   // this request, so a second ensure would only attach to the same download.
@@ -289,16 +296,23 @@ export function useFirstRunModel({
         // Nothing installed and nothing in flight: a fresh first run or an
         // abandoned download. Either way we wait for the person's tap. The
         // engine comes down with the model, so the key counts it too.
-        const engine = await llamaEngineNeed({
-          provider,
-          ...(backendOverride ? { llamaCppBackendOverride: backendOverride } : {}),
-        }).catch(() => null);
+        const [engine, incomplete] = await Promise.all([
+          llamaEngineNeed({
+            provider,
+            ...(backendOverride ? { llamaCppBackendOverride: backendOverride } : {}),
+          }).catch(() => null),
+          (provider === 'mlx' ? api.listIncompleteMlxModels() : api.listIncompleteLlamaCppModels())
+            .then((res) => res.incomplete)
+            .catch(() => []),
+        ]);
+        const partial = incomplete.find((entry) => entry.id === targetModel && entry.resumable);
         setState({
           kind: 'needs-download',
           provider,
           modelId: targetModel,
           sizeBytes,
           ...(engine?.downloadBytes ? { engineBytes: engine.downloadBytes } : {}),
+          ...(partial && partial.bytes > 0 ? { resumeBytes: partial.bytes } : {}),
           alternatives: modelsRes.models
             .filter((m) => m.id !== targetModel)
             .slice(0, 3)
@@ -434,6 +448,15 @@ export function useFirstRunModel({
     [runInstall, check],
   );
 
+  const settleCaught = useCallback((err: unknown, target: OnDeviceProvider, modelId: string) => {
+    if (pausedRef.current) {
+      pausedRef.current = false;
+      setState({ kind: 'checking' });
+      return;
+    }
+    setState(failedFromCaught(err, target, modelId));
+  }, []);
+
   const start = useCallback(async () => {
     if (state.kind !== 'needs-download') return;
     setBusy(true);
@@ -448,11 +471,28 @@ export function useFirstRunModel({
     try {
       await install(state.provider, state.modelId, state.sizeBytes);
     } catch (err) {
-      setState(failedFromCaught(err, state.provider, state.modelId));
+      settleCaught(err, state.provider, state.modelId);
     } finally {
       setBusy(false);
     }
-  }, [state, install, backendOverride, fetchEngine]);
+  }, [state, install, backendOverride, fetchEngine, settleCaught]);
+
+  const pause = useCallback(async () => {
+    if (state.kind !== 'installing') return;
+    pausedRef.current = true;
+    try {
+      if (state.provider === 'mlx') await api.cancelMlxModelInstall(state.modelId);
+      else await api.cancelLlamaCppModelInstall(state.modelId);
+    } catch {
+      pausedRef.current = false;
+      return;
+    }
+    // A download this window did not start has no open request to end.
+    if (!installRequestOpenRef.current) {
+      pausedRef.current = false;
+      setState({ kind: 'checking' });
+    }
+  }, [state]);
 
   const retry = useCallback(async () => {
     if (state.kind !== 'failed') return;
@@ -461,11 +501,11 @@ export function useFirstRunModel({
       await clearInstallError();
       await install(state.provider, state.modelId, null);
     } catch (err) {
-      setState(failedFromCaught(err, state.provider, state.modelId));
+      settleCaught(err, state.provider, state.modelId);
     } finally {
       setBusy(false);
     }
-  }, [state, clearInstallError, install]);
+  }, [state, clearInstallError, install, settleCaught]);
 
   /**
    * Retry bypassing sha256 verification. Only offered after a checksum
@@ -479,11 +519,11 @@ export function useFirstRunModel({
       await clearInstallError();
       await install(state.provider, state.modelId, null, true);
     } catch (err) {
-      setState(failedFromCaught(err, state.provider, state.modelId));
+      settleCaught(err, state.provider, state.modelId);
     } finally {
       setBusy(false);
     }
-  }, [state, clearInstallError, install]);
+  }, [state, clearInstallError, install, settleCaught]);
 
   /** Use a chat model already on disk instead of downloading one. */
   const pickInstalled = useCallback(
@@ -525,11 +565,11 @@ export function useFirstRunModel({
       onConfigChanged(next);
       await install('llama-cpp', llamaTier, null);
     } catch (err) {
-      setState(failedFromCaught(err, state.provider, state.modelId));
+      settleCaught(err, state.provider, state.modelId);
     } finally {
       setBusy(false);
     }
-  }, [state, defaultModel, onConfigChanged, install]);
+  }, [state, defaultModel, onConfigChanged, install, settleCaught]);
 
   /**
    * The cloud way out of a broken on-device install. Copilot's runtime is an
@@ -565,6 +605,7 @@ export function useFirstRunModel({
     busy,
     copilotAvailable: copilotAvailability ? copilotAvailability.available : null,
     start,
+    pause,
     retry,
     retryEngine,
     downloadAnyway,

@@ -44,7 +44,7 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
   if (task.assignee.kind === 'user') {
     return (
       <div className="task-detail-chat-empty muted">
-        This task is assigned to you. Assign it to a gezel to chat about it here.
+        This task is assigned to you. Assign it to someone on the crew to chat about it here.
       </div>
     );
   }
@@ -52,8 +52,8 @@ export function TaskChatPane({ task, gezels }: { task: Task; gezels: GezelSummar
   if (!targetGezel) {
     return (
       <div className="task-detail-chat-empty muted">
-        The assigned gezel (<code>{assigneeGezelId}</code>) isn&apos;t available on this install.
-        Reassign the task to chat about it here.
+        The assignee (<code>{assigneeGezelId}</code>) isn&apos;t available on this install. Reassign
+        the task to chat about it here.
       </div>
     );
   }

@@ -64,11 +64,11 @@
 }
 
 .side li .gezel-row:hover {
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--hover-bg);
 }
 
 .side li .gezel-row.active {
-  background: rgba(176, 114, 76, 0.15);
+  background: var(--selected-bg);
 }
 
 .gezel-row-text {

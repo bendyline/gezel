@@ -203,7 +203,7 @@ describe('CommandsPanel sections', () => {
 
     render(<CommandsPanel projectId="p1" section="tasks" onStageCommand={() => {}} />);
 
-    expect(await screen.findByText('Craftbooks')).toBeTruthy();
+    expect(await screen.findByText('Plans')).toBeTruthy();
     expect(screen.getByText('Skills (workspace)')).toBeTruthy();
     expect(screen.getByText('Imports to review (1)')).toBeTruthy();
   });
@@ -233,7 +233,7 @@ describe('CommandsPanel "skills" section', () => {
     expect(await screen.findByText('Skills (workspace)')).toBeTruthy();
     expect(screen.getByText('Imports to review (1)')).toBeTruthy();
 
-    expect(screen.queryByText('Craftbooks')).toBeNull();
+    expect(screen.queryByText('Plans')).toBeNull();
     expect(screen.queryByText('Getting around')).toBeNull();
     expect(screen.queryByText('Tools on this machine')).toBeNull();
     expect(screen.queryByText('npm scripts')).toBeNull();
@@ -312,7 +312,7 @@ describe('CommandsPanel combined rail', () => {
 
     const { container } = render(<CommandsPanel projectId="project-1" />);
 
-    await waitFor(() => expect(screen.getByText('Craftbooks')).toBeTruthy());
+    await waitFor(() => expect(screen.getByText('Plans')).toBeTruthy());
 
     const titles = Array.from(container.querySelectorAll('.commands-panel-group-title'), (h) =>
       h.textContent?.trim(),
@@ -323,7 +323,7 @@ describe('CommandsPanel combined rail', () => {
       'npm scripts',
       'Scripts folder',
       'Tools on this machine',
-      'Craftbooks',
+      'Plans',
     ]);
     expect(titles.slice(4)).toEqual(primerTitles);
   });

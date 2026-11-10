@@ -45,7 +45,7 @@ export function GlobalTimeline({
   emptyContent?: import('react').ReactNode;
   /** After the last message; see ChatTimelineView. */
   trailingContent?: import('react').ReactNode;
-  /** Hold trailingContent until a task has finished; see ChatTimelineView. */
+  /** Hold trailingContent for a visit that opens on a finished task; see ChatTimelineView. */
   trailingContentAfterWrapUp?: boolean;
   /** Fold launched sessions into one Working notes line; see ChatTimelineView. */
   foldWorkingNotes?: boolean;

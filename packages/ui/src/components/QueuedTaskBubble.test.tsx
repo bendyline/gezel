@@ -77,7 +77,7 @@ describe('QueuedTaskBubble', () => {
 
   it('falls back to a neutral assignee when the roster has not loaded', () => {
     render(<QueuedTaskBubble task={TASK} wait={waitState()} />);
-    expect(screen.getByText(/the assigned gezel is free/i)).toBeInTheDocument();
+    expect(screen.getByText(/Gezel is free/)).toBeInTheDocument();
     expect(screen.queryByTestId('gezel-icon')).toBeNull();
   });
 

@@ -47,7 +47,7 @@ const card = {
   projectId: 'default',
   gezelId: 'wren',
   sessionId: '',
-  prompt: 'Overnight your crew read 1,204 files.',
+  prompt: 'Overnight Gezel read 1,204 files.',
   choices: ['Dismiss'],
   allowWriteIn: false,
   multiSelect: false,
@@ -64,7 +64,7 @@ const card = {
 describe('MorningPanel', () => {
   it('leads with the morning card, then what is queued for tonight', async () => {
     render(<MorningPanel question={card} review={null} />);
-    expect(await screen.findByText('Overnight your crew read 1,204 files.')).toBeInTheDocument();
+    expect(await screen.findByText('Overnight Gezel read 1,204 files.')).toBeInTheDocument();
     expect(await screen.findByText('Queued for tonight')).toBeInTheDocument();
     expect(screen.getByText('Sort the holiday photos')).toBeInTheDocument();
   });

@@ -29,7 +29,7 @@ export const meesterThread: RequestThread = {
     {
       role: 'assistant',
       at: T(28),
-      content: 'Your PDF for **Price list** is ready.',
+      content: 'Your PDF is ready: **Price list**.',
       synthetic: 'task-wrapup',
       referencedTasks: ['bakery/2'],
       deliverable: { kind: 'artifact', path: 'tasks/2/report.pdf', projectId: 'bakery' },

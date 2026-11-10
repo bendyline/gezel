@@ -203,7 +203,7 @@ export function OllamaSettings({ config, onConfigChanged }: Props) {
             alignItems: 'center',
             gap: '0.5rem',
             marginTop: '0.5rem',
-            fontSize: '0.85rem',
+            fontSize: 'var(--text-sm)',
           }}
         >
           <input

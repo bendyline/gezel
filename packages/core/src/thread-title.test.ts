@@ -1,9 +1,66 @@
 import { describe, expect, it } from 'vitest';
 import {
+  TASK_TITLE_MAX_LENGTH,
   THREAD_TITLE_MAX_LENGTH,
+  deriveTaskTitle,
   deriveThreadTitle,
   deriveThreadTitleFromMessages,
 } from './thread-title.js';
+
+describe('deriveTaskTitle', () => {
+  it('names the thing asked for, without the making verb', () => {
+    expect(
+      deriveTaskTitle(
+        "Write a one-page catering proposal for Harbor Books' holiday party: 60 guests, assorted pastries and coffee service at $18 per person, delivery on December 12. Make it a Word document I can send.",
+      ),
+    ).toBe("One-page catering proposal for Harbor Books' holiday party");
+    expect(
+      deriveTaskTitle(
+        'I need a simple weekly cleaning checklist for my bakery kitchen. Can you make one?',
+      ),
+    ).toBe('Simple weekly cleaning checklist for my bakery kitchen');
+    expect(deriveTaskTitle('Can you make me a slide deck about our fall menu?')).toBe(
+      'Slide deck about our fall menu',
+    );
+  });
+
+  it('keeps a verb that is not a making frame', () => {
+    expect(deriveTaskTitle('Make sense of the October sales spreadsheet')).toBe(
+      'Make sense of the October sales spreadsheet',
+    );
+    expect(deriveTaskTitle('Write three ads for the spring sale')).toBe(
+      'Write three ads for the spring sale',
+    );
+  });
+
+  it('stays within the title limit and says nothing for an empty request', () => {
+    const title = deriveTaskTitle(
+      'Create a detailed onboarding handbook covering schedules, safety, allergen handling, register training and closing duties for every new hire',
+    );
+    expect(title).toBe('Detailed onboarding handbook covering schedules');
+    const long = deriveTaskTitle(
+      'Write a complete operations manual describing every opening closing cleaning ordering and scheduling routine the bakery follows each week',
+    );
+    expect(long?.length).toBeLessThanOrEqual(TASK_TITLE_MAX_LENGTH);
+    expect(long?.endsWith('…')).toBe(true);
+    expect(deriveTaskTitle('   ')).toBeUndefined();
+  });
+
+  // The wrap-up read "…for the Harbor Books holiday…." (2026-11-09).
+  it('drops a closing date before it cuts a word of the subject', () => {
+    expect(
+      deriveTaskTitle(
+        'Write a one-page catering proposal for the Harbor Books holiday party on December 12: coffee, pastries and sandwiches for 40 people, as a Word document.',
+      ),
+    ).toBe('One-page catering proposal for the Harbor Books holiday party');
+  });
+
+  it('does not break a title inside a number', () => {
+    expect(
+      deriveTaskTitle('Write a friendly reminder to Harbor Books about their $1,200 invoice'),
+    ).toBe('Friendly reminder to Harbor Books about their $1,200 invoice');
+  });
+});
 
 describe('deriveThreadTitle', () => {
   // Keyword extraction titled a first request "Plan trip Lisbon next spring

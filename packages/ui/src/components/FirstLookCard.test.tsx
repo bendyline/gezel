@@ -36,7 +36,7 @@ describe('first look', () => {
 
   it('estimates the first night only when it takes hours, leaving cloud photos out', () => {
     expect(firstNightEstimate(photos)).toBe(
-      'Describing 11,276 photos takes about 7 hours on this computer. Your crew picks up where it left off each night.',
+      'Describing 11,276 photos takes about 7 hours on this computer. Gezel picks up where it left off each night.',
     );
     expect(firstNightEstimate({ ...photos, byModality: { image: 200 }, cloudOnly: 0 })).toBeNull();
   });

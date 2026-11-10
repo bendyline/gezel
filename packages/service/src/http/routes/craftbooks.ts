@@ -268,7 +268,7 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
     else await ctx.store.writeLocalCraftbookTemplate(book);
     await ctx.history?.log({
       kind: 'craftbook.created',
-      summary: `Created craftbook "${book.name}" (${book.id}) from a document`,
+      summary: `Created plan "${book.name}" (${book.id}) from a document`,
       details: { id: book.id, name: book.name, stepCount: book.steps.length },
     });
     const gated = book.steps.filter((s) => s.gate || s.advanceWhen).length;
@@ -360,7 +360,7 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
 
     await ctx.history?.log({
       kind: 'craftbook.created',
-      summary: `Created craftbook "${book.name}" (${id})`,
+      summary: `Created plan "${book.name}" (${id})`,
       details: { id, name: book.name, stepCount: steps.length },
     });
 
@@ -447,7 +447,7 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
 
     await ctx.history?.log({
       kind: 'craftbook.updated',
-      summary: `Updated craftbook "${next.name}" (${id})`,
+      summary: `Updated plan "${next.name}" (${id})`,
       details: { id, name: next.name, stepCount: next.steps.length },
     });
 
@@ -479,7 +479,7 @@ export function craftbookRoutes(ctx: ServiceContext): Hono {
 
     await ctx.history?.log({
       kind: 'craftbook.deleted',
-      summary: `Deleted craftbook "${existing.name}" (${id})`,
+      summary: `Deleted plan "${existing.name}" (${id})`,
       details: { id, name: existing.name },
     });
 

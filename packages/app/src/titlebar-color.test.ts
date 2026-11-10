@@ -23,6 +23,14 @@ function resolveToken(name: string): string {
 }
 
 const brandSage = mainProcess.match(/const BRAND_SAGE = '(#[0-9a-f]{6})';/i)?.[1]?.toLowerCase();
+const brandSageNight = mainProcess
+  .match(/const BRAND_SAGE_NIGHT = '(#[0-9a-f]{6})';/i)?.[1]
+  ?.toLowerCase();
+
+/** How many times foundation.css declares the night titlebar: once per dark block. */
+function nightTitlebarDeclarations(): number {
+  return foundation.split('--titlebar: var(--gezel-sage-night);').length - 1;
+}
 
 // Windows paints the window-control overlay itself, so a renderer titlebar
 // one step deeper than the overlay reads as a seam beside minimize/maximize/
@@ -33,6 +41,20 @@ describe('titlebar color contract', () => {
     expect(brandSage).toBeDefined();
     expect(resolveToken('titlebar')).toBe(brandSage);
     expect(mainProcess).toMatch(/titleBarOverlay:\s*\{\s*color:\s*BRAND_SAGE,/);
+  });
+
+  // The brand sage over a walnut canvas was the brightest thing on a dark
+  // screen. The bar deepens at night, and main repaints the overlay to match.
+  it('paints the night titlebar the same in both dark blocks and in the overlay', () => {
+    expect(brandSageNight).toBeDefined();
+    expect(resolveToken('gezel-sage-night')).toBe(brandSageNight);
+    // The OS-dark media block and the pinned `[data-theme="dark"]` block.
+    expect(nightTitlebarDeclarations()).toBe(2);
+    expect(mainProcess).toContain(
+      'nativeTheme.shouldUseDarkColors ? BRAND_SAGE_NIGHT : BRAND_SAGE',
+    );
+    expect(mainProcess).toContain('mainWindow.setTitleBarOverlay({ color,');
+    expect(mainProcess).toContain("nativeTheme.on('updated', applyTitlebarTheme)");
   });
 
   it('keeps the window background, fallback pages and splash on that sage', () => {

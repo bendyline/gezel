@@ -27,7 +27,7 @@ export const SLASH_COMMAND_WORDWHEEL_SIZE = 4;
 export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'help', description: 'show the command reference' },
   { name: 'project', description: 'switch active project' },
-  { name: 'gezel', description: 'switch gezel, or bring a role onto the project' },
+  { name: 'gezel', description: 'switch crew member, or bring a role onto the project' },
   { name: 'allow', description: 'allow a project permission' },
   { name: 'disallow', description: 'disallow a project permission' },
   { name: 'show', description: 'show optional chat details' },
@@ -44,7 +44,7 @@ export const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
   { name: 'disconnect', description: 'remove Gezel from a connected local app' },
   { name: 'focus', description: 'send into another active chat' },
   { name: 'cli', description: 'make bare input run shell commands' },
-  { name: 'chat', description: 'make bare input message your gezel' },
+  { name: 'chat', description: 'make bare input a message to Gezel' },
   { name: 'clear', description: 'clear the visible feed' },
   { name: 'quit', description: 'exit the TUI' },
 ];

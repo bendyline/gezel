@@ -92,34 +92,34 @@ const MODE_COPY: Record<
 > = {
   'one-time': {
     title: 'New Task',
-    subtitle: 'Pick a plan, add a few details, and let your crew get to work.',
+    subtitle: 'Choose what to make, add a few details, and Gezel gets to work.',
     generalLabel: GENERAL_TASK_CARD.label,
     generalDescription: GENERAL_TASK_CARD.description,
     featuredLabel: 'Recommended',
     featuredTitle: 'Recommended',
-    featuredTagline: 'proven recipes for this kind of project',
+    featuredTagline: 'proven plans for this kind of project',
     submitLabel: 'Create task',
     footnote: 'Lands ready to fire — nothing runs until you fire it.',
   },
   scheduled: {
     title: 'New Scheduled Task',
-    subtitle: 'Choose a repeatable plan, then set when each fresh run should begin.',
+    subtitle: 'Choose what should repeat, then set when each fresh run should begin.',
     generalLabel: 'Blank scheduled task',
     generalDescription: 'Define a repeatable job from scratch and run a fresh copy on a cadence.',
     featuredLabel: 'For schedules',
     featuredTitle: 'Scheduled plans',
-    featuredTagline: 'recipes identified as safe for recurring unattended runs',
+    featuredTagline: 'plans that are safe for recurring unattended runs',
     submitLabel: 'Create schedule',
     footnote: 'Starts active and creates a fresh task on each scheduled run.',
   },
   'night-shift': {
     title: 'New Night Shift Task',
-    subtitle: 'Choose work your crew can pick up unattended during the Night Shift window.',
+    subtitle: 'Choose work Gezel can pick up unattended during the Night Shift window.',
     generalLabel: 'Blank Night Shift task',
     generalDescription: 'Define a one-off job that waits for Night Shift before it begins.',
     featuredLabel: 'For Night Shift',
     featuredTitle: 'Night Shift plans',
-    featuredTagline: 'recipes identified as safe for unattended overnight work',
+    featuredTagline: 'plans that are safe for unattended overnight work',
     submitLabel: 'Queue for Night Shift',
     footnote: 'Starts active, but only runs while Night Shift is on.',
   },
@@ -1183,7 +1183,7 @@ export function NewTaskDialog({
                       <h3>{composeMode ? 'Task for this message' : modeCopy.title}</h3>
                     </Dialog.Title>
                     <p className="gz-npd-header-sub">
-                      {composeMode ? 'Pick a plan to attach to your message.' : modeCopy.subtitle}
+                      {composeMode ? 'Attach a plan to your message.' : modeCopy.subtitle}
                     </p>
                   </div>
                   <div className="gz-ntd-header-controls">
@@ -1602,13 +1602,11 @@ export function NewTaskDialog({
                                   {gezel.name}
                                 </Select.Item>
                               ))}
-                              <Select.Item value="__user">Me (no gezel)</Select.Item>
+                              <Select.Item value="__user">Me</Select.Item>
                             </Select.Content>
                           </Select.Root>
                           {resolvedAssigneeSel === AUTO_ASSIGNEE && (
-                            <small className="muted">
-                              The crew will choose someone for each step.
-                            </small>
+                            <small className="muted">Gezel chooses who takes each step.</small>
                           )}
                         </label>
                         {selectedBook && (
@@ -1681,8 +1679,8 @@ export function NewTaskDialog({
                         ? 'Nothing runs yet. It attaches to your message and starts when you send.'
                         : creationMode === 'one-time' && selectedBook
                           ? offerTonight
-                            ? 'Your crew can make this now or during the next Night Shift.'
-                            : 'Your crew starts on this as soon as you press Start now.'
+                            ? 'Gezel can make this now or during the next Night Shift.'
+                            : 'Gezel starts on this as soon as you press Start now.'
                           : modeCopy.footnote}
                     </p>
                   )}

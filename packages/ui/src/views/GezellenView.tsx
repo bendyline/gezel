@@ -236,7 +236,7 @@ export function GezellenView({
       <aside className="side gezels-side" hidden={compact && showCompactDetail}>
         <div className="area-toolbar">
           <button type="button" className="area-toolbar-btn" onClick={() => setShowCreate(true)}>
-            + New gezel
+            + New crew member
           </button>
         </div>
         <ul className="gezel-list">
@@ -285,8 +285,8 @@ export function GezellenView({
                       {a.fixedFunction && (
                         <span
                           className="ff-row-badge"
-                          title={`Fixed-function gezel — forwards messages to ${a.fixedFunction.tool} (no LLM)`}
-                          aria-label="Fixed-function gezel"
+                          title={`Fixed-function crew member — forwards messages to ${a.fixedFunction.tool} (no LLM)`}
+                          aria-label="Fixed-function crew member"
                         >
                           ⚡
                         </span>
@@ -314,7 +314,7 @@ export function GezellenView({
                     className="project-row-thinking gezel-row-thinking"
                     onClick={() => openGezel(a.id)}
                     title={`${a.name} is working — open`}
-                    aria-label={`${a.name} is working. Open gezel.`}
+                    aria-label={`${a.name} is working. Open their page.`}
                   >
                     <span className="project-row-thinking-dot" aria-hidden="true" />
                     <span className="project-row-thinking-dot" aria-hidden="true" />
@@ -385,7 +385,7 @@ function NewGezelDialog({
         <Dialog.Overlay />
         <Dialog.Content className="new-gezel-dialog">
           <Dialog.Title asChild>
-            <h3 style={{ margin: 0 }}>New gezel</h3>
+            <h3 style={{ margin: 0 }}>New crew member</h3>
           </Dialog.Title>
           <Tabs.Root value={tab} onValueChange={(v) => setTab(v as NewGezelTab)}>
             <Tabs.List>
@@ -540,13 +540,13 @@ function TemplateTab({
   return (
     <div className="new-gezel-template-tab">
       <Dialog.Description className="muted small" style={{ margin: '0 0 0.5rem 0' }}>
-        Pick a role to start from. The template's about.md becomes the new gezel's prompt — you can
-        edit it after.
+        Pick a role to start from. The template's about.md becomes the new crew member's prompt —
+        you can edit it after.
       </Dialog.Description>
       {error && <p className="error">{error}</p>}
       <CatalogBrowser
         kind="gezel-template"
-        emptyMessage="No gezel templates available."
+        emptyMessage="No role templates available."
         action={(item) => {
           if (item.manifest.kind !== 'gezel-template') return null;
           const m = item.manifest as TemplateManifestExt;

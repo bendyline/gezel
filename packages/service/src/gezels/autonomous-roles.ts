@@ -209,7 +209,7 @@ export async function ensureDefaultBoekwachter(
   const ensured = existingRole
     ? await store.getGezel(existingRole.id)
     : await createFreshBoekwachter(store, catalog);
-  if (!ensured) throw new Error('Failed to ensure the Librarian gezel.');
+  if (!ensured) throw new Error('Failed to ensure the Librarian.');
   if (existingRole) await store.writeConfig({ boekwachterGezelId: ensured.id });
   await recruitBoekwachterTo(store, ensured.id, opts.recruitProjectIds, { allProjects: true });
   return ensured;

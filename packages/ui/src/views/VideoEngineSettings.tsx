@@ -133,7 +133,7 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
         <legend>Confirmation</legend>
         <p className="muted small">
           Video generation is long-running and monopolizes the GPU, pausing the chat model. Choose
-          whether the agent should ask before each generation.
+          whether Gezel should ask before each generation.
         </p>
         <div
           className="gz-tray"

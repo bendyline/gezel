@@ -11,6 +11,7 @@ import {
   displayName,
   isOutsideInInternalPath,
   isSharedLibraryProject,
+  resolveInterestAreas,
   roleForMatching,
 } from '@bendyline/gezel';
 import {
@@ -28,9 +29,11 @@ import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { ContextMenu, Tooltip } from '../primitives/index.js';
 import { runtimeCapabilities, supportsArea } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
+import { peekApiRead } from '../shared-api-reads.js';
 import { getSidebarSide } from '../sidebar-side.js';
 import { railSystemNotices } from '../system-notices.js';
 import { useUpdateState } from '../update-state.js';
+import { WorkshopIcon } from './AreaIcon.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { type FileEntry, FileTree } from './FileTree.js';
 import { GezelActionsMenu } from './GezelActionsMenu.js';
@@ -63,6 +66,7 @@ import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
 import { useDebugMode } from './useDebugMode.js';
 import { useHasKnowledgeCatalogs } from './useHasKnowledgeCatalogs.js';
+import { useInterests } from './useInterests.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
@@ -142,6 +146,10 @@ interface SidebarProps {
 
 type GroupId = 'projects' | 'documents' | 'gezels';
 
+/** What `gezel:nav:groups` holds. `workshop` is absent until the person opens
+ *  or closes that group themselves; until then its default applies. */
+type StoredGroups = Record<GroupId, boolean> & { workshop?: boolean };
+
 const WIDTH_KEY = 'gezel:nav:sidebar-width';
 const COLLAPSED_KEY = 'gezel:nav:sidebar-collapsed';
 const STAY_OPEN_KEY = 'gezel:nav:sidebar-stay-open';
@@ -180,24 +188,23 @@ const DEFAULT_GROUPS: Record<GroupId, boolean> = {
   gezels: false,
 };
 
-// Top-level area links rendered below the groups (Settings is pulled out
-// last). Scripts/History live here as plain links per the nav design rather
-// than under a "More" group. Benchmarks is intentionally absent — it is the
-// "Benchmarks" tab in Settings, where it sits beside the model settings it
-// measures.
 // Areas that render as an expandable Group rather than a plain link. They
 // already light their own header when selected, so the transient-row rule
 // below must skip them.
 const GROUP_BACKED_AREAS: ReadonlySet<RecentTabArea> = new Set(['projects', 'documents', 'gezels']);
 
-const AREA_LINKS: RecentTabArea[] = [
-  'tasks',
-  'craftbooks',
-  'scripts',
-  'history',
-  'knowledge',
-  'settings',
-];
+// The builder's tools, in the order shown. They fold into one Workshop group
+// so the rail opens on the places an owner uses (Home, Projects, Documents,
+// Crew): a first hour should not start in a step editor or an audit log.
+// Folding is not hiding. The group is one click away, and each area keeps
+// the capability and advanced-features checks it had as a plain link.
+const WORKSHOP_AREAS: readonly RecentTabArea[] = ['tasks', 'craftbooks', 'scripts', 'history'];
+const WORKSHOP_AREA_SET: ReadonlySet<RecentTabArea> = new Set(WORKSHOP_AREAS);
+
+// Plain links below the groups (Settings last). Benchmarks is intentionally
+// absent — it is the "Benchmarks" tab in Settings, where it sits beside the
+// model settings it measures.
+const AREA_LINKS: readonly RecentTabArea[] = ['knowledge', 'settings'];
 
 // The built-in "Default" project is an always-present scratchpad, not a
 // user-created project. Hide it from the sidebar's Projects group so the
@@ -238,15 +245,16 @@ function readStoredStayOpen(): boolean {
   }
 }
 
-function readStoredGroups(): Record<GroupId, boolean> {
+function readStoredGroups(): StoredGroups {
   try {
     const raw = window.localStorage.getItem(GROUPS_KEY);
     if (!raw) return { ...DEFAULT_GROUPS };
-    const parsed = JSON.parse(raw) as Partial<Record<GroupId, boolean>>;
+    const parsed = JSON.parse(raw) as Partial<StoredGroups>;
     return {
       projects: parsed.projects ?? DEFAULT_GROUPS.projects,
       documents: parsed.documents ?? DEFAULT_GROUPS.documents,
       gezels: parsed.gezels ?? DEFAULT_GROUPS.gezels,
+      ...(typeof parsed.workshop === 'boolean' ? { workshop: parsed.workshop } : {}),
     };
   } catch {
     return { ...DEFAULT_GROUPS };
@@ -293,7 +301,7 @@ export function Sidebar({
     () => documentQuickListEntries(docs, documentQuickList.state),
     [docs, documentQuickList.state],
   );
-  const [groups, setGroups] = useState<Record<GroupId, boolean>>(() => readStoredGroups());
+  const [groups, setGroups] = useState<StoredGroups>(() => readStoredGroups());
   const [width, setWidth] = useState<number>(() => readStoredWidth());
   const [storedCollapsed, setCollapsed] = useState<boolean>(() => readStoredCollapsed());
   const [stayOpen, setStayOpen] = useState<boolean>(() => readStoredStayOpen());
@@ -319,33 +327,52 @@ export function Sidebar({
   // "Scripts" is a power-user surface — gated behind Settings → About →
   // Advanced → "Show advanced features".
   const currentArea = selection?.kind === 'area' ? selection.area : null;
-  const areaLinks = useMemo(() => {
-    const links = AREA_LINKS.filter((area) => {
+  const { workshopLinks, areaLinks } = useMemo(() => {
+    const shown = (area: RecentTabArea) => {
       if (!supportsArea(area)) return false;
       if (area === 'scripts') return showAdvancedFeatures || debugMode;
       // Knowledge appears the moment the user registers ≥1 catalog — the
       // rail flips exactly at that count, never from machine inventory.
       if (area === 'knowledge') return hasKnowledgeCatalogs;
       return true;
-    });
+    };
     // A hidden area that is nevertheless the current destination gets a
     // transient row, the same way HIDDEN_PROJECT_IDS surfaces the Default
     // project while it is selected. Without it the rail matches nothing and
     // renders no active row at all, so it silently disagrees with the canvas —
     // reachable by default through the Home "Save a routine" tip, which routes
-    // to Scripts while Scripts is gated off. Group-backed areas are excluded:
+    // to Scripts while Scripts is gated off. The row appears where the area
+    // lives: a Workshop area in that group, in its usual place, and never as
+    // a second row among the plain links. Group-backed areas are excluded:
     // they light their own Group header instead and would double-render.
+    const destination = currentArea && supportsArea(currentArea) ? currentArea : null;
+    const workshop = WORKSHOP_AREAS.filter((area) => shown(area) || area === destination);
+    const links = AREA_LINKS.filter(shown);
     if (
-      currentArea &&
-      supportsArea(currentArea) &&
-      !links.includes(currentArea) &&
-      !GROUP_BACKED_AREAS.has(currentArea)
+      destination &&
+      !links.includes(destination) &&
+      !GROUP_BACKED_AREAS.has(destination) &&
+      !WORKSHOP_AREA_SET.has(destination)
     ) {
       const settingsAt = links.indexOf('settings');
-      links.splice(settingsAt < 0 ? links.length : settingsAt, 0, currentArea);
+      links.splice(settingsAt < 0 ? links.length : settingsAt, 0, destination);
     }
-    return links;
+    return { workshopLinks: workshop, areaLinks: links };
   }, [showAdvancedFeatures, debugMode, hasKnowledgeCatalogs, currentArea]);
+  // Workshop starts closed for an owner. It starts open for someone who said
+  // they build software, or who turned advanced features on: their interests
+  // set the default and nothing else, and their own choice replaces it.
+  const interests = useInterests();
+  const buildsSoftware = (
+    interests.loaded ? interests.areas : resolveInterestAreas(peekApiRead('getConfig'))
+  ).includes('software');
+  const workshopOpensByDefault = showAdvancedFeatures || buildsSoftware;
+  const currentWorkshopArea =
+    currentArea && WORKSHOP_AREA_SET.has(currentArea) ? currentArea : null;
+  // Session-only, so opening itself for a destination is never stored as the
+  // person's choice.
+  const [workshopOpenedItself, setWorkshopOpenedItself] = useState(currentWorkshopArea !== null);
+  const workshopExpanded = workshopOpenedItself || (groups.workshop ?? workshopOpensByDefault);
   // Installation and updater notices live beneath Settings, which is the
   // lower corner of the rail in the default right-sidebar layout. Routine
   // "up to date" feedback clears after a moment; download and ready states
@@ -634,7 +661,7 @@ export function Sidebar({
     },
     [inListArea, storedCollapsed, commitCollapsed, commitStayOpen],
   );
-  const commitGroups = useCallback((next: Record<GroupId, boolean>) => {
+  const commitGroups = useCallback((next: StoredGroups) => {
     setGroups(next);
     try {
       window.localStorage.setItem(GROUPS_KEY, JSON.stringify(next));
@@ -665,6 +692,24 @@ export function Sidebar({
     if (!selectedGezelId) return;
     setGroups((current) => (current.gezels ? current : { ...current, gezels: true }));
   }, [selectedGezelId]);
+
+  // Workshop opens the same way when one of its areas becomes the
+  // destination. Keyed on the area, so closing the group while there keeps
+  // it closed.
+  useEffect(() => {
+    if (currentWorkshopArea) setWorkshopOpenedItself(true);
+  }, [currentWorkshopArea]);
+
+  const toggleWorkshop = useCallback(() => {
+    setWorkshopOpenedItself(false);
+    // Same as toggleGroup: from the icon rail, expand it and show the list.
+    if (collapsed) {
+      setRailCollapsed(false);
+      commitGroups({ ...groups, workshop: true });
+      return;
+    }
+    commitGroups({ ...groups, workshop: !workshopExpanded });
+  }, [collapsed, groups, workshopExpanded, setRailCollapsed, commitGroups]);
 
   // ── Drag-to-resize (adapted from ChatReferences) ────────────────
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -960,6 +1005,18 @@ export function Sidebar({
     }),
     [onPreload],
   );
+  const areaLink = (area: RecentTabArea) => {
+    const areaTab = toRecentTab({ kind: 'area', area });
+    return (
+      <NavigationArea
+        key={area}
+        area={area}
+        active={activeKey === tabKey(areaTab)}
+        onOpen={() => onOpenArea(area)}
+        onPreload={() => onPreload?.(areaTab)}
+      />
+    );
+  };
   const documentActionsForEntry = useCallback(
     (entry: FileEntry) => {
       if (entry.isDirectory) return [];
@@ -1120,8 +1177,8 @@ export function Sidebar({
                           e.stopPropagation();
                           select();
                         }}
-                        title="A gezel is working — open"
-                        aria-label={`${p.name}: a gezel is working. Open project.`}
+                        title="Gezel is working — open"
+                        aria-label={`${p.name}: Gezel is working. Open project.`}
                       >
                         <span className="project-row-thinking-dot" aria-hidden="true" />
                         <span className="project-row-thinking-dot" aria-hidden="true" />
@@ -1219,7 +1276,7 @@ export function Sidebar({
           onOpen={() => onOpenArea('gezels')}
           onPreload={() => onPreload?.(toRecentTab({ kind: 'area', area: 'gezels' }))}
           onAdd={addFor('gezels', 'gezel', 'gezel:new-gezel')}
-          addTitle="New gezel"
+          addTitle="New crew member"
         >
           {gezels.length === 0 ? (
             <li className="app-sidebar-empty">No crew members yet.</li>
@@ -1294,7 +1351,7 @@ export function Sidebar({
                       className="project-row-thinking app-sidebar-gezel-thinking"
                       onClick={select}
                       title={`${name} is working — open`}
-                      aria-label={`${name} is working. Open gezel.`}
+                      aria-label={`${name} is working. Open their page.`}
                     >
                       <span className="project-row-thinking-dot" aria-hidden="true" />
                       <span className="project-row-thinking-dot" aria-hidden="true" />
@@ -1308,21 +1365,29 @@ export function Sidebar({
           )}
         </Group>
 
+        {/* Workshop — the builder's tools. It has no screen of its own, so
+            its title opens and closes it and there is nothing to add. On the
+            icon rail an open group, or one holding the current area, keeps
+            its links under its icon. */}
+        {workshopLinks.length > 0 && (
+          <NavigationGroup
+            id="workshop"
+            label="Workshop"
+            icon={<WorkshopIcon size={18} />}
+            expanded={workshopExpanded || (collapsed && currentWorkshopArea !== null)}
+            collapsed={collapsed}
+            railChildren
+            onToggle={toggleWorkshop}
+          >
+            {workshopLinks.map((area) => (
+              <li key={area}>{areaLink(area)}</li>
+            ))}
+          </NavigationGroup>
+        )}
+
         {/* Top-level area links */}
         <div className="app-sidebar-links">
-          {areaLinks.map((area) => {
-            const areaTab = toRecentTab({ kind: 'area', area });
-            const key = tabKey(areaTab);
-            return (
-              <NavigationArea
-                key={area}
-                area={area}
-                active={activeKey === key}
-                onOpen={() => onOpenArea(area)}
-                onPreload={() => onPreload?.(areaTab)}
-              />
-            );
-          })}
+          {areaLinks.map(areaLink)}
           {/* Settings is last in AREA_LINKS, so install-health notices land
               directly beneath it — the screen that explains them. */}
           <div className="app-sidebar-notices" aria-live="polite" aria-atomic="false">

@@ -157,7 +157,11 @@ the app, including those inside `service-bundle.tar.gz`, needs a newer macOS.
   in the `-rocm` bundles (x64 only, ROCm 10.0). Only the AMD *driver* must be
   present: a current Adrenalin or PRO driver on Windows, the in-kernel
   `amdgpu` driver on Linux, where the account also needs read-write access to
-  `/dev/kfd` (the `render` and `video` groups). The bundles carry kernels for
+  `/dev/kfd` (the `render` and `video` groups). The `.deb` and `.rpm` add the
+  shared engine's `gezel` account to the groups that own `/dev/kfd` and the
+  render nodes (`render` on current releases; `video` only where it owns one,
+  since it also opens webcams); a per-user install needs the person's own
+  account in them. The bundles carry kernels for
   RDNA3, RDNA4 and the Radeon 780M/760M, Strix Point and Strix Halo
   integrated GPUs (`ROCM_GFX_TARGETS` in
   `packages/core/src/native/rocm-devices.ts`). Discovery asks the ROCm build

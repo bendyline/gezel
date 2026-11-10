@@ -68,7 +68,7 @@ export function EngagementModePanel({
       id="settings-ai-engagement"
       className={`engagement-mode-${mode}`}
       title="AI engagement"
-      hint="Choose how independently your crew works, from taking initiative together to waiting for your messages or pausing entirely."
+      hint="Choose how independently Gezel works, from taking initiative to waiting for your messages or pausing entirely."
     >
       <div>
         <div

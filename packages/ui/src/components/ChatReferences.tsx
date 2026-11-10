@@ -35,6 +35,7 @@ import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-comma
 import { gezelReportThemeForMode } from './chat-theme.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
+import { type ResultStage, ResultStageContext } from './result-stage.js';
 import { GEZEL_DARK_SURFACE, GEZEL_LIGHT_SURFACE } from './transform/surfaces.js';
 import { useCompactLayout } from './useCompactLayout.js';
 import { useDebugMode } from './useDebugMode.js';
@@ -75,6 +76,16 @@ const SIDE_FRACTION_STORAGE_KEY = 'gezel:chat-rail-side-fraction';
 const MIN_SIDE_FRACTION = 0.18;
 const MAX_SIDE_FRACTION = 0.65;
 const DEFAULT_SIDE_FRACTION = 0.34;
+
+/**
+ * A result opened from its finished-work card gets most of the rail, so a
+ * document reads at page width, not in a 400px column; the conversation
+ * keeps enough room to read and answer. It lasts for the visit and is never
+ * stored: the stored fraction is the width the person chose for everything
+ * else, and dragging the grip hands control back to it.
+ */
+export const WIDE_SIDE_FRACTION = 0.62;
+export const WIDE_MIN_CHAT_PX = 360;
 
 /**
  * Minimum widths for the split chat/reference layout. Below
@@ -302,6 +313,15 @@ export function ChatReferences({
   const [references, setReferences] = useState<Reference[]>([]);
   const seenOrderRef = useRef(0);
   const [activeRef, setActiveRef] = useState<Reference | null>(null);
+  // The person picked a file from the menu or a link in this visit: a result
+  // that finishes later is listed, and does not take the pane from them.
+  const handPickedRef = useRef(false);
+  // Set while a finished-work card's Open runs, so the open that reaches this
+  // rail is known to come from the card and not from a link in a message.
+  const openingFromCardRef = useRef(false);
+  const presentedResultsRef = useRef(new Set<string>());
+  const latestPresentedAtRef = useRef('');
+  const [wide, setWide] = useState(false);
   const [taskRefs, setTaskRefs] = useState<TaskRef[]>([]);
   const [activeTaskRef, setActiveTaskRef] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<RailSection>('references');
@@ -321,6 +341,10 @@ export function ChatReferences({
     setReferences([]);
     seenOrderRef.current = 0;
     setActiveRef(null);
+    handPickedRef.current = false;
+    presentedResultsRef.current.clear();
+    latestPresentedAtRef.current = '';
+    setWide(false);
     setTaskRefs([]);
     setActiveTaskRef(null);
     setCompactPane('chat');
@@ -349,6 +373,57 @@ export function ChatReferences({
       return remembered;
     },
     [],
+  );
+
+  // A click on a file is a request to read it: bring the viewer forward even
+  // when the Tasks tab is showing (a deliverable card lives there). Opened
+  // from a finished-work card the file also gets the stage. Any other click
+  // is the person's own choice, which a later result leaves alone.
+  const showReference = useCallback((reference: Reference) => {
+    if (openingFromCardRef.current) setWide(true);
+    else handPickedRef.current = true;
+    setActiveRef(reference);
+    setActiveTab('references');
+    setCompactPane('references');
+  }, []);
+
+  const pickReference = useCallback((reference: Reference) => {
+    handPickedRef.current = true;
+    setActiveRef(reference);
+  }, []);
+
+  const resultStage = useMemo<ResultStage>(
+    () => ({
+      present(file, fileProjectId, modifiedAt) {
+        // Another project's file opens in that project's own view, and
+        // workspace HTML already has the Output pane.
+        if (fileProjectId !== resolvedProjectId) return;
+        if (file.kind === 'workspace' && isHtml(file.path)) return;
+        const key = referenceKey(
+          file.kind,
+          fileProjectId,
+          canonicalReferencePath(file.kind, file.path),
+        );
+        // Once per visit: a card that remounts must not take the pane back.
+        if (presentedResultsRef.current.has(key)) return;
+        presentedResultsRef.current.add(key);
+        const reference = rememberReference(file.kind, file.path, fileProjectId);
+        if (handPickedRef.current) return;
+        // Cards mount in thread order, but one can load late: the newest wins.
+        if (modifiedAt && modifiedAt < latestPresentedAtRef.current) return;
+        if (modifiedAt) latestPresentedAtRef.current = modifiedAt;
+        setActiveRef(reference);
+      },
+      openFromCard(open) {
+        openingFromCardRef.current = true;
+        try {
+          open();
+        } finally {
+          openingFromCardRef.current = false;
+        }
+      },
+    }),
+    [rememberReference, resolvedProjectId],
   );
 
   // The Skills panel owns richer polling while it is visible, but it cannot
@@ -454,14 +529,9 @@ export function ChatReferences({
 
   const handleArtifactReference = useCallback(
     (path: string, messageProjectId?: string) => {
-      const ref = rememberReference('artifact', path, messageProjectId);
-      setActiveRef(ref);
-      // A click is a request to read the file: bring the viewer forward even
-      // when the Tasks tab is showing (a deliverable card lives there).
-      setActiveTab('references');
-      setCompactPane('references');
+      showReference(rememberReference('artifact', path, messageProjectId));
     },
-    [rememberReference],
+    [rememberReference, showReference],
   );
 
   const handleArtifactSeen = useCallback(
@@ -473,14 +543,9 @@ export function ChatReferences({
 
   const handleWorkspaceReference = useCallback(
     (path: string, messageProjectId?: string) => {
-      const ref = rememberReference('workspace', path, messageProjectId);
-      setActiveRef(ref);
-      // A click is a request to read the file: bring the viewer forward even
-      // when the Tasks tab is showing (a deliverable card lives there).
-      setActiveTab('references');
-      setCompactPane('references');
+      showReference(rememberReference('workspace', path, messageProjectId));
     },
-    [rememberReference],
+    [rememberReference, showReference],
   );
 
   const handleWorkspaceSeen = useCallback(
@@ -506,12 +571,9 @@ export function ChatReferences({
 
   const handleOpenReference = useCallback(
     (reference: OpenChatReference) => {
-      const ref = rememberReference(reference.kind, reference.path, reference.projectId);
-      setActiveRef(ref);
-      setActiveTab('references');
-      setCompactPane('references');
+      showReference(rememberReference(reference.kind, reference.path, reference.projectId));
     },
-    [rememberReference],
+    [rememberReference, showReference],
   );
 
   const openTaskFile = useCallback(
@@ -562,7 +624,19 @@ export function ChatReferences({
   );
   const isCompact = compact || narrow;
 
-  const effectiveActive = activeRef ?? references[0] ?? null;
+  // With nothing chosen the pane follows the work: the file seen last. It
+  // used to hold the first file of the visit, so a new result arrived behind
+  // an old working paper and only a click could bring it forward.
+  const latestReference = useMemo(
+    () =>
+      references.reduce<Reference | null>(
+        (latest, reference) =>
+          latest && latest.lastSeenOrder > reference.lastSeenOrder ? latest : reference,
+        null,
+      ),
+    [references],
+  );
+  const effectiveActive = activeRef ?? latestReference;
   const hasReferences = effectiveActive !== null;
   const hasSkills = Boolean(skillsProjectId && skillsAvailableProjectId === skillsProjectId);
   // Pinned-first ordering: the session's own task sits at the top, then
@@ -650,13 +724,25 @@ export function ChatReferences({
     }
   }, []);
 
+  // The fraction the side pane is drawn at: the wide one, as the grid clamps
+  // it, while a result has the stage; the person's stored one otherwise.
+  const shownSideFraction = useCallback(
+    (containerWidth: number) => {
+      if (!wide) return sideFraction;
+      if (containerWidth <= 0) return clampFraction(WIDE_SIDE_FRACTION);
+      const room = (containerWidth - WIDE_MIN_CHAT_PX - CHAT_RAIL_GRIP_TRACK_PX) / containerWidth;
+      return clampFraction(Math.min(WIDE_SIDE_FRACTION, room));
+    },
+    [wide, sideFraction],
+  );
+
   const onGripMouseDown = useCallback(
     (e: ReactMouseEvent<HTMLDivElement>) => {
       e.preventDefault();
       const width = containerRef.current?.clientWidth ?? 1;
       dragState.current = {
         startX: e.clientX,
-        startFraction: sideFraction,
+        startFraction: shownSideFraction(width),
         containerWidth: width,
       };
       // During a drag, the cursor may cross the reference iframe. An
@@ -674,6 +760,9 @@ export function ChatReferences({
         if (containerWidth <= 0) return;
         // Moving left grows the side pane, moving right shrinks it.
         const deltaPx = startX - ev.clientX;
+        // A drag is the person's own width: it starts from what is on screen
+        // and the stored fraction takes over from the wide one.
+        setWide(false);
         commitSideFraction(startFraction + deltaPx / containerWidth);
       };
       const onUp = () => {
@@ -686,29 +775,40 @@ export function ChatReferences({
       window.addEventListener('mousemove', onMove);
       window.addEventListener('mouseup', onUp);
     },
-    [sideFraction, commitSideFraction],
+    [shownSideFraction, commitSideFraction],
   );
 
   const onGripKeyDown = useCallback(
     (e: ReactKeyboardEvent<HTMLDivElement>) => {
       // Keyboard a11y — arrow keys nudge by 2% (8% with Shift),
-      // Home/End snap to the bounds.
+      // Home/End snap to the bounds. Like a drag, a nudge starts from the
+      // width on screen and ends the wide state.
       const step = e.shiftKey ? 0.08 : 0.02;
-      if (e.key === 'ArrowLeft') {
-        e.preventDefault();
-        commitSideFraction(sideFraction + step);
-      } else if (e.key === 'ArrowRight') {
-        e.preventDefault();
-        commitSideFraction(sideFraction - step);
-      } else if (e.key === 'Home') {
-        e.preventDefault();
-        commitSideFraction(MAX_SIDE_FRACTION);
-      } else if (e.key === 'End') {
-        e.preventDefault();
-        commitSideFraction(MIN_SIDE_FRACTION);
-      }
+      const shown = shownSideFraction(containerRef.current?.clientWidth ?? 0);
+      const next =
+        e.key === 'ArrowLeft'
+          ? shown + step
+          : e.key === 'ArrowRight'
+            ? shown - step
+            : e.key === 'Home'
+              ? MAX_SIDE_FRACTION
+              : e.key === 'End'
+                ? MIN_SIDE_FRACTION
+                : null;
+      if (next === null) return;
+      e.preventDefault();
+      setWide(false);
+      commitSideFraction(next);
     },
-    [sideFraction, commitSideFraction],
+    [shownSideFraction, commitSideFraction],
+  );
+
+  const toggleWide = useCallback(() => setWide((current) => !current), []);
+
+  // Every finished-work card in this conversation, and the rail's own task
+  // card, reaches the pane through the stage.
+  const provideStage = (body: ReactNode) => (
+    <ResultStageContext.Provider value={resultStage}>{body}</ResultStageContext.Provider>
   );
 
   // Compact short-circuit: replace the split rail with one full-width pane.
@@ -724,7 +824,7 @@ export function ChatReferences({
         : []),
     ];
     const onlyChat = compactPanes.length === 1;
-    return (
+    return provideStage(
       <div ref={containerRef} className="chat-rail-body chat-rail-body-compact">
         {banner && <div className="chat-rail-banner">{banner(referenceApi)}</div>}
 
@@ -803,7 +903,7 @@ export function ChatReferences({
                     refs={references}
                     activeKey={effectiveActive.key}
                     selected
-                    onSelect={setActiveRef}
+                    onSelect={pickReference}
                   />
                 </div>
               )}
@@ -818,17 +918,27 @@ export function ChatReferences({
             </Tabs.Content>
           )}
         </Tabs.Root>
-      </div>
+      </div>,
     );
   }
 
-  return (
+  // Wide, the grid takes the larger fraction and a lower floor for the
+  // conversation; its own min() keeps the side from crowding that floor.
+  const splitWide = hasSide && wide;
+  return provideStage(
     <div
       ref={containerRef}
-      className={`chat-rail-body${hasSide ? ' chat-rail-body-split' : ''}`}
+      className={`chat-rail-body${hasSide ? ' chat-rail-body-split' : ''}${
+        splitWide ? ' chat-rail-body-wide' : ''
+      }`}
       style={{
-        ['--chat-rail-side-fraction' as string]: sideFraction.toFixed(4),
-        ['--chat-rail-min-main-width' as string]: `${CHAT_RAIL_MIN_CHAT_PX}px`,
+        ['--chat-rail-side-fraction' as string]: (splitWide
+          ? WIDE_SIDE_FRACTION
+          : sideFraction
+        ).toFixed(4),
+        ['--chat-rail-min-main-width' as string]: `${
+          splitWide ? WIDE_MIN_CHAT_PX : CHAT_RAIL_MIN_CHAT_PX
+        }px`,
         ['--chat-rail-min-side-width' as string]: `${CHAT_RAIL_MIN_SIDE_PX}px`,
         ['--chat-rail-grip-track-width' as string]: `${CHAT_RAIL_GRIP_TRACK_PX}px`,
       }}
@@ -900,7 +1010,7 @@ export function ChatReferences({
                       selected={activeTab === 'references'}
                       onOpen={() => setActiveTab('references')}
                       onSelect={(reference) => {
-                        setActiveRef(reference);
+                        pickReference(reference);
                         setActiveTab('references');
                       }}
                     />
@@ -945,6 +1055,8 @@ export function ChatReferences({
                     projectId={effectiveActive.projectId ?? resolvedProjectId}
                     reference={effectiveActive}
                     onResolved={handleResolved}
+                    wide={wide}
+                    onToggleWide={toggleWide}
                   />
                 </div>
               </div>
@@ -962,7 +1074,7 @@ export function ChatReferences({
           </div>
         </aside>
       )}
-    </div>
+    </div>,
   );
 }
 
@@ -1215,7 +1327,7 @@ function TaskRailCard({
       {task.description && <p className="chat-rail-task-desc">{task.description}</p>}
       {cb && (
         <div className="chat-rail-task-craftbook">
-          <span className="muted small">From craftbook</span> {cb.name}
+          <span className="muted small">From plan</span> {cb.name}
         </div>
       )}
       {result?.deliverable && !hideDeliverable && (
@@ -1534,11 +1646,17 @@ function ReferenceViewer({
   reference,
   onClose,
   onResolved,
+  wide = false,
+  onToggleWide,
 }: {
   projectId: string;
   reference: Reference;
   onClose?: () => void;
   onResolved?: (refKey: string, resolvedKind: RefKind) => void;
+  /** The pane holds most of the rail (a result has the stage). */
+  wide?: boolean;
+  /** Present beside the conversation only: there the pane has a width to change. */
+  onToggleWide?: () => void;
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [contentMode, setContentMode] = useState<'text' | 'markdown' | null>(null);
@@ -1642,7 +1760,7 @@ function ReferenceViewer({
       <header className="chat-rail-viewer-header">
         <div>
           <span className={`chat-rail-ref-kind chat-rail-ref-kind-${resolvedKind}`}>
-            {resolvedKind}
+            {resolvedKind.charAt(0).toUpperCase() + resolvedKind.slice(1)}
           </span>
           {resolvedDiffers && (
             <span className="muted small" style={{ marginLeft: '0.35rem' }}>
@@ -1652,6 +1770,29 @@ function ReferenceViewer({
           <code className="chat-rail-viewer-path">{reference.path}</code>
         </div>
         <div className="chat-rail-viewer-actions">
+          {onToggleWide && (
+            <button
+              type="button"
+              className="tree-actions-trigger chat-rail-viewer-actions-trigger"
+              aria-label={wide ? 'Narrower' : 'Wider'}
+              title={wide ? 'Narrower' : 'Wider'}
+              onClick={onToggleWide}
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                <path
+                  d={
+                    wide
+                      ? 'M1 7h4.5M3.5 4.5 6 7 3.5 9.5M13 7H8.5M10.5 4.5 8 7l2.5 2.5'
+                      : 'M1 7h12M3.5 4.5 1 7l2.5 2.5M10.5 4.5 13 7l-2.5 2.5'
+                  }
+                  stroke="currentColor"
+                  strokeWidth="1.4"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
           <DropdownMenu.Root>
             <DropdownMenu.Trigger asChild>
               <button
@@ -1909,7 +2050,9 @@ function RenderedMarkdownPreview({
     );
   }
   // Files in the rail are working documents — reports, plans, notes — rendered
-  // in the report theme on the rail's own reading surface.
+  // in the report theme on the rail's own reading surface, in Squisq's
+  // document register: a masthead and em-based headings. The page register
+  // set a 44px cover title in a pane under 400px wide.
   return (
     <div className="chat-rail-viewer-markdown">
       <LinearDocView
@@ -1918,6 +2061,7 @@ function RenderedMarkdownPreview({
         surface={surface}
         fenceRenderers={fenceRenderers}
         thinMargins={compact}
+        variant="document"
       />
     </div>
   );

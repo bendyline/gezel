@@ -81,7 +81,7 @@ export async function ensureVisitorChatSession(
   if (args.visitor.chatSessionId) return { sessionId: args.visitor.chatSessionId };
   const gezelId = await resolveVisitorChatGezel(deps.store, args.projectId);
   if (!gezelId) {
-    return { error: 'this site has no gezel available for chat', status: 503 };
+    return { error: 'no one is available for chat on this site', status: 503 };
   }
   const record = await deps.chat.createSession({
     gezelId,

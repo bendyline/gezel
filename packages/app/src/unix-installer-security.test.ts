@@ -886,6 +886,101 @@ fi
     );
   }
 
+  // The 1.26313.105 audit: the engine broker's account was in no GPU group, so
+  // /dev/kfd stayed closed to it and the new ROCm build could never run.
+  function gpuGroupStep(): string {
+    const start = position(linuxPostinstall, 'gpu_device_groups() (');
+    const end = linuxPostinstall.indexOf('\ndone\n', start);
+    expect(end, 'unterminated GPU group step').toBeGreaterThan(start);
+    return linuxPostinstall.slice(start, end + '\ndone\n'.length);
+  }
+
+  it('lets the engine account open GPU devices before the service starts', () => {
+    const step = position(linuxPostinstall, 'gpu_device_groups() (');
+    expect(step).toBeGreaterThan(position(linuxPostinstall, 'passwd_entry=$(getent passwd'));
+    expect(step).toBeLessThan(position(linuxPostinstall, 'systemctl restart gezeld.service'));
+    // `video` also opens webcams: it is joined only where it owns a GPU node.
+    expect(gpuGroupStep()).not.toMatch(/usermod[^\n]*\bvideo\b/);
+    expect(linuxUnit).not.toContain('SupplementaryGroups');
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'live probe: joins the groups that own the GPU nodes, and only those',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'gezel-postinst-gpu-'));
+      try {
+        const bin = join(root, 'bin');
+        const dev = join(root, 'dev');
+        mkdirSync(bin);
+        const stub = (name: string, lines: string[]) => {
+          writeFileSync(join(bin, name), ['#!/bin/sh', ...lines, ''].join('\n'));
+          chmodSync(join(bin, name), 0o755);
+        };
+        stub('getent', [
+          '[ "$1:$2" = "group:render" ] && [ -n "$HAS_RENDER" ] && exit 0',
+          'exit 2',
+        ]);
+        stub('stat', ['grep "^$3 " "$STAT_MAP" | cut -d" " -f2']);
+        stub('id', ['echo "$ID_GROUPS"']);
+        stub('usermod', ['printf \'%s\\n\' "$*" >> "$STUB_LOG"', 'exit "${USERMOD_STATUS:-0}"']);
+        const block = gpuGroupStep()
+          .replaceAll('/dev/kfd', join(dev, 'kfd'))
+          .replaceAll('/dev/dri/renderD*', `${join(dev, 'dri')}/renderD*`);
+
+        const run = (opts: {
+          render: boolean;
+          nodes: Record<string, string>;
+          member?: string;
+          usermodStatus?: number;
+        }) => {
+          rmSync(dev, { recursive: true, force: true });
+          mkdirSync(join(dev, 'dri'), { recursive: true });
+          const map = join(root, 'stat-map');
+          writeFileSync(map, '');
+          for (const [node, group] of Object.entries(opts.nodes)) {
+            writeFileSync(join(dev, node), '');
+            writeFileSync(map, `${join(dev, node)} ${group}\n`, { flag: 'a' });
+          }
+          const log = join(root, 'usermod.log');
+          writeFileSync(log, '');
+          const result = spawnSync('/bin/sh', ['-eu', '-c', `GEZEL_USER=gezel\n${block}`], {
+            encoding: 'utf8',
+            env: {
+              PATH: `${bin}:/usr/bin:/bin`,
+              HAS_RENDER: opts.render ? '1' : '',
+              STAT_MAP: map,
+              ID_GROUPS: opts.member ? `gezel ${opts.member}` : 'gezel',
+              STUB_LOG: log,
+              USERMOD_STATUS: String(opts.usermodStatus ?? 0),
+            },
+          });
+          const calls = readFileSync(log, 'utf8').trim().split('\n').filter(Boolean);
+          return { status: result.status, calls, err: result.stderr };
+        };
+
+        const ubuntu = run({ render: true, nodes: { kfd: 'render', 'dri/renderD128': 'render' } });
+        expect(ubuntu.status, ubuntu.err).toBe(0);
+        expect(ubuntu.calls).toEqual(['-a -G render gezel']);
+
+        // Older releases give /dev/kfd to `video`; only then does it join.
+        const older = run({ render: false, nodes: { kfd: 'video' } });
+        expect(older.calls).toEqual(['-a -G video gezel']);
+
+        // A GPU added later still works where the `render` group exists.
+        expect(run({ render: true, nodes: {} }).calls).toEqual(['-a -G render gezel']);
+        expect(run({ render: true, nodes: { kfd: 'render' }, member: 'render' }).calls).toEqual([]);
+        expect(run({ render: false, nodes: {} }).calls).toEqual([]);
+
+        // A refused usermod warns and lets the install finish.
+        const refused = run({ render: true, nodes: { kfd: 'render' }, usermodStatus: 1 });
+        expect(refused.status, refused.err).toBe(0);
+        expect(refused.err).toContain('could not add gezel to the render group');
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('reloads and restarts the service only while systemd is running', () => {
     const step = serviceStartStep();
     const booted = position(step, 'if [ -d /run/systemd/system ]; then');

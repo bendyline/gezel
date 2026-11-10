@@ -378,7 +378,7 @@ function buildApprovalPrompt(input: ApprovalGateInput): string {
     shownFiles.length > 0
       ? `\n\nIdentifiable files bound to this approval:\n${shownFiles.map((file) => `- \`${file.path}\` — \`${file.sha256.slice(0, 12)}…\``).join('\n')}${input.inputFiles.length > shownFiles.length ? `\n- …and ${input.inputFiles.length - shownFiles.length} more` : ''}`
       : '';
-  return `A gezel wants to run ${verb} in this project.${bodyBlock}${argsLine}${filesBlock}\n\nSecurity warning: package commands are not isolated from your OS account. They can spawn other programs, access the network, and read or modify files outside this project. Approve only if you trust this command, these exact arguments, and the project's dependencies.\n\nApproving stores this decision for this exact command body, argument list, and the identifiable file contents above. Editing one of those files will ask again. Files outside the project, directory or glob contents, dynamically discovered files, implicit configuration, PATH-resolved programs, package imports, and network inputs may not be identifiable in advance.`;
+  return `Gezel wants to run ${verb} in this project.${bodyBlock}${argsLine}${filesBlock}\n\nSecurity warning: package commands are not isolated from your OS account. They can spawn other programs, access the network, and read or modify files outside this project. Approve only if you trust this command, these exact arguments, and the project's dependencies.\n\nApproving stores this decision for this exact command body, argument list, and the identifiable file contents above. Editing one of those files will ask again. Files outside the project, directory or glob contents, dynamically discovered files, implicit configuration, PATH-resolved programs, package imports, and network inputs may not be identifiable in advance.`;
 }
 
 function buildPlaywrightApprovalPrompt(input: ApprovalGateInput): string {
@@ -395,7 +395,7 @@ function buildPlaywrightApprovalPrompt(input: ApprovalGateInput): string {
           .map((file) => `- \`${file.path}\` — \`${file.sha256.slice(0, 12)}…\``)
           .join('\n')}${imports.length > 12 ? `\n- …and ${imports.length - 12} more` : ''}`
       : '';
-  return `A gezel wants to run the Playwright script \`${input.name}\` (${mode}) from this project's artifacts.\n\nScript:\n\n${fence}ts\n${input.body}\n${fence}${importsBlock}\n\nSecurity warning: Playwright scripts are not isolated from your OS account. They drive a real browser with full network access, can start other programs, and can read or modify files outside this project. Approve only if you have read this script and trust what it does.\n\nApproving stores this decision for this exact script and the files listed above. Editing any of them will ask again.`;
+  return `Gezel wants to run the Playwright script \`${input.name}\` (${mode}) from this project's artifacts.\n\nScript:\n\n${fence}ts\n${input.body}\n${fence}${importsBlock}\n\nSecurity warning: Playwright scripts are not isolated from your OS account. They drive a real browser with full network access, can start other programs, and can read or modify files outside this project. Approve only if you have read this script and trust what it does.\n\nApproving stores this decision for this exact script and the files listed above. Editing any of them will ask again.`;
 }
 
 // ── npx allowlist ──────────────────────────────────────────────────────────

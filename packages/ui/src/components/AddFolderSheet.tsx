@@ -104,8 +104,8 @@ export function AddFolderSheet() {
           </Dialog.Title>
           {preview.state === 'idle' && (
             <p className="muted">
-              Pick a folder for your crew to look after: your photos, your documents, a project
-              you're working on.
+              Pick a folder for Gezel to look after: your photos, your documents, a project you're
+              working on.
             </p>
           )}
           {preview.state === 'loading' && <p className="muted">Looking at {preview.path}…</p>}
@@ -134,7 +134,7 @@ export function AddFolderSheet() {
               {ready.folder && ready.folder.census.cloudOnly > 0 && (
                 <p className="add-folder-note">
                   Files stored only in the cloud are listed by name and date and left in the cloud,
-                  so gezel never downloads them. Download them to have your crew read them.
+                  so gezel never downloads them. Download them to have them read too.
                 </p>
               )}
               <label className="add-folder-switch">

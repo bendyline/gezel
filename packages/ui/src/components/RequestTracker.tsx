@@ -5,6 +5,7 @@ import {
   type RequestTrack,
   displayName,
   parseTaskRef,
+  taskPausedReasonText,
 } from '@bendyline/gezel';
 import { useState } from 'react';
 import { api } from '../api.js';
@@ -52,6 +53,7 @@ export function RequestTracker({
   roleBasedNameOnlyMode = false,
   variant = 'full',
   onOpenFile,
+  projectName,
 }: {
   track: RequestTrack;
   gezels: ReadonlyMap<string, GezelSummary>;
@@ -60,9 +62,13 @@ export function RequestTracker({
   variant?: 'full' | 'compact';
   /** Opens a file in the thread's own project; other projects open in their own view. */
   onOpenFile?: (file: ReferencedFile) => void;
+  /** The name of the project the finished work lives in; a board's card leads with it. */
+  projectName?: string;
 }) {
   const [kept, setKept] = useState(false);
   const [confirmStop, setConfirmStop] = useState(false);
+  const [retrying, setRetrying] = useState(false);
+  const [retryNote, setRetryNote] = useState<string | null>(null);
   const nameOf = (id: string | undefined) => {
     const gezel = id ? gezels.get(id) : undefined;
     return gezel
@@ -70,7 +76,7 @@ export function RequestTracker({
       : undefined;
   };
   const lead = track.leadGezelId ? gezels.get(track.leadGezelId) : undefined;
-  const leadName = nameOf(track.leadGezelId) ?? 'Your gezel';
+  const leadName = nameOf(track.leadGezelId) ?? 'Gezel';
   const ready = track.state === 'ready';
   const overdue = track.eta?.overdue === true && !kept;
   const compact = variant === 'compact';
@@ -97,6 +103,27 @@ export function RequestTracker({
         source: file.kind === 'artifact' ? 'artifacts' : 'workspace',
       }),
     );
+  };
+
+  // The runtime closes its own pause card once the task leaves paused, so
+  // restarting the task is the whole of "Try again".
+  const tryAgain = async () => {
+    const parsed = track.paused ? parseTaskRef(track.paused.taskRef) : null;
+    if (!parsed || retrying) return;
+    setRetrying(true);
+    setRetryNote(null);
+    try {
+      const result = await api.retryTask(parsed.projectId, parsed.num);
+      if (!result.dispatched && result.reason && result.reason !== 'not-paused') {
+        setRetryNote(
+          "It's set to go again, but nothing could pick it up. Open the task to see why.",
+        );
+      }
+    } catch {
+      setRetryNote("That didn't start. Try again in a moment.");
+    } finally {
+      setRetrying(false);
+    }
   };
 
   const stopWork = async () => {
@@ -146,6 +173,23 @@ export function RequestTracker({
           </span>
         </p>
       )}
+      {!compact && track.paused && (
+        <div className="request-tracker-paused" data-testid="request-tracker-paused">
+          <span>
+            {track.paused.reason ? `${taskPausedReasonText(track.paused.reason)} ` : ''}
+            What it made so far is kept.
+          </span>
+          <button
+            type="button"
+            className="gz-key"
+            onClick={() => void tryAgain()}
+            disabled={retrying}
+          >
+            {retrying ? 'Starting…' : track.paused.reason ? 'Try again' : 'Carry on'}
+          </button>
+          {retryNote && <span className="request-tracker-paused-note">{retryNote}</span>}
+        </div>
+      )}
       {debugMode && track.actual && (
         <p className="request-tracker-actual">
           {[nameOf(track.actual.gezelId), track.actual.stepName, track.actual.taskRef]
@@ -172,6 +216,8 @@ export function RequestTracker({
           deliverable={deliverable}
           projectId={home}
           onOpen={openDeliverable}
+          {...(track.title ? { title: track.title } : {})}
+          {...(projectName ? { projectName } : {})}
           {...(maker && makerId
             ? {
                 maker: {
@@ -195,7 +241,7 @@ export function RequestTracker({
                   key={id}
                   member={{
                     gezelId: id,
-                    name: nameOf(id) ?? 'A gezel',
+                    name: nameOf(id) ?? 'Crew member',
                     ...(gezels.get(id)?.role ? { role: gezels.get(id)!.role! } : {}),
                   }}
                   {...(gezels.get(id) ? { gezel: gezels.get(id)! } : {})}
@@ -217,7 +263,7 @@ export function RequestTracker({
       <ConfirmDialog
         open={confirmStop}
         title="Stop this work?"
-        message="The crew stops where it is. What it has made so far stays in the project."
+        message="Gezel stops where it is. What it has made so far stays in the project."
         confirmLabel="Stop"
         danger
         onConfirm={stopWork}

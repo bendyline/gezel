@@ -25,7 +25,7 @@
   gap: 0.45rem;
   font-family: var(--font-display);
   font-weight: 700;
-  font-size: 1rem;
+  font-size: var(--text-lg);
   color: var(--text);
   padding: 0.15rem 0.35rem 0.75rem;
 }
@@ -161,7 +161,7 @@
 
 .handboek-toc-entry-active,
 .handboek-toc-entry-active:hover {
-  background: var(--panel);
+  background: var(--selected-bg);
   color: var(--accent-text);
   font-weight: 600;
 }
@@ -189,7 +189,7 @@
 
 .handboek-pane-header h2 {
   margin: 0;
-  font-size: 1.15rem;
+  font-size: var(--text-xl);
 }
 
 .handboek-pane-summary {

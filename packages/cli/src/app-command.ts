@@ -304,7 +304,7 @@ export async function runAppRemove(
   console.log(`Uninstalled ${appId} (${versions}${kept}).`);
   if (removed.appliedProjects.length > 0) {
     console.log(
-      `${removed.appliedProjects.length} project(s) were outfitted by this app — they keep their copied gezels, scripts, and files, but the app's pages and updates are gone.`,
+      `${removed.appliedProjects.length} project(s) were outfitted by this app — they keep their copied crew members, scripts, and files, but the app's pages and updates are gone.`,
     );
   }
 }
@@ -388,7 +388,7 @@ function printPlan(plan: ProjectTypeApplyPlan): void {
 function printApplied(applied: AppliedProjectType, projectName: string): void {
   const parts: string[] = [];
   if (applied.gezelsCreated.length > 0) {
-    parts.push(`${applied.gezelsCreated.length} gezel(s)`);
+    parts.push(`${applied.gezelsCreated.length} crew member(s)`);
   }
   if (applied.scriptsInstalled.length > 0) {
     parts.push(`${applied.scriptsInstalled.length} script(s)`);

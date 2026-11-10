@@ -60,7 +60,7 @@ describe('CraftbooksView', () => {
       'battle-report',
     );
 
-    await user.click(screen.getByRole('button', { name: 'Back to craftbooks' }));
+    await user.click(screen.getByRole('button', { name: 'Back to plans' }));
     expect(rail).not.toHaveAttribute('hidden');
     expect(editor).toHaveAttribute('hidden');
   });
@@ -68,13 +68,13 @@ describe('CraftbooksView', () => {
   it('keeps creation, search, and the list together in the left rail', async () => {
     render(<CraftbooksView />);
 
-    const rail = screen.getByRole('complementary', { name: 'Craftbook library' });
-    const search = within(rail).getByRole('searchbox', { name: 'Search craftbooks' });
-    const create = within(rail).getByRole('button', { name: '+ New craftbook' });
+    const rail = screen.getByRole('complementary', { name: 'Plan library' });
+    const search = within(rail).getByRole('searchbox', { name: 'Search plans' });
+    const create = within(rail).getByRole('button', { name: '+ New plan' });
 
     expect(search.closest('.craftbooks-toolbar')).toContainElement(create);
     expect(rail.querySelector('.craftbooks-list')).toBeInTheDocument();
-    expect(screen.getByRole('region', { name: 'Craftbook editor' })).not.toContainElement(rail);
+    expect(screen.getByRole('region', { name: 'Plan editor' })).not.toContainElement(rail);
 
     await waitFor(() => {
       expect(screen.getByTestId('mock-craftbook-editor')).toHaveTextContent('release-review');
@@ -86,7 +86,7 @@ describe('CraftbooksView', () => {
     const user = userEvent.setup();
 
     await screen.findByRole('button', { name: /Historical battle report/ });
-    await user.type(screen.getByRole('searchbox', { name: 'Search craftbooks' }), 'battle');
+    await user.type(screen.getByRole('searchbox', { name: 'Search plans' }), 'battle');
 
     expect(screen.queryByRole('button', { name: /Release review/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Historical battle report/ })).toBeInTheDocument();

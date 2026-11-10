@@ -265,7 +265,7 @@
 }
 
 .usage-value {
-  font-size: 1.4rem;
+  font-size: var(--text-title);
   font-weight: 600;
 }
 
@@ -666,6 +666,68 @@
   margin-inline: 0 !important;
 }
 
+/* A reply stays at chat scale. It renders in Squisq's document register
+   (em-based, see RenderedMarkdown), whose top heading is still 1.6em and
+   opens under a hairline, like a report's. In a bubble no heading is larger
+   than 1.25em of the reply's own text, list numerals are the size of that
+   text, and a heading keeps the bubble's spacing with no rule above it. The
+   doubled `.squisq-linear-content.squisq-page` outranks Squisq's own rules,
+   which load later from inside the view, in either of its registers: the
+   page register sized a reply's heading 32px over 15px prose. */
+.msg-body-rendered
+  .squisq-linear-content.squisq-page
+  :is(
+    .squisq-page-section-title,
+    .squisq-page-banner-title,
+    .squisq-page-items-title,
+    .squisq-page-prose :is(h1, h2)
+  ) {
+  font-size: 1.25em;
+}
+
+.msg-body-rendered
+  .squisq-linear-content.squisq-page
+  :is([data-heading-level="3"] .squisq-page-section-title, .squisq-page-prose h3) {
+  font-size: 1.1em;
+}
+
+.msg-body-rendered
+  .squisq-linear-content.squisq-page
+  :is(
+    :is([data-heading-level="4"], [data-heading-level="5"], [data-heading-level="6"])
+      .squisq-page-section-title,
+    .squisq-page-prose :is(h4, h5, h6)
+  ) {
+  font-size: 1em;
+}
+
+.msg-body-rendered .squisq-linear-content.squisq-page .squisq-page-items li,
+.msg-body-rendered .squisq-linear-content.squisq-page .squisq-page-items li::before {
+  font-size: 1em;
+}
+
+/* The document register drops the first section's top padding and the last
+   one's bottom padding, and rules off every top-level heading. A bubble
+   keeps the breath it had, and its headings need no rule. */
+.msg-body-rendered .squisq-page--document.squisq-page--thin > .squisq-page-section:first-of-type {
+  padding-top: 0.55rem;
+}
+
+.msg-body-rendered .squisq-page--document.squisq-page--thin > .squisq-page-section:last-of-type {
+  padding-bottom: 0.55rem;
+}
+
+.msg-body-rendered .squisq-page.squisq-page--document > .squisq-page-section[data-heading-level] {
+  margin-top: 0;
+}
+
+.msg-body-rendered
+  .squisq-page.squisq-page--document
+  > .squisq-page-section[data-heading-level]
+  > .squisq-page-section-inner::before {
+  display: none;
+}
+
 .msg-user {
   align-self: flex-end;
   align-items: flex-end;
@@ -1005,9 +1067,11 @@
 /* ─── Deliverable card ─────────────────────────────────────────────────
    The one file a task hands its owner (DeliverableCard.tsx): closing a
    wrap-up bubble, under the rail's task tracker, and on the task page. A
-   file tile, an eyebrow naming what it is ("Your PowerPoint deck"), the
-   file name at reading size, where it lives, and Open as the one filled
-   key. The whole face opens the file too — it is the big link. A draft
+   file tile, an eyebrow naming what it is ("Your PowerPoint deck"), what
+   the person asked for at reading size (the file name when the work has no
+   title of its own), a small line with the file name, size and age, and
+   Open as the one filled key. The path is the file name's tooltip, never
+   text. The whole face opens the file too — it is the big link. A draft
    (the latest copy of a task still running) takes a dashed border, the
    same "not settled yet" cue as a suggested task strip. */
 .deliverable-card {
@@ -1125,7 +1189,7 @@
 }
 
 .deliverable-card-tile-ext {
-  font-size: 0.62rem;
+  font-size: var(--text-2xs);
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--text-muted);
@@ -1160,10 +1224,6 @@
   font-size: var(--text-xs);
   color: var(--text-muted);
   overflow-wrap: anywhere;
-}
-
-.deliverable-card-folder {
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 /* Keys sit under the text column, not under the tile. */
@@ -1800,7 +1860,7 @@
 }
 .squisq-mention-popover .squisq-mention-item.is-selected,
 .squisq-mention-popover .squisq-mention-item:hover {
-  background: rgba(176, 114, 76, 0.18);
+  background: var(--selected-bg);
   color: #6e4024;
 }
 .squisq-mention-popover .squisq-mention-desc {
@@ -1814,7 +1874,7 @@
 }
 [data-theme="dark"] .squisq-mention-popover .squisq-mention-item.is-selected,
 [data-theme="dark"] .squisq-mention-popover .squisq-mention-item:hover {
-  background: rgba(224, 184, 151, 0.22);
+  background: var(--selected-bg);
   color: #f3ede0;
 }
 [data-theme="dark"] .squisq-mention-popover .squisq-mention-desc {
@@ -1829,7 +1889,7 @@
   }
   :root:not([data-theme="light"]) .squisq-mention-popover .squisq-mention-item.is-selected,
   :root:not([data-theme="light"]) .squisq-mention-popover .squisq-mention-item:hover {
-    background: rgba(224, 184, 151, 0.22);
+    background: var(--selected-bg);
     color: #f3ede0;
   }
   :root:not([data-theme="light"]) .squisq-mention-popover .squisq-mention-desc {
@@ -2167,11 +2227,11 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button--active {
   color: #e0b897;
-  background: rgba(176, 114, 76, 0.18);
+  background: var(--selected-bg);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button--active:hover {
   color: #f3ede0;
-  background: rgba(176, 114, 76, 0.26);
+  background: var(--selected-bg-hover);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-separator {
   background: rgba(176, 114, 76, 0.28);
@@ -2239,7 +2299,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-item--active {
   color: #e0b897;
-  background: rgba(176, 114, 76, 0.22);
+  background: var(--selected-bg);
 }
 
 /* Light-mode overrides — Squisq's stock light skin paints active states
@@ -2332,18 +2392,18 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-button--active,
 [data-theme="light"] .squisq-toolbar-button--active {
-  color: var(--success-text) !important;
-  background: rgba(88, 138, 63, 0.16) !important;
+  color: var(--accent-text) !important;
+  background: var(--selected-bg) !important;
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-button--active:hover,
 [data-theme="light"] .squisq-toolbar-button--active:hover {
-  color: var(--success-text) !important;
-  background: rgba(88, 138, 63, 0.26) !important;
+  color: var(--accent-text-hover) !important;
+  background: var(--selected-bg-hover) !important;
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-overflow-item--active,
 [data-theme="light"] .squisq-toolbar-overflow-item--active {
-  color: var(--success-text) !important;
-  background: rgba(88, 138, 63, 0.16) !important;
+  color: var(--accent-text) !important;
+  background: var(--selected-bg) !important;
 }
 .squisq-editor-shell[data-theme="light"] .squisq-view-tab--active,
 [data-theme="light"] .squisq-view-tab--active {
@@ -2359,12 +2419,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   }
   :root:not([data-theme="dark"]) .squisq-toolbar-button--active,
   :root:not([data-theme="dark"]) .squisq-toolbar-overflow-item--active {
-    color: var(--success-text) !important;
-    background: rgba(88, 138, 63, 0.16) !important;
+    color: var(--accent-text) !important;
+    background: var(--selected-bg) !important;
   }
   :root:not([data-theme="dark"]) .squisq-toolbar-button--active:hover {
-    color: var(--success-text) !important;
-    background: rgba(88, 138, 63, 0.26) !important;
+    color: var(--accent-text-hover) !important;
+    background: var(--selected-bg-hover) !important;
   }
 }
 

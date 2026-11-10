@@ -2403,7 +2403,8 @@ export class PortableProductService {
     if (!isTaskWorkAllowed(await this.store.readConfig()))
       throw new Error('Active task work is disabled by AI engagement settings');
     const assignee = taskActiveAssignee(task);
-    if (assignee.kind !== 'gezel') throw new Error('Assign this step to a gezel before running it');
+    if (assignee.kind !== 'gezel')
+      throw new Error('Assign this step to someone on the crew before running it');
     this.assertNoConflict();
     const gezel = await this.store.getGezel(assignee.gezelId);
     if (!gezel) throw new Error('Task assignee not found');
@@ -2567,7 +2568,7 @@ export class PortableProductService {
         PORTABLE_HANDOFF_LIMITS,
       )
     )
-      throw new Error('The crew handoff limit was reached; send a message to continue.');
+      throw new Error('The handoff limit was reached; send a message to continue.');
   }
 
   private async queueHandoff(
@@ -2579,7 +2580,7 @@ export class PortableProductService {
   ) {
     this.assertHandoffAllowed(turn, gezelId);
     const gezel = await this.store.getGezel(gezelId);
-    if (!gezel) throw new Error('Gezel not found');
+    if (!gezel) throw new Error('Crew member not found');
     if (turn.cancelled || this.suspended) throw new Error('This response was stopped');
     const session = await this.store.createSession({
       gezelId,

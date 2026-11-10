@@ -19,8 +19,8 @@ export const HANDBOEK_AREAS: readonly HandboekArea[] = [
 
 export const HANDBOEK_AREA_TITLES: Record<HandboekArea, string> = {
   conceptual: 'Concepts',
-  'gezel-roles': 'Gezel Roles',
-  craftbooks: 'Craftbooks',
+  'gezel-roles': 'Crew roles',
+  craftbooks: 'Plans',
   'project-types': 'Project Types',
   technical: 'Technical',
   'whats-new': "What's New",

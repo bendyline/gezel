@@ -1274,7 +1274,7 @@ export function castBlock(
     }),
     text(
       `${id}-title`,
-      `${COUNT_WORDS[gezels] ?? String(gezels)} ${gezels === 1 ? 'gezel' : 'gezels'}, one job`,
+      `${COUNT_WORDS[gezels] ?? String(gezels)} crew ${gezels === 1 ? 'member' : 'members'}, one job`,
       {
         x: '50%',
         y: '26%',

@@ -156,7 +156,7 @@ export function DraftPlanCard({
           className="pending-question-skip subtle"
           onClick={() => refresh()}
           disabled={busy !== null}
-          title="Re-fetch after the gezel edits the plan."
+          title="Re-fetch after the plan is edited."
         >
           Refresh
         </button>

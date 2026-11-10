@@ -5,9 +5,11 @@ import type { ProjectConnectorBinding } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { RemoteImageProvider } from '../providers/image/remote-image.js';
+import { RemoteVideoProvider } from '../providers/video/remote-video.js';
 import {
   CAMERA_PIXELS_CLOUD_ENGINE,
   CAMERA_PIXELS_PAIRED_ENGINE,
+  CAMERA_PIXELS_PAIRED_VIDEO_ENGINE,
   CAMERA_PIXELS_WITHHELD,
 } from './caller-location.js';
 import type { ServiceContext } from './context.js';
@@ -222,6 +224,56 @@ describe('camera keyframes in the image tools', () => {
     const other = pairedServer(false);
     const h2 = harness({ session: 'llama-cpp', engine: 'unused', provider: other.provider });
     expect(await h2.image(CHART)).toEqual({ status: 500, error: 'reached the engine' });
+  });
+
+  // The 1.26313.105 audit: the image route got the paired-server check, the
+  // video route did not, so a keyframe could still leave as a video's first frame.
+  function pairedVideoServer(onThisComputer: boolean) {
+    const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => {
+      throw new Error('reached the engine');
+    });
+    const provider = new RemoteVideoProvider({
+      remoteId: onThisComputer ? 'machine' : 'office-pc',
+      label: onThisComputer ? 'This computer' : 'Office PC',
+      baseUrl: 'https://192.168.1.20:6229',
+      token: 't',
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      onThisComputer,
+    });
+    return { provider, fetch };
+  }
+
+  it("never sends a keyframe to a paired server's video engine", async () => {
+    const paired = pairedVideoServer(false);
+    const h = harness({ session: 'llama-cpp', engine: 'unused', provider: paired.provider });
+    expect(await h.video(KEYFRAME)).toEqual({
+      status: 403,
+      error: CAMERA_PIXELS_PAIRED_VIDEO_ENGINE,
+    });
+    expect(paired.fetch).not.toHaveBeenCalled();
+  });
+
+  it("uses this computer's machine video engine for a keyframe", async () => {
+    const broker = pairedVideoServer(true);
+    const h = harness({ session: 'llama-cpp', engine: 'unused', provider: broker.provider });
+    expect(await h.video(KEYFRAME)).toEqual({ status: 500, error: 'reached the engine' });
+    expect(broker.fetch.mock.calls.map(([url]) => String(url))).toContain(
+      'https://192.168.1.20:6229/v1/remote/video/generate',
+    );
+  });
+
+  it("lets a paired server's video engine use a camera that allows cloud AI, and other images", async () => {
+    const allowed = pairedVideoServer(false);
+    const h = harness({
+      session: 'llama-cpp',
+      engine: 'unused',
+      provider: allowed.provider,
+      allowCloud: true,
+    });
+    expect(await h.video(KEYFRAME)).toEqual({ status: 500, error: 'reached the engine' });
+    const other = pairedVideoServer(false);
+    const h2 = harness({ session: 'llama-cpp', engine: 'unused', provider: other.provider });
+    expect(await h2.video(CHART)).toEqual({ status: 500, error: 'reached the engine' });
   });
 
   it('leaves images outside the camera alone', async () => {

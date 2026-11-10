@@ -82,7 +82,7 @@ export function scheduleRunsSummary(opts: {
     case 'no-night-shift':
       return say(
         'Not scheduled',
-        'The Night Shift is turned off, so this never starts on its own. Turn on Enable Night Shift in Settings → General, or use Run now.',
+        'The Night Shift is turned off, so this never starts on its own. Turn on Enable Night Shift in Settings → Night Shift, or use Run now.',
       );
     case 'unknown':
       return say('Scheduled', '');

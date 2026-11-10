@@ -843,13 +843,14 @@ function FullApp() {
                 <NavigationMenuIcon />
               </button>
             )}
+            {/* Back, Forward and the trail of views visited, leading the bar
+              ahead of the brand as in a browser. Compact layouts leave them
+              out (the bar has no room); the phone's Back walks the same stack
+              through useBackNavigation. */}
+            {!compact && <HistoryKeys />}
             {!compact && (
               <AppBrand active={selection === null} onClick={() => commitSelection(null)} />
             )}
-            {/* Back, Forward and the trail of views visited. Compact layouts
-              leave them out (the bar has no room); the phone's Back walks the
-              same stack through useBackNavigation. */}
-            {!compact && <HistoryKeys />}
             {/* Unified search is anchored near the brand so changing status-pill
             widths do not recenter it. It stays shrinkable in the flex row, so
             crowded titlebars still give the pills room without overlap — and
@@ -1529,7 +1530,7 @@ function nightShiftSummary(
     hint:
       window && !window.open && start
         ? `Instead of waiting until ${start}.`
-        : 'Your crew works through the queue now.',
+        : 'Gezel works through the queue now.',
   };
   if (!window) {
     return {
@@ -1551,8 +1552,8 @@ function nightShiftSummary(
     line:
       lastNightLine(lastNight) ??
       (start
-        ? `Your crew works through the queue from ${start}.`
-        : 'Your crew works through the queue overnight.'),
+        ? `Gezel works through the queue from ${start}.`
+        : 'Gezel works through the queue overnight.'),
     badge: { text: nightWord(window.start), tone: 'idle' },
     track: ticks && { ...ticks, progress: 0 },
     action: startNow,
@@ -1571,7 +1572,7 @@ function lastNightLine(night: LastNight | null): string | null {
       : night.questions === 1
         ? ' One question is waiting for you.'
         : ` ${night.questions} questions are waiting for you.`;
-  return `Last night your crew ${did}.${ask}`;
+  return `Last night Gezel ${did}.${ask}`;
 }
 
 /** "Tonight", "Tomorrow", or the weekday a window opens on. */

@@ -1407,7 +1407,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     const onOpenSettings = (e: Event) => {
       const detail = (e as CustomEvent<{ projectId?: string }>).detail;
       if (detail?.projectId && selected && detail.projectId !== selected.id) return;
-      setTab('settings');
+      // The Settings tab's value is 'about'; 'settings' renders no pane.
+      setTab('about');
     };
     window.addEventListener('gezel:open-project-settings', onOpenSettings);
     return () => window.removeEventListener('gezel:open-project-settings', onOpenSettings);
@@ -2664,7 +2665,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             label={crewLeadLabel(selected)}
                             hint={
                               selected.mode === 'solo'
-                                ? 'The single gezel who handles this entire job — the Builder. Team-management tools are stripped from their thread.'
+                                ? 'The Builder handles this entire job. Team-management tools are stripped from their thread.'
                                 : 'Leads the crew. Every chat here knows who it is.'
                             }
                           >
@@ -2745,7 +2746,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           id="project-about-workspace"
                           className="project-about-anchor"
                           title="Workspace"
-                          hint="Where this project’s files live and what your crew may do with them."
+                          hint="Where this project’s files live and what Gezel may do with them."
                         >
                           {runtimeCapabilities().externalFolders && (
                             <SettingField
@@ -2753,7 +2754,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               controlId="project-setting-folder"
                               hint={
                                 selected.workingDir
-                                  ? 'Your crew works on the files in this folder.'
+                                  ? 'Gezel works on the files in this folder.'
                                   : 'No folder chosen, so files live in Gezel’s own workspace for this project.'
                               }
                             >
@@ -2793,8 +2794,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             label={MANAGED_WORKSPACE_WRITE_SETTING_LABEL}
                             hint={
                               selected.workingDir
-                                ? 'Off by default for a folder of your own. Turn on only if you trust the crew’s tools and automations to edit it.'
-                                : 'On by default for Gezel’s own workspace. Crew members that run in Codex or Claude Code follow those apps’ own permissions.'
+                                ? 'Off by default for a folder of your own. Turn on only if you trust Gezel’s tools and automations to edit it.'
+                                : 'On by default for Gezel’s own workspace. Work that runs in Codex or Claude Code follows those apps’ own permissions.'
                             }
                             checked={workspaceAccess.managedWritable}
                             onChange={(next) => {
@@ -2838,7 +2839,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                     ? selected.github.checkoutDir
                                       ? `Linked. Checkout: ${selected.github.checkoutDir}${selected.github.branch ? ` (${selected.github.branch})` : ''}`
                                       : 'Linked. Use the GitHub tab to clone.'
-                                    : 'Optional. When set, your crew gains a GitHub-linked checkout and a new GitHub tab.'}
+                                    : 'Optional. When set, the project gains a GitHub-linked checkout and a new GitHub tab.'}
                                   {gitStatus && (
                                     <>
                                       {' '}
@@ -2865,8 +2866,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             <SettingField label="Recent workspace changes">
                               {writesJournal.length === 0 ? (
                                 <p className="gz-setting-hint">
-                                  Nothing changed yet. Files crew members write, delete, create, or
-                                  rename show up here.
+                                  Nothing changed yet. Files Gezel writes, deletes, creates, or
+                                  renames show up here.
                                 </p>
                               ) : (
                                 <ul className="project-writes-log">
@@ -2909,7 +2910,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             id="project-about-access"
                             className="project-about-anchor"
                             title="Access"
-                            hint="What your crew can reach beyond this project’s own files."
+                            hint="What Gezel can reach beyond this project’s own files."
                           >
                             {showLinkedProjects && (
                               <SettingField
@@ -3020,7 +3021,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           {runtimeCapabilities().catalog && (
                             <SettingField
                               label="Project type"
-                              hint="Tunes which craftbooks the command rail suggests. Auto-detect reads the project’s files and About text."
+                              hint="Tunes which plans the command rail suggests. Auto-detect reads the project’s files and About text."
                             >
                               <Select.Root
                                 value={selected.projectTypeId || '__AUTO__'}
@@ -3154,7 +3155,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     message={
                       selected.workingDir ? (
                         <>
-                          Your crew will be able to create, modify, and delete files inside{' '}
+                          Gezel will be able to create, modify, and delete files inside{' '}
                           <code>{selected.workingDir}</code>. Every change is logged in the Settings
                           section. You can turn this back off at any time.
                         </>
@@ -3206,7 +3207,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           ? selected.workingDir || !runtimeCapabilities().externalFolders
                             ? 'Workspace directory is empty.'
                             : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
-                          : 'No artifacts yet. Your crew will store reports and outputs here.'
+                          : 'No artifacts yet. Gezel stores reports and outputs here.'
                       }
                       mutations={fileMutations}
                       customList={fileCustomList}
@@ -3523,7 +3524,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         <SettingsSection
                           id="project-toolsets"
                           title="Toolsets"
-                          hint="Available to every gezel working in this project. Project MCP files are discovered automatically."
+                          hint="Available to everyone working in this project. Project MCP files are discovered automatically."
                         >
                           <ToolsetsEditor
                             scope={{ kind: 'project', projectId: selected.id }}

@@ -28,7 +28,7 @@ const TEMPLATES: TemplateCard[] = [
   {
     id: 'post-message',
     title: 'Post a message when a phase starts',
-    blurb: 'Writes a note onto the task so the team sees it.',
+    blurb: 'Writes a note onto the task for whoever works on it next.',
     requires: ['tasks.write'],
   },
   {

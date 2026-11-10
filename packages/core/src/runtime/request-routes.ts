@@ -1,5 +1,6 @@
 import { stepDurationEstimates } from '../request-track/eta.js';
 import { assembleRequestTracks } from '../request-track/resolve.js';
+import { withRequestTitles } from '../request-track/title.js';
 import type { ListRequestsResponse } from '../schemas/request-track.js';
 import type { ChatSession } from '../schemas/session.js';
 import type { PortableStore } from './store.js';
@@ -58,5 +59,5 @@ export async function portableRequestTracks(
       ...(query.get('live') === '1' ? { live: true } : {}),
     },
   );
-  return { requests, at: new Date(now).toISOString() };
+  return { requests: withRequestTitles(requests, tasks), at: new Date(now).toISOString() };
 }

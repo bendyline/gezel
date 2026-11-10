@@ -267,7 +267,7 @@ export function GezelDetail({
   if (error) {
     return (
       <div className="placeholder">
-        <p>Couldn't open this gezel: {error}</p>
+        <p>Couldn't open this crew member: {error}</p>
       </div>
     );
   }
@@ -309,7 +309,7 @@ export function GezelDetail({
             <input
               ref={renameInputRef}
               className="rename-input"
-              aria-label="Gezel name"
+              aria-label="Crew member name"
               value={renameDraft}
               onChange={(e) => setRenameDraft(e.target.value)}
               onBlur={() => void commitRename()}
@@ -322,7 +322,7 @@ export function GezelDetail({
                 type="button"
                 className="gezel-name-editable"
                 onClick={startRename}
-                title="Rename gezel"
+                title={`Rename ${selected.name}`}
               >
                 {selected.name}
               </button>
@@ -335,13 +335,16 @@ export function GezelDetail({
             // font is set from the Appearance tab, same as any other
             // gezel.)
             <div className="provider-override">
-              <span className="gezel-role muted small ff-header-tag" title="Fixed-function gezel">
+              <span
+                className="gezel-role muted small ff-header-tag"
+                title="Fixed-function crew member"
+              >
                 Fixed-function · forwards to <code>{selected.fixedFunction.tool}</code>
               </span>
               {generationEngineLabel && (
                 <span
                   className="gezel-role muted small ff-header-tag"
-                  title="Generation model used by this gezel"
+                  title={`Generation model ${selected.name} uses`}
                 >
                   {generationEngineLabel}
                 </span>
@@ -1271,7 +1274,7 @@ function HeaderModelName({
           type="button"
           className="gezel-header-model-name"
           onClick={onOpenSettings}
-          title="Change this gezel's model in Settings"
+          title="Change this crew member's model in Settings"
         >
           {name}
         </button>
@@ -1457,7 +1460,7 @@ function GezelSettingsPanel({
       {effectiveProvider === 'copilot' && (
         <SettingKeys
           label="Sandbox"
-          description="Deny the Copilot CLI's built-in tools (bash, web_fetch, file edit, grep) and force this gezel through our MCP tools."
+          description="Deny the Copilot CLI's built-in tools (bash, web_fetch, file edit, grep) and force this crew member through our MCP tools."
           options={[
             { value: 'default', label: 'Inherit' },
             { value: 'on', label: 'On' },
@@ -1473,7 +1476,7 @@ function GezelSettingsPanel({
       {effectiveProvider === 'codex-cli' && (
         <SettingKeys
           label="Access"
-          description="Override this gezel's Codex execution posture. A project-level choice still takes precedence."
+          description="Override this crew member's Codex execution posture. A project-level choice still takes precedence."
           options={[
             { value: 'inherit', label: 'Inherit' },
             { value: 'plan', label: 'Plan' },
@@ -1623,7 +1626,7 @@ function GezelFontPicker({
     >
       <Select.Trigger
         className="gezel-font-picker"
-        title="Font used for this gezel's chat bubbles"
+        title="Font used for this crew member's chat bubbles"
         style={preview ? { fontFamily: preview } : undefined}
         aria-label="Chat bubble font"
       >

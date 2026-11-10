@@ -67,7 +67,7 @@ describe('ReportActionFence', () => {
     });
     renderFence(FIRE_BODY);
     expect(await screen.findByText('Run the accessibility audit')).toBeInTheDocument();
-    expect(screen.getByText(/Craftbook: a11y-audit/)).toBeInTheDocument();
+    expect(screen.getByText(/Plan: a11y-audit/)).toBeInTheDocument();
 
     vi.mocked(api.getReportActions).mockResolvedValue({
       actions: [

@@ -56,9 +56,9 @@ export async function listGeneratedSummaries(
   out.push({
     id: 'craftbooks-index',
     area: 'craftbooks',
-    title: 'Every craftbook',
+    title: 'Every plan',
     order: 0,
-    summary: 'All the step-by-step procedures your crew can follow.',
+    summary: 'All the step-by-step procedures Gezel can follow.',
   });
   const craftbooks = (await catalog.list('craftbook-template'))
     .map((s) => s.manifest as CraftbookTemplateManifest)
@@ -94,7 +94,7 @@ export async function listGeneratedSummaries(
     area: 'project-types',
     title: 'Every project type',
     order: 0,
-    summary: 'Ready-made project setups: crew, craftbooks, and toolsets in one.',
+    summary: 'Ready-made project setups: crew, plans, and toolsets in one.',
   });
   const projectTypes = (await catalog.list('project-type'))
     .map((s) => s.manifest as ProjectTypeManifest)
@@ -126,9 +126,9 @@ export async function buildGeneratedBody(
   }
   if (id === 'craftbooks-index') {
     return [
-      '# Every craftbook',
+      '# Every plan',
       '',
-      'Craftbooks are step-by-step procedures your crew can follow to produce a real deliverable — each one names its steps, who runs them, and the checks a result must pass.',
+      'Plans are step-by-step procedures Gezel can follow to produce a real deliverable — each one names its steps, the role that runs each, and the checks a result must pass.',
       '',
       '::handboek-craftbook-list',
     ].join('\n');
@@ -156,7 +156,7 @@ export async function buildGeneratedBody(
     const lines = [
       '# Every project type',
       '',
-      'A project type outfits a whole project for one kind of work: the right crew, craftbooks, toolsets, and schedules, composed into a single installable setup.',
+      'A project type outfits a whole project for one kind of work: the right crew, plans, toolsets, and schedules, composed into a single installable setup.',
     ];
     if (items.length > 0) {
       lines.push('', '| Project type | What it sets up |', '| --- | --- |');
@@ -210,7 +210,7 @@ function roleBody(roleId: RoleId): string {
     '',
     `::handboek-role-tools{role=${roleId} scope=tiers}`,
     '',
-    '## Craftbooks they run well',
+    '## Plans they run well',
     '',
     `::handboek-craftbook-list{role=${roleId}}`,
   ].join('\n');

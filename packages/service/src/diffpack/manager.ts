@@ -263,7 +263,7 @@ export class DiffpackManager {
       draft.sealedAt = nowIso();
       if (files.length === 0) {
         draft.status = 'failed';
-        draft.error = 'The gezel finished without proposing any change.';
+        draft.error = 'Gezel finished without proposing any change.';
       } else {
         draft.status = 'ready';
         delete draft.error;

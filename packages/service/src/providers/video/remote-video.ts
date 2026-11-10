@@ -24,13 +24,21 @@ export interface RemoteVideoProviderOpts {
   baseUrl: string;
   token: string;
   fetch: typeof fetch;
+  /**
+   * The machine broker: this computer's own engine host, which renders
+   * on-device only. Any other paired server renders on another computer with
+   * whatever engine it has picked.
+   */
+  onThisComputer?: boolean;
 }
 
 export class RemoteVideoProvider implements VideoProvider {
   readonly name: string;
+  readonly onThisComputer: boolean;
 
   constructor(private readonly opts: RemoteVideoProviderOpts) {
     this.name = `remote:${opts.label}`;
+    this.onThisComputer = opts.onThisComputer ?? false;
   }
 
   private headers(): Record<string, string> {

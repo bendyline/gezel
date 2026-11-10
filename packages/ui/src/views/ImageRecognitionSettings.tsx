@@ -178,7 +178,7 @@ export function ImageRecognitionSettings() {
         Most models can't see images. When someone pastes a screenshot into a chat with a model that
         has no vision, a small local model reads the image and passes along a description — so the
         conversation still works. Runs entirely on this device; weights live under{' '}
-        <code>~/.gezel/engines/recognition/</code>. Also available to any gezel through the{' '}
+        <code>~/.gezel/engines/recognition/</code>. Also available to Gezel through the{' '}
         <code>describe_image</code> tool.
       </p>
 

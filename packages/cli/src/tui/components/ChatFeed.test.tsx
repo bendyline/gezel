@@ -105,7 +105,7 @@ describe('ChatFeed', () => {
     );
 
     expect(output).not.toContain('vasile:');
-    expect(output).toContain('gezel: I am starting.');
+    expect(output).toContain('Gezel: I am starting.');
   });
 
   it('leaves a blank line between the feed and the prompt area', () => {

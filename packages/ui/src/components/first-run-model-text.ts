@@ -26,6 +26,15 @@ export function formatDownloadSize(bytes: number): string {
   return `${Math.round(bytes / 1024 ** 2)} MB`;
 }
 
+/**
+ * "1.2 GB of 15.3 GB": how much has arrived, as amounts. A percent of an
+ * unknown whole says nothing about how long is left; gigabytes do.
+ */
+export function formatDownloadProgress(writtenBytes: number, totalBytes: number): string {
+  const written = Math.max(0, Math.min(writtenBytes, totalBytes));
+  return `${formatDownloadSize(written)} of ${formatDownloadSize(totalBytes)}`;
+}
+
 /** What a first-run download averages: Hugging Face to a home connection. */
 const FIRST_RUN_GB_PER_MINUTE = 0.6;
 
@@ -52,12 +61,17 @@ export function readSizeFromCatalog(
         kind?: string;
         approxSizeBytes?: number;
         mlx?: { approxSizeBytes?: number };
-        llamaCpp?: { approxSizeBytes?: number };
+        llamaCpp?: { approxSizeBytes?: number; mmproj?: { sizeBytes?: number } };
       }
     | undefined;
   if (!m || m.kind !== 'chat-model') return null;
   const perSource = provider === 'mlx' ? m.mlx?.approxSizeBytes : m.llamaCpp?.approxSizeBytes;
-  return perSource ?? m.approxSizeBytes ?? null;
+  const weights = perSource ?? m.approxSizeBytes ?? null;
+  if (weights === null) return null;
+  // A llama.cpp model that can see downloads its vision file too. Left out,
+  // the key said 15.3 GB and the progress line counted to 16.2 GB.
+  const vision = provider === 'llama-cpp' ? (m.llamaCpp?.mmproj?.sizeBytes ?? 0) : 0;
+  return weights + vision;
 }
 
 /** Percent downloaded, or null while the size is unknown or a later phase runs. */

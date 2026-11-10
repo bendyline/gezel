@@ -226,7 +226,7 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
                 nameDraft.current = e.target.value;
               }}
               onBlur={saveName}
-              aria-label="Craftbook name"
+              aria-label="Plan name"
             />
           )}
           <span className="task-ref">{book.id}</span>
@@ -246,7 +246,7 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
         }${selectedStepId !== null ? ' has-selected-step' : ''}`}
       >
         <div className="task-bench-sidebar">
-          <fieldset className="task-tab-rail" aria-label="Craftbook view">
+          <fieldset className="task-tab-rail" aria-label="Plan view">
             <button
               type="button"
               aria-pressed={selectedStepId === null && tab === 'overview'}
@@ -273,7 +273,7 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
           onSelect={setSelectedStepId}
           entryStepId={book.entryStepId}
           busy={busy}
-          ariaLabel="Craftbook steps"
+          ariaLabel="Plan steps"
           addLabel="Add step"
           variant="bench"
           {...(readOnly ? {} : { onAddStep, onReorder })}
@@ -300,11 +300,11 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
           <div className="task-step-field full-width">
             <span className="task-step-field-label">Description</span>
             <MarkdownField
-              accessibleName="Craftbook description"
+              accessibleName="Plan description"
               key={`cbdesc-${book.id}`}
               value={book.description ?? ''}
               readOnly={readOnly}
-              placeholder="What this craftbook is for and when to reach for it."
+              placeholder="What this plan is for and when to reach for it."
               onCommit={(md) => {
                 descDraft.current = md;
                 saveDesc();

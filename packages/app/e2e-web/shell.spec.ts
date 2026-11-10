@@ -5,7 +5,7 @@
 import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { setTheme } from './helpers/determinism.js';
-import { gotoHome } from './helpers/nav.js';
+import { expandGroup, gotoHome } from './helpers/nav.js';
 import { shot } from './helpers/shot.js';
 
 test.describe('app shell', () => {
@@ -24,6 +24,8 @@ test.describe('app shell', () => {
 
     await expect(page.getByTestId('app-sidebar')).toBeVisible();
     await expect(page.getByTestId('app-header')).toBeVisible();
+    // History sits in the Workshop group, which starts closed.
+    await expandGroup(page, 'workshop');
 
     const destinations = [
       {

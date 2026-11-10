@@ -907,6 +907,11 @@ export const LlamaCppBackendHealthResponseSchema = z.object({
       kind: z.enum(['no-supported-gpu', 'no-device-access', 'probe-failed']),
       /** Technical explanation, for a "Technical details" disclosure. */
       detail: z.string(),
+      /**
+       * `no-device-access`: the account that cannot open `/dev/kfd`. A Linux
+       * package install's shared engine runs as `gezel`, not as the person.
+       */
+      account: z.string().optional(),
     })
     .optional(),
   /**

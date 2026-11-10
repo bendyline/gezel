@@ -344,6 +344,11 @@ export class SearchService {
       pathPrefix?: string;
       /** Answer from the keyword arms rather than wait for a cold embedder. */
       skipColdEmbedder?: boolean;
+      /**
+       * Wait at most this long for a cold or warming embedder, then answer from
+       * the keyword arms while the load continues for the next query.
+       */
+      coldEmbedderBudgetMs?: number;
       /** Re-judge the fused order with the relevance model, when one is on. */
       relevance?: RelevanceStageRequest;
       /**
@@ -380,6 +385,9 @@ export class SearchService {
       ...(opts.catalogs ? { catalogs: opts.catalogs } : {}),
       ...(opts.projectIds[0] ? { primaryProjectId: opts.projectIds[0] } : {}),
       ...(opts.skipColdEmbedder ? { skipColdEmbedder: true } : {}),
+      ...(opts.coldEmbedderBudgetMs !== undefined
+        ? { coldEmbedderBudgetMs: opts.coldEmbedderBudgetMs }
+        : {}),
       ...(opts.media ? { media: true } : {}),
       // Scale per-source fetch with paging depth so page 2 has material to
       // page into; identical to PER_SOURCE_RESULTS at offset 0.
@@ -542,7 +550,7 @@ export class SearchService {
         kind: 'craftbook',
         id: `craftbook:${c.source}:${c.id}`,
         title: c.name,
-        subtitle: `Craftbook · ${c.source === 'bundled' ? 'Gilde' : c.source}`,
+        subtitle: `Plan · ${c.source === 'bundled' ? 'Gilde' : c.source}`,
       });
     }
     for (const h of handboek) {
@@ -715,6 +723,15 @@ export class SearchService {
        * path follows. Explicit searches leave this off and wait.
        */
       skipColdEmbedder?: boolean;
+      /**
+       * How long an explicit search waits for a cold or warming embedder. On a
+       * new install the embedder is still downloading, beside the chat model,
+       * and an unbounded wait outlasted the MCP tool timeout: the first search
+       * of a PowerPoint task waited 8.5 minutes and the task lost its research
+       * step (1.26313.105 audit). Past the budget the keyword arms answer and
+       * the load keeps going for the next query.
+       */
+      coldEmbedderBudgetMs?: number;
       /** Include media hits; unscoped (titlebar) search always does. */
       media?: boolean;
     },
@@ -743,6 +760,10 @@ export class SearchService {
       // inside short-lived processes — `gezel run --standalone` boots a
       // service, answers, and exits, and an in-process load outlives it.
       log.debug(`skipping the vector arm while embeddings are ${embedderStatus}`);
+    } else if (embedderCold && scope?.coldEmbedderBudgetMs !== undefined) {
+      const pending = embedQuery(query).then((value) => ({ value }));
+      vector = (await withTimeout(pending, scope.coldEmbedderBudgetMs, null))?.value ?? null;
+      if (!vector) log.info(`searching by keyword while embeddings are ${embedderStatus}`);
     } else {
       try {
         vector = await embedQuery(query);

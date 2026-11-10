@@ -45,7 +45,7 @@ describe('scheduleRunsSummary', () => {
       now: at(9, 15),
     });
     expect(summary.nextWord).toBe('Not scheduled');
-    expect(summary.line).toContain('Settings → General');
+    expect(summary.line).toContain('Settings → Night Shift');
   });
 
   it('says how Crew activity is holding it', () => {

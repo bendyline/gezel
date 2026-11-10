@@ -288,14 +288,14 @@
 }
 
 .history-row:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--hover-bg);
 }
 
 .history-row-selected,
 .history-row-selected:hover {
   --muted: var(--text);
   --text-muted: var(--text);
-  background: color-mix(in srgb, var(--titlebar) 32%, transparent);
+  background: var(--selected-bg);
 }
 
 .history-kind {

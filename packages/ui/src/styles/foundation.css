@@ -21,32 +21,40 @@
      text. System emoji fonts stay as fallbacks if OpenMoji fails to load. */
   font-family: var(--font-ui);
 
-  /* Type scale. A small, deliberate set of sizes so chrome (settings,
-     dialogs, panels) reads as one system instead of a spread of ad-hoc
-     values. Long-form/editorial surfaces (chat, Home intro) keep 1rem+
-     of their own; these tokens size the dense UI chrome. See
-     docs/ux.md → Typography. */
-  --text-2xs: 0.72rem; /* micro labels, badges */
-  --text-xs: 0.8rem; /* helper & caption text, section labels */
-  --text-sm: 0.85rem; /* dense controls, secondary body copy */
-  --text-md: 0.9rem; /* default UI body */
-  --text-lg: 1rem; /* emphasized body, dialog/panel sub-headings */
-  --text-xl: 1.1rem; /* panel & dialog section headings */
-  --text-title: 1.35rem; /* an open entity's title: a task, a craftbook */
+  /* Type scale: six sizes, none under 13px. Sentences a person reads and
+     the controls they press share one size (15px); what annotates them is
+     one step down (14px); only a badge or a count is smaller (13px). Three
+     heading steps sit above. The scale before this ran 11.5 / 12.8 / 13.6 /
+     14.4px, four sizes inside three pixels, and three quarters of the text
+     on Home, Tasks and Settings was under 14px. Long-form surfaces (chat,
+     the Home intro) keep their own reading size. See docs/ux.md →
+     Typography. */
+  --text-2xs: 0.8125rem; /* 13px: badges, counts. Never a sentence */
+  --text-xs: 0.875rem; /* 14px: captions, hints, meta, section labels */
+  --text-md: 0.9375rem; /* 15px: body, and every control and row */
+  --text-sm: var(--text-md); /* the same size: controls and body are one */
+  --text-lg: 1.0625rem; /* 17px: sub-headings, emphasized body */
+  --text-xl: 1.25rem; /* 20px: panel & dialog section headings */
+  --text-title: 1.5rem; /* 24px: an open entity's title: a task, a plan */
 
   /* Gezel foundation palette.
      These are the small set of authored colors for app chrome. Component
      rules consume the semantic aliases below (--bg, --panel, --surface,
      --text, --accent, etc.); scoped surfaces such as Home may derive nearby
      tones from these primitives, but should not start a parallel palette. */
+  /* One paper, in steps of lightness. Every tone sits on the parchment hue
+     (OKLCH h≈88). The reading, workshop and control papers carry less color
+     than the chrome around them, so long text sits on a quiet cream, but
+     they no longer lean rose (h≈55-70): a chat bubble or a Handboek page
+     read pink beside the yellow chrome. */
   --gezel-paper-canvas: #eae5d6;
-  --gezel-paper-workshop: #efe6dc;
+  --gezel-paper-workshop: #ece7dc;
   --gezel-paper-panel: #f3eddf;
-  --gezel-paper-reading: #f1e9e1;
-  --gezel-paper-reading-inset: #e8dfd7;
-  --gezel-paper-handoff: #efebe8;
-  --gezel-paper-control: #ece8e5;
-  --gezel-paper-control-deep: #e4dfdc;
+  --gezel-paper-reading: #eeeae1;
+  --gezel-paper-reading-inset: #e5e0d6;
+  --gezel-paper-handoff: #efece4;
+  --gezel-paper-control: #ece9e1;
+  --gezel-paper-control-deep: #e3e0d8;
   --gezel-paper-inset: #ddd3bd;
   /* Colored paper painted behind a craftbook's or project type's transparent
      cut-paper mark, one tone per category (catalogGroundFor in core). */
@@ -68,9 +76,18 @@
   --gezel-ink-warm-quiet: #6b6152;
   /* Deep enough that the cream titlebar labels clear 4.5:1 (~5:1). */
   --gezel-sage: #5c6a4a;
+  /* The brand sage at night: the same hue, deep enough that the bar is not
+     the brightest thing over a walnut canvas. Main repaints the window
+     controls to match (BRAND_SAGE_NIGHT). */
+  --gezel-sage-night: #38412d;
   --gezel-sage-muted: #8a9a76;
   --gezel-sage-forest: #3d4d3a;
   --gezel-sage-soft: #d6dec6;
+  /* A sage bright enough to read as a status light on parchment. */
+  --gezel-sage-lit: #6f8d58;
+  /* Ochre: the status light for "needs you". Its hue (OKLCH h≈78) stands
+     apart from the terracotta accent (h≈52), which the old orange shared. */
+  --gezel-ochre: #b9831a;
   --gezel-terra: #b0724c;
   --gezel-terra-hover: #996142;
   --gezel-terra-raised: #9c6440;
@@ -91,7 +108,7 @@
   --bg: var(--gezel-paper-canvas);
   --home-workshop-paper: var(--gezel-paper-workshop);
   --panel: var(--gezel-paper-panel);
-  /* Chat prose sits on a quiet mushroom beige in light mode. Keep this
+  /* Chat prose sits on the quiet reading cream in light mode. Keep this
      matched to `GEZEL_LIGHT_SURFACE.background` in chat-theme.ts so the
      Squisq interior and its outer bubble remain one continuous surface. */
   --chat-bubble-bg: var(--gezel-paper-reading);
@@ -149,18 +166,23 @@
      active-state colors keep their existing treatments. */
   --toolbar-icon-ink: var(--gezel-toolbar-ink);
 
-  /* Brand palette. The titlebar must stay the brand sage: the Windows/Linux
-     window-control overlay, the window background and the splash paint it
-     outside the renderer (titlebar-color.test.ts). */
+  /* Brand palette. The titlebar is the brand sage by day and the deep night
+     sage in dark mode. Both must match what the main process paints outside
+     the renderer: the Windows/Linux window-control overlay, the window
+     background and the splash (BRAND_SAGE / BRAND_SAGE_NIGHT,
+     titlebar-color.test.ts). */
   --titlebar: var(--gezel-sage);
   --titlebar-ink: var(--gezel-cream-ink);
   /* Titlebar keys and wells. Every control on the bar stands one height, so
      pills, keys, trays and the search well share a single silhouette line.
      Faces sit a few percent darker than the bar and take their lift from a
      cream top highlight: a lighter face would drop the cream labels below
-     4.5:1 on the brand sage. The bar is sage in every theme, so these are
-     theme-independent. */
+     4.5:1 on the brand sage. Every face derives from `--titlebar`, so the
+     night bar's keys follow it with no values of their own. */
   --titlebar-control-h: 28px;
+  /* The two status keys (Activity, the engine) share one fixed width, so the
+     bar never moves as their words change. */
+  --titlebar-status-w: 10.5rem;
   --titlebar-key-bg: linear-gradient(
     to bottom,
     color-mix(in srgb, black 2%, var(--titlebar)),
@@ -198,16 +220,37 @@
   --sage-ink: #38512e;
   --sage-soft: var(--gezel-sage-soft);
 
+  /* Selection: the one treatment for "this is the current item" in every
+     list and navigation. A wash of the accent over whatever paper the list
+     sits on, so it resolves in both themes with no second color. A selected
+     row was sage in Tasks, History and Plans, tan in Crew and the rail, blue
+     in the chat rail and gray in the GitHub lists. Latched keys in a tray
+     and the active tab of a pane are different patterns and keep their own
+     faces (docs/ux.md → Color). */
+  --selected-bg: color-mix(in srgb, var(--accent) 16%, transparent);
+  --selected-bg-hover: color-mix(in srgb, var(--accent) 23%, transparent);
+  /* Hover on a row that is not selected: a breath of ink, never a color. */
+  --hover-bg: color-mix(in srgb, var(--text) 6%, transparent);
+
   /* Semantic colors */
   --success: #27ae60;
   --success-bg: rgba(39, 174, 96, 0.12);
   --success-text: #14622f;
-  --warning: #e67e22;
-  --warning-bg: rgba(230, 126, 34, 0.12);
-  --warning-text: #7c4200;
+  --warning: var(--gezel-ochre);
+  --warning-bg: rgba(185, 131, 26, 0.14);
+  --warning-text: #6f4700;
   --danger: #c0392b;
   --danger-bg: rgba(192, 57, 43, 0.12);
   --danger-text: #98271d;
+
+  /* Status: three colors, each always beside its word. Needs you is ochre,
+     Working is the accent, Ready is sage. Trouble is `--danger` and nothing
+     else is a status color: work that is only waiting or scheduled carries
+     no hue. A surface that tints a zone derives the wash and its edge from
+     the one color with `--status-wash` / `--status-edge` strengths. */
+  --status-attention: var(--warning);
+  --status-working: var(--accent);
+  --status-ready: var(--gezel-sage-lit);
 
   /* Unified-diff blocks (tool-call edits). Deeper ink than the semantic
      status colors so code text stays readable on the parchment surface;
@@ -338,12 +381,14 @@
     --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
     --sage-ink: #a9c294;
     --sage-soft: #3a4634;
+    --gezel-sage-lit: #a2c088;
+    --titlebar: var(--gezel-sage-night);
     --success: #6ad38f;
     --success-bg: rgba(106, 211, 143, 0.15);
     --success-text: #6ad38f;
-    --warning: #f0a04b;
-    --warning-bg: rgba(240, 160, 75, 0.15);
-    --warning-text: #f0a04b;
+    --warning: #e2b55c;
+    --warning-bg: rgba(226, 181, 92, 0.15);
+    --warning-text: #e8c279;
     --danger: #e74c3c;
     --danger-bg: rgba(231, 76, 60, 0.15);
     --danger-text: #ff8175;
@@ -444,12 +489,14 @@
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.46);
   --sage-ink: #a9c294;
   --sage-soft: #3a4634;
+  --gezel-sage-lit: #a2c088;
+  --titlebar: var(--gezel-sage-night);
   --success: #6ad38f;
   --success-bg: rgba(106, 211, 143, 0.15);
   --success-text: #6ad38f;
-  --warning: #f0a04b;
-  --warning-bg: rgba(240, 160, 75, 0.15);
-  --warning-text: #f0a04b;
+  --warning: #e2b55c;
+  --warning-bg: rgba(226, 181, 92, 0.15);
+  --warning-text: #e8c279;
   --danger: #e74c3c;
   --danger-bg: rgba(231, 76, 60, 0.15);
   --danger-text: #ff8175;
@@ -656,6 +703,14 @@ select {
   font-family: inherit;
 }
 
+/* And the scale's size. A bare control otherwise renders at the browser's
+   13.33px, the one size on a screen that is not on the scale: Start task,
+   Discard and every unclassed button did. Zero specificity, so any rule
+   that sets a size still wins. */
+:where(button, input, textarea, select) {
+  font-size: var(--text-md);
+}
+
 /* Display register — headings and long-form prose carry the serif. Any
    surface that wants sans can opt out by setting font-family explicitly.
    Chat messages and the Home intro card opt in below. */
@@ -666,6 +721,22 @@ h4,
 h5,
 h6 {
   font-family: var(--font-display);
+}
+
+/* A heading with no size of its own lands on the scale, not on the
+   browser's 2em / 1.5em / 1.17em / 0.83em. Zero specificity, so every rule
+   that sizes a heading still wins. */
+:where(h1) {
+  font-size: var(--text-title);
+}
+:where(h2) {
+  font-size: var(--text-xl);
+}
+:where(h3) {
+  font-size: var(--text-lg);
+}
+:where(h4, h5, h6) {
+  font-size: var(--text-md);
 }
 
 /* The intro card's own prose keeps the editorial register; scoped to
@@ -775,7 +846,7 @@ html.embedded-chat #root {
 }
 .embedded-chat-status {
   padding: 12px;
-  font-size: 0.85rem;
+  font-size: var(--text-sm);
   color: var(--text-muted, var(--text));
 }
 

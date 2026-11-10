@@ -12,6 +12,7 @@ import {
   UpdateQueuedMessageRequestSchema,
   composeCraftbookLaunch,
   createLogger,
+  deriveTaskTitle,
   errorMessageWithCause,
   getEngagementMode,
   isEngagementAllowed,
@@ -448,7 +449,8 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       const launched = await ctx.taskLauncher.launch(
         target.projectId,
         {
-          title: launch.title?.trim() || book.name,
+          // Named for what the person asked for, not for the plan that runs it.
+          title: launch.title?.trim() || deriveTaskTitle(text) || book.name,
           description: composed.description,
           craftbookId: launch.craftbookId,
           ...(launch.craftbookSourceId ? { craftbookSourceId: launch.craftbookSourceId } : {}),

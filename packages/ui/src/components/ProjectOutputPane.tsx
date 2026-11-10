@@ -604,7 +604,7 @@ export function ProjectOutputPane({
   ) : (
     <div className="project-output-empty">
       <p className="muted small">
-        No previewable HTML in this workspace yet. When a gezel writes an <code>index.html</code>,
+        No previewable HTML in this workspace yet. When Gezel writes an <code>index.html</code>,
         it'll show up here.
       </p>
     </div>

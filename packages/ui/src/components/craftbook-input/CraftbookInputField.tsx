@@ -33,7 +33,7 @@ export interface CraftbookInputValue {
 export const EMPTY_INPUT_VALUE: CraftbookInputValue = { source: null };
 
 const SKIP_REASON_COPY: Record<TaskInputSkipReason, string> = {
-  'not-accepted': 'not a type this craftbook reads',
+  'not-accepted': 'not a type this plan reads',
   'sync-junk': 'system file',
   'too-large': 'too large',
   'over-file-limit': 'over the file limit',
@@ -417,9 +417,7 @@ function WorkspacePicker({
   if (entries.length === 0) {
     return (
       <p className="muted small">
-        {isFolder
-          ? 'This project has no folders yet.'
-          : 'No file here is a type this craftbook reads.'}
+        {isFolder ? 'This project has no folders yet.' : 'No file here is a type this plan reads.'}
       </p>
     );
   }

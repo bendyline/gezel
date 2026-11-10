@@ -111,7 +111,7 @@ prove a fix by running the tests rather than by claiming it works.
 **The complex-workflow set** (9 tests) asks a model to build the recipe, not
 just follow one: write a reusable procedure with its own quality gates, run it
 twice against different inputs, repair one that is broken, and turn a job it
-just did by hand into something the crew can run again next quarter.
+just did by hand into something that can be run again next quarter.
 
 ### Complex workflows (9 tests)
 

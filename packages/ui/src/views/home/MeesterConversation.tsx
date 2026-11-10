@@ -18,6 +18,7 @@ import {
   MeesterWelcome,
   type WelcomeHelper,
   type WelcomeSetup,
+  canQueueFirstRequest,
   composerWaitingStatus,
 } from './MeesterWelcome.js';
 
@@ -286,6 +287,11 @@ export function MeesterConversation({
               // Setup is on screen in the welcome, so the composer's warning
               // names its state instead of pointing elsewhere.
               {...(setup ? { waitingStatus: composerWaitingStatus(setup) } : {})}
+              // Once the tools are on their way, the person's first request
+              // need not wait for them to come back: Send holds it and it
+              // goes out when the model lands. Only in the meester's own
+              // thread, where the welcome makes that promise.
+              sendWhenReady={onMeesterThread && canQueueFirstRequest(setup)}
               onTurnStateChange={(state) => {
                 if (state === 'streaming') onTurnStarted?.();
               }}

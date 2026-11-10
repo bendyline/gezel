@@ -488,6 +488,15 @@ export class ProviderPool {
       if (this.retiring) {
         throw new Error('local engine pool retired after machine engine adoption');
       }
+      // The entry can be gone while its engine is still shutting down, and
+      // that process holds its graphics memory until it exits. A task whose
+      // next step wanted the model its last step had just lost built here,
+      // read a full card, and was refused 0.7 s before the card emptied.
+      const tearingDown = this.entries.has(key) ? undefined : this.evicting.get(key);
+      if (tearingDown) {
+        await tearingDown;
+        continue;
+      }
       const pending = this.buildLocks.get(key);
       if (pending) return this.joinBuild(key, pending, opts);
       // A foreground request that drained an engine must load into the room
@@ -742,9 +751,31 @@ export class ProviderPool {
   ): Promise<{ reason: string; message: string } | null> {
     let measured = await this.measuredVramDenial(modelId, required, evictedOwnEngine);
     while (measured) {
+      // Unload only what is on the card, and only when it could make the room.
+      // Another program's memory is not this pool's to free: unloading every
+      // model, draining a busy task turn with no limit, and still failing cost
+      // the person their warm engines for nothing (1.26313.105 audit). An
+      // engine whose process already stopped frees nothing on the card either.
+      const freeable = this.cardBytesFreeable(opts);
       const victim =
-        this.idleByEvictionOrder(opts)[0]?.key ?? (opts.background ? null : this.lruKey(opts));
-      if (!victim) break;
+        freeable < measured.shortBytes
+          ? null
+          : (this.idleByEvictionOrder(opts).find((v) => this.holdsCard(v.key))?.key ??
+            (opts.background ? null : this.busyCardHolder(opts)));
+      if (!victim && freeable < measured.shortBytes && this.evicting.size === 0) {
+        log.info(
+          `graphics card short ${gb(measured.shortBytes)} for ${modelId}; Gezel's engines ` +
+            `hold ${gb(freeable)} of it there, so none is unloaded`,
+        );
+      }
+      if (!victim) {
+        // Nothing left to unload, but an engine this pool is still shutting
+        // down keeps its memory until it exits. Let it finish and read again.
+        if (this.evicting.size === 0) break;
+        await Promise.all([...this.evicting.values()]);
+        measured = await this.measuredVramDenial(modelId, required, true);
+        continue;
+      }
       log.info(`graphics card short for ${modelId}; unloading ${victim} to make room on the card`);
       await this.evict(victim, opts);
       measured = await this.measuredVramDenial(modelId, required, true);
@@ -1125,7 +1156,7 @@ export class ProviderPool {
     modelId: string,
     residentBytes: number,
     waitForOwnedReclaim: boolean,
-  ): Promise<{ reason: string; message: string } | null> {
+  ): Promise<{ reason: string; message: string; shortBytes: number } | null> {
     const vramHeadroom = this.vramHeadroom;
     if (!vramHeadroom) return null;
     const committed = this.broker.committed();
@@ -1190,7 +1221,7 @@ export class ProviderPool {
           'second Gezel engine, or the graphics driver may be holding that memory. Close the other ',
           'graphics-card workload, or wait a few seconds and try again.',
         ].join('');
-    return { reason, message };
+    return { reason, message, shortBytes: required - freeBytes - MEASURED_VRAM_TOLERANCE_BYTES };
   }
 
   /**
@@ -1210,7 +1241,9 @@ export class ProviderPool {
    */
   private async makeRoom(needed: number, opts: EngineWaitOpts = {}): Promise<boolean> {
     let evictedOwnEngine = false;
-    while (!this.broker.canReserve(needed) && this.entries.size > 0) {
+    // A teardown in flight still holds its reservation, so the loop also runs
+    // when the pool is empty but an engine has not finished shutting down.
+    while (!this.broker.canReserve(needed) && (this.entries.size > 0 || this.evicting.size > 0)) {
       const idleBatch = this.idleVictimsFor(needed, opts);
       if (idleBatch.length > 0) {
         const evicted = await Promise.all(
@@ -1243,6 +1276,7 @@ export class ProviderPool {
         // its memory and re-check the budget.
         if (this.evicting.size === 0) break;
         await Promise.race([...this.evicting.values()]).catch(() => {});
+        evictedOwnEngine = true;
         continue;
       }
       await this.evict(victim, opts);
@@ -1320,6 +1354,47 @@ export class ProviderPool {
       }
     }
     return oldestIdle?.key ?? draining ?? oldestBusy?.key ?? null;
+  }
+
+  /** Whether `key`'s engine process is up (or starting) and so holds graphics memory. */
+  private holdsCard(key: string): boolean {
+    const entry = this.entries.get(key);
+    if (!entry) return false;
+    const lifecycle = engineLifecycle(entry);
+    return lifecycle === undefined || lifecycle.running;
+  }
+
+  /** The busy engine to drain for card room: one already draining first, else the oldest. */
+  private busyCardHolder(opts: EngineWaitOpts): string | null {
+    let draining: string | null = null;
+    let oldest: { key: string; at: number } | null = null;
+    for (const [key, entry] of this.entries) {
+      if (!this.holdsCard(key)) continue;
+      if (entry.draining) {
+        draining ??= key;
+        continue;
+      }
+      if (!this.occupiedFor(entry, opts)) continue;
+      if (oldest === null || entry.lastUsedAt < oldest.at) oldest = { key, at: entry.lastUsedAt };
+    }
+    return draining ?? oldest?.key ?? null;
+  }
+
+  /**
+   * At most how much graphics memory this caller could free by unloading: the
+   * card share of every running engine it may take (background work never
+   * takes a busy one). An upper bound, so room is never given up on early.
+   */
+  private cardBytesFreeable(opts: EngineWaitOpts): number {
+    const pools = this.broker.committed().pools;
+    const cap = pools.kind === 'discrete-gpu' ? pools.fastBytes : Number.POSITIVE_INFINITY;
+    let total = 0;
+    for (const [key, entry] of this.entries) {
+      if (!this.holdsCard(key)) continue;
+      if (opts.background && (entry.draining || this.occupiedFor(entry, opts))) continue;
+      total += Math.min(entry.residentBytes, cap);
+    }
+    return total;
   }
 
   /**

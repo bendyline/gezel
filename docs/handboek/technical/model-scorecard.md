@@ -82,7 +82,7 @@ one score.
 
 **Performance** shows two measured speeds on the machine named above: output
 speed is how fast the model writes its answer, and prefill speed is how fast it
-takes in your prompt and documents. Both matter for how a gezel *feels* —
+takes in your prompt and documents. Both matter for how a chat *feels* —
 prefill governs the pause before it starts, while output governs how fast text
 appears. A dash means that round did not record a throughput probe.
 
@@ -137,7 +137,7 @@ from aggregate engine measurements.
 
 A high score on the office set is the better guide for everyday document,
 planning, and analysis work. A high score on the general set matters more if
-you want a gezel writing or fixing code, and the engineering set, where a round
+you want the model writing or fixing code, and the engineering set, where a round
 has it, is the stricter test of that.
 
 If a model you're considering isn't listed, it hasn't been measured here yet

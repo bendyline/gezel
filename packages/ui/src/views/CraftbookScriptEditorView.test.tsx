@@ -99,7 +99,7 @@ describe('CraftbookScriptEditorView', () => {
       });
     });
     await waitFor(() => expect(screen.queryByText(/unsaved/)).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Back to craftbook' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to plan' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(navigate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -114,7 +114,7 @@ describe('CraftbookScriptEditorView', () => {
     render(<CraftbookScriptEditorView craftbookId="review" scriptName="qualityGate" />);
     await screen.findByLabelText('craftbook script source');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to craftbook' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to plan' }));
 
     expect(navigate).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -132,10 +132,10 @@ describe('CraftbookScriptEditorView', () => {
     const navigate = vi.spyOn(window, 'dispatchEvent');
     render(<CraftbookScriptEditorView craftbookId="review" scriptName="qualityGate" />);
 
-    expect(screen.getByRole('button', { name: 'Back to craftbook' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Back to plan' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
     await screen.findByText('Cannot load script');
-    fireEvent.click(screen.getByRole('button', { name: 'Back to craftbook' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to plan' }));
 
     expect(navigate).toHaveBeenCalledWith(
       expect.objectContaining({ detail: { kind: 'craftbook', id: 'review' } }),
@@ -148,7 +148,7 @@ describe('CraftbookScriptEditorView', () => {
     const editor = await screen.findByLabelText('craftbook script source');
     fireEvent.change(editor, { target: { value: '// unsaved draft\n' } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to craftbook' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to plan' }));
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
@@ -156,7 +156,7 @@ describe('CraftbookScriptEditorView', () => {
     expect(editor).toHaveValue('// unsaved draft\n');
     expect(navigate).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to craftbook' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to plan' }));
     fireEvent.click(screen.getByRole('button', { name: 'Discard changes and return' }));
     expect(navigate).toHaveBeenCalledWith(
       expect.objectContaining({ detail: { kind: 'craftbook', id: 'review' } }),
@@ -171,7 +171,7 @@ describe('CraftbookScriptEditorView', () => {
     fireEvent.change(editor, { target: { value: '// temporary edit\n' } });
     fireEvent.change(editor, { target: { value: SOURCE } });
 
-    fireEvent.click(screen.getByRole('button', { name: 'Back to craftbook' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to plan' }));
 
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(navigate).toHaveBeenCalledWith(
@@ -191,12 +191,12 @@ describe('CraftbookScriptEditorView', () => {
     const editor = await screen.findByLabelText('craftbook script source');
     fireEvent.change(editor, { target: { value: '// first edit\n' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(screen.getByRole('button', { name: 'Back to craftbook' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Back to plan' })).toBeDisabled();
     fireEvent.change(editor, { target: { value: '// newer edit\n' } });
 
     await act(async () => finishSave());
     expect(editor).toHaveValue('// newer edit\n');
-    fireEvent.click(screen.getByRole('button', { name: 'Back to craftbook' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to plan' }));
     expect(screen.getByRole('alertdialog')).toBeInTheDocument();
   });
 

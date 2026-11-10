@@ -8,9 +8,10 @@ import type {
   Question,
   Task,
 } from '@bendyline/gezel';
-import { formatNightShiftSummary, parseTaskRef } from '@bendyline/gezel';
+import { formatNightShiftSummary, parseTaskRef, taskPausedCardDetail } from '@bendyline/gezel';
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import { openSettingsSection } from '../settings-nav.js';
 import { openAddFolder } from './AddFolderSheet.js';
 import { CardNavigation, QuestionPrompt } from './QuestionPrompt.js';
 import { PermissionIcon, WorkspacePermissionForm } from './WorkspacePermissionForm.js';
@@ -116,10 +117,12 @@ function QuestionBody({
   question,
   onAnswered,
   onOpenInChat,
+  compact,
 }: {
   question: Question;
   onAnswered?: (q: Question) => void;
   onOpenInChat?: (question: Question) => void;
+  compact?: boolean;
 }) {
   if (question.answer) {
     return <AnsweredView question={question} />;
@@ -200,7 +203,7 @@ function QuestionBody({
     return <NightShiftReviewCard question={question} onAnswered={onAnswered} />;
   }
   if (question.intent?.kind === 'task-paused') {
-    return <TaskPausedCard question={question} onAnswered={onAnswered} />;
+    return <TaskPausedCard question={question} onAnswered={onAnswered} compact={compact} />;
   }
   if (question.intent?.kind === 'task-finished') {
     return (
@@ -550,7 +553,7 @@ function NightShiftReviewCard({
               )
             }
           >
-            <span className="pending-question-night-row-title">Your crew's week</span>
+            <span className="pending-question-night-row-title">Gezel's week</span>
             <span className="muted small">{intent.weeklyRecap.week}</span>
           </button>
         </div>
@@ -619,7 +622,7 @@ function useQuietNightFix(
   if (reason === 'quota-held') {
     return {
       label: 'Night Shift settings',
-      run: () => navigateToTab({ kind: 'area', area: 'settings' }),
+      run: () => openSettingsSection('nightShift'),
     };
   }
   if (reason === 'asleep' && keepRunningOffered) {
@@ -632,7 +635,7 @@ function useQuietNightFix(
         await api.updateConfig({
           nightShift: { ...(config.nightShift ?? {}), keepAwakeWhileRunning: true },
         });
-        return 'Gezel now starts when you sign in and keeps the computer awake while your crew works.';
+        return 'Gezel now starts when you sign in and keeps the computer awake while it works.';
       },
     };
   }
@@ -654,10 +657,14 @@ function useQuietNightFix(
 function TaskPausedCard({
   question,
   onAnswered,
+  compact,
 }: {
   question: Question;
   onAnswered?: (q: Question) => void;
+  /** The row already shows the task's title; "Open task" joins the actions. */
+  compact?: boolean | undefined;
 }) {
+  const onNavigate = useContext(CardNavigation);
   const [submitting, setSubmitting] = useQuestionDraft<'retry' | 'dismiss' | null>(
     question.id,
     'submitting',
@@ -713,10 +720,20 @@ function TaskPausedCard({
     }
   }, [question.id, question.taskRef, submitting, onAnswered, setSubmitting, setError]);
 
+  // In the Activity panel the way into the task is a key beside the other
+  // two moves, not a link up in the title line.
+  const openTaskRef = compact ? question.taskRef : undefined;
+
   return (
     <div className="pending-question pending-question-pending">
-      <ContextStrip question={question} />
-      <QuestionPrompt question={question} />
+      <ContextStrip question={question} taskLink={!openTaskRef} />
+      <QuestionPrompt
+        question={
+          compact && question.taskRef
+            ? { ...question, prompt: taskPausedCardDetail(question.prompt) }
+            : question
+        }
+      />
       {held && <p className="pending-question-hold muted">{held}</p>}
       {error && <p className="pending-question-error">{error}</p>}
       <div className="pending-question-actions">
@@ -728,6 +745,18 @@ function TaskPausedCard({
         >
           {submitting === 'retry' ? 'Restarting…' : 'Try again'}
         </button>
+        {openTaskRef && (
+          <button
+            type="button"
+            className="pending-question-open subtle"
+            onClick={() => {
+              navigateToTab({ kind: 'task', ref: openTaskRef });
+              onNavigate?.();
+            }}
+          >
+            Open task
+          </button>
+        )}
         <button
           type="button"
           className="pending-question-skip subtle"
@@ -798,7 +827,7 @@ function retryHoldText(reason: 'no-active-step' | 'no-assignee' | 'project-inact
     case 'no-active-step':
       return 'The task is active again, but no step is current — open it and start one.';
     case 'no-assignee':
-      return 'The task is active again, but its current step has nobody assigned — open it and pick a gezel.';
+      return 'The task is active again, but its current step has nobody assigned — open it and pick someone.';
     case 'project-inactive':
       return "The task is active again, but this project isn't taking background work right now. Set it active in the project's settings.";
   }
@@ -1068,7 +1097,7 @@ function ToolPermissionForm({
       <div className="pending-question-prompt">
         {/* The raw slug rides along as the title so a power user can still
             see which tool this is without it being the headline. */}
-        Your gezel wants to use the{' '}
+        Gezel wants to use the{' '}
         <strong title={intent.toolName}>{toolDisplayName(intent.toolName)}</strong> tool.
       </div>
       {Object.keys(intent.toolInput).length > 0 && (
@@ -1316,7 +1345,7 @@ function ClaudeUserQuestionForm({
       onOpenInChat={onOpenInChat}
       kicker={kicker || undefined}
       choiceDescriptions={intent.options.map((o) => o.description)}
-      skipHint="Dismiss without answering. The gezel is still working and will carry on without this input."
+      skipHint="Dismiss without answering. The work is still going and will carry on without this input."
     />
   );
 }
@@ -1504,8 +1533,7 @@ function PendingForm({
               onClick={() => void submit('silent-skip')}
               disabled={submitting}
               title={
-                skipHint ??
-                'Dismiss the question. The gezel keeps doing nothing — its turn already ended.'
+                skipHint ?? 'Dismiss the question. Nothing else happens — the turn already ended.'
               }
             >
               Skip
@@ -1614,11 +1642,11 @@ function NpmInstallApprovalForm({
       <div className="pending-question-prompt">
         {multi ? (
           <p>
-            A gezel wants to install <strong>{packages.length} npm packages</strong> — not in the
+            Gezel wants to install <strong>{packages.length} npm packages</strong> — not in the
             pre-vetted list. Pick one per package, or apply the same to all:
           </p>
         ) : (
-          <p>A gezel wants to install an npm package — not in the pre-vetted list. Approve?</p>
+          <p>Gezel wants to install an npm package — not in the pre-vetted list. Approve?</p>
         )}
       </div>
 
@@ -1707,13 +1735,20 @@ function NpmInstallApprovalForm({
 
 // ── Context strip (task / document attachments) ─────────────────────
 
-function ContextStrip({ question }: { question: Question }) {
+function ContextStrip({
+  question,
+  taskLink = true,
+}: {
+  question: Question;
+  /** False when the card's action row carries "Open task" instead. */
+  taskLink?: boolean;
+}) {
   const documentHoisted = useContext(DocumentHoisted);
   const showDocument = Boolean(question.documentPath) && !documentHoisted;
   if (!question.taskRef && !showDocument) return null;
   return (
     <div className="pending-question-context">
-      {question.taskRef && <TaskContext taskRef={question.taskRef} />}
+      {question.taskRef && <TaskContext taskRef={question.taskRef} link={taskLink} />}
       {showDocument && question.documentPath && (
         <DocumentContext
           projectId={question.projectId}
@@ -1729,7 +1764,7 @@ function ContextStrip({ question }: { question: Question }) {
   );
 }
 
-function TaskContext({ taskRef }: { taskRef: string }) {
+function TaskContext({ taskRef, link = true }: { taskRef: string; link?: boolean }) {
   const onNavigate = useContext(CardNavigation);
   const [task, setTask] = useState<Task | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1746,7 +1781,7 @@ function TaskContext({ taskRef }: { taskRef: string }) {
         if (cancelled) return;
         const raw = (err as Error).message;
         const friendly = /404/.test(raw)
-          ? `doesn't exist — the gezel referenced a task that hasn't been created`
+          ? `doesn't exist — the message referenced a task that hasn't been created`
           : `couldn't load: ${raw}`;
         setError(friendly);
       });
@@ -1775,16 +1810,18 @@ function TaskContext({ taskRef }: { taskRef: string }) {
       <span className="muted">Task</span>
       <span className="pending-question-context-title">{task.title}</span>
       <span className={`pending-question-context-status status-${task.status}`}>{task.status}</span>
-      <button
-        type="button"
-        className="pending-question-context-link"
-        onClick={() => {
-          navigateToTab({ kind: 'task', ref: taskRef });
-          onNavigate?.();
-        }}
-      >
-        Open task
-      </button>
+      {link && (
+        <button
+          type="button"
+          className="pending-question-context-link"
+          onClick={() => {
+            navigateToTab({ kind: 'task', ref: taskRef });
+            onNavigate?.();
+          }}
+        >
+          Open task
+        </button>
+      )}
     </div>
   );
 }
@@ -1852,7 +1889,7 @@ function DocumentContext({
         // error into something human — the user shouldn't see our
         // internal URL shape.
         const friendly = /404/.test(raw)
-          ? `No document, project doc, or artifact at ${documentPath} — the gezel referenced a path that doesn't exist yet.`
+          ? `No document, project doc, or artifact at ${documentPath} — the message referenced a path that doesn't exist yet.`
           : raw;
         setError(friendly);
       });

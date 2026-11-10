@@ -9,8 +9,14 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 
+import { RemoteVideoProvider } from '../../providers/video/remote-video.js';
 import type { VideoInputBytes, VideoProvider } from '../../providers/video/types.js';
-import { CAMERA_PIXELS_WITHHELD, callerMaySeeFilePixels } from '../caller-location.js';
+import {
+  CAMERA_PIXELS_PAIRED_VIDEO_ENGINE,
+  CAMERA_PIXELS_WITHHELD,
+  callerMaySeeFilePixels,
+  cameraKeepsFileLocal,
+} from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 
 import { videoModelRoutes } from './video-models.js';
@@ -56,14 +62,21 @@ export function videoGenRoutes(ctx: ServiceContext): Hono {
     if (req.inputImage) {
       // The clip and its poster frame go back to the caller, so a camera
       // keyframe as the first frame passes the same check as reading it.
+      // A paired server renders on another computer with whatever engine it
+      // has picked, so it never gets one; the machine broker runs here.
       if ('artifactPath' in req.inputImage) {
         const project = await ctx.store.getProject(projectId).catch(() => null);
         const file = await ctx.store.resolveProjectArtifactReadPath(
           projectId,
           req.inputImage.artifactPath.replace(/^artifacts\//, ''),
         );
-        if (project && file && !(await callerMaySeeFilePixels(ctx, c, project, file))) {
-          return c.json({ error: CAMERA_PIXELS_WITHHELD }, 403);
+        if (project && file && (await cameraKeepsFileLocal(ctx, project, file))) {
+          if (provider instanceof RemoteVideoProvider && !provider.onThisComputer) {
+            return c.json({ error: CAMERA_PIXELS_PAIRED_VIDEO_ENGINE }, 403);
+          }
+          if (!(await callerMaySeeFilePixels(ctx, c, project, file))) {
+            return c.json({ error: CAMERA_PIXELS_WITHHELD }, 403);
+          }
         }
       }
       try {

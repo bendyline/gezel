@@ -23,7 +23,7 @@ export function TimeoutRow({
   const persistedDraft = configValue ? String(configValue) : '';
   return (
     <div style={{ marginTop: '0.6rem' }}>
-      <div style={{ fontSize: '0.85rem', marginBottom: '0.2rem' }}>
+      <div style={{ fontSize: 'var(--text-sm)', marginBottom: '0.2rem' }}>
         <strong>{label}</strong> <span className="muted small">({unit})</span>
       </div>
       <p className="muted small" style={{ margin: '0 0 0.3rem 0' }}>

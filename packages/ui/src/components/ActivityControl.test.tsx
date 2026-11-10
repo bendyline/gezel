@@ -914,3 +914,237 @@ describe('Activity — a request is one row', () => {
     expect(within(trigger).queryByText('Activity')).toBeNull();
   });
 });
+
+// The panel once stacked four-line entries and full cards at one weight:
+// sixteen things ran three screens deep, with the results at the bottom
+// under every scheduled job.
+describe('Activity reads as rows, with what is for the person first', () => {
+  async function openPanel(current: ActivityStatusResponse) {
+    vi.mocked(api.getActivityStatus).mockResolvedValue(current);
+    render(
+      <ActivityProvider>
+        <ActivityControl />
+      </ActivityProvider>,
+    );
+    await userEvent.click(await screen.findByRole('button', { name: /^Activity —/ }));
+    return screen.findByRole('dialog', { name: 'What’s going on' });
+  }
+  const openFold = (region: HTMLElement, label: string) => {
+    const fold = within(region).getByText(label).closest('details')!;
+    act(() => {
+      fold.open = true;
+    });
+    return fold;
+  };
+
+  it('orders the sections: decisions, running, results, waiting', async () => {
+    const dialog = await openPanel(snapshot());
+    expect(
+      within(dialog)
+        .getAllByRole('region')
+        .map((region) => region.getAttribute('aria-label')),
+    ).toEqual(['Needs you', 'Working', 'Ready', 'Next']);
+  });
+
+  it('folds a long schedule into one line and leaves a short one in view', async () => {
+    const current = snapshot([]);
+    const scheduled = (n: number) => ({
+      id: `task:shop/${n}`,
+      section: 'next' as const,
+      title: `Nightly job ${n}`,
+      detail: `Scheduled · 2026-10-0${n + 2}T06:00:00.000Z`,
+      taskRef: `shop/${n}`,
+      scheduled: true,
+      questionIds: [],
+    });
+    current.items = [1, 2, 3, 4].map(scheduled);
+    const dialog = await openPanel(current);
+    const next = within(dialog).getByRole('region', { name: 'Next' });
+    expect(within(next).getByRole('heading', { name: 'Next 4' })).toBeVisible();
+    expect(within(next).getByText('Nightly job 1')).not.toBeVisible();
+    const fold = openFold(next, 'Scheduled for later');
+    expect(within(fold).getByText('4')).toBeVisible();
+    expect(within(next).getByText('Nightly job 4')).toBeVisible();
+    // A row says when, not "Scheduled · <timestamp>".
+    expect(within(next).queryByText(/2026-10-0/)).toBeNull();
+    await userEvent.click(
+      within(next).getByRole('button', { name: 'View task details for Nightly job 2' }),
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    current.items = [1, 2].map(scheduled);
+    await userEvent.click(screen.getByRole('button', { name: /^Activity —/ }));
+    await refresh();
+    const short = screen.getByRole('region', { name: 'Next' });
+    expect(within(short).queryByText('Scheduled for later')).toBeNull();
+    expect(within(short).getByText('Nightly job 2')).toBeVisible();
+  });
+
+  it('shows finished work as one row with Open, and puts it away without losing it', async () => {
+    const finished: Question = {
+      ...question('ready-1'),
+      prompt: '**Autumn flyer** is finished.\n\n- **`out/flyer.pdf`**\n- `notes.md`',
+      taskRef: 'shop/1',
+      referencedFiles: [{ kind: 'artifact', path: 'out/flyer.pdf' }],
+      intent: { kind: 'task-finished', taskRef: 'shop/1' },
+    };
+    const dialog = await openPanel(snapshot([finished]));
+    const ready = within(dialog).getByRole('region', { name: 'Ready' });
+    expect(within(ready).getByText('Autumn flyer')).toBeVisible();
+    expect(within(ready).getByText('flyer.pdf')).toBeVisible();
+    expect(within(ready).getByText('+1 more')).toBeVisible();
+    expect(within(ready).getByRole('button', { name: 'Open' })).toBeVisible();
+    expect(
+      within(ready).getByRole('button', { name: 'Open the chat for Autumn flyer' }),
+    ).toBeVisible();
+    // The card's task strip, status chip and second sentence are gone.
+    expect(within(ready).queryByText(/is finished/)).toBeNull();
+    expect(within(ready).queryByRole('button', { name: 'Open task' })).toBeNull();
+
+    await userEvent.click(within(ready).getByRole('button', { name: 'Dismiss Autumn flyer' }));
+    expect(api.answerQuestion).toHaveBeenCalledWith('ready-1', { selectedChoices: [0] });
+    expect(screen.getByRole('dialog')).toBeVisible();
+    await waitFor(() => expect(within(ready).queryByRole('button', { name: 'Open' })).toBeNull());
+  });
+
+  it('keeps what was finished earlier on record under Ready, outside its count', async () => {
+    const current = snapshot([]);
+    current.earlier = [
+      {
+        key: 'thread@2026-10-01T09:00:00.000Z',
+        sessionId: 'thread',
+        projectId: 'shop',
+        at: '2026-10-01T09:00:00.000Z',
+        summary: 'Make a price list for the autumn range',
+        title: 'Price list',
+        kind: 'work',
+        stop: 'ready',
+        state: 'ready',
+        taskRefs: ['shop/3'],
+        liveSessionIds: [],
+        crew: [],
+        deliverable: {
+          kind: 'artifact',
+          path: 'prices/price-list.xlsx',
+          modifiedAt: '2026-10-01T09:20:00.000Z',
+        },
+        questionIds: [],
+      },
+    ];
+    const dialog = await openPanel(current);
+    const ready = within(dialog).getByRole('region', { name: 'Ready' });
+    expect(within(ready).getByRole('heading', { name: 'Ready 0' })).toBeVisible();
+    expect(within(ready).getByText('New results will appear here.')).toBeVisible();
+    expect(within(ready).getByText('Price list')).not.toBeVisible();
+    openFold(ready, 'Finished earlier');
+    expect(within(ready).getByText('Price list')).toBeVisible();
+    expect(within(ready).getByText('price-list.xlsx')).toBeVisible();
+    await userEvent.click(within(ready).getByRole('button', { name: 'Open Price list' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('lists a request once and stops its running work from its own row', async () => {
+    const base = snapshot([]);
+    const track = {
+      key: 'mees-thread@2026-10-02T11:58:00.000Z',
+      sessionId: 'mees-thread',
+      projectId: 'default',
+      at: '2026-10-02T11:58:00.000Z',
+      summary: 'Make my October invoices',
+      kind: 'work' as const,
+      leadGezelId: 'mees',
+      stop: 'making' as const,
+      state: 'working' as const,
+      line: { gezelId: 'mees', doing: 'is drafting the invoices' },
+      taskRefs: ['shop/1'],
+      liveSessionIds: ['step-draft'],
+      crew: ['maya'],
+      questionIds: [],
+    };
+    base.queues.providers = {
+      mlx: {
+        running: 1,
+        queuedInteractive: 0,
+        queuedBackground: 0,
+        concurrency: 1,
+        active: [
+          {
+            sessionId: 'step-draft',
+            gezelId: 'maya',
+            projectId: 'shop',
+            job: 'shop/1 · draft',
+            runningForMs: 9_000,
+          },
+        ],
+        pending: [],
+      },
+    };
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        { id: 'maya', name: 'Maya', role: 'Writer' },
+        { id: 'mees', name: 'Mees', role: 'Meester' },
+      ],
+    } as never);
+    const dialog = await openPanel({
+      ...base,
+      items: [
+        {
+          id: `request:${track.key}`,
+          section: 'working',
+          title: track.summary,
+          detail: 'Drafting the invoices.',
+          projectId: 'default',
+          sessionId: 'mees-thread',
+          taskRef: 'shop/1',
+          gezelId: 'mees',
+          questionIds: [],
+          requestKey: track.key,
+        },
+      ],
+      requests: [track],
+    });
+    const working = within(dialog).getByRole('region', { name: 'Working' });
+    expect(await within(working).findByTestId('request-tracker')).toBeVisible();
+    // The engine's row for the step session ("Maya · shop/1 · draft") is not
+    // listed beside the tracker that already stands for it.
+    expect(within(working).queryByRole('button', { name: /Stop active chat/ })).toBeNull();
+    expect(within(working).queryByText(/shop\/1 · draft/)).toBeNull();
+    await userEvent.click(
+      within(working).getByRole('button', { name: 'Stop work on Make my October invoices' }),
+    );
+    expect(api.cancelChatSessionTurn).toHaveBeenCalledWith('step-draft', { stopTask: true });
+  });
+
+  it('says where paused work stopped once, beside the title and the way in', async () => {
+    const paused: Question = {
+      ...question('paused-1'),
+      sessionId: '',
+      prompt:
+        '"Autumn newsletter" stopped at "Write it". The work didn\'t pass its checks after several tries. Open the task to see what happened.',
+      choices: ['Dismiss'],
+      allowWriteIn: false,
+      taskRef: 'shop/1',
+      intent: { kind: 'task-paused', taskRef: 'shop/1', reason: 'gate_exhausted' },
+    };
+    vi.mocked(api.getTaskByRef).mockResolvedValue({
+      ref: 'shop/1',
+      title: 'Autumn newsletter',
+      status: 'paused',
+    } as Task);
+    const dialog = await openPanel(snapshot([paused]));
+    const needs = within(dialog).getByRole('region', { name: 'Needs you' });
+    expect(
+      await within(needs).findByText(
+        'Stopped at "Write it". The work didn\'t pass its checks after several tries.',
+      ),
+    ).toBeVisible();
+    expect(await within(needs).findByText('Autumn newsletter')).toBeVisible();
+    // The way in is a key between the two moves, not a link in the title line.
+    expect(within(needs).getAllByRole('button', { name: 'Open task' })).toHaveLength(1);
+    const keys = within(needs)
+      .getAllByRole('button')
+      .map((key) => key.textContent)
+      .filter((name) => name === 'Try again' || name === 'Open task' || name === 'Dismiss');
+    expect(keys).toEqual(['Try again', 'Open task', 'Dismiss']);
+  });
+});

@@ -1267,8 +1267,8 @@
 }
 
 .folder-tree-node.active {
-  background: var(--color-accent, #6cf);
-  color: var(--color-bg, #111);
+  background: var(--selected-bg);
+  color: var(--text);
 }
 
 /* Light-mode terminal-chrome — make the input wrap + folder picker read

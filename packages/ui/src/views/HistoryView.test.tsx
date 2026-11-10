@@ -129,7 +129,7 @@ describe('HistoryView', () => {
     });
 
     // Event row shows the kind, summary, and chips for project + gezel.
-    const kindEls = screen.getAllByText('Gezel created');
+    const kindEls = screen.getAllByText('Crew member created');
     expect(kindEls.some((el) => el.className.includes('history-kind'))).toBe(true);
     expect(screen.getAllByText('Maya').length).toBeGreaterThanOrEqual(1);
 

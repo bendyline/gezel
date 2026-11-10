@@ -190,9 +190,9 @@ export function openInGezelSection(entryId: string, siteUrl: string): string | u
 }
 
 const AREA_BLURBS: Record<HandboekArea, string> = {
-  conceptual: 'What gezel is, who your crew are, and how the pieces fit together.',
-  'gezel-roles': 'The roles a gezel can take, and what each one is good at.',
-  craftbooks: 'Step-by-step recipes your crew can run — one per job.',
+  conceptual: 'What gezel is, who does the work, and how the pieces fit together.',
+  'gezel-roles': 'The roles on a crew, and what each one is good at.',
+  craftbooks: 'Step-by-step plans Gezel can follow — one per job.',
   'project-types': 'Ready-made project setups, each with a crew and a bench.',
   technical: 'Architecture, file layout, providers, security, and the CLI.',
   'whats-new': 'What changed in each release, in plain language.',

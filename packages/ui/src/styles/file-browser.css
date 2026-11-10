@@ -160,8 +160,11 @@ button.danger {
   margin-bottom: 0.75rem;
 }
 
+/* The name of what is open (a crew member, a document) is an entity title,
+   like a task's. */
 .detail-header h3 {
   margin: 0 0 0.15rem;
+  font-size: var(--text-title);
 }
 
 .detail-actions {
@@ -428,7 +431,7 @@ button.danger {
 
 .file-tree-collapsed-label {
   writing-mode: vertical-rl;
-  font-size: var(--text-2xs, 0.68rem);
+  font-size: var(--text-2xs);
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
@@ -1503,7 +1506,7 @@ button.danger {
 .msg-role-drift {
   margin-left: 0.4rem;
   padding: 0.05rem 0.45rem;
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0.02em;
@@ -1835,11 +1838,11 @@ button.danger {
 }
 
 .tree-row:hover {
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--hover-bg);
 }
 
 .tree-row-selected {
-  background: rgba(176, 114, 76, 0.15);
+  background: var(--selected-bg);
 }
 
 /* Documents can be lifted from the tree and set into a folder. Keep the
@@ -2123,7 +2126,7 @@ button.tree-row-trailing-select {
 
 .workspace-index-health-score {
   color: var(--accent-text);
-  font-size: 1.55rem;
+  font-size: var(--text-title);
   font-weight: 700;
   line-height: 1;
 }

@@ -176,7 +176,7 @@ async function createHost(
   const sponsorLabel =
     item.source.kind === 'gezel-template'
       ? item.source.gezelName
-        ? `${item.source.gezelName} (${item.source.role ?? 'gezel'})`
+        ? `${item.source.gezelName}${item.source.role ? ` (${item.source.role})` : ''}`
         : `the "${item.source.templateId}" role`
       : `the "${item.source.typeId}" project type`;
   const bookLabel = item.craftbookName ?? item.craftbookId;

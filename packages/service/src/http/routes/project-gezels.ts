@@ -100,7 +100,7 @@ export function projectGezelRoutes(ctx: ServiceContext): Hono {
       return c.json(
         {
           error:
-            'the @project gezel is derived from the workspace instruction file; delete that file instead',
+            '@project is derived from the workspace instruction file; delete that file instead',
         },
         409,
       );

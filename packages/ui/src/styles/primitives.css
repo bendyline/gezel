@@ -238,7 +238,7 @@
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 0.95rem;
+  font-size: var(--text-md);
   font-family: inherit;
 }
 

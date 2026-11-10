@@ -18,7 +18,7 @@ function kindLabel(selection: RecentTab | null): string | undefined {
     case 'project':
       return 'Project';
     case 'gezel':
-      return 'Gezel';
+      return 'Crew member';
     case 'task':
       return 'Task';
     case 'document':
@@ -26,9 +26,9 @@ function kindLabel(selection: RecentTab | null): string | undefined {
     case 'script':
       return 'Script';
     case 'craftbook':
-      return 'Craftbook';
+      return 'Plan';
     case 'craftbook-script':
-      return 'Craftbook script';
+      return 'Plan script';
     default:
       return undefined;
   }

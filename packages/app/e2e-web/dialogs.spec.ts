@@ -20,7 +20,7 @@ test.describe('dialogs', () => {
   test('create-gezel dialog', async ({ page }) => {
     await gotoHome(page);
     await openAreaView(page, 'gezels');
-    const dialog = await openDialog(page, '+ New gezel', 'New gezel');
+    const dialog = await openDialog(page, '+ New crew member', 'New crew member');
     await shot(page, 'create-gezel', {
       area: 'dialogs',
       clip: dialog,

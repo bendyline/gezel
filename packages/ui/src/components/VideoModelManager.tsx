@@ -323,8 +323,8 @@ export function VideoModelManager({
           {installedError && <p className="error">{installedError}</p>}
           {showActivePicker && installed.length > 1 && (
             <p className="muted small">
-              The <strong>active</strong> model is what the video-generator gezel and the{' '}
-              <code>generate_video</code> tool use by default. A gezel can still ask for a specific
+              The <strong>active</strong> model is what a video generator and the{' '}
+              <code>generate_video</code> tool use by default. Gezel can still ask for a specific
               model per clip; switching reloads the engine, which takes a moment.
             </p>
           )}

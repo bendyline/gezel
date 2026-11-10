@@ -50,8 +50,7 @@ export function MemorySection({
         hint={
           <>
             Higher settings provide more direct evidence. Lower settings preserve context space on
-            memory-constrained models. The gezel can still call <code>search</code> when this is
-            Off.
+            memory-constrained models. Gezel can still call <code>search</code> when this is Off.
           </>
         }
       >

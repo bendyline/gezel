@@ -210,7 +210,7 @@ export function formatBackupPlan(plan: BackupPlan): string {
     byKind.set(item.kind, bucket);
   }
   const labels: Record<string, string> = {
-    gezel: 'gezels',
+    gezel: 'crew members',
     project: 'projects',
     'document-root': 'documents',
     'memory-root': 'memories about you',
@@ -234,7 +234,8 @@ export function formatRestoreReview(review: RestoreReview): string {
   ];
   for (const item of review.items) {
     const flag = item.conflict === 'exists' ? ' [already here]' : '';
-    lines.push(`  ${pad(formatBytes(item.bytes), 10)} ${item.kind}: ${item.label}${flag}`);
+    const kind = item.kind === 'gezel' ? 'crew member' : item.kind;
+    lines.push(`  ${pad(formatBytes(item.bytes), 10)} ${kind}: ${item.label}${flag}`);
   }
   if (review.items.length === 0) lines.push('  (this backup is empty)');
   if (review.warnings.length > 0) {

@@ -74,7 +74,7 @@ for await (const chunk of stream) {
 
 The in-memory map keeps the quickstart self-contained, but a real application must replace it with secure operating-system storage; do not save the token in source code, a project file, or plain-text preferences. `connect()` verifies a stored token still has the requested scopes. If it was revoked or is too narrow, the SDK discards it and starts a fresh visible consent flow.
 
-Call `app.models()` rather than hardcoding a model id. The response is the authoritative list available to this connection and can include both raw models and eligible gezels. Selecting a gezel gives the caller that gezel's character and tuned model, while your app keeps ownership of its interface and conversation loop.
+Call `app.models()` rather than hardcoding a model id. The response is the authoritative list available to this connection and can include both raw models and eligible crew members. Selecting a crew member gives the caller that crew member's character and tuned model, while your app keeps ownership of its interface and conversation loop.
 
 ## Consent and scopes
 
@@ -90,7 +90,7 @@ Every connection has a stable `appId`, a user-visible name, and one or more scop
 
 An app that is already connected adds a scope without disconnecting: `app.requestScopes({ appId, appName, scopes: [...held, 'images'], onVerificationCode })` asks for the wider grant while the current token keeps working, then switches the client to the new token. Ask for `images` only from an explicit action, such as an "Allow image generation" button, and only when `app.images.support()` reports that this Gezel serves it; an older Gezel answers `images_unsupported` before anything changes.
 
-Third-party applications should not request the first-party `cli` scope or call `authorizeLocalOwner()`. Those surfaces are reserved for Gezel's own command line and same-user clients. Ask for `product` only when the application truly needs projects, tasks, gezels, or other product state; add `openai` only if that same application also performs inference.
+Third-party applications should not request the first-party `cli` scope or call `authorizeLocalOwner()`. Those surfaces are reserved for Gezel's own command line and same-user clients. Ask for `product` only when the application truly needs projects, tasks, crew, or other product state; add `openai` only if that same application also performs inference.
 
 Stateful scopes require `onVerificationCode`. Show the code in the requesting application so the user can type it into Gezel's approval dialog:
 
@@ -136,7 +136,7 @@ This pairing is the supported route for a rich integration: the app SDK owns dis
 
 | Method | Purpose |
 | --- | --- |
-| `app.models()` | List the models and gezels exposed to this app |
+| `app.models()` | List the models and crew members exposed to this app |
 | `app.chat()` | OpenAI-compatible chat completion, streaming or complete |
 | `app.embeddings()` | OpenAI-compatible embeddings when the selected provider supports them |
 | `app.ensureModel()` | Make sure a catalog model is installed and warm |
@@ -174,7 +174,7 @@ both project-scoped, and an application that has the project never has to pass
 its id back in. `gezel.openProject(id)` reaches a project that already exists.
 
 A hosted daemon keeps its state under `~/.gezel/apps/<appId>/`, so the projects
-and gezels an application creates for itself never appear in the person's own
+and crew members an application creates for itself never appear in the person's own
 workshop, and the two daemons never contend for one runtime directory. Models
 the person already installed are read from their home rather than downloaded
 again.
@@ -199,7 +199,7 @@ optional and switched on by the person inside it may pass
 
 ## Tools your application runs
 
-An application can offer its own tools to the gezels in its project. The model
+An application can offer its own tools to the crew in its project. The model
 sees them beside Gezel's built-in tools; when one is called, the handler runs in
 the application's process and what it returns becomes the tool's output.
 

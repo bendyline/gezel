@@ -38,15 +38,12 @@ interface Args {
 type NamedVariant = (name: string, pronouns: GezelPronounForms) => string;
 
 const MEESTER_VARIANTS: ReadonlyArray<NamedVariant> = [
-  (name) =>
-    `Talk with ${name} about project ideas, to catch up on existing projects, or to spin up a new gezel.`,
+  (name) => `Talk with ${name} about project ideas, or to catch up on existing projects.`,
   (name) => `Ask ${name} what you should work on next — or just say what's on your mind.`,
-  (name) =>
-    `${name} knows the whole team. Ask what everyone's doing, delegate something new, or just vent about a stuck project.`,
-  (name) =>
-    `Got a half-baked idea? ${name} will help shape it into something your crew can actually start on.`,
+  (name) => `Ask ${name} where things stand, start something new, or vent about a stuck project.`,
+  (name) => `Got a half-baked idea? ${name} will help shape it into something to start on.`,
   (name, pronouns) =>
-    `Ask ${name} who's working on what, or hand ${pronouns.object} something new to route.`,
+    `Tell ${name} what you want done, or ask ${pronouns.object} what's in progress.`,
 ];
 
 const VOORMAN_VARIANTS: ReadonlyArray<

@@ -14,8 +14,8 @@ const TIPS: ReadonlyArray<{
   {
     body: (
       <>
-        Give your crew a folder to look after &mdash; your photos, your documents. They read it
-        overnight and leave you answers in the morning, and never change a file.
+        Give Gezel a folder to look after &mdash; your photos, your documents. It reads it overnight
+        and leaves you answers in the morning, and never changes a file.
       </>
     ),
     action: 'Add a folder',
@@ -24,17 +24,17 @@ const TIPS: ReadonlyArray<{
   {
     body: (
       <>
-        Most of getting great work out of a gezel is shaping its brief. Trim a gezel&rsquo;s
-        standing orders and it&rsquo;ll stop over-explaining.
+        Most of getting great work out of Gezel is shaping the brief. Trim a crew member&rsquo;s
+        standing orders and they&rsquo;ll stop over-explaining.
       </>
     ),
-    action: 'Train a gezel',
+    action: 'Train a crew member',
     view: 'gezels',
   },
   {
     body: (
       <>
-        Teach a gezel once and it sticks &mdash; stamp today&rsquo;s steps into a routine it can run
+        Teach Gezel once and it sticks &mdash; stamp today&rsquo;s steps into a routine it can run
         on its own.
       </>
     ),
@@ -44,11 +44,11 @@ const TIPS: ReadonlyArray<{
   {
     body: (
       <>
-        Your crew can grow with your work. A second specialist lets the first stay deep on one
-        project.
+        Your crew can grow with your work. Add a crew member when a project calls for a different
+        role.
       </>
     ),
-    action: 'Hire a gezel',
+    action: 'Add a crew member',
     view: 'gezels',
   },
   {
@@ -63,10 +63,7 @@ const TIPS: ReadonlyArray<{
   },
   {
     body: (
-      <>
-        Hand the meester a half-baked idea and they&rsquo;ll shape it into something your crew can
-        actually start on.
-      </>
+      <>Hand the meester a half-baked idea and they&rsquo;ll shape it into something to start on.</>
     ),
     action: 'See your projects',
     view: 'projects',

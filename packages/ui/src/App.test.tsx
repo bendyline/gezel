@@ -474,8 +474,8 @@ describe('Crew activity menu', () => {
       await screen.findByRole('button', { name: 'Crew activity: Proactive. Click to change.' }),
     );
 
-    const readout = await screen.findByText(/members start work, check in on projects/);
-    expect(readout.closest('.app-engagement-readout')).toHaveTextContent(/^Proactive — Your crew/);
+    const readout = await screen.findByText(/it starts work and checks in on projects/);
+    expect(readout.closest('.app-engagement-readout')).toHaveTextContent(/^Proactive — Gezel/);
     const order = screen.getAllByRole('menuitemradio').map((item) => item.textContent);
     expect(order).toEqual(['Off', 'Chat only', 'Tasks + chat', 'Proactive']);
   });
@@ -883,7 +883,7 @@ describe('Night Shift header status', () => {
     );
 
     expect(
-      await screen.findByText(`Your crew works through the queue from ${clock(start)}.`),
+      await screen.findByText(`Gezel works through the queue from ${clock(start)}.`),
     ).toBeInTheDocument();
     const ticks = document.querySelector('.app-nightshift-track-ticks');
     expect(ticks).toHaveTextContent(`${clock(start)}${clock(end)}`);

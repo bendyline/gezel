@@ -17,7 +17,11 @@ import {
   LaunchTaskFromSessionRequestSchema,
 } from '../schemas/session.js';
 import type { Task } from '../schemas/task.js';
-import { NEW_THREAD_TITLE, deriveThreadTitleFromMessages } from '../thread-title.js';
+import {
+  NEW_THREAD_TITLE,
+  deriveTaskTitle,
+  deriveThreadTitleFromMessages,
+} from '../thread-title.js';
 import { craftbookStartCardForTask } from '../tool-cards.js';
 import { draftMatchesSession } from './draft-address.js';
 import { HttpStatusError as ProductError } from './http/errors.js';
@@ -160,7 +164,8 @@ async function launchTaskFromSession(
       task = await host.tasks.create(
         session.projectId,
         {
-          title: launch.title?.trim() || book.name,
+          // Named for what the person asked for, not for the plan that runs it.
+          title: launch.title?.trim() || deriveTaskTitle(text) || book.name,
           description: composed.description,
           craftbookId: launch.craftbookId,
           ...(launch.craftbookSourceId ? { craftbookSourceId: launch.craftbookSourceId } : {}),
@@ -255,7 +260,7 @@ export async function handlePortableSessionRoute(
       if (inventory && !inventory.models.some((item) => item.id === model))
         throw new ProductError(
           gezel?.parsed.frontmatter.model
-            ? `The model assigned to ${gezel.name} is not installed. Import it in Settings → Artificial intelligence, or change this gezel's model.`
+            ? `The model assigned to ${gezel.name} is not installed. Import it in Settings → Artificial intelligence, or change ${gezel.name}'s model.`
             : inventory.models.length === 0
               ? 'No chat model is installed on this device. Download or import one in Settings → Artificial intelligence, then send your message again.'
               : 'Choose an available chat model in Settings → Artificial intelligence, then send your message again.',

@@ -260,6 +260,8 @@ declare global {
         projectId: string;
         kind: 'artifact' | 'document' | 'workspace';
         path: string;
+        /** The name the dialog offers, for a file better known by its work's title. */
+        suggestedName?: string;
       }) => Promise<{ ok: true; path?: string } | { ok: false; error: string }>;
       /** Reveal a daemon-scoped References file in Finder/Explorer/the Linux file manager. */
       showReferenceInFolder?: (request: {

@@ -6,6 +6,7 @@ import { type ElectronApplication, type Page, expect, test } from '@playwright/t
 import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
+import { revealSettingsNavItem } from './helpers/settings-nav.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -56,7 +57,11 @@ test('Back, Forward and the trail of views visited', async () => {
     await test.step('visit Settings, one of its sections, then a project', async () => {
       await openTab(page, { kind: 'area', area: 'settings' });
       await expect(activeSettingsSection(page)).toBeVisible({ timeout: 15_000 });
-      await page.locator('.settings-nav .settings-nav-item', { hasText: /^Folders$/ }).click();
+      // Folders sits under "More settings", which starts folded. Back and
+      // Forward below land on it with that group unfolded for them.
+      const folders = page.locator('.settings-nav .settings-nav-item', { hasText: /^Folders$/ });
+      await revealSettingsNavItem(page, folders);
+      await folders.click();
       await expect(activeSettingsSection(page)).toHaveText('Folders');
       await openTab(page, { kind: 'project', id: 'default' });
       await expect(projectView).toBeVisible({ timeout: 15_000 });

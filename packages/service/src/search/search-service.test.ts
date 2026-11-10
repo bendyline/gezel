@@ -716,6 +716,47 @@ describe('SearchService.searchProject', () => {
     expect(embedMock).toHaveBeenCalledTimes(1);
   });
 
+  // The 1.26313.105 audit: on a new install the embedder was still
+  // downloading, and the search tool's first call waited 8.5 minutes, past the
+  // MCP bridge's 300 s tool timeout.
+  it('answers by keyword when a cold embedder outlasts the budget', async () => {
+    const code = vi.fn(async () => ({
+      results: [{ path: 'src/physics.ts', lineStart: 1, snippet: 'physics', score: 0.8 }],
+      engine: 'fts',
+      truncated: false,
+    })) as unknown as ContentIndex['searchCode'];
+    const svc = makeService({ projects: [{ id: 'p1', name: 'Driving Game' }], code });
+    embeddingStatusMock.mockReturnValue('cold');
+    embedMock.mockImplementationOnce(() => new Promise<number[]>(() => {}));
+
+    const { results } = await svc.searchProject('physics', {
+      projectIds: ['p1'],
+      coldEmbedderBudgetMs: 20,
+    });
+
+    expect(embedMock).toHaveBeenCalledTimes(1);
+    expect((code as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[2]).not.toHaveProperty(
+      'queryVector',
+    );
+    expect(results.map((result) => result.path)).toContain('src/physics.ts');
+  });
+
+  it('uses the vector when a cold embedder answers within the budget', async () => {
+    const code = vi.fn(async () => ({
+      results: [],
+      engine: 'fts',
+      truncated: false,
+    })) as unknown as ContentIndex['searchCode'];
+    const svc = makeService({ projects: [{ id: 'p1', name: 'Driving Game' }], code });
+    embeddingStatusMock.mockReturnValue('cold');
+
+    await svc.searchProject('physics', { projectIds: ['p1'], coldEmbedderBudgetMs: 5_000 });
+
+    expect((code as unknown as ReturnType<typeof vi.fn>).mock.calls[0]?.[2]).toMatchObject({
+      queryVector: [0.1, 0.2, 0.3],
+    });
+  });
+
   it('hands named catalogs to the knowledge arm', async () => {
     const svc = makeService({ projects: [{ id: 'p1', name: 'Driving Game' }] });
     const knowledgeSearch = vi.fn(

@@ -51,7 +51,7 @@ export function GezelTuningEditor({
           ? { tuningProfileId: gezel.parsed.frontmatter.tuningProfile }
           : {})}
         onSave={onSave}
-        scopeLabel={gezel.name ?? 'this gezel'}
+        scopeLabel={gezel.name ?? 'this crew member'}
       />
     </div>
   );
@@ -119,8 +119,8 @@ function VoicePicker({
       >
         <strong>Voice</strong>{' '}
         <span className="muted">
-          — preset the model applies for this gezel. Your manual tuning below overrides individual
-          fields.
+          — preset the model applies for this crew member. Your manual tuning below overrides
+          individual fields.
         </span>
       </label>
       <select

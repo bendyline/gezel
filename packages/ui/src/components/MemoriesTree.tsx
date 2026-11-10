@@ -107,8 +107,8 @@ export function MemoriesTree({
     <>
       {tree.days.length === 0 && (
         <p className="placeholder">
-          No notes yet. This gezel builds a memory as you work together, and you can write its
-          lessons yourself.
+          No notes yet. A memory builds up as you work together, and you can write the lessons
+          yourself.
         </p>
       )}
       <div className="memories-pane" data-testid="memories-tree">
@@ -252,8 +252,8 @@ export function ProjectMemoriesEditor({
       sectionId="project-about-memories"
       sectionClassName="project-about-anchor"
       title="Memories"
-      hint="Notes shared by every gezel working in this project. Changes are saved to the project’s memory files and used in future recall."
-      emptyText="No project memories yet. Crew members add shared notes here as work progresses."
+      hint="Notes shared by everyone working in this project. Changes are saved to the project’s memory files and used in future recall."
+      emptyText="No project memories yet. Shared notes are added here as work progresses."
     />
   );
 }
@@ -267,8 +267,8 @@ export function UserMemoriesEditor() {
       ownerName="About you"
       sectionId="settings-about-you"
       title="About you"
-      hint="What your crew has learned about you, shared across the crew. Correct or remove anything here; crew members read the new version from their next message."
-      emptyText="Nothing yet. As you work together, crew members note what they learn about you here."
+      hint="What Gezel has learned about you. Correct or remove anything here; the new version is used from the next message."
+      emptyText="Nothing yet. As you work together, Gezel notes what it learns about you here."
     />
   );
 }

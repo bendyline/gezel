@@ -483,7 +483,7 @@ export function ConnectedAppsPanel() {
               </p>
             )}
             <div className="connected-apps-serving">
-              <span id="serving-gezel-label">Fallback gezel</span>
+              <span id="serving-gezel-label">Fallback crew member</span>
               <Select.Root
                 value={
                   configuredFallbackGezel ? configuredFallbackGezel.id : AUTOMATIC_FALLBACK_GEZEL
@@ -516,14 +516,14 @@ export function ConnectedAppsPanel() {
             </div>
             <p className="muted small">
               Apps receive your crew members as model choices, including their names and roles. If
-              an app asks for something else, {fallbackGezel?.name ?? 'your default gezel'} answers
-              with their character and model settings.
+              an app asks for something else, {fallbackGezel?.name ?? 'your default crew member'}{' '}
+              answers with their character and model settings.
             </p>
             {fallbackGezel && fallbackLacksAppTools && (
               <p className="small connected-apps-caution">
                 {fallbackGezel.name} runs on {resolveProvider(fallbackGezel)}, which can't accept
                 tools sent by apps — editors that use tools will get an error. For full
-                compatibility, pick a gezel on a local model or a direct API provider.
+                compatibility, pick a crew member on a local model or a direct API provider.
               </p>
             )}
             <label className="debug-toggle">
@@ -543,7 +543,7 @@ export function ConnectedAppsPanel() {
             <p className="muted small">
               Gezel knows how to get the best out of each model — catching runaway rambling, folding
               leaked reasoning, and applying model-specific fixes. Turn this off for plain serving:
-              apps still get the gezel's character and each model's tuned settings (sampling,
+              apps still get each crew member's character and each model's tuned settings (sampling,
               thinking mode), but no runtime interventions.
             </p>
             {endpointsStatus?.scope === 'endpoints' && (

@@ -98,7 +98,7 @@ button.codebase-guide-folder:hover,
 }
 
 .codebase-guide-file[aria-current="true"] {
-  background: var(--panel);
+  background: var(--selected-bg);
   font-weight: 600;
 }
 

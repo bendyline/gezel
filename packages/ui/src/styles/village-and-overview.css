@@ -26,7 +26,7 @@
   flex-shrink: 0;
 }
 .filemap-stats {
-  font-size: 12px;
+  font-size: var(--text-2xs);
   opacity: 0.7;
   white-space: nowrap;
   overflow: hidden;
@@ -35,7 +35,7 @@
 .filemap-refresh {
   color: var(--text);
   flex: 0 0 auto;
-  font-size: 12px;
+  font-size: var(--text-2xs);
   padding: 4px 10px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
@@ -84,7 +84,7 @@
   z-index: 3;
 }
 .filemap-symtip strong {
-  font-size: 12px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -92,7 +92,7 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 .filemap-symtip span {
-  font-size: 11px;
+  font-size: var(--text-2xs);
   color: var(--text-muted, inherit);
 }
 .filemap-empty {
@@ -104,7 +104,7 @@
   padding: 24px;
   text-align: center;
   opacity: 0.7;
-  font-size: 14px;
+  font-size: var(--text-sm);
 }
 .filemap-inspector {
   position: relative;
@@ -116,7 +116,7 @@
   background: var(--panel);
   border-left: 1px solid var(--border, rgba(127, 127, 127, 0.25));
   box-shadow: -6px 0 18px rgba(0, 0, 0, 0.08);
-  font-size: 13px;
+  font-size: var(--text-xs);
 }
 .filemap-inspector h4 {
   margin: 0 0 8px;
@@ -131,7 +131,7 @@
 }
 .filemap-inspector dt {
   opacity: 0.6;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   text-transform: uppercase;
   letter-spacing: 0.03em;
   align-self: center;
@@ -142,7 +142,7 @@
 }
 .filemap-mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 11px;
+  font-size: var(--text-2xs);
   opacity: 0.85;
 }
 .filemap-inspector-close {
@@ -189,7 +189,7 @@
   flex: 1 1 auto;
   min-width: 0;
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--text-sm);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -208,7 +208,7 @@
   background: none;
   color: inherit;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-2xs);
   padding: 2px 8px;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -236,7 +236,7 @@
   gap: 4px 6px;
   max-height: 42px;
   overflow: hidden;
-  font-size: 11px;
+  font-size: var(--text-2xs);
 }
 .filemap-fileview-path {
   flex: 0 1 auto;
@@ -288,7 +288,7 @@
   background: none;
   color: inherit;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--text-2xs);
   padding: 4px 8px;
   border-radius: var(--radius-md);
   cursor: pointer;
@@ -538,7 +538,7 @@ button.filemap-review-issue:hover {
 .filemap-hint {
   margin: 0;
   opacity: 0.7;
-  font-size: 12px;
+  font-size: var(--text-2xs);
   line-height: 1.5;
 }
 .filemap-hint-float {
@@ -572,7 +572,7 @@ button.filemap-review-issue:hover {
   padding: 3px 4px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--text-2xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -599,7 +599,7 @@ button.filemap-review-issue:hover {
   overflow: hidden;
 }
 .filemap-scope button {
-  font-size: 12px;
+  font-size: var(--text-2xs);
   padding: 4px 10px;
   border: none;
   border-left: 1px solid var(--border, rgba(0, 0, 0, 0.12));
@@ -616,7 +616,7 @@ button.filemap-review-issue:hover {
 }
 
 .filemap-pr {
-  font-size: 12px;
+  font-size: var(--text-2xs);
   padding: 4px 8px;
   max-width: 240px;
   border-radius: var(--radius-md);
@@ -626,7 +626,7 @@ button.filemap-review-issue:hover {
   cursor: pointer;
 }
 .filemap-overlay-stat {
-  font-size: 12px;
+  font-size: var(--text-2xs);
   font-weight: 600;
   color: var(--accent-text, #c9722e);
   white-space: nowrap;
@@ -831,7 +831,7 @@ button.filemap-review-issue:hover {
   margin-top: 6px;
 }
 .project-overview-chip {
-  font-size: 12px;
+  font-size: var(--text-2xs);
   padding: 2px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border, rgba(0, 0, 0, 0.15));
@@ -860,7 +860,7 @@ button.filemap-review-issue:hover {
 .project-overview-areas li div {
   margin-top: 2px;
   color: var(--muted, #777);
-  font-size: 13px;
+  font-size: var(--text-xs);
 }
 .project-overview-chips {
   display: flex;
@@ -955,7 +955,7 @@ button.filemap-review-issue:hover {
 }
 .project-overview-open-digest {
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--text-2xs);
   padding: 4px 12px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border, rgba(0, 0, 0, 0.15));

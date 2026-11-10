@@ -11,7 +11,7 @@ Gezel doesn't come with its own AI — it puts *your* choice of AI to work. That
 
 ## Tiers: matching the model to the job
 
-Models come in sizes, and size matters for what a gezel can be trusted to do alone. Gezel groups them into **tiers**:
+Models come in sizes, and size matters for what a model can be trusted to do alone. Gezel groups them into **tiers**:
 
 | Tier | Size (in billions of parameters) | Good at |
 | --- | --- | --- |
@@ -21,7 +21,7 @@ Models come in sizes, and size matters for what a gezel can be trusted to do alo
 | large | 45B and up, local | most roles, unsupervised steps |
 | cloud | hosted frontier models | everything |
 
-Every role declares a **model floor** — the minimum tier it needs to work unsupervised. A reviewer gating your deliverables needs more headroom than a gezel drafting a shopping list, and gezel enforces that automatically.
+Every role declares a **model floor** — the minimum tier it needs to work unsupervised. A reviewer gating your deliverables needs more headroom than someone drafting a shopping list, and gezel enforces that automatically.
 
 A tier says what a size class *should* manage. For what individual models actually did — measured, on a real machine — see the **[Model scorecard](../technical/model-scorecard.md)**. It is the fastest way to pick a local model you can trust with a given job, and [How we test models](../technical/how-we-test-models.md) explains what the numbers do and do not tell you.
 
@@ -35,6 +35,6 @@ A tier says what a size class *should* manage. For what individual models actual
 
 ## Choosing
 
-You don't have to get this right up front. Set a default provider in Settings, and override it per gezel only when a companion needs something different — a big cloud model for your reviewer, a fast local one for day-to-day chat. Gezel checks each new model's fitness on your hardware before recommending it.
+You don't have to get this right up front. Set a default provider in Settings, and override it for one crew member only when they need something different — a big cloud model for your reviewer, a fast local one for day-to-day chat. Gezel checks each new model's fitness on your hardware before recommending it.
 
 [Every model](https://gezel.com/docs/model-catalog/) on gezel.com lists the local chat, image, and video models Gezel knows about, including their download size, context window, license, and the engines they run on. Once you have a shortlist that fits, the [Model scorecard](../technical/model-scorecard.md) shows how those models actually performed.

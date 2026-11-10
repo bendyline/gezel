@@ -205,11 +205,11 @@ export async function enumerateInPlaceInput(args: {
     if (!inputAccepts(spec, rel)) {
       throw new TaskInputError(
         param,
-        `"${basename(rel)}" is not a file type this craftbook reads (${spec.accept?.join(', ')}).`,
+        `"${basename(rel)}" is not a file type this plan reads (${spec.accept?.join(', ')}).`,
       );
     }
     if (info.size > limits.maxFileBytes) {
-      throw new TaskInputError(param, `"${basename(rel)}" is larger than this craftbook accepts.`);
+      throw new TaskInputError(param, `"${basename(rel)}" is larger than this plan accepts.`);
     }
     return {
       kind: 'file',
@@ -250,18 +250,18 @@ export async function enumerateInPlaceInput(args: {
   if (listing.capped || files.length > limits.maxFiles) {
     throw new TaskInputError(
       param,
-      `"${label}" holds more than ${limits.maxFiles} files this craftbook can take. Pick a smaller folder.`,
+      `"${label}" holds more than ${limits.maxFiles} files this plan can take. Pick a smaller folder.`,
     );
   }
   if (totalBytes > limits.maxBytes) {
     throw new TaskInputError(
       param,
-      `"${label}" is larger than this craftbook can take. Pick a smaller folder.`,
+      `"${label}" is larger than this plan can take. Pick a smaller folder.`,
     );
   }
   if (files.length === 0) {
     const accepted = spec.accept ? ` (${spec.accept.join(', ')})` : '';
-    throw new TaskInputError(param, `"${label}" has no files this craftbook reads${accepted}.`);
+    throw new TaskInputError(param, `"${label}" has no files this plan reads${accepted}.`);
   }
   return {
     kind: 'folder',

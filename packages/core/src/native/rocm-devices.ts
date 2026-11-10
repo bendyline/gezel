@@ -40,6 +40,7 @@ import {
   readdirSync,
   writeFileSync,
 } from 'node:fs';
+import { userInfo } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import { windowsHeadlessSpawnOptions } from './console-detach.js';
 import { LINUX_AMD_KFD_PATH } from './llama-backend.js';
@@ -65,6 +66,13 @@ export interface RocmBlocker {
   kind: RocmBlockerKind;
   /** Technical explanation, for a "Technical details" disclosure. */
   detail: string;
+  /**
+   * For `no-device-access`: the account that cannot open the device. On a
+   * Linux package install that is the shared engine's `gezel` account, not
+   * the person's, so "add your account to the render group" sent people to
+   * the wrong account (1.26313.105 audit).
+   */
+  account?: string;
 }
 
 export interface RocmCheck {
@@ -303,7 +311,11 @@ export function readRocmBlocker(env: NodeJS.ProcessEnv = process.env): RocmBlock
     const parsed = JSON.parse(raw) as Partial<RocmBlocker>;
     if (typeof parsed.kind !== 'string' || !BLOCKER_KINDS.has(parsed.kind)) return null;
     if (typeof parsed.detail !== 'string') return null;
-    return { kind: parsed.kind as RocmBlockerKind, detail: parsed.detail };
+    return {
+      kind: parsed.kind as RocmBlockerKind,
+      detail: parsed.detail,
+      ...(typeof parsed.account === 'string' && parsed.account ? { account: parsed.account } : {}),
+    };
   } catch {
     return null;
   }
@@ -319,6 +331,8 @@ export interface RocmProbeIo {
   listDir?: (path: string) => string[];
   /** Whether this account can open `path` for reading and writing. */
   canOpen?: (path: string) => boolean;
+  /** This process's account name, or undefined when the OS will not say. */
+  account?: () => string | undefined;
   fingerprint?: (path: string) => string | null;
   /** Run the build's `--list-devices`; returns combined output, or null when it failed. */
   listDevices?: (binaryPath: string, env: NodeJS.ProcessEnv) => string | null;
@@ -388,6 +402,14 @@ function canOpenDefault(path: string): boolean {
     return true;
   } catch {
     return false;
+  }
+}
+
+function currentAccountName(): string | undefined {
+  try {
+    return userInfo().username || undefined;
+  } catch {
+    return undefined; // a uid with no passwd entry, as in some containers
   }
 }
 
@@ -492,11 +514,14 @@ function startRocmCheck(home: string, binaryPath: string, io: RocmProbeIo): Rocm
   // Linux: the ROCm runtime opens /dev/kfd for every device. Without access
   // it finds nothing and the build would run on the CPU; say why instead.
   if (platform === 'linux' && !canOpen(LINUX_AMD_KFD_PATH)) {
+    const account = (io.account ?? currentAccountName)();
+    const who = account ? `the "${account}" account` : 'this account';
     return {
       check: {
         blocker: {
           kind: 'no-device-access',
-          detail: `${LINUX_AMD_KFD_PATH} is not readable and writable by this account; add it to the "render" and "video" groups`,
+          detail: `${LINUX_AMD_KFD_PATH} is not readable and writable by ${who}; add it to the "render" and "video" groups`,
+          ...(account ? { account } : {}),
         },
         devices: [],
         visibleDevices: null,

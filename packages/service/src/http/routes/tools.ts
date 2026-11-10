@@ -91,7 +91,10 @@ import {
   safeJoin,
 } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { KnowledgeSpatialCursorError } from '@bendyline/gezel-inference/internal/knowledge/spatial-query';
-import { embedQuery } from '@bendyline/gezel-inference/internal/memory/embeddings';
+import {
+  embedQuery,
+  embeddingPipelineStatus,
+} from '@bendyline/gezel-inference/internal/memory/embeddings';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { type Context, Hono } from 'hono';
 import type { ReadEntry } from 'tar';
@@ -153,6 +156,32 @@ const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_WEB_SEARCH_TIMEOUT_MS = 15_000;
 const DEFAULT_WEB_SEARCH_LIMIT = 10;
 const ARCHIVE_LIMITS = DEFAULT_ARCHIVE_LIMITS;
+/**
+ * How long the `search` tool waits for a cold or warming embedder before it
+ * answers by keyword. On a new install the embedder downloads beside the chat
+ * model, and an unbounded wait outlasted the MCP bridge's 300 s tool timeout:
+ * a PowerPoint task's first search waited 8.5 minutes and its research step
+ * was lost (1.26313.105 audit). The load keeps going for the next query.
+ */
+const SEARCH_COLD_EMBEDDER_BUDGET_MS = 20_000;
+/** Craftbook suggestions are a hint beside the results; they never hold them up. */
+const CRAFTBOOK_COLD_EMBEDDER_BUDGET_MS = 3_000;
+
+/** The query's vector, or null while the embedder is unavailable or still loading. */
+async function queryVectorWithinBudget(query: string): Promise<number[] | null> {
+  const status = embeddingPipelineStatus();
+  const pending = embedQuery(query).catch(() => null);
+  if (status !== 'cold' && status !== 'warming') return pending;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), SEARCH_COLD_EMBEDDER_BUDGET_MS);
+  });
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 class ArchiveValidationError extends Error {
   constructor(message: string) {
@@ -1090,12 +1119,8 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const body = ProjectSearchRequestSchema.parse(await c.req.json());
     if (body.spatial) {
       if (!ctx.knowledge) return c.json({ results: [], truncated: false, craftbooks: [] });
-      let vector: number[] | null = null;
-      try {
-        vector = await embedQuery(body.query);
-      } catch {
-        /* Keyword retrieval remains available offline. */
-      }
+      // Keyword retrieval remains available offline and while the embedder loads.
+      const vector = await queryVectorWithinBudget(body.query);
       const limit = body.maxResults ?? 30;
       const results = await ctx.knowledge.searchUnified(body.query, {
         vector,
@@ -1126,6 +1151,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         // drop only what a calibrated model calls plainly off-topic.
         relevance: { surface: 'search', mode: 'reorder' },
         media: true,
+        coldEmbedderBudgetMs: SEARCH_COLD_EMBEDDER_BUDGET_MS,
       }),
       // Craftbooks are an optional execution hint, never a reason for indexed
       // knowledge search to fail. Project-local, user-local, and Gilde books
@@ -1137,7 +1163,12 @@ export function toolRoutes(ctx: ServiceContext): Hono {
         ? Promise.resolve([])
         : suggestCraftbooks(
             { catalog: ctx.catalog, store: ctx.store, git: ctx.git },
-            { projectId: id, query: body.query, topK: 5 },
+            {
+              projectId: id,
+              query: body.query,
+              topK: 5,
+              coldEmbedderBudgetMs: CRAFTBOOK_COLD_EMBEDDER_BUDGET_MS,
+            },
           ).catch(() => []),
     ]);
     const craftbooks = usefulCraftbooksForSearch(rankedCraftbooks).map((suggestion) => ({

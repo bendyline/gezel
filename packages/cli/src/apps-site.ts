@@ -268,15 +268,15 @@ ${mark(app, 160, `${prefix}${id}/logo.webp`)}
 function indexHtml(apps: AppEntry[], ctx: PageContext): string {
   const present = CATEGORIES.filter(([id]) => apps.some((a) => a.category === id));
   const demos = apps.filter((a) => a.demo).length;
-  const description = `${apps.length} Gezel apps: an interface paired with AI crew members, the plans they follow, and the actions they take. Try ${demos} of them in your browser.`;
-  return `${head('Gezel apps — a page you use, and a crew that works it', description, '/apps/', ctx)}
+  const description = `${apps.length} Gezel apps: an interface paired with AI that knows the job, the plans it follows, and the actions it takes. Try ${demos} of them in your browser.`;
+  return `${head('Gezel apps — a page you use, and Gezel working behind it', description, '/apps/', ctx)}
 <body>
 <div class="wrap">
 ${masthead()}
 <main>
 <section class="hero">
-<h1><span class="title">Gezel apps</span><span class="tagline">A page you use, and a crew that works it.</span></h1>
-<p class="lede">Each app pairs an interface with AI crew members who know the job, the step-by-step plans they follow, and actions that change the app’s own files. Try ${demos} of them right here on sample data, with a scripted conversation. In Gezel they run on your computer, on your files, with the model you choose.</p>
+<h1><span class="title">Gezel apps</span><span class="tagline">A page you use, and Gezel working behind it.</span></h1>
+<p class="lede">Each app pairs an interface with AI that knows the job, the step-by-step plans it follows, and actions that change the app’s own files. Try ${demos} of them right here on sample data, with a scripted conversation. In Gezel they run on your computer, on your files, with the model you choose.</p>
 </section>
 <div class="filter">
 <div class="tray" role="radiogroup" aria-label="Show apps for">
@@ -290,7 +290,7 @@ ${apps.map((a) => card(a)).join('\n')}
 </ul>
 <section class="band">
 <h2>Make your own</h2>
-<p>An app is plain files: an HTML page, the crew it hires, the craftbooks they follow, and small scripts for its actions. Build one for yourself, or contribute it to the catalog everyone installs from.</p>
+<p>An app is plain files: an HTML page, its crew, the craftbooks they follow, and small scripts for its actions. Build one for yourself, or contribute it to the catalog everyone installs from.</p>
 <p class="band-links"><a href="${esc(ctx.docsBase)}building-ai-apps-inside-gezel/">Building AI apps inside Gezel</a><a href="${esc(ctx.docsBase)}gezel-page-apis/">The page APIs</a><a href="https://github.com/bendyline/gilde">The gilde catalog on GitHub</a></p>
 </section>
 </main>
@@ -394,7 +394,7 @@ function appHtml(app: AppEntry, apps: AppEntry[], ctx: PageContext): string {
     : '';
   const shown = actions.slice(0, 8);
   const tools = actions.length
-    ? `<section class="inside-card"><h3>Actions the crew can take</h3><ul class="plain">${shown
+    ? `<section class="inside-card"><h3>Actions Gezel can take</h3><ul class="plain">${shown
         .map(
           (t) =>
             `<li><strong>${esc(humanizeTool(t.name))}</strong><span>${esc(firstSentence(t.description ?? ''))}</span></li>`,
@@ -444,7 +444,7 @@ ${demo}
 <li><a href="/#download">Download Gezel</a> for Mac, Windows or Linux. It’s free.</li>
 <li>Choose <strong>New project</strong>, then <strong>${esc(label)}</strong>, then <strong>${esc(m.name)}</strong>.</li>
 ${questions.length ? `<li>Answer ${questions.length === 1 ? 'its question' : 'a few questions'}: ${questions.map((q) => `<em>${esc(q)}</em>`).join(' ')}</li>` : ''}
-<li>${lead ? `Your ${esc(lead.role.toLowerCase())} takes it from there, on the model you choose.` : 'Your crew takes it from there, on the model you choose.'}</li>
+<li>${lead ? `Your ${esc(lead.role.toLowerCase())} takes it from there, on the model you choose.` : 'Gezel takes it from there, on the model you choose.'}</li>
 </ol>
 </section>
 ${

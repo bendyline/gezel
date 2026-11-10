@@ -518,7 +518,7 @@ function GateSettingsDialog({
           <label className="new-script-field">
             <span>If rejected</span>
             <select value={onReject} onChange={(e) => setOnReject(e.target.value)}>
-              <option value="">stay on this step (worker gets the message)</option>
+              <option value="">stay on this step (the assignee gets the message)</option>
               {stepOptions.map((s) => (
                 <option key={s.id} value={s.id}>
                   go back to "{s.name}" with a fresh session
@@ -769,7 +769,7 @@ function HookDialog({
               <div className="hook-dialog-settings">
                 <p className="muted small">
                   {mode === 'gate'
-                    ? 'Runs automatically when the step tries to complete. If it rejects, the worker stays on the step and gets its message; if every check approves, the task moves on. It can:'
+                    ? 'Runs automatically when the step tries to complete. If it rejects, the assignee stays on the step and gets its message; if every check approves, the task moves on. It can:'
                     : `This will run automatically — no confirmation — every time the step ${
                         mode === 'enter' ? 'starts' : 'completes'
                       }. It can:`}

@@ -186,11 +186,11 @@ function validateFile(path: string, bytes: Uint8Array): void {
   } else if (relative === 'gezel.md' && segments[0] === 'gezels') {
     const parsed = parseGezelMarkdown(decodeText(bytes));
     if (parsed.frontmatter.id && parsed.frontmatter.id !== id)
-      throw new Error('Backup gezel identity does not match its path');
-    if (!parsed.frontmatter.name.trim()) throw new Error('Backup gezel needs a name');
+      throw new Error('Backup crew member identity does not match its path');
+    if (!parsed.frontmatter.name.trim()) throw new Error('Backup crew member needs a name');
   } else if (relative === 'poppetje.json' && segments[0] === 'gezels') {
     if (PoppetjeSchema.parse(parseRecord(bytes)).key !== id)
-      throw new Error('Backup character identity does not match its gezel');
+      throw new Error('Backup character identity does not match its crew member');
   } else if (/^sessions\/[^/]+\.json$/.test(relative) && segments[0] === 'gezels') {
     const session = ChatSessionSchema.parse(parseRecord(bytes));
     if (session.gezelId !== id || `${session.id}.json` !== segments[3])

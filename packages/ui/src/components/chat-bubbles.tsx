@@ -2630,8 +2630,8 @@ export function StreamingBubble({
                   <>
                     Nothing back yet — {formatElapsedLong(silentFor)}. This turn hasn't started
                     producing output: it may still be waiting its turn on the engine behind another
-                    gezel, loading the model, or reading a long prompt. You can keep waiting, or
-                    stop it and start again.
+                    chat, loading the model, or reading a long prompt. You can keep waiting, or stop
+                    it and start again.
                   </>
                 ) : stalledSilence ? (
                   <>
@@ -3957,6 +3957,11 @@ export function RenderedMarkdown({
   // Chat history uses Squisq's thumbnail image mode so a pasted screenshot
   // doesn't steamroll the bubble — the user can click to open full-size
   // if needed (future follow-up).
+  //
+  // A reply renders in Squisq's document register, whose sizes are em-based
+  // and follow the bubble's own text. The page register sizes in rem: a
+  // heading in a reply came out near 32px over 15px prose, and a numbered
+  // list as "01 / 02" numerals. The report register keeps the page it had.
   const view = (
     <LinearDocView
       doc={doc}
@@ -3965,6 +3970,7 @@ export function RenderedMarkdown({
       thinMargins
       showCover={false}
       imageDisplayMode="thumbnail"
+      {...(register === 'chat' ? { variant: 'document' as const } : {})}
     />
   );
   if (!mediaProvider) return view;

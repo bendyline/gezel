@@ -19,6 +19,7 @@ import {
   resolveModelTarget,
   translateMessagesWithPrefix,
 } from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
+import { providerListable } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
 import { ModelNotInstalledError } from '@bendyline/gezel-inference/internal/providers/types';
 import type {
   ExternalToolCall,
@@ -380,8 +381,17 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
    */
   app.get('/tags', async (c) => {
     const now = new Date().toISOString();
+    // Listing the Claude or Codex command line runs it, and listing Ollama
+    // probes its port: only once the person chose them, as /v1/models does.
+    const [config, gezels] = await Promise.all([
+      ctx.store.readConfig().catch(() => null),
+      ctx.store.listGezels().catch(() => []),
+    ]);
+    const providers = PROVIDERS_FOR_TAGS.filter((provider) =>
+      providerListable(provider, config, gezels),
+    );
     const buckets = await Promise.all(
-      PROVIDERS_FOR_TAGS.map(async (provider) => {
+      providers.map(async (provider) => {
         try {
           const models = await ctx.chat.listModelsForProvider(provider);
           return models.map<OllamaTagsModel>((m) => ({

@@ -136,7 +136,7 @@ export function filterPick(spec: CraftbookParamInput, pick: PickedSet): Filtered
   const base = { label: pick.label, accepted, skipped, totalBytes };
   if (accepted.length === 0) {
     const types = spec.accept ? ` (${spec.accept.join(', ')})` : '';
-    return { ...base, error: `Nothing here is a file this craftbook reads${types}.` };
+    return { ...base, error: `Nothing here is a file this plan reads${types}.` };
   }
   if (spec.kind === 'file' && accepted.length > 1) {
     return { ...base, error: 'This input takes a single file.' };
@@ -144,11 +144,11 @@ export function filterPick(spec: CraftbookParamInput, pick: PickedSet): Filtered
   if (accepted.length > limits.maxFiles) {
     return {
       ...base,
-      error: `That is more than the ${limits.maxFiles} files this craftbook can take. Pick a smaller folder.`,
+      error: `That is more than the ${limits.maxFiles} files this plan can take. Pick a smaller folder.`,
     };
   }
   if (totalBytes > limits.maxBytes) {
-    return { ...base, error: 'Those files are larger than this craftbook can take together.' };
+    return { ...base, error: 'Those files are larger than this plan can take together.' };
   }
   return base;
 }

@@ -35,7 +35,7 @@ export const CLI_ENGAGEMENT_MODES: ReadonlyArray<CliEngagementModeOption> = [
     name: 'full-play',
     mode: 'proactive',
     label: 'Full play',
-    description: 'Everything runs, including proactive nudges and cross-gezel work.',
+    description: 'Everything runs, including proactive nudges and handoffs.',
   },
 ];
 

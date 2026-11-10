@@ -203,6 +203,17 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
     else if (waits.some((w) => w.reason === 'dispatching')) state = 'working';
     else state = 'waiting';
 
+    // The runtime's own "paused for help" card is filed as a question, but
+    // it asks nothing: the work stopped, and the person restarts it.
+    const pauseCard = questions.find((q) => q.intent?.kind === 'task-paused');
+    const hasAsk = questions.some((q) => q.intent?.kind !== 'task-paused');
+    const pausedTask =
+      state === 'needs-you' && !hasAsk
+        ? kept.find((t) => taskEffectiveStatus(t) === 'paused')
+        : undefined;
+    const pausedForHelp =
+      pausedTask && pauseCard?.intent?.kind === 'task-paused' ? pauseCard.intent : undefined;
+
     const active = activeStepOf(current);
     const stage = active ? craftbookStepStages(current.craftbook.steps).get(active.id) : undefined;
     const promised = taskDeliverableCandidates(current)[0];
@@ -211,9 +222,10 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
     if (state === 'ready') doing = trailing ? 'is wrapping up' : undefined;
     else if (state === 'stopped') doing = 'stopped working on this';
     else if (state === 'needs-you')
-      doing =
-        questions.length > 0
-          ? 'has a question for you'
+      doing = hasAsk
+        ? 'has a question for you'
+        : pausedForHelp
+          ? 'stopped before this was finished'
           : kept.some((t) => taskEffectiveStatus(t) === 'draft')
             ? 'is waiting for you to start it'
             : 'is waiting for you to go on';
@@ -284,6 +296,14 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
       ...(deliverable ? { deliverable } : {}),
       ...(wrapUp?.makerGezelId ? { makerGezelId: wrapUp.makerGezelId } : {}),
       ...(trailing ? { trailing: true } : {}),
+      ...(pausedTask
+        ? {
+            paused: {
+              taskRef: pausedTask.ref,
+              ...(pausedForHelp ? { reason: pausedForHelp.reason } : {}),
+            },
+          }
+        : {}),
       questionIds: questions.map((q) => q.id),
     });
   }
