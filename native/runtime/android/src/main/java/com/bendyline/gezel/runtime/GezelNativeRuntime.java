@@ -246,7 +246,11 @@ public final class GezelNativeRuntime {
         // charges only allocated bytes, because mapped weights are reclaimable
         // page cache, so availMem says little about whether a model can run;
         // half the device's memory is the share one app can count on.
-        library.put("memoryBudgetBytes", memoryInfo().totalMem / 2);
+        long totalMem = memoryInfo().totalMem;
+        library.put("memoryBudgetBytes", totalMem / 2);
+        // Downloads past a comfortable share of it are labeled tight
+        // (COMFORTABLE_MEMORY_SHARE in packages/capacitor/src/model-manager.ts).
+        library.put("physicalMemoryBytes", totalMem);
         return library;
     }
 

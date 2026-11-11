@@ -1,4 +1,8 @@
-import { acquireSuspendMonitor, createAwakeTimeout } from '@bendyline/gezel';
+import {
+  acquireSuspendMonitor,
+  createAwakeTimeout,
+  estimateLlamaCppResidentBytes,
+} from '@bendyline/gezel';
 import {
   GezelSdkError,
   type ModelListEntry,
@@ -26,6 +30,70 @@ export const mobileCatalog: readonly MobileCatalogEntry[] = MobileCatalogSchema.
   snapshot.models,
 );
 export const mobileCatalogVersion = snapshot.version;
+
+/**
+ * The share of a device's memory one model may hold before the OS keeps
+ * warning about it. The iOS runtime sizes windows above the 4K floor with the
+ * same share (`comfortableShare` in GezelNativeRuntime.swift).
+ */
+export const COMFORTABLE_MEMORY_SHARE = 0.3;
+/** The native bridge's own buffers beside llama.cpp's (`bridgeBufferBytes`). */
+const BRIDGE_BUFFER_BYTES = 128 * 1024 ** 2;
+/**
+ * KV cache at the 4K floor, before the file exists for the runtime's dry run.
+ * Granite 4.2 3B and Nanbeige 4.2 3B, the catalog models with authored f16
+ * geometry, need 15% and 27% of their weights there; sitting near the high
+ * end keeps a phone from downloading a model it then refuses to load.
+ */
+const FLOOR_KV_SHARE = 0.25;
+
+/**
+ * Bytes a catalog model needs at the 4K floor: llama.cpp's resident estimate
+ * (core model-fit), its KV cache, and the bridge's buffers. Once downloaded,
+ * the native dry run measures the file instead.
+ */
+export function catalogFloorBytes(approxSizeBytes: number): number {
+  return (
+    estimateLlamaCppResidentBytes(approxSizeBytes) +
+    Math.round(approxSizeBytes * FLOOR_KV_SHARE) +
+    BRIDGE_BUFFER_BYTES
+  );
+}
+
+/**
+ * How a catalog download fits this device: `too-big` past what one app may use
+ * here, which Settings leaves out; `tight` past the comfortable share, which
+ * runs but keeps the OS short of memory, so a long reply may be stopped. No
+ * rating where the host reports no budget (the simulator, the browser), and
+ * only `too-big` from a runtime that predates `physicalMemoryBytes`.
+ */
+export function catalogFit(
+  approxSizeBytes: number,
+  memory: { memoryBudgetBytes?: number; physicalMemoryBytes?: number },
+): NonNullable<ModelListEntry['fit']> | undefined {
+  if (memory.memoryBudgetBytes === undefined) return undefined;
+  const need = catalogFloorBytes(approxSizeBytes);
+  if (need > memory.memoryBudgetBytes)
+    return {
+      tier: 'too-big',
+      label: 'too large for this device',
+      detail: 'Needs more memory than this device allows one app, so it could not load here.',
+    };
+  if (memory.physicalMemoryBytes === undefined) return undefined;
+  if (need > memory.physicalMemoryBytes * COMFORTABLE_MEMORY_SHARE)
+    return {
+      tier: 'tight',
+      label: 'tight on memory',
+      detail:
+        'Fits, but leaves this device short of memory while it runs, so a long reply may stop early. A smaller model runs more reliably.',
+    };
+  return {
+    tier: 'fits',
+    label: 'fits in memory',
+    detail: 'Runs within the memory this device can comfortably spare.',
+  };
+}
+
 export interface MobileModelManagerOptions {
   catalog?: readonly MobileCatalogEntry[];
   pollIntervalMs?: number;
@@ -96,9 +164,8 @@ export function createMobileModelManager(
           )
             continue;
           const limits = resolveMobileInferenceLimits(llama);
-          const fits =
-            inventory.memoryBudgetBytes === undefined ||
-            item.approxSizeBytes + 512 * 1024 ** 2 <= inventory.memoryBudgetBytes;
+          const fit = catalogFit(item.approxSizeBytes, inventory);
+          const fits = fit?.tier !== 'too-big';
           const active = pending.find(
             (job) =>
               sameSource(item.source, job.source) &&
@@ -115,6 +182,7 @@ export function createMobileModelManager(
             locality: 'on-device',
             preparation: 'app-download',
             download_bytes: item.approxSizeBytes,
+            ...(fit ? { fit } : {}),
             context_window: limits.contextSize,
             max_output_tokens: limits.maxTokens,
             availability: !fits ? 'unavailable' : active ? 'downloading' : 'download-required',

@@ -187,7 +187,6 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     private var backgrounded = false
     private var memoryObserver: NSObjectProtocol?
     private var thermalObserver: NSObjectProtocol?
-    private var lastMemoryWarning: TimeInterval = -.infinity
     private var appleTask: Task<Void, Never>?
     /// Native tool calls parked until the app's tool loop completes them.
     private var pendingToolCalls: [String: CheckedContinuation<NativeToolReply, Error>] = [:]
@@ -225,6 +224,24 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     /// Room a larger window must leave in the process allowance, so the chosen
     /// window is not the one that barely fits.
     private static let ladderSpareBytes: Int64 = 256 * 1024 * 1024
+    /// The share of the device's memory one model may hold before iOS starts
+    /// warning about it. The process allowance alone let a 6 GB iPhone take a
+    /// 16K window that left the whole system short, and every warning then
+    /// ended the reply (MiniCPM5 1B, 2026-11-10); the Increased Memory Limit
+    /// entitlement raises that allowance further, but not the phone's memory.
+    /// Above the 4K floor a window must fit this share as well. The product's
+    /// download fit uses the same share (`COMFORTABLE_MEMORY_SHARE` in
+    /// packages/capacitor/src/model-manager.ts).
+    private static let comfortableShare = 0.3
+    /// A running reply rides out a memory warning while this much of the
+    /// process allowance is left. Below it iOS is about to end the app, and a
+    /// stopped reply is better than a crash.
+    private static let pressureFloorBytes: Int64 = 256 * 1024 * 1024
+    /// Posted synchronously on the inference queue before a model runs, so the
+    /// app's other on-device models free their memory first. Observed by name in
+    /// GezelKnowledgePlugin.swift, which may be built against an older runtime.
+    public static let willRunModelNotification = Notification.Name("GezelRuntimeWillRunModel")
+    private static let memoryStopMessage = "The device ran low on memory, so the reply stopped early. Try again, or choose a smaller model if this keeps happening."
     /// A description needs the picture's tokens and a few hundred more.
     private static let describeContext = 4096
     /// The projector's encoder graph and image batch beside the weights;
@@ -251,12 +268,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             self.operationLock.lock(); self.backgrounded = false; self.operationLock.unlock()
         }
         memoryObserver = NotificationCenter.default.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self else { return }
-            self.operationLock.lock()
-            self.lastMemoryWarning = ProcessInfo.processInfo.systemUptime
-            self.activeFailure = MobileInferenceError(code: "RESOURCE_LIMIT", message: "The device is low on memory. The current model has been released.")
-            self.operationLock.unlock()
-            self.requestRelease(nil)
+            self?.handleMemoryWarning()
         }
         // Only .critical stops a reply mid-generation. At .serious iOS asks apps
         // to scale back and already throttles the clocks itself; aborting there
@@ -323,7 +335,11 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             }
             var result: [String: Any] = ["models": models]
             if let selected = library.selectedModelId { result["selectedModelId"] = selected }
-            if let budget = self.memoryBudget() { result["memoryBudgetBytes"] = budget }
+            if let budget = self.memoryBudget() {
+                result["memoryBudgetBytes"] = budget
+                // Downloads are rated against it with the share that sizes windows here.
+                result["physicalMemoryBytes"] = Int64(ProcessInfo.processInfo.physicalMemory)
+            }
             return result
         }
     }
@@ -384,17 +400,17 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     }
 
     /// 16K or 8K when the process allowance holds that window with room to
-    /// spare, else the 4K floor, which admission still checks. A loaded model
-    /// keeps its window, so a listing never makes the next turn reload it;
-    /// memory another loaded model holds counts as free, since loading this one
-    /// releases it.
+    /// spare and it stays within the device's comfortable share, else the 4K
+    /// floor, which admission still checks. A loaded model keeps its window, so
+    /// a listing never makes the next turn reload it; memory another loaded
+    /// model holds counts as free, since loading this one releases it.
     /// Logs a model's window only when it changes; the listing is polled.
-    private func noteFittedWindow(id: String, context: Int, bytes: Int64, available: Int64) {
+    private func noteFittedWindow(id: String, context: Int, bytes: Int64, available: Int64, comfortable: Int64) {
         sizingLock.lock()
         let changed = fittedWindows[id] != context
         fittedWindows[id] = context
         sizingLock.unlock()
-        if changed { NSLog("GezelRuntime window %ld for %@: needs %lld bytes, %lld available", context, id, bytes, available) }
+        if changed { NSLog("GezelRuntime window %ld for %@: needs %lld bytes, %lld available, %lld comfortable", context, id, bytes, available, comfortable) }
     }
 
     private func fitContext(id: String, path: String) -> Int? {
@@ -409,14 +425,16 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         #else
         var available = Int64(os_proc_available_memory())
         if let heldPath { available += max(0, allocation(path: heldPath, contextSize: heldContext)) }
+        let comfortable = Int64(Double(ProcessInfo.processInfo.physicalMemory) * Self.comfortableShare)
         for context in Self.contextLadder {
             let bytes = allocation(path: path, contextSize: context)
-            if bytes >= 0, bytes + Self.ladderSpareBytes <= available {
-                noteFittedWindow(id: id, context: context, bytes: bytes, available: available)
+            if bytes >= 0, bytes + Self.ladderSpareBytes <= available, bytes <= comfortable {
+                noteFittedWindow(id: id, context: context, bytes: bytes, available: available, comfortable: comfortable)
                 return context
             }
         }
-        noteFittedWindow(id: id, context: Self.floorContext, bytes: allocation(path: path, contextSize: Self.floorContext), available: available)
+        noteFittedWindow(id: id, context: Self.floorContext, bytes: allocation(path: path, contextSize: Self.floorContext),
+                         available: available, comfortable: comfortable)
         return Self.floorContext
         #endif
     }
@@ -744,6 +762,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             guard let engine, let store else { throw storeError ?? MobileStoreError.unknownModel }
             let (model, url) = try store.modelURL(id: modelId)
             var nativeError = gezel_llama_error()
+            releaseCompanionModels()
             if loadedModelId != model.id || loadedContextSize != contextSize {
                 try unloadLlama()
                 appliedChatConfig = nil
@@ -850,6 +869,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             let (projector, projectorURL) = try store.modelURL(id: projectorId)
             let pixels = try Self.rgbPixels(image, maxEdge: Self.describeMaxEdge)
             var nativeError = gezel_llama_error()
+            releaseCompanionModels()
             let visionBytes = UInt64(projector.sizeBytes) + Self.visionComputeBytes
             if loadedModelId != model.id {
                 try unloadLlama()
@@ -954,13 +974,14 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         }
     }
 
+    /// No cool-off follows a memory warning: admission measures the allowance
+    /// itself, and refusing every load for ten seconds made retrying a reply
+    /// that a warning had stopped fail as well.
     private func resourceReason() -> String? {
         operationLock.lock()
         let hidden = backgrounded
-        let recentlyWarned = ProcessInfo.processInfo.systemUptime - lastMemoryWarning < 10
         operationLock.unlock()
         if hidden { return "Reopen the app to use on-device AI." }
-        if recentlyWarned { return "The device is low on memory. Wait before loading a model again." }
         if ProcessInfo.processInfo.thermalState == .critical { return "The device is too warm for local inference. Let it cool down first." }
         return nil
     }
@@ -1078,6 +1099,60 @@ public final class GezelNativeRuntime: @unchecked Sendable {
 
     public func releaseModel(_ call: NativeCall) { requestRelease(call) }
 
+    /// iOS warns every foreground app when the system runs short, and on a 6 GB
+    /// iPhone loading a model is itself enough to cause that. Releasing on every
+    /// warning ended replies mid-sentence while the process allowance was far
+    /// from spent (MiniCPM5 1B, 2026-11-10), the same failure Android met on a
+    /// Galaxy S20 FE. As there, a running reply rides a warning out and an idle
+    /// model gives its memory back. Only a nearly spent allowance stops a reply.
+    private func handleMemoryWarning() {
+        let headroom = processHeadroom()
+        let exhausted = headroom.map { $0 < Self.pressureFloorBytes } ?? false
+        operationLock.lock()
+        let running = activeId != nil
+        let idle = !running && !modelMutation
+        if running && exhausted {
+            activeFailure = MobileInferenceError(code: "RESOURCE_LIMIT", message: Self.memoryStopMessage)
+        }
+        operationLock.unlock()
+        if idle { releaseIfIdle(); return }
+        guard exhausted else {
+            NSLog("GezelRuntime memory warning: continuing with %lld bytes of allowance left", headroom ?? -1)
+            return
+        }
+        NSLog("GezelRuntime memory warning: stopping with %lld bytes of allowance left", headroom ?? -1)
+        requestRelease(nil)
+    }
+
+    /// What remains of the process allowance, or nil where iOS reports none (the simulator).
+    private func processHeadroom() -> Int64? {
+        #if targetEnvironment(simulator)
+        return nil
+        #else
+        let available = Int64(os_proc_available_memory())
+        return available > 0 ? available : nil
+        #endif
+    }
+
+    /// Unloads the model unless a request or model change holds it. Unlike
+    /// `requestRelease`, it never cancels anything; claiming `releasing` under the
+    /// lock refuses a request that arrives meanwhile instead of racing it.
+    private func releaseIfIdle() {
+        operationLock.lock()
+        guard activeId == nil, !modelMutation else { operationLock.unlock(); return }
+        releasing = true
+        operationLock.unlock()
+        scheduleReleaseIfIdle()
+    }
+
+    /// Asks the app's other on-device models to free their memory before this
+    /// one runs; the knowledge query encoder alone is a 130–490 MB model.
+    /// Inference queue only: observers release synchronously before the post
+    /// returns.
+    private func releaseCompanionModels() {
+        NotificationCenter.default.post(name: Self.willRunModelNotification, object: nil)
+    }
+
     private func requestRelease(_ call: NativeCall?) {
         operationLock.lock()
         releasing = true
@@ -1172,7 +1247,10 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         let terminal: Result<[String: Any], Error>
         do {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                inferenceQueue.async { continuation.resume(with: Result { try self.unloadLlama() }) }
+                inferenceQueue.async {
+                    self.releaseCompanionModels()
+                    continuation.resume(with: Result { try self.unloadLlama() })
+                }
             }
             try checkResources(additionalBytes: 256 * 1024 * 1024)
             if isCancelled(requestId) { throw CancellationError() }
@@ -1229,6 +1307,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             guard let engine, let store else { throw storeError ?? MobileStoreError.unknownModel }
             let (model, url) = try store.modelURL(id: modelId)
             var nativeError = gezel_llama_error()
+            releaseCompanionModels()
             if loadedModelId != model.id || loadedContextSize != contextSize {
                 try unloadLlama()
                 // Native allocation and memory warnings still enforce the

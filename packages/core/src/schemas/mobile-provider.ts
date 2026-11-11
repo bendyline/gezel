@@ -144,6 +144,12 @@ export const MobileModelInventorySchema = z
      * host cannot tell (the simulator, the browser).
      */
     memoryBudgetBytes: z.number().int().positive().optional(),
+    /**
+     * The device's physical memory, sent beside the budget. A model that takes
+     * more than a comfortable share of it fits but keeps the OS short of memory
+     * while it runs, so Settings labels it rather than hiding it.
+     */
+    physicalMemoryBytes: z.number().int().positive().optional(),
   })
   .strict()
   .superRefine((inventory, ctx) => {
