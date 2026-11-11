@@ -43,7 +43,7 @@ describe('titlebar color contract', () => {
     expect(mainProcess).toMatch(/titleBarOverlay:\s*\{\s*color:\s*BRAND_SAGE,/);
   });
 
-  // The brand sage over a walnut canvas was the brightest thing on a dark
+  // The brand sage over the night canvas was the brightest thing on a dark
   // screen. The bar deepens at night, and main repaints the overlay to match.
   it('paints the night titlebar the same in both dark blocks and in the overlay', () => {
     expect(brandSageNight).toBeDefined();

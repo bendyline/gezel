@@ -77,7 +77,7 @@
   /* Deep enough that the cream titlebar labels clear 4.5:1 (~5:1). */
   --gezel-sage: #5c6a4a;
   /* The brand sage at night: the same hue, deep enough that the bar is not
-     the brightest thing over a walnut canvas. Main repaints the window
+     the brightest thing over the night canvas. Main repaints the window
      controls to match (BRAND_SAGE_NIGHT). */
   --gezel-sage-night: #38412d;
   --gezel-sage-muted: #8a9a76;
@@ -341,24 +341,29 @@
     --gezel-ground-terracotta: #88593b;
     --gezel-ground-rose: #946b67;
     --gezel-ground-plum: #614d5d;
-    /* Walnut, not slate: the night paper keeps the wood hue of the day paper
-       (red highest, blue lowest) and steps canvas, workshop, panel, inset and
-       the key faces built on it far enough apart to read. The two dark blocks
-       must stay identical. */
-    --gezel-paper-canvas: #191512;
-    --gezel-paper-workshop: #201b17;
-    --gezel-paper-panel: #221d19;
+    /* Charcoal with a trace of warmth: the night ground is a dark gray that
+       leans to the day paper's side (red a point or two above blue, never
+       cool), so the terracotta accent and the sage bar are the only colors on
+       it. It was walnut until 2026-11-11, the accent's own hue, and the whole
+       window read brown. Each tone keeps the lightness it had, so canvas,
+       workshop, panel, inset and the key faces built on them step apart as
+       before. The two dark blocks must stay identical. */
+    --gezel-paper-canvas: #171615;
+    --gezel-paper-workshop: #1d1c1b;
+    --gezel-paper-panel: #1f1e1d;
     --gezel-paper-reading: var(--gezel-paper-panel);
     --gezel-paper-control: var(--gezel-paper-canvas);
     --gezel-paper-control-deep: var(--gezel-paper-inset);
-    --gezel-paper-inset: #29231e;
+    --gezel-paper-inset: #252423;
     /* Text is the titlebar labels' cream, never a neutral white. Home's warm
-       inks resolve from this ramp too, so Home and the rail share one ink. */
+       inks resolve from this ramp too, so Home and the rail share one ink.
+       The quieter inks keep the cream's hue at under half its color: they are
+       most of the secondary text, and at full warmth read tan on gray. */
     --gezel-ink: var(--gezel-cream-ink);
-    --gezel-ink-muted: #ada396;
+    --gezel-ink-muted: #a8a49e;
     --gezel-ink-warm: var(--gezel-ink);
-    --gezel-ink-warm-muted: #c9bca9;
-    --gezel-ink-warm-quiet: #9c9083;
+    --gezel-ink-warm-muted: #c3bdb5;
+    --gezel-ink-warm-quiet: #97918b;
     /* The structural accent lifts at night: rings, dots and squisq's active
        tab labels are drawn in it, and its fills carry dark ink. Fills that
        carry cream use the deep `--action-bg` below. */
@@ -404,8 +409,8 @@
     /* Dark mode: keep the active home-tab logo cream — there's no
        lifted-canvas contrast problem to solve here. */
     --logo-active-fill: var(--titlebar-ink);
-    --scrollbar-thumb: rgba(224, 184, 151, 0.28);
-    --scrollbar-thumb-hover: rgba(224, 184, 151, 0.5);
+    --scrollbar-thumb: rgba(243, 237, 224, 0.24);
+    --scrollbar-thumb-hover: rgba(243, 237, 224, 0.42);
     --scrollbar-track: rgba(243, 237, 224, 0.04);
     --preview-frame-bg: var(--gezel-paper-canvas);
     /* Trays sink below the canvas and key faces rise above the inset, both
@@ -461,18 +466,18 @@
   --gezel-ground-terracotta: #88593b;
   --gezel-ground-rose: #946b67;
   --gezel-ground-plum: #614d5d;
-  --gezel-paper-canvas: #191512;
-  --gezel-paper-workshop: #201b17;
-  --gezel-paper-panel: #221d19;
+  --gezel-paper-canvas: #171615;
+  --gezel-paper-workshop: #1d1c1b;
+  --gezel-paper-panel: #1f1e1d;
   --gezel-paper-reading: var(--gezel-paper-panel);
   --gezel-paper-control: var(--gezel-paper-canvas);
   --gezel-paper-control-deep: var(--gezel-paper-inset);
-  --gezel-paper-inset: #29231e;
+  --gezel-paper-inset: #252423;
   --gezel-ink: var(--gezel-cream-ink);
-  --gezel-ink-muted: #ada396;
+  --gezel-ink-muted: #a8a49e;
   --gezel-ink-warm: var(--gezel-ink);
-  --gezel-ink-warm-muted: #c9bca9;
-  --gezel-ink-warm-quiet: #9c9083;
+  --gezel-ink-warm-muted: #c3bdb5;
+  --gezel-ink-warm-quiet: #97918b;
   --gezel-terra: #c0875d;
   --gezel-terra-hover: #d5a07a;
   --gezel-terra-raised: #b07a50;
@@ -510,8 +515,8 @@
   --diff-gutter: rgba(255, 255, 255, 0.3);
   --diff-sep: rgba(255, 255, 255, 0.4);
   --logo-active-fill: var(--titlebar-ink);
-  --scrollbar-thumb: rgba(224, 184, 151, 0.28);
-  --scrollbar-thumb-hover: rgba(224, 184, 151, 0.5);
+  --scrollbar-thumb: rgba(243, 237, 224, 0.24);
+  --scrollbar-thumb-hover: rgba(243, 237, 224, 0.42);
   --scrollbar-track: rgba(243, 237, 224, 0.04);
   --preview-frame-bg: var(--gezel-paper-canvas);
   --tray-bg: color-mix(in srgb, black 16%, var(--gezel-paper-canvas));

@@ -11,7 +11,7 @@ import { getDocPlaybackDuration } from '@bendyline/squisq/schemas';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { AreaIcon } from '../components/AreaIcon.js';
-import { GEZEL_LIGHT_SURFACE, gezelChatThemeForMode } from '../components/chat-theme.js';
+import { gezelChatThemeForMode, gezelReadingSurfaceForMode } from '../components/chat-theme.js';
 import { consumeOpenHandboek } from '../components/pending-open-handboek.js';
 import { useEffectiveTheme } from '../theme.js';
 import '../styles/handbook.css';
@@ -73,7 +73,7 @@ export function HandboekView() {
   // The gezellig theme's native pages are dark. Overlay the shared warm-paper
   // surface in light mode, matching the Home screen's embedded Handboek article.
   const effectiveTheme = useEffectiveTheme();
-  const surface = effectiveTheme === 'light' ? GEZEL_LIGHT_SURFACE : undefined;
+  const surface = gezelReadingSurfaceForMode(effectiveTheme);
 
   useEffect(() => {
     let alive = true;

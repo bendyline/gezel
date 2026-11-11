@@ -120,7 +120,7 @@ const loopbackCertificatePin = createLoopbackCertificatePin();
 const BRAND_SAGE = '#5c6a4a';
 /**
  * The renderer's `--titlebar` in dark mode (`--gezel-sage-night`). The brand
- * sage over a walnut canvas was the brightest thing on a dark screen.
+ * sage over a dark canvas was the brightest thing on the screen.
  */
 const BRAND_SAGE_NIGHT = '#38412d';
 

@@ -16,8 +16,8 @@ const stamped = () => document.documentElement.getAttribute('data-sidebar-side')
 
 /** Run the pre-bundle script the way the page does, against this document. */
 function runThemeInit(): void {
-  // Vitest runs from the package root.
-  const source = readFileSync(resolve(process.cwd(), 'public/theme-init.js'), 'utf8');
+  // Not process.cwd(): the coverage job runs Vitest from the repo root.
+  const source = readFileSync(resolve(import.meta.dirname, '../public/theme-init.js'), 'utf8');
   new Function(source)();
 }
 

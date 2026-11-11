@@ -56,9 +56,8 @@ export function IntroHandboekArticle({
   const [article, setArticle] = useState<KnowledgeDocumentRead | null>(null);
   const [failed, setFailed] = useState(false);
   const [mode, setMode] = useState<ViewMode>('doc');
-  // In light mode overlay the shared warm-paper reading surface (the
-  // gezellig theme's own pages are dark); in dark mode let the theme's
-  // warm-tinted dark background come through — same rule as chat bubbles.
+  // The article reads on gezel's own reading surface in both modes (the
+  // gezellig theme's own pages are a dark walnut): same rule as chat bubbles.
   const effectiveTheme = useEffectiveTheme();
 
   useEffect(() => {

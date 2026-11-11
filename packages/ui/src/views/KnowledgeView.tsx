@@ -13,7 +13,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js';
 import { KnowledgeCatalogMark } from '../components/KnowledgeCatalogMark.js';
 import { KnowledgeCatalogsDialog } from '../components/KnowledgeCatalogsDialog.js';
-import { GEZEL_LIGHT_SURFACE, gezelChatThemeForMode } from '../components/chat-theme.js';
+import { gezelChatThemeForMode, gezelReadingSurfaceForMode } from '../components/chat-theme.js';
 import { queueComposerPrefill } from '../components/composer-prefill.js';
 import { AuthedMediaPreview } from '../components/file-browser/FilePreview.js';
 import { navigateToTab } from '../components/nav-actions.js';
@@ -161,7 +161,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
   const searchTimer = useRef<number | null>(null);
 
   const effectiveTheme = useEffectiveTheme();
-  const surface = effectiveTheme === 'light' ? GEZEL_LIGHT_SURFACE : undefined;
+  const surface = gezelReadingSurfaceForMode(effectiveTheme);
 
   // The view stack: an article (or a catalog's front page) is a place.
   // Declared ahead of the effects that correct the selection, so their
@@ -785,7 +785,7 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
                     doc={renderedDoc}
                     className="gezel-article-view"
                     theme={gezelChatThemeForMode(effectiveTheme)}
-                    {...(surface ? { surface } : {})}
+                    surface={surface}
                     imageDisplayMode="inline"
                     showCover={false}
                     linkSchemes={['knowledge']}

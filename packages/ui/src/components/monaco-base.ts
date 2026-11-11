@@ -66,10 +66,10 @@ export function registerGezelMonacoThemes(): void {
     // Monaco cannot read CSS variables: these follow the night ramp in
     // foundation.css (panel paper, a step darker for the gutter).
     colors: {
-      'editor.background': '#221d19',
-      'editorGutter.background': '#1e1a16',
-      'editorLineNumber.foreground': '#6c6158',
-      'minimap.background': '#1e1a16',
+      'editor.background': '#1f1e1d',
+      'editorGutter.background': '#1c1b1a',
+      'editorLineNumber.foreground': '#67625e',
+      'minimap.background': '#1c1b1a',
     },
   });
   themesRegistered = true;

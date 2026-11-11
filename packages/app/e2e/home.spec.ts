@@ -169,7 +169,7 @@ test('renders the workshop in dark (dusk) mode', async () => {
     const el = document.querySelector('.home-workshop');
     return el ? getComputedStyle(el).getPropertyValue('--paper').trim() : '';
   });
-  expect(paper).toBe('#201b17');
+  expect(paper).toBe('#1d1c1b');
 
   await captureScreenshot(page, {
     path: join(screenshotDir, 'home-02-workshop-dark.png'),

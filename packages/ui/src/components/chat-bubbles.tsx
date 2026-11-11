@@ -23,7 +23,7 @@ import {
   parseTaskHandoffNote,
   promoteBareChannelNames,
 } from '@bendyline/gezel';
-import type { MediaProvider, SurfaceScheme } from '@bendyline/squisq';
+import type { MediaProvider } from '@bendyline/squisq';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { formatDebugBundle } from './chat-debug-bundle.js';
 import { humanizeChatError } from './chat-error-copy.js';
@@ -32,10 +32,6 @@ import { formatContextWindow } from './model-context.js';
 
 export { formatDebugBundle } from './chat-debug-bundle.js';
 
-// Chat-bubble light surface — shared with the Home intro's embedded
-// Handboek page; the scheme and its rationale live in
-// [chat-theme.ts](./chat-theme.ts).
-const CHAT_BUBBLE_LIGHT_SURFACE: SurfaceScheme = GEZEL_LIGHT_SURFACE;
 import { LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import type { FontFamily, Theme } from '@bendyline/squisq/schemas';
@@ -77,8 +73,8 @@ import { WorkChunksCount } from './WorkChunksCount.js';
 import { markdownToChatDoc, prepareChatMarkdown } from './chat-markdown.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import {
-  GEZEL_LIGHT_SURFACE,
   gezelChatThemeForMode,
+  gezelReadingSurfaceForMode,
   gezelReportThemeForMode,
 } from './chat-theme.js';
 import { ToolAudioRow, ToolImageRow, ToolVideoRow } from './chat-tool-media.js';
@@ -4013,11 +4009,11 @@ export function RenderedMarkdown({
   // bubble bodies and the attachment previewer in
   // [ChatReferences.tsx](./ChatReferences.tsx) stay in lockstep.
   //
-  // In light mode we overlay the shared pale-brown reading surface. Its
-  // color matches the `--chat-bubble-bg` token used by the outer bubble,
-  // so the result appears seamlessly tinted. In dark mode we skip the
-  // surface overlay so the theme's own warm-tinted canvas comes through.
-  const surface = effective === 'light' ? CHAT_BUBBLE_LIGHT_SURFACE : undefined;
+  // Both modes overlay gezel's reading surface. Its color matches the
+  // `--chat-bubble-bg` token used by the outer bubble, so the result appears
+  // seamlessly tinted. Night used to skip the overlay, which left the
+  // theme's walnut on code blocks and its tan on muted text.
+  const surface = gezelReadingSurfaceForMode(effective);
   if (!doc) return <>{markdown}</>;
   // Chat history uses Squisq's thumbnail image mode so a pasted screenshot
   // doesn't steamroll the bubble — the user can click to open full-size

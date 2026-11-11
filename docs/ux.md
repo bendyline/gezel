@@ -112,7 +112,7 @@ pacing of a transition. If a first-time user can't quite put a finger on
   outside the renderer (`BRAND_SAGE` in the Electron main process), so any
   other tone shows as a seam at the controls. At night the bar is the same
   hue, deeper (`--gezel-sage-night`, #38412d, `BRAND_SAGE_NIGHT`): the day
-  sage over a walnut canvas was the brightest thing on a dark screen. Main
+  sage over the night canvas was the brightest thing on a dark screen. Main
   repaints the window controls and background when the theme in effect
   changes, and holds the day sage until the renderer has said which theme
   the person chose, so someone who pinned Light on a dark OS never sees the
@@ -167,15 +167,27 @@ pacing of a transition. If a first-time user can't quite put a finger on
   which resolves warm in both themes; the cool `rgba(79, 125, 255, …)`
   washes that marked a few forms and badges are gone.
 
-  **Dark mode is walnut, not slate.** The dark blocks in foundation.css
-  re-author the `--gezel-paper-*` and `--gezel-ink*` primitives on one warm
-  hue (red highest, blue lowest): canvas `#191512`, workshop `#201b17`, panel
-  `#221d19`, inset `#29231e`. Trays sit below the canvas and key faces above
-  the inset, each step a few hundredths of OKLCH lightness apart. Text is the
-  titlebar's cream (`--gezel-cream-ink`), muted text `#ada396`; dark chrome
-  has no neutral white or gray. Home's dusk tokens derive from the same
-  primitives, so Home and the rail share one temperature. The cool gray ramp
-  this replaced put a warm Home beside a slate sidebar.
+  **Dark mode is charcoal with a trace of warmth.** The dark blocks in
+  foundation.css re-author the `--gezel-paper-*` and `--gezel-ink*`
+  primitives as dark grays that lean to the day paper's side (red a point or
+  two above blue, never cool): canvas `#171615`, workshop `#1d1c1b`, panel
+  `#1f1e1d`, inset `#252423`. The ground has no color of its own, so the
+  terracotta accent and the sage bar are the only colors on a dark screen,
+  which is the relationship parchment and accent have by day. It was walnut
+  until 2026-11-11 (red 7 to 11 above blue), the accent's own hue: under
+  cream text and terracotta lines the whole window read brown, and the
+  accent had nothing to stand out from. Each tone kept its lightness, so
+  trays still sit below the canvas and key faces above the inset, each step
+  a few hundredths of OKLCH lightness apart, and text contrast is unchanged.
+  Text is the titlebar's cream (`--gezel-cream-ink`), never a neutral white.
+  The quieter inks (muted `#a8a49e`) keep the cream's hue at under half its
+  color: they are most of the secondary text, and at full warmth read tan on
+  gray. Home's dusk tokens derive from the same primitives, so Home and the
+  rail share one temperature; the cool gray ramp before walnut put a warm
+  Home beside a slate sidebar. What stays warm at night is the accent at
+  work: a selected row's wash, the person's own chat bubble, the composer's
+  edge, a latched key. A new dark surface is a lightness step on the ramp,
+  never a hand-written brown (`night-ground.test.ts` pins the range).
 
   **Emphasis points the same way in both themes.** Filled actions
   (`--action-bg`) and latched keys (`--key-pressed-bg`) are the day's deep
@@ -187,7 +199,12 @@ pacing of a transition. If a first-time user can't quite put a finger on
   its dark contrast. Monaco themes and Squisq reading surfaces cannot read CSS
   variables and repeat the panel and inset hexes (`monaco-base.ts`,
   `terminal-monaco-setup.ts`, `transform/surfaces.ts`); the chat reading
-  surface repeats the reading papers (`chat-theme.ts`). The app pages'
+  surface repeats the reading papers (`chat-theme.ts`), and the same test
+  holds every copy to the tokens. A Squisq reader names its surface in both
+  modes through `gezelReadingSurfaceForMode`: the gezellig preset is
+  dark-first and brings a walnut page of its own, which a reader that left
+  `surface` unset at night painted inside the app (Help, Knowledge, the Home
+  article, code blocks in chat). The app pages'
   component kit cannot read them either: its `--action` / `--on-action` pair
   repeats the deep terracotta and cream for primary keys and the demo Send
   (core `page-components.ts`), while its `--accent` lifts for rings and tints.

@@ -1926,7 +1926,7 @@
   color: rgba(43, 36, 32, 0.6);
 }
 [data-theme="dark"] .squisq-mention-popover {
-  background: #2b2420;
+  background: var(--gezel-paper-inset);
   border-color: rgba(224, 184, 151, 0.28);
   color: #f3ede0;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
@@ -1941,7 +1941,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .squisq-mention-popover {
-    background: #2b2420;
+    background: var(--gezel-paper-inset);
     border-color: rgba(224, 184, 151, 0.28);
     color: #f3ede0;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
@@ -2248,14 +2248,14 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   color: #f3ede0;
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-editor-header {
-  background: #2b2420;
+  background: var(--gezel-paper-inset);
   border-bottom-color: rgba(176, 114, 76, 0.28);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar {
   background: rgba(176, 114, 76, 0.08);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tabs {
-  background: #1f1a17;
+  background: var(--gezel-paper-workshop);
   border-right-color: rgba(176, 114, 76, 0.28);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab,
@@ -2342,7 +2342,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
    it up with the same terracotta + cream used by the rest of the
    composer chrome. */
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-menu {
-  background: #2b2420;
+  background: var(--gezel-paper-inset);
   border-color: rgba(176, 114, 76, 0.35);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
 }

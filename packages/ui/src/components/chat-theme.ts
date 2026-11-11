@@ -14,6 +14,7 @@
 
 import { LIGHT_SURFACE, type SurfaceScheme } from '@bendyline/squisq';
 import { type FontFamily, type Theme, resolveTheme } from '@bendyline/squisq/schemas';
+import { GEZEL_DARK_SURFACE } from './transform/surfaces.js';
 
 export const GEZEL_CHAT_THEME_ID = 'gezellig';
 
@@ -32,6 +33,17 @@ export const GEZEL_LIGHT_SURFACE: SurfaceScheme = {
   text: LIGHT_SURFACE.text,
   textMuted: LIGHT_SURFACE.textMuted,
 };
+
+/**
+ * The reading surface for a theme mode. Night always names one: Squisq's
+ * gezellig preset is dark-first and carries its own walnut page (`#1f1a17`,
+ * code blocks `#2b2420`), so a reader that left `surface` unset at night
+ * painted a brown page inside the charcoal app. The dark values repeat
+ * foundation.css's night panel and inset papers and its cream inks.
+ */
+export function gezelReadingSurfaceForMode(mode: 'light' | 'dark'): SurfaceScheme {
+  return mode === 'light' ? GEZEL_LIGHT_SURFACE : GEZEL_DARK_SURFACE;
+}
 
 /**
  * Keep the gezellig palette and typography without its decorative page
