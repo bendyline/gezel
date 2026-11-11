@@ -17,17 +17,18 @@
  * release: mobile-native.yml stages the build it just made (`0.0.0-ci.*`) and
  * its consumer job must test those bytes, not the pin.
  *
- * `--require-current` is the release gate. A native release is cut from a
- * merged commit, so a pull request that changes `native/runtime` cannot pin
- * its own, and ordinary packs only warn about that drift. A published package
- * must not ship it: the plugin sources in the tarball would be newer than the
- * engines beside them. Nor may it ship without the speech runtime, which apps
- * such as DocBlocks take this package for. Run from `publish-npm.yml` before
- * anything publishes.
+ * `--release` is the release gate, run from `publish-npm.yml` before anything
+ * publishes. It validates the package against the pinned release, not against
+ * the newest runtime sources: it replaces anything staged that is not the pin
+ * (such as a CI build), verifies the pinned payloads, checks that the plugin
+ * names no runtime API the pinned release lacks, and refuses a
+ * release without the speech runtime, which apps such as DocBlocks take this
+ * package for. Changes to `native/runtime` after the pin are reported and ship
+ * when the pin moves; they never hold a release.
  *
  * Usage:
  *   node scripts/stage-capacitor-native.mjs
- *   node scripts/stage-capacitor-native.mjs --require-current
+ *   node scripts/stage-capacitor-native.mjs --release
  */
 import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -38,6 +39,7 @@ import * as tar from 'tar';
 import {
   stageNative,
   stageSpeech,
+  verifyPluginRuntimeApi,
   verifyProducerSources,
   verifyRuntime,
   verifySpeechDistribution,
@@ -114,21 +116,21 @@ async function stagedVersion(directory) {
 }
 
 /** Whether a staged payload should be replaced by the pinned one. */
-export function needsPinnedPayload(version, release, requireCurrent = false) {
+export function needsPinnedPayload(version, release, releaseGate = false) {
   if (version === release) return false;
-  if (version === null || requireCurrent) return true;
+  if (version === null || releaseGate) return true;
   // A prerelease is a build someone staged on purpose; an older x.y.z is a stale pin.
   return !version.includes('-');
 }
 
 /**
- * @param {{ repoRoot: string, fetchImpl?: typeof fetch, requireCurrent?: boolean, log?: (message: string) => void }} input
+ * @param {{ repoRoot: string, fetchImpl?: typeof fetch, releaseGate?: boolean, log?: (message: string) => void }} input
  * @returns {Promise<{ release: string, staged: string[] }>}
  */
 export async function stagePinnedMobileSdks({
   repoRoot,
   fetchImpl = fetch,
-  requireCurrent = false,
+  releaseGate = false,
   log = console.log,
 }) {
   const { release, digest } = parseNativePin(
@@ -139,7 +141,7 @@ export async function stagePinnedMobileSdks({
   const pending = [];
   for (const payload of PAYLOADS) {
     const version = await stagedVersion(join(nativeRoot, payload.directory));
-    if (needsPinnedPayload(version, release, requireCurrent)) pending.push(payload);
+    if (needsPinnedPayload(version, release, releaseGate)) pending.push(payload);
   }
 
   // Checking an older pin for a speech runtime it cannot have must not take
@@ -149,7 +151,7 @@ export async function stagePinnedMobileSdks({
       ? null
       : await download(`${RELEASE_BASE}/native-v${release}/SHA256SUMS`, fetchImpl).catch(
           (error) => {
-            if (requireCurrent || !pending.every((payload) => payload.speech)) throw error;
+            if (releaseGate || !pending.every((payload) => payload.speech)) throw error;
             log(
               `stage-capacitor-native: could not check native-v${release} for a speech runtime (${error.message}); offline speech stays unavailable`,
             );
@@ -170,7 +172,7 @@ export async function stagePinnedMobileSdks({
         // package still builds and its speech status reports unavailable,
         // which a release must never ship.
         if (payload.speech && !listsArchive(sums, name)) {
-          if (requireCurrent) {
+          if (releaseGate) {
             throw new Error(
               `native-v${release} has no ${payload.directory} runtime. Cut a native release and pin it with scripts/pin-native-release.mjs before publishing @bendyline/gezel-capacitor.`,
             );
@@ -197,14 +199,16 @@ export async function stagePinnedMobileSdks({
     }
   }
 
-  if (requireCurrent) {
+  if (releaseGate) {
+    const manifests = [];
     for (const target of TARGETS) {
       const manifest = await verifyRuntime(join(nativeRoot, target), target);
-      await verifyProducerSources(manifest, repoRoot).catch((error) => {
+      if (manifest.packageVersion !== release) {
         throw new Error(
-          `${error.message}: native-v${release} predates that change. Cut a native release and pin it with scripts/pin-native-release.mjs before publishing @bendyline/gezel-capacitor.`,
+          `The staged ${target} runtime is ${manifest.packageVersion}, not the pinned native-v${release}.`,
         );
-      });
+      }
+      manifests.push(manifest);
       await verifySpeechDistribution(join(nativeRoot, `speech-${target}`), target).catch(
         (error) => {
           throw new Error(
@@ -213,7 +217,15 @@ export async function stagePinnedMobileSdks({
         },
       );
     }
-    log(`stage-capacitor-native: native-v${release} matches its sources`);
+    // Both platforms' manifests record the same sources, so one report covers them.
+    await verifyProducerSources(manifests[0], repoRoot, log, { allowStale: true });
+    await verifyPluginRuntimeApi({
+      capacitorRoot: dirname(nativeRoot),
+      repoRoot,
+      manifest: manifests[0],
+      warn: log,
+    });
+    log(`stage-capacitor-native: native-v${release} verified as pinned`);
   }
   return { release, staged };
 }
@@ -221,10 +233,10 @@ export async function stagePinnedMobileSdks({
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   const flags = process.argv.slice(2);
   for (const flag of flags) {
-    if (flag !== '--require-current') throw new Error(`unexpected argument ${flag}`);
+    if (flag !== '--release') throw new Error(`unexpected argument ${flag}`);
   }
   await stagePinnedMobileSdks({
     repoRoot: resolve(dirname(fileURLToPath(import.meta.url)), '..'),
-    requireCurrent: flags.includes('--require-current'),
+    releaseGate: flags.includes('--release'),
   });
 }

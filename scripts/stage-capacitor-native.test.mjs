@@ -188,18 +188,19 @@ test('refuses an archive that does not match SHA256SUMS', async (t) => {
   await assert.rejects(stagePinnedMobileSdks(input(f)), /does not match SHA256SUMS/);
 });
 
-test('an ordinary stage tolerates source drift, and the release gate names the fix', async (t) => {
+test('the release gate ships the pinned release and only reports later runtime changes', async (t) => {
+  // native/runtime moving past the pin is normal: those changes ship when the
+  // pin moves. A release must never wait for a native build because of it.
   const f = await fixture(t, { sourceHash: sha256('an older wrapper') });
-  await stagePinnedMobileSdks(input(f));
-  await assert.rejects(
-    stagePinnedMobileSdks(input(f, { requireCurrent: true })),
-    /native-v1\.2\.3 predates that change\. Cut a native release/,
-  );
+  const logs = [];
+  await stagePinnedMobileSdks(input(f, { releaseGate: true, log: (line) => logs.push(line) }));
+  assert.match(logs.join('\n'), /1\.2\.3 predates changes to native\/runtime\/stage-sdk\.py/);
+  assert.match(logs.join('\n'), /native-v1\.2\.3 verified as pinned/);
 });
 
 test('the release gate accepts a pinned payload matching its sources', async (t) => {
   const f = await fixture(t);
-  await stagePinnedMobileSdks(input(f, { requireCurrent: true }));
+  await stagePinnedMobileSdks(input(f, { releaseGate: true }));
 });
 
 test('a release without speech packs without it, and can never be published', async (t) => {
@@ -209,7 +210,7 @@ test('a release without speech packs without it, and can never be published', as
   assert.deepEqual(staged, ['ios', 'android']);
   assert.match(logs.join('\n'), /has no speech-ios runtime/);
   await assert.rejects(
-    stagePinnedMobileSdks(input(f, { requireCurrent: true })),
+    stagePinnedMobileSdks(input(f, { releaseGate: true })),
     /native-v1\.2\.3 has no speech-ios runtime\. Cut a native release/,
   );
 });
@@ -219,7 +220,7 @@ test('a speech runtime shaped like native-v0.1.61 stages, but can never be publi
   const { staged } = await stagePinnedMobileSdks(input(f));
   assert.deepEqual(staged, ['ios', 'speech-ios', 'android', 'speech-android']);
   await assert.rejects(
-    stagePinnedMobileSdks(input(f, { requireCurrent: true })),
+    stagePinnedMobileSdks(input(f, { releaseGate: true })),
     /Info\.plist has no CFBundleShortVersionString.*native-v1\.2\.3's speech runtime cannot ship/,
   );
   await assert.rejects(
@@ -233,7 +234,7 @@ test('the release gate refuses a package whose speech runtime is missing', async
   await stagePinnedMobileSdks(input(f));
   await rm(join(f.root, 'packages/capacitor/native/speech-android'), { recursive: true });
   f.assets.delete('gezel-mobile-1.2.3-speech-android.tar.gz');
-  await assert.rejects(stagePinnedMobileSdks(input(f, { requireCurrent: true })), /speech/);
+  await assert.rejects(stagePinnedMobileSdks(input(f, { releaseGate: true })), /speech/);
 });
 
 test('the release gate replaces a CI build rather than shipping it', async (t) => {
@@ -244,7 +245,7 @@ test('the release gate replaces a CI build rather than shipping it', async (t) =
   manifest.packageVersion = '0.0.0-ci.9.1';
   await cp(staged, `${staged}.ci`, { recursive: true });
   await writeFile(join(staged, 'sdk-manifest.json'), JSON.stringify(manifest));
-  const { staged: replaced } = await stagePinnedMobileSdks(input(f, { requireCurrent: true }));
+  const { staged: replaced } = await stagePinnedMobileSdks(input(f, { releaseGate: true }));
   assert.deepEqual(replaced, ['ios']);
 });
 
@@ -260,5 +261,5 @@ test('packing offline still works when only a speech runtime is missing', async 
   });
   assert.deepEqual((await stagePinnedMobileSdks(offline)).staged, []);
   assert.match(logs.join('\n'), /could not check native-v1\.2\.3 for a speech runtime/);
-  await assert.rejects(stagePinnedMobileSdks({ ...offline, requireCurrent: true }), /offline/);
+  await assert.rejects(stagePinnedMobileSdks({ ...offline, releaseGate: true }), /offline/);
 });

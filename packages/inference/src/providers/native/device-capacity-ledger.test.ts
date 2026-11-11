@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { DatabaseSync as DatabaseSyncType } from 'node:sqlite';
 import type { NativeCapacityCommand } from '@bendyline/gezel';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DeviceCapacityLedger } from './device-capacity-ledger.js';
 import { ProcessIdentityCache, VERIFIED_IDENTITY_TTL_MS } from './process-identity.js';
+
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as {
+  DatabaseSync: typeof DatabaseSyncType;
+};
 
 const GIB = 1024 ** 3;
 const dirs: string[] = [];
@@ -121,5 +127,45 @@ describe('birth-stamp reads in the capacity ledger', () => {
     const second = await runningEngine(other, 90, 101);
     expect((await ledger.execute(request(40, 2))).state).toBe('waiting');
     expect((await other.execute({ action: 'status', id: second.id })).state).toBe('granted');
+  });
+});
+
+describe('contention on the capacity ledger', () => {
+  it('outlasts another process holding the write lock past one busy timeout', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'gezel-capacity-'));
+    dirs.push(directory);
+    let release: (() => void) | undefined;
+    const ledger = new DeviceCapacityLedger({
+      directory,
+      sample: async () => ({
+        budgetBytes: 112 * GIB,
+        gpuBudgetBytes: 96 * GIB,
+        serializeLoads: false,
+      }),
+      alive: () => true,
+      identityCache: Object.assign(new ProcessIdentityCache(), {
+        // The ledger's last await before BEGIN IMMEDIATE. A timer armed here
+        // cannot fire until its first try has blocked on the lock and failed.
+        lookup: async () => {
+          if (release) setTimeout(release, 0);
+          release = undefined;
+          return new Map<number, string>();
+        },
+      }),
+    });
+    await ledger.execute({ action: 'status', id: randomUUID() });
+    const holder = new DatabaseSync(join(directory, 'leases.sqlite'));
+    let holding = true;
+    try {
+      holder.exec('BEGIN IMMEDIATE');
+      release = () => {
+        if (holding) holder.exec('COMMIT');
+      };
+      expect((await ledger.execute(request(40))).state).toBe('granted');
+      expect(release).toBeUndefined();
+    } finally {
+      holding = false;
+      holder.close();
+    }
   });
 });

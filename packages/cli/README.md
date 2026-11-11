@@ -72,7 +72,7 @@ Run `gezel --help`, or `--help` on any command, for every option.
 | `gezel craftbook show <craftbook>` | What one craftbook does, what it takes before your request, and where it saves |
 | `gezel workflow <name-or-file> [args…]` | Run a repository workflow from `.gezel/workflows/<name>.mjs` or a module path |
 | `gezel task list\|show\|create` | Tasks across every project |
-| `gezel task wait\|resume\|pause <ref>` | Follow a task to the end, retry a paused task and follow it, or pause one task |
+| `gezel task wait\|resume\|pause <ref>` | Follow a task to the end, retry a paused task and follow it, or pause one task. Waiting prints where the result is; `--out <dir>` copies it |
 | `gezel task notes <ref>` | A task's notes, including pause reasons and failed checks (`--warnings` adds runtime warnings) |
 | `gezel agent list\|create\|show\|output-limit` | Manage your crew (the command name is historical) |
 | `gezel project list\|create\|install\|indexing\|edits` | Manage projects, their npm packages, background indexing, and whether Gezel may change files in the folder (`gezel env` is the same command) |
@@ -203,10 +203,11 @@ name (its id, unless it declares one) exactly, and built-in commands always
 win. A mistyped name reports an unknown command without creating a project.
 
 ```bash
-gezel do summarize-long "Summarize notes.txt for the board"
+gezel do summarize-long "Summarize notes.txt for the board" --out ./board-summary
 gezel summarize-long "Summarize notes.txt for the board"
 gezel do powerpoint-deck "A deck about Delft" audience=investors --wait --json
 gezel task wait my-project/12 --timeout 7200 --json
+gezel task wait my-project/12 --out ./board-summary
 gezel task resume my-project/12 --json
 gezel task notes my-project/12 --warnings --json
 ```
@@ -219,8 +220,24 @@ timeout leaves the task running. When a task is blocked, `--wait` prints why
 stderr; `--json` writes the result to stdout. `resume` retries a paused task
 with its saved recipe. Answer pending questions in Gezel before waiting again.
 
+When a task completes, waiting prints where its result is:
+
+```text
+work/1: complete
+Result: /Users/you/.gezel/projects/work/artifacts/tasks/1/summary.md
+Also made: scope.md, verdict.md
+Folder: /Users/you/.gezel/projects/work/artifacts/tasks/1
+```
+
+`--json` carries the same under `output`: each file's `relativePath`, its
+absolute `path` on the computer running Gezel, whether this command can open it
+(`readable`), and which one is the `deliverable`. When Gezel runs somewhere this
+command cannot read (a remote service, a container, or a machine-wide service),
+the paths are not yours to open; copy the files instead.
+
 A folder's project starts read-only. Most craftbooks keep what they make in
-the task's own folder, which `--out <dir>` copies out when the task finishes.
+the task's own folder, which `--out <dir>` copies out when the task finishes;
+`gezel task wait <ref> --out <dir>` copies a finished task's.
 Some save into the folder itself, such as a deck or a web page;
 `gezel craftbook show <craftbook>` says which. At a terminal `gezel do` asks
 before it starts one of those. In a script, add `--allow-edits`, or run

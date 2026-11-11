@@ -18,22 +18,34 @@ ESM only, Node 24+. `zod` is the sole runtime dependency.
   signing, which need `node:crypto` / `node:fs`.
 
 ```ts
+import { readFile } from 'node:fs/promises';
 import { KnowledgeCatalogManifestSchema, parseKnowledgeUri, quantizeInt8 } from '@bendyline/gezk';
-import { verifyManifestSignature } from '@bendyline/gezk/node';
+import { type KnowledgeTrustAnchor, verifyManifestSignature } from '@bendyline/gezk/node';
 
 // Citations are a parsed grammar, not string surgery.
 parseKnowledgeUri('knowledge://bendyline/handboek/guides/intro#line=3-9');
 // → { publisherId: 'bendyline', catalogId: 'handboek', documentId: 'guides/intro',
 //     fragment: { lineStart: 3, lineEnd: 9 } }
 
-// A manifest is only ever trusted after it parses AND verifies.
-const manifest = KnowledgeCatalogManifestSchema.parse(JSON.parse(rawManifestJson));
+// A manifest is only ever trusted after it parses AND verifies. Trust anchors
+// are the publisher keys you accept, [{ keyId, publicKeyPem }], obtained out of band.
+const trustAnchors: KnowledgeTrustAnchor[] = JSON.parse(
+  await readFile('./trust-anchors.json', 'utf8'),
+);
+const manifest = KnowledgeCatalogManifestSchema.parse(
+  JSON.parse(await readFile('./extracted/manifest.json', 'utf8')),
+);
 const verdict = verifyManifestSignature(manifest, trustAnchors);
 if (!verdict.ok) throw new Error(`untrusted catalog: ${verdict.reason}`);
 
 // Passage vectors are packed with these exact formulas, never a SQLite extension's.
-const packed = quantizeInt8(unitVector);
+const packed = quantizeInt8([0.6, -0.8]); // Int8Array [76, -102]
 ```
+
+`./extracted/manifest.json` is the manifest of an extracted `.gezk` archive.
+Publishers sign it with `signManifest` from `@bendyline/gezk/node`, using a key
+from `generateKnowledgeSigningKeyPair`, and publish the public half as a trust
+anchor.
 
 The format specification, JSON Schemas, conformance fixtures and the Python
 reference reader live in [bendyline/gezk](https://github.com/bendyline/gezk).

@@ -6,12 +6,14 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   realpath,
   rename,
   rm,
 } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { inflateRawSync } from 'node:zlib';
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -117,9 +119,12 @@ async function verifyFiles(root, manifest) {
 const LICENSE_INPUTS = 'native/licenses/';
 
 /**
- * `allowStale` is for packs outside a release. A native release is cut from a
- * merged commit, so a pull request that changes the wrapper sources cannot pin
- * its own, and failing its packs would make that change impossible to merge.
+ * Report where `native/runtime` has moved past the staged release. Packs and
+ * releases pass `allowStale`: the package ships the pinned release as built,
+ * and runtime changes reach it when the pin moves. What would actually break is
+ * the plugin calling runtime API the pinned release lacks, which
+ * `verifyPluginRuntimeApi` refuses. A name that escapes the repository always
+ * throws.
  */
 export async function verifyProducerSources(
   manifest,
@@ -145,13 +150,213 @@ export async function verifyProducerSources(
   }
   if (staleSources.length)
     warn(
-      `Native runtime ${manifest.packageVersion} predates changes to ${staleSources.join(', ')}; a release needs a new native build first.`,
+      `Native runtime ${manifest.packageVersion} predates changes to ${staleSources.join(', ')}; they ship when the pin moves to a newer native release.`,
     );
   if (staleNotices.length)
     warn(
       `Native runtime ${manifest.packageVersion} predates changes to ${staleNotices.join(', ')}; its license notices refresh with the next native build.`,
     );
   return staleNotices;
+}
+
+/* ───────────── The plugin's use of the pinned runtime's API ───────────── */
+
+/**
+ * The consuming app compiles the plugin (`ios/Sources`, `android/src`)
+ * against the staged runtime, never against `native/runtime` in this repo. So
+ * the plugin may name only runtime API the staged release already declares.
+ * Code that needs something newer reaches it in a way that still works
+ * without it: a notification or map key by name, a feature check, a dynamic
+ * call. Names are compared, not signatures, so a new member whose name the
+ * pinned runtime already declares elsewhere is not caught.
+ */
+export async function verifyPluginRuntimeApi({
+  capacitorRoot = packageRoot,
+  repoRoot,
+  manifest,
+  warn = console.warn,
+}) {
+  const repoSources = Object.keys(manifest.sources ?? {});
+  const platforms = [
+    {
+      lang: 'swift',
+      pinned: () => readTree(path.join(capacitorRoot, 'native/ios/Sources'), '.swift'),
+      repo: repoSources.filter((name) => name.endsWith('.swift')),
+      plugin: path.join(capacitorRoot, 'ios/Sources'),
+      ext: '.swift',
+    },
+    {
+      lang: 'java',
+      pinned: () => readPinnedJavaSources(path.join(capacitorRoot, 'native/android/maven')),
+      repo: repoSources.filter((name) => name.endsWith('.java') && !name.includes('/src/test/')),
+      plugin: path.join(capacitorRoot, 'android/src/main/java'),
+      ext: '.java',
+    },
+  ];
+  const problems = [];
+  for (const platform of platforms) {
+    const pinnedTexts = await platform.pinned();
+    if (pinnedTexts.length === 0) {
+      warn(
+        `The staged ${platform.lang} runtime ships no sources, so the plugin's use of its API was not checked.`,
+      );
+      continue;
+    }
+    const pinned = publicNames(pinnedTexts, platform.lang);
+    const repoTexts = [];
+    for (const name of platform.repo) {
+      const text = await readFile(path.resolve(repoRoot, name), 'utf8').catch(() => null);
+      if (text !== null) repoTexts.push(text);
+    }
+    const unpinned = [...publicNames(repoTexts, platform.lang)].filter((name) => !pinned.has(name));
+    if (unpinned.length === 0) continue;
+    for (const [file, text] of await readTreeWithNames(platform.plugin, platform.ext)) {
+      const used = codeIdentifiers(text, platform.lang);
+      const names = unpinned.filter((name) => used.has(name));
+      if (names.length > 0) {
+        problems.push(
+          `${path.relative(capacitorRoot, file).split(path.sep).join('/')} uses ${names.join(', ')}`,
+        );
+      }
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `The plugin uses native runtime API that native-v${manifest.packageVersion} does not have (${problems.join('; ')}). Apps compile the plugin against that release, so reach the newer API in a way that still works without it, or move the pin.`,
+    );
+  }
+}
+
+/** Public declarations in Swift or Java source, comments and strings removed. */
+export function publicNames(texts, lang) {
+  const patterns =
+    lang === 'swift'
+      ? [
+          /\b(?:public|open)\b(?:\s+(?:static|class|final|override|convenience|required|mutating|nonisolated|dynamic|lazy|weak|unowned|indirect|\w+\(set\)|@[\w.]+(?:\([^)]*\))?))*\s+(?:func|var|let|class|struct|enum|protocol|typealias|actor)\s+([A-Za-z_]\w*)/g,
+          /\bcase\s+([A-Za-z_]\w*)/g,
+        ]
+      : [
+          /\bpublic\b(?:\s+(?:static|final|abstract|sealed))*\s+(?:class|interface|enum|record|@interface)\s+([A-Za-z_$][\w$]*)/g,
+          /\bpublic\b(?:\s+(?:static|final|synchronized|abstract|native|default|transient|volatile))*\s+(?:<[^>]*>\s+)?[\w.$]+(?:<[^;{}()]*>)?(?:\[\])*\s+([A-Za-z_$][\w$]*)\s*[(;=]/g,
+        ];
+  const keywords = new Set(['let', 'var', 'is', 'default', 'case', '_']);
+  const names = new Set();
+  for (const text of texts) {
+    const code = stripCommentsAndStrings(text, lang);
+    for (const pattern of patterns) {
+      for (const match of code.matchAll(pattern)) {
+        if (!keywords.has(match[1])) names.add(match[1]);
+      }
+    }
+  }
+  return names;
+}
+
+function codeIdentifiers(text, lang) {
+  return new Set(stripCommentsAndStrings(text, lang).match(/[A-Za-z_$][\w$]*/g) ?? []);
+}
+
+/**
+ * Blank out comments and string literals, so a name the plugin only mentions,
+ * or passes as text (the way it reaches a newer API on purpose), is not a use.
+ */
+export function stripCommentsAndStrings(text, lang) {
+  let out = '';
+  let i = 0;
+  let depth = 0;
+  while (i < text.length) {
+    const two = text.slice(i, i + 2);
+    if (depth > 0) {
+      if (two === '/*') {
+        depth += lang === 'swift' ? 1 : 0;
+        i += 2;
+      } else if (two === '*/') {
+        depth -= 1;
+        i += 2;
+      } else i += 1;
+      continue;
+    }
+    if (two === '/*') {
+      depth = 1;
+      i += 2;
+    } else if (two === '//') {
+      while (i < text.length && text[i] !== '\n') i += 1;
+    } else if (text.startsWith('"""', i)) {
+      const end = text.indexOf('"""', i + 3);
+      i = end < 0 ? text.length : end + 3;
+      out += ' ';
+    } else if (text[i] === '"' || (lang === 'java' && text[i] === "'")) {
+      const quote = text[i];
+      i += 1;
+      while (i < text.length && text[i] !== quote && text[i] !== '\n')
+        i += text[i] === '\\' ? 2 : 1;
+      i += 1;
+      out += ' ';
+    } else {
+      out += text[i];
+      i += 1;
+    }
+  }
+  return out;
+}
+
+async function readTreeWithNames(root, ext) {
+  const entries = await readdir(root, { recursive: true }).catch(() => []);
+  const files = entries.filter((name) => name.endsWith(ext)).sort();
+  return Promise.all(
+    files.map(async (name) => {
+      const file = path.join(root, name);
+      return [file, await readFile(file, 'utf8')];
+    }),
+  );
+}
+
+async function readTree(root, ext) {
+  return (await readTreeWithNames(root, ext)).map(([, text]) => text);
+}
+
+/** The pinned Android runtime's API, from the sources jar beside its AAR. */
+async function readPinnedJavaSources(mavenRoot) {
+  const runtime = path.join(mavenRoot, 'com/bendyline/gezel/gezel-runtime');
+  const entries = await readdir(runtime, { recursive: true }).catch(() => []);
+  const jar = entries.find((name) => name.endsWith('-sources.jar'));
+  if (!jar) return [];
+  const sources = readZipTextEntries(await readFile(path.join(runtime, jar)), (name) =>
+    name.endsWith('.java'),
+  );
+  return [...sources.values()];
+}
+
+/** Text entries of a zip archive (a sources jar): stored or deflated, no zip64. */
+export function readZipTextEntries(buffer, accept) {
+  let end = -1;
+  for (let i = buffer.length - 22; i >= Math.max(0, buffer.length - 65_557); i -= 1) {
+    if (buffer.readUInt32LE(i) === 0x06054b50) {
+      end = i;
+      break;
+    }
+  }
+  if (end < 0) throw new Error('Not a zip archive');
+  const count = buffer.readUInt16LE(end + 10);
+  let offset = buffer.readUInt32LE(end + 16);
+  const entries = new Map();
+  for (let n = 0; n < count; n += 1) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error('Corrupt zip directory');
+    const method = buffer.readUInt16LE(offset + 10);
+    const size = buffer.readUInt32LE(offset + 20);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const skip = nameLength + buffer.readUInt16LE(offset + 30) + buffer.readUInt16LE(offset + 32);
+    const local = buffer.readUInt32LE(offset + 42);
+    const name = buffer.toString('utf8', offset + 46, offset + 46 + nameLength);
+    offset += 46 + skip;
+    if (!accept(name)) continue;
+    const start = local + 30 + buffer.readUInt16LE(local + 26) + buffer.readUInt16LE(local + 28);
+    const data = buffer.subarray(start, start + size);
+    if (method === 0) entries.set(name, data.toString('utf8'));
+    else if (method === 8) entries.set(name, inflateRawSync(data).toString('utf8'));
+    else throw new Error(`Unsupported zip compression ${method} for ${name}`);
+  }
+  return entries;
 }
 
 export function stageNative(
