@@ -95,7 +95,7 @@ describe('ProjectAddGezelDialog project-type suggestions', () => {
     expect(within(suggested).getByText('Core role')).toBeInTheDocument();
     expect(within(suggested).getByText('Suggested')).toBeInTheDocument();
 
-    const workshop = screen.getByRole('region', { name: 'From your workshop' });
+    const workshop = screen.getByRole('region', { name: 'Already on your crew' });
     expect(within(workshop).queryByText('Lin')).not.toBeInTheDocument();
 
     const otherRoles = screen.getByRole('region', { name: 'Add a new crew member for a role' });

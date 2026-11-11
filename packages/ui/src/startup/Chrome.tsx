@@ -2,6 +2,7 @@ import type { StartupHomeSnapshot } from '@bendyline/gezel';
 import { AppBrand } from '../components/AppBrand.js';
 import { WorkshopIcon } from '../components/AreaIcon.js';
 import {
+  NAVIGATION_MORE_LABEL,
   NavigationArea,
   NavigationGroup,
   NavigationHome,
@@ -140,7 +141,7 @@ export function StartupNavigation({
         <NavigationGroup id="gezels" area="gezels" label="Crew" expanded={false} onToggle={noop} />
         <NavigationGroup
           id="workshop"
-          label="Workshop"
+          label={NAVIGATION_MORE_LABEL}
           icon={<WorkshopIcon size={18} />}
           expanded={false}
           onToggle={noop}
@@ -170,11 +171,11 @@ export function StartupPlaceholder({ lines = [92, 78, 85, 40] }: { lines?: numbe
   );
 }
 
-/** "Opening your workshop…", with its dots in motion. */
+/** "Opening Gezel…", with its dots in motion. */
 export function StartupLoadingLine() {
   return (
     <output className="startup-loading-line">
-      Opening your workshop
+      Opening Gezel
       <span className="startup-loading-dots" aria-hidden="true">
         <span>.</span>
         <span>.</span>
@@ -213,7 +214,7 @@ export function StartupWelcome({
       )}
       <div className="meester-welcome-body">
         <h2 className="meester-welcome-title">
-          {greeting}.{meester?.name ? ` I'm ${meester.name} — I run this workshop.` : ''}
+          {greeting}.{meester?.name ? ` I'm ${meester.name} — I run things here.` : ''}
         </h2>
         <StartupPlaceholder lines={[96, 88, 60]} />
         <div className="startup-placeholder-cards" aria-hidden="true">

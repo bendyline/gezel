@@ -324,7 +324,7 @@ export function createHandboekEngine(opts: HandboekEngineOptions): HandboekEngin
           article.markdown.length > MAX_AGENT_MARKDOWN
             ? {
                 ...article,
-                markdown: `${article.markdown.slice(0, MAX_AGENT_MARKDOWN)}\n\n[truncated — open "${article.title}" in the Handboek for the rest]`,
+                markdown: `${article.markdown.slice(0, MAX_AGENT_MARKDOWN)}\n\n[truncated — open "${article.title}" in Help for the rest]`,
               }
             : article,
         );

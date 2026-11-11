@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { captureScreenshot } from './helpers/screenshot.js';
@@ -37,8 +38,7 @@ test.describe('Image recognition settings', () => {
       }),
     });
     page = await app.firstWindow();
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(3000);
+    await waitForAppReady(page);
   });
 
   test.afterAll(async () => {

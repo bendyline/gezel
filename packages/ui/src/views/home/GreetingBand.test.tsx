@@ -19,7 +19,7 @@ vi.mock('./StatusReportPanel.js', () => ({
 vi.mock('./IntroHandboekArticle.js', () => ({
   IntroHandboekArticle: () => (
     <div data-testid="home-intro-article">
-      <button type="button">Open in Handboek →</button>
+      <button type="button">Open in Help →</button>
       <div role="radiogroup" aria-label="View as">
         <label>
           <input type="radio" name="intro-mode" checked readOnly />
@@ -164,7 +164,7 @@ describe('GreetingBand', () => {
       greetingForHour(new Date().getHours()),
       'Night shift',
       'Create',
-      'Handboek',
+      'Help',
     ]);
     expect(screen.getByRole('button', { name: '1 waiting on you' })).toBeVisible();
     expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
@@ -207,7 +207,7 @@ describe('GreetingBand', () => {
     }
     const user = userEvent.setup();
     render(<StatefulBand />);
-    const handboek = screen.getByRole('tab', { name: 'Handboek' });
+    const handboek = screen.getByRole('tab', { name: 'Help' });
 
     await user.click(handboek);
     expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
@@ -289,7 +289,7 @@ describe('GreetingBand', () => {
   it('shows the Handboek article with read and watch choices in the tour', () => {
     renderBand({ tab: 'tour' });
     expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Open in Handboek/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open in Help/ })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Read' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Watch' })).not.toBeChecked();
     expect(screen.queryByText('What a meester is')).not.toBeInTheDocument();

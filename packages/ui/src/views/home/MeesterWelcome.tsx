@@ -228,7 +228,7 @@ export function MeesterWelcome({
       )}
       <div className="meester-welcome-body">
         <h2 className="meester-welcome-title">
-          {greeting}. {introduce(meesterName)} — I run this workshop.
+          {greeting}. {introduce(meesterName)} — I run things here.
         </h2>
 
         {setup && <WelcomeTools setup={setup} />}

@@ -10336,7 +10336,7 @@ server.tool(
 
 server.tool(
   'how_do_i',
-  "Consult the Handboek — gezel's built-in documentation — for meta questions about gezel itself: what a role can do, how craftbooks / projects / memory / models work, where files live, how to set something up. Ask in plain language and answer from what it returns instead of guessing.",
+  "Consult Help — Gezel's built-in documentation — for meta questions about gezel itself: what a role can do, how craftbooks / projects / memory / models work, where files live, how to set something up. Ask in plain language and answer from what it returns instead of guessing.",
   {
     question: z
       .string()
@@ -10351,7 +10351,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: 'The Handboek has no matching article. Answer from your own knowledge of gezel and say so when unsure.',
+            text: 'Help has no matching article. Answer from your own knowledge of Gezel and say so when unsure.',
           },
         ],
       };

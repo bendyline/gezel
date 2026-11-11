@@ -129,7 +129,7 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   search_sessions: 'Search past chats',
 
   // Handboek (built-in documentation)
-  how_do_i: 'Look it up in the Handboek',
+  how_do_i: 'Look it up in Help',
 
   // Search across the workspace
   grep_files: 'Search across files',

@@ -92,7 +92,7 @@ test('the greeting collapses and the tour tab swaps content', async () => {
   // aside for this visit. Wait for it, so a late introduction cannot collapse
   // the band under the clicks below; reopening it by hand is authoritative.
   await expect(
-    page.getByTestId('meester-welcome').getByRole('heading', { name: /I run this workshop/ }),
+    page.getByTestId('meester-welcome').getByRole('heading', { name: /I run things here/ }),
   ).toBeVisible({ timeout: 20_000 });
   await page.getByRole('button', { name: 'Expand the greeting' }).click();
   await expect(page.getByText('Tip of the day')).toBeVisible();
@@ -124,11 +124,11 @@ test('the greeting collapses and the tour tab swaps content', async () => {
 
   // The tour tab swaps the greeting + tip for the tour content in place.
   await page.getByRole('button', { name: 'Collapse the greeting' }).click();
-  const tour = page.getByRole('tab', { name: 'Handboek' });
+  const tour = page.getByRole('tab', { name: 'Help' });
   await tour.click();
   await expect(tour).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByText('Tip of the day')).toBeHidden();
-  await expect(page.getByRole('button', { name: /Open in Handboek/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Open in Help/ })).toBeVisible();
   await expect(page.getByRole('radio', { name: 'Read' })).toBeVisible();
   await expect(page.getByRole('radio', { name: 'Watch' })).toBeVisible();
   await expect(page.getByText(/off-disk/i)).toHaveCount(0);
@@ -143,7 +143,7 @@ test('renders the workshop in dark (dusk) mode', async () => {
   // Return to the greeting button left inactive by the previous test for a clean shot.
   if (
     await page
-      .getByRole('button', { name: /Open in Handboek/ })
+      .getByRole('button', { name: /Open in Help/ })
       .isVisible()
       .catch(() => false)
   ) {
@@ -152,13 +152,13 @@ test('renders the workshop in dark (dusk) mode', async () => {
 
   await expect(page.getByTestId('home-workshop')).toBeVisible({ timeout: 20_000 });
 
-  // The day surface stays on the shared mushroom-beige foundation tone rather
-  // than drifting back to yellow parchment or to the old flat greige.
+  // The day surface stays on the shared workshop paper (--gezel-paper-workshop,
+  // a quiet cream on the parchment hue) rather than drifting rose or greige.
   const dayPaper = await page.evaluate(() => {
     const el = document.querySelector('.home-workshop');
     return el ? getComputedStyle(el).getPropertyValue('--paper').trim() : '';
   });
-  expect(dayPaper).toBe('#efe6dc');
+  expect(dayPaper).toBe('#ece7dc');
 
   // Flip the app's explicit-dark trigger ([data-theme="dark"] on <html>),
   // exercising the `.home-workshop` dusk token override.

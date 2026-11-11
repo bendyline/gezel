@@ -30,7 +30,7 @@ const GROUP_ORDER: Array<{ kind: UnifiedSearchResultKind; label: string }> = [
   { kind: 'session', label: 'Threads' },
   { kind: 'memory', label: 'Memories' },
   { kind: 'craftbook', label: 'Plans' },
-  { kind: 'handboek', label: 'Handboek' },
+  { kind: 'handboek', label: 'Help' },
   { kind: 'knowledge', label: 'Knowledge' },
 ];
 

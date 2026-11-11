@@ -94,7 +94,7 @@ test.describe('app shell', () => {
           getComputedStyle(element).getPropertyValue('--paper').trim(),
         ),
       )
-      .toBe('#efe6dc');
+      .toBe('#ece7dc');
 
     await shot(page, 'app-shell', { area: 'shell', description: 'Full app shell, light theme' });
 

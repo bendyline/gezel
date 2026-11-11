@@ -6,7 +6,7 @@ import { type Page, expect } from '@playwright/test';
  */
 export async function openFirstHandboekArticle(page: Page): Promise<void> {
   const view = page.getByTestId('knowledge-view');
-  await expect(view.locator('.knowledge-catalog-name')).toHaveText('Gezel Handboek');
+  await expect(view.locator('.knowledge-catalog-name')).toHaveText('Gezel Help');
   await view.locator('.knowledge-doc-row').first().click();
 }
 
@@ -17,7 +17,7 @@ export async function expectHandboekArticle(
 ): Promise<void> {
   const view = page.getByTestId('knowledge-view');
   await expect(view).toBeVisible();
-  await expect(view.locator('.knowledge-catalog-name')).toHaveText('Gezel Handboek');
+  await expect(view.locator('.knowledge-catalog-name')).toHaveText('Gezel Help');
   await expect(view.getByRole('region', { name: 'Article' })).toHaveAttribute('aria-busy', 'false');
   const heading = view.locator('.knowledge-reader-header h2');
   await expect(heading).toBeVisible();

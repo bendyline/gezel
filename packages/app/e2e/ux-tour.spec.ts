@@ -107,10 +107,10 @@ test('01 - home workshop renders and a chat turn round-trips', async () => {
 
 test('02 - the home tour tab shows the intro article', async () => {
   // The greeting steps aside once a conversation starts, and 01 started one.
-  const tour = page.getByRole('tab', { name: 'Handboek' });
+  const tour = page.getByRole('tab', { name: 'Help' });
   await tour.click();
   await expect(tour).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('button', { name: /Open in Handboek/ })).toBeVisible({
+  await expect(page.getByRole('button', { name: /Open in Help/ })).toBeVisible({
     timeout: 15_000,
   });
   await shot('03-home-tour-article.png');

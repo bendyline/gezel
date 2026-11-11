@@ -363,69 +363,77 @@ export function VideoModelManager({
             </p>
           )}
           {installed.length > 0 && (
-            <table className="ollama-model-table">
-              <thead>
-                <tr>
-                  {showActivePicker && (
-                    <th scope="col" className="gz-active-model-column">
-                      Active
-                    </th>
-                  )}
-                  <th>Name</th>
-                  <th>Size</th>
-                  <th>Added</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {installed.map((m) => (
-                  <tr key={m.id}>
+            // Five columns do not fit a phone's panel; the table scrolls inside it.
+            <div className="ollama-model-table-wrap">
+              <table className="ollama-model-table">
+                <thead>
+                  <tr>
                     {showActivePicker && (
-                      <td className="gz-active-model-column">
-                        <input
-                          type="radio"
-                          name="active-video-model"
-                          className="gz-active-model-radio"
-                          aria-label={`Use ${m.name} as the active video model`}
-                          checked={activeModelId === m.id}
-                          onChange={() => {
-                            // Re-selecting the active model would still reset the
-                            // provider and cold-reload a warm engine — no-op it.
-                            if (activeModelId !== m.id) void onSetActiveModel?.(m.id);
-                          }}
-                        />
-                      </td>
+                      <th scope="col" className="gz-active-model-column">
+                        Active
+                      </th>
                     )}
-                    <td>
-                      {m.name}
-                      {videoModelAbilities(m).length > 0 && (
-                        <span className="muted small"> · {videoModelAbilities(m).join(' · ')}</span>
-                      )}
-                    </td>
-                    <td>{formatSize(m.approxSizeBytes)}</td>
-                    <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
-                    <td>
-                      {m.readOnly ? (
-                        <span
-                          className="muted small"
-                          title="Installed for every user of this machine by the Gezel service. It can only be removed by an administrator, not from here."
-                        >
-                          Machine-wide
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          className="gz-link-button"
-                          onClick={() => setToDelete(m.id)}
-                        >
-                          Delete
-                        </button>
-                      )}
-                    </td>
+                    <th>Name</th>
+                    <th>Size</th>
+                    <th>Added</th>
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {installed.map((m) => (
+                    <tr key={m.id}>
+                      {showActivePicker && (
+                        <td className="gz-active-model-column">
+                          <input
+                            type="radio"
+                            name="active-video-model"
+                            className="gz-active-model-radio"
+                            aria-label={`Use ${m.name} as the active video model`}
+                            checked={activeModelId === m.id}
+                            onChange={() => {
+                              // Re-selecting the active model would still reset the
+                              // provider and cold-reload a warm engine — no-op it.
+                              if (activeModelId !== m.id) void onSetActiveModel?.(m.id);
+                            }}
+                          />
+                        </td>
+                      )}
+                      <td>
+                        {m.name}
+                        {videoModelAbilities(m).length > 0 && (
+                          <span className="muted small">
+                            {' '}
+                            · {videoModelAbilities(m).join(' · ')}
+                          </span>
+                        )}
+                      </td>
+                      <td>{formatSize(m.approxSizeBytes)}</td>
+                      <td className="muted small">
+                        {new Date(m.installedAt).toLocaleDateString()}
+                      </td>
+                      <td>
+                        {m.readOnly ? (
+                          <span
+                            className="muted small"
+                            title="Installed for every user of this machine by the Gezel service. It can only be removed by an administrator, not from here."
+                          >
+                            Machine-wide
+                          </span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="gz-link-button"
+                            onClick={() => setToDelete(m.id)}
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

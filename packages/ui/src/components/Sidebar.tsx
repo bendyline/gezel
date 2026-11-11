@@ -11,7 +11,6 @@ import {
   displayName,
   isOutsideInInternalPath,
   isSharedLibraryProject,
-  resolveInterestAreas,
   roleForMatching,
 } from '@bendyline/gezel';
 import {
@@ -29,7 +28,6 @@ import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { ContextMenu, Tooltip } from '../primitives/index.js';
 import { runtimeCapabilities, supportsArea } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
-import { peekApiRead } from '../shared-api-reads.js';
 import { getSidebarSide } from '../sidebar-side.js';
 import { railSystemNotices } from '../system-notices.js';
 import { useUpdateState } from '../update-state.js';
@@ -40,6 +38,7 @@ import { GezelActionsMenu } from './GezelActionsMenu.js';
 import { GezelIcon } from './GezelIcon.js';
 import { NewPathDialog } from './NewPathDialog.js';
 import {
+  NAVIGATION_MORE_LABEL,
   NavigationArea,
   NavigationGroup,
   type NavigationGroupProps,
@@ -64,9 +63,9 @@ import { openUpdates } from './nav-actions.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
+import { useBuilderView } from './useBuilderView.js';
 import { useDebugMode } from './useDebugMode.js';
 import { useHasKnowledgeCatalogs } from './useHasKnowledgeCatalogs.js';
-import { useInterests } from './useInterests.js';
 import { useNarrowWindow } from './useNarrowWindow.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
@@ -194,11 +193,12 @@ const DEFAULT_GROUPS: Record<GroupId, boolean> = {
 // below must skip them.
 const GROUP_BACKED_AREAS: ReadonlySet<RecentTabArea> = new Set(['projects', 'documents', 'gezels']);
 
-// The builder's tools, in the order shown. They fold into one Workshop group
-// so the rail opens on the places an owner uses (Home, Projects, Documents,
-// Crew): a first hour should not start in a step editor or an audit log.
-// Folding is not hiding. The group is one click away, and each area keeps
-// the capability and advanced-features checks it had as a plain link.
+// The builder's tools, in the order shown. They fold into one group, shown
+// as "More", so the rail opens on the places an owner uses (Home, Projects,
+// Documents, Crew): a first hour should not start in a step editor or an
+// audit log. Folding is not hiding. The group is one click away, and each
+// area keeps the capability and advanced-features checks it had as a plain
+// link. The code and the stored key keep the group's first name, `workshop`.
 const WORKSHOP_AREAS: readonly RecentTabArea[] = ['tasks', 'craftbooks', 'scripts', 'history'];
 const WORKSHOP_AREA_SET: ReadonlySet<RecentTabArea> = new Set(WORKSHOP_AREAS);
 
@@ -366,22 +366,18 @@ export function Sidebar({
     }
     return { workshopLinks: workshop, areaLinks: links };
   }, [showAdvancedFeatures, debugMode, hasKnowledgeCatalogs, currentArea]);
-  // Workshop starts closed for an owner. It starts open for someone who said
-  // they build software, or who turned advanced features on: their interests
-  // set the default and nothing else, and their own choice replaces it.
-  const interests = useInterests();
-  const buildsSoftware = (
-    interests.loaded ? interests.areas : resolveInterestAreas(peekApiRead('getConfig'))
-  ).includes('software');
-  const workshopOpensByDefault = showAdvancedFeatures || buildsSoftware;
+  // The group starts closed for an owner and open for a builder
+  // (useBuilderView). That sets the default and nothing else: the person's
+  // own choice replaces it.
+  const workshopOpensByDefault = useBuilderView();
   const currentWorkshopArea =
     currentArea && WORKSHOP_AREA_SET.has(currentArea) ? currentArea : null;
   // Session-only, so opening itself for a destination is never stored as the
   // person's choice.
   const [workshopOpenedItself, setWorkshopOpenedItself] = useState(currentWorkshopArea !== null);
   const workshopExpanded = workshopOpenedItself || (groups.workshop ?? workshopOpensByDefault);
-  // Installation and updater notices live beneath Settings, which is the
-  // lower corner of the rail in the default right-sidebar layout. Routine
+  // Installation and updater notices live beneath Settings, at the foot of
+  // the rail's links on whichever side the rail sits. Routine
   // "up to date" feedback clears after a moment; download and ready states
   // remain visible for the full lifecycle.
   const updateState = useUpdateState();
@@ -1393,14 +1389,14 @@ export function Sidebar({
           )}
         </Group>
 
-        {/* Workshop — the builder's tools. It has no screen of its own, so
-            its title opens and closes it and there is nothing to add. On the
-            icon rail an open group, or one holding the current area, keeps
-            its links under its icon. */}
+        {/* More — the builder's tools. It has no screen of its own, so its
+            title opens and closes it and there is nothing to add. On the icon
+            rail an open group, or one holding the current area, keeps its
+            links under its icon. */}
         {workshopLinks.length > 0 && (
           <NavigationGroup
             id="workshop"
-            label="Workshop"
+            label={NAVIGATION_MORE_LABEL}
             icon={<WorkshopIcon size={18} />}
             expanded={workshopExpanded || (collapsed && currentWorkshopArea !== null)}
             collapsed={collapsed}

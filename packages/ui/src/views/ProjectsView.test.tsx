@@ -8,6 +8,9 @@ import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
+// The owner's view by default; a test of the builder's readouts turns it on.
+const view = vi.hoisted(() => ({ builder: false }));
+vi.mock('../components/useBuilderView.js', () => ({ useBuilderView: () => view.builder }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 vi.mock('../primitives/Tabs.js', () => primitivesMock.Tabs);
 
@@ -274,6 +277,7 @@ const PROJECTS: Project[] = [
 
 describe('ProjectsView', () => {
   beforeEach(() => {
+    view.builder = false;
     consumeOpenFile('pj-alpha');
     consumeOpenFile('pj-beta');
     outsideInMocks.resolveLayout.mockReset().mockReturnValue(null);
@@ -489,7 +493,30 @@ describe('ProjectsView', () => {
     expect(within(roster).getByText('Developer')).toBeInTheDocument();
   });
 
-  it('adds an existing workshop gezel from Project Settings', async () => {
+  // An owner's status bar shows a project's status only once it is paused,
+  // so the control has to be reachable from Settings.
+  it('changes the project status from Project Settings', async () => {
+    const project = { id: 'pj-alpha', ...CODE_TYPE, name: 'Alpha', packages: [], status: 'active' };
+    vi.mocked(api.getProject).mockResolvedValue(project as never);
+    vi.mocked(api.updateProject).mockImplementation(
+      async (_id, patch) => ({ ...project, ...patch }) as never,
+    );
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    const status = (await screen.findAllByTestId('mock-select')).find((select) =>
+      within(select).queryByRole('option', { name: 'Inactive' }),
+    );
+    expect(status).toHaveValue('active');
+    fireEvent.change(status as HTMLElement, { target: { value: 'inactive' } });
+    await waitFor(() =>
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', { status: 'inactive' }),
+    );
+  });
+
+  it('adds an existing crew member from Project Settings', async () => {
     vi.mocked(api.listGezels).mockResolvedValue({
       gezels: [
         {
@@ -1247,6 +1274,8 @@ describe('ProjectsView', () => {
   });
 
   it('shows workspace indexing issues and toggles the index results pane', async () => {
+    // The index chip is a builder's readout.
+    view.builder = true;
     const editableProject = {
       id: 'pj-alpha',
       ...CODE_TYPE,

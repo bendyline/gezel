@@ -396,7 +396,7 @@ export function ProjectAddGezelDialog({
           <Dialog.Description className="muted small">
             {selectedTemplate
               ? `Give this new ${plainRoleTitle(selectedTemplate.manifest.role)} a name and appearance before adding them to ${project.name}.`
-              : `Choose someone from your workshop or add a new role to ${project.name}.`}
+              : `Choose someone already on your crew or add a new role to ${project.name}.`}
           </Dialog.Description>
 
           {error && <p className="error small project-add-gezel-error">{error}</p>}
@@ -547,7 +547,7 @@ export function ProjectAddGezelDialog({
                 )}
 
                 <section aria-labelledby="project-add-existing-title">
-                  <h4 id="project-add-existing-title">From your workshop</h4>
+                  <h4 id="project-add-existing-title">Already on your crew</h4>
                   {visibleGezels.length > 0 ? (
                     <ul className="project-add-gezel-list">
                       {visibleGezels.map((gezel) => {
@@ -581,9 +581,9 @@ export function ProjectAddGezelDialog({
                   ) : (
                     <p className="muted small project-add-gezel-empty">
                       {otherAvailableGezels.length > 0
-                        ? 'No workshop crew members match that search.'
+                        ? 'No crew members match that search.'
                         : suggestedOptions.some((option) => option.kind === 'existing')
-                          ? 'No other workshop crew members are available.'
+                          ? 'No other crew members are available.'
                           : 'Every available crew member is already on this project.'}
                     </p>
                   )}

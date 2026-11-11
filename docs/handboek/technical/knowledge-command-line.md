@@ -204,7 +204,7 @@ To update a catalog, install its catalog id again or install the replacement arc
 
 `find` searches your installed catalogs directly. It does not select the project for the current directory or apply that project's catalog policy. For the session-scoped search a chat uses, see the `search` tool.
 
-Removing a private catalog deletes the daemon's installed copy, not the original `.gezk` archive you supplied. Removing a shared catalog removes your reference; public shared bytes have a separate reclamation lifecycle. The bundled Handboek is managed by Gezel and cannot be removed through this command; disable it in Knowledge settings if needed.
+Removing a private catalog deletes the daemon's installed copy, not the original `.gezk` archive you supplied. Removing a shared catalog removes your reference; public shared bytes have a separate reclamation lifecycle. The bundled Help is managed by Gezel and cannot be removed through this command; disable it in Knowledge settings if needed.
 
 ## Sign and export a catalog
 

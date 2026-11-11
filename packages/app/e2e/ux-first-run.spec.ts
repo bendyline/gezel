@@ -83,7 +83,7 @@ test('01 - first boot opens on the meester, who asks for their tools with one ke
   await expect(welcome).toHaveAttribute('data-welcome-state', 'needs-download', {
     timeout: 60_000,
   });
-  await expect(welcome.getByRole('heading', { name: /I run this workshop/ })).toBeVisible();
+  await expect(welcome.getByRole('heading', { name: /I run things here/ })).toBeVisible();
   await expect(welcome.getByRole('button', { name: /^Fetch my tools/ })).toBeVisible();
   // The key says how much; how long is a sentence under it, and what stays
   // private is the one muted line at the foot.

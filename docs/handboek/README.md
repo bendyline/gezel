@@ -1,6 +1,6 @@
-# Handboek content
+# Help content (the Handboek)
 
-This tree is the hand-curated half of the **Handboek** — gezel's built-in documentation. The service build copies it to `dist/handboek-content/` for the static HTML exporter and compatibility API. The in-app Handboek is the bundled `handboek.gezk` catalog in Knowledge; gezellen retrieve and cite it through the normal knowledge search path. `gezel handboek export` still generates the website's HTML from this tree and the generated articles.
+This tree is the hand-curated half of **Help**, gezel's built-in documentation. People read it as Help; the code, this folder, the routes and the macros keep its first name, the Handboek. The service build copies it to `dist/handboek-content/` for the static HTML exporter and compatibility API. The in-app Help is the bundled `handboek.gezk` catalog in Knowledge; gezellen retrieve and cite it through the normal knowledge search path. `gezel handboek export` still generates the website's HTML from this tree and the generated articles.
 
 The service build makes the bundled catalog; it is not committed. `packages/service/assets/handboek/` holds the archive and `handboek.gezk.lock.json`, a git-ignored local cache: the lock records a hash of every input the rendering reads (this tree, the Handboek engine and catalog loader sources, the builder, and the Gilde pin) and a hash of the rendered articles. A build with no archive builds one (about a minute); when the inputs move, it re-renders and re-embeds only if the articles changed. A local build that cannot embed (offline on first use, say) warns and ships no in-app Handboek; a CI build fails instead, and packaging refuses a service without one. CI restores both files from the Actions cache. `pnpm --filter @bendyline/gezel-service build:handboek-gezk` rebuilds by hand, and `GEZEL_SKIP_HANDBOEK_GEZK=1` skips the check. The builder freezes device-neutral `site` rendering, preserving Markdown formatting, article links, and images. It uses the pinned BGE embedding profile and may download that model on first use. Bump the service version when publishing changed catalog content; startup replaces the installed bundle when its archive digest changes and preserves the user's enabled setting.
 
@@ -85,9 +85,9 @@ A macro is a leaf directive on its own line. The engine expands it into plain ma
 
 ## Conventions
 
-- Second person, warm, plain language — the Handboek exists to make gezel approachable for non-technical people.
+- Second person, warm, plain language — Help exists to make gezel approachable for non-technical people.
 - Don't re-explain gezel in every article. [What is gezel?](conceptual/welcome.md) says what a gezel is and introduces the Meester, so other articles use those words without defining them and link to the article that covers a concept rather than restating it.
-- The only Dutch words left are *gezel*, *Handboek* and *Meester*. Everything else has a plain English name (the Crew Lead, the Librarian, the Scribe; see [plain-names.ts](../../packages/core/src/roles/plain-names.ts)), so use that name and don't bring the Dutch one back.
+- The only Dutch words left are *gezel* and *Meester*. The documentation is called Help. Everything else has a plain English name (the Crew Lead, the Librarian, the Scribe; see [plain-names.ts](../../packages/core/src/roles/plain-names.ts)), so use that name and don't bring the Dutch one back.
 - No emojis (repo-wide rule).
 - Don't hard-wrap prose — one paragraph is one line. The squisq renderer keeps a single newline inside a paragraph as a real line break, so 80-column wrapping shows up as ragged breaks in the app. The engine folds soft breaks defensively (`packages/service/src/handboek/unwrap.ts`, for prose that comes from gilde), but sources here stay unwrapped so diffs stay readable.
 - Relative links between articles and to `assets/…` only; the link checker (`scripts/check-markdown-links.mjs`) runs over this tree.

@@ -33,7 +33,7 @@ Three words that should describe any screen:
 
    **Gezel is the product, and Gezel is who does the work.** "gezel",
    "gezels" and "gezellen" are not words for a helper in anything a person
-   reads: the app, the Handboek's articles, command-line help and package
+   reads: the app, Help's articles, command-line help and package
    READMEs. With most models one generalist carries a job from start to
    finish, so copy must not promise or presume a team. Three rules:
 
@@ -52,6 +52,16 @@ Three words that should describe any screen:
    `gezel.md`, routes, ids, API and tool names — and so does text written
    only for a model. `styles/owner-vocabulary.test.ts` reports either word
    used for a helper in interface text.
+
+   **The place has no name of its own, and the manual is Help.** Neither
+   "workshop" nor "workbench" is a word the interface leans on: nothing a
+   person reads names the whole app that way, and no area, group or key is
+   called either. Say Gezel ("Opening Gezel…", "when Gezel is ready"), or say
+   what is there ("Already on your crew"). The built-in documentation is
+   **Help** wherever a person or a model reads it: the Home tab, "Open in
+   Help", the Knowledge catalog "Gezel Help", the gezel.com pages. Code keeps
+   its first name (`handboek` in folders, routes, macros, ids and the
+   `gezel handboek` command), the way it keeps `voorman`.
 
    **Roles are plain English; the Meester is the one Dutch title.** A
    newcomer met a crew of Voormannen and Ceremoniemeesters and could not tell
@@ -113,7 +123,7 @@ pacing of a transition. If a first-time user can't quite put a finger on
   the parchment hue (OKLCH h≈88). The reading, workshop and control papers
   carry less color than the chrome around them, so long text sits on a quiet
   cream without a yellow cast, but they are the same hue: they used to lean
-  rose (h≈55-70), and a chat bubble or a Handboek page read pink beside the
+  rose (h≈55-70), and a chat bubble or a Help page read pink beside the
   yellow rail. A new paper tone is a lightness step on that hue, with chroma
   between 0.010 and 0.032.
 
@@ -240,7 +250,7 @@ pacing of a transition. If a first-time user can't quite put a finger on
   a control. Other copyable values opt in with `.gz-selectable-text`
   (preformatted output is selectable too).
 - **Spelling is American English** everywhere a person reads it: UI
-  strings, Handboek articles, starter prompts, and prompt text a model may
+  strings, Help articles, starter prompts, and prompt text a model may
   echo back. *Practice*, *color*, *organize*, *labeled*, *catalog*, *gray*.
   Code that recognizes what a person typed (brief routing, intent matchers)
   keeps accepting British spellings too.
@@ -363,7 +373,7 @@ Rules:
   subject, the choice keys keep their own inner `role="radiogroup"` (one Tab
   stop, arrows move), and a 1px `--tray-border` divider separates them from
   the action keys so an action never reads as one more choice. The Home
-  Handboek tab's *Read · Watch | Open in Handboek* is the reference.
+  Help tab's *Read · Watch | Open in Help* is the reference.
 - **Native `<input type="radio">` stays native** in dense config forms
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to
@@ -817,7 +827,7 @@ the chat palette and page rhythm and sets headings and body in Hanken Grotesk.
 Those surfaces are the report reader, the Home status and night-review
 panels, and the rail's document preview. `RenderedMarkdown` takes
 `register="report"` for the same reason: the document a question attaches,
-a draft plan, and a step's instructions. Chat, the Handboek and albums keep
+a draft plan, and a step's instructions. Chat, Help and albums keep
 the serif. A new surface that shows a report uses the report theme, never
 `gezelChatTheme`.
 
@@ -877,7 +887,7 @@ Three things are sized outside the scale, on purpose:
 
 - **Long-form reading surfaces** set their own comfortable reading size:
   chat prose (15px PT Serif, scaled by the person's font setting), the Home
-  welcome's lines and the Handboek's articles (16px and up).
+  welcome's lines and Help's articles (16px and up).
 - **Glyphs** (carets, close marks, arrows, a prompt sigil) are sized as
   drawings.
 - **A count raised on the corner of a key** in the phone header (9-10px in
@@ -1005,7 +1015,7 @@ testing; it never switches to a second application or a different data store.
 
 **One navigation column at a time.** An area that brings its own list beside
 its content (Crew, Documents, Tasks, Plans, Scripts, History, Settings,
-Handboek, Knowledge, Benchmarks: `LIST_AREAS` in
+Help, Knowledge, Benchmarks: `LIST_AREAS` in
 [Sidebar.tsx](../packages/ui/src/components/Sidebar.tsx)) folds the wide
 rail to its icons on its own. With both open, the content sat between two
 lists, about 520px of a 1440px window. Leaving the area restores the rail
@@ -1014,21 +1024,54 @@ there (`gezel:nav:sidebar-stay-open`), and collapsing it there hands it back
 to the automatic fold. The person's own collapse choice for the rest of the
 app is a separate setting that the fold never writes.
 
-**The rail leads with places; the builder's tools fold into Workshop.** The
-rail lists Home, Projects, Documents and Crew, then one **Workshop** group
+**The rail leads with places; the builder's tools fold into More.** The
+rail lists Home, Projects, Documents and Crew, then one **More** group
 holding Tasks, Plans, Scripts and History (`WORKSHOP_AREAS` in
-[Sidebar.tsx](../packages/ui/src/components/Sidebar.tsx)), then Knowledge
-and Settings. Workshop has no screen of its own, so its title opens and
-closes it the same as its caret, and it has no "+" key. It starts closed,
-opens when one of its areas becomes the destination, and keeps the person's
-own choice (`workshop` in `gezel:nav:groups`). An owner's first hour should
+[Sidebar.tsx](../packages/ui/src/components/Sidebar.tsx); the label is
+`NAVIGATION_MORE_LABEL`), then Knowledge and Settings. The group has no
+screen of its own, so its title opens and closes it the same as its caret,
+and it has no "+" key. It starts closed, opens when one of its areas becomes
+the destination, and keeps the person's own choice (`workshop` in
+`gezel:nav:groups`, the group's first name). An owner's first hour should
 not start in a step editor or an audit log. Folding is not hiding: every
 area stays one click away with the checks it had as a plain link, a group
 with no available area is not drawn, and the person's interests only set the
-default (open for `software`, or with advanced features on; see "Interests
-order; they never hide"). On the icon rail the group is one icon. An open
-group, or one holding the current area, lists its areas' icons beneath it;
-pressing the icon of a closed group expands the rail and opens it.
+default (see the next rule and "Interests order; they never hide"). On the
+icon rail the group is one icon. An open group, or one holding the current
+area, lists its areas' icons beneath it; pressing the icon of a closed group
+expands the rail and opens it.
+
+**The rail sits on the left.** It is under the brand and the back and
+forward keys, so navigation reads in one direction: the rail, then an area's
+own list (Settings' pages, Help's sections, a project's tabs), then the
+content. The right edge is left for what a click opens: a file, a document
+pane, a page's contents. The rail was on the right until 2026-11-11, to keep
+attention on the content, and Settings and Help then had navigation on both
+edges of the window. The side is the person's choice (Settings → General →
+Appearance → Sidebar position, `config.sidebarSide`), and a choice outlives a
+change of default because the picker writes the side by name; only an
+install that never chose follows `DEFAULT_SIDEBAR_SIDE`. Every layout is
+built for both sides, and a spec that measures the rail checks both.
+
+**One test splits the owner's view from the builder's.** A builder is
+someone who picked Software as an interest or turned advanced features on
+(`useBuilderView`). That one test sets three defaults, so they can never
+disagree:
+
+| Surface | Owner | Builder |
+| --- | --- | --- |
+| The rail's More group | Starts closed | Starts open |
+| Title bar | Activity, "This PC", and a plan's quota only once it is 80% used | Also the Claude CLI worker readout, and quota whenever that plan is running |
+| A project's status bar | Drawn only for something to act on: a folder Gezel cannot change, a paused project, search that cannot work, a linked repository | The full bar: index state, status, access |
+
+"This PC" is not part of the split: it stays in the title bar for everyone
+whenever a local engine is in use, because it says where the person's work
+is running. The split only sets what shows at rest. Nothing is removed: a
+project's status is also a field in its Settings (Preferences), indexing
+shows in Activity while it runs, and a state the person has to act on shows
+in either view. A new project used to open over "Not scanned yet" and
+"Active", which told its owner nothing; with nothing to say, the bar is not
+drawn at all.
 
 The native shell shares the responsive frame, brand, navigation rows, project
 section tabs, character renderer, palette, typography, and controls. Its current
@@ -1261,7 +1304,7 @@ Electron opens a small local Home reader before waiting for the daemon. It uses
 the normal sage titlebar and real native window controls, the saved theme and
 sidebar side, and a bounded reading copy of the Meester's status and recent
 Night shift reports. Saved reports carry their dates; live
-activity and report actions wait for the service. The Home Handboek introduction
+activity and report actions wait for the service. The Home Help introduction
 ships with this reader and works on a first launch too.
 
 The local screen uses the live app's logo, navigation tab, Home typography,
@@ -1274,7 +1317,7 @@ is a night to read about, Create disabled until the workshop opens). A home
 nobody has used yet (`StartupHomeSnapshot.welcome`, the service's own
 `everUsed` rule) opens on the Meester's welcome, so the screen draws the
 welcome's shape instead of the greeting sheet. The composer's frame stands
-where the composer will, and its draft area says "Opening your workshop…" with
+where the composer will, and its draft area says "Opening Gezel…" with
 moving dots, the one place an open sheet never covers; placeholder lines
 breathe where text is on its way. The screen once showed a brand, a status
 pill and one Home row, then swapped to a different page with six more keys and
@@ -1284,7 +1327,7 @@ and starting the workshop takes ten. The saved character is the Meester's
 persisted poppetje, not a generated stand-in.
 
 The entry includes React and the small Home components (a 400 KB script budget).
-Squisq and the bundled Handboek introduction are lazy-loaded only when a saved
+Squisq and the bundled Help introduction are lazy-loaded only when a saved
 status report or a chosen Night shift/Handboek page needs them. No project or
 session scan belongs in Electron boot. When the person was reading, the copy
 stays over the live panel while it loads beneath, then steps aside on its own
@@ -1323,7 +1366,7 @@ The first thing a new person meets is the meester, not a setup page. Home
 renders the workshop from the first settled frame; the meester's empty
 conversation opens on `MeesterWelcome`: the meester full-figure on the
 plank (`MeesterFigure`, the same figure the greeting band stages), a serif
-time-of-day line ("Good afternoon. I'm Florian — I run this workshop."),
+time-of-day line ("Good afternoon. I'm Florian — I run things here."),
 and the meester's lines in the chat register (serif body). Rules:
 
 - **One thing at a time.** The welcome has two stages. While the tools are
@@ -1467,10 +1510,10 @@ and the meester's lines in the chat register (serif body). Rules:
 - **The intro plays from the download on.** Once the welcome is past its
   ask for tools, in any first-run state (downloading, setting up, getting
   ready), "While we wait, here is a bit more about Gezel:" and the "What is
-  gezel?" Handboek article as a video
+  gezel?" Help article as a video
   (`IntroHandboekArticle` `variant="player"`: the player alone at the
   video's own 16:9 height with its controls over the frame's foot, standard
-  closed captions, never autoplaying, Open in Handboek beneath) sit under the
+  closed captions, never autoplaying, Open in Help beneath) sit under the
   first projects. Keying
   it to a running download made it come and go with page reloads and models
   already on disk. It stays for the visit after the tools land, so they never
@@ -1700,7 +1743,7 @@ key as `Task.requestRef`.
 Home's intro starts with the greeting tab, named for the time of day like the
 headline inside it (**Good morning**, **Good afternoon**, **Good evening**),
 followed by **Night shift** when a review is available, **Create**, and
-**Handboek** with the "What is gezel?" article. The greeting tab shows the
+**Help** with the "What is gezel?" article. The greeting tab shows the
 current status report when available, otherwise the tip of the day; the report
 has no separate tab. The named tabs remain visible when the intro is collapsed,
 and selecting any of them expands its content, including the already-selected
@@ -2481,7 +2524,7 @@ markdown levels, a rule above each top-level section, the author's own lists
 and tables, and a 15px base that every size scales from in `em`. A surface
 that needs a smaller size sets one `font-size` on `.squisq-linear-content`
 (task notes use `--text-sm`), never per-element overrides. The page register
-stays where it is the point: Handboek and Knowledge articles and the Home
+stays where it is the point: Help and Knowledge articles and the Home
 intro (all `.gezel-article-view`).
 
 **A chat reply stays at chat scale.** A reply (`RenderedMarkdown`'s `chat`
@@ -3304,21 +3347,21 @@ subject carries the catalog's one muted accent. No magnifier: that is the
 craftbook shelf's tool. Gilde ships
 the mark as the catalog's `logo.webp`, with an `art.json` recording the subject
 and accent; the service passes it to installed catalogs as
-`KnowledgeCatalogStatus.logoUrl`, and the bundled Handboek's mark ships with
+`KnowledgeCatalogStatus.logoUrl`, and the bundled Help's mark ships with
 the UI. `KnowledgeCatalogMark` is the one rendering: a `--radius-md` tile at
 24, 34, or 56 px, with a book glyph for catalogs that have no artwork. The
 Knowledge rail shows the 56 px mark beside the catalog's name and the 24 px
 mark in each picker row, which is why that picker is the Radix `Select` and
 not a native `<select>`.
 
-**Knowledge opens on the person's catalogs; the Handboek has its own door.**
+**Knowledge opens on the person's catalogs; Help has its own door.**
 The Knowledge area lands on a catalog the person added before the bundled
-Handboek (`preferredKnowledgeCatalog`), and on its overview: the topic rail
+Help (`preferredKnowledgeCatalog`), and on its overview: the topic rail
 and list beside a reader that says how to search and read it. Only the
-Handboek area opens the Handboek on its welcome article, and that area never
+Help area opens Help on its welcome article, and that area never
 writes the Knowledge door's remembered place; they share `KnowledgeView`,
-and reading the Handboek used to make Knowledge open on "What is gezel?".
-With only the Handboek installed, the overview offers **Browse knowledge
+and reading Help used to make Knowledge open on "What is gezel?".
+With only Help installed, the overview offers **Browse knowledge
 catalogs**. An article's title is shown once, in the reader's header: a first
 `#` heading that repeats it is dropped (`withoutRepeatedTitle`).
 
@@ -3340,7 +3383,7 @@ page gets `.knowledge-letter-index` down its left edge: `#` then A–Z as plain
 The column's header and the index stay put; only the list moves. A letter
 with nothing under it stays in place, dimmed, so the ruler keeps its shape,
 and the letter at the top of the viewport takes `--accent-text`, which is
-the landing cue for a jump. Curated listings (the Handboek's) are not
+the landing cue for a jump. Curated listings (Help's) are not
 alphabetical and get no index.
 
 **A media hit says what matched and opens on it.** A search hit on a photo, a
@@ -3373,13 +3416,13 @@ for a private key. The helpers and copy live in
 [catalog-provenance.ts](../packages/ui/src/components/catalog-provenance.ts);
 `CommunityBadge` is the one rendering of the badge.
 
-**Embedded Handboek pages.** When a surface needs explanatory copy that
+**Embedded Help pages.** When a surface needs explanatory copy that
 also belongs in the documentation, don't hardcode the prose — embed the
-Handboek article (`LinearDocView`/`DocPlayer` + `createHandboekMediaProvider`,
+Help article (`LinearDocView`/`DocPlayer` + `createHandboekMediaProvider`,
 with the shared `GEZEL_LIGHT_SURFACE` overlay in light mode) so the pitch and
 the docs never drift. The Home "What is gezel?" embed
 (`IntroHandboekArticle`) is the reference implementation: a cream page
-resting on the card, a Read/Watch key tray, and an "Open in Handboek →"
+resting on the card, a Read/Watch key tray, and an "Open in Help →"
 link that lands on the same article.
 
 **Loading states.** Routine view transitions, local reads, and lazy-loaded
@@ -3446,8 +3489,8 @@ looking".
 
 **One row per thing, and a place for what it holds.** A bakery owner's
 "invoice" listed each invoicing plan twice (the plan and its generated
-Handboek article), offered "Investor Pitch Deck", and left out the project
-that held the invoices. So the name catalog drops a plan's Handboek article
+Help article), offered "Investor Pitch Deck", and left out the project
+that held the invoices. So the name catalog drops a plan's Help article
 when the plan itself is listed; a scattered match may skip letters inside a
 word or jump to the start of a later word, never into the middle of one
 (`fuzzyScore`); a project matches on what it is for (its description and
@@ -4031,7 +4074,7 @@ fraction. Absolute positioning is the point — the band's height must not
 depend on how many cards are in it. Vertical scrollers keep the native bar;
 this is a horizontal-strip pattern, not a general replacement.
 
-**Figure lists in articles.** A Handboek list whose items lead with a
+**Figure lists in articles.** A Help list whose items lead with a
 poppetje — what `::handboek-gezel-roster` expands to — renders as a card
 per figure: portrait, name, role, and the role's one-line summary, in an
 `auto-fill` grid on the article's own surface tokens
@@ -4383,7 +4426,7 @@ hover details as the fallback for tags suppressed by density.
 
 ## Social preview cards
 
-Every published Handboek page carries a 1200×630 Open Graph card, rendered at
+Every published Help page carries a 1200×630 Open Graph card, rendered at
 export time by [og-image.ts](../packages/service/src/handboek/og-image.ts). It
 is the first thing anyone sees of gezel when a docs link is shared, and it is
 seen at thumbnail size in someone else's feed — so it is a poster, not a page.
@@ -4398,7 +4441,7 @@ The recipe is fixed on purpose, and there is only one:
   scale and the card stops working at the size it is actually read. Aim for
   30–50.
 - **The site palette, flat.** Parchment `#eae5d6`, ink `#1c1c1c`, terracotta
-  `#b0724c` — the same tokens as the Handboek page it previews, so the card and
+  `#b0724c` — the same tokens as the Help page it previews, so the card and
   the page it opens are visibly the same thing.
 - **No texture layers.** Squisq's built-in themes add a `noise` background;
   noise is random pixel data across the whole canvas, and it tripled the encoded

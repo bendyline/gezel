@@ -165,78 +165,83 @@ export function ImageModelManager({
             </p>
           )}
           {installed.length > 0 && (
-            <table className="ollama-model-table">
-              <thead>
-                <tr>
-                  {showActivePicker && (
-                    <th scope="col" className="gz-active-model-column">
-                      Active
-                    </th>
-                  )}
-                  <th>Name</th>
-                  {showFastMode && <th scope="col">Fast mode</th>}
-                  <th>Size</th>
-                  <th>Added</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {installed.map((m) => (
-                  <tr key={m.id}>
+            // Up to six columns do not fit a phone's panel; the table scrolls inside it.
+            <div className="ollama-model-table-wrap">
+              <table className="ollama-model-table">
+                <thead>
+                  <tr>
                     {showActivePicker && (
-                      <td className="gz-active-model-column">
-                        {m.editOnly ? (
-                          <span
-                            className="muted small"
-                            title="Changes a picture you give it; never draws a new one"
-                          >
-                            Edits
-                          </span>
-                        ) : (
-                          <input
-                            type="radio"
-                            name="active-image-model"
-                            className="gz-active-model-radio"
-                            aria-label={`Use ${m.name} as the active image model`}
-                            checked={activeModelId === m.id}
-                            onChange={() => {
-                              // Re-selecting the active model would still reset the
-                              // provider and cold-reload a warm engine — no-op it.
-                              if (activeModelId !== m.id) void onSetActiveModel?.(m.id);
-                            }}
-                          />
-                        )}
-                      </td>
+                      <th scope="col" className="gz-active-model-column">
+                        Active
+                      </th>
                     )}
-                    <td>{m.name}</td>
-                    {showFastMode && (
-                      <td>
-                        {fastModeFor(m) && (
-                          <input
-                            type="checkbox"
-                            aria-label={`Fast mode for ${m.name}`}
-                            title={`Draws in ${fastModeFor(m)?.steps ?? 'a few'} steps`}
-                            checked={fastMode?.[m.id] !== false}
-                            onChange={(e) => void onFastModeChange?.(m.id, e.target.checked)}
-                          />
-                        )}
-                      </td>
-                    )}
-                    <td>{formatSize(m.approxSizeBytes)}</td>
-                    <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="gz-link-button"
-                        onClick={() => setToDelete(m.id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
+                    <th>Name</th>
+                    {showFastMode && <th scope="col">Fast mode</th>}
+                    <th>Size</th>
+                    <th>Added</th>
+                    <th />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {installed.map((m) => (
+                    <tr key={m.id}>
+                      {showActivePicker && (
+                        <td className="gz-active-model-column">
+                          {m.editOnly ? (
+                            <span
+                              className="muted small"
+                              title="Changes a picture you give it; never draws a new one"
+                            >
+                              Edits
+                            </span>
+                          ) : (
+                            <input
+                              type="radio"
+                              name="active-image-model"
+                              className="gz-active-model-radio"
+                              aria-label={`Use ${m.name} as the active image model`}
+                              checked={activeModelId === m.id}
+                              onChange={() => {
+                                // Re-selecting the active model would still reset the
+                                // provider and cold-reload a warm engine — no-op it.
+                                if (activeModelId !== m.id) void onSetActiveModel?.(m.id);
+                              }}
+                            />
+                          )}
+                        </td>
+                      )}
+                      <td>{m.name}</td>
+                      {showFastMode && (
+                        <td>
+                          {fastModeFor(m) && (
+                            <input
+                              type="checkbox"
+                              aria-label={`Fast mode for ${m.name}`}
+                              title={`Draws in ${fastModeFor(m)?.steps ?? 'a few'} steps`}
+                              checked={fastMode?.[m.id] !== false}
+                              onChange={(e) => void onFastModeChange?.(m.id, e.target.checked)}
+                            />
+                          )}
+                        </td>
+                      )}
+                      <td>{formatSize(m.approxSizeBytes)}</td>
+                      <td className="muted small">
+                        {new Date(m.installedAt).toLocaleDateString()}
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="gz-link-button"
+                          onClick={() => setToDelete(m.id)}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}

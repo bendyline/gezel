@@ -118,7 +118,7 @@ describe('IntroHandboekArticle', () => {
 
   // The welcome shows it before anyone asked to watch, so it must not start
   // playing on its own.
-  it('plays as a video alone, without autoplay, with Open in Handboek beneath', async () => {
+  it('plays as a video alone, without autoplay, with Open in Help beneath', async () => {
     render(<IntroHandboekArticle variant="player" />);
     const player = await screen.findByTestId('doc-player');
     expect(player).toHaveAttribute('data-autoplay', 'false');
@@ -127,15 +127,15 @@ describe('IntroHandboekArticle', () => {
     expect(player.parentElement).toHaveClass('home-intro-player--fit');
     expect(screen.queryByTestId('linear-doc-view')).not.toBeInTheDocument();
     expect(screen.queryByRole('radiogroup', { name: 'View as' })).not.toBeInTheDocument();
-    const open = screen.getByRole('button', { name: /Open in Handboek/ });
+    const open = screen.getByRole('button', { name: /Open in Help/ });
     expect(player.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it('keeps Open in Handboek in the view tray, outside the Read/Watch choice', async () => {
+  it('keeps Open in Help in the view tray, outside the Read/Watch choice', async () => {
     render(<IntroHandboekArticle />);
     await screen.findByTestId('linear-doc-view');
-    const tray = screen.getByRole('group', { name: 'Handboek article' });
-    const open = screen.getByRole('button', { name: /Open in Handboek/ });
+    const tray = screen.getByRole('group', { name: 'Help article' });
+    const open = screen.getByRole('button', { name: /Open in Help/ });
     const choice = screen.getByRole('radiogroup', { name: 'View as' });
     expect(tray).toContainElement(open);
     expect(tray).toContainElement(choice);
@@ -144,7 +144,7 @@ describe('IntroHandboekArticle', () => {
     expect(screen.getByRole('radio', { name: 'Watch' })).toHaveAttribute('tabindex', '-1');
   });
 
-  it('routes "Open in Handboek" to its Knowledge catalog', async () => {
+  it('routes "Open in Help" to its Knowledge catalog', async () => {
     const user = userEvent.setup();
     const events: CustomEvent[] = [];
     const handler = (e: Event) => events.push(e as CustomEvent);
@@ -152,7 +152,7 @@ describe('IntroHandboekArticle', () => {
 
     render(<IntroHandboekArticle />);
     await screen.findByTestId('linear-doc-view');
-    await user.click(screen.getByRole('button', { name: /Open in Handboek/ }));
+    await user.click(screen.getByRole('button', { name: /Open in Help/ }));
     window.removeEventListener('gezel:open-knowledge-document', handler);
 
     expect(events.at(-1)?.detail).toEqual({ catalogId: 'handboek', documentId: 'welcome' });

@@ -3,6 +3,13 @@
  * ProjectControlsOverflow shares the status labels and lights with its menu;
  * the parent owns persistence and write-access confirmation. Git actions use
  * the API and useGitSync, with layout in styles/settings-and-status.css.
+ *
+ * A builder (useBuilderView) sees all of it. An owner sees only what they may
+ * have to act on: a folder Gezel cannot change, a paused project, search that
+ * is not working, a linked repository. A new project used to open over "Not
+ * scanned yet" and "Active", which told its owner nothing. The routine state
+ * stays one click away: the project's Settings holds its status, and Activity
+ * shows indexing while it runs. With nothing to say, the bar is not drawn.
  */
 import type {
   ClaudePermissionMode,
@@ -18,6 +25,7 @@ import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { statusChipPhrase } from './github/gitCopy.js';
 import { GIT_CHANGED_EVENT, useGitSync } from './github/useGitSync.js';
 import type { ProjectClaudePermissionMode } from './project-ai-editability.js';
+import { useBuilderView } from './useBuilderView.js';
 
 type ProjectStatus = 'active' | 'readonly' | 'inactive' | 'stable';
 
@@ -120,7 +128,7 @@ function claudeModeTitle(mode: ProjectClaudePermissionMode): string {
   return `Claude ${option?.label ?? mode}: ${option?.hint ?? ''}`;
 }
 
-const PROJECT_STATUS_OPTIONS: ReadonlyArray<{ value: ProjectStatus; label: string }> = [
+export const PROJECT_STATUS_OPTIONS: ReadonlyArray<{ value: ProjectStatus; label: string }> = [
   { value: 'active', label: 'Active' },
   { value: 'stable', label: 'Stable' },
   { value: 'readonly', label: 'Read-only' },
@@ -446,6 +454,7 @@ export function ProjectGitStatusBar({
   const [boekwachterAddBusy, setBoekwachterAddBusy] = useState(false);
   const branchMenuRef = useRef<HTMLDivElement | null>(null);
   const managedWritesOn = managedWorkspaceWritable;
+  const builderView = useBuilderView();
 
   const refresh = useCallback(async () => {
     try {
@@ -855,6 +864,21 @@ export function ProjectGitStatusBar({
   const syncNeedsAttention =
     status?.syncStale === true || (status?.ahead ?? 0) > 0 || (status?.behind ?? 0) > 0;
 
+  // The owner's bar. Indexing that was switched off is a choice, not a fault,
+  // so only a search that cannot work counts. The controls menu stays for any
+  // inline exception, because a narrow bar folds those into it.
+  const searchBroken =
+    embeddingsState === 'unavailable' || indexStatus?.enrichment?.vectorsAvailable === false;
+  const showIndexChip = builderView || searchBroken || indexPanelOpen;
+  const showControlsMenu =
+    builderView ||
+    projectStatus === 'readonly' ||
+    projectStatus === 'inactive' ||
+    !managedWritesOn ||
+    Boolean(codexMode) ||
+    Boolean(claudeMode);
+  if (!hasGitHub && !showIndexChip && !showControlsMenu && !toast) return null;
+
   return (
     <div className={`project-git-status-bar${compact ? ' is-compact' : ''}`}>
       <div className="project-git-status-bar-left">
@@ -964,368 +988,370 @@ export function ProjectGitStatusBar({
             )}
           </>
         )}
-        <Popover.Root
-          open={indexPanelOpen}
-          onOpenChange={(open) => {
-            setIndexPanelOpen(open);
-            if (open) {
-              setIndexRefreshError(null);
-              void refreshIndex();
-            }
-          }}
-        >
-          <Popover.Trigger asChild>
-            <button
-              type="button"
-              className={`project-index-chip project-index-chip-${indexDotState}`}
-              aria-label={indexTriggerLabel}
-              title="Open indexing status"
-            >
-              {/* Notebook glyph — stands in for "workspace index"; the dot to its
-                    right carries the status colour. */}
-              <svg
-                className="project-index-icon"
-                width="14"
-                height="14"
-                viewBox="0 0 16 16"
-                aria-hidden="true"
-                focusable="false"
-              >
-                <rect
-                  x="3"
-                  y="2"
-                  width="10.5"
-                  height="12"
-                  rx="1.3"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.2"
-                />
-                <line x1="6" y1="2" x2="6" y2="14" stroke="currentColor" strokeWidth="1.2" />
-                <line
-                  x1="8"
-                  y1="5.5"
-                  x2="11.5"
-                  y2="5.5"
-                  stroke="currentColor"
-                  strokeWidth="1.1"
-                  strokeLinecap="round"
-                />
-                <line
-                  x1="8"
-                  y1="8"
-                  x2="11.5"
-                  y2="8"
-                  stroke="currentColor"
-                  strokeWidth="1.1"
-                  strokeLinecap="round"
-                />
-                <line
-                  x1="8"
-                  y1="10.5"
-                  x2="10.5"
-                  y2="10.5"
-                  stroke="currentColor"
-                  strokeWidth="1.1"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <span className="project-index-dot" aria-hidden />
-              {indexChipLabel && (
-                <span className="project-index-chip-label" aria-hidden>
-                  {indexChipLabel}
-                </span>
-              )}
-            </button>
-          </Popover.Trigger>
-          <Popover.Content
-            className="project-index-popover"
-            side="top"
-            align="center"
-            aria-label="Indexing status"
+        {showIndexChip && (
+          <Popover.Root
+            open={indexPanelOpen}
+            onOpenChange={(open) => {
+              setIndexPanelOpen(open);
+              if (open) {
+                setIndexRefreshError(null);
+                void refreshIndex();
+              }
+            }}
           >
-            <div className="project-index-panel">
-              <div className="project-index-panel-heading">
-                <span
-                  className={`project-index-panel-dot project-index-panel-dot-${indexDotState}`}
-                  aria-hidden
-                />
-                <strong>{indexHeadline}</strong>
-                {indexState === 'indexing' || indexRefreshBusy ? (
+            <Popover.Trigger asChild>
+              <button
+                type="button"
+                className={`project-index-chip project-index-chip-${indexDotState}`}
+                aria-label={indexTriggerLabel}
+                title="Open indexing status"
+              >
+                {/* Notebook glyph — stands in for "workspace index"; the dot to its
+                    right carries the status colour. */}
+                <svg
+                  className="project-index-icon"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 16 16"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <rect
+                    x="3"
+                    y="2"
+                    width="10.5"
+                    height="12"
+                    rx="1.3"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.2"
+                  />
+                  <line x1="6" y1="2" x2="6" y2="14" stroke="currentColor" strokeWidth="1.2" />
+                  <line
+                    x1="8"
+                    y1="5.5"
+                    x2="11.5"
+                    y2="5.5"
+                    stroke="currentColor"
+                    strokeWidth="1.1"
+                    strokeLinecap="round"
+                  />
+                  <line
+                    x1="8"
+                    y1="8"
+                    x2="11.5"
+                    y2="8"
+                    stroke="currentColor"
+                    strokeWidth="1.1"
+                    strokeLinecap="round"
+                  />
+                  <line
+                    x1="8"
+                    y1="10.5"
+                    x2="10.5"
+                    y2="10.5"
+                    stroke="currentColor"
+                    strokeWidth="1.1"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <span className="project-index-dot" aria-hidden />
+                {indexChipLabel && (
+                  <span className="project-index-chip-label" aria-hidden>
+                    {indexChipLabel}
+                  </span>
+                )}
+              </button>
+            </Popover.Trigger>
+            <Popover.Content
+              className="project-index-popover"
+              side="top"
+              align="center"
+              aria-label="Indexing status"
+            >
+              <div className="project-index-panel">
+                <div className="project-index-panel-heading">
                   <span
-                    className="project-index-phase-spinner"
-                    role="img"
-                    aria-label="File scan running"
-                    title="Reading the workspace file by file"
-                  >
-                    <FileScanSpinner />
-                  </span>
-                ) : serverDrive !== null || fullScanState === 'running' ? (
-                  <span
-                    className="project-index-phase-spinner"
-                    role="img"
-                    aria-label="AI scan running"
-                    title="Studying files — summaries, reviews, and media"
-                  >
-                    <AiScanSpinner />
-                  </span>
-                ) : null}
-              </div>
-
-              {semanticSearchDown && (
-                <p className="project-index-panel-warning">
-                  Semantic search is off — {semanticSearchReason}. Results are keyword-only
-                  {embeddingsState === 'unavailable' ? '; retrying automatically' : ''}.
-                </p>
-              )}
-
-              {enrichment && enrichment.eligible > 0 && overallProgress !== null && (
-                <div className="project-index-panel-progress">
-                  <div className="project-index-panel-progress-label">
-                    <span>Indexing progress</span>
-                    <strong>{overallProgress}%</strong>
-                  </div>
-                  <div
-                    className="project-index-panel-progress-track"
-                    role="progressbar"
-                    aria-label="Indexing progress"
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                    aria-valuenow={overallProgress}
-                    tabIndex={-1}
-                  >
-                    <span style={{ width: `${overallProgress}%` }} />
-                  </div>
-                  <span className="project-index-panel-caption">
-                    {searchReady} of {enrichment.eligible} files searchable
-                    {enrichment.pending > 0 ? ` · ${enrichment.pending} waiting` : ''}
-                  </span>
+                    className={`project-index-panel-dot project-index-panel-dot-${indexDotState}`}
+                    aria-hidden
+                  />
+                  <strong>{indexHeadline}</strong>
+                  {indexState === 'indexing' || indexRefreshBusy ? (
+                    <span
+                      className="project-index-phase-spinner"
+                      role="img"
+                      aria-label="File scan running"
+                      title="Reading the workspace file by file"
+                    >
+                      <FileScanSpinner />
+                    </span>
+                  ) : serverDrive !== null || fullScanState === 'running' ? (
+                    <span
+                      className="project-index-phase-spinner"
+                      role="img"
+                      aria-label="AI scan running"
+                      title="Studying files — summaries, reviews, and media"
+                    >
+                      <AiScanSpinner />
+                    </span>
+                  ) : null}
                 </div>
-              )}
 
-              <dl className="project-index-panel-details">
-                <div>
-                  <dt>File scan</dt>
-                  <dd>{indexStateLabel(indexState)}</dd>
-                </div>
-                {indexStatus?.meta && (
-                  <>
+                {semanticSearchDown && (
+                  <p className="project-index-panel-warning">
+                    Semantic search is off — {semanticSearchReason}. Results are keyword-only
+                    {embeddingsState === 'unavailable' ? '; retrying automatically' : ''}.
+                  </p>
+                )}
+
+                {enrichment && enrichment.eligible > 0 && overallProgress !== null && (
+                  <div className="project-index-panel-progress">
+                    <div className="project-index-panel-progress-label">
+                      <span>Indexing progress</span>
+                      <strong>{overallProgress}%</strong>
+                    </div>
+                    <div
+                      className="project-index-panel-progress-track"
+                      role="progressbar"
+                      aria-label="Indexing progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={overallProgress}
+                      tabIndex={-1}
+                    >
+                      <span style={{ width: `${overallProgress}%` }} />
+                    </div>
+                    <span className="project-index-panel-caption">
+                      {searchReady} of {enrichment.eligible} files searchable
+                      {enrichment.pending > 0 ? ` · ${enrichment.pending} waiting` : ''}
+                    </span>
+                  </div>
+                )}
+
+                <dl className="project-index-panel-details">
+                  <div>
+                    <dt>File scan</dt>
+                    <dd>{indexStateLabel(indexState)}</dd>
+                  </div>
+                  {indexStatus?.meta && (
+                    <>
+                      <div>
+                        <dt>Indexed</dt>
+                        <dd>
+                          {indexStatus.meta.fileCount} file
+                          {indexStatus.meta.fileCount === 1 ? '' : 's'}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt>Last scan</dt>
+                        <dd title={formatAbsoluteTime(indexStatus.meta.scannedAt)}>
+                          {formatRelativeTime(indexStatus.meta.scannedAt, { seconds: true })} ·{' '}
+                          {formatDuration(indexStatus.meta.durationMs)}
+                        </dd>
+                      </div>
+                    </>
+                  )}
+                  {serverDrive && (
                     <div>
-                      <dt>Indexed</dt>
+                      <dt>AI scan</dt>
                       <dd>
-                        {indexStatus.meta.fileCount} file
-                        {indexStatus.meta.fileCount === 1 ? '' : 's'}
+                        {serverDrive === 'full'
+                          ? 'Running at full speed'
+                          : 'Running quietly in background'}
                       </dd>
                     </div>
+                  )}
+                  {enrichment && (enrichment.shadowsPending ?? 0) > 0 && (
                     <div>
-                      <dt>Last scan</dt>
-                      <dd title={formatAbsoluteTime(indexStatus.meta.scannedAt)}>
-                        {formatRelativeTime(indexStatus.meta.scannedAt, { seconds: true })} ·{' '}
-                        {formatDuration(indexStatus.meta.durationMs)}
+                      <dt>Media scan</dt>
+                      <dd>{enrichment.shadowsPending} waiting</dd>
+                    </div>
+                  )}
+                  {enrichment && enrichment.eligible > 0 && (
+                    <div>
+                      <dt>AI summaries</dt>
+                      <dd>
+                        {skippedFiles.length > 0 ? (
+                          <Tooltip.Provider delayDuration={150}>
+                            <Tooltip.Root>
+                              <Tooltip.Trigger asChild>
+                                <button type="button" className="project-index-skipped-trigger">
+                                  {summaryCoverageLabel}
+                                </button>
+                              </Tooltip.Trigger>
+                              <Tooltip.Content side="left">
+                                <div className="project-index-skipped-tip">
+                                  <strong>Skipped after repeated failures</strong>
+                                  <ul>
+                                    {skippedFiles.map((file) => (
+                                      <li key={file.path}>
+                                        <span className="project-index-skipped-path">
+                                          {file.path}
+                                        </span>
+                                        {file.reason && (
+                                          <span className="project-index-skipped-reason">
+                                            {file.reason}
+                                          </span>
+                                        )}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                  {unlistedSkipped > 0 && (
+                                    <span className="project-index-skipped-more">
+                                      and {unlistedSkipped} more
+                                    </span>
+                                  )}
+                                  <span className="project-index-skipped-note">
+                                    Each retries once its content changes.
+                                  </span>
+                                </div>
+                              </Tooltip.Content>
+                            </Tooltip.Root>
+                          </Tooltip.Provider>
+                        ) : (
+                          summaryCoverageLabel
+                        )}
                       </dd>
                     </div>
-                  </>
-                )}
-                {serverDrive && (
-                  <div>
-                    <dt>AI scan</dt>
-                    <dd>
-                      {serverDrive === 'full'
-                        ? 'Running at full speed'
-                        : 'Running quietly in background'}
-                    </dd>
-                  </div>
-                )}
-                {enrichment && (enrichment.shadowsPending ?? 0) > 0 && (
-                  <div>
-                    <dt>Media scan</dt>
-                    <dd>{enrichment.shadowsPending} waiting</dd>
-                  </div>
-                )}
-                {enrichment && enrichment.eligible > 0 && (
-                  <div>
-                    <dt>AI summaries</dt>
-                    <dd>
-                      {skippedFiles.length > 0 ? (
-                        <Tooltip.Provider delayDuration={150}>
-                          <Tooltip.Root>
-                            <Tooltip.Trigger asChild>
-                              <button type="button" className="project-index-skipped-trigger">
-                                {summaryCoverageLabel}
-                              </button>
-                            </Tooltip.Trigger>
-                            <Tooltip.Content side="left">
-                              <div className="project-index-skipped-tip">
-                                <strong>Skipped after repeated failures</strong>
-                                <ul>
-                                  {skippedFiles.map((file) => (
-                                    <li key={file.path}>
-                                      <span className="project-index-skipped-path">
-                                        {file.path}
-                                      </span>
-                                      {file.reason && (
-                                        <span className="project-index-skipped-reason">
-                                          {file.reason}
-                                        </span>
-                                      )}
-                                    </li>
-                                  ))}
-                                </ul>
-                                {unlistedSkipped > 0 && (
-                                  <span className="project-index-skipped-more">
-                                    and {unlistedSkipped} more
-                                  </span>
-                                )}
-                                <span className="project-index-skipped-note">
-                                  Each retries once its content changes.
-                                </span>
-                              </div>
-                            </Tooltip.Content>
-                          </Tooltip.Root>
-                        </Tooltip.Provider>
-                      ) : (
-                        summaryCoverageLabel
-                      )}
-                    </dd>
-                  </div>
-                )}
-                {enrichment?.reviews && enrichment.reviews.eligible > 0 && (
-                  <div>
-                    <dt>Quality review</dt>
-                    <dd>
-                      {enrichment.reviews.reviewed} of {enrichment.reviews.eligible}
-                      {enrichment.reviews.pending > 0
-                        ? ` · ${enrichment.reviews.pending} waiting`
-                        : ''}
-                      {enrichment.reviews.stale > 0
-                        ? ` · ${enrichment.reviews.stale} to refresh`
-                        : ''}
-                    </dd>
-                  </div>
-                )}
-              </dl>
+                  )}
+                  {enrichment?.reviews && enrichment.reviews.eligible > 0 && (
+                    <div>
+                      <dt>Quality review</dt>
+                      <dd>
+                        {enrichment.reviews.reviewed} of {enrichment.reviews.eligible}
+                        {enrichment.reviews.pending > 0
+                          ? ` · ${enrichment.reviews.pending} waiting`
+                          : ''}
+                        {enrichment.reviews.stale > 0
+                          ? ` · ${enrichment.reviews.stale} to refresh`
+                          : ''}
+                      </dd>
+                    </div>
+                  )}
+                </dl>
 
-              <div className="project-index-panel-footer">
-                <span className="project-index-panel-note">
-                  {indexState === 'disabled' ? (
-                    <>
-                      Workspace indexing is off.{' '}
-                      <button
-                        type="button"
-                        className="project-index-panel-link"
-                        onClick={() =>
-                          window.dispatchEvent(
-                            new CustomEvent('gezel:open-project-settings', {
-                              detail: { projectId },
-                            }),
-                          )
-                        }
-                      >
-                        Turn it on in Project Settings
-                      </button>
-                      .
-                    </>
-                  ) : serverDrive === 'full' ? (
-                    'Full scan in progress — it shares the model with chat, so counts move as calls finish.'
-                  ) : serverDrive === 'background' ? (
-                    'Background scan in progress — it politely waits while you chat.'
-                  ) : indexState === 'indexing' ? (
-                    'The status updates automatically while the scan runs.'
-                  ) : aiScanPending && slowDrain ? (
-                    <>
-                      At the idle pace this will take more than a day.{' '}
-                      <button
-                        type="button"
-                        className="project-index-panel-link"
-                        onClick={() =>
-                          window.dispatchEvent(new CustomEvent('gezel:open-night-shift'))
-                        }
-                      >
-                        Set up Night Shift
-                      </button>{' '}
-                      or use “Start full AI scan” to finish sooner.
-                    </>
-                  ) : aiScanPending ? (
-                    'AI indexing continues while the app is idle.'
-                  ) : indexState === 'never' ? (
-                    'Your crew can still open these files. Search and file summaries arrive after the first scan.'
-                  ) : (
-                    'Refresh the index whenever you need the latest workspace state.'
-                  )}
-                </span>
-                <div className="project-index-panel-actions">
-                  {serverDrive !== null || fullScanState === 'running' ? (
-                    <button
-                      type="button"
-                      className="project-index-update-button"
-                      disabled={stopScanState !== 'idle'}
-                      onClick={() => void onStopScan()}
-                      title="Stop the running scan at its next step. Everything indexed so far is kept."
-                    >
-                      {stopScanState === 'idle' ? 'Stop updating index' : 'Stopping…'}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      className="project-index-update-button"
-                      disabled={indexUpdateDisabled}
-                      onClick={() => void onUpdateIndex()}
-                    >
-                      {indexState === 'indexing' || indexRefreshBusy
-                        ? 'Updating index…'
-                        : 'Update index'}
-                    </button>
-                  )}
-                  {indexState !== 'disabled' && (
-                    <button
-                      type="button"
-                      className="project-index-update-button project-index-full-scan-button"
-                      disabled={
-                        fullScanState !== 'idle' || serverDrive !== null || indexStatus === null
-                      }
-                      onClick={() => void onFullScan()}
-                      title="Bring the whole index up to date at full speed — file scan plus AI summaries, rollups, and reviews, run to completion. Shares the model with chat while it works."
-                    >
-                      {fullScanState === 'starting'
-                        ? 'Starting full scan…'
-                        : fullScanState === 'running' || serverDrive === 'full'
-                          ? 'Full scan running…'
-                          : serverDrive === 'background'
-                            ? 'Background scan running…'
-                            : 'Start full AI scan'}
-                    </button>
-                  )}
-                </div>
-                {indexRefreshError && (
-                  <span className="project-index-panel-error" role="alert">
-                    {indexRefreshError}
-                  </span>
-                )}
-                {fullScanError && (
-                  <span className="project-index-panel-error" role="alert">
-                    {fullScanError.code === 'boekwachter-required' && onAddBoekwachter ? (
+                <div className="project-index-panel-footer">
+                  <span className="project-index-panel-note">
+                    {indexState === 'disabled' ? (
                       <>
+                        Workspace indexing is off.{' '}
                         <button
                           type="button"
-                          className="project-index-panel-error-link"
-                          disabled={boekwachterAddBusy}
-                          onClick={() => void addBoekwachter()}
+                          className="project-index-panel-link"
+                          onClick={() =>
+                            window.dispatchEvent(
+                              new CustomEvent('gezel:open-project-settings', {
+                                detail: { projectId },
+                              }),
+                            )
+                          }
                         >
-                          {boekwachterAddBusy
-                            ? 'Adding the Librarian…'
-                            : 'Add the Librarian to this project crew'}
-                        </button>{' '}
-                        to enable AI summaries, reviews, and semantic enrichment.
+                          Turn it on in Project Settings
+                        </button>
+                        .
                       </>
+                    ) : serverDrive === 'full' ? (
+                      'Full scan in progress — it shares the model with chat, so counts move as calls finish.'
+                    ) : serverDrive === 'background' ? (
+                      'Background scan in progress — it politely waits while you chat.'
+                    ) : indexState === 'indexing' ? (
+                      'The status updates automatically while the scan runs.'
+                    ) : aiScanPending && slowDrain ? (
+                      <>
+                        At the idle pace this will take more than a day.{' '}
+                        <button
+                          type="button"
+                          className="project-index-panel-link"
+                          onClick={() =>
+                            window.dispatchEvent(new CustomEvent('gezel:open-night-shift'))
+                          }
+                        >
+                          Set up Night Shift
+                        </button>{' '}
+                        or use “Start full AI scan” to finish sooner.
+                      </>
+                    ) : aiScanPending ? (
+                      'AI indexing continues while the app is idle.'
+                    ) : indexState === 'never' ? (
+                      'Your crew can still open these files. Search and file summaries arrive after the first scan.'
                     ) : (
-                      fullScanError.message
+                      'Refresh the index whenever you need the latest workspace state.'
                     )}
                   </span>
-                )}
+                  <div className="project-index-panel-actions">
+                    {serverDrive !== null || fullScanState === 'running' ? (
+                      <button
+                        type="button"
+                        className="project-index-update-button"
+                        disabled={stopScanState !== 'idle'}
+                        onClick={() => void onStopScan()}
+                        title="Stop the running scan at its next step. Everything indexed so far is kept."
+                      >
+                        {stopScanState === 'idle' ? 'Stop updating index' : 'Stopping…'}
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        className="project-index-update-button"
+                        disabled={indexUpdateDisabled}
+                        onClick={() => void onUpdateIndex()}
+                      >
+                        {indexState === 'indexing' || indexRefreshBusy
+                          ? 'Updating index…'
+                          : 'Update index'}
+                      </button>
+                    )}
+                    {indexState !== 'disabled' && (
+                      <button
+                        type="button"
+                        className="project-index-update-button project-index-full-scan-button"
+                        disabled={
+                          fullScanState !== 'idle' || serverDrive !== null || indexStatus === null
+                        }
+                        onClick={() => void onFullScan()}
+                        title="Bring the whole index up to date at full speed — file scan plus AI summaries, rollups, and reviews, run to completion. Shares the model with chat while it works."
+                      >
+                        {fullScanState === 'starting'
+                          ? 'Starting full scan…'
+                          : fullScanState === 'running' || serverDrive === 'full'
+                            ? 'Full scan running…'
+                            : serverDrive === 'background'
+                              ? 'Background scan running…'
+                              : 'Start full AI scan'}
+                      </button>
+                    )}
+                  </div>
+                  {indexRefreshError && (
+                    <span className="project-index-panel-error" role="alert">
+                      {indexRefreshError}
+                    </span>
+                  )}
+                  {fullScanError && (
+                    <span className="project-index-panel-error" role="alert">
+                      {fullScanError.code === 'boekwachter-required' && onAddBoekwachter ? (
+                        <>
+                          <button
+                            type="button"
+                            className="project-index-panel-error-link"
+                            disabled={boekwachterAddBusy}
+                            onClick={() => void addBoekwachter()}
+                          >
+                            {boekwachterAddBusy
+                              ? 'Adding the Librarian…'
+                              : 'Add the Librarian to this project crew'}
+                          </button>{' '}
+                          to enable AI summaries, reviews, and semantic enrichment.
+                        </>
+                      ) : (
+                        fullScanError.message
+                      )}
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          </Popover.Content>
-        </Popover.Root>
+            </Popover.Content>
+          </Popover.Root>
+        )}
         <div className="project-controls-inline">
           {/* Status and the default "Can edit" live in the overflow menu; a
               board opened from a finished card sat over "Stable" and "Can
@@ -1410,17 +1436,19 @@ export function ProjectGitStatusBar({
             </Select.Root>
           )}
         </div>
-        <ProjectControlsOverflow
-          projectStatus={projectStatus ?? 'active'}
-          statusLocked={statusLocked}
-          onStatusChange={onStatusChange}
-          managedWritesOn={managedWritesOn}
-          onManagedWorkspaceWritesChange={onManagedWorkspaceWritesChange}
-          codexMode={codexMode}
-          onCodexModeChange={onCodexModeChange}
-          claudeMode={claudeMode}
-          onClaudeModeChange={onClaudeModeChange}
-        />
+        {showControlsMenu && (
+          <ProjectControlsOverflow
+            projectStatus={projectStatus ?? 'active'}
+            statusLocked={statusLocked}
+            onStatusChange={onStatusChange}
+            managedWritesOn={managedWritesOn}
+            onManagedWorkspaceWritesChange={onManagedWorkspaceWritesChange}
+            codexMode={codexMode}
+            onCodexModeChange={onCodexModeChange}
+            claudeMode={claudeMode}
+            onClaudeModeChange={onClaudeModeChange}
+          />
+        )}
         {!onManagedWorkspaceWritesChange && !managedWritesOn && (
           <span
             className="project-lockdown-chip"

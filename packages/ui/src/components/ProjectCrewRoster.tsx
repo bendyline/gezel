@@ -163,7 +163,7 @@ export function ProjectCrewRoster({
                   </span>
                   <span className="muted small">
                     {projectBoekwachter
-                      ? `${projectBoekwachter.name} studies changed files, writes short summaries and reviews, and prepares weekly digests while the workshop is quiet.`
+                      ? `${projectBoekwachter.name} studies changed files, writes short summaries and reviews, and prepares weekly digests while nothing else is running.`
                       : 'Structural file and symbol search stays available. Add the Librarian to this crew for background AI summaries, reviews, and digests.'}
                   </span>
                 </div>

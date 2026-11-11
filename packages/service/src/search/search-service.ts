@@ -564,7 +564,7 @@ export class SearchService {
         kind: 'handboek',
         id: `handboek:${h.id}`,
         title: h.title,
-        subtitle: 'Handboek',
+        subtitle: 'Help',
         ...(h.keywords && h.keywords.length > 0 ? { keywords: h.keywords } : {}),
       });
     }

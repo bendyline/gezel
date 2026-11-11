@@ -17,14 +17,14 @@ export function IntroArticleControls({
           type="button"
           className="gz-link-button"
           onClick={() => onOpen?.()}
-          title="Read this article in the Handboek"
+          title="Read this article in Help"
           disabled={!onOpen}
         >
-          Open in Handboek →
+          Open in Help →
         </button>
       ) : (
         // biome-ignore lint/a11y/useSemanticElements: a tray of keys, not a form; <fieldset> would bring a legend and form-group styling.
-        <div className="gz-tray handboek-mode-tray" role="group" aria-label="Handboek article">
+        <div className="gz-tray handboek-mode-tray" role="group" aria-label="Help article">
           <div
             className="home-intro-modes"
             role="radiogroup"
@@ -60,10 +60,10 @@ export function IntroArticleControls({
             type="button"
             className="gz-key"
             onClick={() => onOpen?.()}
-            title="Read this article in the Handboek"
+            title="Read this article in Help"
             disabled={!onOpen}
           >
-            Open in Handboek <span aria-hidden="true">→</span>
+            Open in Help <span aria-hidden="true">→</span>
           </button>
         </div>
       )}

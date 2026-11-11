@@ -828,8 +828,8 @@ export function KnowledgeView({ initialCatalogId }: { initialCatalogId?: string 
                 {!handboekArea &&
                   catalogs?.every((catalog) => catalog.ref.catalogId === HANDBOEK_CATALOG_ID) && (
                     <p className="placeholder">
-                      Only the Gezel Handboek is here so far. Add a reference catalog, such as a
-                      cookbook or a field guide, to look things up in your own subjects.{' '}
+                      Only Gezel Help is here so far. Add a reference catalog, such as a cookbook or
+                      a field guide, to look things up in your own subjects.{' '}
                       <button
                         type="button"
                         className="secondary"

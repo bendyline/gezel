@@ -21,6 +21,6 @@ Most plans can be started straight from chat — each one declares trigger phras
 
 ::handboek-craftbook-list
 
-Every plan has its own article in the Plans section of this Handboek, with the full step-by-step walk of how it runs.
+Every plan has its own article in the Plans section of Help, with the full step-by-step walk of how it runs.
 
 You can also browse [every plan](https://gezel.com/docs/craftbooks-index/) on gezel.com, where the full shelf is grouped by kind of work and each entry shows its steps.

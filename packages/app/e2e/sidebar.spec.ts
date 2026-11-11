@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { LAYOUT_TOLERANCE_PX } from './helpers/layout.js';
@@ -34,11 +35,9 @@ test('sidebar selection persists and document icons align with their group heade
   const app = await launch(gezelHome);
   try {
     const page = await app.firstWindow();
-    await page.waitForLoadState('domcontentloaded');
-
-    // Wait for the App (and its `gezel:open-tab` listener) to mount. The
-    // sidebar rendering is the proxy for "App.tsx finished first render".
-    await expect(page.locator('[data-testid="app-sidebar"]')).toBeVisible({ timeout: 60_000 });
+    // Wait for the App (and its `gezel:open-tab` listener) to mount, and for
+    // the start screen, which draws its own copy of the rail, to hand off.
+    await waitForAppReady(page);
 
     await test.step('document icons align with the Documents header', async () => {
       const documentsToggle = page.getByTestId('sidebar-group-toggle-documents');

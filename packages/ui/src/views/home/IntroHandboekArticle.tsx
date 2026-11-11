@@ -152,7 +152,7 @@ export function IntroHandboekArticle({
           onClick={() => openHandboek(ARTICLE_ID)}
           data-testid="home-intro-handboek-fallback"
         >
-          Open the Handboek for an introduction to gezel →
+          Open Help for an introduction to Gezel →
         </button>
       </p>
     );

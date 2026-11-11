@@ -320,7 +320,7 @@ describe('KnowledgeView', () => {
   const HANDBOEK = {
     ...CATALOG,
     ref: { ...CATALOG.ref, publisherId: 'bendyline', catalogId: 'handboek' },
-    name: 'Gezel Handboek',
+    name: 'Gezel Help',
     source: 'bundled' as const,
   };
 
@@ -330,8 +330,8 @@ describe('KnowledgeView', () => {
     window.localStorage.setItem('gezel:knowledge:document', 'removed-document');
     vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({ catalogs: [HANDBOEK] });
     render(<KnowledgeView />);
-    expect(await screen.findByRole('heading', { name: 'Gezel Handboek' })).toBeInTheDocument();
-    expect(await screen.findByText(/Only the Gezel Handboek is here so far/)).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Gezel Help' })).toBeInTheDocument();
+    expect(await screen.findByText(/Only Gezel Help is here so far/)).toBeInTheDocument();
     expect(api.readKnowledgeDocument).not.toHaveBeenCalledWith('handboek', 'welcome');
   });
 

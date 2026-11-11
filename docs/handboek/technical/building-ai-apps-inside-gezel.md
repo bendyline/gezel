@@ -21,7 +21,7 @@ An AI App is a reusable experience that runs *inside* Gezel: a tailored project,
 
 "Gezel app" and "AI App" name that experience. The **project type** is its reusable composition and setup recipe; the **project** is one person's instance. You can build a useful app with only a page and a folder, then add a crew member or a craftbook when the work calls for one. You do not need every component in every app.
 
-For the interface, read [Using the Gezel page APIs](gezel-page-apis.md) and the [app page style guide](gezel-app-page-style-guide.md). The complete [page API reference](https://github.com/bendyline/gezel/blob/main/docs/output-pane-api.md) and [project-type specification](https://github.com/bendyline/gezel/blob/main/docs/project-types.md) provide the precise runtime contracts. These three Handboek guides are the starting path for people and AI agents building an app.
+For the interface, read [Using the Gezel page APIs](gezel-page-apis.md) and the [app page style guide](gezel-app-page-style-guide.md). The complete [page API reference](https://github.com/bendyline/gezel/blob/main/docs/output-pane-api.md) and [project-type specification](https://github.com/bendyline/gezel/blob/main/docs/project-types.md) provide the precise runtime contracts. These three Help guides are the starting path for people and AI agents building an app.
 
 The project type is the composition root and installer. Public AI Apps arrive through the [project-type collection](https://gezel.com/docs/project-types-index/); private or experimental apps travel as `.gezapp` packages. Both start life as the same thing: a source folder you can build with the command line, by hand, or with an AI agent — this article is the guide to that folder.
 

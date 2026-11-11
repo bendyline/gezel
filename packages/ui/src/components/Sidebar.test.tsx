@@ -1037,7 +1037,8 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('app-sidebar')).toHaveStyle({ width: '320px' });
   });
 
-  it('grows the default right sidebar when its grip is dragged left', () => {
+  it('grows a right sidebar when its grip is dragged left', () => {
+    window.localStorage.setItem('gezel:sidebar-side', 'right');
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     const grip = screen.getByRole('separator', { name: 'Resize sidebar' });
 
@@ -1049,8 +1050,7 @@ describe('Sidebar', () => {
     expect(window.localStorage.getItem('gezel:nav:sidebar-width')).toBe('280');
   });
 
-  it('grows a left sidebar when its grip is dragged right', () => {
-    window.localStorage.setItem('gezel:sidebar-side', 'left');
+  it('grows the default left sidebar when its grip is dragged right', () => {
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     const grip = screen.getByRole('separator', { name: 'Resize sidebar' });
 
@@ -1122,7 +1122,7 @@ describe('Sidebar', () => {
       await configLoaded();
 
       const title = screen.getByTestId('sidebar-group-workshop');
-      expect(title).toHaveTextContent('Workshop');
+      expect(title).toHaveTextContent('More');
       expect(title).toHaveAttribute('aria-expanded', 'false');
       expect(screen.getByTestId('sidebar-group-toggle-workshop')).toHaveAttribute(
         'aria-expanded',
@@ -1281,7 +1281,7 @@ describe('Sidebar', () => {
 
       expect(screen.getByTestId('app-sidebar')).toHaveClass('collapsed');
       const icon = screen.getByTestId('sidebar-group-workshop');
-      expect(icon).toHaveAttribute('title', 'Workshop');
+      expect(icon).toHaveAttribute('title', 'More');
       expect(icon.querySelector('svg')).not.toBeNull();
       expect(screen.queryByTestId('sidebar-group-toggle-workshop')).not.toBeInTheDocument();
       expect(screen.queryByTestId('sidebar-area-tasks')).not.toBeInTheDocument();
@@ -1359,7 +1359,7 @@ describe('Sidebar', () => {
 
         expect(screen.getByTestId('sidebar-group-gezels')).toBeInTheDocument();
         expect(screen.queryByTestId('sidebar-group-workshop')).not.toBeInTheDocument();
-        expect(screen.queryByText('Workshop')).not.toBeInTheDocument();
+        expect(screen.queryByText('More')).not.toBeInTheDocument();
       } finally {
         window.__GEZEL__ = bridge;
       }

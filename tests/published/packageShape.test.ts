@@ -87,8 +87,9 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   // 45 MB for Squisq 2.11.8, whose media-edit audio cleanup ships RNNoise
   // (~3.1 MB gzipped, base64-embedded WASM) twice — once in the worker and
   // once in the main-thread fallback. Deduplicating that upstream is the
-  // follow-up and would win back ~3 MB.
-  '@bendyline/gezel-service': 60_000_000, //          47.5 MB
+  // follow-up and would win back ~3 MB. Raised to 1.5x again on 2026-11-11,
+  // when service plus inference (the combined check below) reached 60.03 MB.
+  '@bendyline/gezel-service': 90_000_000, //          ~54 MB (60 MB with inference)
 };
 
 const ROOT_LICENSE = readFileSync(resolve(REPO_ROOT, 'LICENSE'), 'utf8');

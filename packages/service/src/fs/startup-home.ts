@@ -2,6 +2,7 @@ import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type ChatSession,
+  DEFAULT_SIDEBAR_SIDE,
   KeyedLock,
   type MeesterStatusReport,
   type NightShiftReviewResponse,
@@ -62,7 +63,7 @@ export class StartupHomeCache {
         : null,
       showPoppetjes: config.showPoppetjes !== false,
       theme: config.themePref ?? 'system',
-      sidebar: config.sidebarSide ?? 'right',
+      sidebar: config.sidebarSide ?? DEFAULT_SIDEBAR_SIDE,
       status: readingStatus(status),
     });
   }

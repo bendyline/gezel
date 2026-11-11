@@ -101,7 +101,7 @@ describe('MeesterWelcome', () => {
     it('introduces the meester by name, with no download offer', () => {
       render(<MeesterWelcome {...figure} />);
       expect(
-        screen.getByRole('heading', { name: /I'm Florian — I run this workshop/ }),
+        screen.getByRole('heading', { name: /I'm Florian — I run things here/ }),
       ).toBeInTheDocument();
       expect(
         screen.getByText(/I'll get it started and tell you when it's ready/),
@@ -244,7 +244,7 @@ describe('MeesterWelcome', () => {
     it('never says "I\'m meester" when names are hidden', () => {
       render(<MeesterWelcome {...figure} meesterName="Meester" />);
       expect(
-        screen.getByRole('heading', { name: /I'm your meester — I run this workshop/ }),
+        screen.getByRole('heading', { name: /I'm your meester — I run things here/ }),
       ).toBeInTheDocument();
     });
 
@@ -335,7 +335,7 @@ describe('MeesterWelcome', () => {
 
       const key = await screen.findByRole('button', { name: /^Fetch my tools/ });
       await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
-      expect(screen.getByRole('heading', { name: /I run this workshop/ })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /I run things here/ })).toBeInTheDocument();
       expect(screen.getByText(/Change what I'm allowed to do/)).toBeInTheDocument();
       expect(screen.queryByRole('group', { name: 'What you would like help with' })).toBeNull();
       expect(screen.queryByRole('group', { name: 'Something to start with' })).toBeNull();

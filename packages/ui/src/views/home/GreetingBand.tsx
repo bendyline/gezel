@@ -175,7 +175,7 @@ export function GreetingBand({
   if (morning || nightReview || startupReading?.tab === 'night')
     panels.push({ value: 'night', label: 'Night shift' });
   if (makeSomething) panels.push({ value: 'make', label: 'Create' });
-  panels.push({ value: 'tour', label: 'Handboek' });
+  panels.push({ value: 'tour', label: 'Help' });
   const activeTab = panels.some((panel) => panel.value === tab) ? tab : 'greeting';
   const startupCopy = startupReading?.tab === activeTab ? startupReading : undefined;
   const live = useRef<HTMLDivElement>(null);

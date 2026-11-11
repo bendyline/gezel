@@ -2709,8 +2709,10 @@ const GezelConfigObject = z.object({
    * ephemeral port each launch and `localStorage` is keyed by origin, so
    * a localStorage-only pref would strand on the previous boot's port.
    * The renderer keeps a localStorage cache for fast first paint; this is
-   * the cross-boot source of truth. Absent = `right` (the default); only
-   * an explicit `left` opts out.
+   * the cross-boot source of truth. Absent = the default
+   * (`DEFAULT_SIDEBAR_SIDE`, `left`; it was `right` until 2026-11-11). The
+   * picker always writes the side by name, so a choice outlives a change
+   * of default.
    */
   sidebarSide: z.enum(['left', 'right']).optional(),
   /**

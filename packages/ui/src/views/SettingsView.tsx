@@ -2262,7 +2262,7 @@ function DaemonSettingsView() {
                 <RoleAssignmentField
                   controlId="settings-role-scribe"
                   label="Scribe"
-                  hint="Handles your workshop's utility text work (about.md drafts, rewrites, end-of-thread summaries, memory consolidation), so you can route grunt tasks to a different model than the one your conversations use."
+                  hint="Handles Gezel's small writing jobs (about.md drafts, rewrites, end-of-thread summaries, memory consolidation), so you can route grunt tasks to a different model than the one your conversations use."
                   value={config?.klerkGezelId}
                   gezels={gezels}
                   roleBasedNameOnly={boringMode}
@@ -2277,7 +2277,7 @@ function DaemonSettingsView() {
                   <RoleAssignmentField
                     controlId="settings-role-librarian"
                     label="Librarian"
-                    hint="Your workshop's index-keeper. A project with a Librarian on its assigned crew gets background AI summaries, file reviews, folder rollups, and weekly digests. Remove the role from a project to keep fast structural search without those AI passes. Indexing stays local by default; a local provider and model selected for the Librarian can tune the work."
+                    hint="Keeps the index of your files. A project with a Librarian on its assigned crew gets background AI summaries, file reviews, folder rollups, and weekly digests. Remove the role from a project to keep fast structural search without those AI passes. Indexing stays local by default; a local provider and model selected for the Librarian can tune the work."
                     value={config?.boekwachterGezelId}
                     gezels={gezels}
                     roleBasedNameOnly={boringMode}

@@ -354,16 +354,16 @@ export function HandboekView() {
       data-testid="handboek-view"
       aria-busy={loading || (!toc && !error)}
     >
-      <nav className="handboek-toc" aria-label="Handboek contents">
+      <nav className="handboek-toc" aria-label="Help contents">
         <div className="handboek-toc-brand">
           <AreaIcon area="handboek" size={16} />
-          <span>Handboek</span>
+          <span>Help</span>
         </div>
         <input
           type="search"
           className="handboek-toc-filter"
           placeholder="Find an article…"
-          aria-label="Filter Handboek articles"
+          aria-label="Filter Help articles"
           value={tocFilter}
           onChange={(e) => setTocFilter(e.target.value)}
         />
@@ -437,7 +437,7 @@ export function HandboekView() {
       <div className="handboek-pane">
         <header className="handboek-pane-header">
           <div className="handboek-pane-titles">
-            <h2>{article?.title ?? 'Handboek'}</h2>
+            <h2>{article?.title ?? 'Help'}</h2>
             {article?.summary && <p className="handboek-pane-summary">{article.summary}</p>}
           </div>
           <div className="handboek-header-controls">

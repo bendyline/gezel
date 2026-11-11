@@ -979,7 +979,7 @@ describe('HomeView', () => {
     timeline.empty = true;
     try {
       render(<HomeView />);
-      await screen.findByRole('heading', { name: /I run this workshop/ });
+      await screen.findByRole('heading', { name: /I run things here/ });
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
       });
@@ -1034,12 +1034,12 @@ describe('HomeView', () => {
     };
     const config = { provider: 'copilot' } as never;
     const { rerender } = render(<HomeWorkshop config={config} {...props} />);
-    await userEvent.setup().click(await screen.findByRole('tab', { name: 'Handboek' }));
+    await userEvent.setup().click(await screen.findByRole('tab', { name: 'Help' }));
 
     timeline.empty = true;
     try {
       rerender(<HomeWorkshop config={config} {...props} />);
-      await screen.findByRole('heading', { name: /I run this workshop/ });
+      await screen.findByRole('heading', { name: /I run things here/ });
       expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Collapse the greeting' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Return to Meester chat' })).toBeInTheDocument();
@@ -1112,7 +1112,7 @@ describe('HomeView', () => {
 
   it('switches to the "what is gezel" tour tab', async () => {
     render(<HomeView />);
-    const tourName = 'Handboek';
+    const tourName = 'Help';
     await waitFor(() => {
       expect(screen.getByText('Tip of the day')).toBeInTheDocument();
     });
@@ -1130,7 +1130,7 @@ describe('HomeView', () => {
     render(<HomeView />);
     await screen.findByText('Tip of the day');
     expect(screen.queryByRole('region', { name: 'Create' })).not.toBeInTheDocument();
-    for (const name of ['Create', 'Handboek', GREETING_TAB]) {
+    for (const name of ['Create', 'Help', GREETING_TAB]) {
       await user.click(screen.getByRole('button', { name: 'Collapse the greeting' }));
       await user.click(screen.getByRole('tab', { name }));
       expect(screen.getByRole('tabpanel', { name })).toBeVisible();

@@ -11,11 +11,18 @@ export const NAVIGATION_AREA_LABELS: Record<RecentTabArea, string> = {
   craftbooks: 'Plans',
   scripts: 'Scripts',
   history: 'History',
-  handboek: 'Handboek',
+  handboek: 'Help',
   knowledge: 'Knowledge',
   benchmarks: 'Benchmarks',
   settings: 'Settings',
 };
+
+/**
+ * The rail's folded group of builder areas (Tasks, Plans, Scripts, History).
+ * A plain word on purpose: neither "workshop" nor "workbench" is a name the
+ * person has to learn. The live rail and the startup frame both read it.
+ */
+export const NAVIGATION_MORE_LABEL = 'More';
 
 /** Shared navigation presentation; hosts own entities, capabilities and routing. */
 export function PrimaryNavigation({

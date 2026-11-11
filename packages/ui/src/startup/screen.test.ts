@@ -1,7 +1,16 @@
 import { fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mountStartup } from './screen.js';
+import { mountStartup as mount } from './screen.js';
 import type { StartupHomeBridge } from './types.js';
+
+// Each mount's React roots are unmounted after its test. A root left behind
+// re-renders when the reader's lazy chunk lands, which under coverage can be
+// after jsdom is torn down ("window is not defined", 2026-11-11 CI).
+const disposers: Array<() => void> = [];
+function mountStartup(host: StartupHomeBridge) {
+  const dispose = mount(host);
+  if (dispose) disposers.push(dispose);
+}
 
 function bridge(): StartupHomeBridge {
   return {
@@ -21,6 +30,7 @@ function bridge(): StartupHomeBridge {
   };
 }
 afterEach(() => {
+  for (const dispose of disposers.splice(0)) dispose();
   document.body.replaceChildren();
   delete window.__GEZEL_STARTUP__;
   vi.useRealTimers();
@@ -176,11 +186,9 @@ describe('the frame it draws', () => {
     const rail = document.querySelector('.startup-sidebar')!;
     expect(
       [...rail.querySelectorAll('.app-sidebar-item-label')].map((label) => label.textContent),
-    ).toEqual(['Home ', 'Projects', 'Documents', 'Crew', 'Workshop', 'Knowledge', 'Settings']);
+    ).toEqual(['Home ', 'Projects', 'Documents', 'Crew', 'More', 'Knowledge', 'Settings']);
     expect(rail.querySelector('.startup-navigation-rest')?.hasAttribute('inert')).toBe(true);
-    expect(document.querySelector('.startup-loading-line')).toHaveTextContent(
-      'Opening your workshop',
-    );
+    expect(document.querySelector('.startup-loading-line')).toHaveTextContent('Opening Gezel');
     expect(document.querySelector('.startup-composer')).not.toBeNull();
   });
 
@@ -188,7 +196,7 @@ describe('the frame it draws', () => {
     mountStartup(bridge());
     const tabs = () =>
       [...document.querySelectorAll('.home-workshop-tab')].map((tab) => tab.textContent);
-    expect(tabs().slice(1)).toEqual(['Create', 'Handboek']);
+    expect(tabs().slice(1)).toEqual(['Create', 'Help']);
     document.body.replaceChildren();
     const host = bridge();
     host.snapshot = {
@@ -202,7 +210,7 @@ describe('the frame it draws', () => {
       night: { windowEnd: '2026-11-10T06:00:00Z', completed: 2, reports: [] },
     };
     mountStartup(host);
-    expect(tabs().slice(1)).toEqual(['Night shift', 'Create', 'Handboek']);
+    expect(tabs().slice(1)).toEqual(['Night shift', 'Create', 'Help']);
   });
 
   it('draws the welcome for a home nobody has used yet, with no greeting sheet', () => {
@@ -222,7 +230,7 @@ describe('the frame it draws', () => {
     expect(document.getElementById('startup-home')?.dataset.shape).toBe('welcome');
     expect(document.querySelector<HTMLElement>('.home-workshop-greeting')?.hidden).toBe(true);
     expect(document.querySelector('.startup-welcome .meester-welcome-title')).toHaveTextContent(
-      "I'm Vanya — I run this workshop.",
+      "I'm Vanya — I run things here.",
     );
   });
 });

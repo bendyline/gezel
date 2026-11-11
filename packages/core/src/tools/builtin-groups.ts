@@ -381,7 +381,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
   },
   {
     id: 'handboek',
-    name: 'Handboek',
+    name: 'Help',
     description:
       "Consult gezel's built-in documentation for meta questions about gezel itself — roles, craftbooks, projects, memory, models, setup. In every role's kit so a gezel answers 'how does gezel work?' from the real docs instead of guessing.",
     tools: ['how_do_i'],

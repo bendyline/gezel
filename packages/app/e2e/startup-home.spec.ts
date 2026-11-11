@@ -134,7 +134,7 @@ test('local Home matches the live chrome and preserves reading across service na
     await page.getByRole('tab', { name: 'Night shift', exact: true }).click();
     await expect(page.getByText('The research notes are ready for your review.')).toBeVisible();
 
-    await page.getByRole('tab', { name: 'Handboek', exact: true }).click();
+    await page.getByRole('tab', { name: 'Help', exact: true }).click();
     await expect(page.locator('.home-intro-doc .squisq-linear')).toBeVisible();
     await expect(page.locator('#startup-reading img[alt="gezel-mark"]')).toHaveCount(1);
     await page.locator('#startup-reading .home-intro-doc').evaluate(async (node) => {
@@ -189,7 +189,7 @@ test('local Home matches the live chrome and preserves reading across service na
       .toBeGreaterThan(150);
     await expect(page.locator('#startup-home')).toHaveCount(0, { timeout: 30_000 });
     await expect(page.locator('.startup-reading-overlay, .startup-reading')).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: 'Handboek', exact: true })).toHaveAttribute(
+    await expect(page.getByRole('tab', { name: 'Help', exact: true })).toHaveAttribute(
       'aria-selected',
       'true',
     );

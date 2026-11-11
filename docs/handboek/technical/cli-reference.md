@@ -270,7 +270,7 @@ gezel restore <file>        bring them back (--list to look first)
 gezel handboek export --out ./site
 ```
 
-renders the Handboek — the same articles you're reading now — as a static website, for publishing or offline reading.
+renders Help — the same articles you're reading now — as a static website, for publishing or offline reading.
 
 Run `gezel --help` (or `--help` on any subcommand) for the full surface.
 

@@ -1473,11 +1473,11 @@ skills
     if (result.persona) console.error(`persona: ${result.persona.role}`);
   });
 
-const handboek = program.command('handboek').description('The built-in documentation (Handboek)');
+const handboek = program.command('handboek').description('The built-in documentation (Help)');
 
 handboek
   .command('export')
-  .description('Render the Handboek as a static HTML site for gezel.com (no daemon)')
+  .description('Render Help as a static HTML site for gezel.com (no daemon)')
   .requiredOption('--out <dir>', 'output directory')
   .option(
     '--css <href>',
@@ -1535,7 +1535,7 @@ handboek
         appsOut: opts.appsOut,
         openInGezel: opts.openInGezel === true,
       });
-      console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
+      console.log(`Help exported: ${result.pages} pages → ${result.out}`);
       if (result.apps) {
         console.log(`Apps library: ${result.apps.apps} apps, ${result.apps.demos} with demos`);
       }

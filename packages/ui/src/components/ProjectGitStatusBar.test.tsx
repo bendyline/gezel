@@ -9,6 +9,9 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { createMockApi } from '../test-utils/mockApi.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
+// The full bar is the builder's view; the owner's has its own block below.
+const view = vi.hoisted(() => ({ builder: true }));
+vi.mock('./useBuilderView.js', () => ({ useBuilderView: () => view.builder }));
 
 // Radix Popper measures tooltip content with ResizeObserver. jsdom does not
 // provide it, so give the focused interaction test the inert browser shape.
@@ -49,6 +52,7 @@ const BASE_STATUS = {
 
 describe('ProjectGitStatusBar', () => {
   beforeEach(() => {
+    view.builder = true;
     vi.mocked(api.getProjectGitStatus).mockResolvedValue(BASE_STATUS as never);
     vi.mocked(api.getProjectIndexStatus).mockResolvedValue({ state: 'fresh' } as never);
   });
@@ -688,5 +692,79 @@ describe('ProjectGitStatusBar', () => {
       expect(onOpenGitHub).toHaveBeenCalled();
     });
     expect(screen.getByText(/GitHub needs you to sign in again/)).toBeInTheDocument();
+  });
+});
+
+// A new project opened over "Not scanned yet" and "Active", which told its
+// owner nothing. An owner's bar shows only what they may have to act on.
+describe('ProjectGitStatusBar for an owner', () => {
+  beforeEach(() => {
+    view.builder = false;
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue({ exists: false } as never);
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({ state: 'never' } as never);
+  });
+
+  it('is not drawn when there is nothing to act on', async () => {
+    const { container } = render(
+      <ProjectGitStatusBar
+        projectId="pj-1"
+        status="active"
+        onStatusChange={vi.fn()}
+        managedWorkspaceWritable
+        onManagedWorkspaceWritesChange={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(api.getProjectIndexStatus).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+    expect(screen.queryByText('Not scanned yet')).not.toBeInTheDocument();
+  });
+
+  it('shows a folder Gezel cannot change and a paused project', async () => {
+    const { rerender } = render(
+      <ProjectGitStatusBar
+        projectId="pj-1"
+        status="active"
+        onStatusChange={vi.fn()}
+        managedWorkspaceWritable={false}
+        onManagedWorkspaceWritesChange={vi.fn()}
+      />,
+    );
+    expect(
+      await screen.findByRole('combobox', {
+        name: 'Built-in tool workspace access for this project',
+      }),
+    ).toHaveTextContent('Read-only');
+    // No index chip for a first scan that has simply not run yet.
+    expect(screen.queryByRole('button', { name: /^Indexing status:/ })).not.toBeInTheDocument();
+
+    rerender(
+      <ProjectGitStatusBar
+        projectId="pj-1"
+        status="inactive"
+        onStatusChange={vi.fn()}
+        managedWorkspaceWritable
+        onManagedWorkspaceWritesChange={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole('button', { name: 'Project status: Inactive. Open project controls' }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows search that cannot work, and a linked repository', async () => {
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({
+      state: 'fresh',
+      embeddings: { status: 'unavailable', reason: 'the embedding model could not be loaded' },
+    } as never);
+    const { unmount } = render(
+      <ProjectGitStatusBar projectId="pj-1" status="active" managedWorkspaceWritable />,
+    );
+    expect(await screen.findByRole('button', { name: /^Indexing status:/ })).toBeInTheDocument();
+    unmount();
+
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({ state: 'fresh' } as never);
+    vi.mocked(api.getProjectGitStatus).mockResolvedValue(BASE_STATUS as never);
+    render(<ProjectGitStatusBar projectId="pj-1" status="active" managedWorkspaceWritable />);
+    expect(await screen.findByRole('button', { name: /Sync/ })).toBeInTheDocument();
   });
 });

@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { revealSettingsNavItem } from './helpers/settings-nav.js';
@@ -39,8 +40,7 @@ test('Back, Forward and the trail of views visited', async () => {
   const app = await launch(gezelHome);
   try {
     const page = await app.firstWindow();
-    await page.waitForLoadState('domcontentloaded');
-    await expect(page.locator('[data-testid="app-sidebar"]')).toBeVisible({ timeout: 60_000 });
+    await waitForAppReady(page);
 
     const back = page.getByTestId('history-back');
     const forward = page.getByTestId('history-forward');

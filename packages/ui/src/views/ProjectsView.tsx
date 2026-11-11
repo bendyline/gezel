@@ -50,7 +50,7 @@ import { ProjectMemoriesEditor } from '../components/MemoriesTree.js';
 import { ProjectActionsMenu, ProjectContextMenu } from '../components/ProjectActionsMenu.js';
 import type { ProjectTemplateGezelOptions } from '../components/ProjectAddGezelDialog.js';
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
-import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
+import { PROJECT_STATUS_OPTIONS, ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
 import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
@@ -3042,6 +3042,37 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           className="project-about-anchor"
                           title="Preferences"
                         >
+                          {/* The status bar shows an owner this only when it
+                              is paused, so the control lives here too. */}
+                          <SettingField
+                            label="Project status"
+                            hint="Active lets scheduled tasks and hand-offs run on their own. Read-only and Inactive pause them; chat still works. A project turns Stable by itself once its tasks are finished."
+                          >
+                            <Select.Root
+                              value={selected.status ?? 'active'}
+                              onValueChange={async (v) => {
+                                const updated = await api.updateProject(selected.id, {
+                                  status: v as NonNullable<typeof selected.status>,
+                                });
+                                setSelected(updated);
+                              }}
+                            >
+                              <Select.Trigger
+                                aria-label="Project status"
+                                disabled={selected.archived === true}
+                              >
+                                <Select.Value />
+                              </Select.Trigger>
+                              <Select.Content>
+                                {PROJECT_STATUS_OPTIONS.map((option) => (
+                                  <Select.Item key={option.value} value={option.value}>
+                                    {option.label}
+                                  </Select.Item>
+                                ))}
+                              </Select.Content>
+                            </Select.Root>
+                          </SettingField>
+
                           {runtimeCapabilities().catalog && (
                             <SettingField
                               label="Project type"

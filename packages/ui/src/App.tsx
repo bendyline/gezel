@@ -58,6 +58,7 @@ import {
   preloadTabContent,
   preloadTabData,
 } from './components/tab-content-loaders.js';
+import { useBuilderView } from './components/useBuilderView.js';
 import { useHostNotifications } from './components/useHostNotifications.js';
 import { useIsFirstRun } from './components/useIsFirstRun.js';
 import { HistoryKeys } from './components/view-history/HistoryKeys.js';
@@ -209,6 +210,7 @@ function FullApp() {
   useHostNotifications();
   const { compact, preview, exitPreview } = useResponsiveLayout();
   const firstRun = useIsFirstRun();
+  const builderView = useBuilderView();
   const setupOpened = useRef(false);
   const [navigationOpen, setNavigationOpen] = useState(true);
   const openNavigation = useCallback(() => setNavigationOpen(true), []);
@@ -895,11 +897,19 @@ function FullApp() {
                 (runtimeCapabilities().engineStatus ||
                   runtimeCapabilities().structuredQuestions) && <ActivityControl />}
               {!firstRun && runtimeCapabilities().connections && <WatchingIndicator />}
+              {/* "This PC" stays in view whenever a local engine is in use
+              (owner decision, 2026-11-11). The worker pool is a builder's
+              readout, and an owner sees a plan's quota only when it is
+              nearly spent (useBuilderView). */}
               {!firstRun && runtimeCapabilities().engineStatus && <EngineStatusPill />}
               {!firstRun && runtimeCapabilities().daemonSettings && (
                 <>
-                  <ClaudeCliPoolPill />
-                  <QuotaMeters usage={usage} onOpenSettings={openProviderSettings} />
+                  {builderView && <ClaudeCliPoolPill />}
+                  <QuotaMeters
+                    usage={usage}
+                    onOpenSettings={openProviderSettings}
+                    nearCapOnly={!builderView}
+                  />
                 </>
               )}
               {/* The header tray: icon keys set into one slot, read as a
@@ -1717,12 +1727,24 @@ const QUOTA_ACTIVITY_POLL_MS = 3_000;
 type QuotaProviderKey = (typeof QUOTA_PROVIDERS)[number]['key'];
 type QuotaSettingsSection = (typeof QUOTA_PROVIDERS)[number]['settingsSection'];
 
+/** A plan this close to its cap is something its owner needs to see. */
+const QUOTA_NEAR_CAP_USED = 0.8;
+
+function quotaNearCap(buckets: readonly QuotaBucket[]): boolean {
+  return buckets.some(
+    (bucket) => bucket.limit > 0 && bucket.used / bucket.limit >= QUOTA_NEAR_CAP_USED,
+  );
+}
+
 function QuotaMeters({
   usage,
   onOpenSettings,
+  nearCapOnly = false,
 }: {
   usage: UsageResponse | null;
   onOpenSettings: (section: QuotaSettingsSection) => void;
+  /** The owner's view: a provider's meter shows only once a cap is close. */
+  nearCapOnly?: boolean;
 }) {
   const [activeProviders, setActiveProviders] = useState<ReadonlySet<QuotaProviderKey>>(
     () => new Set(),
@@ -1771,6 +1793,7 @@ function QuotaMeters({
         ) {
           return null;
         }
+        if (nearCapOnly && !quotaNearCap(limitedBuckets)) return null;
         return (
           <ProviderQuotaMeter
             key={provider.key}

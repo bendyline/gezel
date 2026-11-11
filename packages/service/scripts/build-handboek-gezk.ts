@@ -88,7 +88,7 @@ try {
     catalog: {
       id: HANDBOEK_KNOWLEDGE_CATALOG,
       version: servicePackage.version,
-      name: 'Gezel Handboek',
+      name: 'Gezel Help',
       description: 'The guide to gezel, its crew, projects, craftbooks, and tools.',
       language: 'en',
       publisher: { id: HANDBOEK_KNOWLEDGE_PUBLISHER, name: 'Bendyline', url: 'https://gezel.com' },
@@ -108,7 +108,7 @@ try {
     countTokens: (text) => embedder.countTokens(text),
     extraFiles: {
       'README.md':
-        'Gezel Handboek. Source: https://github.com/bendyline/gezel/tree/main/docs/handboek. The website HTML is generated separately from that source tree.\n',
+        'Gezel Help. Source: https://github.com/bendyline/gezel/tree/main/docs/handboek. The website HTML is generated separately from that source tree.\n',
       'LICENSES/catalog.txt':
         'MIT License. Copyright Bendyline. https://github.com/bendyline/gezel/blob/main/LICENSE\n',
     },

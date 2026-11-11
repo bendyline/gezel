@@ -22,15 +22,22 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', 
   return node;
 }
 
-export function mountStartup(bridge: StartupHomeBridge): void {
-  if (!bridge.active || document.getElementById('startup-home')) return;
+/**
+ * Draws the start screen and returns a function that tears it down, which
+ * only tests call: the handoff removes it in production. Every React root must
+ * be unmounted, or a lazy reader chunk that lands after jsdom is gone commits
+ * and React's deferred effect flush reads `window`.
+ */
+export function mountStartup(bridge: StartupHomeBridge): (() => void) | undefined {
+  if (!bridge.active || document.getElementById('startup-home')) return undefined;
   const snapshot = bridge.snapshot;
   const name = snapshot?.meester?.name || '';
   const root = element('div', 'startup-home');
   root.id = 'startup-home';
   root.dataset.platform = window.__GEZEL__?.platform || '';
   document.documentElement.dataset.platform = root.dataset.platform;
-  document.documentElement.dataset.sidebarSide = snapshot?.sidebar || 'right';
+  // With no snapshot, the side theme-init.js applied from the cache stands.
+  if (snapshot?.sidebar) document.documentElement.dataset.sidebarSide = snapshot.sidebar;
   if (snapshot?.theme && snapshot.theme !== 'system')
     document.documentElement.dataset.theme = snapshot.theme;
   // This screen draws the title bar before the app does, so main has to hear
@@ -139,7 +146,7 @@ export function mountStartup(bridge: StartupHomeBridge): void {
     ...(snapshot?.night || view.tab === 'night'
       ? [['night', 'Night shift'] as [StartupHomeView['tab'], string]]
       : []),
-    ['tour', 'Handboek'],
+    ['tour', 'Help'],
   ];
   const buttons = new Map<StartupHomeView['tab'], HTMLButtonElement>();
   function render(target = content) {
@@ -223,7 +230,7 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   const create = element('button', 'gz-tabs-trigger home-workshop-tab', 'Create');
   create.type = 'button';
   create.disabled = true;
-  create.title = 'Opens when your workshop is ready';
+  create.title = 'Opens when Gezel is ready';
   create.dataset.state = 'inactive';
   tabs.insertBefore(create, buttons.get('tour') ?? null);
   function setCollapsed(next: boolean) {
@@ -305,7 +312,7 @@ export function mountStartup(bridge: StartupHomeBridge): void {
           ),
     );
   });
-  const retry = element('button', 'startup-retry', 'Open workshop');
+  const retry = element('button', 'startup-retry', 'Open Gezel');
   retry.type = 'button';
   retry.hidden = true;
   right.append(retry);
@@ -315,7 +322,7 @@ export function mountStartup(bridge: StartupHomeBridge): void {
     busy = true;
     const finalState = current();
     bridge.save(finalState);
-    status.textContent = finalState.draft.trim() ? 'Saving your draft…' : 'Opening your workshop…';
+    status.textContent = finalState.draft.trim() ? 'Saving your draft…' : 'Opening Gezel…';
     root.inert = true;
     try {
       await accept(finalState);
@@ -339,7 +346,7 @@ export function mountStartup(bridge: StartupHomeBridge): void {
       window.__GEZEL_STARTUP__ = undefined;
       window.dispatchEvent(new CustomEvent('gezel:startup-finished', { detail: finalState }));
     } catch {
-      status.textContent = 'Still opening your workshop. Try again.';
+      status.textContent = 'Still opening Gezel. Try again.';
       retry.hidden = false;
       root.inert = false;
       busy = false;
@@ -367,6 +374,16 @@ export function mountStartup(bridge: StartupHomeBridge): void {
     },
   };
   window.dispatchEvent(new Event('gezel:startup-mounted'));
+  return () => {
+    window.removeEventListener('pagehide', save);
+    window.removeEventListener('beforeunload', save);
+    clearTimeout(saveTimer);
+    for (const renderer of [brandRoot, homeRoot, loadingRoot, ...readingRoots.values()]) {
+      renderer.unmount();
+    }
+    readingRoots.clear();
+    root.remove();
+  };
 }
 
 if (typeof window !== 'undefined') {

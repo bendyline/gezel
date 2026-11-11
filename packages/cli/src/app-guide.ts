@@ -30,7 +30,7 @@ export async function renderAppGuide(opts: { contentDir?: string } = {}): Promis
   });
   if (!article) {
     throw new CliError(
-      `this install has no "${APP_GUIDE_ARTICLE_ID}" Handboek article; read ${PUBLISHED_HANDBOEK}${APP_GUIDE_ARTICLE_ID}.md`,
+      `this install has no "${APP_GUIDE_ARTICLE_ID}" Help article; read ${PUBLISHED_HANDBOEK}${APP_GUIDE_ARTICLE_ID}.md`,
     );
   }
   const { areas } = await engine.toc();

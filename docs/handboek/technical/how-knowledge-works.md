@@ -86,7 +86,7 @@ The current registered profiles are:
 
 | Profile | Language use | Query / passage instructions | Stage-one encoding |
 | --- | --- | --- | --- |
-| `bge-small-en-v1.5@1` | English; default for local catalog builds and the Handboek | BGE query instruction / no passage prefix | Raw sign bits |
+| `bge-small-en-v1.5@1` | English; default for local catalog builds and Help | BGE query instruction / no passage prefix | Raw sign bits |
 | `multilingual-e5-small@2` | Multilingual reference catalogs | `query: ` / `passage: ` | Centered sign bits |
 | `multilingual-e5-small@1` | Existing catalogs using the earlier E5 profile | `query: ` / `passage: ` | Raw sign bits |
 | `embeddinggemma-2-512@1` | Catalogs with searchable photos, video and audio | `task: search result \| query: ` / `title: none \| text: ` | Centered sign bits |
@@ -229,7 +229,7 @@ Trusted public catalog downloads can use the machine engine broker's immutable a
 
 The broker receives a trusted catalog coordinate, not a user project path. It manages public immutable bytes; user documents, memories, query embedding work, and retrieval remain product-daemon concerns. Removing a catalog removes your reference and private files, while shared public bytes are reclaimed separately. Background update work respects the app-network policy; an explicitly requested install is the user's own download.
 
-The built-in Handboek is itself a `.gezk` catalog. Gezel builds it from these documentation articles and generated catalog material, then installs the bundled archive through the normal knowledge machinery. Updates replace changed bundled bytes while preserving your enabled setting.
+The built-in Help is itself a `.gezk` catalog. Gezel builds it from these documentation articles and generated catalog material, then installs the bundled archive through the normal knowledge machinery. Updates replace changed bundled bytes while preserving your enabled setting.
 
 ## Diagnosing missing results
 
