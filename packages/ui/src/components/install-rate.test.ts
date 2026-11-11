@@ -62,3 +62,16 @@ describe('formatting', () => {
     expect(formatTimeLeft(120 * 60 * MB, MB)).toBe('about 2 h left');
   });
 });
+
+describe('steadyBytesPerSecond', () => {
+  it('has no figure until the speed has been watched for twenty seconds', async () => {
+    const { steadyBytesPerSecond } = await import('./install-rate.js');
+    let rate = emptyInstallRate();
+    rate = recordInstallSample(rate, 0, 0);
+    rate = recordInstallSample(rate, 12_000, 5 * 1024 ** 2);
+    expect(rate.bytesPerSecond).not.toBeNull();
+    expect(steadyBytesPerSecond(rate)).toBeNull();
+    rate = recordInstallSample(rate, 25_000, 60 * 1024 ** 2);
+    expect(steadyBytesPerSecond(rate)).toBe(rate.bytesPerSecond);
+  });
+});

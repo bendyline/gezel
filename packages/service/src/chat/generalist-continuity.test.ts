@@ -72,4 +72,41 @@ describe('resolveExecutionModelFor', () => {
     expect(profile.tier).toBe('cloud');
     expect(profile.affinity).toBeUndefined();
   });
+
+  it('reads a measured hosted model from the hosted-model table, only through its provider', async () => {
+    const sonnet = await resolveExecutionModelFor({
+      ...stubs({ defaultModel: { anthropic: 'claude-sonnet-5-5' }, manifests }),
+      providerName: 'anthropic',
+    });
+    expect(sonnet.affinity).toEqual({ strategy: 'outcome', procedure: 'advisory' });
+    const elsewhere = await resolveExecutionModelFor({
+      ...stubs({ defaultModel: { 'anthropic-cli': 'claude-sonnet-5-5' }, manifests }),
+      providerName: 'anthropic-cli',
+    });
+    expect(elsewhere.affinity).toBeUndefined();
+    const pinned = await resolveExecutionModelFor({
+      ...stubs({
+        defaultModel: { anthropic: 'claude-sonnet-5-5' },
+        gezel: { tuning: { taskStrategy: { strategy: 'generalist' } } },
+        manifests,
+      }),
+      providerName: 'anthropic',
+      gezelId: 'g1',
+    });
+    expect(pinned.affinity).toEqual({ strategy: 'generalist' });
+  });
+
+  it("reads the provider's own default model when nothing names one", async () => {
+    const codex = await resolveExecutionModelFor({
+      ...stubs({ manifests }),
+      providerName: 'codex-cli',
+    });
+    expect(codex.affinity).toEqual({ strategy: 'outcome', procedure: 'none' });
+    expect(codex.modelId).toBeUndefined();
+    const opus = await resolveExecutionModelFor({
+      ...stubs({ manifests }),
+      providerName: 'anthropic',
+    });
+    expect(opus.affinity).toBeUndefined();
+  });
 });

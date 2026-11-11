@@ -1,7 +1,16 @@
 import { fireEvent } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mountStartup } from './screen.js';
+import { mountStartup as mount } from './screen.js';
 import type { StartupHomeBridge } from './types.js';
+
+// Each mount's React roots are unmounted after its test. A root left behind
+// re-renders when the reader's lazy chunk lands, which under coverage can be
+// after jsdom is torn down ("window is not defined", 2026-11-11 CI).
+const disposers: Array<() => void> = [];
+function mountStartup(host: StartupHomeBridge) {
+  const dispose = mount(host);
+  if (dispose) disposers.push(dispose);
+}
 
 function bridge(): StartupHomeBridge {
   return {
@@ -21,6 +30,8 @@ function bridge(): StartupHomeBridge {
   };
 }
 afterEach(() => {
+  for (const dispose of disposers.splice(0)) dispose();
+  document.documentElement.removeAttribute('data-sidebar-side');
   document.body.replaceChildren();
   delete window.__GEZEL_STARTUP__;
   vi.useRealTimers();
@@ -158,5 +169,100 @@ describe('the sheet rail', () => {
   it('drops back open when the pointer is taken away', () => {
     pull(200, 'pointerCancel');
     expect(rolledUp()).toBe(false);
+  });
+});
+
+// The start screen showed a brand, a status pill and one Home row, then the
+// live bar and rail arrived with six more keys and rows (2026-11-09 review).
+describe('the frame it draws', () => {
+  it('holds the places of the live title bar and navigation', () => {
+    mountStartup(bridge());
+    const header = document.querySelector('.startup-header')!;
+    expect(header.querySelectorAll('.app-history-key')).toHaveLength(3);
+    for (const key of header.querySelectorAll<HTMLButtonElement>('.app-history-key')) {
+      expect(key.disabled).toBe(true);
+    }
+    expect(header.querySelector('.app-header-brand')).not.toBeNull();
+    expect(header.querySelector<HTMLInputElement>('.titlebar-search-input')?.disabled).toBe(true);
+    const rail = document.querySelector('.startup-sidebar')!;
+    expect(
+      [...rail.querySelectorAll('.app-sidebar-item-label')].map((label) => label.textContent),
+    ).toEqual(['Home ', 'Projects', 'Documents', 'Crew', 'More', 'Knowledge', 'Settings']);
+    expect(rail.querySelector('.startup-navigation-rest')?.hasAttribute('inert')).toBe(true);
+    expect(document.querySelector('.startup-loading-line')).toHaveTextContent('Opening Gezel');
+    expect(document.querySelector('.startup-composer')).not.toBeNull();
+  });
+
+  // The frame uses the live app's rules, which read the side off the root:
+  // no attribute is the left, `right` the right.
+  it('draws the rail on the side the snapshot names', () => {
+    const side = () => document.documentElement.getAttribute('data-sidebar-side');
+    const saved = (sidebar: 'left' | 'right') => {
+      document.body.replaceChildren();
+      const host = bridge();
+      host.snapshot = {
+        version: 1,
+        savedAt: '2026-11-11T08:00:00Z',
+        meester: { id: 'vanya', name: 'Vanya' },
+        theme: 'system',
+        sidebar,
+        status: null,
+        lastMessage: null,
+        night: null,
+      };
+      mountStartup(host);
+    };
+    saved('right');
+    expect(side()).toBe('right');
+    // Over a side the page already painted, such as theme-init.js's.
+    saved('left');
+    expect(side()).toBeNull();
+    // With no snapshot the painted side stands.
+    document.documentElement.setAttribute('data-sidebar-side', 'right');
+    document.body.replaceChildren();
+    mountStartup(bridge());
+    expect(side()).toBe('right');
+  });
+
+  it('shows the live tabs: Night shift only with a night to read about, and Create', () => {
+    mountStartup(bridge());
+    const tabs = () =>
+      [...document.querySelectorAll('.home-workshop-tab')].map((tab) => tab.textContent);
+    expect(tabs().slice(1)).toEqual(['Create', 'Help']);
+    document.body.replaceChildren();
+    const host = bridge();
+    host.snapshot = {
+      version: 1,
+      savedAt: '2026-11-10T08:00:00Z',
+      meester: { id: 'vanya', name: 'Vanya' },
+      theme: 'system',
+      sidebar: 'right',
+      status: null,
+      lastMessage: null,
+      night: { windowEnd: '2026-11-10T06:00:00Z', completed: 2, reports: [] },
+    };
+    mountStartup(host);
+    expect(tabs().slice(1)).toEqual(['Night shift', 'Create', 'Help']);
+  });
+
+  it('draws the welcome for a home nobody has used yet, with no greeting sheet', () => {
+    const host = bridge();
+    host.snapshot = {
+      version: 1,
+      savedAt: '2026-11-10T08:00:00Z',
+      meester: { id: 'vanya', name: 'Vanya' },
+      welcome: true,
+      theme: 'system',
+      sidebar: 'right',
+      status: null,
+      lastMessage: null,
+      night: null,
+    };
+    mountStartup(host);
+    expect(document.getElementById('startup-home')?.dataset.shape).toBe('welcome');
+    expect(document.querySelector<HTMLElement>('.home-workshop-greeting')?.hidden).toBe(true);
+    expect(document.querySelector('.startup-welcome .meester-welcome-title')).toHaveTextContent(
+      "I'm Vanya — I run things here.",
+    );
   });
 });

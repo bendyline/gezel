@@ -99,6 +99,7 @@ import { meesterStatusRoutes } from './routes/meester-status.js';
 import { memoryRoutes } from './routes/memory.js';
 import { mlxRoutes } from './routes/mlx.js';
 import { modelFitnessRoutes } from './routes/model-fitness.js';
+import { modelImportRoutes } from './routes/model-imports.js';
 import { modelMigrationRoutes } from './routes/model-migrations.js';
 import { modelsRoutes } from './routes/models.js';
 import { nightShiftRoutes } from './routes/night-shift.js';
@@ -679,6 +680,7 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
   app.route('/api/machine-serving', machineServingRoutes(ctx));
   app.route('/api/ollama', ollamaRoutes(ctx));
   app.route('/api/llama-cpp', llamaCppRoutes(ctx));
+  app.route('/api/model-imports', modelImportRoutes(ctx));
   app.route('/api/model-fitness', modelFitnessRoutes(ctx));
   app.route('/api/ds4', ds4Routes(ctx));
   app.route('/api/mlx', mlxRoutes(ctx));

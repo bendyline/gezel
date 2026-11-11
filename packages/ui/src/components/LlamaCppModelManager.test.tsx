@@ -19,6 +19,11 @@ vi.mock('./ModelBundleControls.js', () => ({
 const { LlamaCppModelManager } = await import('./LlamaCppModelManager.js');
 const { api } = await import('../api.js');
 
+/** The catalog lives behind the page's "Add a model…" key. */
+async function openAddModel() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Add a model…' }));
+}
+
 const GiB = 1024 ** 3;
 
 // Radix Popper measures tooltip content with ResizeObserver. jsdom does not
@@ -401,6 +406,36 @@ describe('LlamaCppModelManager local model list', () => {
     expect(cell).toHaveAttribute('title', expect.not.stringMatching(/free memory/));
   });
 
+  it('keeps the catalog behind Add a model, and says when nothing is on this device', async () => {
+    vi.mocked(api.listLlamaCppModels).mockResolvedValue({ models: [] } as never);
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [catalogModel('current-model', 'Current Model', 'general')],
+    } as never);
+
+    render(<LlamaCppModelManager />);
+
+    expect(await screen.findByText('No models on this device yet.')).toBeInTheDocument();
+    expect(screen.queryByText('Current Model')).not.toBeInTheDocument();
+    expect(screen.queryByText('Download a model')).not.toBeInTheDocument();
+
+    await openAddModel();
+
+    const dialog = await screen.findByTestId('add-model-dialog');
+    expect(dialog).toHaveTextContent('Add a model');
+    expect(await screen.findByText('Current Model')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeEnabled();
+  });
+
+  it('hands off to the Hugging Face import from the add dialog', async () => {
+    render(<LlamaCppModelManager />);
+    await openAddModel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'From Hugging Face or a file…' }));
+
+    expect(await screen.findByTestId('model-import-dialog')).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('add-model-dialog')).not.toBeInTheDocument());
+  });
+
   it('shows one continuous catalog without category filter buttons', async () => {
     vi.mocked(api.listCatalogItems).mockResolvedValue({
       items: [
@@ -410,6 +445,8 @@ describe('LlamaCppModelManager local model list', () => {
     } as never);
 
     render(<LlamaCppModelManager />);
+
+    await openAddModel();
 
     expect(await screen.findByText('General Model')).toBeInTheDocument();
     expect(screen.getByText('Coding Model')).toBeInTheDocument();
@@ -427,6 +464,8 @@ describe('LlamaCppModelManager local model list', () => {
     } as never);
 
     render(<LlamaCppModelManager />);
+
+    await openAddModel();
 
     expect(await screen.findByText('Current Model')).toBeInTheDocument();
     expect(screen.queryByText('Retired Model')).not.toBeInTheDocument();
@@ -449,6 +488,8 @@ describe('LlamaCppModelManager local model list', () => {
 
     render(<LlamaCppModelManager backend="metal" />);
 
+    await openAddModel();
+
     expect(await screen.findByText('Current Model')).toBeInTheDocument();
     expect(screen.queryByText('NVFP4 Model')).not.toBeInTheDocument();
 
@@ -469,6 +510,8 @@ describe('LlamaCppModelManager local model list', () => {
 
     render(<LlamaCppModelManager backend="cuda" />);
 
+    await openAddModel();
+
     expect(await screen.findByText('NVFP4 Model')).toBeInTheDocument();
     expect(screen.queryByText(/Not for/)).not.toBeInTheDocument();
   });
@@ -479,6 +522,8 @@ describe('LlamaCppModelManager local model list', () => {
     } as never);
 
     render(<LlamaCppModelManager />);
+
+    await openAddModel();
 
     const title = await screen.findByText('Gemma 4 (31B)');
     const attribution = title.parentElement?.querySelector('.catalog-item-attribution');

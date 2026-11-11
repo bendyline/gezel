@@ -193,7 +193,7 @@ export function DiffpackReviewView({ projectId }: { projectId: string }) {
     return (
       <div className="dp-empty">
         <p className="placeholder">
-          No change proposals yet. When a gezel fixes something here, the change lands as a proposal
+          No change proposals yet. When Gezel fixes something here, the change lands as a proposal
           you read and apply — your files aren’t touched until you say so.
         </p>
       </div>

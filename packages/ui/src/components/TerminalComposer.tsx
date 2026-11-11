@@ -76,7 +76,7 @@ const GALLERIES: Array<{
   {
     section: 'tasks',
     label: 'Tasks',
-    title: 'Craftbooks and workspace skills a gezel can run for you',
+    title: 'Plans and workspace skills Gezel can run for you',
     icon: (
       <>
         <path

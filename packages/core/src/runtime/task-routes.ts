@@ -309,7 +309,7 @@ export class PortableTaskRunner {
     const step = task.craftbook.steps.find((candidate) => candidate.id === task.activeStepId);
     if (!step?.suggestedRole || step.assignee || step.suggestedGezelId) return task;
     if (!this.options.resolveStepRole)
-      throw new Error(`This step needs a ${step.suggestedRole} gezel`);
+      throw new Error(`This step needs someone in the ${step.suggestedRole} role`);
     const gezelId = await this.options.resolveStepRole(task.projectId, step.suggestedRole);
     return this.options.store.resolveTaskStepRole(task.ref, step.id, gezelId);
   }

@@ -32,8 +32,10 @@ function timestampMs(iso: string): number {
  * The status band across the top of a project chat: one pill per active
  * task, enriched with its latest chat, and the newest independent thread
  * plus other recent/attention-worthy threads. Starting a task lives in the
- * composer (the Task key beside Send), not here. The band stays blank when
- * there is no recent work; the timeline supplies the new-project guidance.
+ * composer (the Task key beside Send), not here. With no recent work there
+ * is no band at all: a new project's chat opened under an empty tray, a
+ * blank stripe the height of a row of tiles. The timeline supplies the
+ * new-project guidance.
  *
  * Purely presentational apart from the two data hooks — it owns no dialog
  * and performs no navigation. The parent decides what focusing a thread or
@@ -68,9 +70,14 @@ export function ChatPillRow({
   refreshKey?: number | undefined;
   terminalRefreshKey?: number | undefined;
 }) {
-  const { tasks } = useProjectActiveTasks({ projectId, refreshKey });
+  const { tasks, loading: tasksLoading } = useProjectActiveTasks({ projectId, refreshKey });
   const taskRefs = useMemo(() => new Set(tasks.map((t) => t.ref)), [tasks]);
-  const { pills, overflow, taskPills } = useChatThreadPills({
+  const {
+    pills,
+    overflow,
+    taskPills,
+    loading: threadsLoading,
+  } = useChatThreadPills({
     projectId,
     gezelId,
     pinnedSessionId: activeSessionId,
@@ -133,7 +140,18 @@ export function ChatPillRow({
     .join(', ');
 
   const cardCount = pills.length + overflow.length + visibleTerminalThreads.length + tasks.length;
-  const { scrollRef, overflowBar } = useOverflowBar(cardCount);
+  // Once both lists have answered for this project an empty strip is left
+  // out, and a later re-read (a send bumps it) must not flash the blank band
+  // back. Until then the band holds its place, so a project with work does
+  // not open by pushing the conversation down a row.
+  const listsSettled = !tasksLoading && !threadsLoading;
+  const [settledProjectId, setSettledProjectId] = useState<string | null>(null);
+  useEffect(() => {
+    if (listsSettled) setSettledProjectId(projectId);
+  }, [listsSettled, projectId]);
+  const empty = cardCount === 0 && (listsSettled || settledProjectId === projectId);
+  const { scrollRef, overflowBar } = useOverflowBar(cardCount, !empty);
+  if (empty) return null;
 
   return (
     <div className="chat-pill-row" role="toolbar" aria-label="Threads, terminal windows, and tasks">
@@ -229,7 +247,10 @@ export function ChatPillRow({
  * scroller's own box ever changing size, so the ResizeObserver alone would
  * miss them.
  */
-function useOverflowBar(cardCount: number): {
+function useOverflowBar(
+  cardCount: number,
+  shown: boolean,
+): {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   overflowBar: { onScroll: () => void; node: React.ReactNode };
 } {
@@ -259,13 +280,14 @@ function useOverflowBar(cardCount: number): {
     measure();
   }, [measure, cardCount]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `shown` is the re-attach trigger — the band leaves the DOM while it has nothing to show and comes back as a new element.
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => measure());
     observer.observe(el);
     return () => observer.disconnect();
-  }, [measure]);
+  }, [measure, shown]);
 
   const onThumbPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const scroller = scrollRef.current;
@@ -386,9 +408,10 @@ function ThreadPillButton({
   const updated = formatLongRelativeTime(pill.lastActivityAt);
   const status = threadStatusLabel(pill.state);
   const message = messagePreviewFor(pill);
-  const title = `${gezelNames} · ${pill.title} · updated ${updated} · ${status}${
-    pill.error ? `: ${pill.error}` : ''
-  }`;
+  // The status says a reply failed; the chat's own banner explains why. The
+  // raw error here put an engine's memory figures and a model id under the
+  // pointer.
+  const title = `${gezelNames} · ${pill.title} · updated ${updated} · ${status}`;
 
   return (
     <button
@@ -536,7 +559,7 @@ function TaskPillButton({
       aria-label={`Task ${task.ref}: ${task.title}. ${accessibleChat}`}
       title={
         latestThread
-          ? `${task.ref} · ${task.title} · latest chat: ${latestThread.title} · ${gezelNames} · updated ${updated} · ${status}${latestThread.error ? `: ${latestThread.error}` : ''}`
+          ? `${task.ref} · ${task.title} · latest chat: ${latestThread.title} · ${gezelNames} · updated ${updated} · ${status}`
           : unassigned
             ? `${task.ref} · ${task.title} — assigned to you · no chat yet`
             : `${task.ref} · ${task.title} · no chat yet`

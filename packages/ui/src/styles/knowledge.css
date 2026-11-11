@@ -117,12 +117,12 @@
 }
 
 .knowledge-catalog-picker-menu .gz-select-item[data-state="checked"] {
-  background: var(--panel);
+  background: var(--selected-bg);
   font-weight: 600;
 }
 
 .knowledge-catalog-picker-menu .gz-select-item[data-state="checked"][data-highlighted] {
-  background: color-mix(in srgb, var(--accent) 18%, var(--panel));
+  background: var(--selected-bg-hover);
 }
 
 .knowledge-catalog-option-count {
@@ -235,7 +235,7 @@
 }
 
 .knowledge-topic-line--current {
-  background: var(--panel);
+  background: var(--selected-bg);
 }
 
 .knowledge-topic-line > .knowledge-topic-row {
@@ -428,7 +428,7 @@
 }
 
 .knowledge-doc-row[aria-current="true"] {
-  background: var(--panel);
+  background: var(--selected-bg);
 }
 
 .knowledge-doc-title {

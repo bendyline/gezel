@@ -35,7 +35,7 @@ This is a `pages` block inside a project type's **version** manifest:
 
 The entry is relative to `pages/`. Reads are project-relative; `workspace` and `artifacts` are different trees. An exact-file grant does not grant the surrounding directory. A folder explorer can deliberately grant `{"source":"workspace","path":".","subtree":true}` for the whole selected project folder. The host checks the grants and path containment. It binds the project; a page never supplies its own project id to escape that boundary.
 
-Every `pages.tools` name must also be declared in the type's `tools` array. Those names are page-only: they are removed from the model's tool roster. If both the page and a gezel need an action, declare two tool names sharing the same script and bound operation. A declared action still needs the script's capabilities and the user's project policy to permit it.
+Every `pages.tools` name must also be declared in the type's `tools` array. Those names are page-only: they are removed from the model's tool roster. If both the page and the model need an action, declare two tool names sharing the same script and bound operation. A declared action still needs the script's capabilities and the user's project policy to permit it.
 
 ## Choose the smallest API that does the job
 
@@ -161,13 +161,15 @@ visitors, and standalone demos show an explicit unavailable message; demos
 never call a model. The parent owns the native chat and composer, including
 their theme, accessibility, sessions, and ordinary permission prompts. Page
 scripts receive no transcript, input text, credentials, or programmatic send
-method. Options change presentation, not the gezel's tool authority.
+method. Options change presentation, not the recipient's tool authority.
 
 The slot follows layout, scrolling, and hidden containers. Keep it rectangular
 and untransformed; the host clips it to the page viewport. Page CSS cannot
-restyle chat internals, and page popovers cannot cover native chat: hide the
-slot while showing a page dialog that overlaps it. At most four slots can be
-mounted per page. Removing a slot from the document destroys it; create a new
+restyle chat internals, and page popovers cannot cover native chat. A modal
+page dialog (`dialog.showModal()`, `aria-modal="true"`, or a component dialog)
+dims the chat instead: the host draws the dialog's backdrop color over it,
+leaves the dialog's own area uncovered, and lets clicks reach the page until
+the dialog closes. At most four slots can be mounted per page. Removing a slot from the document destroys it; create a new
 handle if you need to mount it again.
 
 ## Building a full-page workspace
@@ -176,8 +178,9 @@ handle if you need to mount it again.
 without replacing its DOM. In fullscreen it opens a companion beside the content;
 below 900 CSS pixels the conversation stacks beneath it. Restoring the pane,
 hiding the conversation, or opening a native page dialog retains the conversation
-and its draft. The component hides the native slot while a visible page dialog is
-open, since iframe content cannot cover host-owned chat.
+and its draft. While a page dialog is open the conversation stays on screen,
+dimmed with the rest of the page, since iframe content cannot cover host-owned
+chat.
 
 ```js
 const workspace = gezel.ui.components.appLayout('main', {

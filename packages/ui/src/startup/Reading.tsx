@@ -16,7 +16,7 @@ class ReadingError extends Component<{ children: ReactNode }, { failed: boolean 
   }
   override render() {
     return this.state.failed ? (
-      <output>This page will be available when your workshop is ready.</output>
+      <output>This page will be available when Gezel is ready.</output>
     ) : (
       this.props.children
     );

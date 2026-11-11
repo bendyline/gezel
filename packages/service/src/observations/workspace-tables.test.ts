@@ -15,6 +15,7 @@ import {
   sourceRelPathFromCorpusDir,
   tableNameForSource,
   tabularCorpusDir,
+  workspaceTableMinBytes,
 } from './workspace-tables.js';
 
 let artifacts: string;
@@ -78,11 +79,21 @@ describe('corpus placement', () => {
 });
 
 describe('materialization policy', () => {
-  it('is the indexer trivial line, not a new magic number', () => {
-    const min = 512 * 1024;
+  it('is the indexer trivial line in a code folder, not a new magic number', () => {
+    const min = workspaceTableMinBytes(true, 512 * 1024);
+    expect(min).toBe(512 * 1024);
     expect(shouldMaterialize('data/big.csv', min, { minBytes: min })).toBe(true);
+    // Below the line a code folder's CSV is a fixture: readable, not data.
     expect(shouldMaterialize('data/small.csv', min - 1, { minBytes: min })).toBe(false);
-    // Below the line the file is already chunked, searchable and readable.
+  });
+
+  // A model read a 189-row sales CSV and added it up by hand; the weekday
+  // totals it reported were wrong. Anywhere but a code folder, a CSV with
+  // rows in it is data to calculate from (2026-11-09).
+  it('makes every CSV with rows a table outside a code folder', () => {
+    const min = workspaceTableMinBytes(false, 512 * 1024);
+    expect(shouldMaterialize('sales-october-2026.csv', 9_400, { minBytes: min })).toBe(true);
+    expect(shouldMaterialize('header-only.csv', 12, { minBytes: min })).toBe(false);
   });
 
   it('ignores files it has no reader for', () => {

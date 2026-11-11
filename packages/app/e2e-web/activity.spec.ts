@@ -99,7 +99,7 @@ test('Activity answers inline, retains drafts, and explains held work', async ({
       description: 'Answer receipt stays in place while the panel remains open',
     });
     await panel.getByRole('button', { name: /^Next/ }).click();
-    const held = panel.locator('.activity-work').filter({ hasText: task.title });
+    const held = panel.locator('.activity-row').filter({ hasText: task.title });
     await expect(held).toContainText('Automatic work is paused');
     await held.scrollIntoViewIfNeeded();
     await shot(page, 'held-work', {

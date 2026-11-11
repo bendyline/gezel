@@ -142,8 +142,8 @@ export function AudioEngineSettings() {
         ) : (
           <>
             Speech recognition prefers this device's offline recognizer and uses Whisper when it is
-            unavailable. Kokoro supplies your crew's voices. The speech models are included with the
-            app; no connection is needed.
+            unavailable. Kokoro supplies the voices. The speech models are included with the app; no
+            connection is needed.
           </>
         )}
       </p>
@@ -233,7 +233,7 @@ export function AudioEngineSettings() {
               <span>
                 Narrate assistant replies
                 <span className="muted small" style={{ marginLeft: '0.5rem' }}>
-                  — speak each gezel reply aloud using that gezel's voice, once the reply is
+                  — speak each reply aloud in the voice of whoever wrote it, once the reply is
                   finished.
                 </span>
               </span>
@@ -248,8 +248,8 @@ export function AudioEngineSettings() {
               <span>
                 Include progress updates
                 <span className="muted small" style={{ marginLeft: '0.5rem' }}>
-                  — also speak the short notes a gezel gives while it works, like "Now I'll draft
-                  the outline.", and start each reply as it arrives instead of when it is finished.
+                  — also speak the short notes Gezel gives while it works, like "Now I'll draft the
+                  outline.", and start each reply as it arrives instead of when it is finished.
                 </span>
               </span>
             </label>

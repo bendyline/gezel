@@ -28,6 +28,12 @@ const HistoryEventKinds = [
   'project.inferred',
   'project.deleted',
   'project.updated',
+  /**
+   * The project moved to another version of its app (project type), on its
+   * own or with the person's OK. `details` carries
+   * `{ typeId, typeName, fromVersion, toVersion, automatic }`.
+   */
+  'project.type.updated',
   'project.about.updated',
   'project.mission.updated',
   'project.voorman.changed',
@@ -432,6 +438,7 @@ export const PERSON_FACING_HISTORY_KINDS: ReadonlySet<HistoryEventKind> = new Se
     'project.inferred',
     'project.deleted',
     'project.updated',
+    'project.type.updated',
     'project.about.updated',
     'project.mission.updated',
     'project.voorman.changed',

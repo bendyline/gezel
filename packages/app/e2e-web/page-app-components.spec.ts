@@ -52,19 +52,27 @@ test('application layout preserves content and chat through restore, hide, and p
       ),
     )
     .toBeGreaterThan(200);
+  // A page modal dims the host-drawn conversation instead of emptying it: the
+  // slot keeps its size and names the dialog's area for the host to leave clear.
+  const lastPosition = () =>
+    page.evaluate(() => {
+      const last = (
+        Reflect.get(window, 'messages') as Array<{
+          kind: string;
+          rect?: { width: number };
+          modal?: { areas: unknown[] };
+        }>
+      )
+        .filter((m) => m.kind === 'chat-position')
+        .at(-1);
+      return { width: last?.rect?.width ?? 0, areas: last?.modal?.areas.length ?? 0 };
+    });
   await frame.getByRole('button', { name: 'Open dialog', exact: true }).click();
   await expect(frame.getByRole('dialog')).toBeVisible();
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (Reflect.get(window, 'messages') as Array<{ kind: string; rect?: { width: number } }>)
-            .filter((m) => m.kind === 'chat-position')
-            .at(-1)?.rect?.width,
-      ),
-    )
-    .toBe(0);
+  await expect.poll(async () => (await lastPosition()).areas).toBeGreaterThan(0);
+  expect((await lastPosition()).width).toBeGreaterThan(200);
   await frame.getByRole('button', { name: 'Close dialog', exact: true }).click();
+  await expect.poll(async () => (await lastPosition()).areas).toBe(0);
   await frame.getByRole('button', { name: 'Hide conversation' }).click();
   await frame.getByRole('button', { name: 'Show conversation' }).click();
   await page.evaluate(() =>
@@ -229,7 +237,7 @@ document.getElementById('edit-ana').onclick=()=>window.form.open({name:'Ana',hou
   await expect(page.getByRole('button', { name: 'Change hours' })).toBeFocused();
 });
 
-test('a component dialog hides the host-drawn conversation while it is open', async ({ page }) => {
+test('a component dialog dims the host-drawn conversation while it is open', async ({ page }) => {
   const shim = buildPageApiShim({
     api: 1,
     projectId: 'fixture',
@@ -263,19 +271,27 @@ test('a component dialog hides the host-drawn conversation while it is open', as
     frame.srcdoc = `${shim}<main><h1>Roster</h1><div id="add"></div></main><script>gezel.ui.components.appLayout('main',{title:'At the desk'});gezel.ui.components.actionForm('#add',{title:'Add a shift',presentation:'dialog',tool:'page_add',fields:[{name:'date',label:'Date',type:'date',required:true}]});</script>`;
   }, shim);
   const frame = page.frameLocator('iframe');
-  const lastWidth = () =>
-    page.evaluate(
-      () =>
-        (Reflect.get(window, 'messages') as Array<{ kind: string; rect?: { width: number } }>)
-          .filter((m) => m.kind === 'chat-position')
-          .at(-1)?.rect?.width ?? 0,
-    );
-  await expect.poll(lastWidth).toBeGreaterThan(200);
+  const lastPosition = () =>
+    page.evaluate(() => {
+      const last = (
+        Reflect.get(window, 'messages') as Array<{
+          kind: string;
+          rect?: { width: number };
+          modal?: { areas: unknown[] };
+        }>
+      )
+        .filter((m) => m.kind === 'chat-position')
+        .at(-1);
+      return { width: last?.rect?.width ?? 0, areas: last?.modal?.areas.length ?? 0 };
+    });
+  await expect.poll(async () => (await lastPosition()).width).toBeGreaterThan(200);
   await frame.getByRole('button', { name: 'Add a shift', exact: true }).click();
   await expect(frame.getByRole('dialog', { name: 'Add a shift' })).toBeVisible();
-  await expect.poll(lastWidth).toBe(0);
+  await expect.poll(async () => (await lastPosition()).areas).toBeGreaterThan(0);
+  expect((await lastPosition()).width).toBeGreaterThan(200);
   await frame.getByRole('button', { name: 'Cancel', exact: true }).click();
-  await expect.poll(lastWidth).toBeGreaterThan(200);
+  await expect.poll(async () => (await lastPosition()).areas).toBe(0);
+  expect((await lastPosition()).width).toBeGreaterThan(200);
 });
 
 test('inline action forms stay open and reset to current values', async ({ page }) => {

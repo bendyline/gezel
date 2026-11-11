@@ -317,20 +317,39 @@ describe('KnowledgeView', () => {
     expect(addKey.parentElement).toBe(picker.parentElement);
   });
 
-  it('opens the bundled welcome article after a stale catalog selection and allows returning to the list', async () => {
+  const HANDBOEK = {
+    ...CATALOG,
+    ref: { ...CATALOG.ref, publisherId: 'bendyline', catalogId: 'handboek' },
+    name: 'Gezel Help',
+    source: 'bundled' as const,
+  };
+
+  // The Knowledge door opened "What is gezel?" in the Handboek (2026-11-09).
+  it('opens the Handboek’s overview, not its welcome article, after a stale selection', async () => {
     window.localStorage.setItem('gezel:knowledge:catalog', 'removed-catalog');
     window.localStorage.setItem('gezel:knowledge:document', 'removed-document');
-    vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({
-      catalogs: [
-        {
-          ...CATALOG,
-          ref: { ...CATALOG.ref, publisherId: 'bendyline', catalogId: 'handboek' },
-          name: 'Gezel Handboek',
-          source: 'bundled',
-        },
-      ],
-    });
+    vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({ catalogs: [HANDBOEK] });
     render(<KnowledgeView />);
+    expect(await screen.findByRole('heading', { name: 'Gezel Help' })).toBeInTheDocument();
+    expect(await screen.findByText(/Only Gezel Help is here so far/)).toBeInTheDocument();
+    expect(api.readKnowledgeDocument).not.toHaveBeenCalledWith('handboek', 'welcome');
+  });
+
+  it('leads with the person’s own catalog, even after reading the Handboek area', async () => {
+    window.localStorage.setItem('gezel:knowledge:catalog', 'handboek');
+    window.localStorage.setItem('gezel:knowledge:document', 'welcome');
+    vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({ catalogs: [HANDBOEK, CATALOG] });
+    render(<KnowledgeView />);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Shop Notes' })).toBeInTheDocument(),
+    );
+    expect(api.readKnowledgeDocument).not.toHaveBeenCalled();
+  });
+
+  it('opens the Handboek area on its welcome article and leaves the door’s memory alone', async () => {
+    window.localStorage.setItem('gezel:knowledge:catalog', 'shop-notes');
+    vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({ catalogs: [HANDBOEK, CATALOG] });
+    render(<KnowledgeView initialCatalogId="handboek" />);
     await waitFor(() =>
       expect(api.readKnowledgeDocument).toHaveBeenCalledWith('handboek', 'welcome'),
     );
@@ -338,6 +357,7 @@ describe('KnowledgeView', () => {
     await waitFor(() =>
       expect(screen.getByTestId('knowledge-view')).toHaveClass('knowledge-view--list'),
     );
+    expect(window.localStorage.getItem('gezel:knowledge:catalog')).toBe('shop-notes');
   });
 
   it('keeps the article open when going back to the list, so its row stays marked', async () => {

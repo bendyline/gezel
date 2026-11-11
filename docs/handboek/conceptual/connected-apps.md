@@ -1,8 +1,8 @@
 ---
 id: connected-apps
-title: "Integrations: let other tools use your gezels"
+title: "Integrations: let other tools use Gezel"
 order: 9
-summary: Editors and other programs can talk to your crew through standard AI endpoints — with your approval, on your terms.
+summary: Editors and other programs can talk to Gezel through standard AI endpoints — with your approval, on your terms.
 ---
 
 # Integrations
@@ -15,18 +15,18 @@ Everything described here lives in **Settings → Integrations**.
 
 Apps speak to gezel using the same "OpenAI-style" language most AI tools already know. Two things make it work:
 
-1. **An address.** The address panel in **Settings → Integrations** shows where gezel is listening on your machine. On most personal installs that is `https://127.0.0.1:6228/v1`; when the Gezel machine service is installed, the app API moves to a per-launch port (shown in the panel) because the machine service holds 6228. For apps that need an address that never changes, turn on **Ollama emulation** — it always answers at `http://127.0.0.1:11434`.
+1. **An address.** The address panel in **Settings → Integrations** shows where gezel is listening on your machine. On most personal installs that is `https://127.0.0.1:6228/v1`; when the Gezel machine service is installed, the app API moves to a per-launch port (shown in the panel) because the machine service holds 6228. For apps that need an address that never changes, turn on **Ollama emulation** — it always answers at `http://127.0.0.1:11434`, over plain HTTP and without a key, so any program on this computer can use your models while it is on. From a terminal, `gezel integrations address` prints every address and `gezel integrations ollama on` turns the emulation on.
 2. **Permission.** The first time an app asks for access, gezel shows you an approval request — who is asking, and for what. Nothing gets through until you approve, and you can revoke any app later from the same panel. Gezel's own add-ins for Word, Excel, PowerPoint, LibreOffice, and VS Code are the exception: they can prove they run as you on this computer, so they connect without asking. Revoking one of them only resets it; to disconnect it for good, remove the add-in.
 
 ## Gezel's tools in other AI apps
 
-The rest of this page is about other apps using your gezels and models. This part is the reverse: AI apps that already have their own model — **Claude Code**, **Claude Desktop**, **Codex**, **Cursor** and **VS Code** — can use what Gezel knows and does:
+The rest of this page is about other apps using your crew and models. This part is the reverse: AI apps that already have their own model — **Claude Code**, **Claude Desktop**, **Codex**, **Cursor** and **VS Code** — can use what Gezel knows and does:
 
 - **Search** the folder they are working in (its files, and the text inside its Word, PDF, PowerPoint and Excel files), your shared document library, your saved memories, and the knowledge catalogs you installed.
 - **Read** Word, PDF, PowerPoint and Excel files as text.
 - **Describe** an image on this computer, or read the text in it.
 - **Make an image** with the image engine you chose in Gezel.
-- **Make a Word, PowerPoint, PDF or Excel file** from what the app writes, with the same document maker your gezels use. Gezel keeps the file in the project's artifacts, and the app copies it into your folder.
+- **Make a Word, PowerPoint, PDF or Excel file** from what the app writes, with the same document maker Gezel uses. Gezel keeps the file in the project's artifacts, and the app copies it into your folder.
 - **Remember** a decision or a preference, so Gezel and every other app see it later.
 - **Check the issues** Gezel's night shift found: say which are real, and fix them if you ask.
 
@@ -39,7 +39,7 @@ Set an app up on its own tab: **Gezel's tools in Claude Code**, and so on. Gezel
 **What they may do.** On the Overview tab, under **Gezel's tools in other apps**:
 
 - **Let other apps use Gezel's tools** turns all of it off or on.
-- **Memory**: *Off*, *Read*, or *Save to the project*. A saved memory goes to the project the app is working in, labeled with the app's name, and every gezel in that project sees it. Apps never save to your own "About you" memories.
+- **Memory**: *Off*, *Read*, or *Save to the project*. A saved memory goes to the project the app is working in, labeled with the app's name, and everyone working in that project sees it. Apps never save to your own "About you" memories.
 - **Images**: *Off*, *On this computer* (the default), or *Any image engine*. With *Any image engine* an app can use a cloud engine you set up, which may charge for each image without asking you first. Images are saved in Gezel; the app copies one into its folder when it needs it there.
 - **Issues**: *Off*, *List them*, or *List and judge them* (the default). See below.
 
@@ -65,21 +65,21 @@ One-click setup is available only when the desktop and the Gezel service are on 
 
 Codex custom providers use `wire_api = "responses"`. The managed profile also sets the top-level `web_search = "disabled"`: Codex otherwise advertises a provider-hosted search tool that a local inference server cannot truthfully execute. Do not combine the Gezel profile with Codex's `--search` flag, which explicitly turns that hosted tool back on. Ordinary Codex tools such as shell commands, patching, and helper-agent namespaces remain available because Codex executes those itself.
 
-The setup card puts eligible gezels first. Choosing one gives Codex that gezel's character (`about.md`), effective local model, and tuning while Codex keeps its own tools, sandbox, approvals, and conversation loop. The profile stores the stable gezel id, so renaming the gezel does not break the connection. Raw installed models remain available in a separate fallback group for users who want inference without a gezel persona.
+The setup card puts eligible crew members first. Choosing one gives Codex that crew member's character (`about.md`), effective local model, and tuning while Codex keeps its own tools, sandbox, approvals, and conversation loop. The profile stores their stable id, so renaming them does not break the connection. Raw installed models remain available in a separate fallback group for users who want inference without a persona.
 
-The gezel you choose on the card is the profile's *default*, not its only option: gezel writes a model catalog listing every eligible gezel and local model, so Codex's own model picker shows the whole crew and you can switch between them inside a Codex session.
+The crew member you choose on the card is the profile's *default*, not its only option: gezel writes a model catalog listing every eligible crew member and local model, so Codex's own model picker shows the whole crew and you can switch between them inside a Codex session.
 
-A gezel appears here only when its effective local model is installed and can participate in Codex's caller-executed tool loop. The facade does not attach Gezel chat sessions, memories, project context, or MCP tools, and it does not silently route unknown aliases through the fallback gezel. It also refuses `codex-cli:` / `anthropic-cli:` targets because those are full nested agent harnesses rather than inference providers. Gezel's search, memories, Office reading and images come to Codex the other way, through **Gezel's tools in Codex** on the same tab; see [Gezel's tools in other AI apps](#gezels-tools-in-other-ai-apps).
+A crew member appears here only when their effective local model is installed and can participate in Codex's caller-executed tool loop. The facade does not attach Gezel chat sessions, memories, project context, or MCP tools, and it does not silently route unknown aliases through the fallback crew member. It also refuses `codex-cli:` / `anthropic-cli:` targets because those are full nested agent harnesses rather than inference providers. Gezel's search, memories, Office reading and images come to Codex the other way, through **Gezel's tools in Codex** on the same tab; see [Gezel's tools in other AI apps](#gezels-tools-in-other-ai-apps).
 
 ## VS Code
 
-**Gezel's models in VS Code** uses VS Code's built-in custom-endpoint support, so it does not install or require the Gezel VSIX. Gezel adds one provider named `Gezel` to the selected VS Code profile's `chatLanguageModels.json`. Every eligible gezel and raw local model then appears in VS Code's native model picker while VS Code keeps control of its agent tools, permissions, and conversations.
+**Gezel's models in VS Code** uses VS Code's built-in custom-endpoint support, so it does not install or require the Gezel VSIX. Gezel adds one provider named `Gezel` to the selected VS Code profile's `chatLanguageModels.json`. Every eligible crew member and raw local model then appears in VS Code's native model picker while VS Code keeps control of its agent tools, permissions, and conversations.
 
 This is a shared profile file, so setup uses a narrow merge: entries belonging to other providers are preserved, and **Remove setup** removes only Gezel's entry. Named VS Code profiles have separate files; choose the profile you want before setup. To move the integration later, clear it and set up the other profile.
 
 There is one important tradeoff. Without an extension, VS Code cannot give Gezel access to its encrypted extension secret store. The dedicated VS Code credential is therefore written as plain text in `chatLanguageModels.json`. Gezel limits the effect of that exposure: the credential has inference-only scope, talks to a VS Code-only listener on `127.0.0.1`, reaches only chat completions and model discovery, and is individually revocable. It cannot read Gezel projects, files, terminals, chats, or settings. The profile file is written with private file permissions where the operating system supports them.
 
-The listener's port stays stable even though the ordinary Gezel daemon port can rotate. Keep Gezel running while VS Code uses the models; daemon autostart makes that available without keeping the desktop window open. Gezel periodically reconciles the provider entry, so installing or removing a model, changing a gezel, or changing an effective context limit updates VS Code's model picker automatically.
+The listener's port stays stable even though the ordinary Gezel daemon port can rotate. Keep Gezel running while VS Code uses the models; daemon autostart makes that available without keeping the desktop window open. Gezel periodically reconciles the provider entry, so installing or removing a model, changing a crew member, or changing an effective context limit updates VS Code's model picker automatically.
 
 If the card says **Needs attention**, Gezel could not prove it owns the existing provider entry or could not safely parse the shared file. **Repair VS Code setup** first saves the complete existing file beside it as `chatLanguageModels.json.backup`, then replaces the conflicting Gezel entry. Other parseable provider entries remain in place. If the entire file is damaged, the backup is the recoverable original and the repaired file contains only the working Gezel provider.
 
@@ -93,7 +93,7 @@ OPENCODE_CONFIG=<path shown on the card> opencode
 
 On Windows the card shows the PowerShell form of the same command. OpenCode merges configuration files rather than replacing them, so your own settings still apply; Gezel only adds a provider named `gezel`.
 
-The gezel you choose is the one OpenCode starts with. Every eligible gezel and local model is listed in the file, so OpenCode's own model picker shows the whole crew and you can switch inside a session. Gezel also pins OpenCode's *small* model — the one it uses for titles and summaries — to the same choice, so a machine set up for local inference never quietly reaches for a cloud provider you have not configured.
+The crew member you choose is the one OpenCode starts with. Every eligible crew member and local model is listed in the file, so OpenCode's own model picker shows the whole crew and you can switch inside a session. Gezel also pins OpenCode's *small* model — the one it uses for titles and summaries — to the same choice, so a machine set up for local inference never quietly reaches for a cloud provider you have not configured.
 
 ### Without the command
 
@@ -107,7 +107,7 @@ If the card says **Needs attention**, the managed file was hand-edited or was wr
 
 Because the credential lives in its own file and the config references it by path, revoking the OpenCode entry under Integrations immediately stops it from using the bridge, and no secret is ever copied into a project or shell profile.
 
-As with Codex, a gezel appears here only when its effective local model is installed and can take part in a caller-executed tool loop, one-click setup needs the desktop and the Gezel service on the same computer, and Gezel must stay running while OpenCode uses the model. The bridge carries only inference: the credential grants no access to Gezel projects, files, terminals, or settings.
+As with Codex, a crew member appears here only when their effective local model is installed and can take part in a caller-executed tool loop, one-click setup needs the desktop and the Gezel service on the same computer, and Gezel must stay running while OpenCode uses the model. The bridge carries only inference: the credential grants no access to Gezel projects, files, terminals, or settings.
 
 ## pi
 
@@ -127,11 +127,11 @@ To check it took effect, run `pi --list-models` — the crew appears under `geze
 
 Unlike the Codex profile, nothing here pins pi's own default model. The extension loads in every project, so which model pi starts with stays your choice in its model picker. If you point pi somewhere else with `PI_CODING_AGENT_DIR` in your shell, note that the gezel service cannot see a variable set only in your login shell — the card shows the folder it actually resolved.
 
-As with the others, a gezel appears here only when its effective local model is installed and can take part in a caller-executed tool loop, one-click setup needs the desktop and the Gezel service on the same computer, and Gezel must stay running while pi uses the model.
+As with the others, a crew member appears here only when their effective local model is installed and can take part in a caller-executed tool loop, one-click setup needs the desktop and the Gezel service on the same computer, and Gezel must stay running while pi uses the model.
 
 ## Word, Excel, and PowerPoint
 
-**Use Gezel in Word, Excel, and PowerPoint** adds a **Gezel** button to the Home tab of the desktop Office apps on Windows and macOS. It opens a pane beside your document where you chat with your gezels about it. While the pane is open, the gezels in that project can read the document and, when you allow it, edit it: insert and replace text in Word, read and write cells in Excel, and add slides in PowerPoint.
+**Use Gezel in Word, Excel, and PowerPoint** adds a **Gezel** button to the Home tab of the desktop Office apps on Windows and macOS. It opens a pane beside your document where you chat about it with someone from the project's crew. While the pane is open, they can read the document and, when you allow it, edit it: insert and replace text in Word, read and write cells in Excel, and add slides in PowerPoint.
 
 No store is involved. Gezel serves the pane itself, from this computer, and registers it with each Office app for your account only.
 
@@ -145,11 +145,11 @@ Your system asks you to confirm once. On a Mac that means your password, and mac
 
 After setup, restart any Office app that was open. The first time, choose **Add-ins** on the Home tab and then **Gezel** (on Windows it is listed under **Developer Add-ins**): Office shows Gezel's button on the Home tab only after the add-in has been opened once from that menu. From then on, choose **Gezel** on the Home tab. The pane connects to Gezel on its own, with no connection code to type, because Gezel set it up for your account.
 
-The pane works in the project that owns the document's folder. If there isn't one yet, Gezel creates one for that folder. It picks the folder sensibly: your Documents folder for a loose document there, a folder like `engineeringdocs` when the document sits in one of several work folders inside it, or the Default project for a document saved directly in your home folder. Projects created this way are **read-only**: gezels cannot change files in the folder, only the document you have open, through the pane. You can allow file changes later in the project's settings.
+The pane works in the project that owns the document's folder. If there isn't one yet, Gezel creates one for that folder. It picks the folder sensibly: your Documents folder for a loose document there, a folder like `engineeringdocs` when the document sits in one of several work folders inside it, or the Default project for a document saved directly in your home folder. Projects created this way are **read-only**: Gezel cannot change files in the folder, only the document you have open, through the pane. You can allow file changes later in the project's settings.
 
-The **Allow edits** switch in the pane controls whether gezels may change the open document at all. Turn it off and they can still read it.
+The **Allow edits** switch in the pane controls whether Gezel may change the open document at all. Turn it off and it can still read the document.
 
-Only the gezel you pick in the pane can use the document, and only while the pane is open; the rest of the project's gezels never see it. A gezel that runs on GitHub Copilot, Claude CLI, or Codex CLI can chat with you but cannot read or change the document, and the pane says so when you pick one.
+Only the crew member you pick in the pane can use the document, and only while the pane is open; the rest of the project's crew never sees it. Someone who runs on GitHub Copilot, Claude CLI, or Codex CLI can chat with you but cannot read or change the document, and the pane says so when you pick them.
 
 If the Gezel button does not appear, check that **optional connected experiences** are turned on in Office's privacy settings, then use **Clear Office cache** on the card with Office closed. Office on the web and Outlook are not supported.
 
@@ -157,15 +157,15 @@ If the Gezel button does not appear, check that **optional connected experiences
 
 **Use Gezel in LibreOffice** installs Gezel's extension into LibreOffice Writer, Calc, and Impress for your account, using LibreOffice's own installer. Close LibreOffice before installing. Afterwards choose **Tools > Gezel**, or open the Gezel panel in the sidebar.
 
-The panel connects to Gezel on its own, with no connection code to type. It then works like the Office pane: it finds the project for the document's folder, lets you pick which gezel to talk to, and offers the same document tools, with an **Allow edits** switch.
+The panel connects to Gezel on its own, with no connection code to type. It then works like the Office pane: it finds the project for the document's folder, lets you pick who to talk to, and offers the same document tools, with an **Allow edits** switch.
 
 LibreOffice needs no certificate setup, because the extension runs inside LibreOffice and connects to Gezel directly. On Linux, some distributions ship LibreOffice's Python support separately; install it if the panel does not appear.
 
-## Who answers: gezel choices and the fallback
+## Who answers: crew choices and the fallback
 
-Gezel presents your crew to connected apps as model choices, including each gezel's name and role. When an app chooses one, that gezel answers with their character, model, and settings.
+Gezel presents your crew to connected apps as model choices, including each one's name and role. When an app chooses one, that crew member answers with their character, model, and settings.
 
-Some apps cannot choose from that list and ask for a hardcoded model such as `gpt-4o`. The **fallback gezel** answers those requests. It defaults to your Meester, so there is always a useful front door; you can choose another gezel from **Settings → Integrations**.
+Some apps cannot choose from that list and ask for a hardcoded model such as `gpt-4o`. The **fallback crew member** answers those requests. It defaults to your Meester, so there is always a useful front door; you can choose someone else from **Settings → Integrations**.
 
 ## Supporting behaviors
 
@@ -181,4 +181,4 @@ One honest caveat, spelled out next to the switch: Ollama's convention is no pas
 
 Every chat an app completes through these endpoints is recorded in the **History** tab (look for "App chat" entries), and the tokens they consume count in the **Usage** view — so you can always see who has been using your models, and how much.
 
-If you are developing one of these applications, continue with the technical guide [Building connected apps with gezel-app-sdk](../technical/building-connected-apps-with-gezel-app-sdk.md).
+If you are developing one of these applications, continue with the technical guide [Building connected apps with gezel-app-sdk](../technical/building-connected-apps-with-gezel-app-sdk.md). It opens with a [quick start](../technical/building-connected-apps-with-gezel-app-sdk.md#quick-start-with-curl): three commands, ending in one `curl` call that gets a reply from a local model.

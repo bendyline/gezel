@@ -57,10 +57,12 @@ vi.mock('@bendyline/gezel-client', async () => {
 vi.mock('../components/ChatComposer.js', () => ({
   ChatComposer: ({
     onTurnStateChange,
+    sendWhenReady,
   }: {
     onTurnStateChange?: (state: 'idle' | 'streaming') => void;
+    sendWhenReady?: boolean;
   }) => (
-    <div data-testid="chat-composer">
+    <div data-testid="chat-composer" data-send-when-ready={String(sendWhenReady)}>
       composer
       <button type="button" onClick={() => onTurnStateChange?.('streaming')}>
         mock send
@@ -410,6 +412,57 @@ describe('HomeView', () => {
         expect(screen.getByTestId('home-workshop')).toBeInTheDocument();
       },
     );
+
+    // One thing at a time: the ask used to share the screen with the interest
+    // picker, the first projects, the film and the helpers.
+    it('asks for the tools and nothing else, with Send still held', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'llama-cpp',
+        meesterGezelId: 'gz-meester',
+        defaultModel: { 'llama-cpp': 'recommended-model' },
+      } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
+
+      render(<HomeView />);
+
+      await screen.findByRole('button', { name: /^Fetch my tools/ });
+      expect(screen.getByText(/Change what I'm allowed to do/)).toBeInTheDocument();
+      expect(
+        screen.queryByRole('group', { name: 'Something to start with' }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('home-intro-article')).not.toBeInTheDocument();
+      expect(screen.queryByText(/in your own words/)).not.toBeInTheDocument();
+      expect(screen.getByTestId('chat-composer')).toHaveAttribute('data-send-when-ready', 'false');
+    });
+
+    it('opens the rest of the welcome, and lets Send hold a first request, once the tools are downloading', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'llama-cpp',
+        meesterGezelId: 'gz-meester',
+        defaultModel: { 'llama-cpp': 'recommended-model' },
+      } as never);
+      vi.mocked(api.testProvider).mockResolvedValue({ ok: true, modelCount: 0 } as never);
+      vi.mocked(api.listLlamaCppActiveInstalls).mockResolvedValue({
+        installs: [
+          {
+            catalogId: 'recommended-model',
+            bytesWritten: 1024 ** 3,
+            totalBytes: 4 * 1024 ** 3,
+            phase: 'downloading',
+            startedAt: '2026-11-09T10:00:00.000Z',
+          },
+        ],
+      } as never);
+
+      render(<HomeView />);
+
+      const welcome = await screen.findByTestId('meester-welcome');
+      await waitFor(() => expect(welcome.dataset.welcomeState).toBe('installing'));
+      expect(screen.getByText(/^Fetching my tools · 1\.0 GB of 4\.0 GB/)).toBeInTheDocument();
+      expect(screen.getByRole('group', { name: 'Something to start with' })).toBeInTheDocument();
+      expect(screen.getByText(/Write your first request below and press Send/)).toBeInTheDocument();
+      expect(screen.getByTestId('chat-composer')).toHaveAttribute('data-send-when-ready', 'true');
+    });
 
     // A model on disk with its engine still to fetch said "I'm ready", and the
     // first message failed on the engine download.
@@ -926,7 +979,7 @@ describe('HomeView', () => {
     timeline.empty = true;
     try {
       render(<HomeView />);
-      await screen.findByRole('heading', { name: /I run this workshop/ });
+      await screen.findByRole('heading', { name: /I run things here/ });
       await waitFor(() => {
         expect(screen.getByRole('button', { name: 'Expand the greeting' })).toBeInTheDocument();
       });
@@ -981,12 +1034,12 @@ describe('HomeView', () => {
     };
     const config = { provider: 'copilot' } as never;
     const { rerender } = render(<HomeWorkshop config={config} {...props} />);
-    await userEvent.setup().click(await screen.findByRole('tab', { name: 'Handboek' }));
+    await userEvent.setup().click(await screen.findByRole('tab', { name: 'Help' }));
 
     timeline.empty = true;
     try {
       rerender(<HomeWorkshop config={config} {...props} />);
-      await screen.findByRole('heading', { name: /I run this workshop/ });
+      await screen.findByRole('heading', { name: /I run things here/ });
       expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Collapse the greeting' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Return to Meester chat' })).toBeInTheDocument();
@@ -1059,7 +1112,7 @@ describe('HomeView', () => {
 
   it('switches to the "what is gezel" tour tab', async () => {
     render(<HomeView />);
-    const tourName = 'Handboek';
+    const tourName = 'Help';
     await waitFor(() => {
       expect(screen.getByText('Tip of the day')).toBeInTheDocument();
     });
@@ -1077,7 +1130,7 @@ describe('HomeView', () => {
     render(<HomeView />);
     await screen.findByText('Tip of the day');
     expect(screen.queryByRole('region', { name: 'Create' })).not.toBeInTheDocument();
-    for (const name of ['Create', 'Handboek', GREETING_TAB]) {
+    for (const name of ['Create', 'Help', GREETING_TAB]) {
       await user.click(screen.getByRole('button', { name: 'Collapse the greeting' }));
       await user.click(screen.getByRole('tab', { name }));
       expect(screen.getByRole('tabpanel', { name })).toBeVisible();
@@ -1219,7 +1272,7 @@ describe('HomeView', () => {
   it('cycles the tip of the day', async () => {
     render(<HomeView />);
     await waitFor(() => {
-      expect(screen.getByText(/Give your crew a folder to look after/)).toBeInTheDocument();
+      expect(screen.getByText(/Give Gezel a folder to look after/)).toBeInTheDocument();
     });
     fireEvent.click(screen.getByRole('button', { name: 'Show another tip' }));
     expect(screen.getByText(/Most of getting great work/)).toBeInTheDocument();

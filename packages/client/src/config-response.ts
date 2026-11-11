@@ -431,7 +431,13 @@ export interface ConfigResponse {
    */
   homeGreetingCollapsed?: boolean;
   /** First-run onboarding steps finished or skipped; see `GezelConfig.onboarding`. */
-  onboarding?: { foldersStepDoneAt?: string; overnightStepDoneAt?: string };
+  onboarding?: {
+    foldersStepDoneAt?: string;
+    overnightStepDoneAt?: string;
+    firstProjectDoneAt?: string;
+    optionalDownloadsAt?: string;
+    firstResultOpenedAt?: string;
+  };
   /** What the person wants help with; see `GezelConfig.interests` and `resolveInterestAreas`. */
   interests?: { areas: string[]; askedAt?: string };
   /** When this home was first used; absent on an established install. */

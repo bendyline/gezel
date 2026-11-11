@@ -9,7 +9,7 @@ summary: Runs one project's crew so you don't have to.
 
 A **crew lead** runs one project. Where the Meester looks after your whole guild, the crew lead looks after a single job site: they take in new work, investigate what's really being asked, and hand each piece to the specialist who should do it.
 
-Crew leads read before they route — they can open files and search the workspace to diagnose a problem properly — but they deliberately don't build. Keeping the lead out of the toolshed is what keeps a crew honest: one gezel owns the plan, others own the work, and handoffs stay clean.
+Crew leads read before they route — they can open files and search the workspace to diagnose a problem properly — but they deliberately don't build. Keeping the lead out of the toolshed is what keeps a crew honest: the lead owns the plan, others own the work, and handoffs stay clean.
 
 ::handboek-gezel-roster{role=voorman}
 
@@ -29,6 +29,6 @@ Crew leads read before they route — they can open files and search the workspa
 
 ::handboek-role-tools{role=voorman scope=tiers}
 
-## Craftbooks they run well
+## Plans they run well
 
 ::handboek-craftbook-list{role=voorman}

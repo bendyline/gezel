@@ -86,7 +86,7 @@ gezel security level set super-lockdown
 
 ## Choose the activity mode
 
-The mode decides how much the crew does without being asked. A new install starts in **full play**, which suits a desktop where someone is watching. For a server, use **reactive + tasks**: the crew answers messages, runs the tasks you start and keeps to schedules, but does not nudge or start cross-crew work on its own.
+The mode decides how much Gezel does without being asked. A new install starts in **full play**, which suits a desktop where someone is watching. For a server, use **reactive + tasks**: Gezel answers messages, runs the tasks you start and keeps to schedules, but does not nudge or start work of its own.
 
 ```sh
 gezel mode reactive+tasks

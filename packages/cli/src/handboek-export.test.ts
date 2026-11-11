@@ -480,7 +480,7 @@ describe('llmsTxt', () => {
       ],
       'https://gezel.com/docs/',
     );
-    expect(text.startsWith('# Gezel Handboek\n\n> ')).toBe(true);
+    expect(text.startsWith('# Gezel Help\n\n> ')).toBe(true);
     expect(text).toContain(
       'read [Build a Gezel app: the complete guide](https://gezel.com/docs/build-a-gezel-app.md) first',
     );

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -77,7 +77,7 @@ vi.mock('../components/ModelPicker.js', async () => {
 });
 vi.mock('../components/ProviderModelSelect.js', () => ({ ProviderModelSelect: () => null }));
 
-const { SettingsView } = await import('./SettingsView.js');
+const { SettingsView, copilotIsInUse } = await import('./SettingsView.js');
 const { peekPendingSettingsSection, requestSettingsSection } = await import('../settings-nav.js');
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
@@ -92,6 +92,36 @@ const UNAVAILABLE = {
   pinnedVersion: '1.0.7',
   updateAvailable: false,
 };
+
+type NavGroup = 'ai' | 'more';
+
+/** Unfold a nav group from its chevron; both start folded. */
+async function unfoldGroup(group: NavGroup): Promise<void> {
+  const toggle = await screen.findByTestId(`settings-nav-group-${group}`);
+  if (toggle.getAttribute('aria-expanded') !== 'true') fireEvent.click(toggle);
+}
+
+/** Open a section from the wide nav, unfolding the group it sits in first. */
+async function openSection(id: string, group?: NavGroup): Promise<void> {
+  if (group) await unfoldGroup(group);
+  fireEvent.click(await screen.findByTestId(`settings-nav-${id}`));
+}
+
+/** The section ids the wide nav shows right now, top to bottom. */
+function shownNavIds(): string[] {
+  return [...document.querySelectorAll<HTMLElement>('.settings-nav [data-testid]')]
+    .map((el) => el.dataset.testid ?? '')
+    .filter((id) => id.startsWith('settings-nav-') && !id.startsWith('settings-nav-group-'))
+    .map((id) => id.slice('settings-nav-'.length));
+}
+
+function sendSettingsLink(section: string): void {
+  act(() => {
+    window.dispatchEvent(
+      new CustomEvent('gezel:navigate', { detail: { view: 'settings', section } }),
+    );
+  });
+}
 
 describe('SettingsView', () => {
   beforeEach(() => {
@@ -161,16 +191,305 @@ describe('SettingsView', () => {
       ) as HTMLSelectElement;
     const values = [...picker.options].map((option) => option.value);
     expect(values).toEqual(expect.arrayContaining(['general', 'knowledge', 'toolsets', 'about']));
-    expect(values).not.toContain('workloads');
+    expect(values).not.toContain('more');
+    // The dropdown follows the list's order and reaches the sections a
+    // folded group hides there.
+    const order = [
+      'general',
+      'aboutYou',
+      'securityCompliance',
+      'defaults',
+      'nightShift',
+      'connectedApps',
+      'about',
+      'deviceIntegration',
+      'team',
+      'folders',
+      'imageEngine',
+      'videoEngine',
+      'imageRecognition',
+      'audio',
+      'webSearch',
+      'knowledge',
+      'benchmarks',
+    ];
+    expect(values.filter((value) => order.includes(value))).toEqual(order);
     fireEvent.change(picker, { target: { value: 'about' } });
     expect(await screen.findByTestId('settings-section-about')).toBeTruthy();
   });
 
   it('hosts microphone settings under Device integration', async () => {
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-deviceIntegration'));
+    await openSection('deviceIntegration', 'more');
 
     expect(await screen.findByTestId('microphone-settings')).toBeInTheDocument();
+  });
+
+  describe('navigation groups', () => {
+    it('opens on about eight rows, with both groups folded', async () => {
+      render(<SettingsView />);
+      await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+      await screen.findByTestId('settings-nav-about');
+
+      expect(shownNavIds()).toEqual([
+        'general',
+        'aboutYou',
+        'securityCompliance',
+        'defaults',
+        'nightShift',
+        'connectedApps',
+        'about',
+        'more',
+      ]);
+      expect(screen.getByTestId('settings-nav-group-ai')).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByTestId('settings-nav-group-more')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+      expect(screen.getByTestId('settings-nav-nightShift')).toHaveTextContent('Night Shift');
+      expect(screen.getByTestId('settings-nav-more')).toHaveTextContent('More settings');
+      expect(screen.queryByText('Workloads')).toBeNull();
+    });
+
+    it('lists every section in the agreed order once both groups are open', async () => {
+      window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'mock',
+        debugMode: true,
+        showWorkInProgressFeatures: true,
+        ds4BaseUrl: 'http://127.0.0.1:58585',
+        meesterGezelId: 'gz-meester',
+        hasGithubToken: true,
+      } as never);
+      render(<SettingsView />);
+      await unfoldGroup('ai');
+      await unfoldGroup('more');
+      await screen.findByTestId('settings-nav-channels');
+
+      await waitFor(() =>
+        expect(shownNavIds()).toEqual([
+          'general',
+          'aboutYou',
+          'securityCompliance',
+          'defaults',
+          'mlx',
+          'llamaCpp',
+          'ds4',
+          'copilot',
+          'openai',
+          'codexCli',
+          'anthropic',
+          'anthropicCli',
+          'ollama',
+          'nightShift',
+          'connectedApps',
+          'about',
+          'more',
+          'deviceIntegration',
+          'team',
+          'folders',
+          'accounts',
+          'imageEngine',
+          'videoEngine',
+          'imageRecognition',
+          'audio',
+          'webSearch',
+          'knowledge',
+          'benchmarks',
+          'channels',
+          'remoteServers',
+          'toolsets',
+        ]),
+      );
+    });
+
+    it('opens the Artificial intelligence page from its header and unfolds the pages under it', async () => {
+      render(<SettingsView />);
+      await screen.findByTestId('settings-nav-about');
+      expect(screen.queryByTestId('settings-nav-llamaCpp')).toBeNull();
+
+      fireEvent.click(screen.getByTestId('settings-nav-defaults'));
+
+      expect(await screen.findByTestId('settings-section-defaults')).toBeInTheDocument();
+      expect(await screen.findByTestId('settings-nav-llamaCpp')).toBeInTheDocument();
+      expect(screen.getByTestId('settings-nav-group-ai')).toHaveAttribute('aria-expanded', 'true');
+
+      // Folded by hand over the open page, the header's label unfolds it again.
+      fireEvent.click(screen.getByTestId('settings-nav-group-ai'));
+      expect(screen.queryByTestId('settings-nav-llamaCpp')).toBeNull();
+      fireEvent.click(screen.getByTestId('settings-nav-defaults'));
+      expect(await screen.findByTestId('settings-nav-llamaCpp')).toBeInTheDocument();
+    });
+
+    it('only toggles from the More settings header, which opens no page', async () => {
+      render(<SettingsView />);
+      const header = await screen.findByTestId('settings-nav-more');
+      expect(header).toHaveAttribute('aria-expanded', 'false');
+
+      fireEvent.click(header);
+      expect(await screen.findByTestId('settings-nav-folders')).toBeInTheDocument();
+      expect(header).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByTestId('settings-section-general')).toBeInTheDocument();
+
+      fireEvent.click(header);
+      expect(screen.queryByTestId('settings-nav-folders')).toBeNull();
+      expect(screen.getByTestId('settings-section-general')).toBeInTheDocument();
+    });
+
+    it('unfolds a group when a deep link opens a section inside it', async () => {
+      render(<SettingsView />);
+      await screen.findByTestId('settings-nav-about');
+      expect(screen.queryByTestId('settings-nav-folders')).toBeNull();
+
+      sendSettingsLink('folders');
+
+      expect(await screen.findByTestId('settings-section-folders')).toBeInTheDocument();
+      expect(await screen.findByTestId('settings-nav-folders')).toHaveClass(
+        'settings-nav-item-active',
+      );
+      expect(screen.getByTestId('settings-nav-group-more')).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      );
+      // The other group is left as it was.
+      expect(screen.getByTestId('settings-nav-group-ai')).toHaveAttribute('aria-expanded', 'false');
+    });
+
+    it('opens with the group unfolded when Settings starts on a section inside it', async () => {
+      requestSettingsSection('llamaCpp');
+      render(<SettingsView />);
+
+      expect(await screen.findByTestId('settings-nav-llamaCpp')).toHaveClass(
+        'settings-nav-item-active',
+      );
+      expect(screen.getByTestId('settings-nav-group-ai')).toHaveAttribute('aria-expanded', 'true');
+      expect(screen.getByTestId('settings-nav-group-more')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+    });
+
+    it('unfolds a group when the compact dropdown picks a section inside it', async () => {
+      render(<SettingsView />);
+      await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+      const picker = screen
+        .getAllByTestId('mock-select')
+        .find((select) =>
+          [...(select as HTMLSelectElement).options].some((o) => o.value === 'about'),
+        ) as HTMLSelectElement;
+
+      fireEvent.change(picker, { target: { value: 'knowledge' } });
+
+      expect(await screen.findByTestId('settings-section-knowledge')).toBeInTheDocument();
+      expect(await screen.findByTestId('settings-nav-knowledge')).toBeInTheDocument();
+    });
+
+    it('leaves a group as the person left it when they move elsewhere', async () => {
+      render(<SettingsView />);
+      await openSection('folders', 'more');
+      expect(await screen.findByTestId('settings-section-folders')).toBeInTheDocument();
+
+      // Unfolded stays unfolded on a page outside the group.
+      fireEvent.click(screen.getByTestId('settings-nav-about'));
+      expect(await screen.findByTestId('settings-section-about')).toBeInTheDocument();
+      expect(screen.getByTestId('settings-nav-folders')).toBeInTheDocument();
+
+      // Folded stays folded, too.
+      fireEvent.click(screen.getByTestId('settings-nav-group-more'));
+      fireEvent.click(screen.getByTestId('settings-nav-general'));
+      expect(await screen.findByTestId('settings-section-general')).toBeInTheDocument();
+      expect(screen.queryByTestId('settings-nav-folders')).toBeNull();
+    });
+  });
+
+  // The live listener kept its own short list of sections, so these links
+  // worked only while Settings was closed.
+  describe('deep links while Settings is open', () => {
+    it.each([
+      'aboutYou',
+      'connectedApps',
+      'videoEngine',
+      'imageRecognition',
+      'audio',
+      'benchmarks',
+      'nightShift',
+    ])('opens %s', async (id) => {
+      render(<SettingsView />);
+      await screen.findByTestId('settings-nav-about');
+
+      sendSettingsLink(id);
+
+      expect(await screen.findByTestId(`settings-section-${id}`)).toBeInTheDocument();
+    });
+
+    it.each(['accounts', 'remoteServers'])(
+      'opens %s once the install shows that section',
+      async (id) => {
+        vi.mocked(api.getConfig).mockResolvedValue({
+          provider: 'mock',
+          debugMode: true,
+          meesterGezelId: 'gz-meester',
+          hasGithubToken: true,
+        } as never);
+        render(<SettingsView />);
+        await unfoldGroup('more');
+        await screen.findByTestId(`settings-nav-${id}`);
+
+        sendSettingsLink(id);
+
+        expect(await screen.findByTestId(`settings-section-${id}`)).toBeInTheDocument();
+      },
+    );
+
+    it('ignores a section the nav is not offering, a group heading, and an unknown id', async () => {
+      render(<SettingsView />);
+      await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+      await screen.findByTestId('settings-nav-about');
+
+      // Channels needs preview features, Remote servers a paired server.
+      for (const id of ['channels', 'remoteServers', 'more', 'nowhere']) {
+        sendSettingsLink(id);
+        expect(screen.getByTestId('settings-section-general')).toBeInTheDocument();
+      }
+      expect(screen.getByTestId('settings-nav-group-more')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+    });
+  });
+
+  it('opens General on what you use Gezel for, and keeps System health on About', async () => {
+    render(<SettingsView />);
+    const general = await screen.findByTestId('settings-section-general');
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+    expect(within(general).queryByRole('heading', { name: 'System health' })).toBeNull();
+    expect(within(general).getAllByRole('heading')[0]).toHaveTextContent(/What you use Gezel for/i);
+
+    fireEvent.click(screen.getByTestId('settings-nav-about'));
+    const about = await screen.findByTestId('settings-section-about');
+    const headings = within(about)
+      .getAllByRole('heading', { level: 3 })
+      .map((heading) => heading.textContent);
+    expect(headings.slice(0, 3)).toEqual(['About', 'System health', 'Updates']);
+  });
+
+  it('gives Night Shift its own page, off General', async () => {
+    render(<SettingsView />);
+    const general = await screen.findByTestId('settings-section-general');
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+    expect(within(general).queryByRole('checkbox', { name: 'Enable Night Shift' })).toBeNull();
+
+    await openSection('nightShift');
+    const page = await screen.findByTestId('settings-section-nightShift');
+    expect(
+      within(page)
+        .getAllByRole('heading', { level: 3 })
+        .map((heading) => heading.textContent),
+    ).toEqual(['Night Shift', 'Night Shift cloud quota']);
+    expect(within(page).getByRole('checkbox', { name: 'Enable Night Shift' })).toBeChecked();
+    expect(
+      within(page).getByRole('spinbutton', { name: 'Overall quota floor percent' }),
+    ).toHaveValue(20);
   });
 
   it('persists the automatic update-check preference from About settings', async () => {
@@ -199,7 +518,7 @@ describe('SettingsView', () => {
     await waitFor(() => expect(api.updateConfig).toHaveBeenCalledWith({ autoUpdateChecks: false }));
   });
 
-  it('offers one "Show gezel names and poppetjes" toggle driving both display flags', async () => {
+  it('offers one "Show names and poppetjes" toggle driving both display flags', async () => {
     // Formerly two checkboxes under a "Boring mode" heading; the single
     // positive switch matches first run (2026-09-02 UX review).
     vi.mocked(api.updateConfig).mockResolvedValue({
@@ -211,7 +530,7 @@ describe('SettingsView', () => {
 
     render(<SettingsView />);
     const checkbox = await screen.findByRole('checkbox', {
-      name: 'Show gezel names and poppetjes',
+      name: 'Show names and poppetjes',
     });
     expect(checkbox).toBeChecked();
     expect(screen.queryByText('Boring mode')).toBeNull();
@@ -242,7 +561,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-team'));
+    await openSection('team', 'more');
 
     // The card above each picker and the picker's own options both name the
     // gezel — neither may leak the friendly name while boring mode is on.
@@ -250,6 +569,25 @@ describe('SettingsView', () => {
     expect(screen.getAllByText('boekwachter').length).toBeGreaterThan(0);
     expect(screen.queryByText(/Brigitte/)).toBeNull();
     expect(screen.queryByText(/Noor/)).toBeNull();
+  });
+
+  // Settings shows no save notes, so a failed create used to close the form
+  // with no gezel and no word why (1.26313.105 audit).
+  it('keeps the form open and says why when creating a role gezel fails', async () => {
+    vi.mocked(api.createNewMeester).mockRejectedValue(new Error('no model is ready yet'));
+    render(<SettingsView />);
+    await openSection('team', 'more');
+
+    const option = await screen.findByRole('option', { name: 'New Meester…' });
+    fireEvent.change(option.closest('select') as HTMLSelectElement, {
+      target: { value: '__new' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Meester' }));
+
+    expect(
+      await screen.findByText("Couldn't create the Meester: no model is ready yet"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create Meester' })).toBeEnabled();
   });
 
   // Open conversations read debug mode live; without the broadcast they kept
@@ -321,7 +659,8 @@ describe('SettingsView', () => {
   it('hides the Channels section until work-in-progress features are on', async () => {
     render(<SettingsView />);
     await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
-    await screen.findByTestId('settings-nav-about');
+    await unfoldGroup('more');
+    await screen.findByTestId('settings-nav-knowledge');
     expect(screen.queryByTestId('settings-nav-channels')).toBeNull();
   });
 
@@ -334,7 +673,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-channels'));
+    await openSection('channels', 'more');
 
     expect(await screen.findByTestId('channels-settings')).toBeInTheDocument();
   });
@@ -585,6 +924,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
+    await unfoldGroup('ai');
 
     expect(await screen.findByRole('button', { name: 'This Mac (Apple MLX)' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'This Mac (llama)' })).toBeInTheDocument();
@@ -690,6 +1030,7 @@ describe('SettingsView', () => {
       hasGithubToken: true,
     } as never);
     const { unmount } = render(<SettingsView />);
+    await unfoldGroup('ai');
     expect(
       await screen.findByRole('button', { name: 'This PC (DwarfStar - DS4)' }),
     ).toBeInTheDocument();
@@ -703,6 +1044,8 @@ describe('SettingsView', () => {
     window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'win32' };
     const windowsView = render(<SettingsView />);
     await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+    await unfoldGroup('ai');
+    await screen.findByTestId('settings-nav-llamaCpp');
     expect(
       screen.queryByRole('button', { name: 'This PC (DwarfStar - DS4)' }),
     ).not.toBeInTheDocument();
@@ -714,6 +1057,7 @@ describe('SettingsView', () => {
       hasGithubToken: true,
     } as never);
     render(<SettingsView />);
+    await unfoldGroup('ai');
     expect(
       await screen.findByRole('button', { name: 'This PC (DwarfStar - DS4)' }),
     ).toBeInTheDocument();
@@ -730,6 +1074,8 @@ describe('SettingsView', () => {
     render(<SettingsView />);
     await screen.findByTestId('settings-nav-general');
     await waitFor(() => expect(api.health).toHaveBeenCalled());
+    await unfoldGroup('ai');
+    await screen.findByTestId('settings-nav-llamaCpp');
     await waitFor(() => expect(screen.queryByTestId('settings-nav-ds4')).not.toBeInTheDocument());
   });
 
@@ -743,8 +1089,17 @@ describe('SettingsView', () => {
       'toolsets',
       'accounts',
     ];
+    // Folded groups hide every row inside them, so open both before judging
+    // which sections this install is offered.
+    const unfoldAll = async () => {
+      await unfoldGroup('ai');
+      await unfoldGroup('more');
+      await screen.findByTestId('settings-nav-llamaCpp');
+      await screen.findByTestId('settings-nav-knowledge');
+    };
     const plain = render(<SettingsView />);
     await screen.findByTestId('settings-nav-general');
+    await unfoldAll();
     await waitFor(() =>
       expect(screen.queryByTestId('settings-nav-toolsets')).not.toBeInTheDocument(),
     );
@@ -761,6 +1116,7 @@ describe('SettingsView', () => {
       hasGithubToken: true,
     } as never);
     const using = render(<SettingsView />);
+    await unfoldAll();
     expect(await screen.findByTestId('settings-nav-ollama')).toBeInTheDocument();
     expect(screen.queryByTestId('settings-nav-codexCli')).not.toBeInTheDocument();
     using.unmount();
@@ -772,6 +1128,7 @@ describe('SettingsView', () => {
       hasGithubToken: true,
     } as never);
     render(<SettingsView />);
+    await unfoldAll();
     for (const id of developer) {
       expect(await screen.findByTestId(`settings-nav-${id}`)).toBeInTheDocument();
     }
@@ -780,11 +1137,14 @@ describe('SettingsView', () => {
   it('explains on macOS why the night shift cannot wake a sleeping Mac', async () => {
     const { unmount } = render(<SettingsView />);
     await waitFor(() => expect(api.getConfig).toHaveBeenCalled());
+    await openSection('nightShift');
+    await screen.findByRole('checkbox', { name: 'Enable Night Shift' });
     expect(screen.queryByText(/can't wake a sleeping Mac/)).not.toBeInTheDocument();
     unmount();
 
     window.__GEZEL__ = { ...window.__GEZEL__, token: 'test-token', platform: 'darwin' };
     render(<SettingsView />);
+    await openSection('nightShift');
     expect(await screen.findByText(/can't wake a sleeping Mac/)).toBeInTheDocument();
   });
 
@@ -796,6 +1156,7 @@ describe('SettingsView', () => {
       startAtLogin: { get: vi.fn().mockResolvedValue({ supported: true, enabled: false }), set },
     };
     render(<SettingsView />);
+    await openSection('nightShift');
     expect(
       await screen.findByRole('checkbox', {
         name: 'Pause night work while this computer runs on battery',
@@ -814,6 +1175,7 @@ describe('SettingsView', () => {
 
   it('defaults the quota reserve to overall-on at 20% with per-day opt-in', async () => {
     render(<SettingsView />);
+    await openSection('nightShift');
     const overallToggle = await screen.findByRole('checkbox', {
       name: 'Stop night work near my overall quota',
     });
@@ -840,6 +1202,7 @@ describe('SettingsView', () => {
       },
     } as never);
     render(<SettingsView />);
+    await openSection('nightShift');
 
     const overallToggle = await screen.findByRole('checkbox', {
       name: 'Stop night work near my overall quota',
@@ -859,6 +1222,7 @@ describe('SettingsView', () => {
 
   it('clamps a quota percent typed past 100', async () => {
     render(<SettingsView />);
+    await openSection('nightShift');
     const overallPercent = await screen.findByRole('spinbutton', {
       name: 'Overall quota floor percent',
     });
@@ -1021,7 +1385,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-openai'));
+    await openSection('openai', 'ai');
     fireEvent.change(await screen.findByPlaceholderText('Paste OpenAI API key (sk-…)'), {
       target: { value: 'sk-test-12345' },
     });
@@ -1052,7 +1416,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-anthropic'));
+    await openSection('anthropic', 'ai');
     fireEvent.change(await screen.findByPlaceholderText('Paste Anthropic API key (sk-ant-…)'), {
       target: { value: 'sk-ant-test-12345' },
     });
@@ -1191,7 +1555,7 @@ describe('SettingsView', () => {
   // Sizes come from the settings-page recipe, not inline styles.
   it('draws the Copilot sandbox switch as a settings-page checkbox', async () => {
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-copilot'));
+    await openSection('copilot', 'ai');
 
     const checkbox = await screen.findByRole('checkbox', {
       name: 'Sandbox Copilot to gezel tools only',
@@ -1209,7 +1573,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-copilot'));
+    await openSection('copilot', 'ai');
 
     const heading = await screen.findByRole('heading', {
       name: /Alternative sign-in: GitHub token/,
@@ -1222,6 +1586,48 @@ describe('SettingsView', () => {
     expect(card).toHaveTextContent('<Stored GitHub token>');
     expect(card).not.toHaveTextContent('KzTe');
     expect(within(card as HTMLElement).getByPlaceholderText('Replace GitHub token…')).toBeVisible();
+  });
+
+  // A bakery owner on This PC opened the Copilot page and read "copilot
+  // provider failed to start: Pending response rejected since connection got
+  // disposed" for a provider they never chose (2026-11-09).
+  it('does not probe Copilot on open when nobody uses it, and says a failure plainly', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'llama-cpp',
+      meesterGezelId: 'gz-meester',
+      hasGithubToken: false,
+    } as never);
+    vi.mocked(api.testProvider).mockResolvedValue({
+      ok: false,
+      error:
+        'copilot provider failed to start: Pending response rejected since connection got disposed. Go to Settings and check your credentials.',
+    } as never);
+
+    render(<SettingsView />);
+    await openSection('copilot', 'ai');
+
+    expect(await screen.findByText('Not set up. Sign in below to use Copilot.')).toBeVisible();
+    expect(vi.mocked(api.testProvider).mock.calls.map(([p]) => p)).not.toContain('copilot');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Test connection' }));
+    const failure = await screen.findByText(/Not connected\. Sign in below/);
+    expect(failure).not.toHaveTextContent('Pending response');
+    expect(failure).toHaveAttribute('title', expect.stringContaining('Pending response'));
+  });
+
+  it('copilotIsInUse counts the default, the Night Shift, a crew member and a token', () => {
+    expect(copilotIsInUse({ provider: 'llama-cpp' } as never, [])).toBe(false);
+    expect(copilotIsInUse({ provider: 'copilot' } as never, [])).toBe(true);
+    expect(
+      copilotIsInUse(
+        { provider: 'llama-cpp', nightShift: { modelOverride: { provider: 'copilot' } } } as never,
+        [],
+      ),
+    ).toBe(true);
+    expect(copilotIsInUse({ provider: 'llama-cpp' } as never, [{ provider: 'copilot' }])).toBe(
+      true,
+    );
+    expect(copilotIsInUse({ provider: 'llama-cpp', hasGithubToken: true } as never, [])).toBe(true);
   });
 
   it('offers the expanded Codex CLI reasoning levels', async () => {
@@ -1253,7 +1659,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-codexCli'));
+    await openSection('codexCli', 'ai');
 
     expect(await screen.findByTestId('model-picker-codex-cli')).toBeInTheDocument();
     const effortTray = await screen.findByRole('radiogroup', { name: 'Reasoning effort' });
@@ -1268,7 +1674,7 @@ describe('SettingsView', () => {
     expect(screen.getByText('Gezel tools')).toBeInTheDocument();
     expect(
       screen.getByRole('checkbox', {
-        name: 'Add Gezel tools like search, memories, tasks, and team coordination to Codex',
+        name: "Give Codex Gezel's tools, such as search, memories, and tasks",
       }),
     ).toBeChecked();
     expect(
@@ -1296,7 +1702,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-codexCli'));
+    await openSection('codexCli', 'ai');
 
     const effortTray = await screen.findByRole('radiogroup', { name: 'Reasoning effort' });
     expect(within(effortTray).getByRole('radio', { name: 'Model default (Low)' })).toBeChecked();
@@ -1326,7 +1732,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-anthropicCli'));
+    await openSection('anthropicCli', 'ai');
 
     expect(await screen.findByTestId('model-picker-anthropic-cli')).toBeInTheDocument();
     const effortSelect = await screen.findByDisplayValue('xhigh');
@@ -1401,7 +1807,7 @@ describe('SettingsView', () => {
     } as never);
 
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-anthropicCli'));
+    await openSection('anthropicCli', 'ai');
 
     const tray = await screen.findByRole('radiogroup', { name: 'Default permission' });
     expect(within(tray).getByRole('radio', { name: /Accept edits/i })).toBeChecked();
@@ -1412,7 +1818,7 @@ describe('SettingsView', () => {
     expect(screen.getByText('Gezel tools')).toBeInTheDocument();
     expect(
       screen.getByRole('checkbox', {
-        name: 'Add Gezel tools like search, memories, tasks, and team coordination to Claude',
+        name: "Give Claude Gezel's tools, such as search, memories, and tasks",
       }),
     ).toBeChecked();
     expect(
@@ -1437,7 +1843,7 @@ describe('SettingsView', () => {
 
   it('shows the designated Librarian and explains project-level opt-in', async () => {
     render(<SettingsView />);
-    fireEvent.click(await screen.findByTestId('settings-nav-team'));
+    await openSection('team', 'more');
 
     expect(await screen.findByTestId('boekwachter-settings')).toHaveTextContent(
       'A project with a Librarian on its assigned crew',

@@ -12,12 +12,24 @@ function back() {
   });
   return handled;
 }
-function Example({ compact = true }: { compact?: boolean }) {
+function Example({
+  compact = true,
+  trail = 0,
+}: {
+  compact?: boolean;
+  /** How many views the stack can step back through. */
+  trail?: number;
+}) {
   const [navigationOpen, setNavigationOpen] = useState(false);
-  useBackNavigation(compact, navigationOpen, () => setNavigationOpen(true));
+  const [steps, setSteps] = useState(trail);
+  useBackNavigation(compact, navigationOpen, () => setNavigationOpen(true), {
+    canGoBack: steps > 0,
+    back: () => setSteps((n) => n - 1),
+  });
   return (
     <>
       <nav hidden={!navigationOpen}>Workshop navigation</nav>
+      <output aria-label="Steps back">{steps}</output>
       <main hidden={navigationOpen}>
         <textarea aria-label="Draft" defaultValue="Keep my draft" />
         <Dialog.Root>
@@ -59,6 +71,38 @@ describe('native Back with the shared responsive app', () => {
     const view = render(<Example compact={false} />);
     expect(back()).toBe(false);
     view.unmount();
+    expect(back()).toBe(false);
+  });
+});
+
+describe('native Back walks the view stack', () => {
+  it('steps back through visited views before it opens navigation', () => {
+    render(<Example trail={2} />);
+    const steps = screen.getByRole('status', { name: 'Steps back' });
+    expect(back()).toBe(true);
+    expect(steps).toHaveTextContent('1');
+    expect(back()).toBe(true);
+    expect(steps).toHaveTextContent('0');
+    expect(screen.queryByRole('navigation')).toBeNull();
+    expect(back()).toBe(true);
+    expect(screen.getByRole('navigation')).toBeVisible();
+    expect(back()).toBe(false);
+  });
+
+  it('closes an overlay before it steps back', async () => {
+    render(<Example trail={1} />);
+    fireEvent.click(screen.getByRole('button', { name: 'New project' }));
+    await screen.findByRole('dialog');
+    expect(back()).toBe(true);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByRole('status', { name: 'Steps back' })).toHaveTextContent('1');
+    expect(back()).toBe(true);
+    expect(screen.getByRole('status', { name: 'Steps back' })).toHaveTextContent('0');
+  });
+
+  it('steps back in a wide layout too', () => {
+    render(<Example compact={false} trail={1} />);
+    expect(back()).toBe(true);
     expect(back()).toBe(false);
   });
 });

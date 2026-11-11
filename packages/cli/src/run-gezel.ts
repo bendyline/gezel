@@ -32,10 +32,12 @@ export async function resolveRunGezel(
     const candidates = gezels.filter((gezel) => match.labels.includes(gezel.name));
     throw ambiguous(ref, candidates);
   }
-  throw new CliError(`No gezel matches "${ref}". Run \`gezel agent list\` to see your gezels.`);
+  throw new CliError(`No crew member matches "${ref}". Run \`gezel agent list\` to see your crew.`);
 }
 
 function ambiguous(ref: string, candidates: ReadonlyArray<{ id: string; name: string }>): CliError {
   const listed = candidates.map((gezel) => `${gezel.name} (${gezel.id})`).join(', ');
-  return new CliError(`"${ref}" matches more than one gezel: ${listed}. Pass the id instead.`);
+  return new CliError(
+    `"${ref}" matches more than one crew member: ${listed}. Pass the id instead.`,
+  );
 }

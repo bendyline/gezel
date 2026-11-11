@@ -1189,6 +1189,97 @@ describe('BundledSource — image-lora kind', () => {
   });
 });
 
+describe('BundledSource — video-model kind', () => {
+  let root: string;
+
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), 'catalog-video-model-'));
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  const baseIdentity = {
+    schemaVersion: 1,
+    kind: 'video-model',
+    name: 'Fixture video',
+    description: 'A video model fixture.',
+    tags: ['text-to-video'],
+    maintainer: { name: 'Test' },
+    license: 'Apache 2.0',
+    licenseClass: 'open',
+    commercialUse: true,
+    yankedVersions: [],
+  };
+  const file = (name: string, extras: Record<string, unknown> = {}) => ({
+    name,
+    sha256: 'd'.repeat(64),
+    sizeBytes: 1_000,
+    ...extras,
+  });
+  const version = (files: object[]) => ({
+    schemaVersion: 1,
+    version: '1.0.0',
+    releasedAt: '2026-11-09T00:00:00.000Z',
+    source: { huggingfaceRepo: 'x/y', files, approxSizeBytes: 3_000 },
+  });
+
+  it('carries the sd.cpp engine, roles, architecture and render settings through', async () => {
+    const id = 'wan2.2-ti2v-5b-q4';
+    const dir = await writeIdentity(root, 'video-model', id, {
+      ...baseIdentity,
+      id,
+      family: 'wan',
+      engine: 'sd-cpp',
+      architecture: 'wan2.2-ti2v-5b',
+      sdCpp: { sampler: 'euler', flowShift: 5, vaeTiling: { temporal: true } },
+      promptFormat: 'text',
+      supportsImageToVideo: true,
+      imageToVideoOnly: false,
+    });
+    await writeVersion(
+      dir,
+      '1.0.0',
+      version([
+        file('Wan2.2-TI2V-5B-Q4_K_M.gguf', { role: 'diffusion_model' }),
+        file('umt5-xxl-encoder-Q4_K_M.gguf', {
+          role: 't5xxl',
+          repo: 'city96/umt5-xxl-encoder-gguf',
+        }),
+        file('wan2.2_vae.safetensors', { role: 'vae' }),
+      ]),
+    );
+    const items = await new BundledSource(root).list('video-model');
+    const manifest = items[0]?.manifest;
+    if (manifest?.kind !== 'video-model') throw new Error('wrong kind');
+    expect(manifest).toMatchObject({
+      engine: 'sd-cpp',
+      architecture: 'wan2.2-ti2v-5b',
+      sdCpp: { sampler: 'euler', flowShift: 5, vaeTiling: { spatial: true, temporal: true } },
+      promptFormat: 'text',
+      supportsImageToVideo: true,
+      imageToVideoOnly: false,
+    });
+    expect(manifest.source.files.map((f) => f.role)).toEqual(['diffusion_model', 't5xxl', 'vae']);
+  });
+
+  it('reads an entry without an engine as a diffusers model', async () => {
+    const id = 'ltx-fixture';
+    const dir = await writeIdentity(root, 'video-model', id, {
+      ...baseIdentity,
+      id,
+      family: 'ltx',
+    });
+    await writeVersion(dir, '1.0.0', version([file('transformer/model.safetensors')]));
+    const manifest = (await new BundledSource(root).list('video-model'))[0]?.manifest;
+    if (manifest?.kind !== 'video-model') throw new Error('wrong kind');
+    expect(manifest.engine).toBe('diffusers');
+    expect(manifest.architecture).toBeUndefined();
+    expect(manifest.source.files[0]?.role).toBeUndefined();
+  });
+});
+
 describe('BundledSource — file-bundle index', () => {
   let root: string;
 

@@ -65,7 +65,7 @@ export function VideoGeneratorGezelHint() {
     <div className="ff-img-hint">
       {existing.length > 0 ? (
         <div className="ff-img-hint-have">
-          <span className="muted small">Video-generator gezel</span>
+          <span className="muted small">Video generator</span>
           {existing.length === 1 ? (
             <button
               type="button"
@@ -98,14 +98,14 @@ export function VideoGeneratorGezelHint() {
         <div className="ff-img-hint-empty">
           <p className="muted small">
             Once a model is on your device, the easiest way to use it from chat is to add a{' '}
-            <strong>video-generator gezel</strong>. It takes your exact prompt and passes it
-            straight to the video-generation AI, so use terse, concrete descriptions — e.g.{' '}
+            <strong>video generator</strong>. It takes your exact prompt and passes it straight to
+            the video-generation AI, so use terse, concrete descriptions — e.g.{' '}
             <em>
               "a red hot-air balloon drifting over snowy mountains at sunrise, slow aerial shot."
             </em>
           </p>
           <button type="button" className="primary" onClick={() => setShowInstall(true)}>
-            Add a video-generator gezel
+            Add a video generator
           </button>
         </div>
       )}
@@ -198,7 +198,7 @@ function VideoGeneratorInstallDialog({
             }}
           >
             <Dialog.Title asChild>
-              <h3 style={{ margin: 0 }}>Add a video-generator gezel</h3>
+              <h3 style={{ margin: 0 }}>Add a video generator</h3>
             </Dialog.Title>
             <button type="button" className="gz-link-button" onClick={onClose} disabled={busy}>
               Cancel
@@ -242,7 +242,7 @@ function VideoGeneratorInstallDialog({
                 title="Pick a random name"
                 aria-label="Pick a random name"
               >
-                🎲
+                <span className="fa-solid fa-dice" aria-hidden="true" />
               </button>
               <button type="submit" className="primary" disabled={busy || !name.trim()}>
                 {busy ? 'Creating…' : 'Create'}

@@ -40,10 +40,12 @@ restart. Tests override `GEZEL_NATIVE_CAPACITY_DIR` to avoid live user state.
   platform-wide automatic swap heuristic no longer decides residency; an
   explicit user `swap` setting remains supported.
 - DS4 full residency is explicitly exclusive. The historical 96 GiB estimate
-  alone cannot express exclusivity on larger machines. Image and video engines
-  are also exclusive until they expose reliable peak-allocation planners.
-  DS4 streaming and smaller chat/recognition/audio engines can coexist within
-  their budgets.
+  alone cannot express exclusivity on larger machines. Both video engines (the
+  diffusers server and sd.cpp video, `SD_VIDEO_EXCLUSIVE`) are exclusive until
+  their size-aware prices are calibrated (docs/media-model-memory.md). The
+  image engine is admitted by bytes, claiming its estimated peak
+  (`sdServerLedgerClaim`). DS4 streaming and smaller chat/recognition/audio
+  engines can coexist within their budgets.
 - Interactive loads take priority, with FIFO order within each lane. After
   four newer admissions bypass an older claim, that claim takes precedence.
   A large request therefore gets a chance to accumulate enough free capacity.

@@ -126,7 +126,7 @@ describe('toolActivityPhrase', () => {
   // Four spelling rules, one representative each. The sweep below is what
   // actually guards the vocabulary; these name the rules for the next reader.
   it('applies each -ing spelling rule', () => {
-    expect(toolActivityPhrase('create_gezel')).toBe('Creating gezel'); // silent -e drops
+    expect(toolActivityPhrase('update_gezel')).toBe('Updating crew member'); // silent -e drops
     expect(toolActivityPhrase('run_git')).toBe('Running a git command'); // CVC doubles
     expect(toolActivityPhrase('replace_in_file')).toBe('Editing file'); // two vowels, no double
     expect(toolActivityPhrase('verify_outcome')).toBe('Verifying an outcome'); // -y stands

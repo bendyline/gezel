@@ -224,6 +224,16 @@
   font-size: var(--text-xs);
   color: var(--text-muted);
 }
+/* An empty group's way to start, quiet like the text it replaced. */
+.app-sidebar-empty .app-sidebar-empty-action {
+  color: var(--text-muted);
+  font-size: inherit;
+  text-align: left;
+  text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+}
+.app-sidebar-empty .app-sidebar-empty-action:hover {
+  color: var(--text);
+}
 
 .app-sidebar-links {
   margin-top: 0.4rem;
@@ -266,7 +276,7 @@
 .primary-navigation-touch .app-sidebar-item.active,
 .primary-navigation-touch .app-sidebar-group-header.active {
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+  background: var(--selected-bg);
   color: var(--text);
 }
 

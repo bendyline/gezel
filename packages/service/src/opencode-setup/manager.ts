@@ -241,7 +241,7 @@ export function createOpenCodeSetupManager(
     } else if (state) {
       if (!endpointsEnabled) reasons.push('Connected-app model serving is turned off.');
       if (!findHarnessModel(models, state.model, state.gezelId)) {
-        reasons.push('The configured gezel or local model is no longer available.');
+        reasons.push('The configured crew member or local model is no longer available.');
       }
       if (managedConfig === null) reasons.push('The managed OpenCode config is missing.');
       if (!tokenRecord || !isExactHarnessToken(tokenRecord, OPENCODE_SETUP_APP_NAME)) {
@@ -373,7 +373,7 @@ export function createOpenCodeSetupManager(
       if (!selected) {
         throw new OpenCodeSetupError(
           'model_not_available',
-          `The selected gezel or local model is not available for OpenCode: ${input.model}`,
+          `The selected crew member or local model is not available for OpenCode: ${input.model}`,
           404,
         );
       }

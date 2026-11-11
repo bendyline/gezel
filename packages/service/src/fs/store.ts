@@ -509,7 +509,7 @@ export class Store {
     this.craftbooks = new CraftbookStore({
       home: this.home,
       projectWorkspaceDir: (id) => this.projectWorkspaceDir(id),
-      assertWorkspaceWritable: (id) => this.assertWorkspaceWritable(id),
+      assertWorkspaceWritable: (id, opts) => this.assertWorkspaceWritable(id, opts),
     });
   }
 
@@ -1296,7 +1296,7 @@ export class Store {
     const project = await this.createProject(
       {
         name: 'Shared Library',
-        description: 'Shared knowledge every gezel can reach, from any project.',
+        description: 'Shared knowledge Gezel can reach from any project.',
         about: SHARED_PROJECT_ABOUT_MD,
         missionObjectives: SHARED_PROJECT_MISSION_MD,
         workingDir: documentsRoot,
@@ -1885,7 +1885,7 @@ export class Store {
     if (!existing) throw new Error(`agent ${id} not found`);
     if (existing.storageScope === 'machine-shared') {
       throw new Error(
-        'Machine-shared gezellen cannot be removed from an individual account. Shared removal is not available yet.',
+        'Machine-shared crew members cannot be removed from an individual account. Shared removal is not available yet.',
       );
     }
 
@@ -1923,7 +1923,7 @@ export class Store {
     await this.history?.log({
       kind: 'gezel.deleted',
       gezelId: id,
-      summary: `Deleted gezel "${existing.name}"`,
+      summary: `Removed ${existing.name} from the crew`,
       details: { id, name: existing.name },
     });
 
@@ -2703,7 +2703,7 @@ export class Store {
     await this.history?.log({
       kind: 'gezel.created',
       gezelId: encodedId,
-      summary: `Created project gezel ${detail.name}${detail.role ? ` · ${detail.role}` : ''}`,
+      summary: `Created ${detail.name}${detail.role ? ` · ${detail.role}` : ''} for this project`,
       details: { projectId, localId, canonical: input.canonical === true },
     });
     return detail;
@@ -2733,7 +2733,7 @@ export class Store {
   ): Promise<GezelDetail> {
     if (localId === PROJECT_GEZEL_LOCAL_ID) {
       throw new Error(
-        'the @project gezel prompt is the workspace instruction file (AGENTS.md/CLAUDE.md); edit that file instead',
+        'the @project prompt is the workspace instruction file (AGENTS.md/CLAUDE.md); edit that file instead',
       );
     }
     const gate = await this.assertWorkspaceWritable(projectId);
@@ -3376,13 +3376,22 @@ export class Store {
        */
       properties?: Record<string, string>;
     },
+    opts?: {
+      /**
+       * Keep `updatedAt` as it was. For writes the system makes on its own,
+       * such as moving a project to a newer version of its app: `updatedAt`
+       * reads as "the person worked here".
+       */
+      preserveUpdatedAt?: boolean;
+    },
   ): Promise<ProjectDetail> {
-    return this.projectUpdateLocks.run(id, () => this.updateProjectUnlocked(id, patch));
+    return this.projectUpdateLocks.run(id, () => this.updateProjectUnlocked(id, patch, opts));
   }
 
   private async updateProjectUnlocked(
     id: string,
     patch: Parameters<Store['updateProject']>[1],
+    opts?: Parameters<Store['updateProject']>[2],
   ): Promise<ProjectDetail> {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) throw new Error(`project ${id} not found`);
@@ -3452,7 +3461,7 @@ export class Store {
           : undefined);
     const updated: Project = {
       ...meta,
-      updatedAt: isViewStateOnlyPatch(patch) ? meta.updatedAt : nowIso(),
+      updatedAt: opts?.preserveUpdatedAt || isViewStateOnlyPatch(patch) ? meta.updatedAt : nowIso(),
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
       ...(patch.icon === null
@@ -5852,6 +5861,18 @@ export class Store {
     }
   }
 
+  /**
+   * Whether any chat session was ever saved. Reads directory names only, so
+   * the start screen can ask it on every boot of a home nobody has used yet.
+   */
+  async hasAnySession(): Promise<boolean> {
+    for (const gezelId of await safeReaddir(gezelPaths(this.home, this.external).gezels)) {
+      const files = await readdirIfReadable(gezelSessionsDir(this.home, gezelId, this.external));
+      if (files?.some((file) => file.endsWith('.json'))) return true;
+    }
+    return false;
+  }
+
   async listSessions(opts?: {
     gezelId?: string;
     projectId?: string;
@@ -7297,8 +7318,16 @@ export class Store {
     return this.craftbooks.getProjectCraftbook(projectId, id, version, options);
   }
 
-  async writeProjectCraftbook(projectId: string, book: Craftbook): Promise<void> {
-    await this.craftbooks.writeProjectCraftbook(projectId, book);
+  /**
+   * `userInitiated` waives only the external-folder consent, for a write the
+   * person approved with a click (an app update). Never from a model surface.
+   */
+  async writeProjectCraftbook(
+    projectId: string,
+    book: Craftbook,
+    opts?: { userInitiated?: boolean },
+  ): Promise<void> {
+    await this.craftbooks.writeProjectCraftbook(projectId, book, opts);
   }
 
   async deleteProjectCraftbook(projectId: string, id: string): Promise<void> {
@@ -7316,8 +7345,9 @@ export class Store {
     projectId: string,
     id: string,
     prov: ProjectCraftbookProvenance,
+    opts?: { userInitiated?: boolean },
   ): Promise<void> {
-    await this.craftbooks.writeProjectCraftbookProvenance(projectId, id, prov);
+    await this.craftbooks.writeProjectCraftbookProvenance(projectId, id, prov, opts);
   }
 }
 

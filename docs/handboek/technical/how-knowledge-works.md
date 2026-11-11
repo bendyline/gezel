@@ -11,7 +11,7 @@ subcategory:
 
 # How knowledge works in Gezel
 
-Gezel brings relevant information into a conversation from your files, your crew's memories, and installed reference catalogs. It stores that information locally, builds indexes to find it, and gives the language model selected excerpts with references to their sources. This is retrieval-augmented generation, usually shortened to **RAG**: search supplies evidence that the model can use when answering.
+Gezel brings relevant information into a conversation from your files, saved memories, and installed reference catalogs. It stores that information locally, builds indexes to find it, and gives the language model selected excerpts with references to their sources. This is retrieval-augmented generation, usually shortened to **RAG**: search supplies evidence that the model can use when answering.
 
 An embedding is a numerical representation used to find related passages. It does not replace the original text, and installing a catalog does not train or change your chat model. You can inspect the source, search it with another model, or open a cited passage independently of the conversation.
 
@@ -23,9 +23,9 @@ Several sources meet in search, but they have different owners and lifecycles:
 
 | Source | Authoritative content | Search storage | Scope |
 | --- | --- | --- | --- |
-| Gezel memory | Daily Markdown notes and lessons | A rebuildable SQLite `mem.db` with text vectors | The named gezel |
+| A crew member's memory | Daily Markdown notes and lessons | A rebuildable SQLite `mem.db` with text vectors | That crew member |
 | Project memory | Daily Markdown notes and lessons | A separate rebuildable `mem.db` | The project |
-| Your memory ("About you") | Daily Markdown notes | A separate rebuildable `mem.db` | You; every gezel reads it |
+| Your memory ("About you") | Daily Markdown notes | A separate rebuildable `mem.db` | You; the whole crew reads it |
 | Workspace and artifacts | Your original files and produced artifacts | Content indexes with structural data, full-text search, and, where supported, embeddings | The active project and explicitly admitted sources |
 | Shared document library | Your library files | The shared library project's content index | Available across projects |
 | Reference catalogs | Documents, metadata, and indexes shipped in a `.gezk` file | Immutable SQLite databases extracted from the catalog | Installed and enabled catalogs, intersected with project selection |
@@ -43,9 +43,9 @@ The main storage locations are:
 
 | Location | Contents |
 | --- | --- |
-| `~/.gezel/gezels/<id>/memories/index/mem.db` | Derived vector index for a gezel's memory |
+| `~/.gezel/gezels/<id>/memories/index/mem.db` | Derived vector index for one crew member's memory |
 | `~/.gezel/projects/<id>/memories/index/mem.db` | Account-local derived vector index for project memory |
-| `~/.gezel/memories/index/mem.db` | Derived vector index for what the crew knows about you |
+| `~/.gezel/memories/index/mem.db` | Derived vector index for what Gezel knows about you |
 | `<workspace>/.gezel/index/index.db` | Content index for an ordinary writable workspace |
 | `~/.gezel/projects/<id>/index/index.db` | Content index when the workspace cannot host it, and for the shared library or machine-shared projects |
 | `~/.gezel/index/global.db` | Full-text mirror of sessions and history; this database does not store embeddings |
@@ -86,7 +86,7 @@ The current registered profiles are:
 
 | Profile | Language use | Query / passage instructions | Stage-one encoding |
 | --- | --- | --- | --- |
-| `bge-small-en-v1.5@1` | English; default for local catalog builds and the Handboek | BGE query instruction / no passage prefix | Raw sign bits |
+| `bge-small-en-v1.5@1` | English; default for local catalog builds and Help | BGE query instruction / no passage prefix | Raw sign bits |
 | `multilingual-e5-small@2` | Multilingual reference catalogs | `query: ` / `passage: ` | Centered sign bits |
 | `multilingual-e5-small@1` | Existing catalogs using the earlier E5 profile | `query: ` / `passage: ` | Raw sign bits |
 | `embeddinggemma-2-512@1` | Catalogs with searchable photos, video and audio | `task: search result \| query: ` / `title: none \| text: ` | Centered sign bits |
@@ -197,11 +197,11 @@ Proactive retrieval is bounded separately from a full search. It diversifies sou
 
 Memory recall has an additional time dimension. Durable facts, decisions, and preferences remain searchable, while `status` notes decay for automatic recall so an old “the build is broken” observation does not keep appearing as current state. Dates and source scope remain attached to recalled notes.
 
-A note saved to a gezel's memory or to yours also records the project it came from, written after its kind — `## 14:30 [pref] {project:spanish gezel:wren}`. Recall ranks notes from the current project a little higher, and growth credits the gezel that wrote a note about you. When the text embedder is cold or unavailable, memory recall falls back to keyword matching over the daily files instead of dropping out; a keyword note is admitted only if it contains a word from the message. Phones have no embedder and always recall this way, within the window's retrieval budget (about 160 tokens at a 4K context, 320 at 8K).
+A note saved to a crew member's memory or to yours also records the project it came from, written after its kind — `## 14:30 [pref] {project:spanish gezel:wren}`. Recall ranks notes from the current project a little higher, and growth credits whoever wrote a note about you. When the text embedder is cold or unavailable, memory recall falls back to keyword matching over the daily files instead of dropping out; a keyword note is admitted only if it contains a word from the message. Phones have no embedder and always recall this way, within the window's retrieval budget (about 160 tokens at a 4K context, 320 at 8K).
 
 ## Scope, citations, and model context
 
-Each session has a named gezel and a project. The model-facing `search` tool searches the admitted workspace, artifacts, project memory, that gezel's memory, what the crew knows about you, shared library, and reference catalogs. It can restrict sources or catalog ids. Project catalog policy is `inherit`, `selected`, or `off`; a selected catalog must also be installed, enabled, and successfully mounted.
+Each session has a named crew member and a project. The model-facing `search` tool searches the admitted workspace, artifacts, project memory, that crew member's memory, what Gezel knows about you, shared library, and reference catalogs. It can restrict sources or catalog ids. Project catalog policy is `inherit`, `selected`, or `off`; a selected catalog must also be installed, enabled, and successfully mounted.
 
 The Knowledge browser and `gezel knowledge find` use the user's installed catalog search surface. They do not implicitly adopt the project policy of whichever directory the CLI runs in. Project-scoped retrieval applies that policy through the session's project context.
 
@@ -229,14 +229,14 @@ Trusted public catalog downloads can use the machine engine broker's immutable a
 
 The broker receives a trusted catalog coordinate, not a user project path. It manages public immutable bytes; user documents, memories, query embedding work, and retrieval remain product-daemon concerns. Removing a catalog removes your reference and private files, while shared public bytes are reclaimed separately. Background update work respects the app-network policy; an explicitly requested install is the user's own download.
 
-The built-in Handboek is itself a `.gezk` catalog. Gezel builds it from these documentation articles and generated catalog material, then installs the bundled archive through the normal knowledge machinery. Updates replace changed bundled bytes while preserving your enabled setting.
+The built-in Help is itself a `.gezk` catalog. Gezel builds it from these documentation articles and generated catalog material, then installs the bundled archive through the normal knowledge machinery. Updates replace changed bundled bytes while preserving your enabled setting.
 
 ## Diagnosing missing results
 
 | Symptom | What to check |
 | --- | --- |
 | A file appears by name but not by meaning | Embedding readiness and project indexing/enrichment status; the structural pass can finish first |
-| A memory cannot be recalled | Correct gezel/project/user scope, saved Markdown, memory index health, and any status-note age |
+| A memory cannot be recalled | Correct crew-member/project/user scope, saved Markdown, memory index health, and any status-note age |
 | A catalog appears installed but supplies no results | Enabled/mounted state, quarantine reason, project selection, and the query profile's readiness |
 | Offline keyword search works but semantic search fails | Embedding runtime installation, cached pinned model files, and supported profile |
 | A title is found but a related passage is missed | Shard routing and candidate limits; compare keyword and semantic results |

@@ -708,8 +708,8 @@ export function ToolsetsEditor({ scope: incomingScope, subject, hint }: Toolsets
               </Dialog.Title>
             </header>
             <p className="muted small">
-              Values configured here apply globally — every gezel that installs this toolset shares
-              the same configuration.
+              Values configured here apply globally — the same configuration is shared wherever this
+              toolset is installed.
             </p>
             {installTarget?.community && (
               <p className="warning small">{COMMUNITY_SECRETS_WARNING}</p>
@@ -748,8 +748,8 @@ export function ToolsetsEditor({ scope: incomingScope, subject, hint }: Toolsets
               </Dialog.Title>
             </header>
             <p className="muted small">
-              Configuration for <code>{configureTarget?.toolsetId}</code> is shared across every
-              gezel that installs it.
+              Configuration for <code>{configureTarget?.toolsetId}</code> is shared wherever it is
+              installed.
             </p>
             {configureTarget && (
               <ToolsetConfigForm

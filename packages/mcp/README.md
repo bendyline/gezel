@@ -1,15 +1,14 @@
 # @bendyline/gezel-mcp
 
 The [Model Context Protocol](https://modelcontextprotocol.io) server that gives
-gezels, the AI companions in [Gezel](https://github.com/bendyline/gezel), their
-hands.
+[Gezel](https://github.com/bendyline/gezel) its hands.
 
-Every tool a gezel can call lives here: memory search and save, workspace file
+Every tool Gezel can call lives here: memory search and save, workspace file
 operations, project artifacts, the shared document library, script and
-Playwright execution, task management, team and project management, image
+Playwright execution, task management, crew and project management, image
 rendering, and history search.
 
-Gezel runs this server for every gezel's chat. It also gives other AI apps
+Gezel runs this server for every chat. It also gives other AI apps
 (Claude Code, Codex, Cursor, Claude Desktop, VS Code) a small set of Gezel's
 tools; see [For other AI apps](#for-other-ai-apps).
 
@@ -50,7 +49,7 @@ Gezel is not running, every tool says so instead of the server exiting.
 
 ## The full surface, with your own access
 
-Without `--harness` the server offers every tool a gezel has, acting with your
+Without `--harness` the server offers every tool Gezel has, acting with your
 own access, as the `gezel` command does. It speaks stdio, so any MCP client can
 run it. With Gezel running on the same computer:
 
@@ -61,7 +60,7 @@ run it. With Gezel running on the same computer:
       "command": "npx",
       "args": ["-y", "@bendyline/gezel-mcp"],
       "env": {
-        "GEZEL_AGENT_ID": "<a gezel id from `gezel agent list`>",
+        "GEZEL_AGENT_ID": "<an id from `gezel agent list`>",
         "GEZEL_PROJECT_ID": "default"
       }
     }
@@ -81,20 +80,20 @@ it, then reconnect the server from your MCP client.
 
 | Variable | |
 |---|---|
-| `GEZEL_AGENT_ID` | The gezel the tools work as: whose memories they search and save, whose tasks they see. |
+| `GEZEL_AGENT_ID` | The crew member the tools work as: whose memories they search and save, whose tasks they see. |
 | `GEZEL_PROJECT_ID` | The project tools use when a call names none. Default `default`. |
 | `GEZEL_HOME` | A Gezel home other than `~/.gezel`. |
 
 Run this way, the server acts with your own access, as the `gezel` command
 does; `GEZEL_PROJECT_ID` picks a default, not a boundary.
 
-`gezel agent list` (from `@bendyline/gezel-cli`) lists your gezels and their
+`gezel agent list` (from `@bendyline/gezel-cli`) lists your crew and their
 ids. The `agent` in that command and in `GEZEL_AGENT_ID` is a historical name:
-both refer to your gezels.
+both refer to your crew members.
 
-When Gezel starts the server itself, for a gezel's chat, it passes the
+When Gezel starts the server itself, for a chat, it passes the
 connection directly: `GEZEL_BASE_URL`, `GEZEL_TOKEN` (a token it mints for that
-one session, confined to its project unless the gezel coordinates across
+one session, confined to its project unless the session coordinates across
 projects), and `GEZEL_CERT_PATH` (the
 `runtime/cert.pem` that token's service is using). Setting `GEZEL_BASE_URL`
 yourself turns the lookup off, and keeping all three current across restarts
@@ -103,7 +102,7 @@ is then up to you.
 ## Tool categories
 
 Memory · workspace files · project artifacts · shared documents · script and
-Playwright execution · package installation · team and project management ·
+Playwright execution · package installation · crew and project management ·
 tasks · user questions · history search · image rendering.
 
 Run the server and call `tools/list` for the authoritative, current inventory.

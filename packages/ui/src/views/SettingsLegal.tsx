@@ -39,7 +39,7 @@ export function SettingsLegalSection() {
             >
               How Gezel handles your data
             </button>{' '}
-            <span className="muted small">in the Handboek</span>
+            <span className="muted small">in Help</span>
           </li>
         )}
         {LEGAL_LINKS.map((link) => (

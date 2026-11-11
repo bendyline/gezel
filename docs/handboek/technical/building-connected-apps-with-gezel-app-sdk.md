@@ -23,6 +23,92 @@ For a worked editor integration, see [How DocBlocks uses Gezel for text AI](docb
 
 This article teaches the SDK. For what is promised rather than how to use it — which exports are stable, what cancellation guarantees, and what a store build must do differently — see the [App SDK surface](https://github.com/bendyline/gezel/blob/main/docs/app-sdk-surface.md) contract.
 
+## Quick start with curl
+
+You don't need the SDK to try Gezel's models. Any program that speaks the OpenAI chat API can reach them over plain HTTP, in three steps.
+
+**1. Install the command line and download a model that fits this computer.** Skip this step if Gezel is already set up here.
+
+```bash
+npm install -g @bendyline/gezel-cli
+gezel run --download "Say hello"
+```
+
+**2. Open the plain-HTTP port.**
+
+```bash
+gezel integrations ollama on
+```
+
+This is the port Ollama uses, `11434`, so tools that look for Ollama find Gezel too. It takes no key. While it is on, any program on this computer can use your models without asking, which is why it stays off until you turn it on. In the desktop app the same switch is **Settings → Integrations → Ollama**. Gezel leaves the port alone when Ollama itself is running.
+
+**3. Ask.**
+
+```bash
+curl http://127.0.0.1:11434/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "gezel",
+    "reasoning_effort": "none",
+    "messages": [{"role": "user", "content": "Say hello in five words."}]
+  }'
+```
+
+The reply comes from your Meester, the crew member who runs your workshop, on the model your chats use. Gezel answers any model name it does not know that way, so code written for another OpenAI-style service runs without a change to its model name. `"reasoning_effort": "none"` skips the model's thinking step, which is what you want for a quick reply.
+
+In PowerShell, send the same request with `Invoke-RestMethod`:
+
+```powershell
+$body = '{"model":"gezel","reasoning_effort":"none","messages":[{"role":"user","content":"Say hello in five words."}]}'
+(Invoke-RestMethod http://127.0.0.1:11434/v1/chat/completions -Method Post -ContentType 'application/json' -Body $body).choices[0].message.content
+```
+
+### Choose who answers
+
+```bash
+curl http://127.0.0.1:11434/v1/models
+```
+
+The list holds your crew, as `gezel:<role>-<name>`, and the models in Gezel's catalog, as `<engine>:<model>`. A crew member answers in character on its own tuned model. A model answers plainly, and only one whose `availability` is `available` is downloaded and ready; the others need a download first. On an Apple-silicon Mac the engine is `mlx`, and elsewhere it is `llama-cpp`, for example `llama-cpp:qwen3.5-9b-q4`.
+
+### Use an OpenAI client
+
+Point the client at the same address. The port takes no key, but most clients insist on a value.
+
+```python
+from openai import OpenAI
+
+client = OpenAI(base_url="http://127.0.0.1:11434/v1", api_key="not-needed")
+
+reply = client.chat.completions.create(
+    model="gezel",
+    reasoning_effort="none",
+    messages=[{"role": "user", "content": "Say hello in five words."}],
+)
+print(reply.choices[0].message.content)
+```
+
+```js
+import OpenAI from 'openai';
+
+const client = new OpenAI({ baseURL: 'http://127.0.0.1:11434/v1', apiKey: 'not-needed' });
+
+const reply = await client.chat.completions.create({
+  model: 'gezel',
+  reasoning_effort: 'none',
+  messages: [{ role: 'user', content: 'Say hello in five words.' }],
+});
+console.log(reply.choices[0].message.content);
+```
+
+### When you ship an app
+
+The open port is for trying things out and for tools that only know Ollama. An app other people install should connect with a key of its own, so the person can see it in **Settings → Integrations** and revoke it:
+
+- `gezel integrations token create my-app` makes a key and prints the address to use it with. `gezel integrations address` prints every address at any time.
+- Outside a container that address is served with Gezel's own certificate, which a program has to trust or skip checking. The SDK below does that for you, along with asking the person for consent and keeping the key.
+- A [Gezel container](gezel-in-docker.md) answers keyed requests over plain HTTP at `http://localhost:6230/v1`.
+
 ## Install and connect
 
 The Node entry requires Node.js 24 or newer:
@@ -74,7 +160,7 @@ for await (const chunk of stream) {
 
 The in-memory map keeps the quickstart self-contained, but a real application must replace it with secure operating-system storage; do not save the token in source code, a project file, or plain-text preferences. `connect()` verifies a stored token still has the requested scopes. If it was revoked or is too narrow, the SDK discards it and starts a fresh visible consent flow.
 
-Call `app.models()` rather than hardcoding a model id. The response is the authoritative list available to this connection and can include both raw models and eligible gezels. Selecting a gezel gives the caller that gezel's character and tuned model, while your app keeps ownership of its interface and conversation loop.
+Call `app.models()` rather than hardcoding a model id. The response is the authoritative list available to this connection and can include both raw models and eligible crew members. Selecting a crew member gives the caller that crew member's character and tuned model, while your app keeps ownership of its interface and conversation loop.
 
 ## Consent and scopes
 
@@ -90,7 +176,7 @@ Every connection has a stable `appId`, a user-visible name, and one or more scop
 
 An app that is already connected adds a scope without disconnecting: `app.requestScopes({ appId, appName, scopes: [...held, 'images'], onVerificationCode })` asks for the wider grant while the current token keeps working, then switches the client to the new token. Ask for `images` only from an explicit action, such as an "Allow image generation" button, and only when `app.images.support()` reports that this Gezel serves it; an older Gezel answers `images_unsupported` before anything changes.
 
-Third-party applications should not request the first-party `cli` scope or call `authorizeLocalOwner()`. Those surfaces are reserved for Gezel's own command line and same-user clients. Ask for `product` only when the application truly needs projects, tasks, gezels, or other product state; add `openai` only if that same application also performs inference.
+Third-party applications should not request the first-party `cli` scope or call `authorizeLocalOwner()`. Those surfaces are reserved for Gezel's own command line and same-user clients. Ask for `product` only when the application truly needs projects, tasks, crew, or other product state; add `openai` only if that same application also performs inference.
 
 Stateful scopes require `onVerificationCode`. Show the code in the requesting application so the user can type it into Gezel's approval dialog:
 
@@ -109,6 +195,8 @@ const authorized = await authorizeLocal({
 ```
 
 The daemon generates the code and never sends it to the Gezel desktop approval surface. This proves that the person approving the grant can also see the application that requested it.
+
+On a server, or anywhere Gezel runs without its window, the person answers from a terminal. `gezel integrations list` shows the apps waiting, `gezel integrations approve <appId>` lets one in (add `--code <code>` for a scope that shows a code), and `gezel integrations deny <appId>` turns it down. A request waits ten minutes.
 
 ## Use the full product API
 
@@ -136,12 +224,14 @@ This pairing is the supported route for a rich integration: the app SDK owns dis
 
 | Method | Purpose |
 | --- | --- |
-| `app.models()` | List the models and gezels exposed to this app |
+| `app.models()` | List the models and crew members exposed to this app |
 | `app.chat()` | OpenAI-compatible chat completion, streaming or complete |
 | `app.embeddings()` | OpenAI-compatible embeddings when the selected provider supports them |
 | `app.ensureModel()` | Make sure a catalog model is installed and warm |
 | `app.streamEnsureEvents()` | Follow model download progress and completion over SSE |
 | `app.revokeMyToken()` | Let the app revoke its own connection |
+
+Many local models think before they answer, and that thinking is not part of the reply. A short answer can take several seconds and use a few hundred tokens you never see. For quick replies such as a title, a label, or a yes or no, send `reasoning_effort: 'none'` (or `'minimal'`) with the chat request and the model answers straight away. On the Ollama-style endpoints the same switch is `think: false`. Neither turns thinking on for a model that runs without it.
 
 `detectGezel()` is a useful preflight, but it does not authorize anything. `connect()` returns a ready `GezelApp`; `authorize()` returns the generic base URL, token, and trusted `fetch`; `connectLocal()` combines the full Node-native local flow with non-sensitive daemon diagnostics.
 
@@ -174,7 +264,7 @@ both project-scoped, and an application that has the project never has to pass
 its id back in. `gezel.openProject(id)` reaches a project that already exists.
 
 A hosted daemon keeps its state under `~/.gezel/apps/<appId>/`, so the projects
-and gezels an application creates for itself never appear in the person's own
+and crew members an application creates for itself never appear in the person's own
 workshop, and the two daemons never contend for one runtime directory. Models
 the person already installed are read from their home rather than downloaded
 again.
@@ -199,7 +289,7 @@ optional and switched on by the person inside it may pass
 
 ## Tools your application runs
 
-An application can offer its own tools to the gezels in its project. The model
+An application can offer its own tools to the crew in its project. The model
 sees them beside Gezel's built-in tools; when one is called, the handler runs in
 the application's process and what it returns becomes the tool's output.
 

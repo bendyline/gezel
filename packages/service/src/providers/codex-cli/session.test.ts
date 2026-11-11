@@ -108,6 +108,32 @@ describe('CodexCliSession', () => {
     expect(body).toContain('default_tools_approval_mode = "approve"');
   });
 
+  it('sends Codex to its own editor only when this session may edit the workspace', async () => {
+    const editLine = 'are left out because Codex has its own';
+    const instructionsFor = async (
+      sessionId: string,
+      tweak: (deps: CodexSessionDeps) => void,
+    ): Promise<string> => {
+      const deps = buildDeps({ binaryPath: await makeFakeCodex(happyPathStream) });
+      deps.context = { ...deps.context, sessionId };
+      deps.mcpServer = { command: 'node', args: ['/tmp/gezel-mcp.js'], env: {} };
+      tweak(deps);
+      await new CodexCliSession(deps).sendAndWait('hello');
+      return readFile(join(deps.runtimeDir, 'proj-1', sessionId, 'config.toml'), 'utf8');
+    };
+    expect(await instructionsFor('full', () => {})).toContain(editLine);
+    const drafting = await instructionsFor('drafting', (deps) => {
+      deps.mcpServer!.env.GEZEL_DIFFPACK_ID = '7';
+    });
+    expect(drafting).toContain('### Calling Gezel tools');
+    expect(drafting).not.toContain(editLine);
+    const reader = await instructionsFor('reader', (deps) => {
+      deps.toolAllowlist = new Set(['read_file', 'advance_task_step']);
+    });
+    expect(reader).toContain('### Calling Gezel tools');
+    expect(reader).not.toContain(editLine);
+  });
+
   it('stamps the session home on every turn so the runtime sweep sees it as in use', async () => {
     const codex = await makeFakeCodex(happyPathStream);
     const deps = buildDeps({ binaryPath: codex });

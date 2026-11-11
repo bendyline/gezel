@@ -9,6 +9,7 @@ import { GezelClient } from '@bendyline/gezel-client';
  * panel (provider managers live inside their section panels, so clipping the
  * section covers them).
  */
+import { openSettingsSection } from '../e2e/helpers/settings-nav.js';
 import { expect, test } from './fixtures/test.js';
 import { settle } from './helpers/determinism.js';
 import { gotoHome, openAreaView } from './helpers/nav.js';
@@ -59,7 +60,8 @@ test.describe('settings', () => {
       await openAreaView(page, 'settings');
 
       for (const s of SECTIONS) {
-        await page.getByTestId(`settings-nav-${s.id}`).click();
+        // Your team, Folders and the provider pages sit in folded groups.
+        await openSettingsSection(page, s.id);
         const panel = page.getByTestId(`settings-section-${s.id}`);
         await expect(panel).toBeVisible();
         // The section wrapper exists before its lazy provider panel mounts.
@@ -136,7 +138,7 @@ test.describe('settings', () => {
       // Windows has no native DS4 build, but an already-selected DS4 provider
       // may point at an external server. Its settings must remain reachable.
       await openAreaView(page, 'settings');
-      await page.getByTestId('settings-nav-ds4').click();
+      await openSettingsSection(page, 'ds4');
       const panel = page.getByTestId('settings-section-ds4');
       await expect(panel).toBeVisible();
       await settle(page);

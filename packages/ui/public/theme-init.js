@@ -13,11 +13,11 @@
   } catch (_) {}
   // Sidebar side, same rationale: apply the cached choice before the
   // bundle mounts React so the nav rail renders on the correct side with
-  // no side-to-side jump. RIGHT is the default, so anything other than an
-  // explicit 'left' resolves to right and stamps the attribute; 'left' is
-  // the CSS base (no attribute).
+  // no side-to-side jump. LEFT is the default (core's DEFAULT_SIDEBAR_SIDE,
+  // repeated here because this runs before any bundle) and the CSS base, so
+  // only an explicit 'right' stamps the attribute.
   try {
-    if (localStorage.getItem('gezel:sidebar-side') !== 'left') {
+    if (localStorage.getItem('gezel:sidebar-side') === 'right') {
       document.documentElement.setAttribute('data-sidebar-side', 'right');
     }
   } catch (_) {}

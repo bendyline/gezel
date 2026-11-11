@@ -4,6 +4,7 @@ import {
   type Task,
   assembleRequestTracks,
   stepDurationEstimates,
+  withRequestTitles,
 } from '@bendyline/gezel';
 import type { ServiceContext } from '../http/context.js';
 
@@ -38,7 +39,7 @@ export async function listRequestTracks(
     read.questions ?? ctx.store.listAllPendingQuestions(),
     ctx.store.readConfig(),
   ]);
-  return assembleRequestTracks(
+  const tracks = await assembleRequestTracks(
     {
       tasks,
       session: (id) => ctx.store.findSessionById(id),
@@ -52,4 +53,5 @@ export async function listRequestTracks(
     },
     filter,
   );
+  return withRequestTitles(tracks, tasks);
 }

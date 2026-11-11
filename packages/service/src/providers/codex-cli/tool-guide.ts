@@ -23,14 +23,31 @@
  * Gotchas: a large roster (an ordinary chat session) is described by the
  * naming rule alone; listing a hundred tools would cost more prompt than the
  * lookup it saves. Wildcard markers for extra MCP servers are skipped.
+ *
+ * Craftbook procedures name Gezel's own writers (`write_file`, `rename`, …),
+ * which `excluded-mcp-tools.ts` keeps out of Codex. Told nothing, GPT-6.1 Sol
+ * read the missing `write_file` as a blocker and paused a bug fix at its
+ * first step instead of using its own editor (strategy smoke, 2026-11-10), so
+ * a session that may edit is told where that work goes. A later step's
+ * procedure can arrive in a user turn, so this does not depend on what the
+ * instructions happen to name.
  */
 
 /** Rosters up to this size are listed by name. */
 export const CODEX_TOOL_GUIDE_MAX_LISTED = 16;
 
 const GEZEL_PREFIX = 'mcp__gezel__';
+const RECEIPT_RUNNERS = ['run_package_script', 'run_npx'];
 
-export function codexToolGuide(registeredToolNames: ReadonlyArray<string>): string | null {
+export interface CodexToolGuideOptions {
+  /** False for a read-only (`plan`) session, which must not be told to edit. */
+  canEdit?: boolean;
+}
+
+export function codexToolGuide(
+  registeredToolNames: ReadonlyArray<string>,
+  opts: CodexToolGuideOptions = {},
+): string | null {
   const gezelTools = registeredToolNames.filter(
     (name) => name.startsWith(GEZEL_PREFIX) && !name.endsWith('*'),
   );
@@ -39,20 +56,33 @@ export function codexToolGuide(registeredToolNames: ReadonlyArray<string>): stri
     gezelTools.length <= CODEX_TOOL_GUIDE_MAX_LISTED
       ? ` This turn's: ${gezelTools.map((name) => `\`tools.${name}\``).join(', ')}.`
       : '';
-  return [
+  const lines = [
     '### Calling Gezel tools',
     '',
     `Gezel's tools are named \`mcp__gezel__<tool>\`; inside an \`exec\` script call them as \`await tools.mcp__gezel__<tool>({ ... })\`.${roster} Call them directly with the arguments your instructions show — there is no need to look them up in \`ALL_TOOLS\` first.`,
     '',
     "One script can make several calls in order. When a call's result only feeds the next call, make both in the same script: read an input and then the files it names (print text with `text(...)`, pass images to `image(...)`), or write the deliverable and then call `advance_task_step`. A successful write already confirms what was saved, so do not read it back.",
-  ].join('\n');
+  ];
+  if (opts.canEdit !== false) {
+    const runners = RECEIPT_RUNNERS.filter((name) => gezelTools.includes(`${GEZEL_PREFIX}${name}`));
+    lines.push(
+      '',
+      `Gezel's file, shell and web tools (\`write_file\`, \`delete_path\`, \`make_dir\`, \`rename\`, \`run_nodejs_script\`, \`fetch_url\`, \`web_search\`) are left out because Codex has its own. Where your instructions name one, do that work with your built-in file editing, shell or web search. Its absence is not a blocker.${
+        runners.length > 0
+          ? ` Use ${runners.map((name) => `\`${name}\``).join(' and ')} where your instructions name them: the step's checks read their run records, which a shell run does not leave.`
+          : ''
+      }`,
+    );
+  }
+  return lines.join('\n');
 }
 
 /** `instructions` with the tool guide appended, or unchanged when there is no Gezel tool. */
 export function withCodexToolGuide(
   instructions: string,
   registeredToolNames: ReadonlyArray<string>,
+  opts: CodexToolGuideOptions = {},
 ): string {
-  const guide = codexToolGuide(registeredToolNames);
+  const guide = codexToolGuide(registeredToolNames, opts);
   return guide ? `${instructions.trimEnd()}\n\n---\n\n${guide}` : instructions;
 }

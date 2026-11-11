@@ -376,10 +376,7 @@ export const PROJECT_KINDS: ProjectKindMeta[] = [
     description: 'A flexible project with a blank workspace.',
     category: 'general',
     glyph: 'sheet',
-    give: [
-      'A blank workspace your crew reads and writes',
-      'Your About and mission set the direction',
-    ],
+    give: ['A blank workspace Gezel reads and writes', 'Your About and mission set the direction'],
   },
   {
     id: 'email',
@@ -403,10 +400,10 @@ export const PROJECT_KINDS: ProjectKindMeta[] = [
   {
     id: 'folder',
     label: 'Existing Folder',
-    description: 'Have your crew look after a folder on this computer.',
+    description: 'Have Gezel look after a folder on this computer.',
     category: 'general',
     glyph: 'folder',
-    give: ['Read-only: your files are never changed', 'A crew that works on it overnight'],
+    give: ['Read-only: your files are never changed', 'Gezel works on it overnight'],
   },
   {
     id: 'calendar',

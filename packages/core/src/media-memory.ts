@@ -17,9 +17,33 @@
  *
  * Pure and browser-safe. Contract and calibration: docs/media-model-memory.md.
  */
-import type { WeightTensors } from './schemas/catalog.js';
+import {
+  type MediaCalibrationStatus,
+  type VideoDecodeLine,
+  type VideoMemoryCoefficients,
+  type VideoVaeDecode,
+  sdCppWidenedBytes,
+  videoMemoryCoefficientCandidates,
+  videoMemoryCoefficients,
+} from './media-memory-coefficients.js';
+import type {
+  SdCppVideoRender,
+  VideoArchitecture,
+  VideoEngine,
+  VideoModelFamily,
+  WeightTensors,
+} from './schemas/catalog.js';
 import type { MediaFitAssessment, MediaFitVerdict, MediaMemoryPool } from './schemas/media-fit.js';
-import type { VideoAccelerator } from './schemas/video.js';
+import type { MediaBackend, VideoAccelerator } from './schemas/video.js';
+import {
+  VIDEO_ARCHITECTURES,
+  type VideoArchitectureGeometry,
+  type VideoRenderSize,
+  resolveVideoArchitecture,
+  snapVideoFrames,
+  videoFrameStep,
+  videoLatentTokens,
+} from './video-geometry.js';
 
 const GIB = 1024 ** 3;
 
@@ -139,6 +163,7 @@ interface WeightSummary {
   total: Priced;
   /** The heaviest single component — what a streaming pipeline holds on the card at once. */
   largest: Priced;
+  byComponent: ReadonlyMap<string, Priced>;
 }
 
 function summarizeWeights(
@@ -160,6 +185,10 @@ function summarizeWeights(
         : priced,
     );
   }
+  return summaryOf(byComponent);
+}
+
+function summaryOf(byComponent: ReadonlyMap<string, Priced>): WeightSummary {
   const components = [...byComponent.values()];
   return {
     total: {
@@ -172,6 +201,7 @@ function summarizeWeights(
       floorBytes: Math.max(0, ...components.map((c) => c.floorBytes)),
       exact: components.every((c) => c.exact),
     },
+    byComponent,
   };
 }
 
@@ -189,6 +219,22 @@ export interface MediaMemoryFigures {
   gpuBytes: number;
 }
 
+/** When an engine needs a component or a working buffer. */
+export type MediaPhase = 'load' | 'encode' | 'sample' | 'decode' | 'audio';
+
+export interface MediaMemoryBreakdown {
+  /** Weights per component at load precision, with the phase that uses them. */
+  components: Array<{ component: string; bytes: number; phase: MediaPhase }>;
+  /** Engine, runtime and driver memory held whatever the size. */
+  fixedBytes: number;
+  /** Working memory each phase needs on top of the weights and the fixed share. */
+  phases: Array<{ phase: MediaPhase; workingBytes: number }>;
+  /** The phase that sets the peak. */
+  peakPhase: MediaPhase;
+  /** How the VAE decodes at this size. */
+  vaeDecode?: VideoVaeDecode;
+}
+
 export interface MediaMemoryRequirement extends MediaMemoryFigures {
   pool: MediaMemoryPool;
   /**
@@ -201,6 +247,13 @@ export interface MediaMemoryRequirement extends MediaMemoryFigures {
   exact: boolean;
   /** The same figures with every unread file priced at its smallest plausible load. Equals the rest when `exact`. */
   floor: MediaMemoryFigures;
+  /** Set when the price was made for a render size. */
+  engine?: VideoEngine;
+  backend?: MediaBackend;
+  /** How far to trust the working-memory share; see media-memory-coefficients.ts. */
+  calibration?: MediaCalibrationStatus;
+  size?: VideoRenderSize;
+  breakdown?: MediaMemoryBreakdown;
 }
 
 function requirementFrom(
@@ -280,18 +333,480 @@ export function videoStreamsComponents(family: string, accelerator: VideoAcceler
 export interface VideoMemoryInput {
   files: readonly MediaWeightFile[];
   family: string;
+  /** The diffusers server's device. sd.cpp entries pass the device their pool implies. */
   accelerator: VideoAccelerator;
   pool: MediaMemoryPool;
   vaeDtype?: 'float32' | 'bfloat16' | undefined;
+  /** Default `diffusers`. */
+  engine?: VideoEngine | undefined;
+  architecture?: VideoArchitecture | undefined;
+  /** The engine's compute backend; default the diffusers accelerator. */
+  backend?: MediaBackend | undefined;
+  /**
+   * The clip to price. Absent on a diffusers model: the legacy price, which
+   * knows nothing of size. Absent on an sd.cpp model: `defaultSize`.
+   */
+  size?: VideoRenderSize | undefined;
+  /** The model's catalog default; anchors provisional coefficients. Default `size`. */
+  defaultSize?: VideoRenderSize | undefined;
+  /**
+   * Above 1 diffusers batches a guided and an unguided pass, doubling the
+   * transformer's batch; sd-server runs them in turn and holds one.
+   */
+  guidanceScale?: number | undefined;
+  /** How the VAE decodes; default what the engine does at this size. */
+  vaeDecode?: VideoVaeDecode | undefined;
+  /**
+   * sd.cpp's spatial decode tile, when the entry sets one. A tiled decoder's
+   * buffer follows the tile's area, and every sd.cpp decode line was
+   * measured at sd.cpp's own default ({@link SD_CPP_DEFAULT_TILE_PX}).
+   */
+  vaeTileSizePx?: number | undefined;
+  /** The render animates a picture, which holds more through sampling. */
+  animatesPicture?: boolean | undefined;
+  /**
+   * sd.cpp on a discrete card: `--max-vram`, the graphics memory it may fill.
+   * Weights beyond it stay in system memory, so only this much must fit the card.
+   */
+  gpuLimitBytes?: number | undefined;
+}
+
+const FAMILY_KNOWN: Readonly<Record<VideoModelFamily, true>> = {
+  ltx: true,
+  ltx2: true,
+  wan: true,
+  lingbot: true,
+};
+
+/**
+ * Which pipeline a component's weights serve. Text and conditioning
+ * encoders run once before sampling; the VAE after it; anything not
+ * recognized counts as sampling, the phase that holds the most.
+ */
+export function componentPhase(component: string): MediaPhase {
+  const name = component.toLowerCase();
+  if (name === 'vae' || name === 'tae') return 'decode';
+  if (name === 'audio_vae' || name === 'vocoder' || name === 'audio_encoder') return 'audio';
+  if (
+    name.startsWith('text_encoder') ||
+    name.startsWith('clip') ||
+    name === 't5xxl' ||
+    name === 'llm' ||
+    name === 'llm_vision' ||
+    name === 'connectors' ||
+    name === 'embeddings_connectors' ||
+    name === 'image_encoder'
+  ) {
+    return 'encode';
+  }
+  return 'sample';
+}
+
+/**
+ * How the VAE should decode a clip. The diffusers server tiles every CUDA
+ * decode; elsewhere it decodes whichever way its price says is smaller, and
+ * the daemon sends that choice with the request (`vaeTiling`), so the engine
+ * does what it was admitted for. Choosing the smaller line also keeps the
+ * price rising with size, where a fixed threshold would let a larger clip
+ * price below a smaller one. sd.cpp decodes as its catalog entry says.
+ */
+export function chooseVideoVaeDecode(input: {
+  engine?: VideoEngine | undefined;
+  family: string;
+  accelerator: VideoAccelerator;
+  backend?: MediaBackend | undefined;
+  architecture?: VideoArchitecture | undefined;
+  size: VideoRenderSize;
+  configured?: VideoVaeDecode | undefined;
+}): VideoVaeDecode {
+  if (input.configured) return input.configured;
+  const engine = input.engine ?? 'diffusers';
+  if (engine === 'sd-cpp') return 'spatial';
+  if (input.accelerator === 'cuda') return 'spatial';
+  const architecture =
+    input.architecture ??
+    (input.family in FAMILY_KNOWN
+      ? resolveVideoArchitecture({ family: input.family as VideoModelFamily })
+      : undefined);
+  if (!architecture) return 'untiled';
+  const coefficients = videoMemoryCoefficients(
+    engine,
+    input.backend ?? input.accelerator,
+    architecture,
+  );
+  if (coefficients.preferredDecode) return coefficients.preferredDecode;
+  return decodeBytes(coefficients.decode.spatial, input.size) <
+    decodeBytes(coefficients.decode.untiled, input.size)
+    ? 'spatial'
+    : 'untiled';
+}
+
+/**
+ * sd.cpp's spatial decode tile when an entry names none: 256 pixels a side.
+ * Every sd.cpp decode line was measured at it.
+ */
+export const SD_CPP_DEFAULT_TILE_PX = 256;
+
+/**
+ * A decode line's bytes for one clip. `tileScale` resizes the tile's own
+ * buffer (`baseBytes`, `bytesPerFrame`) for a tile of another area; the
+ * frames the decoder writes out (`bytesPerPixel`, `bytesPerPixelFrame`) are
+ * whole frames whatever the tile. Wan2.1's tiny decoder at 128-pixel tiles
+ * held 2.22 GiB at 480x480x81 against 8.86 at 256 (M5 Max, 2026-11-10): a
+ * quarter, as the area says.
+ */
+function decodeBytes(line: VideoDecodeLine, size: VideoRenderSize, tileScale = 1): number {
+  const pixels = size.width * size.height;
+  return Math.max(
+    0,
+    tileScale * (line.baseBytes + (line.bytesPerFrame ?? 0) * size.numFrames) +
+      line.bytesPerPixel * pixels +
+      line.bytesPerPixelFrame * pixels * size.numFrames,
+  );
+}
+
+interface PhaseWorking {
+  phases: Array<{ phase: MediaPhase; workingBytes: number }>;
+  peak: { phase: MediaPhase; workingBytes: number };
+}
+
+function phaseWorking(
+  coefficients: VideoMemoryCoefficients,
+  geo: VideoArchitectureGeometry,
+  size: VideoRenderSize,
+  opts: {
+    batch: number;
+    activationScale: number;
+    vaeDecode: VideoVaeDecode;
+    decodeTileScale?: number;
+    animatesPicture?: boolean;
+  },
+): PhaseWorking {
+  const tokens = videoLatentTokens(geo, size);
+  const sample =
+    opts.batch *
+      opts.activationScale *
+      ((coefficients.sampleBaseBytes ?? 0) +
+        coefficients.sampleBytesPerTokenWidth * geo.hiddenSize * tokens +
+        coefficients.sampleBytesPerTokenSquared * tokens * tokens) +
+    (coefficients.sampleBytesPerPixelFrame ?? 0) * size.width * size.height * size.numFrames;
+  const phases: PhaseWorking['phases'] = [
+    { phase: 'sample', workingBytes: sample },
+    // Preparing and encoding the picture, before sampling starts.
+    ...(opts.animatesPicture && coefficients.imageToVideoBytes
+      ? [{ phase: 'encode' as const, workingBytes: coefficients.imageToVideoBytes }]
+      : []),
+    {
+      phase: 'decode',
+      workingBytes: decodeBytes(
+        coefficients.decode[opts.vaeDecode],
+        size,
+        // An untiled decode has no tile to resize.
+        opts.vaeDecode === 'untiled' ? 1 : (opts.decodeTileScale ?? 1),
+      ),
+    },
+  ];
+  const peak = phases.reduce((a, b) => (b.workingBytes > a.workingBytes ? b : a));
+  return { phases, peak };
+}
+
+/** Adds bytes an engine holds beyond what a component's files price at. */
+function withExtraBytes(weights: WeightSummary, component: string, bytes: number): WeightSummary {
+  const prior = weights.byComponent.get(component);
+  if (!prior || bytes <= 0) return weights;
+  const byComponent = new Map(weights.byComponent);
+  byComponent.set(component, {
+    ...prior,
+    bytes: prior.bytes + bytes,
+    floorBytes: prior.floorBytes + bytes,
+  });
+  return summaryOf(byComponent);
 }
 
 export function videoMemoryRequirement(input: VideoMemoryInput): MediaMemoryRequirement {
-  return requirementFrom(
-    summarizeWeights(input.files, videoFloatLoadBytes(input)),
-    input.pool,
-    videoWorkingBytes,
-    videoStreamsComponents(input.family, input.accelerator),
+  const engine = input.engine ?? 'diffusers';
+  const size = input.size ?? (engine === 'sd-cpp' ? input.defaultSize : undefined);
+  const streams = engine === 'diffusers' && videoStreamsComponents(input.family, input.accelerator);
+  const architecture =
+    input.architecture ??
+    (input.family in FAMILY_KNOWN
+      ? resolveVideoArchitecture({ family: input.family as VideoModelFamily })
+      : undefined);
+  const stored = summarizeWeights(
+    input.files,
+    engine === 'diffusers' ? videoFloatLoadBytes(input) : imageFloatLoadBytes(),
   );
+  const weights =
+    engine === 'sd-cpp' && architecture
+      ? withExtraBytes(stored, 'diffusion_model', sdCppWidenedBytes(architecture))
+      : stored;
+  if (!size || !architecture) {
+    return capToGpuLimit(
+      requirementFrom(weights, input.pool, videoWorkingBytes, streams),
+      engine,
+      input,
+    );
+  }
+  const geo = VIDEO_ARCHITECTURES[architecture];
+  const backend = input.backend ?? input.accelerator;
+  const vaeDecodeFor = (s: VideoRenderSize): VideoVaeDecode =>
+    chooseVideoVaeDecode({ ...input, engine, architecture, size: s, configured: input.vaeDecode });
+  const decodeTileScale =
+    engine === 'sd-cpp' && input.vaeTileSizePx
+      ? (input.vaeTileSizePx / SD_CPP_DEFAULT_TILE_PX) ** 2
+      : 1;
+  const opts = (s: VideoRenderSize) => ({
+    // sd-server runs the guided and unguided passes in turn; diffusers batches them.
+    batch: engine === 'sd-cpp' ? 1 : (input.guidanceScale ?? 1) > 1 ? 2 : 1,
+    activationScale: engine === 'diffusers' && input.accelerator === 'cpu' ? 2 : 1,
+    vaeDecode: vaeDecodeFor(s),
+    decodeTileScale,
+    animatesPicture: input.animatesPicture === true,
+  });
+  const priced = videoMemoryCoefficientCandidates(engine, backend, architecture).map(
+    (coefficients) =>
+      priceVideoWith(coefficients, { input, engine, backend, size, geo, weights, streams }, opts),
+  );
+  return priced.reduce((a, b) => (b.bytes > a.bytes ? b : a));
+}
+
+function priceVideoWith(
+  coefficients: VideoMemoryCoefficients,
+  ctx: {
+    input: VideoMemoryInput;
+    engine: VideoEngine;
+    backend: MediaBackend;
+    size: VideoRenderSize;
+    geo: VideoArchitectureGeometry;
+    weights: WeightSummary;
+    streams: boolean;
+  },
+  opts: (s: VideoRenderSize) => {
+    batch: number;
+    activationScale: number;
+    vaeDecode: VideoVaeDecode;
+    decodeTileScale: number;
+    animatesPicture: boolean;
+  },
+): MediaMemoryRequirement {
+  const { input, engine, backend, size, geo, weights, streams } = ctx;
+  const vaeDecodeFor = (s: VideoRenderSize): VideoVaeDecode => opts(s).vaeDecode;
+  const atSize = phaseWorking(coefficients, geo, size, opts(size));
+  const anchorSize = input.defaultSize ?? size;
+  const anchorPeak = phaseWorking(coefficients, geo, anchorSize, opts(anchorSize)).peak
+    .workingBytes;
+  const fixedFor = (weightBytes: number): number =>
+    coefficients.fixedBytes === 'anchor-legacy'
+      ? Math.max(coefficients.minFixedBytes, videoWorkingBytes(weightBytes) - anchorPeak)
+      : Math.max(coefficients.minFixedBytes, coefficients.fixedBytes);
+  // Each phase holds its own fixed share beside its working memory; the
+  // weights stay resident through all of them.
+  // The load's extra followed the size of GGUF text encoders; a 16-bit
+  // safetensors encoder showed none of it (see SD_CPP_METAL_LOAD_PER_ENCODER_BYTE).
+  const encoderBytes = input.files
+    .filter((f) => f.format === 'gguf' && componentPhase(f.component) === 'encode')
+    .reduce((sum, f) => sum + f.sizeBytes, 0);
+  const loadPhaseBytes =
+    (coefficients.loadBytes ?? 0) + (coefficients.loadBytesPerEncoderByte ?? 0) * encoderBytes;
+  const phaseTotals = (weightBytes: number) => {
+    const fixed = fixedFor(weightBytes);
+    return atSize.phases
+      .map((p) => ({
+        phase: p.phase,
+        bytes:
+          p.workingBytes +
+          (p.phase === 'decode' && coefficients.decodeFixedBytes !== undefined
+            ? coefficients.decodeFixedBytes
+            : fixed),
+      }))
+      .concat([{ phase: 'load', bytes: loadPhaseBytes }]);
+  };
+  const peakOf = (weightBytes: number) =>
+    phaseTotals(weightBytes).reduce((a, b) => (b.bytes > a.bytes ? b : a));
+  const working = (weightBytes: number): number => {
+    const fitted = peakOf(weightBytes).bytes;
+    return Math.max(
+      fitted * (1 + coefficients.margin.relative),
+      fitted + coefficients.margin.absoluteBytes,
+    );
+  };
+
+  const req = capToGpuLimit(requirementFrom(weights, input.pool, working, streams), engine, input);
+  return {
+    ...req,
+    engine,
+    backend,
+    calibration: coefficients.status,
+    size,
+    breakdown: {
+      components: [...weights.byComponent].map(([component, priced]) => ({
+        component,
+        bytes: Math.ceil(priced.bytes),
+        phase: componentPhase(component),
+      })),
+      fixedBytes: Math.ceil(fixedFor(weights.total.bytes)),
+      phases: atSize.phases.map((p) => ({ ...p, workingBytes: Math.ceil(p.workingBytes) })),
+      peakPhase: peakOf(weights.total.bytes).phase,
+      vaeDecode: vaeDecodeFor(size),
+    },
+  };
+}
+
+/**
+ * sd.cpp's auto-fit places weights on the card up to `--max-vram` and keeps
+ * the rest in system memory, so only that much must sit on the card.
+ */
+function capToGpuLimit(
+  req: MediaMemoryRequirement,
+  engine: VideoEngine,
+  input: VideoMemoryInput,
+): MediaMemoryRequirement {
+  if (engine !== 'sd-cpp' || input.pool !== 'discrete' || input.gpuLimitBytes === undefined) {
+    return req;
+  }
+  const limit = Math.ceil(input.gpuLimitBytes);
+  return {
+    ...req,
+    gpuBytes: Math.min(req.gpuBytes, limit),
+    gpuPeakBytes: Math.min(req.gpuPeakBytes, limit),
+    floor: { ...req.floor, gpuBytes: Math.min(req.floor.gpuBytes, limit) },
+  };
+}
+
+/** {@link videoMemoryRequirement} for an sd.cpp model: stored precision, priced at a size. */
+export function sdCppVideoMemoryRequirement(
+  input: Omit<VideoMemoryInput, 'engine' | 'vaeDtype'>,
+): MediaMemoryRequirement {
+  return videoMemoryRequirement({ ...input, engine: 'sd-cpp' });
+}
+
+/**
+ * The decoder an sd.cpp video model loads on this backend, when its entry
+ * ships both. The full Wan VAE decodes at about 80 s per million
+ * pixel-frames on Metal (Wan2.2 TI2V-5B, M5 Max, 2026-11-09): hours for a
+ * default 1280x704x121 clip, against well under a second for the tiny
+ * decoder. Elsewhere the full VAE is the better picture. The launch and the
+ * price both read this, so the engine loads what it was admitted for.
+ */
+export function sdCppVideoDecoder(
+  roles: Iterable<string>,
+  backend: MediaBackend | undefined,
+): 'vae' | 'tae' | undefined {
+  const present = new Set(roles);
+  if (present.has('tae') && (backend === 'metal' || !present.has('vae'))) return 'tae';
+  return present.has('vae') ? 'vae' : undefined;
+}
+
+/** How an sd.cpp entry decodes, in the estimator's terms. */
+export function sdCppVideoVaeDecode(
+  sdCpp: SdCppVideoRender | undefined,
+  decoder: 'vae' | 'tae' | undefined = 'vae',
+): VideoVaeDecode {
+  if (decoder === 'tae') return 'tiny';
+  const tiling = sdCpp?.vaeTiling;
+  if (!tiling) return 'spatial';
+  if (tiling.temporal) return 'temporal';
+  return tiling.spatial ? 'spatial' : 'untiled';
+}
+
+/** The clip a model renders when asked for nothing in particular. */
+export function videoDefaultSize(
+  model: Pick<SdCppPricedVideoModel, 'defaultWidth' | 'defaultHeight' | 'defaultNumFrames'>,
+): VideoRenderSize {
+  return {
+    width: model.defaultWidth ?? 832,
+    height: model.defaultHeight ?? 480,
+    numFrames: model.defaultNumFrames ?? 81,
+  };
+}
+
+const SD_CPP_BACKEND_DEVICE: Readonly<Record<MediaBackend, VideoAccelerator>> = {
+  metal: 'mps',
+  mps: 'mps',
+  cuda: 'cuda',
+  vulkan: 'cuda',
+  cpu: 'cpu',
+};
+
+/** What pricing reads of an sd.cpp model, whether from its catalog entry or its install record. */
+export interface SdCppPricedVideoModel {
+  family: string;
+  architecture?: VideoArchitecture | undefined;
+  sdCpp?: SdCppVideoRender | undefined;
+  guidanceScale?: number | undefined;
+  defaultWidth?: number | undefined;
+  defaultHeight?: number | undefined;
+  defaultNumFrames?: number | undefined;
+}
+
+export interface SdCppVideoModelPriceInput {
+  files: readonly MediaWeightFile[];
+  model: SdCppPricedVideoModel;
+  pool: MediaMemoryPool;
+  backend: MediaBackend;
+  /** The clip to price; the model's default when absent. */
+  size?: VideoRenderSize;
+  /** The render animates a picture. */
+  animatesPicture?: boolean;
+  /** `--max-vram` on a discrete card. */
+  gpuLimitBytes?: number;
+}
+
+/**
+ * The one price of an sd.cpp video model: the download page passes its
+ * catalog files, the launch the same files read from disk, so a model the
+ * page hides is a model the launch would refuse. It prices only the decoder
+ * this backend loads ({@link sdCppVideoDecoder}).
+ */
+export function sdCppVideoModelRequirement(
+  input: SdCppVideoModelPriceInput,
+): MediaMemoryRequirement {
+  const defaultSize = videoDefaultSize(input.model);
+  const decoder = sdCppVideoDecoder(
+    input.files.map((f) => f.component),
+    input.backend,
+  );
+  const unused = decoder === 'tae' ? 'vae' : 'tae';
+  return sdCppVideoMemoryRequirement({
+    files: input.files.filter((f) => f.component !== unused),
+    family: input.model.family as VideoModelFamily,
+    architecture: input.model.architecture,
+    accelerator: SD_CPP_BACKEND_DEVICE[input.backend],
+    backend: input.backend,
+    pool: input.pool,
+    size: input.size ?? defaultSize,
+    defaultSize,
+    guidanceScale: input.model.guidanceScale,
+    vaeDecode: sdCppVideoVaeDecode(input.model.sdCpp, decoder),
+    vaeTileSizePx: input.model.sdCpp?.vaeTiling?.tileSizePx,
+    animatesPicture: input.animatesPicture,
+    gpuLimitBytes: input.gpuLimitBytes,
+  });
+}
+
+/**
+ * The longest clip, on the VAE's frame grid within `range`, whose price
+ * `accepts`; null when even `range.min` does not. Assumes the price never
+ * falls as frames grow, which media-memory.test.ts pins.
+ */
+export function largestVideoFrames(
+  architecture: VideoArchitecture,
+  range: { min: number; max: number },
+  priceAt: (numFrames: number) => MediaMemoryRequirement,
+  accepts: (req: MediaMemoryRequirement) => boolean,
+): number | null {
+  const geo = VIDEO_ARCHITECTURES[architecture];
+  const step = videoFrameStep(geo);
+  const frames = (n: number) => n * step + 1;
+  let lo = Math.ceil((Math.max(1, range.min) - 1) / step);
+  let hi = (snapVideoFrames(geo, range.max) - 1) / step;
+  if (lo > hi || !accepts(priceAt(frames(lo)))) return null;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (accepts(priceAt(frames(mid)))) lo = mid;
+    else hi = mid - 1;
+  }
+  return frames(lo);
 }
 
 // ─ Image (stable-diffusion.cpp sd-server) ───────────────────────────

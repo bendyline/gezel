@@ -2,7 +2,7 @@ import { Tooltip } from '../primitives/index.js';
 import { COMMUNITY_BADGE_HINT, COMMUNITY_BADGE_LABEL } from './catalog-provenance.js';
 
 /**
- * Small uppercase `community` badge for an unreviewed catalog entry. The
+ * Small sentence-case "Community" badge for an unreviewed catalog entry. The
  * neutral badge recipe (the sibling of search's `related` and chat's
  * `automatic`): a label that says where something came from, not a warning
  * colour, because most community entries are fine — they are just unvetted.

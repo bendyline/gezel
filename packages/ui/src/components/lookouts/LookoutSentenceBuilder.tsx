@@ -184,7 +184,7 @@ export function LookoutSentenceBuilder({
     }
     if (d.email && !d.email.recipients.trim()) return setProblem('Who should the email go to?');
     if (d.askGezel && !d.askGezel.instruction.trim()) {
-      return setProblem('Say what the gezel should do.');
+      return setProblem('Say what they should do.');
     }
     const camera = choices.cameras.find((c) => c.id === d.cameraId)?.name ?? 'the camera';
     const fallbackName =
@@ -365,7 +365,7 @@ export function LookoutSentenceBuilder({
                 set('askGezel', e.target.checked ? { gezelId: '', instruction: '' } : null)
               }
             />{' '}
-            Ask a gezel to follow up
+            Have Gezel follow up
           </label>
           {d.askGezel ? (
             <div className="lookout-builder-sub">
@@ -376,7 +376,7 @@ export function LookoutSentenceBuilder({
                     set('askGezel', { ...d.askGezel!, gezelId: v === '__lead' ? '' : v })
                   }
                 >
-                  <Select.Trigger className="lookout-builder-select" aria-label="Which gezel">
+                  <Select.Trigger className="lookout-builder-select" aria-label="Which crew member">
                     <Select.Value />
                   </Select.Trigger>
                   <Select.Content>
@@ -393,11 +393,11 @@ export function LookoutSentenceBuilder({
                 rows={2}
                 value={d.askGezel.instruction}
                 placeholder="Add it to the cat diary with the time, and tell me if it happens twice in a day."
-                aria-label="What the gezel should do"
+                aria-label="What they should do"
                 onChange={(e) => set('askGezel', { ...d.askGezel!, instruction: e.target.value })}
               />
               <span className="muted small">
-                A gezel on a cloud model cannot see the pictures unless the camera allows it.
+                A cloud model cannot see the pictures unless the camera allows it.
               </span>
             </div>
           ) : null}
@@ -412,11 +412,11 @@ export function LookoutSentenceBuilder({
                   set('craftbook', e.target.checked ? (choices.craftbooks[0]?.id ?? '') : null)
                 }
               />{' '}
-              Run a craftbook
+              Run a plan
             </label>
             {d.craftbook !== null ? (
               <Select.Root value={d.craftbook} onValueChange={(v) => set('craftbook', v)}>
-                <Select.Trigger className="lookout-builder-select" aria-label="Craftbook">
+                <Select.Trigger className="lookout-builder-select" aria-label="Plan">
                   <Select.Value />
                 </Select.Trigger>
                 <Select.Content>

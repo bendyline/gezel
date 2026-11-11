@@ -72,7 +72,7 @@ describe('ChatManager — crew introduction', () => {
     const intro = (await store.getSession('ada', thread.id))?.messages.at(-1);
     expect(intro).toMatchObject({ role: 'assistant', synthetic: 'crew-introduction' });
     expect(intro?.content).toBe(
-      'I\'ve brought **Kylian** onto the crew as your Copywriter for **Bakery weekly admin**. Kylian starts with "Draft posts and quotes".',
+      "I've brought **Kylian** onto the crew as your Copywriter for **Bakery weekly admin**.",
     );
     // The thread's own gezel needs no introduction.
     await expect(manager.postCrewIntroduction(task, 'ada', step)).resolves.toBeNull();

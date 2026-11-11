@@ -94,17 +94,30 @@ describe('FolderOnboardingStep', () => {
 });
 
 describe('shouldOfferFolderStep', () => {
+  const opened = { onboarding: { firstResultOpenedAt: '2026-11-09' } } as never;
+
   it('offers until done, and not once a folder is added', () => {
-    expect(shouldOfferFolderStep({} as never, [])).toBe(true);
+    expect(shouldOfferFolderStep(opened, [])).toBe(true);
     expect(
-      shouldOfferFolderStep({ onboarding: { foldersStepDoneAt: '2026-10-07' } } as never, []),
+      shouldOfferFolderStep(
+        {
+          onboarding: { firstResultOpenedAt: '2026-11-09', foldersStepDoneAt: '2026-10-07' },
+        } as never,
+        [],
+      ),
     ).toBe(false);
-    expect(shouldOfferFolderStep({} as never, [{ workingDir: '/Users/ada/app' }])).toBe(false);
+    expect(shouldOfferFolderStep(opened, [{ workingDir: '/Users/ada/app' }])).toBe(false);
     expect(
-      shouldOfferFolderStep({} as never, [
+      shouldOfferFolderStep(opened, [
         { workingDir: '/Users/ada/Documents', properties: { 'gezel.sharedLibrary': '1' } },
       ]),
     ).toBe(true);
     expect(shouldOfferFolderStep(null, [])).toBe(false);
+  });
+
+  // Asked as the first result landed, it pushed that result off the screen.
+  it('waits until the person has opened a finished result', () => {
+    expect(shouldOfferFolderStep({} as never, [])).toBe(false);
+    expect(shouldOfferFolderStep({ onboarding: {} } as never, [])).toBe(false);
   });
 });

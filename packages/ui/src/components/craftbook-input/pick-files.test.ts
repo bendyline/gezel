@@ -67,6 +67,6 @@ describe('filterPick', () => {
     ).toMatch(/single file/);
     expect(
       filterPick({ kind: 'folder', accept: ['.md'] }, pick([{ relPath: 'x.png' }])).error,
-    ).toMatch(/Nothing here is a file this craftbook reads \(\.md\)/);
+    ).toMatch(/Nothing here is a file this plan reads \(\.md\)/);
   });
 });

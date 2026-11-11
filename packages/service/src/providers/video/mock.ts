@@ -20,8 +20,11 @@ const TINY_PNG_BASE64 =
 
 export class MockVideoProvider implements VideoProvider {
   readonly name = 'mock';
+  /** Bytes of the picture the last render was asked to animate; 0 for none. Test seam. */
+  lastInputImageBytes = 0;
 
   async generate(input: VideoGenerationInput): Promise<VideoGenerationOutput> {
+    this.lastInputImageBytes = input.inputImage?.data.length ?? 0;
     const width = input.width ?? 256;
     const height = input.height ?? 256;
     const numFrames = input.numFrames ?? 25;
@@ -55,6 +58,7 @@ export class MockVideoProvider implements VideoProvider {
         name: 'Mock Video Model',
         approxSizeBytes: 0,
         installedAt: new Date(0).toISOString(),
+        supportsImageToVideo: true,
       },
     ];
   }

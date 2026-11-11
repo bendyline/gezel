@@ -304,7 +304,7 @@ export async function runAppRemove(
   console.log(`Uninstalled ${appId} (${versions}${kept}).`);
   if (removed.appliedProjects.length > 0) {
     console.log(
-      `${removed.appliedProjects.length} project(s) were outfitted by this app — they keep their copied gezels, scripts, and files, but the app's pages and updates are gone.`,
+      `${removed.appliedProjects.length} project(s) were outfitted by this app — they keep their copied crew members, scripts, and files, but the app's pages and updates are gone.`,
     );
   }
 }
@@ -388,7 +388,7 @@ function printPlan(plan: ProjectTypeApplyPlan): void {
 function printApplied(applied: AppliedProjectType, projectName: string): void {
   const parts: string[] = [];
   if (applied.gezelsCreated.length > 0) {
-    parts.push(`${applied.gezelsCreated.length} gezel(s)`);
+    parts.push(`${applied.gezelsCreated.length} crew member(s)`);
   }
   if (applied.scriptsInstalled.length > 0) {
     parts.push(`${applied.scriptsInstalled.length} script(s)`);
@@ -532,8 +532,15 @@ export async function runAppStatus(
     if (status.updateAvailable) {
       console.log(`Update available: gezel app apply ${status.provenance.id}`);
     }
-  } else {
+  } else if (status.provenance.source === 'installed-ai-apps') {
     console.log(`App: ${applied} — no longer installed (project keeps its copies)`);
+  } else {
+    console.log(`App: ${applied} — from the ${status.provenance.source} catalog`);
+    if (status.latestVersion) {
+      console.log(
+        `Update available: ${status.latestVersion}. Gezel applies it on its own unless it would replace something changed here; then update from the project in Gezel.`,
+      );
+    }
   }
   if (status.seeds.length > 0) {
     const counts = new Map<string, number>();

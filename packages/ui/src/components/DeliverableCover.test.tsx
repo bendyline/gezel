@@ -22,6 +22,37 @@ describe('readCoverText', () => {
       lines: ['Lisbon first, then the Algarve.', '• Pack sunscreen', 'Book the train'],
     });
   });
+
+  // A kitchen checklist's cover showed a row of dashes and a table's pipes.
+  it('reads rules, tables and checkboxes as words, not markup', () => {
+    expect(
+      readCoverText(
+        [
+          '# Bakery Kitchen Weekly Cleaning Checklist',
+          'A weekly checklist for the **bakery** kitchen.',
+          '---',
+          '## Weekly schedule',
+          '| Day | Focus |',
+          '|-----|:------|',
+          '| Monday | Ovens and proofers |',
+          '<!-- generated -->',
+          '- [ ] Wipe the mixer',
+          '```',
+          'code',
+          '```',
+        ].join('\n'),
+      ),
+    ).toEqual({
+      title: 'Bakery Kitchen Weekly Cleaning Checklist',
+      lines: [
+        'A weekly checklist for the bakery kitchen.',
+        'Weekly schedule',
+        'Day · Focus',
+        'Monday · Ovens and proofers',
+        '• Wipe the mixer',
+      ],
+    });
+  });
 });
 
 describe('the finished-work card', () => {
@@ -60,6 +91,35 @@ describe('the finished-work card', () => {
     expect(onMakeChanges).toHaveBeenCalled();
   });
 
+  // Home's folder question waits until the person has opened what was made.
+  it('notes the first finished result the person opens, keeping other stamps', async () => {
+    const { resetResultOpenedNote } = await import('./result-opened.js');
+    resetResultOpenedNote();
+    vi.mocked(api.getConfig).mockResolvedValue({
+      provider: 'mock',
+      onboarding: { firstProjectDoneAt: '2026-11-09T10:00:00.000Z' },
+    } as never);
+    vi.mocked(api.updateConfig).mockResolvedValue({ provider: 'mock' } as never);
+    const onOpen = vi.fn();
+    render(
+      <DeliverableCard
+        deliverable={{ kind: 'artifact', path: 'tasks/2/report.docx' }}
+        projectId="default"
+        onOpen={onOpen}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(onOpen).toHaveBeenCalled();
+    await waitFor(() =>
+      expect(api.updateConfig).toHaveBeenCalledWith({
+        onboarding: {
+          firstProjectDoneAt: '2026-11-09T10:00:00.000Z',
+          firstResultOpenedAt: expect.any(String),
+        },
+      }),
+    );
+  });
+
   it('opens a project board as the board, not as its JSON', () => {
     const onOpen = vi.fn();
     render(
@@ -76,7 +136,88 @@ describe('the finished-work card', () => {
       />,
     );
     expect(screen.getByText('Trip: Portugal')).toBeInTheDocument();
-    expect(screen.getByText("The project's Output page")).toBeInTheDocument();
+    expect(screen.getByText('Opens in the project')).toBeInTheDocument();
     expect(screen.queryByText('trip.json')).not.toBeInTheDocument();
+  });
+
+  // A catering proposal read `report.docx`, "In the artifacts drawer · tasks/2".
+  it('leads with what the person asked for and keeps the path out of sight', () => {
+    render(
+      <DeliverableCard
+        deliverable={{
+          kind: 'artifact',
+          path: 'tasks/2/report.docx',
+          bytes: 16_180,
+          modifiedAt: new Date(Date.now() - 120_000).toISOString(),
+        }}
+        projectId="default"
+        onOpen={vi.fn()}
+        title="One-page catering proposal for Harbor Books"
+      />,
+    );
+    const card = screen.getByTestId('deliverable-card');
+    expect(card.querySelector('.deliverable-card-name')).toHaveTextContent(
+      'One-page catering proposal for Harbor Books',
+    );
+    expect(card.querySelector('.deliverable-card-meta')?.textContent).toMatch(
+      /^report\.docx · 15\.8 KB · /,
+    );
+    expect(screen.getByText('report.docx')).toHaveAttribute('title', 'tasks/2/report.docx');
+    expect(card).not.toHaveTextContent(/artifacts drawer|project folder|tasks\/2/);
+  });
+
+  it('keeps the file name as the main line when the work has no title of its own', () => {
+    render(
+      <DeliverableCard
+        deliverable={{ kind: 'workspace', path: 'reports/q3/summary.pdf', bytes: 2048 }}
+        projectId="default"
+        onOpen={vi.fn()}
+      />,
+    );
+    const card = screen.getByTestId('deliverable-card');
+    expect(card.querySelector('.deliverable-card-name')).toHaveTextContent('summary.pdf');
+    expect(screen.getByText('summary.pdf')).toHaveAttribute('title', 'reports/q3/summary.pdf');
+    expect(card.querySelector('.deliverable-card-meta')).toHaveTextContent(/^2\.0 KB$/);
+  });
+
+  it("offers the work's title as the name of a saved copy", async () => {
+    const saveReferenceCopy = vi.fn().mockResolvedValue({ ok: true });
+    window.__GEZEL__ = { token: 't', saveReferenceCopy } as unknown as typeof window.__GEZEL__;
+    try {
+      const { rerender } = render(
+        <DeliverableCard
+          deliverable={{ kind: 'artifact', path: 'tasks/2/report.docx' }}
+          projectId="default"
+          title="Q3: plan/review for Harbor Books"
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Save a copy…' }));
+      await waitFor(() =>
+        expect(saveReferenceCopy).toHaveBeenLastCalledWith({
+          projectId: 'default',
+          kind: 'artifact',
+          path: 'tasks/2/report.docx',
+          suggestedName: 'Q3 plan review for Harbor Books.docx',
+        }),
+      );
+
+      // Without a title the dialog keeps offering the file's own name.
+      rerender(
+        <DeliverableCard
+          deliverable={{ kind: 'artifact', path: 'tasks/2/report.docx' }}
+          projectId="default"
+        />,
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Save a copy…' }));
+      await waitFor(() =>
+        expect(saveReferenceCopy).toHaveBeenLastCalledWith({
+          projectId: 'default',
+          kind: 'artifact',
+          path: 'tasks/2/report.docx',
+        }),
+      );
+    } finally {
+      window.__GEZEL__ = undefined;
+    }
   });
 });

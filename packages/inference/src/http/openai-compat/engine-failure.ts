@@ -9,6 +9,7 @@
  * prose is exactly what a sanitizing proxy strips. Each internal code maps to
  * one stable wire code here; anything unrecognized stays `provider_error`.
  */
+import { ENGINE_UNSUPPORTED_CODE } from '../../providers/engine-unsupported.js';
 
 export type EngineFailureCode =
   | 'capacity_denied'
@@ -18,7 +19,8 @@ export type EngineFailureCode =
   | 'engine_out_of_memory'
   | 'context_length_exceeded'
   | 'engine_not_ready'
-  | 'model_not_ready';
+  | 'model_not_ready'
+  | 'engine_unsupported';
 
 export interface EngineFailure {
   code: EngineFailureCode | 'provider_error';
@@ -35,6 +37,7 @@ const WIRE_CODES: ReadonlyMap<string, EngineFailureCode> = new Map([
   ['context-overflow', 'context_length_exceeded'],
   ['engine-not-ready', 'engine_not_ready'],
   ['model-not-ready', 'model_not_ready'],
+  [ENGINE_UNSUPPORTED_CODE, 'engine_unsupported'],
 ]);
 
 /**
@@ -52,6 +55,8 @@ export const ENGINE_FAILURE_SUMMARIES: Readonly<Record<EngineFailureCode, string
   context_length_exceeded: 'The prompt is longer than this model can read at once.',
   engine_not_ready: 'The on-device engine is still getting ready. Try again shortly.',
   model_not_ready: 'This model is not ready yet.',
+  engine_unsupported:
+    'This computer cannot run that engine. GET /v1/models lists the models it can run.',
 };
 
 export function isEngineFailureCode(value: unknown): value is EngineFailureCode {
@@ -94,7 +99,11 @@ export function engineFailure(err: unknown): EngineFailure {
   if (!code) return { code: 'provider_error', type: 'server_error', status: 500 };
   // OpenAI's own spelling and status for an over-long prompt. A 500 makes
   // every SDK retry a request that cannot fit no matter how often it is sent.
-  if (code === 'context_length_exceeded') {
+  // An engine this computer can never run is the caller's choice of model in
+  // the same way: the request has to change, and no retry will help. As a 500
+  // it also lost its message to the service's opaque-error middleware, so
+  // `"model": "mlx"` on Windows answered a bare `internal_error` (2026-11-10).
+  if (code === 'context_length_exceeded' || code === 'engine_unsupported') {
     return { code, type: 'invalid_request_error', status: 400 };
   }
   return { code, type: 'server_error', status: 500 };

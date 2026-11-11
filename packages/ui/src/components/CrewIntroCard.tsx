@@ -2,10 +2,11 @@ import type { CrewIntroduction, GezelSummary } from '@bendyline/gezel';
 import { CrewMemberCard } from './CrewMemberCard.js';
 
 /**
- * The crew a task brought, introduced in the thread that launched it: one
- * card per gezel with their portrait, their role in plain words ("Trip
- * Planner"), what they start with, and a way to say hello. It replaced a line of prose that named people the reader
- * had never met and could not see.
+ * Crew introduced in the thread the person reads: the crew a task brought,
+ * or someone the thread's gezel hired in conversation. One card per gezel
+ * with their portrait, their role in plain words ("Trip Planner"), what they
+ * do, and a way to say hello. It replaced a line of prose that named people
+ * the reader had never met and could not see.
  */
 export function CrewIntroCard({
   intro,

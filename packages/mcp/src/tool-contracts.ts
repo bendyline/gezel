@@ -213,6 +213,8 @@ export const VideoToolOutputSchema = z.object({
   gezelVideo: z.object({
     artifactPath: z.string(),
     mimeType: z.string(),
+    /** The poster frame's artifact path, when the daemon saved one. */
+    posterPath: z.string().optional(),
   }),
 });
 

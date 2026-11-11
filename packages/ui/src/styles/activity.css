@@ -11,6 +11,30 @@
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
+/* With its words showing, the key keeps one width whatever it says (see the
+   engine key in app-shell.css): "All quiet", "1 needs you" and a working
+   crew member's name used to resize it, and the bar, on every change. A
+   crowded bar steps it down to a narrower fixed width that shows a count. */
+.activity-control[data-density="full"] {
+  width: var(--titlebar-status-w);
+}
+.activity-control[data-density="compact"] {
+  width: 6.5rem;
+}
+.activity-control:is([data-density="full"], [data-density="compact"])
+  :is(.activity-control-summary, .activity-control-worker) {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+}
+.activity-control:is([data-density="full"], [data-density="compact"])
+  .activity-control-worker-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
+}
 .activity-control-dot {
   width: 7px;
   height: 7px;
@@ -175,65 +199,46 @@
     animation: none;
   }
 }
-/* A soft traffic light over the four sections: Needs you is blush, Working
-   and Next share one honey zone, Ready is sage (the workshop's green, not
-   --success mint). Each tone has a light (the indicator dot), a wash (the
-   zone's paper) and an edge (its hairline). Washes sit lighter than the
-   panel's tan so the honey still reads as yellow on parchment. */
+/* The sections wear the app's three status colors (foundation.css →
+   Status): Needs you is ochre, Working is the accent, Ready is sage. Next is
+   work that is only scheduled, which is not a status, so it stays on plain
+   paper with a quiet light. A lit zone derives its wash (the zone's paper),
+   its edge (the hairline) and its rule (the line between rows) from its one
+   color, so both themes follow the tokens. The panel used to carry nine
+   colors of its own: blush, honey and sage, each with a wash and an edge,
+   authored again for dark. */
 .activity-panel {
-  --activity-attention: #c4604c;
-  --activity-attention-wash: #f4e2d8;
-  --activity-attention-edge: #e2c1b2;
-  --activity-active: #cf9a2e;
-  --activity-active-wash: #f5eaca;
-  --activity-active-edge: #e2cf9c;
-  --activity-done: #6f8d58;
-  --activity-done-wash: #e3ead4;
-  --activity-done-edge: #c5d2ae;
-  /* Mixed into a zone's wash for the insets inside it (keys, strips, rows),
-     so they read as paler paper of the same tone instead of tan chips. */
+  /* Mixed into a zone's wash for the insets inside it (keys, fields), so
+     they read as paler paper of the same tone instead of tan chips. */
   --activity-inset: #fff;
 }
 [data-theme="dark"] .activity-panel {
-  --activity-attention: #e48b77;
-  --activity-attention-wash: #322426;
-  --activity-attention-edge: #573a36;
-  --activity-active: #e2b55c;
-  --activity-active-wash: #2f2a1e;
-  --activity-active-edge: #57482a;
-  --activity-done: #a2c088;
-  --activity-done-wash: #242c23;
-  --activity-done-edge: #3f4f38;
   --activity-inset: var(--gezel-paper-canvas);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .activity-panel {
-    --activity-attention: #e48b77;
-    --activity-attention-wash: #322426;
-    --activity-attention-edge: #573a36;
-    --activity-active: #e2b55c;
-    --activity-active-wash: #2f2a1e;
-    --activity-active-edge: #57482a;
-    --activity-done: #a2c088;
-    --activity-done-wash: #242c23;
-    --activity-done-edge: #3f4f38;
     --activity-inset: var(--gezel-paper-canvas);
   }
 }
+.activity-panel [data-tone] {
+  --tone-wash: color-mix(in srgb, var(--tone) 13%, var(--panel));
+  --tone-edge: color-mix(in srgb, var(--tone) 34%, var(--panel));
+  --tone-rule: color-mix(in srgb, var(--tone) 22%, var(--panel));
+}
 .activity-panel [data-tone="attention"] {
-  --tone: var(--activity-attention);
-  --tone-wash: var(--activity-attention-wash);
-  --tone-edge: var(--activity-attention-edge);
+  --tone: var(--status-attention);
 }
 .activity-panel [data-tone="active"] {
-  --tone: var(--activity-active);
-  --tone-wash: var(--activity-active-wash);
-  --tone-edge: var(--activity-active-edge);
+  --tone: var(--status-working);
 }
 .activity-panel [data-tone="done"] {
-  --tone: var(--activity-done);
-  --tone-wash: var(--activity-done-wash);
-  --tone-edge: var(--activity-done-edge);
+  --tone: var(--status-ready);
+}
+.activity-panel [data-tone="quiet"] {
+  --tone: var(--text-muted);
+  --tone-wash: transparent;
+  --tone-edge: var(--border);
+  --tone-rule: var(--border);
 }
 /* The light is lit only when its section holds something, so color on the
    panel always means there is something to read. */
@@ -270,24 +275,30 @@
 }
 .activity-panel-header {
   display: flex;
-  align-items: start;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1rem 0.6rem;
+  padding: 0.85rem 1rem 0.3rem;
 }
 .activity-panel-header h2 {
   margin: 0;
   font-size: var(--text-xl);
 }
+/* Shown only when the panel is held to one project. */
 .activity-panel-header p {
-  margin: 0.25rem 0 0;
+  display: inline;
+  margin: 0;
   color: var(--muted);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
+}
+.activity-all-projects {
+  margin-left: 0.6rem;
+  font-size: var(--text-xs);
 }
 .activity-section-links {
   display: flex;
   gap: 0.25rem;
-  padding: 0.5rem 1rem;
+  padding: 0.45rem 1rem 0.6rem;
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
@@ -303,8 +314,7 @@
   width: 7px;
   height: 7px;
 }
-.activity-section-links .activity-count,
-.activity-section h3 .activity-count {
+.activity-count {
   color: var(--muted);
   font-weight: 400;
 }
@@ -314,11 +324,15 @@
   overscroll-behavior: contain;
   min-height: 0;
 }
-/* Each section is a zone of tinted paper whose edges line up with the
-   section keys above. An empty one keeps only a faint outline. */
+
+/* ── Sections ──────────────────────────────────────────────────────────
+   Each section is one zone of tinted paper whose edges line up with the
+   section keys above, and the zone is the only box: what it holds are flat
+   rows parted by a hairline. A zone used to hold bordered cards that held
+   inset strips, three boxes deep. */
 .activity-section {
   scroll-margin-top: 0.75rem;
-  padding: 0.85rem 0.9rem 0.9rem;
+  padding: 0.7rem 0.9rem 0.25rem;
   border: 1px solid var(--tone-edge);
   border-radius: var(--radius-lg);
   background: var(--tone-wash);
@@ -329,48 +343,12 @@
 .activity-section:not(.is-empty) {
   --surface: color-mix(in srgb, var(--activity-inset) 40%, var(--tone-wash));
 }
-/* A card takes its zone's tone, so a finished report is not edged in the
-   terracotta that asks for a decision. */
-.activity-section:not(.is-empty) .pending-question {
-  border-color: color-mix(in srgb, var(--tone) 60%, var(--tone-edge));
-  background: color-mix(in srgb, var(--tone) 5%, transparent);
-}
-/* An empty section is one quiet line, heading and note side by side, with
-   no outline: two empty boxes stood between the person and the first thing
-   that had work in it, repeating counts the section keys already show. */
-.activity-section.is-empty {
+.activity-section-head {
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
   gap: 0.25rem 0.75rem;
-  padding-block: 0.35rem;
-  border-color: transparent;
-  background: transparent;
-}
-.activity-panel .activity-section.is-empty h3 {
-  margin: 0;
-  font-size: var(--text-md);
-  color: var(--text-muted);
-}
-/* Working and Next are one zone: when both are lit (or both empty) they
-   join into a single card with a hairline between them. */
-.activity-section[data-tone="active"]:not(.is-empty):has(
-    + .activity-section[data-tone="active"]:not(.is-empty)
-  ),
-.activity-section[data-tone="active"].is-empty:has(
-    + .activity-section[data-tone="active"].is-empty
-  ) {
-  border-bottom: 0;
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-}
-.activity-section[data-tone="active"]:not(.is-empty)
-  + .activity-section[data-tone="active"]:not(.is-empty),
-.activity-section[data-tone="active"].is-empty + .activity-section[data-tone="active"].is-empty {
-  margin-top: 0;
-  border-top-style: dashed;
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
+  padding-bottom: 0.3rem;
 }
 .activity-section h3 {
   display: flex;
@@ -378,49 +356,309 @@
   gap: 0.5rem;
   font-size: var(--text-lg);
 }
-/* `.gz-dialog h3 { margin: 0 }` ties this on specificity and loads later,
-   which left the heading sitting directly on the first row beneath it. */
+/* `.gz-dialog h3 { margin: 0 }` ties this on specificity and loads later. */
 .activity-panel .activity-section h3 {
-  margin: 0 0 0.65rem;
+  margin: 0;
 }
-.activity-question,
-.activity-work {
-  margin: 0.75rem 0;
-  overflow-wrap: anywhere;
+.activity-section > :is(.activity-question, .activity-row, .activity-queue, .activity-fold) {
+  border-top: 1px solid var(--tone-rule);
 }
-.activity-section > :last-child {
-  margin-bottom: 0;
+.activity-section > .activity-section-head + * {
+  border-top-color: transparent;
 }
-.activity-context {
-  color: var(--muted);
-  font-size: var(--text-xs);
-  margin: 0 0 0.25rem;
+/* An empty section is one quiet line, heading and note side by side, with
+   no outline: two empty boxes stood between the person and the first thing
+   that had work in it, repeating counts the section keys already show. It
+   may still hold a fold (what was finished earlier). */
+.activity-section.is-empty {
+  padding-block: 0.3rem 0;
+  border-color: transparent;
+  background: transparent;
+}
+.activity-panel .activity-section.is-empty h3 {
+  font-size: var(--text-md);
+  color: var(--text-muted);
 }
 .activity-empty {
   margin: 0;
   color: var(--muted);
   font-size: var(--text-sm);
 }
-.activity-work {
-  border-left: 2px solid var(--tone-edge, var(--border));
-  padding-left: 0.75rem;
+
+/* ── Rows ──────────────────────────────────────────────────────────────
+   One shape for every piece of work: a mark (who is on it, or what kind of
+   file it is), the work in bold, one quiet line of who, where and what is
+   happening, and at most one key. The engine's own rows (the queue's,
+   below) take the same columns. */
+.activity-row,
+.activity-queue .queue-meter-panel-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1.75rem minmax(0, 1fr) auto auto;
+  column-gap: 0.6rem;
+  align-items: center;
+  padding: 0.5rem 0;
 }
-.activity-work > p:not(.activity-context) {
-  margin: 0.25rem 0 0.5rem;
-  font-size: var(--text-sm);
+.activity-row-mark,
+.activity-queue .queue-meter-panel-item-marker {
+  grid-column: 1;
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  min-height: 1.6rem;
 }
-.activity-work .btn {
-  font-size: var(--text-sm);
-  margin-right: 0.4rem;
+.activity-row-mark .gezel-icon {
+  border-color: color-mix(in srgb, var(--border) 78%, var(--accent));
+  border-radius: var(--radius-sm);
+  background: var(--panel);
 }
-/* The per-row way in reads as a quiet link: as an outlined button it
-   repeated down the list and out-shouted the work it opens. */
-.activity-work .gz-link-button {
+/* Work with no one to show: the section's own color, as a dot. */
+.activity-row-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--tone, var(--text-muted)) 75%, transparent);
+}
+.activity-row-mark-file {
+  color: var(--muted);
+  font-size: var(--text-lg);
+}
+.activity-row-text,
+.activity-queue .queue-meter-panel-gezel {
+  grid-column: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+  line-height: 1.3;
+  overflow: visible;
+}
+.activity-row-title,
+.activity-queue .queue-meter-panel-gezel-name {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: var(--text-md);
+  font-weight: 600;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.activity-row-sub {
+  display: flex;
+  flex-wrap: wrap;
+  row-gap: 0.1rem;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+/* The mark follows its piece, so a wrapped line never opens with one. */
+.activity-row-sub > span:not(:last-child)::after {
+  content: "·";
+  margin-inline: 0.4rem;
+  color: var(--text-muted);
+}
+.activity-row-sub .gz-link-button {
+  font-size: inherit;
+}
+.activity-row-when {
+  grid-column: 3;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.activity-row-actions {
+  grid-column: 3 / span 2;
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.activity-row-actions .btn {
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+.activity-row-chevron {
+  grid-column: 4;
+  color: var(--text-muted);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.activity-row-body {
+  grid-column: 2 / -1;
+  position: relative;
+  z-index: 1;
+  margin-top: 0.4rem;
+}
+.activity-row-body > .gz-link-button {
+  margin-right: 0.9rem;
+  font-size: var(--text-xs);
+}
+.activity-row-error {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: var(--text-xs);
+}
+/* A row with somewhere to go is one target. The transparent key lies under
+   its text; a row's own keys stay above it. */
+.activity-row-open,
+.activity-queue .queue-meter-panel-item-open {
+  position: absolute;
+  inset: 0 -0.4rem;
+  z-index: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  cursor: pointer;
+}
+.activity-row-open:hover,
+.activity-queue .queue-meter-panel-item-open:hover {
+  background: var(--hover-bg);
+}
+.activity-row-open:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.activity-row:has(> .activity-row-open)
+  > :not(.activity-row-open, .activity-row-body, .activity-row-actions) {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+/* Putting a result away: a quiet mark, since nothing is lost by it. */
+.activity-row-dismiss {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--text-lg);
+  line-height: 1;
+  cursor: pointer;
+}
+.activity-row-dismiss:hover {
+  background: var(--hover-bg);
+  color: var(--text);
+}
+/* A request's tracker names its lead in words; the row's mark is the figure. */
+.activity-request .request-tracker-line .gezel-icon {
+  display: none;
+}
+
+/* ── Folds ─────────────────────────────────────────────────────────────
+   A section's long tail on one line: the standing schedule under Next, what
+   was finished and put away under Ready. */
+.activity-fold > summary {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0;
+  color: var(--muted);
   font-size: var(--text-sm);
-  margin-right: 0.75rem;
+  cursor: pointer;
+  list-style: none;
+}
+.activity-fold > summary::-webkit-details-marker {
+  display: none;
+}
+.activity-fold > summary:hover .activity-fold-label {
+  color: var(--text);
+}
+.activity-fold-caret {
+  display: inline-flex;
+  justify-content: center;
+  width: 1.75rem;
+  color: var(--text-muted);
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+.activity-fold-caret::before {
+  content: "›";
+  transition: transform 120ms ease-out;
+}
+.activity-fold[open] .activity-fold-caret::before {
+  transform: rotate(90deg);
+}
+.activity-fold-hint {
+  margin-left: auto;
+  font-size: var(--text-xs);
+}
+.activity-fold-body > .activity-row {
+  border-top: 1px solid var(--tone-rule);
+}
+.activity-fold-body .activity-row-title {
+  font-weight: 500;
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-fold-caret::before {
+    transition: none;
+  }
+}
+
+/* ── Decisions ─────────────────────────────────────────────────────────
+   A question is the one thing that opens into a card, and the zone is its
+   box: who asked, the task it is about, the question, the answers. */
+.activity-question {
+  padding: 0.6rem 0 0.7rem;
+  overflow-wrap: anywhere;
+}
+.activity-question-result {
+  padding: 0;
+}
+.activity-context {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.3rem;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.activity-context .activity-row-mark {
+  width: auto;
+  min-height: 0;
 }
 .activity-question .pending-question {
   margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  gap: 0.45rem;
+}
+/* The task a card is about: its title and the way in. The row above already
+   says who and where, and the section says what state it is in. */
+.activity-question .pending-question-context {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.activity-question .pending-question-context-row > .muted:first-child:not(:only-child),
+.activity-panel .activity-question .pending-question-context-status {
+  display: none;
+}
+.activity-question .pending-question-context-title {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+/* The question is plain text on the zone's paper, in the panel's face.
+   Squisq sets a reading surface and its page defaults inline, so these must
+   take precedence (as for a step's instructions, below). */
+.activity-question .pending-question-prompt :is(.squisq-linear, .squisq-page) {
+  background: transparent !important;
+}
+.activity-question .pending-question-prompt .squisq-page--thin {
+  padding: 0;
+}
+.activity-question .pending-question-prompt .squisq-linear-content {
+  font-family: var(--font-ui) !important;
+  color: var(--text) !important;
 }
 .activity-question .pending-question-prompt:has(> .squisq-linear) {
   max-height: min(32vh, 20rem);
@@ -431,6 +669,25 @@
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+/* The night's summary lists its reports and finished tasks as the panel's
+   flat rows, not as boxed keys inside the zone. */
+.activity-question .pending-question-night-band {
+  gap: 0;
+  margin: 0.3rem 0 0.2rem;
+}
+.activity-question .pending-question-night-row {
+  padding: 0.4rem 0;
+  border: 0;
+  border-top: 1px solid var(--tone-rule);
+  border-radius: 0;
+  background: transparent;
+}
+.activity-question .pending-question-night-row:hover {
+  background: var(--hover-bg);
+}
+.activity-question .pending-question-night-band-label + .pending-question-night-row {
+  margin-top: 0.3rem;
+}
 .activity-warning {
   padding: 0.75rem;
   margin-bottom: 0.6rem;
@@ -440,38 +697,59 @@
 .activity-warning p {
   margin: 0.3rem 0 0.6rem;
 }
-/* The header queue's rows, set into Working and Next. The popover chrome
-   goes; the panel is wide enough for the job line to wrap instead of
-   clipping, and touch has no hover, so the row controls stay visible. */
+
+/* ── The engine's rows ─────────────────────────────────────────────────
+   The header queue's rows, set into Working and Next in the panel's row
+   shape. The popover chrome goes, and touch has no hover, so the row
+   controls stay visible. One engine needs no heading: the title bar's
+   engine key names it. */
 .activity-queue.queue-meter-panel {
   position: static;
   z-index: auto;
   width: 100%;
   max-width: none;
   max-height: none;
-  margin: 0 0 0.75rem;
+  margin: 0;
   padding: 0;
-  border: 0;
   border-radius: 0;
   box-shadow: none;
   background: transparent;
   overflow: visible;
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
+}
+.activity-section > .activity-queue.queue-meter-panel {
+  border-inline: 0;
+  border-bottom: 0;
+}
+.activity-queue[data-engines="one"] :is(.queue-meter-panel-provider, .queue-meter-panel-note) {
+  display: none;
+}
+.activity-queue .queue-meter-panel-provider {
+  margin: 0.5rem 0 0;
+  font-size: var(--text-xs);
+}
+.activity-queue .queue-meter-panel-section + .queue-meter-panel-section {
+  margin-top: 0;
+  padding-top: 0;
+  border-top-color: var(--tone-rule);
+}
+.activity-queue .queue-meter-panel-list {
+  gap: 0;
 }
 .activity-queue .queue-meter-panel-item {
-  min-height: 2.1rem;
-  font-size: var(--text-sm);
+  min-height: 0;
+  margin-inline: 0;
+  font-size: var(--text-md);
+}
+.activity-queue .queue-meter-panel-item + .queue-meter-panel-item {
+  border-top: 1px solid var(--tone-rule);
 }
 .activity-queue .queue-meter-panel-context {
-  white-space: normal;
-  overflow-wrap: anywhere;
+  display: flex;
+  font-size: var(--text-xs);
 }
 .activity-queue .queue-meter-panel-actions {
   opacity: 1;
-}
-.activity-all-projects {
-  align-self: flex-start;
-  margin-left: 1rem;
 }
 @media (max-width: 760px) {
   .activity-control-summary,
@@ -494,6 +772,16 @@
   }
   .activity-section {
     padding-inline: 0.7rem;
+  }
+  /* Four keys do not fit one row at phone width, and three and one read as
+     a mistake. */
+  .activity-section-links {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .activity-row-dismiss {
+    width: 40px;
+    height: 40px;
   }
   .activity-queue .queue-meter-panel-action:not(.queue-meter-panel-action-stop) {
     min-width: 32px;

@@ -432,7 +432,12 @@ export async function createTypedProject(
           home: stageHome,
           installGezels: await store.listGezels().catch(() => []),
         },
-        { projectId, ...input.projectType },
+        {
+          projectId,
+          ...input.projectType,
+          // Asking for an exact version keeps the project on it.
+          pin: input.projectType.pin ?? input.projectType.version !== undefined,
+        },
       );
       // A code project gets the Node + TypeScript template now, after the
       // type's own seeds so they win; others get it lazily before a Node tool.

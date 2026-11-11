@@ -24,7 +24,7 @@ import {
 import type { TaskManager } from '../tasks/manager.js';
 import {
   type EnsureProjectLeadResult,
-  ensureFolderProjectBuilder,
+  ensureProjectBuilder,
   ensureProjectVoorman,
 } from '../workspace/import-sync.js';
 
@@ -93,7 +93,7 @@ export async function recruitCrewForFolder(
   }
 
   if (kind === 'code') {
-    const ensureLead = project.mode === 'solo' ? ensureFolderProjectBuilder : ensureProjectVoorman;
+    const ensureLead = project.mode === 'solo' ? ensureProjectBuilder : ensureProjectVoorman;
     const lead = await ensureLead(deps, projectId).catch((err: unknown) => {
       log.warn(`[projects] ${projectId}: lead for a code folder failed: ${String(err)}`);
       return {} as EnsureProjectLeadResult;

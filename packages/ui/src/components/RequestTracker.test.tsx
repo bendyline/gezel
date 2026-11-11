@@ -1,5 +1,5 @@
 import type { GezelSummary, RequestTrack } from '@bendyline/gezel';
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -53,6 +53,15 @@ describe('RequestTracker', () => {
     expect(screen.getByText('Open the task')).toBeInTheDocument();
   });
 
+  // A lead hired for this request showed as a letter "Y" beside "Your gezel"
+  // until the roster was read again (2026-11-09).
+  it('draws no letter for a lead the roster does not know yet', () => {
+    render(<RequestTracker track={{ ...working, leadGezelId: 'minji' }} gezels={new Map()} />);
+    const line = document.querySelector('.request-tracker-line');
+    expect(line?.querySelector('[data-testid="gezel-icon-pending"]')).not.toBeNull();
+    expect(line?.querySelector('.gezel-icon-fallback:not(.gezel-icon-pending)')).toBeNull();
+  });
+
   it('names the real step and task in debug mode', () => {
     render(<RequestTracker track={working} gezels={gezels} debugMode />);
     expect(screen.getByText('Aditya · Draft · bakery/1')).toBeInTheDocument();
@@ -86,6 +95,44 @@ describe('RequestTracker', () => {
     expect(card).not.toBeNull();
     expect(within(card).getByText(/Dejan/)).toBeInTheDocument();
     expect(screen.getAllByRole('listitem')[3]).toHaveClass('is-done');
+    // No title of its own: the file name leads.
+    expect(card.querySelector('.deliverable-card-name')).toHaveTextContent('invoices.pdf');
+  });
+
+  it('names the finished work by what was asked for, and a board by its project', () => {
+    const ready: RequestTrack = {
+      ...working,
+      stop: 'ready',
+      state: 'ready',
+      title: 'October invoices for the three cafes',
+      deliverable: { kind: 'artifact', path: 'tasks/1/invoices.pdf' },
+    };
+    const { container, rerender } = render(<RequestTracker track={ready} gezels={gezels} />);
+    const card = container.querySelector('.deliverable-card') as HTMLElement;
+    expect(card.querySelector('.deliverable-card-name')).toHaveTextContent(
+      'October invoices for the three cafes',
+    );
+    expect(within(card).getByText('invoices.pdf')).toHaveAttribute('title', 'tasks/1/invoices.pdf');
+
+    rerender(
+      <RequestTracker
+        track={{
+          ...ready,
+          deliverable: {
+            kind: 'workspace',
+            path: 'trip.json',
+            projectId: 'trip',
+            view: 'output-page',
+          },
+        }}
+        gezels={gezels}
+        projectName="Trip: Portugal"
+      />,
+    );
+    const board = container.querySelector('.deliverable-card') as HTMLElement;
+    expect(board.querySelector('.deliverable-card-name')).toHaveTextContent('Trip: Portugal');
+    expect(within(board).getByText('Opens in the project')).toBeInTheDocument();
+    expect(board).not.toHaveTextContent('trip.json');
   });
 
   it('is the stops and the line in an Activity row', () => {
@@ -94,5 +141,76 @@ describe('RequestTracker', () => {
     );
     expect(container.querySelector('.request-tracker-compact')).not.toBeNull();
     expect(screen.queryByText("Who's helping?")).not.toBeInTheDocument();
+  });
+
+  // A task the runtime paused once read "has a question for you" above the
+  // engine's raw error, with the way to restart it two panels away.
+  it('says work stopped in one sentence and restarts it from the tracker', async () => {
+    const paused: RequestTrack = {
+      ...working,
+      state: 'needs-you',
+      line: { gezelId: 'dejan', doing: 'stopped before this was finished' },
+      paused: { taskRef: 'bakery/1', reason: 'step_stalled' },
+      liveSessionIds: [],
+    };
+    delete (paused as Partial<RequestTrack>).eta;
+    vi.mocked(api.retryTask).mockResolvedValue({ dispatched: true } as never);
+    render(<RequestTracker track={paused} gezels={gezels} />);
+
+    expect(screen.getByText('Dejan').closest('p')).toHaveTextContent(
+      'Dejan stopped before this was finished',
+    );
+    expect(screen.getByTestId('request-tracker-paused')).toHaveTextContent(
+      "Gezel tried this step several times and couldn't finish it. What it made so far is kept.",
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(api.retryTask).toHaveBeenCalledWith('bakery', 1));
+  });
+
+  it('says so when restarting could not put anyone to work', async () => {
+    const paused: RequestTrack = {
+      ...working,
+      state: 'needs-you',
+      line: { gezelId: 'dejan', doing: 'is waiting for you to go on' },
+      paused: { taskRef: 'bakery/1' },
+    };
+    vi.mocked(api.retryTask).mockResolvedValue({
+      dispatched: false,
+      reason: 'no-assignee',
+    } as never);
+    render(<RequestTracker track={paused} gezels={gezels} />);
+
+    expect(screen.getByTestId('request-tracker-paused')).toHaveTextContent(
+      'What it made so far is kept.',
+    );
+    // The person stopped this one, so the key carries on instead of retrying.
+    fireEvent.click(screen.getByRole('button', { name: 'Carry on' }));
+    await screen.findByText(/nothing could pick it up/);
+  });
+
+  // Crew hired mid-request were introduced only inside the closed "Who's
+  // helping?", so a bakery owner met seven crew members nobody announced.
+  it('names who joined the crew for the request without opening anything', () => {
+    const roster = new Map(gezels).set('noor', {
+      id: 'noor',
+      name: 'Noor',
+      role: 'Researcher',
+    } as GezelSummary);
+    const { rerender } = render(
+      <RequestTracker track={{ ...working, joined: ['aditya', 'noor'] }} gezels={roster} />,
+    );
+    expect(screen.getByTestId('request-tracker-joined')).toHaveTextContent(
+      'Dejan brought Aditya (Bookkeeper) and Noor (Researcher) onto your crew for this.',
+    );
+    rerender(
+      <RequestTracker
+        track={{ ...working, joined: ['aditya'] }}
+        gezels={roster}
+        variant="compact"
+      />,
+    );
+    expect(screen.queryByTestId('request-tracker-joined')).not.toBeInTheDocument();
+    rerender(<RequestTracker track={working} gezels={roster} />);
+    expect(screen.queryByTestId('request-tracker-joined')).not.toBeInTheDocument();
   });
 });

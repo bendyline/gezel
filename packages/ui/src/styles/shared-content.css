@@ -265,7 +265,7 @@
 }
 
 .usage-value {
-  font-size: 1.4rem;
+  font-size: var(--text-title);
   font-weight: 600;
 }
 
@@ -666,6 +666,65 @@
   margin-inline: 0 !important;
 }
 
+/* A reply stays at chat scale. It renders in Squisq's document register
+   (em-based, see RenderedMarkdown), whose top heading is still 1.6em and
+   opens under a hairline, like a report's. In a bubble a heading is one
+   step of the type scale above the reply's own text, 17px over 15px prose
+   (`--text-lg` over `--text-md`, written in em so a gezel's font scale still
+   applies), and the deepest levels are text-sized. List numerals are the
+   size of that text, and a heading keeps the bubble's spacing with no rule
+   above it. The doubled `.squisq-linear-content.squisq-page` outranks
+   Squisq's own rules, which load later from inside the view, in either of
+   its registers: the page register sized a reply's heading 32px over 15px
+   prose, and 1.25em still read as a document title inside a bubble. */
+.msg-body-rendered
+  .squisq-linear-content.squisq-page
+  :is(
+    .squisq-page-section-title,
+    .squisq-page-banner-title,
+    .squisq-page-items-title,
+    .squisq-page-prose :is(h1, h2, h3)
+  ) {
+  font-size: 1.1333em;
+}
+
+.msg-body-rendered
+  .squisq-linear-content.squisq-page
+  :is(
+    :is([data-heading-level="4"], [data-heading-level="5"], [data-heading-level="6"])
+      .squisq-page-section-title,
+    .squisq-page-prose :is(h4, h5, h6)
+  ) {
+  font-size: 1em;
+}
+
+.msg-body-rendered .squisq-linear-content.squisq-page .squisq-page-items li,
+.msg-body-rendered .squisq-linear-content.squisq-page .squisq-page-items li::before {
+  font-size: 1em;
+}
+
+/* The document register drops the first section's top padding and the last
+   one's bottom padding, and rules off every top-level heading. A bubble
+   keeps the breath it had, and its headings need no rule. */
+.msg-body-rendered .squisq-page--document.squisq-page--thin > .squisq-page-section:first-of-type {
+  padding-top: 0.55rem;
+}
+
+.msg-body-rendered .squisq-page--document.squisq-page--thin > .squisq-page-section:last-of-type {
+  padding-bottom: 0.55rem;
+}
+
+.msg-body-rendered .squisq-page.squisq-page--document > .squisq-page-section[data-heading-level] {
+  margin-top: 0;
+}
+
+.msg-body-rendered
+  .squisq-page.squisq-page--document
+  > .squisq-page-section[data-heading-level]
+  > .squisq-page-section-inner::before {
+  display: none;
+}
+
 .msg-user {
   align-self: flex-end;
   align-items: flex-end;
@@ -725,6 +784,42 @@
 .msg-from-gezel .msg-body {
   background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
   border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
+}
+
+/* A narrow conversation (a page's companion chat, the Office pane, about
+   320px) gives its width to the words. An indented reply under the 92% cap,
+   inside the timeline's gutter and the bubble's own padding, wrapped at about
+   22 characters a line. Here a reply takes the whole column, and the message
+   actions sit in the flow as they do on a narrow window, since the gutter
+   they float in is gone. Container query, not viewport: the pane is narrow
+   inside a wide window. */
+@container chat-timeline (max-width: 420px) {
+  .chat-timeline-viewport > .chat-timeline {
+    --thread-indent: 0.75rem;
+    padding-inline: 0.5rem;
+  }
+  .chat-timeline :is(.msg-assistant, .msg-from-gezel) {
+    max-width: 100%;
+  }
+  .chat-timeline :is(.msg-body, .msg-body-rendered) {
+    padding-inline: 0.55rem;
+  }
+  .chat-timeline .msg-actions-anchor {
+    position: static;
+    height: auto;
+    padding: 0.5rem 0 0;
+  }
+  .chat-timeline .msg-actions {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .chat-timeline .msg-action-button:not(.msg-action-button-debug),
+  .chat-timeline .msg-actions-anchor:not(:has(.msg-action-button-debug)) {
+    display: none;
+  }
 }
 
 .msg-role-handoff {
@@ -933,6 +1028,32 @@
   color: var(--muted, #888);
 }
 
+/* The same sentences, marked where they stand in the reply (grounding-flags.ts):
+   a wavy ochre underline on a faint wash, the attention color. A gray count
+   under the reply was the only sign before, and a wrong table read as settled. */
+::highlight(gezel-unconfirmed) {
+  background-color: color-mix(in srgb, var(--warning) 16%, transparent);
+  text-decoration: underline wavy var(--warning);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+/* The count of those sentences, in the attention color rather than the
+   footer's gray. */
+.msg-grounding-flagged {
+  color: var(--warning-text);
+}
+
+/* A calculated number's working: the query, then what it returned. */
+.msg-grounding-query-label {
+  margin: 0.35rem 0 0.15rem;
+  color: var(--muted, #888);
+  font-size: var(--text-xs);
+}
+.msg-grounding-query-label:first-child {
+  margin-top: 0;
+}
+
 .msg-refs-label {
   color: var(--muted, #888);
   font-size: var(--text-xs);
@@ -1005,9 +1126,11 @@
 /* ─── Deliverable card ─────────────────────────────────────────────────
    The one file a task hands its owner (DeliverableCard.tsx): closing a
    wrap-up bubble, under the rail's task tracker, and on the task page. A
-   file tile, an eyebrow naming what it is ("Your PowerPoint deck"), the
-   file name at reading size, where it lives, and Open as the one filled
-   key. The whole face opens the file too — it is the big link. A draft
+   file tile, an eyebrow naming what it is ("Your PowerPoint deck"), what
+   the person asked for at reading size (the file name when the work has no
+   title of its own), a small line with the file name, size and age, and
+   Open as the one filled key. The path is the file name's tooltip, never
+   text. The whole face opens the file too — it is the big link. A draft
    (the latest copy of a task still running) takes a dashed border, the
    same "not settled yet" cue as a suggested task strip. */
 .deliverable-card {
@@ -1125,7 +1248,7 @@
 }
 
 .deliverable-card-tile-ext {
-  font-size: 0.62rem;
+  font-size: var(--text-2xs);
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--text-muted);
@@ -1160,10 +1283,6 @@
   font-size: var(--text-xs);
   color: var(--text-muted);
   overflow-wrap: anywhere;
-}
-
-.deliverable-card-folder {
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
 /* Keys sit under the text column, not under the tile. */
@@ -1800,21 +1919,21 @@
 }
 .squisq-mention-popover .squisq-mention-item.is-selected,
 .squisq-mention-popover .squisq-mention-item:hover {
-  background: rgba(176, 114, 76, 0.18);
+  background: var(--selected-bg);
   color: #6e4024;
 }
 .squisq-mention-popover .squisq-mention-desc {
   color: rgba(43, 36, 32, 0.6);
 }
 [data-theme="dark"] .squisq-mention-popover {
-  background: #2b2420;
+  background: var(--gezel-paper-inset);
   border-color: rgba(224, 184, 151, 0.28);
   color: #f3ede0;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
 }
 [data-theme="dark"] .squisq-mention-popover .squisq-mention-item.is-selected,
 [data-theme="dark"] .squisq-mention-popover .squisq-mention-item:hover {
-  background: rgba(224, 184, 151, 0.22);
+  background: var(--selected-bg);
   color: #f3ede0;
 }
 [data-theme="dark"] .squisq-mention-popover .squisq-mention-desc {
@@ -1822,14 +1941,14 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .squisq-mention-popover {
-    background: #2b2420;
+    background: var(--gezel-paper-inset);
     border-color: rgba(224, 184, 151, 0.28);
     color: #f3ede0;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
   }
   :root:not([data-theme="light"]) .squisq-mention-popover .squisq-mention-item.is-selected,
   :root:not([data-theme="light"]) .squisq-mention-popover .squisq-mention-item:hover {
-    background: rgba(224, 184, 151, 0.22);
+    background: var(--selected-bg);
     color: #f3ede0;
   }
   :root:not([data-theme="light"]) .squisq-mention-popover .squisq-mention-desc {
@@ -2129,14 +2248,14 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   color: #f3ede0;
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-editor-header {
-  background: #2b2420;
+  background: var(--gezel-paper-inset);
   border-bottom-color: rgba(176, 114, 76, 0.28);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar {
   background: rgba(176, 114, 76, 0.08);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tabs {
-  background: #1f1a17;
+  background: var(--gezel-paper-workshop);
   border-right-color: rgba(176, 114, 76, 0.28);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab,
@@ -2167,11 +2286,11 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button--active {
   color: #e0b897;
-  background: rgba(176, 114, 76, 0.18);
+  background: var(--selected-bg);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button--active:hover {
   color: #f3ede0;
-  background: rgba(176, 114, 76, 0.26);
+  background: var(--selected-bg-hover);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-separator {
   background: rgba(176, 114, 76, 0.28);
@@ -2223,7 +2342,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
    it up with the same terracotta + cream used by the rest of the
    composer chrome. */
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-menu {
-  background: #2b2420;
+  background: var(--gezel-paper-inset);
   border-color: rgba(176, 114, 76, 0.35);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
 }
@@ -2239,7 +2358,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-item--active {
   color: #e0b897;
-  background: rgba(176, 114, 76, 0.22);
+  background: var(--selected-bg);
 }
 
 /* Light-mode overrides — Squisq's stock light skin paints active states
@@ -2332,18 +2451,18 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-button--active,
 [data-theme="light"] .squisq-toolbar-button--active {
-  color: var(--success-text) !important;
-  background: rgba(88, 138, 63, 0.16) !important;
+  color: var(--accent-text) !important;
+  background: var(--selected-bg) !important;
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-button--active:hover,
 [data-theme="light"] .squisq-toolbar-button--active:hover {
-  color: var(--success-text) !important;
-  background: rgba(88, 138, 63, 0.26) !important;
+  color: var(--accent-text-hover) !important;
+  background: var(--selected-bg-hover) !important;
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-overflow-item--active,
 [data-theme="light"] .squisq-toolbar-overflow-item--active {
-  color: var(--success-text) !important;
-  background: rgba(88, 138, 63, 0.16) !important;
+  color: var(--accent-text) !important;
+  background: var(--selected-bg) !important;
 }
 .squisq-editor-shell[data-theme="light"] .squisq-view-tab--active,
 [data-theme="light"] .squisq-view-tab--active {
@@ -2359,12 +2478,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   }
   :root:not([data-theme="dark"]) .squisq-toolbar-button--active,
   :root:not([data-theme="dark"]) .squisq-toolbar-overflow-item--active {
-    color: var(--success-text) !important;
-    background: rgba(88, 138, 63, 0.16) !important;
+    color: var(--accent-text) !important;
+    background: var(--selected-bg) !important;
   }
   :root:not([data-theme="dark"]) .squisq-toolbar-button--active:hover {
-    color: var(--success-text) !important;
-    background: rgba(88, 138, 63, 0.26) !important;
+    color: var(--accent-text-hover) !important;
+    background: var(--selected-bg-hover) !important;
   }
 }
 

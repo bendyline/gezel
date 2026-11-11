@@ -263,7 +263,7 @@ export function DocumentsView() {
           if (!hit) return null;
           return (
             <span className="documents-search-snippet">
-              {hit.related && <span className="documents-search-related">related</span>}
+              {hit.related && <span className="documents-search-related">Related</span>}
               <SearchMarkdownSnippet
                 markdown={hit.snippet}
                 query={search.matchedQuery}

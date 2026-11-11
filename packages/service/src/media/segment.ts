@@ -17,7 +17,8 @@ import { type RgbImage, gemmaVisionTargetSize } from '../memory/image-pixels.js'
 /** Windows one file may produce: an hour of audio, or of video at 32 s per window. */
 export const MAX_MEDIA_WINDOWS = 120;
 const RUN_TIMEOUT_MS = 10 * 60_000;
-const SAFE_INPUT = [
+/** Flags every ffmpeg run over untrusted media starts with: no stdin, local files only. */
+export const SAFE_INPUT = [
   '-nostdin',
   '-hide_banner',
   '-loglevel',
@@ -33,7 +34,7 @@ export interface MediaWindow<T> {
 }
 
 /** Run ffmpeg, collecting stdout up to `maxBytes` (then stopping it). */
-function runFfmpeg(ffmpeg: string, args: string[], maxBytes: number): Promise<Buffer> {
+export function runFfmpeg(ffmpeg: string, args: string[], maxBytes: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const child = spawn(ffmpeg, args, { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
     const chunks: Buffer[] = [];

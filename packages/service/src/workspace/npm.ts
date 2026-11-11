@@ -396,10 +396,10 @@ export async function requestNpmInstalls(
 function buildApprovalPrompt(packages: NpmInstallApprovalPackage[]): string {
   if (packages.length === 1) {
     const p = packages[0]!;
-    return `A gezel wants to install the npm package **${p.package}@${p.version}** — not in the pre-vetted list. Approve?`;
+    return `Gezel wants to install the npm package **${p.package}@${p.version}** — not in the pre-vetted list. Approve?`;
   }
   const lines = packages.map((p) => `- **${p.package}@${p.version}**`).join('\n');
-  return `A gezel wants to install ${packages.length} npm packages — not in the pre-vetted list. Approve each?\n\n${lines}`;
+  return `Gezel wants to install ${packages.length} npm packages — not in the pre-vetted list. Approve each?\n\n${lines}`;
 }
 
 function keyOf(pkg: string, version: string): string {

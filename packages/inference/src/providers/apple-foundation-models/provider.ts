@@ -15,6 +15,7 @@ import {
   resolvePromptFootprint,
 } from '@bendyline/gezel';
 import { computeToolBudgetChars } from '@bendyline/gezel/local-loop';
+import { engineUnsupportedError } from '../engine-unsupported.js';
 import { ProviderQueue, runInQueue } from '../queue.js';
 import { StreamingSessionBase } from '../streaming-session.js';
 import { terminalToolClosingText } from '../terminal-tool-policy.js';
@@ -104,7 +105,7 @@ export class AppleFoundationModelsProvider implements LLMProvider {
 
   async initialize(): Promise<void> {
     if (!this.platformSupported)
-      throw actionable('Apple on-device AI is only available on Apple silicon Macs.');
+      throw engineUnsupportedError('Apple on-device AI is only available on Apple silicon Macs.');
     if (!this.helper)
       throw actionable(
         'Apple on-device AI is not installed with this build of Gezel (the gezel-apple-fm helper is missing).',

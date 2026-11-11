@@ -2,7 +2,7 @@
 id: gezel-in-docker
 title: "Gezel in Docker"
 order: 11
-summary: One command runs Gezel in a container, with every engine inside. Use the workshop from your browser, give your other apps local AI, or put the crew to work on a folder.
+summary: One command runs Gezel in a container, with every engine inside. Use Gezel from your browser, give your other apps local AI, or put Gezel to work on a folder.
 subcategory:
   id: gezel-command-line
   title: The Gezel Command Line
@@ -20,7 +20,7 @@ to read pictures, along with a web browser for tasks that visit websites.
 You need Docker. On Linux, Docker Engine; on Windows and macOS, Docker
 Desktop works too, with the limits under [Good to know](#good-to-know).
 
-## Your workshop in a browser
+## Gezel in a browser
 
 ```sh
 docker run -d --name gezel -p 127.0.0.1:6230:6230 -v gezel:/gezel ghcr.io/bendyline/gezel
@@ -68,7 +68,7 @@ docker run -d --name gezel -p 127.0.0.1:6230:6230 -v gezel:/gezel \
 
 `docker exec gezel gezel model list --available` lists the model ids.
 
-## Put the crew to work on a folder
+## Put Gezel to work on a folder
 
 To run one craftbook on the folder you are in and collect what it makes:
 
@@ -126,7 +126,7 @@ docker run -d --name gezel -p 127.0.0.1:6230:6230 -v gezel:/gezel \
 
 A new container starts at the `lockdown` [security level](security-model.md)
 and in the **Reactive + tasks** [activity mode](gezel-on-a-server.md#choose-the-activity-mode):
-the crew answers, runs the tasks you start and keeps to schedules, but does not
+Gezel answers, runs the tasks you start and keeps to schedules, but does not
 start work of its own, which on a server would compete with your requests.
 To start differently, set them for the first start:
 

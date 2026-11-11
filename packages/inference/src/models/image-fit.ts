@@ -17,6 +17,7 @@ import {
   type ImageModelManifest,
   type ImageQuality,
   MEDIA_MODEL_WONT_RUN_CODE,
+  type MediaBackend,
   type MediaCapacity,
   type MediaFitAssessment,
   type MediaMemoryPool,
@@ -96,6 +97,24 @@ export function imageMediaPool(
     return 'cpu';
   }
   return kind === 'discrete-gpu' ? 'discrete' : kind === 'unified' ? 'unified' : 'cpu';
+}
+
+/**
+ * The ggml backend sd-server computes on, by the same rules as
+ * {@link imageMediaPool}: Metal on Apple Silicon, CUDA when discovery picked
+ * a CUDA build, the processor for the Arm builds without one and for Intel
+ * Macs, and Vulkan for every other build.
+ */
+export function sdServerBackend(
+  host: { platform: NodeJS.Platform; arch: string; sdServerBin?: string | undefined } = {
+    platform: process.platform,
+    arch: process.arch,
+    sdServerBin: process.env.GEZEL_SD_SERVER_BIN,
+  },
+): MediaBackend {
+  if (host.platform === 'darwin') return host.arch === 'arm64' ? 'metal' : 'cpu';
+  if (host.sdServerBin && isCudaArchivePath(host.sdServerBin)) return 'cuda';
+  return host.arch === 'arm64' ? 'cpu' : 'vulkan';
 }
 
 /** The ceilings the device ledger applies on this machine, automatic and under the person's limit. */

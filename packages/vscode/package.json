@@ -38,7 +38,7 @@
       },
       {
         "command": "gezel.switchGezel",
-        "title": "Gezel: Switch Active Gezel"
+        "title": "Gezel: Switch Active Crew Member"
       },
       {
         "command": "gezel.switchFolder",
@@ -79,7 +79,7 @@
         "gezel.defaultGezel": {
           "type": "string",
           "default": "dev",
-          "description": "Name of the gezel that handles direct chat (the one you reach without @-mentioning)."
+          "description": "Name of the crew member that handles direct chat (the one you reach without @-mentioning)."
         },
         "gezel.spawnIfMissing": {
           "type": "boolean",
@@ -89,7 +89,7 @@
         "gezel.languageModelProvider.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Register gezels as language models in Copilot Chat's model picker. Each gezel becomes one entry (e.g. `Gezel: Maya`). Disable to keep gezels out of the picker; the chat panel still works."
+          "description": "Register crew members as language models in Copilot Chat's model picker. Each becomes one entry (e.g. `Gezel: Maya`). Disable to keep your crew out of the picker; the chat panel still works."
         },
         "gezel.codeIntel.enabled": {
           "type": "boolean",

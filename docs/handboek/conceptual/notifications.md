@@ -9,10 +9,10 @@ summary: What gezel notifies you about, how often, and how to turn it down or of
 
 Gezel only sends you a notification when something actually happened:
 
-- **a gezel asked you a question** and is waiting on your answer,
+- **Gezel asked you a question** and is waiting on your answer,
 - **work you asked for is finished**,
-- **your crew worked overnight** and the morning review is ready,
-- **a gezel reached a new level** (only with social mode on),
+- **Gezel worked overnight** and the morning review is ready,
+- **a crew member reached a new level** (only with social mode on),
 - **a project worked out that something is due.** Flashcards, for example, remind you when your next cards come up for review. The time comes from your own cards, never from a schedule picked to bring you back.
 - **a lookout you set up saw what it was watching for.** See [Cameras and lookouts](cameras-and-lookouts.md).
 

@@ -1,7 +1,7 @@
 import type { GezelSummary, ProjectDetail } from '@bendyline/gezel';
 import { displayName, roleForMatching } from '@bendyline/gezel';
 import { type ReactNode, useMemo, useState } from 'react';
-import { crewLeadLabelLower } from '../labels.js';
+import { mainCrewMemberSubtitle } from '../labels.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { GezelIcon } from './GezelIcon.js';
 import {
@@ -107,7 +107,7 @@ export function ProjectCrewRoster({
             className="primary project-crew-add"
             onClick={() => setShowAddGezel(true)}
           >
-            Add Gezel
+            Add crew member
           </button>
         )
       }
@@ -119,7 +119,9 @@ export function ProjectCrewRoster({
               { name: gezel.name, roleBasedName: gezel.roleBasedName },
               roleBasedNameOnlyMode,
             );
-            const subtitle = isLead ? `⭐ ${crewLeadLabelLower(project)}` : gezel.role;
+            const subtitle = isLead
+              ? `⭐ ${mainCrewMemberSubtitle(project, gezel.role)}`
+              : gezel.role;
             return (
               <li
                 key={gezel.id}
@@ -161,7 +163,7 @@ export function ProjectCrewRoster({
                   </span>
                   <span className="muted small">
                     {projectBoekwachter
-                      ? `${projectBoekwachter.name} studies changed files, writes short summaries and reviews, and prepares weekly digests while the workshop is quiet.`
+                      ? `${projectBoekwachter.name} studies changed files, writes short summaries and reviews, and prepares weekly digests while nothing else is running.`
                       : 'Structural file and symbol search stays available. Add the Librarian to this crew for background AI summaries, reviews, and digests.'}
                   </span>
                 </div>

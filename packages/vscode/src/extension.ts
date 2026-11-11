@@ -391,7 +391,7 @@ function buildStatusReport(state: ExtensionState): string {
   } else {
     lines.push('Daemon       : NOT connected');
   }
-  lines.push(`Active gezel : ${state.activeGezel?.name ?? '(none)'}`);
+  lines.push(`Chatting with: ${state.activeGezel?.name ?? '(none)'}`);
   lines.push(`Active proj  : ${state.activeProjectId ?? '(none)'}`);
   lines.push(`Active folder: ${state.activeFolder?.uri.fsPath ?? '(none)'}`);
   lines.push(

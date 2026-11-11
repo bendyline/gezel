@@ -29,6 +29,6 @@ Use them for sites, dashboards, and web apps; pair them with a Designer for the 
 
 ::handboek-role-tools{role=web-developer scope=tiers}
 
-## Craftbooks they run well
+## Plans they run well
 
 ::handboek-craftbook-list{role=web-developer}

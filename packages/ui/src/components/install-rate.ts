@@ -46,6 +46,22 @@ export function recordInstallSample(rate: InstallRate, at: number, bytes: number
   };
 }
 
+/** A time-left figure needs a longer look than a speed does. */
+const ESTIMATE_MIN_SPAN_MS = 20_000;
+
+/**
+ * The rate to base "about 12 min left" on, or null until it has settled. The
+ * first pieces arrive in bursts: twelve seconds into a first-run download the
+ * welcome said "about 10 h 20 min left" and warned of a slow connection, and
+ * twenty-five seconds later it said 1 h 40 min.
+ */
+export function steadyBytesPerSecond(rate: InstallRate): number | null {
+  const first = rate.samples[0];
+  const last = rate.samples.at(-1);
+  if (!first || !last || rate.bytesPerSecond === null) return null;
+  return last.at - first.at >= ESTIMATE_MIN_SPAN_MS ? rate.bytesPerSecond : null;
+}
+
 export function formatRate(bytesPerSecond: number): string {
   const mb = bytesPerSecond / 1024 ** 2;
   return mb >= 10 ? `${Math.round(mb)} MB/s` : `${mb.toFixed(1)} MB/s`;

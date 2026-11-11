@@ -9,19 +9,18 @@
  *    every step (`generalist`), or by a specialist per step, each in its own
  *    session (`stepwise`). Steps, gates and fanout are identical in both
  *    modes; only who runs them and how much context carries over changes.
- *  - **Kickoff shape** ({@link resolveGeneralistKickoff}): whether the
- *    Meester's `start_project` routes a concrete ask to a single solo lead
- *    (the Builder template with every build-loop step pinned to them) or
- *    recruits a crew.
+ *  - **New project shape** (`resolveNewProjectMode` in `task-strategy.ts`):
+ *    whether a project nobody chose a shape for is one multirole gezel
+ *    working alone or a crew under a crew lead. It follows the task strategy
+ *    the install's default model works best under, so an explicit `on` /
+ *    `off` here decides it and `auto` leaves it to the model.
  *
- * `auto` deliberately differs between the two. Kickoff keeps the measured
- * rule — self-orchestrating providers plus local MEDIUM (paired N=3 core
- * A/B, 2026-07-17, llama.cpp: flat >= scaffold on every scenario, zero
- * regressions across 24 paired trials) — and adds the raw cloud SDKs so every
- * frontier provider gets the same shape. Task execution is generalist for
- * frontier providers only: the single-session + union-tool-surface semantics
- * are unmeasured on local engines, where tool schemas dominate prompt mass,
- * so local models stay stepwise until the generalist eval says otherwise.
+ * Task execution under `auto` is generalist for frontier providers only: the
+ * single-session + union-tool-surface semantics are unmeasured on local
+ * engines, where tool schemas dominate prompt mass, so local models stay
+ * stepwise until the generalist eval says otherwise.
+ * {@link resolveGeneralistKickoff} is the kickoff rule the project shape
+ * replaced (2026-11-10); the phone still reads it.
  *
  * Kept dependency-free (string in, union out) so the runtime, the MCP child
  * and the eval harness resolve the mode the same way. See
@@ -94,7 +93,13 @@ export function resolveTaskExecutionMode(
 }
 
 /**
- * Resolve the kickoff shape the Meester's `start_project` uses.
+ * @deprecated The desktop takes a new project's shape from
+ * `resolveNewProjectMode` (`task-strategy.ts`), which follows the default
+ * model's preferred task strategy and so gives every on-device tier a solo
+ * project. This is the rule before that, measured for local MEDIUM only
+ * (paired N=3 core A/B, 2026-07-17, llama.cpp: flat >= scaffold on every
+ * scenario, zero regressions across 24 paired trials). The phone's prompt
+ * still reads it.
  *
  *  - explicit `on` / `off` → that value (the escape hatch: `off` forces the
  *    full crew on a frontier provider).

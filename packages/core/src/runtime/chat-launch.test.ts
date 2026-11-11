@@ -101,6 +101,8 @@ describe('phone chat launch', () => {
     expect(thread.at(-1)).toMatchObject({ synthetic: 'craftbook-launch' });
     expect((await store.getPromptDraft(session.projectId, draft.id))?.status).toBe('sent');
     expect(await tasks()).toHaveLength(1);
+    // Titled with the request, not with the plan that runs it.
+    expect((await tasks())[0]?.title).toBe('Turn these meeting notes into actions for the team');
     // The task names the message it answers, as on the desktop.
     const asked = thread.at(-2)!;
     expect(asked.id).toEqual(expect.any(String));
@@ -115,6 +117,7 @@ describe('phone chat launch', () => {
         key: `${session.id}@${asked.at}`,
         kind: 'work',
         summary: message,
+        title: 'Turn these meeting notes into actions for the team',
         taskRefs: [(await tasks())[0]?.ref],
       }),
     ]);

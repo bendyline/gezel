@@ -78,6 +78,7 @@ export class VideoProviderManager {
           baseUrl: remote.baseUrl,
           token: remote.token,
           fetch,
+          onThisComputer: remote.managed === 'machine-engine',
         }),
       };
       this.remoteCache.set(remote.remoteId, cached);

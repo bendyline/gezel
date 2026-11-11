@@ -1,5 +1,5 @@
 import { expect, test } from './fixtures/test.js';
-import { expectHandboekArticle } from './helpers/handboek.js';
+import { expectHandboekArticle, openFirstHandboekArticle } from './helpers/handboek.js';
 import { gotoHome, openArea } from './helpers/nav.js';
 
 test('Handboek readiness waits for article content after the view has mounted', async ({
@@ -23,6 +23,7 @@ test('Handboek readiness waits for article content after the view has mounted', 
   let readiness: Promise<void> | undefined;
   try {
     await openArea(page, 'knowledge');
+    await openFirstHandboekArticle(page);
     readiness = expectHandboekArticle(page).then(() => {
       ready = true;
     });
@@ -45,6 +46,7 @@ test('Handboek readiness waits for article content after the view has mounted', 
 test('Handboek navigation loads the newly selected article', async ({ page }) => {
   await gotoHome(page);
   await openArea(page, 'knowledge');
+  await openFirstHandboekArticle(page);
   await expectHandboekArticle(page);
   const row = page.locator('.knowledge-doc-row:not([aria-current="true"])').first();
   const article = { title: (await row.locator('.knowledge-doc-title').innerText()).trim() };
@@ -57,6 +59,7 @@ test('Handboek navigation loads the newly selected article', async ({ page }) =>
 test('Handboek article links open catalog documents', async ({ page }) => {
   await gotoHome(page);
   await openArea(page, 'knowledge');
+  await openFirstHandboekArticle(page);
   await expectHandboekArticle(page);
   const previousBody = await page.locator('.knowledge-reader-body').innerText();
   await page

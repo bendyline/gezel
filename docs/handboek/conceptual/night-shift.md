@@ -1,14 +1,14 @@
 ---
 id: night-shift
-title: "The Night Shift: work your crew does while you sleep"
+title: "The Night Shift: work Gezel does while you sleep"
 order: 7.5
 summary: A nightly window for quiet background work — and the roles that bring their own.
 ---
 
-# The Night Shift: work your crew does while you sleep
+# The Night Shift: work Gezel does while you sleep
 
 The **Night Shift** is a window — 22:00 to 06:00 unless you change it in
-Settings — when your crew is allowed to work on things that don't need
+Settings — when Gezel is allowed to work on things that don't need
 you. Reviews get written, indexes get refreshed, translations catch up.
 In the morning there's a report waiting instead of a backlog.
 
@@ -53,7 +53,7 @@ project.
 
 ## What night work looks like
 
-Night work is deliberately quiet-handed. The suggested craftbooks write
+Night work is deliberately quiet-handed. The suggested plans write
 **reports, findings, and sidecar files** — a security posture report in
 the artifacts drawer, translations beside the originals — rather than
 editing your work in place. Each enabled item runs **at most once per
@@ -81,7 +81,7 @@ automated use: some consumer plans don't.
 Work that's already running always finishes; only new work is held. Held
 work resumes on its own when a quota window resets (if the machine is
 awake) or the next night, and the moon menu says what's being protected
-and why. Gezels on local models spend nothing and are never held.
+and why. Work on local models spends nothing and is never held.
 
 ## Fixes that arrive as proposals
 
@@ -95,8 +95,8 @@ together, each with the reasoning written out and the exact edits laid out
 line by line. Your files are untouched. You read the proposal, look at the
 diff, and apply it if you agree.
 
-That's deliberate, and it has a useful consequence: **it works on folders your
-crew isn't allowed to edit.** You never have to hand over write access to get
+That's deliberate, and it has a useful consequence: **it works on folders
+Gezel isn't allowed to edit.** You never have to hand over write access to get
 a fix drafted. It also works with nothing but the model on your own machine —
 no network, no service, nobody's cloud.
 
@@ -131,9 +131,9 @@ there. A problem the Librarian found is marked fixed when you apply the
 proposal that fixes it, not when the fix is drafted, and goes back to open if
 you dismiss it.
 
-If you'd rather your crew didn't do this, turn off nightly fixing in the
-project's settings. It's on by default only because you assembled a crew that
-can do it.
+If you'd rather Gezel didn't do this, turn off nightly fixing in the
+project's settings. It's on by default only because the project's crew has
+both roles it takes.
 
 ## The morning review
 
@@ -141,7 +141,7 @@ When the window closes, gezel gathers what the shift accomplished and
 puts it where you'll see it: one notification on your desktop, Home opens on
 **This morning**, and the moon menu grows a **Done last night** list. This
 morning leads with what needs a decision (change proposals, then new
-reports), then what finished and how much your crew read and described, then
+reports), then what finished and how much Gezel read and described, then
 what is already queued for tonight. It stays until you dismiss it. On the
 first morning of a new week it also links **Your crew's week**, a one-page
 recap of every night and every folder's weekly digest.
@@ -166,14 +166,14 @@ where they are. **Copy to a folder…** gathers the full-size originals in one
 place when you want them.
 
 Reports can go further than prose. A recommendation that is genuinely
-one click away — fire a craftbook, delegate a fix, apply a reviewed set
+one click away — start a plan, delegate a fix, apply a reviewed set
 of file edits — appears **inside the report as an action card**. You see
 exactly what would run (including the full diff for file edits) and fire
 it, or dismiss it, right from the page. Nothing a report suggests ever
 runs on its own: firing is always your click, and Gezel records the
 resulting task and observed tool activity in History.
 
-A night gets a morning card when your crew made something: a change
+A night gets a morning card when Gezel made something: a change
 proposal, a report, or finished work. A night held back for a reason you
 can fix also gets one, once: it ran on battery, or the quota reserve held
 the work. The card says why and offers the fix. A night when the computer

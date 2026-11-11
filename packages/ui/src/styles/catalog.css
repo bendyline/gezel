@@ -421,11 +421,11 @@
 
 .ollama-pull {
   padding: 0.5rem 0.65rem;
-  border: 1px solid color-mix(in srgb, var(--titlebar) 35%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sage-deep) 35%, transparent);
   border-radius: var(--radius-md);
   /* Tint matches the sage titlebar so active downloads read as part of the
      gezel theme instead of a random blue highlight. */
-  background: color-mix(in srgb, var(--titlebar) 15%, transparent);
+  background: color-mix(in srgb, var(--sage-deep) 15%, transparent);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -767,8 +767,6 @@
   color: var(--text-muted);
   font-size: var(--text-2xs);
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   white-space: nowrap;
   cursor: help;
 }
@@ -1007,6 +1005,217 @@
   border-top: 1px solid var(--border);
 }
 
+/* The installed-models heading on an engine or media page, with its
+   "Add a model…" key at the right of the heading row. */
+.model-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.ollama-section .model-list-heading > h4 {
+  margin: 0;
+}
+
+.model-list-heading > button {
+  flex-shrink: 0;
+}
+
+/* The catalog a model page downloads from, opened by "Add a model…". Wide
+   enough for the two-column catalog card grid; only the body scrolls, so the
+   footer's keys stay put. */
+.add-model-dialog {
+  width: min(60rem, calc(100vw - 2rem));
+  min-width: 0;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 3rem);
+  overflow: hidden;
+}
+
+.add-model-dialog > :not(.add-model-dialog-body) {
+  flex-shrink: 0;
+}
+
+.add-model-dialog > h3,
+.add-model-dialog > p {
+  margin: 0;
+}
+
+.add-model-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-right: 0.35rem;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.add-model-dialog-body > :first-child {
+  margin-top: 0;
+}
+
+.add-model-dialog > .gz-dialog-actions {
+  flex-wrap: wrap;
+  margin-top: 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Other ways to add a model sit at the left of the footer, Done at the right. */
+.add-model-dialog-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-right: auto;
+}
+
+/* Adding a model from Hugging Face: a link, a review with its checks, then
+   the download and the post-download fitness check. Only the body scrolls,
+   so the keys stay put. */
+.model-import-dialog {
+  width: min(40rem, calc(100vw - 2rem));
+  min-width: 0;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 3rem);
+  overflow: hidden;
+}
+
+.model-import-dialog > :not(.model-import-dialog-body) {
+  flex-shrink: 0;
+}
+
+.model-import-dialog > h3,
+.model-import-dialog > p {
+  margin: 0;
+}
+
+.model-import-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-right: 0.35rem;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.model-import-dialog > .gz-dialog-actions {
+  margin-top: 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+.model-import-enter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.model-import-enter input {
+  width: 100%;
+}
+
+.model-import-or {
+  margin: 0.35rem 0 0;
+}
+
+.model-import-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.model-import-review p {
+  margin: 0;
+}
+
+.model-import-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.model-import-name {
+  overflow-wrap: anywhere;
+}
+
+.model-import-byline {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.6rem;
+  row-gap: 0.15rem;
+  align-items: baseline;
+}
+
+.model-import-notice {
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.model-import-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.model-import-choice-trigger {
+  min-width: 14rem;
+}
+
+.model-import-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.model-import-check {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.model-import-check-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 500;
+}
+
+/* A status color never stands alone: the dot sits beside its word. */
+.model-import-dot {
+  flex: 0 0 auto;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--status-ready);
+}
+
+.model-import-check[data-status="warn"] .model-import-dot {
+  background: var(--status-attention);
+}
+
+.model-import-check[data-status="fail"] .model-import-dot {
+  background: var(--danger);
+}
+
+.model-import-check[data-status="fail"] .model-import-check-status {
+  color: var(--danger-text);
+}
+
+.model-import-check-text {
+  overflow-wrap: anywhere;
+}
+
+.model-import-blocked {
+  display: block;
+  color: var(--danger-text);
+}
+
 .catalog-ollama-meta {
   flex: 1;
   min-width: 0;
@@ -1192,7 +1401,7 @@ a.license-button:hover {
   align-items: center;
   gap: 0.35rem;
   padding: 0.2rem 0.5rem;
-  background: rgba(79, 125, 255, 0.08);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   border-radius: 12px;
   font-size: var(--text-xs);
 }
@@ -1298,8 +1507,6 @@ a.license-button:hover {
 .toolsets-tile-caption {
   font-size: var(--text-2xs);
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
 }
 
 .toolsets-tile-actions {
@@ -1480,7 +1687,7 @@ a.license-button:hover {
 
 .new-gezel-template-form {
   padding: 0.6rem;
-  background: rgba(79, 125, 255, 0.06);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   border-radius: var(--radius-md);
   display: flex;
   flex-direction: column;
@@ -1640,8 +1847,6 @@ a.license-button:hover {
 .gezel-template-badge {
   font-size: var(--text-2xs);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--accent-text);
   border: 1px solid var(--accent);
   border-radius: 3px;
@@ -1758,7 +1963,7 @@ a.license-button:hover {
 
 .ambient-theme-select-menu .gz-select-item[data-state="checked"] {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 15%, var(--surface));
+  background: var(--selected-bg);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
 }
 

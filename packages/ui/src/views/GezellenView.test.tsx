@@ -118,7 +118,7 @@ describe('GezellenView', () => {
     render(<GezellenView activeProjectsByGezel={new Map([['gz-2', new Set(['p2'])]])} />);
 
     const working = await screen.findByRole('button', {
-      name: 'Bob is working. Open gezel.',
+      name: 'Bob is working. Open their page.',
     });
     expect(working.querySelectorAll('.project-row-thinking-dot')).toHaveLength(3);
 
@@ -193,10 +193,12 @@ describe('GezellenView', () => {
     });
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /\+ New gezel/ }));
+    await user.click(screen.getByRole('button', { name: /\+ New crew member/ }));
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { level: 3, name: /New gezel/ })).toBeInTheDocument();
+      expect(
+        screen.getByRole('heading', { level: 3, name: /New crew member/ }),
+      ).toBeInTheDocument();
     });
 
     // Fill the role field via its placeholder; the label-then-querySelector
@@ -223,7 +225,7 @@ describe('GezellenView', () => {
     await screen.findByText('Maya');
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /\+ New gezel/ }));
+    await user.click(screen.getByRole('button', { name: /\+ New crew member/ }));
     await user.click(screen.getByRole('button', { name: 'Pick a random name' }));
 
     expect(screen.getByPlaceholderText('e.g. Ada')).toHaveValue('Robin');
@@ -237,7 +239,7 @@ describe('GezellenView', () => {
     });
 
     const user = userEvent.setup();
-    await user.click(screen.getByRole('button', { name: /\+ New gezel/ }));
+    await user.click(screen.getByRole('button', { name: /\+ New crew member/ }));
     await user.click(screen.getByRole('tab', { name: /From template/ }));
 
     await waitFor(() => {

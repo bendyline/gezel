@@ -20,12 +20,12 @@ You choose the level in **Settings → Security & compliance**, or with `gezel s
 | Traffic | What it carries | `super-lockdown` | `lockdown` | `free` |
 | --- | --- | --- | --- | --- |
 | Local models (llama.cpp, MLX, DwarfStar, Ollama) | Nothing leaves; the model runs on this machine | Allowed | Allowed | Allowed |
-| Cloud model providers (API keys, Claude and Codex command-line tools, Copilot) | Your conversation, and any files a gezel reads in it, to the provider you chose | **Blocked** | Allowed | Allowed |
-| Web search, page fetches and Wikipedia lookups | What a gezel searches for or the address it opens | **Blocked** | **Blocked** | Allowed |
+| Cloud model providers (API keys, Claude and Codex command-line tools, Copilot) | Your conversation, and any files Gezel reads in it, to the provider you chose | **Blocked** | Allowed | Allowed |
+| Web search, page fetches and Wikipedia lookups | What Gezel searches for or the address it opens | **Blocked** | **Blocked** | Allowed |
 | Mail sync and sending | Your mailbox, to and from your mail provider | **Blocked** | **Blocked** | Allowed |
 | Connectors (mail, calendars, issue trackers and similar) | The connected account's data, copied into the project | **Blocked**: no data moves | When you start a sync | Also syncs in the background |
 | Third-party toolsets (community MCP servers) | Whatever that toolset sends; it is outside code Gezel cannot confine | **Blocked** | **Blocked** | Allowed |
-| Package scripts a gezel runs (`npm run`, `npx`) | Whatever the script sends; package scripts run with network access | **Blocked** | **Blocked** | Allowed |
+| Package scripts Gezel runs (`npm run`, `npx`) | Whatever the script sends; package scripts run with network access | **Blocked** | **Blocked** | Allowed |
 | Automatic update checks (the app, and live catalog updates if you turn them on) | Version checks to Gezel's GitHub releases and to npm | **Blocked** | Allowed | Allowed |
 | Downloads you start: models, on-device engines, knowledge catalogs | Requests for those files, from Hugging Face and Gezel's GitHub releases | Allowed | Allowed | Allowed |
 | First-start tool setup | Downloads of the browser-automation tools from npm and Playwright | Allowed | Allowed | Allowed |
@@ -38,9 +38,9 @@ The levels are presets. **Settings → Security & compliance** can turn individu
 
 **Cloud model providers** receive what you would send them using their own product, under their terms. Gezel talks to them directly from this machine and adds no middleman. At `super-lockdown`, the service refuses to start a cloud chat at all, whichever path asks for one.
 
-**Web search and page fetches** carry what a gezel is researching. They are the main reason `lockdown` and `free` differ: a model that can reach the open web can be steered by what it reads there, so this is off by default.
+**Web search and page fetches** carry what Gezel is researching. They are the main reason `lockdown` and `free` differ: a model that can reach the open web can be steered by what it reads there, so this is off by default.
 
-**Connectors** are run by the service, not the model. The service holds the credential, fetches the data and writes it into the project as files the crew reads. At `lockdown` they move data only when you ask; at `free` they also keep themselves in sync.
+**Connectors** are run by the service, not the model. The service holds the credential, fetches the data and writes it into the project as files Gezel reads. At `lockdown` they move data only when you ask; at `free` they also keep themselves in sync.
 
 **Third-party toolsets and package scripts** are code Gezel did not write and cannot sandbox, so they may reach the network whatever they like. They are available at `free` only. (One narrow exception: Gezel's own local preview browser may run at lower levels, locked to pages inside your project.)
 

@@ -4,8 +4,8 @@ import type {
   ProjectDetail,
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
-import { getProjectType, resolveProjectTypeId } from '@bendyline/gezel';
-import { useEffect, useState } from 'react';
+import { getProjectType, projectHoldsCode, resolveProjectTypeId } from '@bendyline/gezel';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { FirstLookCard } from '../components/FirstLookCard.js';
 import { MarkdownField } from '../components/MarkdownField.js';
@@ -16,6 +16,7 @@ import { workspaceIndexLabel } from '../components/WorkspaceIndexPane.js';
 import { useDebugMode } from '../components/useDebugMode.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { RailSection } from './home/RailSection.js';
+import { projectActivityLine, taskTitlesFrom } from './project-activity-line.js';
 
 /**
  * The project's gestalt page — everything the boekwachter has learned,
@@ -119,6 +120,10 @@ export function ProjectOverviewView({
   const indexingDisabled = indexStatus?.state === 'disabled';
   const aiPending = indexStatus?.aiScanPending === true;
   const reviewPending = indexStatus?.enrichment?.reviews?.pending ?? 0;
+  // The map, folder notes and architecture summary are a codebase's; an
+  // invoice book or a checklist is never promised them.
+  const holdsCode = projectHoldsCode(project);
+  const taskTitles = useMemo(() => taskTitlesFrom(recent), [recent]);
 
   return (
     <div className="project-overview">
@@ -163,7 +168,7 @@ export function ProjectOverviewView({
         </p>
       )}
 
-      {!map?.indexed && !indexingDisabled && (
+      {holdsCode && !map?.indexed && !indexingDisabled && (
         <p className="muted">
           The Librarian hasn't scanned this workspace yet. The map, folder notes, and architecture
           summary appear here once indexing runs.
@@ -175,7 +180,7 @@ export function ProjectOverviewView({
           <p className="project-overview-architecture">{map.architecture}</p>
         </RailSection>
       )}
-      {map?.indexed && !map.architecture && (
+      {holdsCode && map?.indexed && !map.architecture && (
         <RailSection label="Architecture">
           <p className="muted small">
             Not written yet — the Librarian distills an architecture note after it has summarized
@@ -285,7 +290,11 @@ export function ProjectOverviewView({
                   <span className="muted small" title={formatAbsoluteTime(at)}>
                     {formatRelativeTime(at)}
                   </span>{' '}
-                  {e.entryType === 'event' ? e.summary : `Chat: ${e.title}`}
+                  {debugMode
+                    ? e.entryType === 'event'
+                      ? e.summary
+                      : `Chat: ${e.title}`
+                    : projectActivityLine(e, projectId, taskTitles)}
                 </li>
               );
             })}

@@ -240,9 +240,18 @@ export function previewableArtifact(files: readonly ReferencedFile[]): string | 
   )?.path;
 }
 
+/** A file as the model reading the thread back needs it: which drawer it is in. */
 function fileLabel(file: ReferencedFile): string {
   return file.kind === 'artifact' ? `\`${file.path}\`` : `\`${file.path}\` (in the project folder)`;
 }
+
+/**
+ * Where finished work lives, as the person reads it: in the project. The
+ * same result was "in the artifacts drawer", "in the project folder" and "on
+ * the project's Output page" (2026-11-09). The drawer is the machinery's
+ * word; a linked path opens the file wherever it is.
+ */
+const IN_THE_PROJECT = 'in the project';
 
 function sameFile(a: ReferencedFile, b: ReferencedFile): boolean {
   return a.kind === b.kind && a.path.toLowerCase() === b.path.toLowerCase();
@@ -271,7 +280,7 @@ export function taskFinishedQuestion(opts: {
   const name = taskPersonName(task);
   const lines = [
     board
-      ? `${name ? `**${name}** is` : 'It is'} ready to look at on the project's Output page.`
+      ? `${name ? `**${name}** is` : 'It is'} ready to look at ${IN_THE_PROJECT}.`
       : name
         ? `**${name}** is finished.`
         : deliverable
@@ -360,13 +369,14 @@ export async function loadMakerQuestion(
 
 /**
  * The message itself: warm, short, and only true things. With a deliverable
- * it names that file by what it is ("Your PDF for **Invoices** is ready") and
- * leaves the path to the card that closes the bubble; the working files the
- * task made on the way stay on the task. The bakery's wrap-up had listed
- * `pdf/task-2/report.md` and two outlines under the book's name. A board is
- * "ready to look at", never "finished": its kickoff ends at a first draft.
- * The maker's open question is passed on in their words. What the next model
- * turn needs (the ref and the paths) rides in {@link wrapUpModelNote}.
+ * the finished card says what was made and that it is ready, so the message
+ * does not say it again: "Ready" read three times over one result, on the
+ * tracker, on the card and in "Your Word document is ready: …" (2026-11-09).
+ * It keeps what the card cannot say: what was checked, the maker's open
+ * question in their words, and what to do next. The working files the task
+ * made on the way stay on the task. Without a deliverable it names the work
+ * and links what it made. What the next model turn needs (the ref and the
+ * paths) rides in {@link wrapUpModelNote}.
  */
 export function composeTaskWrapUp(
   task: Task,
@@ -378,56 +388,46 @@ export function composeTaskWrapUp(
   // A project type's page reads the file; the page is what to look at.
   const board = deliverable?.view === 'output-page';
   const name = taskPersonName(task);
-  const lines = [wrapUpHeadline(name, deliverable, board)];
+  // Named by kind rather than "it": the thread's preview line and the
+  // text-only surfaces have no card to point at.
+  const thing = board
+    ? 'the project'
+    : deliverable
+      ? `your ${deliverableFormatNoun(deliverable.path)}`
+      : undefined;
+  const blocks: string[] = [];
   if (!deliverable) {
+    blocks.push(name ? `All done — **${name}** is finished.` : 'All done — the work is finished.');
     const shown = outputs.slice(0, WRAP_UP_MAX_FILES);
     if (shown.length === 1) {
-      lines.push('', `Here's what it made: ${fileLabel(shown[0]!)}`);
+      blocks.push(`Here's what it made: \`${shown[0]!.path}\``);
     } else if (shown.length > 1) {
-      lines.push('', "Here's what it made:", '', ...shown.map((file) => `- ${fileLabel(file)}`));
+      blocks.push("Here's what it made:", shown.map((file) => `- \`${file.path}\``).join('\n'));
       const more = outputs.length - shown.length;
-      if (more > 0) lines.push('', `…and ${more} more on the task page.`);
+      if (more > 0) blocks.push(`…and ${more} more on the task page.`);
     }
   }
   const checks = renderFigureReview(figures, 'Before you send anything, check:');
-  if (checks.length > 0) lines.push('', ...checks);
+  if (checks.length > 0) blocks.push(checks.join('\n'));
   if (ask) {
-    lines.push(
-      '',
+    blocks.push(
       `${ask.name} asks: “${ask.question}”`,
-      '',
-      deliverable
-        ? `Answer ${ask.name} with **Make changes**, or open it to see it first.`
+      thing
+        ? `Answer ${ask.name} with **Make changes**, or open ${thing} first.`
         : `Answer ${ask.name} in the project's chat, or tell me what you would like.`,
     );
-    return lines.join('\n');
+    return blocks.join('\n\n');
   }
-  lines.push(
-    '',
+  blocks.push(
     board
       ? 'Open the project to see it, or tell me what you would like changed.'
-      : deliverable
-        ? 'Open it to review, or tell me what you would like changed.'
+      : thing
+        ? `Open ${thing} to review, or tell me what you would like changed.`
         : outputs.length > 0
           ? 'Open any of them to review, or tell me what you would like changed.'
           : 'The task page has every step. Tell me if you would like anything changed.',
   );
-  return lines.join('\n');
-}
-
-function wrapUpHeadline(
-  name: string | undefined,
-  deliverable: ReferencedFile | null | undefined,
-  board: boolean,
-): string {
-  if (board) {
-    return `${name ? `**${name}** is` : 'It is'} ready to look at on the project's Output page.`;
-  }
-  if (deliverable) {
-    const noun = deliverableFormatNoun(deliverable.path);
-    return name ? `Your ${noun} for **${name}** is ready.` : `Your ${noun} is ready.`;
-  }
-  return name ? `All done — **${name}** is finished.` : 'All done — the work is finished.';
+  return blocks.join('\n\n');
 }
 
 /**

@@ -38,6 +38,10 @@ import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { navigateToTab, openProjectFileActions, runNavActions } from '../components/nav-actions.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useProjectTaskEvents, useTaskEvents, useTaskResult } from '../components/useTaskResult.js';
+import {
+  useRestoredViewPart,
+  useViewLocation,
+} from '../components/view-history/ViewHistoryContext.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { Select } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
@@ -176,9 +180,14 @@ export function TaskDetail({
   // Chat is where a running task is followed. A draft's description and
   // outcomes are edited on Task, and a task assigned to the person has no
   // chat, so those two open there instead. A schedule has no chat of its own.
-  const [tab, setTab] = useState<'task' | 'chat'>(() =>
-    task.status === 'draft' || task.assignee.kind === 'user' || scheduleHost ? 'task' : 'chat',
-  );
+  // Back to this task reopens the tab it was left on.
+  const restoredPart = useRestoredViewPart('task');
+  const [tab, setTab] = useState<'task' | 'chat'>(() => {
+    if (restoredPart?.value === 'task' || restoredPart?.value === 'chat') return restoredPart.value;
+    return task.status === 'draft' || task.assignee.kind === 'user' || scheduleHost
+      ? 'task'
+      : 'chat';
+  });
   const [nightShift, setNightShift] = useState<NightShiftStatusResponse | null>(null);
   const [engagementMode, setEngagementMode] = useState<AIEngagementMode | undefined>(undefined);
   // A child task names its parent in the header, so the person can see what
@@ -214,6 +223,15 @@ export function TaskDetail({
     setSelectedStepId(null);
     setTab(next);
   }, []);
+  // The view stack: Task and Chat are places; a step's panel is not, so Back
+  // never walks a run's steps one by one.
+  useViewLocation('task', {
+    part: { key: tab, value: tab, label: tab === 'chat' ? 'Chat' : 'Task' },
+    title: task.title,
+    onRestore: (part) => {
+      if (part.value === 'task' || part.value === 'chat') handleSelectTab(part.value);
+    },
+  });
   // Follow the cursor: when we're viewing the step that was active and it
   // advances (e.g. after a Complete), move the selection along with it. Never
   // steals focus while on the Task/Chat views (no step selected).
@@ -670,7 +688,7 @@ export function TaskDetail({
           {isSystemJob ? (
             <div
               className="task-system-owner"
-              title="This gezel manages a service-run job. It does not open a duplicate chat turn."
+              title={`${systemOwner?.name ?? 'The Librarian'} manages a service-run job. It does not open a duplicate chat turn.`}
             >
               {systemOwner && (
                 <GezelIcon

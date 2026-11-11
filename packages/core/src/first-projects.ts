@@ -18,12 +18,29 @@ import type { InterestAreaId } from './interests/areas.js';
  * marker in the list were promoted ahead of that so every interest area has
  * starts of its own; any that fail the `first-projects` suite come out.
  *
- * A card prefills its sentence into the composer rather than sending it, so
- * the person makes it theirs ("Lisbon" becomes "Kyoto") before anyone reads
- * it. The catalog package's data-contract test holds each `typeId` to its
+ * A card never sends. One that needs nothing from the person (it brings a
+ * sample, or it is a game) puts its sentence in the composer. One that needs
+ * what only the person can say carries an `ask`: the card asks its question,
+ * the composer gets the opening words, and the person finishes the sentence.
+ * "Send an invoice" used to write an illustrator and her two clients into
+ * the box of someone who runs a bakery.
+ *
+ * The catalog package's data-contract test holds each `typeId` to its
  * routing and each `craftbookId` and sample to the pinned catalog, so a
  * renamed type or a removed book fails there, not on a first run.
  */
+export interface FirstProjectAsk {
+  /** What the meester asks when the card is picked. */
+  question: string;
+  /**
+   * The words the composer starts with. They name the work, so the request
+   * routes to its project type whatever the person adds.
+   */
+  opening: string;
+  /** One way to finish the sentence, shown as an example and never sent for the person. */
+  example: string;
+}
+
 interface FirstProjectBase {
   id: string;
   /** The interest area the welcome files it under. */
@@ -31,8 +48,14 @@ interface FirstProjectBase {
   title: string;
   /** What the person ends up with, in a line. */
   hint: string;
-  /** The editable sentence the card puts in the composer. */
+  /**
+   * The whole request as a sentence: what the evals send, and what the card
+   * puts in the composer when it has no `ask`. With an `ask` it is the
+   * opening followed by the example.
+   */
   prompt: string;
+  /** Set when the work needs the person's own details to start. */
+  ask?: FirstProjectAsk;
   /**
    * Passed on a phone's own model in the phone runtime (2 of 3 runs). A phone
    * offers only these; the desktop offers every entry.
@@ -64,6 +87,11 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     hint: 'A day-by-day plan and a packing list, on a trip board.',
     prompt:
       'Plan a trip to Lisbon next spring for the four of us, about a week, with a packing list.',
+    ask: {
+      question: 'Where to, when, and who is going?',
+      opening: 'Plan a trip to',
+      example: 'Lisbon next spring for the four of us, about a week, with a packing list.',
+    },
     typeId: 'trip-planner',
     // Shipped on the phone before the phone bar existed; the phone column
     // of the eval tracker is what confirms or removes it.
@@ -142,6 +170,12 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     hint: 'A short update your team can read in a minute.',
     prompt:
       'Write a status report for my team: we shipped the new onboarding flow, the billing migration slipped a week, and hiring is on track.',
+    ask: {
+      question: 'What has happened since your last update?',
+      opening: 'Write a status report for my team:',
+      example:
+        'we shipped the new onboarding flow, the billing migration slipped a week, and hiring is on track.',
+    },
     craftbookId: 'status-report',
   },
   {
@@ -151,6 +185,11 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     title: 'Draft a proposal',
     hint: 'Scope, timeline and price, ready to send.',
     prompt: "Draft a proposal for redesigning a local bakery's website, about four weeks of work.",
+    ask: {
+      question: 'Who is the proposal for, and what is the work?',
+      opening: 'Draft a proposal for',
+      example: "redesigning a local bakery's website, about four weeks of work.",
+    },
     craftbookId: 'proposal-sow',
   },
   {
@@ -161,6 +200,11 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     hint: 'This month’s news, written to be read.',
     prompt:
       "Write this month's newsletter for my pottery studio: a new glaze, a spring class, and a studio sale.",
+    ask: {
+      question: 'Who is it for, and what is new this month?',
+      opening: "Write this month's newsletter for",
+      example: 'my pottery studio: a new glaze, a spring class, and a studio sale.',
+    },
     craftbookId: 'newsletter-issue',
   },
   {
@@ -171,6 +215,13 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     hint: 'Your clients and what they owe, on an office board.',
     prompt:
       "Start a project to run my freelance office. I'm an illustrator, and two clients owe me: Harbor Books $1,200 for a book cover and Riverside Cafe $450 for a menu, both due at the end of the month.",
+    ask: {
+      // The board needs what they do as well as who owes what.
+      question: 'What do you do, and who owes you how much?',
+      opening: 'Start a project to run my freelance office.',
+      example:
+        "I'm an illustrator, and two clients owe me: Harbor Books $1,200 for a book cover and Riverside Cafe $450 for a menu, both due at the end of the month.",
+    },
     typeId: 'freelance-office',
   },
   {
@@ -180,6 +231,11 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     title: 'Plan a week of posts',
     hint: 'Drafts in your voice, ready to publish.',
     prompt: 'Start a project to plan a week of LinkedIn posts for my pottery studio.',
+    ask: {
+      question: 'What is your business, and what should the posts be about?',
+      opening: 'Start a project to plan a week of LinkedIn posts for',
+      example: 'my pottery studio.',
+    },
     typeId: 'social-feed',
   },
   {
@@ -192,6 +248,11 @@ export const FIRST_PROJECTS: readonly FirstProject[] = [
     typeId: 'word-clues',
   },
 ];
+
+/** What the card puts in the composer: its opening words, or its whole sentence. */
+export function firstProjectDraft(first: FirstProject): string {
+  return first.ask ? `${first.ask.opening} ` : first.prompt;
+}
 
 /**
  * The areas the default spread draws from when the person chose nothing, in

@@ -30,7 +30,7 @@ export const PROJECT_PROPERTY_DEFINITIONS: ProjectPropertyDefinition[] = [
     id: 'content.language',
     label: 'Designated language',
     description:
-      'The language this project’s content targets — e.g. what a translator gezel translates into. Free text; a language name or BCP-47 tag both work.',
+      'The language this project’s content targets — e.g. what a translator translates into. Free text; a language name or BCP-47 tag both work.',
     kind: 'string',
     options: ['Nederlands', 'English', 'Deutsch', 'Français', 'Español', '日本語'],
   },

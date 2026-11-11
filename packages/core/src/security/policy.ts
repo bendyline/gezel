@@ -211,6 +211,13 @@ export const MANAGED_WORKSPACE_WRITE_SETTING_LABEL =
   'Allow built-in tools and background work to modify the workspace';
 
 /**
+ * The same switch from a terminal, run in the project's folder. A pause note
+ * names it and `gezel do` looks for it there to print the way forward, so the
+ * note and the command line cannot drift apart.
+ */
+export const PROJECT_EDITS_CLI_COMMAND = 'gezel project edits on';
+
+/**
  * Effective per-project writability for Gezel-managed workspace mutations:
  * builtin MCP tools, scripts, Store routes, and ambient scheduler work.
  *

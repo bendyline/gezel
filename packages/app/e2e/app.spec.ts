@@ -9,6 +9,7 @@ import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { expectNear } from './helpers/layout.js';
 import { captureScreenshot } from './helpers/screenshot.js';
+import { unfoldSettingsGroup } from './helpers/settings-nav.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -80,9 +81,12 @@ test('02 - header shows the brand and the left sidebar lists every area', async 
   await expect(page.locator('[data-testid="sidebar-group-projects"]')).toBeVisible();
   await expect(page.locator('[data-testid="sidebar-group-gezels"]')).toBeVisible();
   await expect(page.locator('[data-testid="sidebar-group-documents"]')).toBeVisible();
+  await expect(page.locator('[data-testid="sidebar-area-settings"]')).toBeVisible();
+  // Tasks and History fold into the Workshop group, one click away.
+  await expect(page.locator('[data-testid="sidebar-group-workshop"]')).toBeVisible();
+  await showWorkshop();
   await expect(page.locator('[data-testid="sidebar-area-tasks"]')).toBeVisible();
   await expect(page.locator('[data-testid="sidebar-area-history"]')).toBeVisible();
-  await expect(page.locator('[data-testid="sidebar-area-settings"]')).toBeVisible();
 
   const sidebarText = (await sidebar.textContent()) ?? '';
   expect(sidebarText).not.toContain('Agents');
@@ -114,8 +118,18 @@ test('02b - the header band matches the native window-control overlay', async ()
   expectNear(geometry.headerHeight, geometry.overlayHeight);
 });
 
+const WORKSHOP_AREAS = ['tasks', 'craftbooks', 'scripts', 'history'];
+
+/** Open the rail's Workshop group when it is closed; its title toggles it. */
+async function showWorkshop(): Promise<void> {
+  const workshop = page.locator('[data-testid="sidebar-group-workshop"]');
+  if ((await workshop.getAttribute('aria-expanded')) !== 'true') await workshop.click();
+}
+
 async function openArea(area: string): Promise<void> {
-  await page.locator(`[data-testid="sidebar-area-${area}"]`).click();
+  const link = page.locator(`[data-testid="sidebar-area-${area}"]`);
+  if (WORKSHOP_AREAS.includes(area) && !(await link.isVisible())) await showWorkshop();
+  await link.click();
 }
 
 async function expandGroup(id: string): Promise<void> {
@@ -153,9 +167,9 @@ test('04 - gezels list loads without JSON parse error', async () => {
 
 test('05 - can create a gezel via the sidebar "+"', async () => {
   // The Gezels group "+" opens the Gezels view and pops the create dialog.
-  await page.locator('[aria-label="New gezel"]').click();
+  await page.locator('[aria-label="New crew member"]').click();
   await page.waitForTimeout(300);
-  const dialog = page.getByRole('dialog', { name: 'New gezel', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'New crew member', exact: true });
   await expect(dialog).toBeVisible();
   // Clear the pre-filled random name and type ours.
   await dialog.locator('input').first().fill('TestBot');
@@ -183,6 +197,8 @@ test('06 - settings area loads', async () => {
   await page.waitForTimeout(1000);
   await captureScreenshot(page, { path: join(screenshotDir, '06-settings.png'), fullPage: true });
 
+  // The provider pages sit under "Artificial intelligence", folded until opened.
+  await unfoldSettingsGroup(page, 'ai');
   const body = await page.textContent('body');
   expect(body).toContain('GitHub Copilot');
   expect(body).toContain('OpenAI');
@@ -192,12 +208,12 @@ test('06 - settings area loads', async () => {
 test('07 - projects group hides the built-in default project', async () => {
   // The "Default" project is an always-present scratchpad, not a user-created
   // project, so the sidebar hides it (HIDDEN_PROJECT_IDS in Sidebar.tsx). With
-  // no user projects in a fresh home dir, the group shows its empty state.
+  // no user projects in a fresh home dir, the group offers a way to start one.
   await expandGroup('projects');
   await captureScreenshot(page, { path: join(screenshotDir, '07-projects.png'), fullPage: true });
 
   const sidebar = page.locator('[data-testid="app-sidebar"]');
-  await expect(sidebar).toContainText('No projects created yet.');
+  await expect(sidebar).toContainText('Start your first project');
   // The empty state names Default in its prose; what must be absent is a row.
   await expect(sidebar.locator('.app-sidebar-proj-row', { hasText: 'Default' })).toHaveCount(0);
 });

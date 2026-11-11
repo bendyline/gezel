@@ -1,6 +1,10 @@
 import { mkdir, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type GetScriptSourceResponse, ScriptNameSchema } from '@bendyline/gezel';
+import {
+  type GetScriptSourceResponse,
+  ScriptNameSchema,
+  newestVersionFirst,
+} from '@bendyline/gezel';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   craftbookShardPrefix,
@@ -24,7 +28,7 @@ async function latestVersion(home: string, id: string): Promise<string> {
   const versionsDir = join(craftbookTemplateDir(home, prefix, id), 'versions');
   try {
     const vs = (await readdir(versionsDir)).filter((v) => /^\d+\.\d+\.\d+/.test(v));
-    if (vs.length) return vs.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))[0]!;
+    if (vs.length) return vs.sort(newestVersionFirst)[0]!;
   } catch {
     /* none yet */
   }

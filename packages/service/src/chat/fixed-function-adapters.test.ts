@@ -131,6 +131,37 @@ describe('formatFixedFunctionResult — generate_image adapter', () => {
   });
 });
 
+describe('formatFixedFunctionResult — generate_video adapter', () => {
+  const raw =
+    'Generated a 704×1280 video with wan2.2-ti2v-5b-q4 (121 frames @ 24fps, seed 1, 20 steps, 9000ms). The user sees the clip.';
+
+  it('says it animated the picture it was given', () => {
+    expect(
+      formatFixedFunctionResult('generate_video', raw, {
+        inputImage: { artifactPath: 'generated/cat.png' },
+      }),
+    ).toBe('Animated your picture into a 704×1280 video with wan2.2-ti2v-5b-q4.');
+  });
+
+  it('says so when the model could not use the picture', () => {
+    const skipped = `${raw}\n\nThe picture was not used: Wan 2.1 makes clips from words only; the picture was not used.`;
+    expect(
+      formatFixedFunctionResult('generate_video', skipped, {
+        inputImage: { artifactPath: 'generated/cat.png' },
+      }),
+    ).toMatch(/^Generated 704×1280 video .*the picture was not used\.\)$/);
+  });
+});
+
+describe('buildVideoPromptExpansionInput', () => {
+  it('asks for motion, not a new scene, when animating a picture', () => {
+    const text = buildVideoPromptExpansionInput('it starts to rain', 'animate');
+    expect(text).toMatch(/describe how it moves/);
+    expect(text).toMatch(/Do not introduce a new subject/);
+    expect(buildVideoPromptExpansionInput('a cat')).toMatch(/text-to-video/);
+  });
+});
+
 describe('cleanGenerativePrompt', () => {
   it('strips conversational framing from a request', () => {
     expect(cleanGenerativePrompt('Can you generate a smiling cat?')).toBe('a smiling cat');

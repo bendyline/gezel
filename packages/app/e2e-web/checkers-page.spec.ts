@@ -50,8 +50,11 @@ test('checkers uses native opponent chat only while expanded and preserves it th
   await editor.fill('I have a move in mind.');
   await board.getByRole('button', { name: 'New game', exact: true }).click();
   await expect(board.getByRole('dialog')).toBeVisible();
-  await expect(chat).toBeHidden();
+  // The conversation stays on screen, dimmed with the board, until the dialog closes.
+  await expect(chat).toHaveAttribute('data-dimmed', 'true');
+  await expect(editor).toHaveText('I have a move in mind.');
   await board.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(chat).not.toHaveAttribute('data-dimmed');
   await expect(editor).toHaveText('I have a move in mind.');
   await page.getByRole('button', { name: 'Restore output pane', exact: true }).click();
   await expect(chat).toBeHidden();

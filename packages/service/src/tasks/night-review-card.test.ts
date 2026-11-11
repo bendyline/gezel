@@ -309,7 +309,7 @@ describe('a night that produced nothing', () => {
     expect(newCards()).toHaveLength(1);
     const card = newCards()[0]!;
     expect(card.prompt).toBe(
-      'Your crew waited last night because the computer was running on battery.',
+      'Gezel waited last night because the computer was running on battery.',
     );
     expect((card.intent as NightShiftReviewIntent).quiet).toEqual({ reason: 'on-battery' });
   });

@@ -224,6 +224,7 @@ export function ProjectOutputPane({
   projectId,
   htmlFiles,
   typePage,
+  notice,
   initialMaximized = false,
   onMaximizedChange,
   onClose,
@@ -236,9 +237,13 @@ export function ProjectOutputPane({
    * When the project has an applied custom project type that pins an Output
    * page (its dashboard), this is that page — served read-only from the
    * type's catalog `pages/` tree. When set it becomes the default target,
-   * shown ahead of workspace files. See docs/project-types.md.
+   * shown ahead of workspace files. `version` is the app version the project
+   * runs; an app update that keeps the same entry still reloads the page.
+   * See docs/project-types.md.
    */
-  typePage?: { entry: string; label: string; pageTools?: string[] };
+  typePage?: { entry: string; label: string; version?: string; pageTools?: string[] };
+  /** One muted line under the toolbar, such as an app update waiting for the person. */
+  notice?: ReactNode;
   initialMaximized?: boolean;
   onMaximizedChange?: (maximized: boolean) => void;
   /** Hide the pane entirely (flips the tab-row toggle off). */
@@ -586,7 +591,11 @@ export function ProjectOutputPane({
       source={selectedTarget.source}
       title={selectedTarget.label}
       className="project-output-iframe"
-      refreshKey={refreshKey}
+      refreshKey={
+        selectedTarget.source === 'type' && typePage?.version
+          ? `${refreshKey}:${typePage.version}`
+          : refreshKey
+      }
       onLog={appendLog}
       onUrlReady={setPreviewUrl}
       // The page-invoke bridge opens only for the pinned type page — plain
@@ -604,7 +613,7 @@ export function ProjectOutputPane({
   ) : (
     <div className="project-output-empty">
       <p className="muted small">
-        No previewable HTML in this workspace yet. When a gezel writes an <code>index.html</code>,
+        No previewable HTML in this workspace yet. When Gezel writes an <code>index.html</code>,
         it'll show up here.
       </p>
     </div>
@@ -663,6 +672,7 @@ export function ProjectOutputPane({
   return (
     <aside className={`project-output-pane${maximized ? ' project-output-pane-maximized' : ''}`}>
       {toolbar}
+      {notice}
       <div ref={bodyRef} className="project-output-pane-body">
         {body}
       </div>

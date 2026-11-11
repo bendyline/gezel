@@ -2,7 +2,9 @@ import {
   type Craftbook,
   type CraftbookInputParam,
   craftbookInputParams,
+  deriveTaskTitle,
   fillMainContentParam,
+  isAnswerEnvelope,
 } from '@bendyline/gezel';
 import { z } from 'zod';
 import {
@@ -151,6 +153,54 @@ export function normalizeCraftbookInvocationParams(
   return merged.outputPath
     ? { ...merged, outputPath: normalizeDocumentOutputPath(merged.outputPath) }
     : merged;
+}
+
+/** The parts of a transcript message that say whose words it holds. */
+export interface TaskTitleSourceMessage {
+  role: string;
+  content: string;
+  hidden?: boolean | undefined;
+  from?: unknown;
+  origin?: string | undefined;
+}
+
+function isPersonsMessage(message: TaskTitleSourceMessage): boolean {
+  return (
+    message.role === 'user' &&
+    !message.hidden &&
+    !message.from &&
+    message.origin !== 'system' &&
+    message.content.trim().length > 0
+  );
+}
+
+/**
+ * The title for a task a model starts from a craftbook: the title it gave,
+ * else what the person asked for in their own words ("One-page catering
+ * proposal for Harbor Books"). Undefined leaves the caller the plan's name,
+ * which is how every Word document used to be listed. The request is the
+ * message that opened this turn, or the one it answers when it is an answer
+ * to a question. A turn opened by a gezel, the system or a hidden prompt
+ * names no request of the person's.
+ */
+export function requestedTaskTitle(
+  title: string | undefined,
+  messages: readonly TaskTitleSourceMessage[],
+): string | undefined {
+  const given = title?.trim();
+  if (given) return given;
+  let opened = messages.length - 1;
+  while (opened >= 0 && messages[opened]!.role !== 'user') opened -= 1;
+  const opener = messages[opened];
+  if (!opener || !isPersonsMessage(opener)) return undefined;
+  if (!isAnswerEnvelope(opener.content)) return deriveTaskTitle(opener.content);
+  for (let index = opened - 1; index >= 0; index -= 1) {
+    const earlier = messages[index]!;
+    if (isPersonsMessage(earlier) && !isAnswerEnvelope(earlier.content)) {
+      return deriveTaskTitle(earlier.content);
+    }
+  }
+  return undefined;
 }
 
 export interface BinaryDocumentCraftbookRequest {

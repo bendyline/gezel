@@ -1426,7 +1426,7 @@ export class TaskManager {
     const task = await this.requireTask(projectId, num);
     if (task.origin?.kind === 'system-job' && patch.assignee !== undefined) {
       throw new Error(
-        `task ${task.ref}: system jobs are managed by their designated gezel and cannot be reassigned`,
+        `task ${task.ref}: system jobs are managed by their designated owner and cannot be reassigned`,
       );
     }
     const changed: string[] = [];
@@ -1994,7 +1994,7 @@ export class TaskManager {
     await this.history?.log({
       kind: 'task.craftbook.updated',
       projectId,
-      summary: `Updated craftbook metadata on ${next.ref}`,
+      summary: `Updated plan details on ${next.ref}`,
       details: { ref: next.ref, fields: Object.keys(patch) },
     });
     return next;

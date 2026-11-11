@@ -20,7 +20,7 @@ test.describe('dialogs', () => {
   test('create-gezel dialog', async ({ page }) => {
     await gotoHome(page);
     await openAreaView(page, 'gezels');
-    const dialog = await openDialog(page, '+ New gezel', 'New gezel');
+    const dialog = await openDialog(page, '+ New crew member', 'New crew member');
     await shot(page, 'create-gezel', {
       area: 'dialogs',
       clip: dialog,
@@ -33,7 +33,7 @@ test.describe('dialogs', () => {
   test('create-project dialog', async ({ page }) => {
     await gotoHome(page);
     await openAreaView(page, 'projects');
-    const dialog = await openDialog(page, '+ New Project', 'New Project');
+    const dialog = await openDialog(page, '+ New project', 'New project');
     await shot(page, 'create-project', {
       area: 'dialogs',
       clip: dialog,

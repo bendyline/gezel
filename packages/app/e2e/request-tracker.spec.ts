@@ -204,7 +204,7 @@ async function seedHome(home: string): Promise<void> {
         },
         {
           role: 'assistant',
-          content: 'Your PDF for **Price list** is ready.',
+          content: 'Your PDF is ready: **Price list**.',
           at: at(20),
           synthetic: 'task-wrapup',
           referencedTasks: ['bakery/2'],

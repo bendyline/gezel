@@ -112,7 +112,7 @@ export function GildeUpdatesCard() {
     <SettingsSection
       id="settings-catalog-content"
       title="Catalog content"
-      hint="Craftbooks, model recommendations, and role templates ship with the app and can also update between releases. When on, Gezel checks about once a day for newer content, verifies it, and applies it. Nothing about you or this install is sent. Turning it off returns to the content that shipped with the app."
+      hint="Plans, model recommendations, and role templates ship with the app and can also update between releases. When on, Gezel checks about once a day for newer content, verifies it, and applies it. Nothing about you or this install is sent. Turning it off returns to the content that shipped with the app."
     >
       <SettingCheck
         label="Keep catalog content up to date automatically"

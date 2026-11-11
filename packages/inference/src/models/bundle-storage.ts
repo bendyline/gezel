@@ -38,7 +38,10 @@ export async function listBundleModelFiles(root: string): Promise<string[]> {
         );
       }
       const rel = relative(root, full).split(sep).join('/');
-      if (rel === 'manifest.json' || rel.endsWith('.partial')) continue;
+      // Dot-files are not payload: the imported-model catalog entry, OS droppings.
+      if (rel === 'manifest.json' || rel.endsWith('.partial') || entry.name.startsWith('.')) {
+        continue;
+      }
       out.push(rel);
     }
   };

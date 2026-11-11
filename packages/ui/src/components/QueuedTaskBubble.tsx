@@ -72,7 +72,7 @@ export function QueuedTaskBubble({
   const roleBasedNameOnlyMode = useRoleBasedNameOnlyMode();
   const assignee = gezel
     ? displayName({ name: gezel.name, roleBasedName: gezel.roleBasedName }, roleBasedNameOnlyMode)
-    : 'the assigned gezel';
+    : 'Gezel';
   const since = formatRelativeTime(wait.since, { style: 'long', fallback: wait.since });
 
   return (

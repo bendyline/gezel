@@ -80,7 +80,7 @@ export const CORE_ROLE_ORDER: readonly string[] = [
 
 const SECTION_IN_PROJECT = 'In this project';
 const SECTION_RECOMMENDED = 'Recommended for this project';
-const SECTION_OTHER_GEZELS = 'Your other gezels';
+const SECTION_OTHER_GEZELS = 'The rest of your crew';
 const SECTION_CORE = 'Core roles';
 const SECTION_MORE = 'More roles';
 

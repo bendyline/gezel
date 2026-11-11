@@ -76,7 +76,7 @@ export function DocumentChat({
   if (!gezel) {
     return (
       <p className="muted document-chat-missing">
-        The gezel this {noun} was talking to is no longer available. Choose another one above.
+        Whoever this {noun} was talking to is no longer available. Choose someone else above.
       </p>
     );
   }

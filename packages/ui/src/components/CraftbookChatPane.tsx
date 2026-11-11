@@ -69,14 +69,14 @@ export function CraftbookChatPane({
   if (readOnly) {
     return (
       <div className="craftbook-chat-pane muted small">
-        This craftbook is read-only — fork it to a local copy to improve it with AI.
+        This plan is read-only — make your own copy to improve it with AI.
       </div>
     );
   }
   if (!gezel) {
     return (
       <div className="craftbook-chat-pane muted small">
-        No gezel available yet. Create a crew lead or the Meester first, then come back.
+        No one is available yet. Create a crew lead or the Meester first, then come back.
       </div>
     );
   }

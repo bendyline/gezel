@@ -47,6 +47,10 @@ const UNTOOLED_COORDINATOR_ROUTES: ReadonlyArray<{ probe: CoordinatorRouteProbe;
     probe: { method: 'GET', path: '/api/tasks' },
     why: 'list_tasks without a project; a worker MCP child falls back to its own project route',
   },
+  {
+    probe: { method: 'POST', path: '/api/sessions/:session/crew-introduction' },
+    why: 'best-effort card after a hire; the hiring tools are listed by their primary route',
+  },
 ];
 
 const ALL_PROBES: ReadonlyArray<{ owner: string; probe: CoordinatorRouteProbe }> = [
@@ -60,6 +64,7 @@ function concretePath(probe: CoordinatorRouteProbe): string {
   return probe.path
     .replaceAll(':project', PROJECT)
     .replaceAll(':gezel', GEZEL)
+    .replaceAll(':session', SESSION)
     .replaceAll(':other', OTHER);
 }
 

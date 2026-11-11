@@ -61,6 +61,37 @@ describe('parseGezelDeepLink', () => {
       id: 'fact-check',
     });
   });
+
+  it('reads a Hugging Face model, keeping the repo case and an optional GGUF file', () => {
+    expect(parseGezelDeepLink('gezel://model/huggingface/unsloth/Qwen3-8B-GGUF')).toEqual({
+      kind: 'model',
+      source: 'huggingface',
+      repo: 'unsloth/Qwen3-8B-GGUF',
+    });
+    expect(
+      parseGezelDeepLink(
+        'gezel://model/huggingface/unsloth/Qwen3-8B-GGUF?file=BF16%2FQwen3-8B-BF16-00001-of-00002.gguf',
+      ),
+    ).toEqual({
+      kind: 'model',
+      source: 'huggingface',
+      repo: 'unsloth/Qwen3-8B-GGUF',
+      file: 'BF16/Qwen3-8B-BF16-00001-of-00002.gguf',
+    });
+  });
+
+  it('opens Home for a model link it cannot trust', () => {
+    expect(parseGezelDeepLink('gezel://model/huggingface/onlyowner')).toEqual({ kind: 'home' });
+    expect(parseGezelDeepLink('gezel://model/civitai/a/b')).toEqual({ kind: 'home' });
+    expect(parseGezelDeepLink('gezel://model/huggingface/a/b/c')).toEqual({ kind: 'home' });
+    expect(parseGezelDeepLink('gezel://model/huggingface/a%20b/c')).toEqual({ kind: 'home' });
+    expect(parseGezelDeepLink('gezel://model/huggingface/a/b?file=..%2Fsecret.gguf')).toEqual({
+      kind: 'home',
+    });
+    expect(parseGezelDeepLink('gezel://model/huggingface/a/b?file=model.exe')).toEqual({
+      kind: 'home',
+    });
+  });
 });
 
 describe('isGezelDeepLink', () => {
@@ -72,6 +103,12 @@ describe('isGezelDeepLink', () => {
     expect(isGezelDeepLink({ kind: 'run', id: 'x' })).toBe(false);
     expect(isGezelDeepLink('gezel://app/x')).toBe(false);
     expect(isGezelDeepLink(null)).toBe(false);
+    expect(isGezelDeepLink({ kind: 'model', source: 'huggingface', repo: 'a/b' })).toBe(true);
+    expect(isGezelDeepLink({ kind: 'model', source: 'huggingface', repo: 'a/b/c' })).toBe(false);
+    expect(
+      isGezelDeepLink({ kind: 'model', source: 'huggingface', repo: 'a/b', file: '../x.gguf' }),
+    ).toBe(false);
+    expect(isGezelDeepLink({ kind: 'model', source: 'other', repo: 'a/b' })).toBe(false);
   });
 });
 
@@ -82,6 +119,13 @@ describe('gezelDeepLinkUrl', () => {
       { kind: 'app', id: 'meal-planner' },
       { kind: 'craftbook', id: 'powerpoint-deck' },
       { kind: 'docs', id: 'whats-new-1.26' },
+      { kind: 'model', source: 'huggingface', repo: 'ggml-org/gemma-3-4b-it-GGUF' },
+      {
+        kind: 'model',
+        source: 'huggingface',
+        repo: 'unsloth/Qwen3-8B-GGUF',
+        file: 'Q4_K_M/Qwen3-8B-Q4_K_M.gguf',
+      },
     ] as const) {
       expect(parseGezelDeepLink(gezelDeepLinkUrl(link))).toEqual(link);
     }

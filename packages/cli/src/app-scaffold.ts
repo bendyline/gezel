@@ -124,7 +124,7 @@ ${
 Run \`gezel app demo . --out ../${id}-demo\`, then open its
 \`pages/dashboard/index.html\` to try the standalone demo. Sample records stay in memory; **Reset demo** restores them.
 Inside Gezel the same page uses real project data and the page-only
-\`page_add_record\` alias. Names in \`pages.tools\` are excluded from the gezel's
+\`page_add_record\` alias. Names in \`pages.tools\` are excluded from the keeper's
 tool roster, so keep its \`add_record\` alias separate. Both call \`records-store\`.
 The browser preview is read-only; embedded and shared-site modes can run actions
 when the host permits them. A host error never switches the page to demo data.
@@ -152,7 +152,7 @@ Authoring references:
         kind: 'project-type',
         id,
         name,
-        description: `A focused ${name} workspace with one gezel and a records store.`,
+        description: `A focused ${name} workspace with one keeper and a records store.`,
         tags: [],
         maintainer: { name: 'Your name' },
         license: 'MIT',

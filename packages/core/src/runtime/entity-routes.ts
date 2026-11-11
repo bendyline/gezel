@@ -154,7 +154,7 @@ export async function handlePortableEntityRoute(
         }
       }
       if (action === 'gezels') {
-        const gezelId = method === 'POST' ? requiredString(body.gezelId, 'Gezel') : child;
+        const gezelId = method === 'POST' ? requiredString(body.gezelId, 'Crew member') : child;
         if (method === 'POST' && gezelId) await host.store.addGezelToProject(id, gezelId);
         if (method === 'DELETE' && gezelId) await host.store.removeGezelFromProject(id, gezelId);
         const current = await host.store.getProject(id);
@@ -294,7 +294,7 @@ export async function handlePortableEntityRoute(
       });
     if (id) {
       const gezel = await host.store.getGezel(id);
-      if (!gezel) throw new ProductError('Gezel not found', 404);
+      if (!gezel) throw new ProductError('Crew member not found', 404);
       if (!action) {
         if (method === 'GET') return json(gezel);
         if (method === 'DELETE') {

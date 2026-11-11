@@ -42,7 +42,7 @@
 }
 
 .dp-list-item-active {
-  background: var(--surface);
+  background: var(--selected-bg);
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 

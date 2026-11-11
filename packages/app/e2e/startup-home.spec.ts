@@ -82,7 +82,10 @@ test('local Home matches the live chrome and preserves reading across service na
     expect(native).toEqual({ resizable: true, minimizable: true, maximizable: true });
     await expect(page.locator('.home-workshop-figure svg')).toBeVisible();
     await expect(page.locator('.startup-home textarea, .startup-search')).toHaveCount(0);
-    await expect(page.locator('.startup-sidebar .app-sidebar-item')).toHaveCount(1);
+    // The rail holds the live rail's places: Home, Knowledge and Settings
+    // rows, with the groups between them.
+    await expect(page.locator('.startup-sidebar .app-sidebar-item')).toHaveCount(3);
+    await expect(page.locator('.startup-header .app-history-key')).toHaveCount(3);
     await page.evaluate(() => document.fonts.ready);
     const chrome = async () =>
       page.evaluate(() =>
@@ -131,7 +134,7 @@ test('local Home matches the live chrome and preserves reading across service na
     await page.getByRole('tab', { name: 'Night shift', exact: true }).click();
     await expect(page.getByText('The research notes are ready for your review.')).toBeVisible();
 
-    await page.getByRole('tab', { name: 'Handboek', exact: true }).click();
+    await page.getByRole('tab', { name: 'Help', exact: true }).click();
     await expect(page.locator('.home-intro-doc .squisq-linear')).toBeVisible();
     await expect(page.locator('#startup-reading img[alt="gezel-mark"]')).toHaveCount(1);
     await page.locator('#startup-reading .home-intro-doc').evaluate(async (node) => {
@@ -186,7 +189,7 @@ test('local Home matches the live chrome and preserves reading across service na
       .toBeGreaterThan(150);
     await expect(page.locator('#startup-home')).toHaveCount(0, { timeout: 30_000 });
     await expect(page.locator('.startup-reading-overlay, .startup-reading')).toHaveCount(0);
-    await expect(page.getByRole('tab', { name: 'Handboek', exact: true })).toHaveAttribute(
+    await expect(page.getByRole('tab', { name: 'Help', exact: true })).toHaveAttribute(
       'aria-selected',
       'true',
     );

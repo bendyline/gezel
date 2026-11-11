@@ -47,7 +47,7 @@ An explicit `--connect <url>` uses a separate CLI-scoped grant for that service.
 
 Rolling-upgrade compatibility may also select an older `legacy-full` machine service, which uses that approval path. Use `--standalone` to skip this compatibility choice; `--home <path>` or an explicit `GEZEL_HOME` also implies standalone operation. A modern machine service is an engine broker; your per-user daemon handles product data and connects to that broker for inference.
 
-A home you name with `--home` is also kept separate from what the Gezel desktop app's machine install publishes: its shared gezels and projects, and the models it downloaded. Set `GEZEL_DISABLE_MACHINE_SHARED=0` to include them anyway. Your default home, `~/.gezel`, still sees them.
+A home you name with `--home` is also kept separate from what the Gezel desktop app's machine install publishes: its shared crew and projects, and the models it downloaded. Set `GEZEL_DISABLE_MACHINE_SHARED=0` to include them anyway. Your default home, `~/.gezel`, still sees them.
 
 To run Gezel headless on a machine of its own, see [Gezel on a server](gezel-on-a-server.md).
 
@@ -70,7 +70,7 @@ gezel stop --keep-running   emergency brake: cancel AI work, unload engines,
                             switch to Reactive — the service keeps running
 gezel mode [mode]           show or set how active the AI may be
                             (read-only, reactive, reactive+tasks, full-play)
-gezel growth [on|off]       show or set gezel growth (XP and level-ups); off
+gezel growth [on|off]       show or set crew growth (XP and level-ups); off
                             computes no XP, for homes that run bulk workflows
 gezel run "..."             one-shot: send a prompt, print the reply
 gezel doctor                check the installation
@@ -90,11 +90,16 @@ If the desktop app's machine-wide service is in use, `gezel stop` applies the em
 
 Gezel never makes a project of your home folder, the temp folder, or the top of a drive. Run a command from one of those and it uses the Default project instead, with a note saying so. Naming one of those folders with `--project` stops the command, so it never quietly uses a different project than the one you asked for.
 
-## Working with the crew
+A folder's project starts read-only: Gezel reads the folder and keeps what it makes in its own task folders, which `--out <dir>` copies out. Some craftbooks save into the folder itself, such as a deck or a web page. At a terminal `gezel do` asks before it starts one of those. In a script, add `--allow-edits`, or run `gezel project edits on` once in the folder. `gezel project edits` shows the current setting, and `gezel craftbook show <craftbook>` says where a craftbook saves.
+
+## Crew, projects, and tasks
 
 ```
-gezel agent list            your gezels
+gezel agent list            your crew
 gezel project list          your projects (gezel env is the same command)
+gezel project edits [on|off]
+                            show or set whether Gezel may change files in
+                            this folder's project (a folder starts read-only)
 gezel task list             tasks across every project (--status to filter)
 gezel task show <ref>       one task, such as default/12
 gezel task pause <ref>      pause one task without stopping the others
@@ -103,9 +108,13 @@ gezel craftbook list [words]
                             craftbooks you can start in this folder's project
                             (words filter by command, title, and tags;
                             --no-start answers from a running service only)
+gezel craftbook show <craftbook>
+                            what one does, what it takes before your request,
+                            and where it saves
 gezel do <craftbook>        start a craftbook as a task in this folder's project
                             (--wait to stay until it finishes; --out <dir> to
-                            wait and copy what it made into that folder)
+                            wait and copy what it made into that folder;
+                            --allow-edits when it saves into the folder itself)
 gezel skills list           SKILL.md skills found in this project's workspace
 gezel skills import <path>  turn one of those skills into a craftbook
 ```
@@ -128,9 +137,20 @@ gezel integrations token create <app>
                             a key for another program to use Gezel's models
                             (--scope to give it more than chat; shown once)
 gezel integrations token revoke <app>
+gezel integrations address  where other programs reach this Gezel's models
+gezel integrations ollama [on|off]
+                            show or set a plain-HTTP port on this computer
+                            that needs no key (Ollama emulation, port 11434)
+gezel integrations list     apps connected to this Gezel, and apps waiting
+                            for your approval
+gezel integrations approve <app> / deny <app>
+                            answer an app that asked to connect (--code for
+                            one that shows a code)
 ```
 
 Everyone with an account can do everything, including open a terminal. Add only people you trust with the computer Gezel runs on.
+
+A program with a key reaches the models at the address `gezel integrations address` prints. Outside a container that address uses Gezel's own certificate, which a program has to trust or skip checking, and its port is 6228 when that port is free. For a program that cannot do either, `gezel integrations ollama on` opens `http://127.0.0.1:11434/v1` (and Ollama's own paths on the same port): plain HTTP, always that port, no key. While it is on, any program on this computer can use your models without asking, so it stays off until you turn it on. Gezel leaves the port alone when Ollama itself is running.
 
 ## AI Apps
 
@@ -230,7 +250,7 @@ gezel security level        the security level and what it allows
 gezel security level set <super-lockdown|lockdown|free>
                             switch to a preset (free is Unrestricted in Settings)
 gezel security external-services [on|off]
-                            let gezels use web search and other outside services
+                            let your crew use web search and other outside services
 gezel env indexing [on|off] pause or resume background indexing for this project
 ```
 
@@ -240,7 +260,7 @@ gezel env indexing [on|off] pause or resume background indexing for this project
 gezel cleanup               see how much space Gezel is using
 gezel cleanup --redownloadable
                             reclaim everything Gezel can download again
-gezel backup <file>         write your gezels, projects, and documents to a file
+gezel backup <file>         write your crew, projects, and documents to a file
 gezel restore <file>        bring them back (--list to look first)
 ```
 
@@ -250,7 +270,7 @@ gezel restore <file>        bring them back (--list to look first)
 gezel handboek export --out ./site
 ```
 
-renders the Handboek — the same articles you're reading now — as a static website, for publishing or offline reading.
+renders Help — the same articles you're reading now — as a static website, for publishing or offline reading.
 
 Run `gezel --help` (or `--help` on any subcommand) for the full surface.
 

@@ -534,6 +534,22 @@ describe('sessionRouteGuard', () => {
     expect((await app.request(`/api/sessions/${own}-2`)).status).toBe(403);
   });
 
+  it('lets a coordinator have its hires introduced in its own thread only', async () => {
+    const hired = jsonPost({ gezelIds: ['tessa'] });
+    const coordinator = sessionPolicyApp(session('proj-a', true));
+    expect(
+      (await coordinator.request('/api/sessions/proj-a/crew-introduction', hired)).status,
+    ).toBe(200);
+    expect((await coordinator.request('/api/sessions/other/crew-introduction', hired)).status).toBe(
+      403,
+    );
+    // Only a coordinator can hire, so only a coordinator introduces.
+    const worker = sessionPolicyApp(session('proj-a'));
+    expect((await worker.request('/api/sessions/proj-a/crew-introduction', hired)).status).toBe(
+      403,
+    );
+  });
+
   it('protects raw sessions, event streams, terminals, and unclassified admin routes', async () => {
     const app = sessionPolicyApp(session('proj-a'));
     expect((await app.request('/api/sessions')).status).toBe(403);
@@ -739,6 +755,22 @@ describe('sessionRouteGuard', () => {
     for (const path of denied) {
       expect((await ui.request(path, jsonPost({}))).status).toBe(200);
     }
+  });
+
+  // Approving an app update can replace a script the person edited and write
+  // into a folder gezels hold no grant for; reading the offer stays open.
+  it('keeps approving an app update first-party', async () => {
+    for (const team of [false, true]) {
+      const app = sessionPolicyApp(session('proj-a', team), undefined, () => true);
+      expect(
+        (await app.request('/api/projects/proj-a/project-type/upgrade', jsonPost({}))).status,
+      ).toBe(403);
+      expect((await app.request('/api/projects/proj-a/project-type/upgrade')).status).toBe(200);
+    }
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    expect(
+      (await ui.request('/api/projects/proj-a/project-type/upgrade', jsonPost({}))).status,
+    ).toBe(200);
   });
 
   it('keeps shared documents available without the foreign-project fallback', async () => {

@@ -56,6 +56,7 @@ export * from './village-file.js';
 export * from './catalog.js';
 export * from './gezmodel.js';
 export * from './model-fitness.js';
+export * from './model-import.js';
 export * from './model-profile.js';
 export * from './model-tuning.js';
 export * from './native-engines.js';

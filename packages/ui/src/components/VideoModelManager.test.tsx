@@ -5,8 +5,15 @@ import { createMockApi } from '../test-utils/mockApi.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 
-const { VideoModelManager } = await import('./VideoModelManager.js');
+const { VideoModelManager, videoDefaultClip, videoModelAbilities } = await import(
+  './VideoModelManager.js'
+);
 const { api } = await import('../api.js');
+
+/** The catalog lives behind the page's "Add a model…" key. */
+async function openAddModel() {
+  await userEvent.click(await screen.findByRole('button', { name: 'Add a model…' }));
+}
 
 const TWO_MODELS = {
   models: [
@@ -145,6 +152,7 @@ describe('VideoModelManager downloads', () => {
       ]) as never,
     );
     render(<VideoModelManager />);
+    await openAddModel();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Show all models' }));
     const tooLarge = await screen.findByRole('button', { name: 'Too large' });
@@ -166,6 +174,7 @@ describe('VideoModelManager downloads', () => {
     );
     vi.mocked(api.pullVideoModel).mockResolvedValue(undefined);
     render(<VideoModelManager />);
+    await openAddModel();
 
     await screen.findByText('may not fit this machine');
     await userEvent.click(screen.getByRole('button', { name: 'Download' }));
@@ -183,6 +192,7 @@ describe('VideoModelManager downloads', () => {
   it('shows everything when the daemon cannot say what fits', async () => {
     vi.mocked(api.getVideoModelFit).mockRejectedValue(new Error('404'));
     render(<VideoModelManager />);
+    await openAddModel();
     expect(await screen.findByRole('button', { name: 'Download' })).toBeEnabled();
   });
 
@@ -194,6 +204,8 @@ describe('VideoModelManager downloads', () => {
     }) as typeof api.pullVideoModel);
 
     render(<VideoModelManager />);
+
+    await openAddModel();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Download' }));
     expect(api.pullVideoModel).toHaveBeenCalledTimes(1);
@@ -212,11 +224,83 @@ describe('VideoModelManager downloads', () => {
       callbacks[0]?.({ type: 'error', error: 'network error' });
     });
 
+    // The failed download's Retry is on the page, under the dialog.
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
 
     await waitFor(() => expect(api.pullVideoModel).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    await openAddModel();
     expect(screen.getByRole('button', { name: /Downloading/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
+  });
+});
+
+describe('what a video model does', () => {
+  it('names picture animation and sound in plain words', () => {
+    expect(videoModelAbilities({ supportsImageToVideo: true, hasAudio: true })).toEqual([
+      'Animates pictures',
+      'With sound',
+    ]);
+    expect(videoModelAbilities({ supportsImageToVideo: true, imageToVideoOnly: true })).toEqual([
+      'Animates pictures only',
+    ]);
+    expect(videoModelAbilities({})).toEqual([]);
+  });
+
+  it('reads the default clip as size and seconds', () => {
+    expect(
+      videoDefaultClip({
+        defaultWidth: 1280,
+        defaultHeight: 704,
+        defaultNumFrames: 121,
+        defaultFps: 24,
+      }),
+    ).toBe('1280×704, 5 s');
+    expect(videoDefaultClip({ defaultWidth: 832, defaultHeight: 480 })).toBe('832×480');
+    expect(videoDefaultClip({})).toBeNull();
+  });
+
+  it('shows abilities on the catalog row and disables a model whose engine is missing', async () => {
+    vi.mocked(api.listInstalledVideoModels).mockResolvedValue({ models: [] } as never);
+    vi.mocked(api.listActiveVideoPulls).mockResolvedValue({ pulls: [] } as never);
+    vi.mocked(api.getVideoModelFit).mockResolvedValue(fitResponse([]) as never);
+    vi.mocked(api.listCatalogItems).mockResolvedValue({
+      items: [
+        {
+          ...VIDEO_MODEL,
+          manifest: {
+            ...VIDEO_MODEL.manifest,
+            engine: 'sd-cpp',
+            supportsImageToVideo: true,
+            defaultWidth: 1280,
+            defaultHeight: 704,
+            defaultNumFrames: 121,
+            defaultFps: 24,
+            source: {
+              huggingfaceRepo: 'x/y',
+              files: [{ name: 'a.gguf', role: 'diffusion_model' }],
+            },
+          },
+        },
+      ],
+    } as never);
+    render(
+      <VideoModelManager
+        engineUnavailable={{
+          'sd-cpp': "This model needs a video engine this install doesn't include.",
+        }}
+      />,
+    );
+    await openAddModel();
+
+    expect(await screen.findByText('· Animates pictures')).toBeInTheDocument();
+    expect(screen.getByText('1280×704, 5 s')).toBeInTheDocument();
+    const download = screen.getByRole('button', { name: 'Download' });
+    expect(download).toBeDisabled();
+    expect(download).toHaveAttribute(
+      'title',
+      "This model needs a video engine this install doesn't include.",
+    );
   });
 });

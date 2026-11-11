@@ -246,6 +246,31 @@ describe('checkRocmBuild', () => {
     expect(fake.probes()).toBe(0);
   });
 
+  // On a Linux package install the shared engine runs as `gezel`, so the
+  // person must be told which account to add, not "your account".
+  it('names the account that cannot open /dev/kfd, and carries it to the engine', () => {
+    const fake = fakeIo();
+    const check = checkRocmBuild(home, binary, {
+      ...fake.io,
+      canOpen: () => false,
+      account: () => 'gezel',
+    });
+    expect(check.blocker).toMatchObject({ kind: 'no-device-access', account: 'gezel' });
+    expect(check.blocker?.detail).toContain('the "gezel" account');
+
+    const env: NodeJS.ProcessEnv = {};
+    publishRocmCheck(check, env);
+    expect(readRocmBlocker(env)).toEqual(check.blocker);
+
+    const unnamed = checkRocmBuild(home, binary, {
+      ...fake.io,
+      canOpen: () => false,
+      account: () => undefined,
+    });
+    expect(unnamed.blocker).not.toHaveProperty('account');
+    expect(unnamed.blocker?.detail).toContain('this account');
+  });
+
   // The supervisor and an embedded daemon run on Electron's main thread: they
   // probe asynchronously first, so the synchronous check reads the cache.
   it('probes without blocking, then answers the synchronous check from the cache', async () => {

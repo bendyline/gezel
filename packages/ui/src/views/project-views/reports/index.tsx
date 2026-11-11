@@ -152,7 +152,7 @@ export default function ReportsProjectView({
         <p className="reports-view-empty">
           {writable.length > 0
             ? 'No reports yet. Gezel writes them overnight, or you can write one now.'
-            : 'No reports yet. Reports Gezel or its crew members write for this project appear here.'}
+            : 'No reports yet. Reports Gezel writes for this project appear here.'}
         </p>
       )}
       {reports.length > 0 && (

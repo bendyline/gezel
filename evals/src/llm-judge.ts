@@ -115,13 +115,19 @@ const ARTIFACT_FENCE_LANG: Record<NonNullable<RunLlmJudgeOpts['artifactKind']>, 
   text: 'text',
 };
 
-const ANTHROPIC_MODEL = 'claude-haiku-4-5';
+/**
+ * `GEZEL_JUDGE_MODEL` picks the Claude model for both Claude backends, so a
+ * sweep can be judged by a named model without editing this file. Read at
+ * import time: one process judges with one model.
+ */
+const JUDGE_MODEL_OVERRIDE = process.env.GEZEL_JUDGE_MODEL?.trim() || undefined;
+const ANTHROPIC_MODEL = JUDGE_MODEL_OVERRIDE ?? 'claude-haiku-4-5';
 /**
  * Model id for the CLI backend. Dashed, not dotted — the Claude CLI
  * rejects `claude-sonnet-4.6` and the mistake is silent until the call
  * fails (wild-caught during the anthropic-cli provider bring-up).
  */
-const CLI_MODEL = 'claude-sonnet-4-6';
+const CLI_MODEL = JUDGE_MODEL_OVERRIDE ?? 'claude-sonnet-4-6';
 const OPENAI_MODEL = 'gpt-5-mini';
 
 export interface RunLlmJudgeOpts {

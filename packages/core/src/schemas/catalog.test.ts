@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { VideoModelLoadSchema, compareSemver, isSemver } from './catalog.js';
+import {
+  SdCppVideoRenderSchema,
+  VideoModelIdentitySchema,
+  VideoModelLoadSchema,
+  VideoModelSourceSchema,
+  compareSemver,
+  isSemver,
+} from './catalog.js';
 
 describe('catalog semver helpers', () => {
   it('isSemver accepts standard major.minor.patch', () => {
@@ -64,5 +71,60 @@ describe('VideoModelLoadSchema.sigmas', () => {
     expect(VideoModelLoadSchema.safeParse({ sigmas: [1.2, 0.5] }).success).toBe(false);
     expect(VideoModelLoadSchema.safeParse({ sigmas: [0.5, 0] }).success).toBe(false);
     expect(VideoModelLoadSchema.safeParse({ sigmas: [] }).success).toBe(false);
+  });
+});
+
+describe('video model engines', () => {
+  const identity = {
+    schemaVersion: 1,
+    kind: 'video-model',
+    id: 'wan2.2-ti2v-5b-q4',
+    name: 'Wan',
+    description: 'fixture',
+    maintainer: { name: 'Test' },
+    family: 'wan',
+    commercialUse: true,
+  };
+
+  it('reads an entry without an engine as diffusers', () => {
+    const parsed = VideoModelIdentitySchema.parse(identity);
+    expect(parsed.engine).toBe('diffusers');
+    expect(parsed.architecture).toBeUndefined();
+    expect(parsed.imageToVideoOnly).toBeUndefined();
+  });
+
+  it('accepts the sd-cpp engine, a LingBot family and its caption prompt', () => {
+    const parsed = VideoModelIdentitySchema.parse({
+      ...identity,
+      family: 'lingbot',
+      engine: 'sd-cpp',
+      architecture: 'lingbot-video-1.3b',
+      promptFormat: 'lingbot-caption',
+    });
+    expect(parsed).toMatchObject({
+      engine: 'sd-cpp',
+      family: 'lingbot',
+      promptFormat: 'lingbot-caption',
+    });
+  });
+
+  it('gives a file an sd-server slot and refuses one sd-server lacks', () => {
+    const source = (role: string) => ({
+      huggingfaceRepo: 'x/y',
+      files: [{ name: 'model.gguf', sha256: 'a'.repeat(64), sizeBytes: 1, role }],
+      approxSizeBytes: 1,
+    });
+    expect(VideoModelSourceSchema.parse(source('embeddings_connectors')).files[0]?.role).toBe(
+      'embeddings_connectors',
+    );
+    expect(VideoModelSourceSchema.safeParse(source('lora')).success).toBe(false);
+  });
+
+  it('keeps VAE tiling spatial by default and refuses an unknown sampler', () => {
+    expect(SdCppVideoRenderSchema.parse({ vaeTiling: {} }).vaeTiling).toEqual({
+      spatial: true,
+      temporal: false,
+    });
+    expect(SdCppVideoRenderSchema.safeParse({ sampler: 'unipc' }).success).toBe(false);
   });
 });

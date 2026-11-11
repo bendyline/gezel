@@ -37,22 +37,22 @@ const TOGGLES: ReadonlyArray<{
   {
     key: 'allowExternalServices',
     label: 'External services',
-    help: 'Let crew members reach the open web and let project previews load external resources. Off blocks those paths; cloud chat has its own switch, and manual GitHub pulls and model downloads are unaffected.',
+    help: 'Let Gezel reach the open web and let project previews load external resources. Off blocks those paths; cloud chat has its own switch, and manual GitHub pulls and model downloads are unaffected.',
   },
   {
     key: 'allowScriptExecution',
     label: 'Execute scripts',
-    help: 'Let crew members run scripts they write and run craftbook script steps. These run in a sandbox. Off still lets the app itself run npm / Node CLIs / MCP servers.',
+    help: 'Let Gezel run scripts it writes and run the script steps in plans. These run in a sandbox. Off still lets the app itself run npm / Node CLIs / MCP servers.',
   },
   {
     key: 'allowPackageScriptExecution',
     label: 'Run package scripts',
-    help: "Let crew members run a project's npm scripts and installed command-line tools, such as npm run test. These run outside the sandbox, as your account, with network access. Gezel still asks you before each new or changed command. Coding craftbooks that check their work by running tests need this.",
+    help: "Let Gezel run a project's npm scripts and installed command-line tools, such as npm run test. These run outside the sandbox, as your account, with network access. It still asks you before each new or changed command. Coding craftbooks that check their work by running tests need this.",
   },
   {
     key: 'allowPackageScriptEdits',
     label: 'Edit package scripts',
-    help: "Let crew members add or change the scripts in a project's package.json. A script runs later, from Gezel or your own terminal, with your whole account. Crew members can still edit the rest of the file.",
+    help: "Let Gezel add or change the scripts in a project's package.json. A script runs later, from Gezel or your own terminal, with your whole account. The rest of the file can still be edited.",
   },
   {
     key: 'allowAppNetwork',
@@ -125,7 +125,7 @@ export function SecurityComplianceSettings({
         id="settings-security-level"
         className={`engagement-mode-${level}`}
         title="Security level"
-        hint="One control over what crew members may do: edit files, use cloud providers, reach the open web, and run scripts. Lock it down to try Gezel safely, and loosen it as you build trust."
+        hint="One control over what Gezel may do: edit files, use cloud providers, reach the open web, and run scripts. Lock it down to try Gezel safely, and loosen it as you build trust."
       >
         <div>
           <div
@@ -175,8 +175,8 @@ export function SecurityComplianceSettings({
         </div>
         <p className="gz-setting-hint">
           Locked-down work still flows into the artifacts sandbox, so reviews, prototypes, and
-          documents keep working. Changing the level restarts open chats so crew members pick up the
-          new rules on their next message; a gezel answering right now finishes that answer first.
+          documents keep working. Changing the level restarts open chats so the new rules apply from
+          the next message; an answer already under way finishes first.
         </p>
       </SettingsSection>
 
@@ -275,9 +275,9 @@ function WindowsSandboxSetting({
       label="Windows sandbox"
       hint={
         <>
-          Run the scripts crew members write inside Windows&rsquo; process container, which limits
-          them to their project folder and blocks the network for scripts that shouldn&rsquo;t use
-          it. Off, those scripts don&rsquo;t run.{' '}
+          Run the scripts Gezel writes inside Windows&rsquo; process container, which limits them to
+          their project folder and blocks the network for scripts that shouldn&rsquo;t use it. Off,
+          those scripts don&rsquo;t run.{' '}
           <span aria-live="polite">{describeScriptSandbox(sandbox)}</span>
         </>
       }

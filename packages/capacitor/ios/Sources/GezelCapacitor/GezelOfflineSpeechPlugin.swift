@@ -56,6 +56,18 @@ public final class GezelOfflineSpeechPlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self else { return }
             self.locked { self.backgrounded = false }
         })
+        // Dictating a prompt and then asking for a reply left the speech model
+        // loaded beside the chat model for the idle minutes. An idle engine
+        // gives it back before a chat model runs; the runtime posts this on its
+        // inference queue and waits. A transcription in progress keeps its
+        // model, and the load never waits behind it.
+        observers.append(center.addObserver(forName: GezelKnowledgePlugin.modelWillRun, object: nil, queue: nil) { [weak self] _ in
+            guard let self, self.locked({ self.activeId == nil }) else { return }
+            self.worker.sync { self.releaseModels() }
+        })
+        observers.append(center.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.scheduleRelease(after: 0)
+        })
     }
     deinit {
         observers.forEach(NotificationCenter.default.removeObserver)

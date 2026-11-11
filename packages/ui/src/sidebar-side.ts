@@ -1,3 +1,4 @@
+import { DEFAULT_SIDEBAR_SIDE } from '@bendyline/gezel';
 import { api } from './api.js';
 
 export type SidebarSide = 'left' | 'right';
@@ -6,36 +7,54 @@ const STORAGE_KEY = 'gezel:sidebar-side';
 const CHANGE_EVENT = 'gezel:sidebar-side-change';
 
 /**
- * The current sidebar side from the localStorage cache. `right` is the
- * default, so only an explicit `left` opts out — an absent/garbage value
- * resolves to `right`. The CSS keys the RIGHT layout off the presence of
- * `data-sidebar-side="right"` and treats no-attribute as the LEFT base,
- * so `applySidebarSide` stamps the attribute for `right` and clears it
- * for `left` (see below); the default resolving to `right` is what makes
- * a fresh install stamp the attribute on first paint.
+ * The cached side for a choice: the default is stored as an absent key, so a
+ * cache that was never written and one holding the default read the same.
+ */
+function cacheSide(side: SidebarSide): void {
+  try {
+    if (side === DEFAULT_SIDEBAR_SIDE) localStorage.removeItem(STORAGE_KEY);
+    else localStorage.setItem(STORAGE_KEY, side);
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * The current sidebar side from the localStorage cache. `left` is the
+ * default (`DEFAULT_SIDEBAR_SIDE`; it was `right` until 2026-11-11), so only
+ * an explicit `right` opts out and an absent or garbage value resolves to
+ * `left`. The CSS treats no attribute as the LEFT base and keys the RIGHT
+ * layout off `data-sidebar-side="right"`, so a fresh install paints the
+ * default with nothing stamped at all.
  */
 export function getSidebarSide(): SidebarSide {
   try {
-    if (localStorage.getItem(STORAGE_KEY) === 'left') return 'left';
+    const cached = localStorage.getItem(STORAGE_KEY);
+    if (cached === 'left' || cached === 'right') return cached;
   } catch {
     /* localStorage unavailable — fall through to the default */
   }
-  return 'right';
+  return DEFAULT_SIDEBAR_SIDE;
+}
+
+/**
+ * Calls `listener` when the side changes, here or from the boot-time sync,
+ * and returns the unsubscribe. Shaped for `useSyncExternalStore`.
+ */
+export function onSidebarSideChange(listener: () => void): () => void {
+  window.addEventListener(CHANGE_EVENT, listener);
+  return () => window.removeEventListener(CHANGE_EVENT, listener);
 }
 
 /**
  * Persist the sidebar side, apply it immediately, and mirror it to the
  * gezel config so it survives Electron's ephemeral-port shuffle — same
- * reasoning as `setThemePref` in theme.ts. `right` is the default, so it
- * clears the cache key (absent = default) and `left` stores explicitly.
+ * reasoning as `setThemePref` in theme.ts. The config always gets the choice
+ * by name, which is what tells a chosen side from the default: a person who
+ * picked the right keeps it when the default moves.
  */
 export function setSidebarSide(side: SidebarSide): void {
-  try {
-    if (side === 'right') localStorage.removeItem(STORAGE_KEY);
-    else localStorage.setItem(STORAGE_KEY, side);
-  } catch {
-    /* ignore */
-  }
+  cacheSide(side);
   applySidebarSide(side);
   window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
   void api.updateConfig({ sidebarSide: side }).catch(() => {});
@@ -53,11 +72,16 @@ export function applySidebarSide(side: SidebarSide): void {
 }
 
 /**
- * Boot-time reconciliation: pull `sidebarSide` from the gezel config and
- * apply it if it differs from the localStorage cache. Mirrors
- * `syncThemeFromConfig`. The early `theme-init.js` script has already
- * applied the cached value before first paint; this covers the case where
- * the config (cross-boot source of truth) disagrees with a stale cache.
+ * Boot-time reconciliation: pull `sidebarSide` from the gezel config (the
+ * cross-boot source of truth), cache it, and paint the resolved side. Mirrors
+ * `syncThemeFromConfig`. A config with no choice in it leaves the cache alone:
+ * the cache only ever holds a side the person picked, or nothing.
+ *
+ * The side is painted every time, even when the cache already agrees. Two
+ * scripts stamp the root before this runs, `theme-init.js` from the cache and
+ * the start screen from its saved snapshot, and `getSidebarSide()` is what
+ * Settings shows. Painting only on a cache change left a start screen's
+ * `right` on the root while Settings said Left (2026-11-11).
  */
 export async function syncSidebarSideFromConfig(): Promise<void> {
   let serverSide: SidebarSide | undefined;
@@ -65,17 +89,12 @@ export async function syncSidebarSideFromConfig(): Promise<void> {
     const cfg = await api.getConfig();
     if (cfg.sidebarSide === 'left' || cfg.sidebarSide === 'right') serverSide = cfg.sidebarSide;
   } catch {
-    /* offline / boot race — keep whatever localStorage says */
+    /* offline / boot race — keep whatever is painted */
     return;
   }
-  if (!serverSide) return;
-  if (serverSide === getSidebarSide()) return;
-  try {
-    if (serverSide === 'right') localStorage.removeItem(STORAGE_KEY);
-    else localStorage.setItem(STORAGE_KEY, serverSide);
-  } catch {
-    /* ignore */
-  }
-  applySidebarSide(serverSide);
-  window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
+  const before = getSidebarSide();
+  if (serverSide) cacheSide(serverSide);
+  const side = serverSide ?? before;
+  applySidebarSide(side);
+  if (side !== before) window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
 }

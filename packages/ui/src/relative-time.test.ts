@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatAbsoluteTime, formatRelativeTime } from './relative-time.js';
+import { formatAbsoluteTime, formatClockTime, formatRelativeTime } from './relative-time.js';
 
 const NOW = Date.parse('2026-08-20T12:00:00.000Z');
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
@@ -79,5 +79,20 @@ describe('formatAbsoluteTime', () => {
   it('returns the fallback for unusable input', () => {
     expect(formatAbsoluteTime(undefined)).toBe('');
     expect(formatAbsoluteTime('nope', '—')).toBe('—');
+  });
+});
+
+describe('formatClockTime', () => {
+  // Home forced a 24-hour "13:01" while History printed "12:31 PM" (2026-11-09).
+  it('reads the clock the way the locale does, and the way the absolute title does', () => {
+    const at = new Date(2026, 10, 9, 13, 1);
+    const locale = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(at);
+    expect(formatClockTime(at)).toBe(locale);
+    expect(formatAbsoluteTime(at)).toContain(formatClockTime(at));
+  });
+
+  it('returns the fallback for unusable input', () => {
+    expect(formatClockTime(null)).toBe('');
+    expect(formatClockTime('nope', '—')).toBe('—');
   });
 });

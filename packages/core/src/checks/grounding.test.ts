@@ -361,3 +361,82 @@ describe('citationsResolve — knowledge citations', () => {
     expect(r.urls.sort()).toEqual([invented, real].sort());
   });
 });
+
+describe('citationsResolve — names that are not files (squisq/37, 2026-11-10)', () => {
+  const ws = (files: Record<string, string>) => ({
+    read: async (f: string) => files[f] ?? null,
+    list: async () => Object.keys(files),
+  });
+  const full = 'packages/formats/src/registry/errors.ts';
+
+  it('never reads a spreadsheet formula as a cited path', async () => {
+    const report = 'The parser rejects `=//1` with a parse error, see `src/parser.ts`.';
+    const r = await citationsResolve(ws({ 'notes.md': report, 'src/parser.ts': 'x' }), 'notes.md');
+    expect(r.ok).toBe(true);
+    expect(r.resolved).toEqual(['src/parser.ts']);
+    expect(r.unresolved).toEqual([]);
+  });
+
+  it('forgives npm package names and keeps them out of the citation count', async () => {
+    const report =
+      'Scope: `@bendyline/squisq-calc`, `@bendyline/squisq-formats/outside-in` and `@bendyline/squisq@1.2.0`. Evidence: `src/a.ts`.';
+    const r = await citationsResolve(ws({ 'notes.md': report, 'src/a.ts': 'x' }), 'notes.md', {
+      minCitations: 1,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.unresolved).toEqual([]);
+    expect(r.forgiven?.sort()).toEqual([
+      '@bendyline/squisq-calc',
+      '@bendyline/squisq-formats/outside-in',
+      '@bendyline/squisq@1.2.0',
+    ]);
+
+    const onlyPackages = await citationsResolve(
+      ws({ 'notes.md': 'Scope: `@bendyline/squisq-calc` and `@bendyline/squisq-graph`.' }),
+      'notes.md',
+      { minCitations: 1 },
+    );
+    expect(onlyPackages.ok).toBe(false);
+    expect(onlyPackages.detail).toMatch(/has 0 recognizable citation/);
+  });
+
+  it('still resolves a real folder whose name starts with @', async () => {
+    const report = 'See `@types/node/index.d.ts`.';
+    const r = await citationsResolve(
+      ws({ 'notes.md': report, '@types/node/index.d.ts': 'x' }),
+      'notes.md',
+    );
+    expect(r.ok).toBe(true);
+    expect(r.resolved).toEqual(['@types/node/index.d.ts']);
+  });
+
+  it('accepts a shortened path the same document cited in full', async () => {
+    const report = [
+      `Each error code lives in \`${full}\`.`,
+      'Not read in full: the `registry/errors.ts` union tail.',
+    ].join('\n');
+    const r = await citationsResolve(ws({ 'notes.md': report, [full]: 'x' }), 'notes.md', {
+      minCitations: 1,
+    });
+    expect(r.ok).toBe(true);
+    expect(r.unresolved).toEqual([]);
+    expect(r.resolved.sort()).toEqual([full, 'registry/errors.ts'].sort());
+  });
+
+  it('a shortened path the document never cited in full is still unresolved', async () => {
+    const report = 'Real: `src/a.ts`. Invented: `registry/errors.ts`.';
+    const r = await citationsResolve(
+      ws({ 'notes.md': report, 'src/a.ts': 'x', [full]: 'x' }),
+      'notes.md',
+    );
+    expect(r.ok).toBe(false);
+    expect(r.unresolved).toEqual(['registry/errors.ts']);
+  });
+
+  it('only whole path segments match, never a partial file name', async () => {
+    const report = `Real: \`${full}\`. Invented: \`ry/errors.ts\`.`;
+    const r = await citationsResolve(ws({ 'notes.md': report, [full]: 'x' }), 'notes.md');
+    expect(r.ok).toBe(false);
+    expect(r.unresolved).toEqual(['ry/errors.ts']);
+  });
+});

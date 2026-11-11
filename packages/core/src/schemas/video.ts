@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ImageAspectRatioSchema } from './image.js';
 
 /**
  * Wire schemas for the video-generation feature. Mirrors `image.ts` —
@@ -50,6 +51,15 @@ export const VideoGenerationRequestSchema = z.object({
    * models whose manifest sets `supportsImageToVideo`.
    */
   inputImage: VideoInputSourceSchema.optional(),
+  /**
+   * The caller means to animate `inputImage`: refuse (409
+   * `video_i2v_unavailable`) rather than make a clip from the words alone
+   * when no installed model can animate a picture, and refuse a request
+   * without a picture (400 `video_source_required`).
+   */
+  requireImageToVideo: z.boolean().optional(),
+  /** The clip's shape at the model's trained area. Absent: the picture's shape, else the model's default. */
+  aspectRatio: ImageAspectRatioSchema.optional(),
   /** Project the output artifact belongs to. Defaults to 'default'. */
   projectId: z.string().optional(),
   /**
@@ -89,6 +99,14 @@ export const VideoGenerationMetaSchema = z.object({
   durationMs: z.number().int().nonnegative(),
   /** Container of the encoded clip, e.g. `video/mp4`. */
   mimeType: z.string(),
+  /** The engine that rendered it, e.g. `diffusers`, `sd-cpp`. */
+  engine: z.string().optional(),
+  /** The clip carries a soundtrack. */
+  hasAudio: z.boolean().optional(),
+  /** Plain sentences about what was changed or left out, e.g. a clip saved as WebM only. */
+  settingsNotes: z.array(z.string()).optional(),
+  /** Why the picture sent to animate was not used: the model makes clips from words only. */
+  i2vSkippedReason: z.string().optional(),
 });
 export type VideoGenerationMeta = z.infer<typeof VideoGenerationMetaSchema>;
 
@@ -111,6 +129,11 @@ export const VideoGenerationResponseSchema = z.object({
    * path via the authenticated artifact-blob endpoint.
    */
   b64Poster: z.string().optional(),
+  /** The poster's artifact path and type (`image/png`, or `image/webp` lifted from a WebM). */
+  posterPath: z.string().optional(),
+  posterMimeType: z.string().optional(),
+  /** The same clip in other containers, as artifact paths (the WebM beside an MP4). */
+  alternates: z.array(z.object({ artifactPath: z.string(), mimeType: z.string() })).optional(),
 });
 export type VideoGenerationResponse = z.infer<typeof VideoGenerationResponseSchema>;
 
@@ -126,12 +149,28 @@ export const InstalledVideoModelSchema = z.object({
    * UI labels it "Machine-wide" instead of offering Delete.
    */
   readOnly: z.boolean().optional(),
+  /** The engine that renders it. Absent from an engine that predates the field: diffusers. */
+  engine: z.string().optional(),
+  family: z.string().optional(),
+  /** Animates a picture it is given. Absent: it makes clips from words only. */
+  supportsImageToVideo: z.boolean().optional(),
+  /** Only animates pictures. */
+  imageToVideoOnly: z.boolean().optional(),
+  /** Its clips come with a soundtrack. */
+  hasAudio: z.boolean().optional(),
+  /** The clip it renders when asked for nothing in particular. */
+  defaultWidth: z.number().int().positive().optional(),
+  defaultHeight: z.number().int().positive().optional(),
+  defaultNumFrames: z.number().int().positive().optional(),
+  defaultFps: z.number().int().positive().optional(),
 });
 export type InstalledVideoModel = z.infer<typeof InstalledVideoModelSchema>;
 
 export const ListInstalledVideoModelsResponseSchema = z.object({
   models: z.array(InstalledVideoModelSchema),
   defaultModel: z.string().optional(),
+  /** The model that animates an attached picture (core `chooseVideoModel`); absent when none can. */
+  defaultImageToVideoModel: z.string().optional(),
 });
 export type ListInstalledVideoModelsResponse = z.infer<
   typeof ListInstalledVideoModelsResponseSchema
@@ -140,6 +179,20 @@ export type ListInstalledVideoModelsResponse = z.infer<
 /** The hardware accelerator the local video engine resolved on this host. */
 export const VideoAcceleratorSchema = z.enum(['cuda', 'mps', 'cpu']);
 export type VideoAccelerator = z.infer<typeof VideoAcceleratorSchema>;
+
+/** Where a media engine computes: PyTorch's device for diffusers, the ggml backend for sd.cpp. */
+export const MediaBackendSchema = z.enum(['cuda', 'mps', 'metal', 'vulkan', 'cpu']);
+export type MediaBackend = z.infer<typeof MediaBackendSchema>;
+
+/** One video engine's health, for the Settings page's per-engine readout. */
+export const VideoEngineEntrySchema = z.object({
+  engine: z.string(),
+  status: z.enum(['ok', 'unreachable', 'not-configured']),
+  backend: MediaBackendSchema.optional(),
+  error: z.string().optional(),
+  modelCount: z.number().int().nonnegative(),
+});
+export type VideoEngineEntry = z.infer<typeof VideoEngineEntrySchema>;
 
 /**
  * Engine health envelope returned by `GET /api/video-gen/engine-status`.
@@ -168,6 +221,8 @@ export const VideoEngineStatusResponseSchema = z.object({
      * will change it. Absent otherwise.
      */
     cpuReason: z.enum(['no-gpu-build']).optional(),
+    /** Each video engine on this computer. Absent from a daemon that predates sd.cpp video. */
+    engines: z.array(VideoEngineEntrySchema).optional(),
   }),
   modelCount: z.number().int().nonnegative(),
 });

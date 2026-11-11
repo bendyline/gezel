@@ -136,7 +136,7 @@
 }
 
 .gh-changes-list li.is-selected {
-  background: var(--surface);
+  background: var(--selected-bg);
 }
 
 .gh-changes-row {
@@ -514,7 +514,7 @@
 }
 
 .gh-conflicts-rail-item.is-selected {
-  background: var(--surface);
+  background: var(--selected-bg);
 }
 
 .gh-conflicts-dot {
@@ -681,7 +681,7 @@
 }
 
 .gh-timeline-item.is-selected {
-  background: var(--surface);
+  background: var(--selected-bg);
 }
 
 .gh-timeline-subject {
@@ -830,7 +830,7 @@
 }
 
 .gh-review-history-item.is-selected {
-  background: var(--surface);
+  background: var(--selected-bg);
 }
 
 .gh-review-history-title {
@@ -1043,7 +1043,7 @@
 }
 
 .growth-counter-value {
-  font-size: 1.15rem;
+  font-size: var(--text-xl);
   font-weight: 700;
 }
 
@@ -1170,7 +1170,7 @@
 
 .growth-proposal-card h5 {
   margin: 0;
-  font-size: 0.92rem;
+  font-size: var(--text-md);
   text-transform: none;
   letter-spacing: 0;
   color: var(--text);

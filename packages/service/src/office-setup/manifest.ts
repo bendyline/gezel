@@ -83,7 +83,7 @@ export function buildOfficeManifest(input: OfficeManifestInput): string {
   <ProviderName>Bendyline</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="${name}"/>
-  <Description DefaultValue="Work with your gezels on this document."/>
+  <Description DefaultValue="Work with Gezel on this document."/>
   <IconUrl DefaultValue="${icon(32)}"/>
   <HighResolutionIconUrl DefaultValue="${icon(64)}"/>
   <SupportUrl DefaultValue="${escapeXml(OFFICE_SUPPORT_URL)}"/>
@@ -144,7 +144,7 @@ ${[16, 32, 80].map((size) => `        <bt:Image id="Gezel.Icon.${size}" DefaultV
         <bt:String id="Gezel.Button.Label" DefaultValue="${name}"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="Gezel.Button.Tooltip" DefaultValue="Open Gezel to work with your gezels on this document."/>
+        <bt:String id="Gezel.Button.Tooltip" DefaultValue="Open Gezel to work on this document."/>
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

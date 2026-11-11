@@ -120,8 +120,6 @@
 
 .home-copilot-recommended {
   font-size: var(--text-2xs);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
   background: var(--action-bg);
   color: var(--action-ink);
   padding: 0.08rem 0.45rem;
@@ -701,7 +699,7 @@
   padding: 0.6rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: rgba(79, 125, 255, 0.06);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
   max-width: 32rem;
 }
 

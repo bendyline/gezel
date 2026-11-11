@@ -510,6 +510,18 @@ describe('groundText', () => {
     ).toBe('supported');
   });
 
+  it('reads an amount with both a thousands comma and cents as one number', () => {
+    const ev = [{ n: 1, text: '| Saturday | 15279.50 |\n| Sunday | 12,330.50 |' }];
+    for (const sentence of [
+      'Saturday took 15,279.50 [1].',
+      'Sunday took 12,330.50 [1].',
+      'Sunday took 12330.50 [1].',
+    ]) {
+      expect(groundText(sentence, ev).sentences[0]?.status, sentence).toBe('supported');
+    }
+    expect(groundText('Sunday took 4,182.50 [1].', ev).sentences[0]?.missing).toEqual(['4182.50']);
+  });
+
   // conflict-synthesis, 2026-10-07: each of these quotes is verbatim from the
   // memo the model had just read, and each was refused.
   it('finds a verbatim quote across a line break, a thousands comma, or the writer’s own punctuation', () => {

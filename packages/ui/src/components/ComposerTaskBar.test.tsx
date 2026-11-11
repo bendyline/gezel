@@ -80,11 +80,9 @@ describe('ComposerTaskBar', () => {
 
   it('says why a pick was refused', () => {
     renderBar({
-      picking: { key: 'source', error: 'Nothing here is a file this craftbook reads.' },
+      picking: { key: 'source', error: 'Nothing here is a file this plan reads.' },
     });
-    expect(screen.getByRole('alert').textContent).toBe(
-      'Nothing here is a file this craftbook reads.',
-    );
+    expect(screen.getByRole('alert').textContent).toBe('Nothing here is a file this plan reads.');
     expect(screen.getByRole('button', { name: 'Use your own file…' })).toBeTruthy();
   });
 

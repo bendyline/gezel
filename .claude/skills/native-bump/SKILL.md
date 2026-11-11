@@ -45,7 +45,7 @@ For each engine the user named (or all, if they said "update the native binaries
    git ls-remote https://github.com/<owner>/<repo>.git refs/tags/<tag>   # sha must equal the commit you pinned
    ```
 
-3. **llama-cpp ONLY — three extra moves.**
+3. **llama-cpp ONLY — four extra moves.**
    - **Sync the cache-bust constant.** `packages/core/src/native/llama-engine-version.ts` has `LLAMA_ENGINE_VERSION`, which **must equal the new `tag=`**. Its doc says "Bumped alongside `native/engines/llama-cpp/VERSION`"; a stale value causes backend-probe cache thrash. *(This is the #1 missed step — it was already stale `b8892` vs VERSION's `b9843` when this skill was written.)*
    - **Set `build=`.** Upstream pins are semver now (`v0.3.0`), and the build number the binary reports (`git rev-list --count HEAD`) is no longer readable off the tag. Every stable release carries an equivalent `b####` tag on the same commit — that number IS the build. Find it with:
      ```bash
@@ -57,6 +57,7 @@ For each engine the user named (or all, if they said "update the native binaries
      matching `b####` is usually not on the first page, so it returns only the
      semver tag and looks like no build number exists.
      `fetch-upstream.sh` and `assert-llama-version.mjs` both **hard-fail** on a pin they can't verify, so a wrong or missing `build=` fails the build rather than sliding through.
+   - **Regenerate the GGUF support table.** `node scripts/sync-engine-model-support.mjs` rewrites `packages/core/src/native/llama-cpp-gguf-support.ts` (the architectures and tensor types the pinned engine loads) from upstream source at the new commit. Hugging Face imports check models against it before download (docs/model-imports.md), and `llama-cpp-gguf-support.test.ts` fails until it matches `VERSION`.
    - **Reconcile the legal surface.** `native/licenses/manifest.json` and the NOTICE.md row both carry the tag+commit and are checked by `scripts/check-notice.mjs`. (`packages/service/dist/NOTICE.md` also goes stale until the next `pnpm build` — that's a build artifact, not a pin error.)
 
 4. **uv ONLY — refresh all 5 sha256 digests.** `build.sh`/`build.ps1` verify the downloaded archive against the pin. Target→key mapping:

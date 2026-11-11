@@ -1167,7 +1167,10 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(launched?.craftbookParams?.topic).toBe(
       'Can you create a PowerPoint about the Battle of Ypres?',
     );
-    expect(launched?.craftbook.steps[0]?.prompt).toContain(
+    // Under the mock provider (copilot) the book renders as one outcome step;
+    // the recipe it was folded from keeps the filled-in parameters.
+    const recipe = launched?.craftbook.sourceSteps ?? launched?.craftbook.steps;
+    expect(recipe?.[0]?.prompt).toContain(
       'Topic: `Can you create a PowerPoint about the Battle of Ypres?`',
     );
   }, 30_000);

@@ -1,12 +1,14 @@
-import type {
-  ActiveVideoPull,
-  CatalogItemSummary,
-  InstalledVideoModel,
-  VideoModelManifest,
-  VideoModelPullEvent,
+import {
+  type ActiveVideoPull,
+  type CatalogItemSummary,
+  type InstalledVideoModel,
+  type VideoModelManifest,
+  type VideoModelPullEvent,
+  videoManifestHasAudio,
 } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { AddModelDialog, HuggingFaceHostingNote, ModelListHeading } from './AddModelDialog.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { LicenseButton } from './LicenseButton.js';
@@ -30,6 +32,33 @@ function formatSize(bytes: number): string {
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(0)} MB`;
   if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
   return `${bytes} B`;
+}
+
+/** What a model does beyond making clips from words, in a person's terms. */
+export function videoModelAbilities(m: {
+  supportsImageToVideo?: boolean | undefined;
+  imageToVideoOnly?: boolean | undefined;
+  hasAudio?: boolean | undefined;
+}): string[] {
+  const out: string[] = [];
+  if (m.imageToVideoOnly) out.push('Animates pictures only');
+  else if (m.supportsImageToVideo) out.push('Animates pictures');
+  if (m.hasAudio) out.push('With sound');
+  return out;
+}
+
+/** The clip a model makes when asked for nothing in particular: `1280×704, 5 s`. */
+export function videoDefaultClip(m: {
+  defaultWidth?: number | undefined;
+  defaultHeight?: number | undefined;
+  defaultNumFrames?: number | undefined;
+  defaultFps?: number | undefined;
+}): string | null {
+  if (!m.defaultWidth || !m.defaultHeight) return null;
+  const size = `${m.defaultWidth}×${m.defaultHeight}`;
+  if (!m.defaultNumFrames || !m.defaultFps) return size;
+  const seconds = Math.round((m.defaultNumFrames / m.defaultFps) * 10) / 10;
+  return `${size}, ${seconds} s`;
 }
 
 interface ActivePull {
@@ -57,6 +86,11 @@ interface ActivePull {
 interface Props {
   /** When true, the Install button is disabled — e.g. no engine configured. */
   disabledReason?: string;
+  /**
+   * Why a catalog entry's engine cannot run here, keyed by engine (`sd-cpp`,
+   * `diffusers`). Its Download key is disabled with this as the reason.
+   */
+  engineUnavailable?: Readonly<Record<string, string>>;
   /** Fired after an install / delete so the parent can refresh status pills. */
   onModelsChanged?: () => void;
   /**
@@ -71,12 +105,15 @@ interface Props {
 
 export function VideoModelManager({
   disabledReason,
+  engineUnavailable,
   onModelsChanged,
   configuredDefaultModelId,
   onSetActiveModel,
 }: Props) {
   const [installed, setInstalled] = useState<InstalledVideoModel[]>([]);
   const [installedError, setInstalledError] = useState<string | null>(null);
+  const [installedLoaded, setInstalledLoaded] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [pulls, setPulls] = useState<Map<string, ActivePull>>(new Map());
   const [toDelete, setToDelete] = useState<string | null>(null);
   // The daemon's verdict per catalog model, so a model this machine cannot
@@ -99,6 +136,8 @@ export function VideoModelManager({
     } catch (err) {
       setInstalled([]);
       setInstalledError((err as Error).message);
+    } finally {
+      setInstalledLoaded(true);
     }
   }, []);
 
@@ -317,18 +356,22 @@ export function VideoModelManager({
         </div>
       )}
 
-      {(installed.length > 0 || installedError) && (
-        <div className="ollama-section">
-          <h4>Local models</h4>
-          {installedError && <p className="error">{installedError}</p>}
-          {showActivePicker && installed.length > 1 && (
-            <p className="muted small">
-              The <strong>active</strong> model is what the video-generator gezel and the{' '}
-              <code>generate_video</code> tool use by default. A gezel can still ask for a specific
-              model per clip; switching reloads the engine, which takes a moment.
-            </p>
-          )}
-          {installed.length > 0 && (
+      <div className="ollama-section">
+        <ModelListHeading title="Local models" onAdd={() => setAddOpen(true)} />
+        {installedError && <p className="error">{installedError}</p>}
+        {installedLoaded && !installedError && installed.length === 0 && (
+          <p className="muted small">No models on this device yet.</p>
+        )}
+        {showActivePicker && installed.length > 1 && (
+          <p className="muted small">
+            The <strong>active</strong> model is what a video generator and the{' '}
+            <code>generate_video</code> tool use by default. Gezel can still ask for a specific
+            model per clip; switching reloads the engine, which takes a moment.
+          </p>
+        )}
+        {installed.length > 0 && (
+          // Five columns do not fit a phone's panel; the table scrolls inside it.
+          <div className="ollama-model-table-wrap">
             <table className="ollama-model-table">
               <thead>
                 <tr>
@@ -362,7 +405,12 @@ export function VideoModelManager({
                         />
                       </td>
                     )}
-                    <td>{m.name}</td>
+                    <td>
+                      {m.name}
+                      {videoModelAbilities(m).length > 0 && (
+                        <span className="muted small"> · {videoModelAbilities(m).join(' · ')}</span>
+                      )}
+                    </td>
                     <td>{formatSize(m.approxSizeBytes)}</td>
                     <td className="muted small">{new Date(m.installedAt).toLocaleDateString()}</td>
                     <td>
@@ -387,12 +435,15 @@ export function VideoModelManager({
                 ))}
               </tbody>
             </table>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
-      <div className="ollama-section ollama-section--flat ollama-section--download">
-        <h4>Download a model</h4>
+      <AddModelDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        description={<HuggingFaceHostingNote />}
+      >
         <HiddenModelsToggle
           hiddenCount={hiddenCount}
           showAll={showAll}
@@ -418,6 +469,14 @@ export function VideoModelManager({
                 : null;
             const modelFit = fit.byId?.get(m.id);
             const tooLarge = !already && hiddenByFit(modelFit);
+            const engineReason = engineUnavailable?.[m.engine ?? 'diffusers'];
+            const unavailableReason = disabledReason ?? engineReason;
+            const clip = videoDefaultClip(m);
+            const abilities = videoModelAbilities({
+              supportsImageToVideo: m.supportsImageToVideo,
+              imageToVideoOnly: m.imageToVideoOnly,
+              hasAudio: videoManifestHasAudio(m),
+            });
             return (
               <div className="catalog-ollama-action">
                 <div className="catalog-ollama-meta">
@@ -427,6 +486,15 @@ export function VideoModelManager({
                     <span>{formatSize(m.approxSizeBytes)}</span>
                     <span>·</span>
                     <span>{m.family.toUpperCase()}</span>
+                    {clip && (
+                      <>
+                        <span>·</span>
+                        <span>{clip}</span>
+                      </>
+                    )}
+                    {abilities.map((label) => (
+                      <span key={label}>· {label}</span>
+                    ))}
                     <MediaFitNote fit={modelFit} />
                   </div>
                   <div className="catalog-ollama-pills">
@@ -435,8 +503,8 @@ export function VideoModelManager({
                 </div>
                 <button
                   type="button"
-                  disabled={already || pulling || tooLarge || Boolean(disabledReason)}
-                  title={(tooLarge ? modelFit?.reason : disabledReason) ?? undefined}
+                  disabled={already || pulling || tooLarge || Boolean(unavailableReason)}
+                  title={(tooLarge ? modelFit?.reason : unavailableReason) ?? undefined}
                   onClick={() => {
                     const message = fitConfirmMessage(m.name, modelFit, m.approxSizeBytes);
                     if (message) setFitConfirm({ id: m.id, message });
@@ -457,7 +525,7 @@ export function VideoModelManager({
             );
           }}
         />
-      </div>
+      </AddModelDialog>
 
       <ConfirmDialog
         open={toDelete !== null}

@@ -62,6 +62,7 @@ import type {
 import type { TaskHandoffHoldReason } from '@bendyline/gezel/queue-status';
 import type { Store } from '../fs/store.js';
 import { readTaskWithEffectiveStatus } from './effective-status.js';
+import { pausesForPausedCrew } from './fanout-barrier.js';
 import { mainBookSource, stepOwnerGezelId } from './manager.js';
 import type { QuotaReserveHold } from './night-quota-gate.js';
 
@@ -210,8 +211,16 @@ export interface TaskRunnerDispatcher {
     resumeExisting?: boolean;
   }): Promise<{ sessionId: string }>;
 
-  /** Cancel a dispatched handoff whose task/activation is no longer current. */
-  cancelHandoffSession?(sessionId: string): Promise<{ cancelled: boolean }>;
+  /**
+   * Cancel a dispatched handoff whose task/activation is no longer current.
+   * `pass` names the dispatch when the task is still live, so a session that
+   * has since moved on to another of the task's steps or passes can keep its
+   * live turn; it is omitted when the task itself stopped.
+   */
+  cancelHandoffSession?(
+    sessionId: string,
+    pass?: { taskRef: string; stepId: string; activationAt?: string },
+  ): Promise<{ cancelled: boolean }>;
 
   /** True while the dispatched handoff's first turn is queued or running. */
   isHandoffSessionActive?(sessionId: string): boolean | Promise<boolean>;
@@ -664,12 +673,16 @@ export class TaskRunner {
       // Status-change hooks call this for every completion, not just boot.
       // Concurrent reconciliations must retain live work, not all history.
       const tasks: Task[] = [];
+      const hostsWithPausedChild = new Set<string>();
       try {
         const candidates =
           opts.rootTaskRef && opts.projectId
             ? this.iterateTaskTree(proj.id, opts.rootTaskRef)
             : this.store.iterateProjectTasks(proj.id);
         for await (const stored of candidates) {
+          if (stored.status === 'paused' && stored.parentTaskRef) {
+            hostsWithPausedChild.add(stored.parentTaskRef);
+          }
           if (stored.status !== 'active') continue;
           const task = await readTaskWithEffectiveStatus(this.store, proj.id, stored.num);
           if (task && taskEffectiveStatus(task) === 'active') tasks.push(task);
@@ -698,13 +711,16 @@ export class TaskRunner {
         // lifecycle and must not enqueue the parent collect/report step while
         // its children are still producing the shards that make the gate
         // satisfiable. The last child's settle hook redispatches the parent.
+        // A child paused for help holds it too: the barrier check pauses the
+        // host for help naming that child (fanout-barrier.ts).
         if (
           task.spawnsCraftbook &&
           !step.spawnFanout &&
-          tasks.some(
+          (tasks.some(
             (candidate) =>
               candidate.parentTaskRef === task.ref && taskEffectiveStatus(candidate) === 'active',
-          )
+          ) ||
+            (hostsWithPausedChild.has(task.ref) && pausesForPausedCrew(task, step)))
         ) {
           continue;
         }
@@ -1298,12 +1314,26 @@ export class TaskRunner {
           if (!stillInFlight) this.activeDispatches.delete(key);
           continue;
         }
-        await this.dispatcher.cancelHandoffSession?.(dispatch.sessionId).catch((err: unknown) => {
-          log.warn(
-            `[task-runner] failed to cancel stale handoff session ${dispatch.sessionId}:`,
-            err instanceof Error ? err.message : err,
-          );
-        });
+        // A task that stopped stops every turn on it. A newer pass of a live
+        // task stops only the turn still serving this dispatch's pass.
+        const supersededPass =
+          task && taskEffectiveStatus(task) === 'active'
+            ? {
+                taskRef: dispatch.taskRef,
+                stepId: dispatch.stepId,
+                ...(dispatch.activationAt !== undefined
+                  ? { activationAt: dispatch.activationAt }
+                  : {}),
+              }
+            : undefined;
+        await this.dispatcher
+          .cancelHandoffSession?.(dispatch.sessionId, supersededPass)
+          .catch((err: unknown) => {
+            log.warn(
+              `[task-runner] failed to cancel stale handoff session ${dispatch.sessionId}:`,
+              err instanceof Error ? err.message : err,
+            );
+          });
         this.activeDispatches.delete(key);
         continue;
       }

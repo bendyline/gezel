@@ -571,11 +571,12 @@
    * geometry, and the mode tabs that sit in them fill it exactly. */
   --compose-top-row-height: 2.1875rem;
   /* What chat spends below its own second row: squisq's editor toolbar
-   * (~35px, where Send lives) plus the editor itself (~85px). Terminal now
-   * spends it the same way — a Fire row of `--compose-top-row-height` over
-   * the command entry — so the two modes settle at the same overall height.
-   * Measured rather than derived, because squisq owns both numbers. */
-  --compose-entry-height: 120px;
+   * (~35px, where Send lives) plus the editor itself (~69px, about two
+   * lines: ChatComposer's collapsed `minHeight`). Terminal spends it the
+   * same way — a Fire row of `--compose-top-row-height` over the command
+   * entry — so the two modes settle at the same overall height. Measured
+   * rather than derived, because squisq owns both numbers. */
+  --compose-entry-height: 104px;
 }
 
 /* An expanded draft claims the column's share through the frame, not
@@ -747,7 +748,7 @@
    * takes chat's — one top row, plus the 1px seam under it. */
   height: calc(var(--compose-entry-height) - var(--compose-top-row-height) - 1px);
   flex: 1 1 calc(var(--compose-entry-height) - var(--compose-top-row-height) - 1px);
-  min-height: 72px;
+  min-height: 60px;
   align-items: stretch;
   border: 0;
   border-radius: 0;
@@ -1090,10 +1091,10 @@
   font-size: var(--text-sm);
   line-height: 1.55;
   padding: 0;
-  /* Tall to match the chat composer's editor minHeight (120px in
+  /* Tall to match the chat composer's editor minHeight (104px in
    * the Squisq EditorShell). User can drag-resize the textarea
    * to grow it further. */
-  min-height: 7.5rem;
+  min-height: 6.5rem;
   resize: vertical;
 }
 
@@ -1267,8 +1268,8 @@
 }
 
 .folder-tree-node.active {
-  background: var(--color-accent, #6cf);
-  color: var(--color-bg, #111);
+  background: var(--selected-bg);
+  color: var(--text);
 }
 
 /* Light-mode terminal-chrome — make the input wrap + folder picker read

@@ -11,6 +11,8 @@ import {
   estimateLlamaCppResidentBytes,
   estimateManifestKvBytes,
   hardwareHint,
+  isImportedChatModel,
+  isLocalFileChatModel,
   isMoEFromTags,
   isRetiredModel,
   launchFitsNow,
@@ -20,6 +22,14 @@ import {
 } from '@bendyline/gezel';
 import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import {
+  AddModelDialog,
+  HuggingFaceHostingNote,
+  LocalInstallNotices,
+  ModelListHeading,
+  NEEDS_ATTENTION_TITLE,
+  useCatalogItems,
+} from './AddModelDialog.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { HuggingFaceRepoLink, huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
@@ -29,6 +39,7 @@ import { LicenseButton } from './LicenseButton.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
 import { ModelFitnessCell, fitnessMenuAction } from './ModelFitnessCell.js';
+import { ModelImportDialog } from './ModelImportDialog.js';
 import { ModelSizeCell } from './ModelSizeCell.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
@@ -224,7 +235,9 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
   // False until the override endpoint answers — an older daemon or machine
   // broker 404s and the affordance hides rather than erroring per row.
   const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
-  const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
+  const [catalogItems, setCatalogItems] = useCatalogItems('chat-model');
+  const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const toggleVision = useCallback(
     async (modelId: string, next: boolean) => {
       setVisionSaving(modelId);
@@ -272,12 +285,22 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
   // (MoE-ness) through this for the hardware hint pill.
   const catalogById = useMemo(() => {
     const map = new Map<string, ChatModelManifest>();
-    for (const item of catalogItems) {
+    for (const item of catalogItems ?? []) {
       const m = asLlamaCppEntry(item.manifest);
       if (m) map.set(m.id, m);
     }
     return map;
   }, [catalogItems]);
+
+  const installNotices = (
+    <LocalInstallNotices
+      mismatch={installMismatch}
+      error={installError}
+      warning={installWarning}
+      onDownloadAnyway={downloadAnyway}
+      onDismissMismatch={() => setInstallMismatch(null)}
+    />
+  );
 
   return (
     <div className="ollama-model-manager">
@@ -309,275 +332,252 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
         onDelete={(id) => setToDelete(id)}
       />
 
-      {installMismatch && (
-        <div className="ollama-section">
-          <div className="gz-status-pill gz-status-pill--warn" style={{ marginBottom: '0.5rem' }}>
-            ⚠ <code>{installMismatch.catalogId}</code> is newer on Hugging Face than the version
-            Gezel knows about
-          </div>
-          <p style={{ marginBottom: '0.5rem' }}>
-            The file <code>{installMismatch.file}</code> changed upstream, so its checksum no longer
-            matches what this version of Gezel pinned. This is almost always a harmless upstream fix
-            — model authors routinely re-publish chat templates and tokenizer configs — but we can't
-            verify it automatically. You can download the current version now, or wait for a Gezel
-            update with a refreshed catalog.
-          </p>
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button
-              type="button"
-              className="gz-link-button"
-              onClick={() => downloadAnyway(installMismatch.catalogId)}
-            >
-              Download anyway
-            </button>
-            <button
-              type="button"
-              className="gz-link-button"
-              onClick={() => setInstallMismatch(null)}
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
-      {installError && (
-        <div className="ollama-section">
-          <p className="error" style={{ marginBottom: '0.5rem' }}>
-            {installError}
-          </p>
-        </div>
-      )}
-
-      {installWarning && (
-        <div className="ollama-section">
-          <div className="gz-status-pill gz-status-pill--warn" style={{ marginBottom: '0.5rem' }}>
-            ⚠ {installWarning.id}: {installWarning.message}
-          </div>
-        </div>
-      )}
+      {!addOpen && installNotices}
 
       {!compact && (
         <SharedModelMigrationPanel engine="llama-cpp" onModelsChanged={onModelsChanged} />
       )}
 
-      {(modelsLoading || models.length > 0 || modelsError) && (
-        <div className="ollama-section">
-          <h4>{compact ? 'Models on this device' : 'Local models'}</h4>
-          {modelsLoading && models.length === 0 && !modelsError && (
-            <p className="muted small" aria-live="polite">
-              Checking shared models… Large models can take a few minutes the first time; later
-              starts use the local verification cache.
-            </p>
-          )}
-          {modelsError && <p className="error">{modelsError}</p>}
-          {models.length > 0 && (
-            <div className="ollama-model-table-wrap">
-              <table className="ollama-model-table">
-                <colgroup>
-                  <col className="model-name-column" />
-                  <col />
-                  <col />
-                  <col />
-                  <col />
-                  <col />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Size</th>
-                    <th>Quant</th>
-                    <th title="Effective per-turn context size after Gezel's settings and memory limits">
-                      Context size
-                    </th>
-                    <th title="Representative startup and decode speed with an approximately 20K-token prompt">
-                      Fitness
-                    </th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {models.map((m) => {
-                    const updating = installs.has(m.id);
-                    const fitnessKey = `llama-cpp:${m.id}`;
-                    const entry = fitness.get(fitnessKey);
-                    const catalogManifest = catalogById.get(m.id);
-                    // Single-slot, not the fleet reservation: the admission
-                    // ladder sheds slots to fit, so a model is never unusable
-                    // because of slot count. Pricing the fleet here would flag
-                    // models as too big that the daemon would happily run.
-                    const installedResidentBytes =
-                      m.predictedResidentBytes ??
-                      estimateLlamaCppResidentBytes(m.approxSizeBytes, {
-                        mmprojBytes: m.mmprojSizeBytes,
-                      });
-                    const ramFit = memory
-                      ? computeModelFit({
+      <div className="ollama-section">
+        <ModelListHeading
+          title={compact ? 'Models on this device' : 'Local models'}
+          onAdd={() => setAddOpen(true)}
+        />
+        {modelsLoading && models.length === 0 && !modelsError && (
+          <p className="muted small" aria-live="polite">
+            Checking shared models… Large models can take a few minutes the first time; later starts
+            use the local verification cache.
+          </p>
+        )}
+        {modelsError && <p className="error">{modelsError}</p>}
+        {!modelsLoading && !modelsError && models.length === 0 && (
+          <p className="muted small">No models on this device yet.</p>
+        )}
+        {models.length > 0 && (
+          <div className="ollama-model-table-wrap">
+            <table className="ollama-model-table">
+              <colgroup>
+                <col className="model-name-column" />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Size</th>
+                  <th>Quant</th>
+                  <th title="Effective per-turn context size after Gezel's settings and memory limits">
+                    Context size
+                  </th>
+                  <th title="Representative startup and decode speed with an approximately 20K-token prompt">
+                    Fitness
+                  </th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {models.map((m) => {
+                  const updating = installs.has(m.id);
+                  const fitnessKey = `llama-cpp:${m.id}`;
+                  const entry = fitness.get(fitnessKey);
+                  const catalogManifest = catalogById.get(m.id);
+                  // Single-slot, not the fleet reservation: the admission
+                  // ladder sheds slots to fit, so a model is never unusable
+                  // because of slot count. Pricing the fleet here would flag
+                  // models as too big that the daemon would happily run.
+                  const installedResidentBytes =
+                    m.predictedResidentBytes ??
+                    estimateLlamaCppResidentBytes(m.approxSizeBytes, {
+                      mmprojBytes: m.mmprojSizeBytes,
+                    });
+                  const ramFit = memory
+                    ? computeModelFit({
+                        residentBytes: installedResidentBytes,
+                        isMoE: isMoEFromTags(catalogManifest?.tags),
+                        ...fitMachine(memory),
+                      })
+                    : undefined;
+                  const startsNow = fitNow?.models.find((x) => x.id === m.id)?.startsNow;
+                  const hint =
+                    memory && catalogManifest
+                      ? hardwareHint(recoDeviceFromMemory(memory), {
+                          isMoE: isMoEFromTags(catalogManifest.tags),
+                          fitTier: ramFit?.tier ?? 'fits',
                           residentBytes: installedResidentBytes,
-                          isMoE: isMoEFromTags(catalogManifest?.tags),
-                          ...fitMachine(memory),
+                          ...(startsNow !== undefined ? { startsNow } : {}),
                         })
-                      : undefined;
-                    const startsNow = fitNow?.models.find((x) => x.id === m.id)?.startsNow;
-                    const hint =
-                      memory && catalogManifest
-                        ? hardwareHint(recoDeviceFromMemory(memory), {
-                            isMoE: isMoEFromTags(catalogManifest.tags),
-                            fitTier: ramFit?.tier ?? 'fits',
-                            residentBytes: installedResidentBytes,
-                            ...(startsNow !== undefined ? { startsNow } : {}),
-                          })
-                        : null;
-                    return (
-                      <Fragment key={m.id}>
-                        <tr>
-                          <td className="model-name-table-cell">
-                            <div className="model-name-cell">
-                              <code>{m.id}</code>
-                              <div className="model-name-meta model-name-meta--stacked">
-                                {hint && (
-                                  <span
-                                    className={`gz-status-pill${hintPillTone(hint.kind)}`}
-                                    title={hint.detail}
-                                  >
-                                    {hint.label}
-                                  </span>
-                                )}
-                                {m.updateAvailable && (
-                                  <span
-                                    className="gz-status-pill gz-status-pill--warn"
-                                    title={
-                                      m.updateReason ??
-                                      (m.availableVersion
-                                        ? `A newer build is available in the catalog (→ v${m.availableVersion}). Updating downloads only the files that differ.`
-                                        : 'A newer build is available in the catalog.')
-                                    }
-                                  >
-                                    update available
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                          <ModelSizeCell model={m} />
-                          <td title={quantizationTitle(m.quantization, m.ggufQuantization)}>
-                            {approximateQuantizationLabel(m.quantization, m.ggufQuantization)}
-                          </td>
-                          <td
-                            title={
-                              m.effectiveContextWindow
-                                ? m.overrideContextTokens !== undefined
-                                  ? `You've set this model to ${m.overrideContextTokens.toLocaleString()} tokens per turn; Gezel grants up to what memory allows (currently ${m.effectiveContextWindow.toLocaleString()}).`
-                                  : `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}. The effective size accounts for model tuning, settings, concurrency, and available memory — Adaptive grows it past 64K when fast memory has room.`
-                                : m.contextSizingStatus === 'restart-required'
-                                  ? 'This model is running with a different context window than the current sizing settings resolve to. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
-                                  : m.contextSizingStatus === 'insufficient-memory'
-                                    ? `The selected context sizing policy needs${m.contextWindow ? ` this model's full advertised ${m.contextWindow.toLocaleString()}-token window` : ' more context'}, which does not fit in memory safely. Choose Adaptive, unload another model, or free memory before trying again.`
-                                    : 'The effective context size is unavailable.'
-                            }
-                          >
-                            {m.contextSizingStatus === 'restart-required' ? (
-                              'Restart needed'
-                            ) : m.contextSizingStatus === 'insufficient-memory' ? (
-                              "Won't fit"
-                            ) : (
-                              <>
-                                {formatContextWindow(m.effectiveContextWindow)}
-                                {m.overrideContextTokens !== undefined && (
-                                  <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
-                                    custom
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </td>
-                          <ModelFitnessCell entry={entry} probing={probing.includes(fitnessKey)} />
-                          <td className="model-actions-table-cell">
-                            <div className="model-actions-cell">
-                              <div className="model-action-status">
-                                {m.readOnly && (
-                                  <span
-                                    className="muted small"
-                                    title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
-                                  >
-                                    Machine model
-                                  </span>
-                                )}
-                              </div>
-                              <div className="model-action-links">
-                                <ModelActionsMenu
-                                  engine="llama-cpp"
-                                  model={m}
-                                  updating={updating}
-                                  contextSupported={contextOverridesSupported}
-                                  contextEditorOpen={contextEditorFor === m.id}
-                                  onToggleContextEditor={() =>
-                                    setContextEditorFor((prev) => (prev === m.id ? null : m.id))
+                      : null;
+                  return (
+                    <Fragment key={m.id}>
+                      <tr>
+                        <td className="model-name-table-cell">
+                          <div className="model-name-cell">
+                            <code>{m.id}</code>
+                            <div className="model-name-meta model-name-meta--stacked">
+                              {hint && (
+                                <span
+                                  className={`gz-status-pill${hintPillTone(hint.kind)}`}
+                                  title={hint.detail}
+                                >
+                                  {hint.label}
+                                </span>
+                              )}
+                              {isImportedChatModel(catalogManifest) && (
+                                <span
+                                  className="gz-status-pill"
+                                  title="Added from outside the catalog. Gezel has not tested this model; its fitness check says how it runs on this computer."
+                                >
+                                  {isLocalFileChatModel(catalogManifest)
+                                    ? 'From a file'
+                                    : 'From Hugging Face'}
+                                </span>
+                              )}
+                              {m.updateAvailable && (
+                                <span
+                                  className="gz-status-pill gz-status-pill--warn"
+                                  title={
+                                    m.updateReason ??
+                                    (m.availableVersion
+                                      ? `A newer build is available in the catalog (→ v${m.availableVersion}). Updating downloads only the files that differ.`
+                                      : 'A newer build is available in the catalog.')
                                   }
-                                  {...(m.nativeVisionEnabled !== undefined
-                                    ? {
-                                        visionAction: {
-                                          enabled: m.nativeVisionEnabled,
-                                          busy: visionSaving === m.id,
-                                          onToggle: () =>
-                                            void toggleVision(m.id, !m.nativeVisionEnabled),
-                                        },
-                                      }
-                                    : {})}
-                                  fitnessAction={fitnessMenuAction(
-                                    entry,
-                                    probing.includes(fitnessKey),
-                                    () => {
-                                      void api
-                                        .runModelFitnessProbe('llama-cpp', m.id)
-                                        .then(() => refreshFitness())
-                                        .catch(() => {});
-                                    },
-                                  )}
-                                  onUpdate={() => startInstall(m.id)}
-                                  onDelete={() => setToDelete(m.id)}
-                                />
-                              </div>
+                                >
+                                  update available
+                                </span>
+                              )}
                             </div>
-                          </td>
-                        </tr>
-                        {contextEditorFor === m.id && (
-                          <tr className="model-context-editor-row">
-                            <td colSpan={6}>
-                              <ModelContextSliderPanel
+                          </div>
+                        </td>
+                        <ModelSizeCell model={m} />
+                        <td title={quantizationTitle(m.quantization, m.ggufQuantization)}>
+                          {approximateQuantizationLabel(m.quantization, m.ggufQuantization)}
+                        </td>
+                        <td
+                          title={
+                            m.effectiveContextWindow
+                              ? m.overrideContextTokens !== undefined
+                                ? `You've set this model to ${m.overrideContextTokens.toLocaleString()} tokens per turn; Gezel grants up to what memory allows (currently ${m.effectiveContextWindow.toLocaleString()}).`
+                                : `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}. The effective size accounts for model tuning, settings, concurrency, and available memory — Adaptive grows it past 64K when fast memory has room.`
+                              : m.contextSizingStatus === 'restart-required'
+                                ? 'This model is running with a different context window than the current sizing settings resolve to. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
+                                : m.contextSizingStatus === 'insufficient-memory'
+                                  ? `The selected context sizing policy needs${m.contextWindow ? ` this model's full advertised ${m.contextWindow.toLocaleString()}-token window` : ' more context'}, which does not fit in memory safely. Choose Adaptive, unload another model, or free memory before trying again.`
+                                  : 'The effective context size is unavailable.'
+                          }
+                        >
+                          {m.contextSizingStatus === 'restart-required' ? (
+                            'Restart needed'
+                          ) : m.contextSizingStatus === 'insufficient-memory' ? (
+                            "Won't fit"
+                          ) : (
+                            <>
+                              {formatContextWindow(m.effectiveContextWindow)}
+                              {m.overrideContextTokens !== undefined && (
+                                <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
+                                  custom
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <ModelFitnessCell entry={entry} probing={probing.includes(fitnessKey)} />
+                        <td className="model-actions-table-cell">
+                          <div className="model-actions-cell">
+                            <div className="model-action-status">
+                              {m.readOnly && (
+                                <span
+                                  className="muted small"
+                                  title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                                >
+                                  Machine model
+                                </span>
+                              )}
+                            </div>
+                            <div className="model-action-links">
+                              <ModelActionsMenu
                                 engine="llama-cpp"
                                 model={m}
-                                onSaved={refresh}
+                                updating={updating}
+                                contextSupported={contextOverridesSupported}
+                                contextEditorOpen={contextEditorFor === m.id}
+                                onToggleContextEditor={() =>
+                                  setContextEditorFor((prev) => (prev === m.id ? null : m.id))
+                                }
+                                {...(m.nativeVisionEnabled !== undefined
+                                  ? {
+                                      visionAction: {
+                                        enabled: m.nativeVisionEnabled,
+                                        busy: visionSaving === m.id,
+                                        onToggle: () =>
+                                          void toggleVision(m.id, !m.nativeVisionEnabled),
+                                      },
+                                    }
+                                  : {})}
+                                fitnessAction={fitnessMenuAction(
+                                  entry,
+                                  probing.includes(fitnessKey),
+                                  () => {
+                                    void api
+                                      .runModelFitnessProbe('llama-cpp', m.id)
+                                      .then(() => refreshFitness())
+                                      .catch(() => {});
+                                  },
+                                )}
+                                onUpdate={() => startInstall(m.id)}
+                                onDelete={() => setToDelete(m.id)}
                               />
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                      {contextEditorFor === m.id && (
+                        <tr className="model-context-editor-row">
+                          <td colSpan={6}>
+                            <ModelContextSliderPanel
+                              engine="llama-cpp"
+                              model={m}
+                              onSaved={refresh}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
-      <div className="ollama-section ollama-section--flat ollama-section--download">
-        <h4>Download a model</h4>
+      <AddModelDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        description={<HuggingFaceHostingNote />}
+        more={
+          <>
+            <button
+              type="button"
+              title="Gezel checks a model that isn't in this list before adding it."
+              onClick={() => {
+                setAddOpen(false);
+                setImportOpen(true);
+              }}
+            >
+              From Hugging Face or a file…
+            </button>
+            <ImportModelBundleButton
+              title="A model package exported from Gezel"
+              onStart={() => setAddOpen(false)}
+            />
+          </>
+        }
+      >
+        {installNotices}
         <p className="muted small" style={{ marginTop: 0 }}>
-          Models are hosted by{' '}
-          <a
-            href="https://huggingface.co"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: 'inherit' }}
-          >
-            Hugging Face
-          </a>
-          , a community library of open, freely available AI models. Your device downloads them
-          directly.
-        </p>
-        <p className="muted small">
           {memory
             ? 'Models that may not fit this machine, and retired models, are hidden by default. '
             : 'Retired models are hidden by default. '}
@@ -598,10 +598,13 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
           kind="chat-model"
           emptyMessage="No on-device models in the catalog yet."
           onItemsLoaded={setCatalogItems}
+          {...(catalogItems ? { initialItems: catalogItems } : {})}
           tagTooltips={TAG_TOOLTIPS}
           filter={(item: CatalogItemSummary) => {
             const m = asLlamaCppEntry(item.manifest);
             if (!m) return false;
+            // Added from Hugging Face: listed above once downloaded, never offered here.
+            if (isImportedChatModel(m)) return false;
             if (!showAll && isRetiredModel(m)) return false;
             if (!showAll && llamaCppBackendExclusion(m.llamaCpp, backend)) return false;
             if (!showAll && memory) {
@@ -707,7 +710,11 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
                   type="button"
                   disabled={installed || needsAttention || Boolean(inflight) || Boolean(excluded)}
                   onClick={() => startInstall(m.id)}
-                  {...(excluded ? { title: excluded } : {})}
+                  {...(excluded
+                    ? { title: excluded }
+                    : needsAttention && !installed && !inflight
+                      ? { title: NEEDS_ATTENTION_TITLE }
+                      : {})}
                 >
                   {installed
                     ? 'On device'
@@ -722,30 +729,35 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
                             ? 'Verifying…'
                             : 'Reading metadata…'
                         : needsAttention
-                          ? 'Needs attention above'
+                          ? 'Needs attention'
                           : 'Download'}
                 </button>
               </div>
             );
           }}
         />
-      </div>
-
-      <div className="ollama-section ollama-section--flat">
-        <ImportModelBundleButton />
-        <span className="muted small" style={{ marginLeft: '0.75rem' }}>
-          Import from a gezel local model package
-        </span>
-      </div>
+      </AddModelDialog>
 
       <ConfirmDialog
         open={toDelete !== null}
         title={`Delete ${toDelete ?? ''}?`}
-        message="This removes the downloaded model from your device. It stays available in the catalog — you can download it again any time."
+        message={
+          toDelete && isLocalFileChatModel(catalogById.get(toDelete))
+            ? 'This removes the model from your device. To use it again, add its file again.'
+            : toDelete && isImportedChatModel(catalogById.get(toDelete))
+              ? 'This removes the downloaded model from your device. To use it again, add it from Hugging Face.'
+              : 'This removes the downloaded model from your device. It stays available in the catalog — you can download it again any time.'
+        }
         confirmLabel="Delete"
         danger
         onConfirm={deleteOne}
         onCancel={() => setToDelete(null)}
+      />
+
+      <ModelImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onInstalled={() => void refresh()}
       />
     </div>
   );

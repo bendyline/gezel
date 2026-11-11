@@ -1204,7 +1204,7 @@ const RECENT_ENGINE_LINES = 40;
  * sd-server's report that the render did not fit in graphics memory. It
  * answers the request with a bare `generate_image returned no results`.
  */
-const ENGINE_MEMORY_SHORTFALL =
+export const ENGINE_MEMORY_SHORTFALL =
   /cannot make enough memory available|out of (?:device )?memory|ErrorOutOfDeviceMemory|failed to allocate/i;
 
 /**

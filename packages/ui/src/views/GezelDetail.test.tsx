@@ -301,7 +301,7 @@ describe('GezelDetail', () => {
     vi.mocked(api.getGezel).mockRejectedValue(new Error('not found'));
     render(<GezelDetail gezelId="gz-missing" />);
     await waitFor(() => {
-      expect(screen.getByText(/Couldn't open this gezel/)).toBeInTheDocument();
+      expect(screen.getByText(/Couldn't open this crew member/)).toBeInTheDocument();
     });
     expect(screen.getByText(/not found/)).toBeInTheDocument();
   });
@@ -314,7 +314,7 @@ describe('GezelDetail', () => {
 
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Maya' }));
-    const input = screen.getByRole('textbox', { name: 'Gezel name' });
+    const input = screen.getByRole('textbox', { name: 'Crew member name' });
     await user.clear(input);
     await user.type(input, 'Mai{Enter}');
 
@@ -336,13 +336,13 @@ describe('GezelDetail', () => {
       await user.tab();
       expect(button).toHaveFocus();
       await user.keyboard(activation);
-      const input = screen.getByRole('textbox', { name: 'Gezel name' }) as HTMLInputElement;
+      const input = screen.getByRole('textbox', { name: 'Crew member name' }) as HTMLInputElement;
       expect(input).toHaveFocus();
       expect([input.selectionStart, input.selectionEnd]).toEqual([0, 4]);
       await user.keyboard('Mia');
       expect(input).toHaveValue('Mia');
       await user.keyboard('{Escape}');
-      expect(screen.queryByRole('textbox', { name: 'Gezel name' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('textbox', { name: 'Crew member name' })).not.toBeInTheDocument();
       expect(screen.getByRole('heading', { name: 'Maya', level: 3 })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Maya' })).toHaveFocus();
       expect(api.renameGezel).not.toHaveBeenCalled();

@@ -160,7 +160,7 @@ interface ModelDownloadProgress {
 
 const HELP = [
   '/project — switch project   /model — switch engine + model',
-  '/gezel — switch gezel or bring on a role   /gezel <role or name> — go straight there',
+  '/gezel — switch crew member or bring on a role   /gezel <role or name> — go straight there',
   '/model download — choose and download a new on-device model',
   '/allow edits — allow tool edits   /disallow edits — make tool edits read-only',
   '/allow codexedits|claudeedits — allow provider-native project edits',
@@ -563,7 +563,7 @@ export function App(props: {
         if (project.mode !== 'solo') return;
         if (project.voormanGezelId === joinedGezelId) return;
         await client.updateProject(projectId, { mode: 'crew' });
-        note('this job is now a crew project — gezels here can delegate and recruit.');
+        note('this job is now a crew project — crew members here can delegate and recruit.');
       } catch (err) {
         note(`could not switch this job to a crew project: ${errMsg(err)}`, 'error');
       }
@@ -653,16 +653,16 @@ export function App(props: {
             'error',
           );
         default:
-          return note(`no gezel or role matches "${arg}". Type /gezel to browse.`, 'error');
+          return note(`no crew member or role matches "${arg}". Type /gezel to browse.`, 'error');
       }
     },
     [gezels, loadRoleTemplates, note, recruitGezel, useGezel],
   );
 
   const openModelPicker = useCallback(async () => {
-    if (!activeGezelId || !activeGezel) return note('no active gezel yet.', 'error');
+    if (!activeGezelId || !activeGezel) return note('no active crew member yet.', 'error');
     if (activeGezel.fixedFunction) {
-      return note('this gezel runs a fixed tool and does not use a chat model.', 'error');
+      return note(`${activeGezel.name} runs a fixed tool and does not use a chat model.`, 'error');
     }
     if (modelChoicesLoading) return note('model choices are already loading.');
     setModelChoicesLoading(true);
@@ -680,9 +680,12 @@ export function App(props: {
 
   const openModelDownloadPicker = useCallback(
     async (returnTo: 'model' | null = null) => {
-      if (!activeGezelId || !activeGezel) return note('no active gezel yet.', 'error');
+      if (!activeGezelId || !activeGezel) return note('no active crew member yet.', 'error');
       if (activeGezel.fixedFunction) {
-        return note('this gezel runs a fixed tool and does not use a chat model.', 'error');
+        return note(
+          `${activeGezel.name} runs a fixed tool and does not use a chat model.`,
+          'error',
+        );
       }
       if (modelChoicesLoading) return note('model choices are already loading.');
       setOverlay(null);
@@ -712,7 +715,7 @@ export function App(props: {
   );
 
   const openThreadPicker = useCallback(async () => {
-    if (!activeGezelId) return note('no active gezel yet.', 'error');
+    if (!activeGezelId) return note('no active crew member yet.', 'error');
     if (threadsLoading) return;
     setThreadsLoading(true);
     try {
@@ -736,7 +739,7 @@ export function App(props: {
       try {
         const session = await client.getChatSession(sessionId);
         if (session.gezelId !== activeGezelId || session.projectId !== projectId) {
-          throw new Error('thread no longer belongs to the active gezel and project');
+          throw new Error('thread no longer belongs to the active crew member and project');
         }
         setOwnSessionId(session.id);
         setFocusedSessionId(session.id);
@@ -752,7 +755,7 @@ export function App(props: {
 
   const startNewThread = useCallback(async () => {
     setOverlay(null);
-    if (!activeGezelId) return note('no active gezel yet.', 'error');
+    if (!activeGezelId) return note('no active crew member yet.', 'error');
     try {
       const session = await client.createChatSession({
         gezelId: activeGezelId,
@@ -1342,7 +1345,7 @@ export function App(props: {
               if (result.projectStatus !== 'active') {
                 note(`${projectName} is ${result.projectStatus}; no project work was started.`);
               } else {
-                note(`no due schedules or gezel-owned active tasks found in ${projectName}.`);
+                note(`no due schedules or active tasks for Gezel found in ${projectName}.`);
               }
             } else {
               note(`continue: ${parts.join('; ')}.`);
@@ -1453,7 +1456,7 @@ export function App(props: {
           return note('CLI mode — bare input runs as a shell command. /chat to exit.');
         case 'chat':
           setMode('chat');
-          return note('chat mode — bare input is a prompt to your gezel.');
+          return note('chat mode — bare input is a prompt to Gezel.');
         case 'clear':
           setTurns(new Map());
           setPendingInput(null);
@@ -1577,14 +1580,14 @@ export function App(props: {
         setModelDownloadProgress(null);
         if (companionResult.name && companionResult.error) {
           note(
-            `downloaded ${choice.model.name}; ${companionResult.name} image reader could not be added: ${companionResult.error}. Switching this gezel to ${choice.model.name}…`,
+            `downloaded ${choice.model.name}; ${companionResult.name} image reader could not be added: ${companionResult.error}. Switching to ${choice.model.name}…`,
           );
         } else if (companionResult.name) {
           note(
-            `downloaded ${choice.model.name} with ${companionResult.name} for image reading; switching this gezel to it…`,
+            `downloaded ${choice.model.name} with ${companionResult.name} for image reading; switching to it…`,
           );
         } else {
-          note(`downloaded ${choice.model.name}; switching this gezel to it…`);
+          note(`downloaded ${choice.model.name}; switching to it…`);
         }
         await applyModelSelection(installedChoice);
       } catch (err) {
@@ -1692,7 +1695,7 @@ export function App(props: {
       ) : null}
       {overlay === 'gezel' ? (
         <Picker
-          title="Switch gezel, or bring on a role"
+          title="Switch crew member, or bring on a role"
           items={gezelPickerItems}
           windowSize={gezelPickerWindowSize}
           onCancel={() => setOverlay(null)}
@@ -2143,7 +2146,7 @@ function taskAssigneeLabel(
   if (task.assignee.kind === 'user') return 'you';
   const gezelId = task.assignee.gezelId;
   const gezel = gezels.find((item) => item.id === gezelId);
-  if (!gezel) return boring ? 'gezel' : gezelId;
+  if (!gezel) return boring ? 'Gezel' : gezelId;
   return boring ? (gezel.roleBasedName ?? gezel.role ?? gezel.id) : gezel.name;
 }
 

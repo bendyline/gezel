@@ -525,7 +525,7 @@ test('places the caret after a craftbook staged from the Terminal Tasks gallery'
   await switchToTerminal(page);
   await page
     .getByRole('button', {
-      name: 'Craftbooks and workspace skills a gezel can run for you',
+      name: 'Plans and workspace skills Gezel can run for you',
     })
     .click();
   await page.getByRole('textbox', { name: 'Filter commands' }).fill(craftbook!.id);

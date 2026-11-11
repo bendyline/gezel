@@ -222,7 +222,7 @@ export function reduceFeed(
           sessionId,
           gezelId,
           kind: 'note',
-          text: '⏳ awaiting another gezel…',
+          text: `⏳ waiting for ${event.targetGezelName || 'someone on the crew'}…`,
           open: false,
         },
       ]);
@@ -391,7 +391,7 @@ export function reduceTurns(turns: TurnMap, env: ChatEventEnvelope): TurnMap {
     case 'heartbeat':
       return event.label ? set(heartbeatLabel(event.label), undefined, null) : turns;
     case 'awaiting_gezel':
-      return set('awaiting gezel', undefined, null);
+      return set(`waiting for ${event.targetGezelName || 'a reply'}`, undefined, null);
     case 'error':
     case 'done':
       return clear();
@@ -685,7 +685,7 @@ export function gezelLabel(
   boring: boolean,
 ): string {
   const g = gezels.find((x) => x.id === gezelId);
-  if (!g) return boring ? 'gezel' : gezelId;
+  if (!g) return boring ? 'Gezel' : gezelId;
   if (boring) return g.roleBasedName ?? g.role ?? g.id;
   return g.role ? `${g.name} · ${g.role}` : g.name;
 }

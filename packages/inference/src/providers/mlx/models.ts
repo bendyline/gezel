@@ -36,7 +36,12 @@ import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve as resolvePath } from 'node:path';
-import { type ChatModelMlxSource, createLogger } from '@bendyline/gezel';
+import {
+  type ChatModelManifest,
+  type ChatModelMlxSource,
+  createLogger,
+  isImportedChatModel,
+} from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import {
   type ModelBundleSource,
@@ -48,6 +53,7 @@ import {
   catalogPayloadFingerprint,
   describeCatalogPayload,
 } from '../../models/catalog-payload-identity.js';
+import { writeImportedModelEntry } from '../../models/imports/entry-store.js';
 import {
   type IncompleteModelDownloadInfo,
   MODEL_HASH_READ_BUFFER_BYTES,
@@ -511,6 +517,23 @@ export class MlxModelManager {
     // without its derived view would keep a 100+ GiB checkpoint allocated.
     await rm(join(this.viewsRoot, id), { recursive: true, force: true });
     await removeModelDir(join(this.modelsRoot, id), this.modelsRoot);
+  }
+
+  /**
+   * Record a reviewed MLX build from outside the catalog so {@link install}
+   * can fetch it. See the llama.cpp manager's twin; only the importer calls it.
+   */
+  async prepareImportedModel(manifest: ChatModelManifest, tuningFrom?: string): Promise<void> {
+    if (!isImportedChatModel(manifest) || !manifest.mlx || !isSafeId(manifest.id)) {
+      throw new Error(`not an imported MLX model: ${manifest.id}`);
+    }
+    if (this.activeInstalls.has(manifest.id)) {
+      throw new Error(`"${manifest.name}" is already downloading`);
+    }
+    if (await modelExistsOnlyReadOnly(this.storageRoots, manifest.id)) {
+      throw readOnlyModelError(manifest.id);
+    }
+    await writeImportedModelEntry(this.modelsRoot, manifest, tuningFrom);
   }
 
   /** Provider-owned snapshot used by the streaming `.gezmodel` exporter. */

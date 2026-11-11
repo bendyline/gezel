@@ -435,7 +435,7 @@ function buildStatusPrompt(candidates: ProjectContext[]): string {
     .slice(0, 40)
     .join(', ');
 
-  return `You are writing the workshop status that greets the user on the Home screen. Below is the current state of every active project.
+  return `You are writing the status that greets the user on the Home screen. Below is the current state of every active project.
 
 ${input}
 

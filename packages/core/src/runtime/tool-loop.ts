@@ -539,7 +539,7 @@ export async function runPortableToolLoop(options: {
     if (call.success && ['message_gezel', 'start_project'].includes(name))
       return {
         end: {
-          text: 'The work has been handed to the crew. You can follow it in the project conversation.',
+          text: 'The work has been handed off. You can follow it in the project conversation.',
           stopReason: 'stop',
         },
       };

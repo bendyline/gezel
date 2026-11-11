@@ -1,0 +1,753 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "2026-11-03-windows-saluki-native-0-1-57-original",
+      "provenance": {
+        "startedAt": "2026-11-04T00:05:25.966Z",
+        "device": {
+          "label": "Windows x64 · RTX 5070 Ti Laptop (12 GB)",
+          "platform": "win32",
+          "arch": "x64",
+          "memoryGb": 31,
+          "osRelease": "win32 10.0.26300",
+          "cpuModel": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M",
+          "gpuModel": "NVIDIA GeForce RTX 5070 Ti Laptop GPU"
+        },
+        "harnessCommit": "643ab3876536b1f7cb17da5685d584083e67a610",
+        "sourceHash": "a9db0da55e94328ff07657f2d42753125c3bd5c81dd99140ae9347a11a5144af",
+        "serviceBuildHash": "bdcfeb51247e378fe28e4a6cd64ba8d823f7dae0ae8a49fd74a368d33198f5d9",
+        "catalogHash": "05f57d957281da3547be1846a6735ce2de5f04ec6f572a632c4c8ff395f4842c",
+        "gildeVersion": "0.3.5",
+        "count": 3,
+        "judgeModelId": "anthropic-cli/claude-sonnet-5-5",
+        "engineBuilds": {
+          "llama-cpp": "Gezel native 0.1.57 · llama.cpp 0.8.0 build 11960 · CUDA 12.8 · 8642541b255bfb5dc39cd351a178be09013a55d6"
+        }
+      },
+      "scope": "suite",
+      "memoryCoverage": "system-only",
+      "suites": [
+        "core",
+        "productivity",
+        "developer",
+        "complex-work"
+      ],
+      "scenariosBySuite": {
+        "core": [
+          "tictactoe",
+          "petshop",
+          "tankcombat",
+          "schema-migration",
+          "failing-tests-spec",
+          "symptom-debug",
+          "data-wrangle",
+          "incident-postmortem",
+          "ops-runbook-anomaly",
+          "plan-and-estimate",
+          "conflict-synthesis"
+        ],
+        "productivity": [
+          "constrained-comms",
+          "records-intake",
+          "plan-and-estimate",
+          "meeting-followup",
+          "craftbook-spreadsheet-model",
+          "conflict-synthesis",
+          "docblocks-theme-roundtrip",
+          "craftbook-powerpoint-deck",
+          "wikipedia-research-brief",
+          "craftbook-week-plan",
+          "craftbook-ab-test-readout",
+          "craftbook-annotated-bibliography",
+          "craftbook-research-to-document"
+        ],
+        "developer": [
+          "fix-squisq-bugs",
+          "dev-craftbook-routing",
+          "interface-contract",
+          "craftbook-code-review",
+          "craftbook-api-contract-review",
+          "craftbook-deep-security-review",
+          "large-pr-review",
+          "craftbook-codemod-sweep",
+          "craftbook-refactor-module",
+          "craftbook-bug-fix-tdd"
+        ],
+        "complex-work": [
+          "craftbook-find-vs-create",
+          "craftbook-edit-midtask",
+          "craftbook-invoice-run",
+          "craftbook-author-linear",
+          "craftbook-route-multi",
+          "craftbook-export-generalize",
+          "craftbook-author-params",
+          "craftbook-author-gate-script",
+          "craftbook-author-fanout"
+        ]
+      },
+      "note": "Original condition: 85 terminal trials, 71 passes, 13 eligible failures and one sandbox-unavailable exclusion. Saluki 27B IQ2 Mix, native 0.1.57 CUDA on a 12 GB RTX 5070 Ti Laptop GPU. Every attempted task used hybrid placement: 39/64 dense FFN layers on GPU and 25 on CPU, context 65,536, one slot, f16 KV. The complete archive contains 128 of 129 planned attempts: 98 fixed passes, 27 eligible failures, one infrastructure exclusion, two unscored interruptions and one unattempted entry. Different environments and execution segments remain separate; three eligible repeats are not available for every entry. Task measurements are engine-log observations, not admission probes. Sonnet 5.5 reviews are advisory and use separate declared rubrics; original Codex reviews and fixed scores remain in the download."
+    }
+  ],
+  "results": [
+    {
+      "modelId": "underdog-saluki-27b-iq2-mix",
+      "label": "Underdog Saluki (27B, IQ2 Mix)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "IQ2 Mix",
+      "grantedContextTokens": 65536,
+      "runId": "2026-11-03-windows-saluki-native-0-1-57-original",
+      "suiteId": "core",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 11329,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "original",
+          "label": "original · all attempts",
+          "trials": 22,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 22,
+            "median": 8.365,
+            "min": 2.76,
+            "max": 9.24
+          },
+          "prefillTokensPerSec": {
+            "samples": 22,
+            "median": 383.125,
+            "min": 146.05,
+            "max": 592
+          },
+          "durationMs": {
+            "samples": 22,
+            "median": 808597,
+            "min": 106211,
+            "max": 6333799
+          },
+          "peakRssMb": {
+            "samples": 22,
+            "median": 11328.5,
+            "min": 9330,
+            "max": 15511
+          },
+          "peakGpuMemMb": {
+            "samples": 22,
+            "median": 10630,
+            "min": 10624,
+            "max": 10654
+          },
+          "judgments": [
+            {
+              "meanScore": 5.875,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "petshop"
+            },
+            {
+              "meanScore": 3.125,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "tankcombat"
+            },
+            {
+              "meanScore": 6.5,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "tictactoe"
+            }
+          ],
+          "noArtifact": 2,
+          "excludedReviews": 0,
+          "notApplicableReviews": 14
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "tictactoe",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 409960.5
+        },
+        {
+          "scenarioId": "petshop",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 4318921
+        },
+        {
+          "scenarioId": "tankcombat",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1126395.5
+        },
+        {
+          "scenarioId": "schema-migration",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1088336
+        },
+        {
+          "scenarioId": "failing-tests-spec",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 624657.5
+        },
+        {
+          "scenarioId": "symptom-debug",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 349054
+        },
+        {
+          "scenarioId": "data-wrangle",
+          "trials": 2,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 4858289
+        },
+        {
+          "scenarioId": "incident-postmortem",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1473796
+        },
+        {
+          "scenarioId": "ops-runbook-anomaly",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 533679
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 363375
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2215430.5
+        }
+      ]
+    },
+    {
+      "modelId": "underdog-saluki-27b-iq2-mix",
+      "label": "Underdog Saluki (27B, IQ2 Mix)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "IQ2 Mix",
+      "grantedContextTokens": 65536,
+      "runId": "2026-11-03-windows-saluki-native-0-1-57-original",
+      "suiteId": "productivity",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 13299,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "original",
+          "label": "original · all attempts",
+          "trials": 26,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 26,
+            "median": 8.17,
+            "min": 2.58,
+            "max": 9.01
+          },
+          "prefillTokensPerSec": {
+            "samples": 26,
+            "median": 361.505,
+            "min": 118.81,
+            "max": 560.19
+          },
+          "durationMs": {
+            "samples": 26,
+            "median": 1411484,
+            "min": 190878,
+            "max": 6870339
+          },
+          "peakRssMb": {
+            "samples": 26,
+            "median": 13299,
+            "min": 9331,
+            "max": 15346
+          },
+          "peakGpuMemMb": {
+            "samples": 26,
+            "median": 10634,
+            "min": 10624,
+            "max": 10648
+          },
+          "judgments": [
+            {
+              "meanScore": 6.166666666666666,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-ab-test-readout"
+            },
+            {
+              "meanScore": 7.25,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-annotated-bibliography"
+            },
+            {
+              "meanScore": 8.125,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-powerpoint-deck"
+            },
+            {
+              "meanScore": 7.666666666666667,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-research-to-document"
+            },
+            {
+              "meanScore": 6.25,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-spreadsheet-model"
+            },
+            {
+              "meanScore": 6.625,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-week-plan"
+            },
+            {
+              "meanScore": 5.333333333333334,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "docblocks-theme-roundtrip"
+            },
+            {
+              "meanScore": 7.875,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "meeting-followup"
+            },
+            {
+              "meanScore": 6,
+              "artifacts": 1,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "wikipedia-research-brief"
+            }
+          ],
+          "noArtifact": 2,
+          "excludedReviews": 0,
+          "notApplicableReviews": 7
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "constrained-comms",
+          "trials": 2,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 336911.5
+        },
+        {
+          "scenarioId": "records-intake",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 4821737.5
+        },
+        {
+          "scenarioId": "plan-and-estimate",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 365053
+        },
+        {
+          "scenarioId": "meeting-followup",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 557706
+        },
+        {
+          "scenarioId": "craftbook-spreadsheet-model",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 4580915
+        },
+        {
+          "scenarioId": "conflict-synthesis",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1083602
+        },
+        {
+          "scenarioId": "docblocks-theme-roundtrip",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 739411.5
+        },
+        {
+          "scenarioId": "craftbook-powerpoint-deck",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3171916.5
+        },
+        {
+          "scenarioId": "wikipedia-research-brief",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1844753.5
+        },
+        {
+          "scenarioId": "craftbook-week-plan",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3753267.5
+        },
+        {
+          "scenarioId": "craftbook-ab-test-readout",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 5849302
+        },
+        {
+          "scenarioId": "craftbook-annotated-bibliography",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1096218
+        },
+        {
+          "scenarioId": "craftbook-research-to-document",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1363898.5
+        }
+      ]
+    },
+    {
+      "modelId": "underdog-saluki-27b-iq2-mix",
+      "label": "Underdog Saluki (27B, IQ2 Mix)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "IQ2 Mix",
+      "grantedContextTokens": 65536,
+      "runId": "2026-11-03-windows-saluki-native-0-1-57-original",
+      "suiteId": "developer",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 14677,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "original",
+          "label": "original · all attempts",
+          "trials": 20,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 20,
+            "median": 8.725,
+            "min": 8.02,
+            "max": 9.41
+          },
+          "prefillTokensPerSec": {
+            "samples": 20,
+            "median": 402.745,
+            "min": 303.23,
+            "max": 644.34
+          },
+          "durationMs": {
+            "samples": 20,
+            "median": 1550974,
+            "min": 76809,
+            "max": 6098466
+          },
+          "peakRssMb": {
+            "samples": 20,
+            "median": 14677,
+            "min": 9762,
+            "max": 15671
+          },
+          "peakGpuMemMb": {
+            "samples": 20,
+            "median": 10638,
+            "min": 10624,
+            "max": 10648
+          },
+          "judgments": [
+            {
+              "meanScore": 7.75,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-api-contract-review"
+            },
+            {
+              "meanScore": 6.666666666666667,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-bug-fix-tdd"
+            },
+            {
+              "meanScore": 7,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-code-review"
+            },
+            {
+              "meanScore": 7.166666666666666,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-codemod-sweep"
+            },
+            {
+              "meanScore": 6.333333333333334,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-deep-security-review"
+            },
+            {
+              "meanScore": 6.666666666666666,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-refactor-module"
+            }
+          ],
+          "noArtifact": 2,
+          "excludedReviews": 0,
+          "notApplicableReviews": 6
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "fix-squisq-bugs",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 692745.5
+        },
+        {
+          "scenarioId": "dev-craftbook-routing",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 85266
+        },
+        {
+          "scenarioId": "interface-contract",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 274699
+        },
+        {
+          "scenarioId": "craftbook-code-review",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1297187
+        },
+        {
+          "scenarioId": "craftbook-api-contract-review",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3534619.5
+        },
+        {
+          "scenarioId": "craftbook-deep-security-review",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1588497
+        },
+        {
+          "scenarioId": "large-pr-review",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 5650375.5
+        },
+        {
+          "scenarioId": "craftbook-codemod-sweep",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1800520
+        },
+        {
+          "scenarioId": "craftbook-refactor-module",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3652274.5
+        },
+        {
+          "scenarioId": "craftbook-bug-fix-tdd",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1445426
+        }
+      ]
+    },
+    {
+      "modelId": "underdog-saluki-27b-iq2-mix",
+      "label": "Underdog Saluki (27B, IQ2 Mix)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "27B",
+      "quantization": "IQ2 Mix",
+      "grantedContextTokens": 65536,
+      "runId": "2026-11-03-windows-saluki-native-0-1-57-original",
+      "suiteId": "complex-work",
+      "runtime": {
+        "contextTokens": 65536,
+        "peakMemoryMb": 14756,
+        "kvCacheType": "f16"
+      },
+      "taskMeasurements": [
+        {
+          "id": "original",
+          "label": "original · all attempts",
+          "trials": 17,
+          "source": "engine-log",
+          "outputTokensPerSec": {
+            "samples": 17,
+            "median": 8.35,
+            "min": 8.07,
+            "max": 9.34
+          },
+          "prefillTokensPerSec": {
+            "samples": 17,
+            "median": 360.93,
+            "min": 300.4,
+            "max": 629.26
+          },
+          "durationMs": {
+            "samples": 17,
+            "median": 3524475,
+            "min": 115272,
+            "max": 24050220
+          },
+          "peakRssMb": {
+            "samples": 17,
+            "median": 14756,
+            "min": 9833,
+            "max": 16959
+          },
+          "peakGpuMemMb": {
+            "samples": 17,
+            "median": 10644,
+            "min": 10628,
+            "max": 10650
+          },
+          "judgments": [
+            {
+              "meanScore": 6,
+              "artifacts": 2,
+              "judgeModel": "anthropic-cli/claude-sonnet-5-5",
+              "rubricId": "craftbook-invoice-run"
+            }
+          ],
+          "noArtifact": 3,
+          "excludedReviews": 0,
+          "notApplicableReviews": 12
+        }
+      ],
+      "cells": [
+        {
+          "scenarioId": "craftbook-find-vs-create",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 115681.5
+        },
+        {
+          "scenarioId": "craftbook-edit-midtask",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 4279187.5
+        },
+        {
+          "scenarioId": "craftbook-invoice-run",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2615316.5
+        },
+        {
+          "scenarioId": "craftbook-author-linear",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 3262338.5
+        },
+        {
+          "scenarioId": "craftbook-route-multi",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 2004526.5
+        },
+        {
+          "scenarioId": "craftbook-export-generalize",
+          "trials": 2,
+          "successes": 0,
+          "nonModelFailures": 0,
+          "medianDurationMs": 14113856
+        },
+        {
+          "scenarioId": "craftbook-author-params",
+          "trials": 2,
+          "successes": 2,
+          "nonModelFailures": 0,
+          "medianDurationMs": 1608501.5
+        },
+        {
+          "scenarioId": "craftbook-author-gate-script",
+          "trials": 2,
+          "successes": 1,
+          "nonModelFailures": 1,
+          "medianDurationMs": 11093510
+        },
+        {
+          "scenarioId": "craftbook-author-fanout",
+          "trials": 1,
+          "successes": 1,
+          "nonModelFailures": 0,
+          "medianDurationMs": 13583917
+        }
+      ]
+    }
+  ]
+}

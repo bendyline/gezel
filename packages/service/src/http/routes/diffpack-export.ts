@@ -73,7 +73,7 @@ function applyInstructions(
   const lines = [
     `# ${ref} — ${title}`,
     '',
-    'A change set a gezel proposed. Nothing here has been applied.',
+    'A change set Gezel proposed. Nothing here has been applied.',
     '',
     '`notes.md` explains the reasoning. `manifest.json` lists every target with the',
     'sha256 each patch was written against — if a file has changed since, expect the',

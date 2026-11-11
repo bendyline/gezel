@@ -536,7 +536,7 @@ export function FileInspector({
                     </span>
                     {finding.taskRef && (
                       <span className="filemap-finding-task">
-                        Developer gezel working ·{' '}
+                        Developer working ·{' '}
                         <button
                           type="button"
                           className="link-button filemap-finding-task-link"
@@ -564,7 +564,7 @@ export function FileInspector({
                           ? 'Finding a developer…'
                           : finding.status === 'in_progress'
                             ? 'Developer working'
-                            : 'Ask a developer gezel'}
+                            : 'Ask a developer'}
                       </button>
                     </div>
                   </div>

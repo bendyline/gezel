@@ -142,11 +142,11 @@ describe('earned notifications', () => {
     expect(earnedItemFor(review, plain)).toMatchObject({
       key: 'morning:morning-q',
       kind: 'morning',
-      title: 'Your crew worked overnight',
+      title: 'Gezel worked overnight',
       body: 'The night shift finished 1 task and left 1 report for you.',
       view: 'home',
     });
-    expect(earnedItemFor(review, social)).toMatchObject({ title: 'Your crew worked overnight' });
+    expect(earnedItemFor(review, social)).toMatchObject({ title: 'Gezel worked overnight' });
     expect(earnedItemFor(review, { ...plain, morningNotification: false })).toBeNull();
     const finishedCard = asked(
       question({ intent: { kind: 'task-finished', taskRef: 'trip/4' } as Question['intent'] }),
@@ -158,7 +158,7 @@ describe('earned notifications', () => {
     for (const reason of ['asleep', 'on-battery', 'quota-held', 'no-work', 'stopped'] as const) {
       const quiet = morningCard(
         { quiet: { reason } },
-        'Your crew waited last night because the computer was running on battery.',
+        'Gezel waited last night because the computer was running on battery.',
       );
       expect(earnedItemFor(quiet, plain)).toBeNull();
       expect(earnedItemFor(quiet, social)).toBeNull();
@@ -168,9 +168,9 @@ describe('earned notifications', () => {
   it('heads the notification by what the card holds', () => {
     const swept = morningCard(
       { indexing: { filesIndexed: 12, filesReviewed: 0, mediaDescribed: 0 } },
-      'Overnight your crew read 12 files.',
+      'Overnight Gezel read 12 files.',
     );
-    expect(earnedItemFor(swept, plain)).toMatchObject({ title: 'Your crew worked overnight' });
+    expect(earnedItemFor(swept, plain)).toMatchObject({ title: 'Gezel worked overnight' });
     // Proposals are not counted in the intent; the heading must not claim work it cannot see.
     const proposalsOnly = morningCard({}, 'The night shift left 1 change proposal for you.');
     expect(earnedItemFor(proposalsOnly, plain)).toMatchObject({

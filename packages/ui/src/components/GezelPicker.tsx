@@ -31,7 +31,7 @@ export function GezelPicker({
   value,
   onValueChange,
   noneLabel,
-  placeholder = 'Select a gezel…',
+  placeholder = 'Select a crew member…',
   ariaLabel,
   disabled,
   className,

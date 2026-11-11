@@ -230,7 +230,7 @@ export async function resolveTurnImages(
     warnings.push(
       recognitionAvailable
         ? `This model can't see images, and local image reading is turned off. ${plan.reason}.`
-        : "This model can't see images. Install a reader in Settings → Workloads → Image recognition, or switch to a model with vision.",
+        : "This model can't see images. Install a reader in Settings → Image recognition, or switch to a model with vision.",
     );
   } else if (unreadable.length > 0) {
     // The plan promised a local read and the read did not happen — a
@@ -246,13 +246,13 @@ export async function resolveTurnImages(
           : 'any of the images'
         : `${unreadable.length} of ${described.length} images`;
     warnings.push(
-      `Couldn't read ${scope} you attached (${unreadable[0]}). The gezel is answering from the file details only — it cannot see the picture.`,
+      `Couldn't read ${scope} you attached (${unreadable[0]}). Gezel is answering from the file details only — it cannot see the picture.`,
     );
   }
 
   if (withheld.length > 0) {
     warnings.push(
-      "Camera pictures stay on this computer: this gezel's model was sent a description, not the picture.",
+      'Camera pictures stay on this computer: the model was sent a description, not the picture.',
     );
   }
   log.info(

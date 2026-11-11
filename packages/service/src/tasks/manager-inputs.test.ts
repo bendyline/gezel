@@ -145,7 +145,7 @@ describe('TaskManager.create — craftbook inputs', () => {
         craftbookId: 'ebook-compile',
         craftbookParams: { source: 'pics' },
       }),
-    ).rejects.toThrow(/no files this craftbook reads/);
+    ).rejects.toThrow(/no files this plan reads/);
   });
 
   it('keeps a gezel from rewriting the files a task was launched on', async () => {

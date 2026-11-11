@@ -4,6 +4,7 @@ import '@bendyline/squisq-editor-react/styles';
 import { useEffect, useMemo, useRef } from 'react';
 import { useEffectiveTheme } from '../../theme.js';
 import { GEZEL_WRITE_CANVAS } from '../SquisqIntegration/write-canvas.js';
+import { isPlainTextFile } from '../plain-text-file.js';
 
 export interface SourceRevealRequest {
   path: string;
@@ -12,7 +13,8 @@ export interface SourceRevealRequest {
 
 /**
  * Read-only squisq view of a file: EditorShell auto-selects by extension —
- * Monaco for code, the rich WYSIWYG surface for markdown/text. Keyed by path so
+ * Monaco for code, the rich WYSIWYG surface for markdown — without its
+ * formatting keys; a `.txt` file shows as typed (`isPlainTextFile`). Keyed by path so
  * a new selection remounts (EditorShell reads `initialMarkdown` once at mount).
  * `codeContext` (per-symbol intelligence sections) may arrive after mount —
  * squisq reconciles its view zones on the prop update.
@@ -48,6 +50,9 @@ export function FileSourceView({
       onLinkClick: (href: string) => onContextLink(href),
     };
   }, [codeContext, onContextLink]);
+  if (isPlainTextFile(path)) {
+    return <pre className="plain-text-file filemap-plain-text">{content}</pre>;
+  }
   return (
     <EditorShell
       {...GEZEL_WRITE_CANVAS}
@@ -59,6 +64,8 @@ export function FileSourceView({
       colorScheme={theme}
       showPlayTab={false}
       showStatusBar={false}
+      showFormattingControls={false}
+      showInsertControls={false}
       toolbarSlotLeft={
         <>
           <RevealEditorLine request={sourceReveal} />

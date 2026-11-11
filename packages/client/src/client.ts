@@ -257,6 +257,8 @@ import type {
   InstallPackageResponse,
   InstallPiExtensionRequest,
   InstalledToolset,
+  IntroduceCrewRequest,
+  IntroduceCrewResponse,
   InvokePageToolRequest,
   InvokePageToolResponse,
   InvokeSessionToolResponse,
@@ -298,6 +300,7 @@ import type {
   ListTasksResponse,
   ListTerminalThreadsResponse,
   ListTimelineResponse,
+  LocalModelImportStatus,
   MachineMemoryUsage,
   MapAttackSurfaceResponse,
   MapRepoRequest,
@@ -308,6 +311,10 @@ import type {
   MlxRuntimeStatus,
   ModelDownloadPreflightRequest,
   ModelDownloadPreflightResponse,
+  ModelImportConfirmRequest,
+  ModelImportConfirmResponse,
+  ModelImportReview,
+  ModelImportReviewRequest,
   NativeEngineName,
   NativeEngineResolveEvent,
   NativeEngineStatusResponse,
@@ -350,6 +357,8 @@ import type {
   ProjectSearchResponse,
   ProjectTypeApplyPlan,
   ProjectTypeStatusResponse,
+  ProjectTypeUpgradeRequest,
+  ProjectTypeUpgradeResponse,
   PromptAssistRequest,
   PromptAssistResponse,
   PromptDraft,
@@ -2514,6 +2523,79 @@ export class GezelClient {
     return this.request('GET', '/api/llama-cpp/incomplete');
   }
 
+  /**
+   * Review a Hugging Face GGUF the catalog does not carry: what it is, which
+   * file, and whether it passes the pre-download checks. Writes nothing.
+   */
+  reviewModelImport(request: ModelImportReviewRequest): Promise<ModelImportReview> {
+    return this.request('POST', '/api/model-imports/review', request);
+  }
+
+  /**
+   * Record one reviewed file. Then install the returned id with
+   * {@link installLlamaCppModel}, exactly like a catalog model.
+   */
+  confirmModelImport(request: ModelImportConfirmRequest): Promise<ModelImportConfirmResponse> {
+    return this.request('POST', '/api/model-imports/confirm', request);
+  }
+
+  /** Start adding GGUF files from this computer; send each with {@link uploadLocalModelFile}. */
+  startLocalModelImport(): Promise<{ importId: string }> {
+    return this.request('POST', '/api/model-imports/local');
+  }
+
+  /**
+   * Stream one file's bytes to the daemon, which hashes them as they land.
+   * Poll {@link getLocalModelImport} meanwhile for progress.
+   */
+  async uploadLocalModelFile(
+    importId: string,
+    file: Blob,
+    name: string,
+    signal?: AbortSignal,
+  ): Promise<{ name: string; sizeBytes: number; sha256: string }> {
+    const res = await this.fetchImpl(
+      `${this.baseUrl}/api/model-imports/local/${encodeURIComponent(importId)}/files/${encodeURIComponent(name)}`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'Content-Type': 'application/octet-stream',
+        },
+        body: file,
+        ...(signal ? { signal } : {}),
+      },
+    );
+    const payload = (await res.json().catch(() => null)) as {
+      name: string;
+      sizeBytes: number;
+      sha256: string;
+      error?: string;
+    } | null;
+    if (!res.ok || !payload) {
+      throw new Error(payload?.error ?? `sending ${name} failed (${res.status})`);
+    }
+    return payload;
+  }
+
+  getLocalModelImport(importId: string): Promise<LocalModelImportStatus> {
+    return this.request('GET', `/api/model-imports/local/${encodeURIComponent(importId)}`);
+  }
+
+  /** Review what arrived: one model, and whether it passes. */
+  reviewLocalModelImport(importId: string): Promise<ModelImportReview> {
+    return this.request('POST', `/api/model-imports/local/${encodeURIComponent(importId)}/review`);
+  }
+
+  /** Add the received files as a model. Nothing downloads. */
+  confirmLocalModelImport(importId: string): Promise<ModelImportConfirmResponse> {
+    return this.request('POST', `/api/model-imports/local/${encodeURIComponent(importId)}/confirm`);
+  }
+
+  cancelLocalModelImport(importId: string): Promise<{ ok: true }> {
+    return this.request('DELETE', `/api/model-imports/local/${encodeURIComponent(importId)}`);
+  }
+
   // ── portable `.gezmodel` bundles ──
 
   /** Fetch a streaming model export response. Callers must consume the body. */
@@ -3954,6 +4036,15 @@ export class GezelClient {
     return this.request('POST', `/api/sessions/${encodeURIComponent(sessionId)}/launch-task`, body);
   }
 
+  /** Introduce gezels this session's turn just hired, in the thread the person reads. */
+  introduceCrew(sessionId: string, body: IntroduceCrewRequest): Promise<IntroduceCrewResponse> {
+    return this.request(
+      'POST',
+      `/api/sessions/${encodeURIComponent(sessionId)}/crew-introduction`,
+      body,
+    );
+  }
+
   /**
    * List the MCP tools available in a session's context — the same merged
    * toolset the model sees for this gezel. Backs the TUI "CLI mode" tool
@@ -4797,6 +4888,27 @@ export class GezelClient {
   /** Applied type vs installed AI App, plus per-seed drift. */
   projectTypeStatus(id: string): Promise<ProjectTypeStatusResponse> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/project-type/status`);
+  }
+
+  /**
+   * The app update this project could take now (`upgrade: null` when it runs
+   * the newest version of its major). Automatic updates run on their own;
+   * the others wait for {@link upgradeProjectType}.
+   */
+  getProjectTypeUpgrade(id: string): Promise<ProjectTypeUpgradeResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/project-type/upgrade`);
+  }
+
+  /**
+   * The person approves the update they were shown. 409 `stale_upgrade` when
+   * the offer is no longer `toVersion`. Owner credentials only.
+   */
+  upgradeProjectType(id: string, body: ProjectTypeUpgradeRequest): Promise<AppliedProjectType> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/project-type/upgrade`,
+      body,
+    );
   }
 
   /** Package an exact-version AI App into a `.gezapp` artifact. */

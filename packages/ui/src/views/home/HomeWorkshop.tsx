@@ -170,14 +170,13 @@ export function HomeWorkshop({
     },
     [],
   );
-  // Which folders the crew looks after: asked at the foot of the meester's
-  // conversation once the crew has finished something, never during the
-  // welcome. Hidden as soon as the person answers; the config stamp keeps it
-  // hidden across launches.
+  // Which folders the crew looks after, and whether it works at night: asked
+  // on the greeting once the person has opened the first thing the crew made,
+  // never during the welcome and never in the conversation. In the thread it
+  // was appended under the first result and scrolled that result away.
+  // Hidden as soon as the person answers; the config stamp keeps it hidden
+  // across launches.
   const [folderStepDone, setFolderStepDone] = useState(false);
-  // Not while the welcome still asks for tools; the invitation itself waits
-  // in the thread for the first wrap-up, so the visit that ends first run
-  // can still end on it.
   const offerFolderStep =
     setup === null && !folderStepDone && shouldOfferFolderStep(config, projects);
   const [tab, setTab] = useState<HomeGreetingTab>('greeting');
@@ -547,6 +546,18 @@ export function HomeWorkshop({
                 />
               ) : undefined
             }
+            {...(offerFolderStep
+              ? {
+                  invite: (
+                    <div className="home-workshop-folder-invite" data-testid="folder-invite">
+                      <FolderOnboardingStep
+                        config={config}
+                        onDone={() => setFolderStepDone(true)}
+                      />
+                    </div>
+                  ),
+                }
+              : {})}
             onNavigate={onNavigate}
           />
         )}
@@ -570,22 +581,6 @@ export function HomeWorkshop({
                 setup={setup}
                 justReady={justReady}
                 helperGezelIds={[config?.klerkGezelId, config?.boekwachterGezelId]}
-                {...(offerFolderStep
-                  ? {
-                      invite: (
-                        <div className="meester-folder-invite" data-testid="folder-invite">
-                          <p className="meester-welcome-line">
-                            Want me to look after a folder of yours too? I won't change any of the
-                            files unless you ask me to; I'll only read them.
-                          </p>
-                          <FolderOnboardingStep
-                            config={config}
-                            onDone={() => setFolderStepDone(true)}
-                          />
-                        </div>
-                      ),
-                    }
-                  : {})}
                 onTurnStarted={collapseForConversation}
                 onIntroductionShown={collapseForConversation}
                 onAttentionChange={onAttentionChange}

@@ -9,6 +9,10 @@ import {
   renderProjectTypeTemplate,
   seedParamDefaults,
 } from '../project-types/composition.js';
+import {
+  pickProjectTypeUpgradeTarget,
+  projectTypeParamsWithoutValue,
+} from '../project-types/upgrade.js';
 import { plainRoleTitle } from '../roles/plain-names.js';
 import {
   type AppliedProjectType,
@@ -48,6 +52,19 @@ export interface PortableProjectType {
   binaryFiles?: Record<string, string>;
   /** The type's craftbooks this host can run, compiled by the build, by declared id. */
   craftbooks?: Record<string, Craftbook>;
+  /**
+   * Earlier versions of this type in the bundled version's major, by version:
+   * the sha256 (hex) of each script file it installed (provenance header
+   * included), its seed paths (artifact seeds prefixed `artifacts/`) and its
+   * param names. See {@link refreshPortableTypedProject}.
+   */
+  earlierVersions?: Record<string, PortableEarlierTypeVersion>;
+}
+
+export interface PortableEarlierTypeVersion {
+  scripts: Record<string, string>;
+  seeds: string[];
+  params: string[];
 }
 
 type ProjectTypeEntry = PortableProjectType & {
@@ -400,6 +417,96 @@ export async function commitPortableTypedProject(
     applied: { ...applied, gezelsCreated },
     hired: [...hiredIds.values()].map((gezel) => gezel.id),
   };
+}
+
+async function sha256Text(text: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(encodeText(text)));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * Move a project made with an earlier version of its type to the version this
+ * host carries, as the desktop's automatic app update does: the scripts move
+ * with the page and tool declarations the host already serves from the
+ * bundled version, new seeds are written, and the stamp moves. Nothing of the
+ * person's changes: a seed already on disk (or one the older version had and
+ * the person deleted) is left as it is, and a script that is not exactly what
+ * some earlier version installed counts as edited and keeps the whole project
+ * where it is. Same major only, never a pinned project. Returns the updated
+ * project, or null when it stays.
+ */
+export async function refreshPortableTypedProject(
+  repo: PortableRepository,
+  entry: PortableProjectType,
+  projectId: string,
+): Promise<ProjectDetail | null> {
+  if (!isProjectTypeEntry(entry)) return null;
+  const manifest = entry.item.manifest;
+  const root = projectRoot(projectId);
+  const project = await repo.tolerantRecord(
+    `${root}/project.json`,
+    ProjectSchema,
+    `project ${projectId}`,
+  );
+  const provenance = project?.projectType;
+  if (!project || !provenance || provenance.id !== manifest.id || provenance.pinned) return null;
+  const target = pickProjectTypeUpgradeTarget({
+    stamp: provenance.version,
+    available: [manifest.version],
+    stampResolves: true,
+  });
+  const earlier = entry.earlierVersions?.[provenance.version];
+  if (target !== manifest.version || !earlier) return null;
+  const missing = projectTypeParamsWithoutValue({
+    previousSchema: { properties: Object.fromEntries(earlier.params.map((key) => [key, {}])) },
+    nextSchema: manifest.params,
+    params: provenance.params,
+  });
+  if (missing.length > 0) return null;
+
+  const shipped = new Set(
+    Object.values(entry.earlierVersions ?? {}).flatMap((version) => Object.values(version.scripts)),
+  );
+  const writes = new Map<string, Uint8Array>();
+  for (const [name, body] of Object.entries(manifest.scripts ?? {})) {
+    const path = `${root}/scripts/${ScriptNameSchema.parse(name)}.ts`;
+    const content = `${projectTypeScriptHeader(manifest.id, manifest.version)}${body}`;
+    const existing = await repo.text(path);
+    if (existing === content) continue;
+    if (existing !== null && !shipped.has(await sha256Text(existing))) return null;
+    writes.set(path, encodeText(content));
+  }
+
+  const params = { ...seedParamDefaults(manifest.params), ...(provenance.params ?? {}) };
+  const seeds = [
+    ...manifest.workspaceSeed.map((rel) => ({ rel, area: 'workspace', record: rel })),
+    ...manifest.artifactsSeed.map((rel) => ({
+      rel,
+      area: 'artifacts',
+      record: `artifacts/${rel}`,
+    })),
+  ];
+  for (const seed of seeds) {
+    if (earlier.seeds.includes(seed.record)) continue;
+    const text = entry.files[seed.rel];
+    if (text === undefined) continue;
+    const path = `${root}/${seed.area}/${validatePortablePath(seed.rel)}`;
+    if ((await repo.text(path)) !== null) continue;
+    writes.set(path, boundedText(renderProjectTypeTemplate(text, params)));
+  }
+
+  const updated = ProjectSchema.parse({
+    ...project,
+    projectType: {
+      ...provenance,
+      version: manifest.version,
+      icon: projectTypeIcon(manifest),
+      ...(manifest.category ? { category: manifest.category } : {}),
+    },
+  });
+  writes.set(`${root}/project.json`, repo.json(updated));
+  await repo.transactions.commit(writes);
+  return getProject(repo, projectId);
 }
 
 /** Parse a typed-create body, refusing fields a typed create never takes. */

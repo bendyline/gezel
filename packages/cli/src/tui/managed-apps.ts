@@ -280,7 +280,7 @@ function preferredModel(status: HarnessStatus): LocalHarnessModelOption {
     status.models[0];
   if (!model) {
     throw new ManagedAppCommandError(
-      'No compatible local gezel or tool-capable model is available for this integration.',
+      'No compatible local crew member or tool-capable model is available for this integration.',
     );
   }
   return model;

@@ -27,7 +27,11 @@ import { createLogger } from '@bendyline/gezel';
 import {
   type ChatMessage,
   DEFAULT_NUM_CTX,
+  type DegenerateEngineReport,
   type DisableThinkingRequestShape,
+  DraftAcceptanceMonitor,
+  type DraftAcceptanceSample,
+  type DraftAcceptanceVerdict,
   LlamaCppSession,
   NativeEngineCrashedError,
   type ReasoningEffortRequestShape,
@@ -598,6 +602,50 @@ export class LlamaCppProvider implements LLMProvider {
   /** Record that this engine rejected `tool_choice: "required"`. */
   noteForcedToolChoiceUnsupported(): void {
     this.forcedToolChoiceUnsupported = true;
+  }
+
+  /** Draft acceptance this engine process has achieved; see degenerate-output.ts. */
+  private readonly draftAcceptance = new DraftAcceptanceMonitor();
+
+  /**
+   * Only a supervised engine is judged: a verdict means something only when
+   * this provider can restart the process that earned it. Keyed by the
+   * child's pid so a restarted engine earns its baseline again.
+   */
+  judgeDraftAcceptance(sample: DraftAcceptanceSample): DraftAcceptanceVerdict {
+    if (!this.supervisor) return { sick: false };
+    return this.draftAcceptance.observe(sample, this.supervisor.currentChildPid());
+  }
+
+  /**
+   * The turn loop gave up on this engine's output. On 2026-11-10 one
+   * llama-server process emitted nothing but "/" for five hours, and every
+   * retry went back to it; its sessions' prompt state was saved to disk the
+   * whole time. So: drop the slot state the session holds or would restore,
+   * then stop the engine as a health restart, which saves nothing. The next
+   * request starts a fresh process (`ensureRunning` waits for the stop).
+   * Returns false for an external engine, which this provider cannot restart.
+   */
+  async recoverFromDegenerateOutput(report: DegenerateEngineReport): Promise<boolean> {
+    try {
+      const removed = await this.cacheAdapter?.discardSessionSnapshots(report.sessionId);
+      if (removed && removed.length > 0) {
+        log.warn(
+          `[llama-cpp] discarded ${removed.length} saved prompt snapshot(s) after degenerate output: ${removed.join(', ')}`,
+        );
+      }
+    } catch (err) {
+      log.warn(
+        `[llama-cpp] could not discard saved prompt snapshots: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!this.supervisor) return false;
+    this.draftAcceptance.reset();
+    log.warn(
+      `[llama-cpp] restarting the engine after degenerate output (pid=${this.supervisor.currentChildPid() ?? '?'})`,
+    );
+    await this.supervisor.stop('health-restart');
+    return true;
   }
 
   /** Whether a constrained turn may ask the engine to force a tool call. */

@@ -12,6 +12,7 @@ import type {
   Project,
   ProjectDetail,
   ProjectTabVisibility,
+  ProjectTypeUpgradePlan,
   WorkspaceIndexFile,
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
@@ -38,6 +39,7 @@ import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
+import { EmptyPlace } from '../components/EmptyPlace.js';
 import { FileAboutLine } from '../components/FileAboutLine.js';
 import { FileFlatList } from '../components/FileFlatList.js';
 import { type FileEntry, FileTree } from '../components/FileTree.js';
@@ -49,7 +51,7 @@ import { ProjectMemoriesEditor } from '../components/MemoriesTree.js';
 import { ProjectActionsMenu, ProjectContextMenu } from '../components/ProjectActionsMenu.js';
 import type { ProjectTemplateGezelOptions } from '../components/ProjectAddGezelDialog.js';
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
-import { ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
+import { PROJECT_STATUS_OPTIONS, ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
 import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
@@ -125,6 +127,7 @@ import { navigateToTab, openUpdates } from '../components/nav-actions.js';
 import { consumeCreate } from '../components/nav-intents.js';
 import { consumeOpenFile } from '../components/pending-open-file.js';
 import { consumeProjectSection } from '../components/pending-project-section.js';
+import { isPlainTextFile } from '../components/plain-text-file.js';
 import {
   type AiProviderEditabilityConfig,
   projectUsesClaude,
@@ -136,6 +139,13 @@ import { makeReportActionFenceRenderers } from '../components/report-actions/Rep
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
 import { useDebugMode } from '../components/useDebugMode.js';
+import { useNarrowWindow } from '../components/useNarrowWindow.js';
+import {
+  ViewLocationScope,
+  useRestoredViewPart,
+  useViewLocation,
+} from '../components/view-history/ViewHistoryContext.js';
+import type { ViewPart } from '../components/view-history/view-history.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
@@ -147,6 +157,11 @@ import { OFFERED_PROJECT_VIEWS, preloadProjectView } from './project-views/regis
 import { useProjectViews } from './project-views/useProjectViews.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
 import { ProjectOutsideInEditor } from './projects/ProjectOutsideInEditor.js';
+import {
+  ProjectTypeField,
+  ProjectTypeUpdateDialog,
+  ProjectTypeUpdateNotice,
+} from './projects/ProjectTypeUpdate.js';
 import {
   type OutsideInOpenFile,
   loadProjectFile,
@@ -258,6 +273,41 @@ type ProjectTab =
   // Compact-only: when the project area is too narrow for the output
   // pane to sit beside the content, it becomes its own tab instead.
   | 'output';
+
+/** Tabs whose content needs the width more than a docked board does, in a narrow window. */
+const BOARD_STEPS_ASIDE_ON: ReadonlySet<ProjectTab> = new Set(['tasks', 'settings']);
+
+/** Each tab's name as its key shows it, for the history menu. */
+const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {
+  settings: 'Settings',
+  about: 'Settings',
+  overview: 'Overview',
+  chat: 'Chat',
+  tasks: 'Tasks',
+  packages: 'Tools',
+  workspace: 'Workspace',
+  artifacts: 'Artifacts',
+  proposals: 'Proposals',
+  github: 'GitHub',
+  mail: 'Mail',
+  connections: 'Connections',
+  map: 'Views',
+  history: 'History',
+  output: 'Output',
+};
+
+/** Where a project view stood, as the view stack keeps it. */
+interface ProjectLocation {
+  projectId: string;
+  tab: ProjectTab;
+}
+
+function projectLocationOf(part: ViewPart | undefined): ProjectLocation | null {
+  const value = part?.value as Partial<ProjectLocation> | undefined;
+  if (!value || typeof value.projectId !== 'string' || typeof value.tab !== 'string') return null;
+  if (!(value.tab in PROJECT_TAB_LABELS)) return null;
+  return { projectId: value.projectId, tab: value.tab };
+}
 
 function preloadProjectTab(tab: ProjectTab): void {
   let loading: Promise<unknown> | undefined;
@@ -505,7 +555,13 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [createMode, setCreateMode] = useState<'crew' | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [tab, setTab] = useState<ProjectTab>('chat');
+  // Back to this project reopens the tab it was left on (see openProject).
+  const restoredPart = useRestoredViewPart('project');
+  const restoreTabRef = useRef<ProjectLocation | null>(projectLocationOf(restoredPart));
+  const [tab, setTab] = useState<ProjectTab>(() => restoreTabRef.current?.tab ?? 'chat');
+  // The project whose openProject has settled: until then `tab` is still the
+  // previous project's (or the default), so the view stack is not told.
+  const [openedProjectId, setOpenedProjectId] = useState<string | null>(null);
   const debugMode = useDebugMode();
   const showViewsTab = useCallback(() => setTab('map'), []);
   const projectViews = useProjectViews({
@@ -621,8 +677,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [typePage, setTypePage] = useState<{
     entry: string;
     label: string;
+    version?: string;
     pageTools?: string[];
   } | null>(null);
+  // The app update this project could take (see project-type/upgrade.ts).
+  // Most run on their own; one that waits for the person shows a line over
+  // the Output page and a key in Settings.
+  const [typeUpdate, setTypeUpdate] = useState<ProjectTypeUpgradePlan | null>(null);
+  const [typeName, setTypeName] = useState<string | null>(null);
+  const [typeUpdateOpen, setTypeUpdateOpen] = useState(false);
+  const selectedIdRef = useRef<string | null>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>(
     () => peekApiRead('listGezels')?.gezels ?? [],
   );
@@ -697,6 +761,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       if (!detail?.projectId) return;
       if (!detail.project) {
         void refresh();
+        // The daemon changed the open project itself (an app update): reload
+        // it, so its Output page follows the new version.
+        const projectId = detail.projectId;
+        if (selectedIdRef.current === projectId) {
+          void api
+            .getProject(projectId)
+            .then((project) =>
+              setSelected((current) => (current?.id === projectId ? project : current)),
+            )
+            .catch(() => {});
+        }
         return;
       }
       setProjects((current) =>
@@ -1253,13 +1328,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       setWorkspaceHtmlFiles([]);
       setArtifactFiles([]);
       setWorkspaceIndexPaneOpen(false);
+      // A link that names a section wins; otherwise Back's restored tab.
       const section = consumeProjectSection(id);
+      const restore = restoreTabRef.current?.projectId === id ? restoreTabRef.current : null;
+      restoreTabRef.current = null;
       if (section && section !== 'overview') {
         setTab('map');
         queueViewsRequest({ projectId: id, view: section.view, path: section.path });
       } else {
-        setTab(section ?? 'chat');
+        setTab(section ?? restore?.tab ?? 'chat');
       }
+      setOpenedProjectId(id);
       setWorkingDirDraft(project.workingDir ?? '');
       setGitHubUrlDraft(project.github?.url ?? '');
       setGitStatus('');
@@ -1313,6 +1392,34 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [],
   );
 
+  // The view stack: a project's tab is a place of its own, so moving from
+  // Chat to Tasks is a step Back undoes. In the Projects area the project
+  // itself is part of the place, since choosing one there does not change
+  // the app's selection.
+  const projectLocation = useViewLocation('project', {
+    part:
+      selected && openedProjectId === selected.id
+        ? {
+            key: detailOnly ? tab : `${selected.id}:${tab}`,
+            value: { projectId: selected.id, tab } satisfies ProjectLocation,
+            label: detailOnly
+              ? PROJECT_TAB_LABELS[tab]
+              : `${selected.name} · ${PROJECT_TAB_LABELS[tab]}`,
+          }
+        : null,
+    title: detailOnly ? selected?.name : undefined,
+    onRestore: (part) => {
+      const location = projectLocationOf(part);
+      if (!location) return;
+      if (location.projectId === selected?.id) {
+        setTab(location.tab);
+        return;
+      }
+      restoreTabRef.current = location;
+      void openProject(location.projectId);
+    },
+  });
+
   // Respond to nav-shortcut clicks from the top-bar MRU chips in App.tsx:
   // the shortcut dispatches `gezel:open-project` with the id, and we open
   // the project here as if the user had clicked it in the sidebar.
@@ -1331,7 +1438,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     const onOpenSettings = (e: Event) => {
       const detail = (e as CustomEvent<{ projectId?: string }>).detail;
       if (detail?.projectId && selected && detail.projectId !== selected.id) return;
-      setTab('settings');
+      // The Settings tab's value is 'about'; 'settings' renders no pane.
+      setTab('about');
     };
     window.addEventListener('gezel:open-project-settings', onOpenSettings);
     return () => window.removeEventListener('gezel:open-project-settings', onOpenSettings);
@@ -2021,24 +2129,52 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             : new Set<string>();
         const pageTools = (pages?.tools ?? []).filter((name) => declared.has(name));
         if (!cancelled) {
+          setTypeName(detail.manifest.name);
           setTypePage(
             pages?.entry
               ? {
                   entry: pages.entry,
                   label: 'Dashboard',
+                  version: projectTypeProvenance.version,
                   ...(pageTools.length > 0 ? { pageTools } : {}),
                 }
               : null,
           );
         }
       } catch {
-        if (!cancelled) setTypePage(null);
+        if (!cancelled) {
+          setTypePage(null);
+          setTypeName(null);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [projectTypeProvenance?.id, projectTypeProvenance?.version, projectTypeProvenance?.source]);
+
+  useEffect(() => {
+    selectedIdRef.current = selected?.id ?? null;
+  }, [selected?.id]);
+
+  // The app update on offer for the open project, re-read whenever the
+  // version it runs changes (an update landed) or another project opens.
+  const selectedId = selected?.id;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the project and the version it runs.
+  useEffect(() => {
+    let cancelled = false;
+    setTypeUpdate(null);
+    if (!selectedId || !projectTypeProvenance) return;
+    void api
+      .getProjectTypeUpgrade(selectedId)
+      .then((res) => {
+        if (!cancelled) setTypeUpdate(res?.upgrade ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, projectTypeProvenance?.id, projectTypeProvenance?.version]);
 
   // A pinned type page makes the pane worth showing even without a workspace
   // index.html — the user's explicit toggle still wins.
@@ -2078,9 +2214,23 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     },
     [selected],
   );
+  // In a narrow window the board steps aside on the tabs that need the
+  // width, without changing the saved choice; its toggle brings it back for
+  // this visit. At 1024 x 700 a docked board left a task's detail 120 px wide.
+  const narrowWindow = useNarrowWindow();
+  const [boardKeptOpen, setBoardKeptOpen] = useState<string | null>(null);
+  const boardStepsAside =
+    narrowWindow &&
+    outputVisible &&
+    BOARD_STEPS_ASIDE_ON.has(tab) &&
+    boardKeptOpen !== selected?.id;
   const toggleOutput = useCallback(() => {
+    if (boardStepsAside) {
+      setBoardKeptOpen(selected?.id ?? null);
+      return;
+    }
     saveOutputChoice({ visible: !outputVisible });
-  }, [saveOutputChoice, outputVisible]);
+  }, [saveOutputChoice, outputVisible, boardStepsAside, selected?.id]);
   const saveOutputMaximized = useCallback(
     (maximized: boolean) => saveOutputChoice({ maximized }),
     [saveOutputChoice],
@@ -2169,7 +2319,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // Wide: output pane sits beside the content (resizable). Compact: it
   // takes over the body as the active 'output' tab. The tab content is
   // hidden only in the compact-output case.
-  const showOutputBeside = !effectiveCompact && outputVisible;
+  const showOutputBeside = !effectiveCompact && outputVisible && !boardStepsAside;
   const showOutputAsTab =
     (compactOutputAvailable && tab === 'output') ||
     (effectiveCompact && outputVisible && outputMaximized);
@@ -2265,9 +2415,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     if (detailOnly) return;
     if (selected) return;
     if (projects.length === 0) return;
-    let saved: string | null = null;
+    // Back to this area reopens the project it was left on, not the last
+    // one chosen anywhere.
+    let saved: string | null = restoreTabRef.current?.projectId ?? null;
     try {
-      saved = window.localStorage.getItem(SELECTED_PROJECT_STORAGE_KEY);
+      saved ??= window.localStorage.getItem(SELECTED_PROJECT_STORAGE_KEY);
     } catch {
       saved = null;
     }
@@ -2287,6 +2439,21 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           mode={createMode ?? 'crew'}
           onClose={() => setCreateMode(null)}
           onCreated={handleProjectCreated}
+        />
+      )}
+      {selected && typeUpdate && !typeUpdate.automatic && (
+        <ProjectTypeUpdateDialog
+          projectId={selected.id}
+          plan={typeUpdate}
+          open={typeUpdateOpen}
+          onOpenChange={setTypeUpdateOpen}
+          onUpdated={() => {
+            setTypeUpdate(null);
+            void api
+              .getProject(selected.id)
+              .then(setSelected)
+              .catch(() => {});
+          }}
         />
       )}
       {selected && workspaceIssueFixRequest && (
@@ -2324,7 +2491,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 className="area-toolbar-btn"
                 onClick={() => setCreateMode('crew')}
               >
-                + New Project
+                + New project
               </button>
             )}
             <button
@@ -2343,8 +2510,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                 type="button"
                 className="collapsed-create-btn"
                 onClick={() => setCreateMode('crew')}
-                title="New Project"
-                aria-label="New Project"
+                title="New project"
+                aria-label="New project"
               >
                 <span className="collapsed-create-symbol" aria-hidden="true">
                   +
@@ -2368,7 +2535,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       )}
       <section className="main" hidden={showProjectList}>
         {!detailOnly && !selected ? (
-          <p className="placeholder">Pick a project on the left to view it here.</p>
+          <EmptyPlace
+            purpose="A project keeps one piece of your work together: its files, its crew, and what they make."
+            action={{ label: 'Start a project', onClick: () => setCreateMode('crew') }}
+            note="Or open one on the left."
+          />
         ) : selected ? (
           <>
             {error && (detailOnly || sidebarIsCollapsed) && (
@@ -2397,11 +2568,11 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               {!effectiveCompact && runtimeCapabilities().htmlPreview && (
                 <button
                   type="button"
-                  className={`output-toggle${outputVisible ? ' is-active' : ''}`}
+                  className={`output-toggle${showOutputBeside ? ' is-active' : ''}`}
                   onClick={toggleOutput}
-                  title={outputVisible ? 'Hide output pane' : 'Show output pane'}
-                  aria-label={outputVisible ? 'Hide output pane' : 'Show output pane'}
-                  aria-pressed={outputVisible}
+                  title={showOutputBeside ? 'Hide output pane' : 'Show output pane'}
+                  aria-label={showOutputBeside ? 'Hide output pane' : 'Show output pane'}
+                  aria-pressed={showOutputBeside}
                 >
                   <svg
                     width="16"
@@ -2551,6 +2722,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   projectId={selected.id}
                   htmlFiles={workspaceHtmlFiles}
                   typePage={typePage ?? undefined}
+                  notice={
+                    typeUpdate && !typeUpdate.automatic ? (
+                      <ProjectTypeUpdateNotice
+                        plan={typeUpdate}
+                        onReview={() => setTypeUpdateOpen(true)}
+                      />
+                    ) : undefined
+                  }
                   initialMaximized={outputMaximized}
                   onMaximizedChange={saveOutputMaximized}
                   onClose={showOutputAsTab ? () => setTab('chat') : toggleOutput}
@@ -2586,8 +2765,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             label={crewLeadLabel(selected)}
                             hint={
                               selected.mode === 'solo'
-                                ? 'The single gezel who handles this entire job — the Builder. Team-management tools are stripped from their thread.'
-                                : 'Leads the crew. Every chat here knows who it is.'
+                                ? 'Does this project’s work from start to finish, without a crew to hand it to.'
+                                : 'Leads the crew and hands work to its members. Every chat here knows who it is.'
                             }
                           >
                             <GezelPicker
@@ -2667,7 +2846,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           id="project-about-workspace"
                           className="project-about-anchor"
                           title="Workspace"
-                          hint="Where this project’s files live and what your crew may do with them."
+                          hint="Where this project’s files live and what Gezel may do with them."
                         >
                           {runtimeCapabilities().externalFolders && (
                             <SettingField
@@ -2675,7 +2854,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               controlId="project-setting-folder"
                               hint={
                                 selected.workingDir
-                                  ? 'Your crew works on the files in this folder.'
+                                  ? 'Gezel works on the files in this folder.'
                                   : 'No folder chosen, so files live in Gezel’s own workspace for this project.'
                               }
                             >
@@ -2715,8 +2894,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             label={MANAGED_WORKSPACE_WRITE_SETTING_LABEL}
                             hint={
                               selected.workingDir
-                                ? 'Off by default for a folder of your own. Turn on only if you trust the crew’s tools and automations to edit it.'
-                                : 'On by default for Gezel’s own workspace. Crew members that run in Codex or Claude Code follow those apps’ own permissions.'
+                                ? 'Off by default for a folder of your own. Turn on only if you trust Gezel’s tools and automations to edit it.'
+                                : 'On by default for Gezel’s own workspace. Work that runs in Codex or Claude Code follows those apps’ own permissions.'
                             }
                             checked={workspaceAccess.managedWritable}
                             onChange={(next) => {
@@ -2744,7 +2923,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           {runtimeCapabilities().background && (
                             <SettingCheck
                               label="Fix problems overnight"
-                              hint="When this project has both a Librarian and a developer, the developer works through open issues during the night shift. Your files aren’t touched — fixes arrive as change proposals in the Proposals tab for you to review and apply."
+                              hint="When this project has both a Librarian and a developer, the developer works through open issues during the Night Shift. Your files aren’t touched — fixes arrive as change proposals in the Proposals tab for you to review and apply."
                               checked={selected.nightlyFixesEnabled !== false}
                               onChange={(checked) => void saveNightlyFixesEnabled(checked)}
                             />
@@ -2760,7 +2939,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                     ? selected.github.checkoutDir
                                       ? `Linked. Checkout: ${selected.github.checkoutDir}${selected.github.branch ? ` (${selected.github.branch})` : ''}`
                                       : 'Linked. Use the GitHub tab to clone.'
-                                    : 'Optional. When set, your crew gains a GitHub-linked checkout and a new GitHub tab.'}
+                                    : 'Optional. When set, the project gains a GitHub-linked checkout and a new GitHub tab.'}
                                   {gitStatus && (
                                     <>
                                       {' '}
@@ -2787,8 +2966,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             <SettingField label="Recent workspace changes">
                               {writesJournal.length === 0 ? (
                                 <p className="gz-setting-hint">
-                                  Nothing changed yet. Files crew members write, delete, create, or
-                                  rename show up here.
+                                  Nothing changed yet. Files Gezel writes, deletes, creates, or
+                                  renames show up here.
                                 </p>
                               ) : (
                                 <ul className="project-writes-log">
@@ -2831,7 +3010,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             id="project-about-access"
                             className="project-about-anchor"
                             title="Access"
-                            hint="What your crew can reach beyond this project’s own files."
+                            hint="What Gezel can reach beyond this project’s own files."
                           >
                             {showLinkedProjects && (
                               <SettingField
@@ -2939,10 +3118,41 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           className="project-about-anchor"
                           title="Preferences"
                         >
+                          {/* The status bar shows an owner this only when it
+                              is paused, so the control lives here too. */}
+                          <SettingField
+                            label="Project status"
+                            hint="Active lets scheduled tasks and hand-offs run on their own. Read-only and Inactive pause them; chat still works. A project turns Stable by itself once its tasks are finished."
+                          >
+                            <Select.Root
+                              value={selected.status ?? 'active'}
+                              onValueChange={async (v) => {
+                                const updated = await api.updateProject(selected.id, {
+                                  status: v as NonNullable<typeof selected.status>,
+                                });
+                                setSelected(updated);
+                              }}
+                            >
+                              <Select.Trigger
+                                aria-label="Project status"
+                                disabled={selected.archived === true}
+                              >
+                                <Select.Value />
+                              </Select.Trigger>
+                              <Select.Content>
+                                {PROJECT_STATUS_OPTIONS.map((option) => (
+                                  <Select.Item key={option.value} value={option.value}>
+                                    {option.label}
+                                  </Select.Item>
+                                ))}
+                              </Select.Content>
+                            </Select.Root>
+                          </SettingField>
+
                           {runtimeCapabilities().catalog && (
                             <SettingField
                               label="Project type"
-                              hint="Tunes which craftbooks the command rail suggests. Auto-detect reads the project’s files and About text."
+                              hint="Tunes which plans the command rail suggests. Auto-detect reads the project’s files and About text."
                             >
                               <Select.Root
                                 value={selected.projectTypeId || '__AUTO__'}
@@ -2975,6 +3185,15 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 </Select.Content>
                               </Select.Root>
                             </SettingField>
+                          )}
+
+                          {selected.projectType && typeName && (
+                            <ProjectTypeField
+                              typeName={typeName}
+                              version={selected.projectType.version}
+                              plan={typeUpdate}
+                              onReview={() => setTypeUpdateOpen(true)}
+                            />
                           )}
 
                           {runtimeCapabilities().catalog && (
@@ -3076,7 +3295,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                     message={
                       selected.workingDir ? (
                         <>
-                          Your crew will be able to create, modify, and delete files inside{' '}
+                          Gezel will be able to create, modify, and delete files inside{' '}
                           <code>{selected.workingDir}</code>. Every change is logged in the Settings
                           section. You can turn this back off at any time.
                         </>
@@ -3128,7 +3347,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                           ? selected.workingDir || !runtimeCapabilities().externalFolders
                             ? 'Workspace directory is empty.'
                             : 'No external working directory set. Use the internal workspace or set an external path under the Settings tab.'
-                          : 'No artifacts yet. Your crew will store reports and outputs here.'
+                          : 'No artifacts yet. Gezel stores reports and outputs here.'
                       }
                       mutations={fileMutations}
                       customList={fileCustomList}
@@ -3212,7 +3431,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                       : workspaceIndexStatus.state === 'stale'
                                         ? 'Index is out of date.'
                                         : workspaceIndexStatus.state === 'never'
-                                          ? 'Not indexed yet — showing files from the folder walk.'
+                                          ? 'Not scanned yet — showing files from the folder walk.'
                                           : 'Indexing is disabled — showing files from the folder walk.'}
                                   </span>
                                   {(workspaceIndexStatus.state === 'stale' ||
@@ -3402,7 +3621,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
 
                   {tab === 'tasks' && (
                     <ProjectPaneBoundary>
-                      <TasksView projectId={selected.id} />
+                      <ViewLocationScope location={projectLocation}>
+                        <TasksView projectId={selected.id} />
+                      </ViewLocationScope>
                     </ProjectPaneBoundary>
                   )}
 
@@ -3443,7 +3664,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         <SettingsSection
                           id="project-toolsets"
                           title="Toolsets"
-                          hint="Available to every gezel working in this project. Project MCP files are discovered automatically."
+                          hint="Available to everyone working in this project. Project MCP files are discovered automatically."
                         >
                           <ToolsetsEditor
                             scope={{ kind: 'project', projectId: selected.id }}
@@ -3684,6 +3905,10 @@ function ProjectFileEditor({
         fileName={file.path}
         readOnly={isReadOnly}
         onChange={isReadOnly ? undefined : handleChange}
+        // A file Gezel may not change shows no formatting keys, and a .txt
+        // opens in Source, where its line breaks are kept.
+        {...(isReadOnly ? { showFormattingControls: false, showInsertControls: false } : {})}
+        {...(isPlainTextFile(file.path) ? { initialView: 'raw' as const } : {})}
         height="100%"
         colorScheme={editorTheme}
         fullWidth

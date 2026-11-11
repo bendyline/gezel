@@ -6,7 +6,7 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 import type { GezelRuntimePlugin } from './definitions.js';
 import { createRuntimeEmbedding } from './embedding.js';
-import { createMobileModelManager } from './model-manager.js';
+import { catalogFit, createMobileModelManager } from './model-manager.js';
 import { connectRuntime } from './transport.js';
 
 const source = {
@@ -21,6 +21,11 @@ const source = {
 const catalog = [
   { name: 'Fixture', license: 'MIT', approxSizeBytes: 64, contextWindow: 4096, source },
 ];
+const GiB = 1024 ** 3;
+// Catalog sizes: MiniCPM5 1B, Qwen 3.5 2B and Gemma 4 E2B, all Q4.
+const MINICPM5_1B = 688_065_920;
+const QWEN35_2B = 1_329_851_808;
+const GEMMA_4_E2B = 2_620_370_976;
 const jobId = '11111111-1111-4111-8111-111111111111';
 const modelId = '22222222-2222-4222-8222-222222222222';
 function fixture() {
@@ -137,6 +142,32 @@ describe('mobile model manager', () => {
     await expect(
       manager.prepare('android-mlkit:android-mlkit', { allowDownload: true }),
     ).resolves.toMatchObject({ availability: 'available', name: 'Gemini Nano (Android ML Kit)' });
+    await manager.close();
+  });
+  it('rates catalog downloads and leaves out what cannot load', async () => {
+    const { plugin } = fixture();
+    plugin.listModels = vi.fn(async () => ({
+      models: [],
+      memoryBudgetBytes: 2.5 * GiB,
+      physicalMemoryBytes: 6 * GiB,
+    }));
+    const big = {
+      ...catalog[0]!,
+      name: 'Big',
+      approxSizeBytes: GEMMA_4_E2B,
+      source: { ...source, catalogId: 'big' },
+    };
+    const manager = createMobileModelManager(plugin, { catalog: [...catalog, big] });
+    const listed = await manager.list();
+    expect(listed.find((model) => model.id === 'catalog:fixture')).toMatchObject({
+      availability: 'download-required',
+      fit: { tier: 'fits' },
+    });
+    expect(listed.find((model) => model.id === 'catalog:big')).toMatchObject({
+      availability: 'unavailable',
+      reason_code: 'insufficient_memory',
+      fit: { tier: 'too-big' },
+    });
     await manager.close();
   });
   it('validates installed identity after completion and emits progress', async () => {
@@ -261,4 +292,19 @@ it('offers the first model download while native inference has no installed weig
   } finally {
     await manager.close();
   }
+});
+
+describe('catalog fit', () => {
+  it('rates a 6 GB phone: 1B fits, 2B is tight, Gemma 4 E2B cannot load', () => {
+    const phone = { memoryBudgetBytes: 2.5 * GiB, physicalMemoryBytes: 6 * GiB };
+    expect(catalogFit(MINICPM5_1B, phone)?.tier).toBe('fits');
+    expect(catalogFit(QWEN35_2B, phone)?.tier).toBe('tight');
+    expect(catalogFit(GEMMA_4_E2B, phone)?.tier).toBe('too-big');
+  });
+  it('rates only what the host reports', () => {
+    expect(catalogFit(MINICPM5_1B, {})).toBeUndefined();
+    // A runtime that predates physicalMemoryBytes can still rule a model out.
+    expect(catalogFit(MINICPM5_1B, { memoryBudgetBytes: 2.5 * GiB })).toBeUndefined();
+    expect(catalogFit(GEMMA_4_E2B, { memoryBudgetBytes: 2.5 * GiB })?.tier).toBe('too-big');
+  });
 });

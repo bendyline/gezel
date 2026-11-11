@@ -689,19 +689,27 @@ function readRole(brief: string): string | null {
   return match ? match[1]!.trim() : null;
 }
 
-/** What someone does for a living: "I'm a freelance logo designer". */
+/**
+ * What someone does for a living: "I'm a freelance logo designer", "my
+ * pottery studio", or "I run a bakery", which is how an owner says it. The
+ * invoice starter asks what they do and lets them finish the sentence.
+ */
 function readBusiness(brief: string): string | null {
   const match = brief.match(
     /\bI(?:'|’)?m\s+(?:a|an)\s+((?:[\p{L}-]+\s+){0,3}?[\p{L}-]+?)(?=\s+(?:and|who|based|from|in|for|with)\b|[.,;!?\n]|$)/iu,
   );
   if (match) return match[1]!.trim();
-  const own = brief.match(BUSINESS_RE);
+  const own = brief.match(BUSINESS_RE) ?? brief.match(RUN_A_BUSINESS_RE);
   return own ? own[1]!.trim() : null;
 }
 
 const VENTURE =
   '(?:studio|shop|bakery|business|brand|company|caf[eé]|band|podcast|channel|restaurant|store|agency|practice|club|school|salon|gallery|roastery|brewery|winery|distillery|farm|bistro|bar|pub|firm|startup|nonprofit|charity|clinic|gym|boutique|label|blog|newsletter)';
 const BUSINESS_RE = new RegExp(`\\b(?:my|our)\\s+((?:[\\p{L}'’-]+\\s+){0,3}${VENTURE})\\b`, 'iu');
+const RUN_A_BUSINESS_RE = new RegExp(
+  `\\bI\\s+(?:run|own|have|manage)\\s+(?:a|an)\\s+((?:[\\p{L}'’-]+\\s+){0,3}${VENTURE})\\b`,
+  'iu',
+);
 
 /** Who a feed speaks for: "posts for my pottery studio" → "pottery studio". */
 function readBrand(brief: string): string | null {

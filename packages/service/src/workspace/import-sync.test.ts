@@ -10,7 +10,7 @@ import { Store } from '../fs/store.js';
 import {
   type ImportSyncDeps,
   approvePendingImport,
-  ensureFolderProjectBuilder,
+  ensureProjectBuilder,
   ensureProjectVoorman,
   syncProjectImports,
 } from './import-sync.js';
@@ -249,7 +249,7 @@ describe('ensureProjectVoorman', () => {
   });
 });
 
-describe('ensureFolderProjectBuilder', () => {
+describe('ensureProjectBuilder', () => {
   it('assigns the curated Builder to a folder-backed solo project', async () => {
     const project = await store.createProject({
       name: 'Workspace',
@@ -257,7 +257,7 @@ describe('ensureFolderProjectBuilder', () => {
       workingDir: join(home, 'workspace'),
     });
 
-    const result = await ensureFolderProjectBuilder(deps(), project.id);
+    const result = await ensureProjectBuilder(deps(), project.id);
 
     const detail = await store.getProject(project.id);
     const builder = await store.getGezel(detail?.voormanGezelId ?? '');
@@ -267,12 +267,37 @@ describe('ensureFolderProjectBuilder', () => {
     expect(result.createdGezel?.id).toBe(builder?.id);
   });
 
-  it('does not add a Builder to a non-folder solo project', async () => {
-    const project = await store.createProject({ name: 'Checkers', mode: 'solo' });
+  // One Builder runs several projects: the crew must not grow by one per
+  // project (owner decision, 2026-11-10).
+  it('gives a blank solo project the Builder the person already has', async () => {
+    const first = await store.createProject({ name: 'Spring menu', mode: 'solo' });
+    const made = await ensureProjectBuilder(deps(), first.id);
+    const second = await store.createProject({ name: 'Summer menu', mode: 'solo' });
 
-    await ensureFolderProjectBuilder(deps(), project.id);
+    const again = await ensureProjectBuilder(deps(), second.id);
 
-    expect((await store.getProject(project.id))?.voormanGezelId).toBeUndefined();
+    expect(again.createdGezel).toBeUndefined();
+    expect((await store.getProject(second.id))?.voormanGezelId).toBe(made.createdGezel?.id);
+    expect(await store.listGezels()).toHaveLength(1);
+  });
+
+  it("leaves a project type's own crew alone, and a crew project", async () => {
+    const typed = await store.createProject({ name: 'Checkers', mode: 'solo' });
+    await store.updateProject(typed.id, {
+      projectType: {
+        id: 'checkers',
+        version: '1.0.0',
+        source: 'bundled',
+        appliedAt: '2026-10-05T00:00:00Z',
+      },
+    });
+    const crew = await store.createProject({ name: 'Launch' });
+
+    await ensureProjectBuilder(deps(), typed.id);
+    await ensureProjectBuilder(deps(), crew.id);
+
+    expect((await store.getProject(typed.id))?.voormanGezelId).toBeUndefined();
+    expect((await store.getProject(crew.id))?.voormanGezelId).toBeUndefined();
     expect(await store.listGezels()).toHaveLength(0);
   });
 });

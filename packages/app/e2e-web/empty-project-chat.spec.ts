@@ -1,5 +1,5 @@
 /**
- * First visit to a project with no chat history: the status band stays quiet,
+ * First visit to a project with no chat history: the status band is left out,
  * while the timeline guidance and composer remain ready for the first message.
  * Uses the isolated browser-suite daemon and a fresh project to avoid seeded work.
  */
@@ -31,7 +31,8 @@ test('first project visit has no recent-threads placeholder', async ({
   await expect(page.getByTestId('project-tab-chat')).toBeVisible();
   await expect(page.getByTestId('chat-timeline')).toContainText('Talk to Ada Lovelace');
   const statusBand = page.getByRole('toolbar', { name: 'Threads, terminal windows, and tasks' });
-  await expect(statusBand).toHaveText('');
+  // With no threads, terminal windows or tasks the strip is left out, not drawn empty.
+  await expect(statusBand).toHaveCount(0);
   await expect(page.getByText('No recent threads', { exact: true })).toHaveCount(0);
   const editor = page
     .getByTestId('chat-composer')

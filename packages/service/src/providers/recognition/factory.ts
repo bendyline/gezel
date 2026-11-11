@@ -82,7 +82,7 @@ export async function createRecognitionProvider(
         const chosen = installed.find((m) => m.id === modelId) ?? installed[0];
         if (!chosen?.weightsPath || !chosen.mmprojPath) {
           throw new Error(
-            'No image-recognition model is installed. Download one from Settings → Workloads → Image recognition.',
+            'No image-recognition model is installed. Download one from Settings → Image recognition.',
           );
         }
         return {

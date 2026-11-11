@@ -14,9 +14,10 @@ const SRC = resolve(import.meta.dirname, '..');
 // content (docs/ux.md → "Color").
 const EXEMPT = /(^|\/)(foundation\.css|village-and-overview\.css|terminal\.css)$/;
 
-// Counted on 2026-11-06, after the token sweep (from ~540 literal font sizes
-// and ~260 literal radii).
-const BASELINE = { fontSize: 98, radius: 47, shadow: 30 };
+// Counted on 2026-11-09, after the type scale was redrawn and the remaining
+// chrome text moved onto it (98 literal font sizes before, ~540 before the
+// 2026-11-06 sweep). What is left is glyphs and long-form reading sizes.
+const BASELINE = { fontSize: 37, radius: 47, shadow: 27 };
 const HEADROOM = 1.5;
 
 function stylesheets(dir: string): string[] {

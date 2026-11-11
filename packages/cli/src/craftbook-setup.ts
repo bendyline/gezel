@@ -158,7 +158,7 @@ export async function ensureCraftbookSetup(
       const to = SECURITY_LEVEL_LABELS[next.level];
       const change = from === to ? '' : ` This changes your security level from ${from} to ${to}.`;
       const yes = await prompter.confirm(
-        `Turn on External services, so gezels can search the web and read web pages?${change} [y/N] `,
+        `Turn on External services, so Gezel can search the web and read web pages?${change} [y/N] `,
       );
       if (!yes) stop(gap);
       await client.updateConfig({ securityPolicy: next });
@@ -170,7 +170,7 @@ export async function ensureCraftbookSetup(
       const to = SECURITY_LEVEL_LABELS[next.level];
       const change = from === to ? '' : ` This changes your security level from ${from} to ${to}.`;
       const yes = await prompter.confirm(
-        `Let gezels run package scripts such as ${gap.commands[0]}? They run outside the sandbox, as your account, with network access, and Gezel asks before each new command.${change} [y/N] `,
+        `Let Gezel run package scripts such as ${gap.commands[0]}? They run outside the sandbox, as your account, with network access, and Gezel asks before each new command.${change} [y/N] `,
       );
       if (!yes) stop(gap);
       await client.updateConfig({ securityPolicy: next });
@@ -433,9 +433,9 @@ function describeGap(gap: CraftbookSetupGap, sizes: ReadonlyMap<string, number>)
   const why = gap.reasons.length > 0 ? ` (${gap.reasons.join('; ')})` : '';
   switch (gap.kind) {
     case 'external-services':
-      return `External services are off, so gezels cannot reach the web${why}.`;
+      return `External services are off, so Gezel cannot reach the web${why}.`;
     case 'package-scripts':
-      return `Run package scripts is off, so gezels cannot run ${gap.commands.join(', ')}${why}.`;
+      return `Run package scripts is off, so Gezel cannot run ${gap.commands.join(', ')}${why}.`;
     case 'web-search':
       return gap.keyMissing
         ? `Web search needs a Brave Search API key, and none is set${why}.`

@@ -3,13 +3,16 @@ import {
   type TaskDeliverable,
   deliverableFormatLabel,
   deliverableFormatNoun,
+  saveCopyFileName,
 } from '@bendyline/gezel';
-import { useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { DeliverableCover, hasTextCover } from './DeliverableCover.js';
 import { FileTypeIcon } from './FileTypeIcon.js';
 import { GezelIcon } from './GezelIcon.js';
 import { formatFileSize } from './file-view-modes.js';
+import { noteResultOpened } from './result-opened.js';
+import { ResultStageContext } from './result-stage.js';
 
 /**
  * The one file a task hands its owner, set as a card rather than as one
@@ -21,6 +24,11 @@ import { formatFileSize } from './file-view-modes.js';
  * `final` is the finished work (a wrap-up, a completed task); `draft` is the
  * latest copy of a task still running, so the tracker can point at the
  * product before the last step signs it off.
+ *
+ * The card names the work, not where it is stored. With a `title` it leads
+ * with what the person asked for and the file name moves to the small line;
+ * the path is the file name's tooltip. A catering proposal used to read
+ * `report.docx`, "In the artifacts drawer · tasks/2".
  */
 export interface DeliverableCardProps {
   deliverable: TaskDeliverable;
@@ -45,6 +53,12 @@ export interface DeliverableCardProps {
   onMakeChanges?: () => void;
   /** The project's name, for a deliverable that is its Output page. */
   projectName?: string;
+  /**
+   * What the person asked for (core's `taskPersonName`): the main line of a
+   * document's card, and the name "Save a copy…" offers. Absent, the file
+   * name leads.
+   */
+  title?: string;
 }
 
 /** The desktop shell's reveal / save-a-copy bridges share this shape. */
@@ -52,6 +66,7 @@ type BridgeAction = (request: {
   projectId: string;
   kind: 'artifact' | 'document' | 'workspace';
   path: string;
+  suggestedName?: string;
 }) => Promise<{ ok: true } | { ok: false; error: string }>;
 
 export function DeliverableCard({
@@ -63,13 +78,12 @@ export function DeliverableCard({
   maker,
   onMakeChanges,
   projectName,
+  title,
 }: DeliverableCardProps) {
   const board = deliverable.view === 'output-page';
   const [error, setError] = useState<string | null>(null);
+  const stage = useContext(ResultStageContext);
   const name = deliverable.path.slice(deliverable.path.lastIndexOf('/') + 1) || deliverable.path;
-  const folder = deliverable.path.includes('/')
-    ? deliverable.path.slice(0, deliverable.path.lastIndexOf('/'))
-    : '';
   const ext = name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toUpperCase() : '';
   const eyebrow = board
     ? state === 'final'
@@ -78,22 +92,54 @@ export function DeliverableCard({
     : state === 'final'
       ? `Your ${deliverableFormatNoun(deliverable.path)}`
       : `${deliverableFormatLabel(deliverable.path)} · in progress`;
-  const where = board
-    ? "The project's Output page"
-    : deliverable.kind === 'workspace'
-      ? 'In the project folder'
-      : 'In the artifacts drawer';
-  const shownName = board ? (projectName ?? 'The project board') : name;
+  const workTitle = board ? undefined : title?.trim() || undefined;
+  const shownName = board ? (projectName ?? 'The project board') : (workTitle ?? name);
   const covered = !board && state === 'final' && Boolean(maker) && hasTextCover(deliverable.path);
   const bridge = typeof window === 'undefined' ? undefined : window.__GEZEL__;
   const file: ReferencedFile = { kind: deliverable.kind, path: deliverable.path };
-  const open = onOpen ? () => onOpen(file) : undefined;
+  // Finished work gets the stage in the pane beside its conversation.
+  const resultStage = state === 'final' ? stage : null;
+  // Opening finished work is what lets Home ask about folders (result-opened.ts).
+  const opened = () => {
+    if (state === 'final') void noteResultOpened();
+  };
+  const open = onOpen
+    ? () => {
+        opened();
+        if (resultStage) resultStage.openFromCard(() => onOpen(file));
+        else onOpen(file);
+      }
+    : undefined;
 
-  const runBridge = async (action: BridgeAction | undefined) => {
+  // A board opens in its project, and a receipt's chip is one file among many.
+  const presents = !board && !compact;
+  useEffect(() => {
+    if (!resultStage || !presents) return;
+    resultStage.present(
+      { kind: deliverable.kind, path: deliverable.path },
+      projectId,
+      deliverable.modifiedAt,
+    );
+  }, [
+    resultStage,
+    presents,
+    deliverable.kind,
+    deliverable.path,
+    deliverable.modifiedAt,
+    projectId,
+  ]);
+
+  const runBridge = async (action: BridgeAction | undefined, suggestedName?: string) => {
     if (!action) return;
+    opened();
     setError(null);
     try {
-      const result = await action({ projectId, kind: deliverable.kind, path: deliverable.path });
+      const result = await action({
+        projectId,
+        kind: deliverable.kind,
+        path: deliverable.path,
+        ...(suggestedName ? { suggestedName } : {}),
+      });
       if (!result.ok) setError(result.error);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -147,7 +193,7 @@ export function DeliverableCard({
           disabled={!open}
           tabIndex={-1}
           aria-hidden="true"
-          title={open ? `Open ${deliverable.path}` : deliverable.path}
+          title={open ? `Open ${shownName}` : shownName}
         >
           <DeliverableCover deliverable={deliverable} projectId={projectId} />
         </button>
@@ -157,7 +203,7 @@ export function DeliverableCard({
         className="deliverable-card-face"
         onClick={open}
         disabled={!open}
-        title={open ? `Open ${board ? shownName : deliverable.path}` : deliverable.path}
+        title={open ? `Open ${shownName}` : shownName}
       >
         <span className="deliverable-card-tile" aria-hidden="true">
           <FileTypeIcon name={board ? 'board.html' : name} className="deliverable-card-tile-icon" />
@@ -167,32 +213,46 @@ export function DeliverableCard({
         </span>
         <span className="deliverable-card-text">
           <span className="deliverable-card-eyebrow">{eyebrow}</span>
-          <span className="deliverable-card-name">{shownName}</span>
-          <span className="deliverable-card-meta">
-            {where}
-            {!board && folder && (
-              <>
-                {' · '}
-                <span className="deliverable-card-folder">{folder}</span>
-              </>
-            )}
-            {!board && deliverable.bytes !== undefined && ` · ${formatFileSize(deliverable.bytes)}`}
-            {deliverable.modifiedAt && (
-              <>
-                {' · '}
-                <time
-                  dateTime={deliverable.modifiedAt}
-                  title={formatAbsoluteTime(deliverable.modifiedAt)}
-                >
-                  {formatRelativeTime(deliverable.modifiedAt)}
-                </time>
-              </>
-            )}
+          <span
+            className="deliverable-card-name"
+            {...(!board && !workTitle ? { title: deliverable.path } : {})}
+          >
+            {shownName}
           </span>
+          {board ? (
+            <span className="deliverable-card-meta">Opens in the project</span>
+          ) : (
+            (workTitle || deliverable.bytes !== undefined || deliverable.modifiedAt) && (
+              <span className="deliverable-card-meta">
+                {workTitle && (
+                  <span className="deliverable-card-file" title={deliverable.path}>
+                    {name}
+                  </span>
+                )}
+                {deliverable.bytes !== undefined &&
+                  `${workTitle ? ' · ' : ''}${formatFileSize(deliverable.bytes)}`}
+                {deliverable.modifiedAt && (
+                  <>
+                    {(workTitle || deliverable.bytes !== undefined) && ' · '}
+                    <time
+                      dateTime={deliverable.modifiedAt}
+                      title={formatAbsoluteTime(deliverable.modifiedAt)}
+                    >
+                      {formatRelativeTime(deliverable.modifiedAt)}
+                    </time>
+                  </>
+                )}
+              </span>
+            )
+          )}
         </span>
       </button>
       {(open || onMakeChanges || bridge?.showReferenceInFolder || bridge?.saveReferenceCopy) && (
-        <div className="deliverable-card-actions" role="toolbar" aria-label={`Actions for ${name}`}>
+        <div
+          className="deliverable-card-actions"
+          role="toolbar"
+          aria-label={`Actions for ${shownName}`}
+        >
           {open && (
             <button type="button" className="deliverable-card-open" onClick={open}>
               Open
@@ -228,7 +288,12 @@ export function DeliverableCard({
               className="secondary deliverable-card-action"
               title="Save a copy…"
               aria-label="Save a copy…"
-              onClick={() => void runBridge(bridge.saveReferenceCopy)}
+              onClick={() =>
+                void runBridge(
+                  bridge.saveReferenceCopy,
+                  saveCopyFileName(workTitle, deliverable.path),
+                )
+              }
             >
               <span
                 className="fa-solid fa-download deliverable-card-action-icon"

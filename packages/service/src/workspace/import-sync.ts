@@ -40,7 +40,7 @@ export interface ImportSyncDeps {
 
 /** The gezel-template instantiated as a project's voorman when none can be promoted. */
 const VOORMAN_TEMPLATE_ID = 'voorman';
-/** The hands-on lead for a folder-backed solo project. */
+/** The main gezel of a solo project nobody else was chosen for: it does the work itself. */
 const BUILDER_TEMPLATE_ID = 'builder';
 
 export interface EnsureProjectLeadResult {
@@ -54,19 +54,22 @@ export interface EnsureProjectLeadResult {
 }
 
 /**
- * Ensure a newly attached folder opens on a hands-on Builder. Unlike generic
- * solo project types (games, chat rooms), a folder has no type-provided roster,
- * so it needs an explicit lead. Reuse the user's existing Builder when one is
- * available; otherwise instantiate the curated Builder template.
+ * Give a solo project its main gezel: a hands-on Builder. For a project with
+ * no type to bring its own crew, such as a folder the person added or a blank
+ * project made for a model that works best alone. Reuse the Builder the
+ * person already has when there is one, so one Builder runs several projects
+ * and the crew does not grow by one per project; otherwise instantiate the
+ * curated Builder template. A project type's own gezel is its main gezel
+ * (the checkers Damspeler), so a typed project is left alone.
  */
-export async function ensureFolderProjectBuilder(
+export async function ensureProjectBuilder(
   deps: ImportSyncDeps,
   projectId: string,
 ): Promise<EnsureProjectLeadResult> {
   const { store, catalog } = deps;
   if (!projectId || projectId === 'default') return {};
   const project = await store.getProject(projectId).catch(() => null);
-  if (!project || project.mode !== 'solo' || !project.workingDir) return {};
+  if (!project || project.mode !== 'solo' || project.projectType) return {};
   if (project.voormanGezelId) return {};
 
   const gezels = await store.listGezels().catch(() => []);

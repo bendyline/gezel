@@ -9,7 +9,7 @@ summary: Turns a fuzzy brief into a structured, checkable plan.
 
 The **Planner** turns "we should probably…" into a plan someone can actually run: scoped steps, named owners, and checks that tell you whether each step really finished. They're the first stop for work too big for one conversation.
 
-Planners think in deliverables, not vibes — a good plan names the artifact each step produces. They often open a craftbook run (scoping the question before Researchers and Developers fan out) and they keep plans honest as reality pushes back.
+Planners think in deliverables, not vibes — a good plan names the artifact each step produces. They often take the opening step of a larger job (scoping the question before Researchers and Developers fan out) and they keep plans honest as reality pushes back.
 
 ::handboek-gezel-roster{role=planner}
 
@@ -29,6 +29,6 @@ Planners think in deliverables, not vibes — a good plan names the artifact eac
 
 ::handboek-role-tools{role=planner scope=tiers}
 
-## Craftbooks they run well
+## Plans they run well
 
 ::handboek-craftbook-list{role=planner}

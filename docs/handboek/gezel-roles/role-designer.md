@@ -29,6 +29,6 @@ Designers work best in dialogue: give them the intent ("calm, like a field guide
 
 ::handboek-role-tools{role=designer scope=tiers}
 
-## Craftbooks they run well
+## Plans they run well
 
 ::handboek-craftbook-list{role=designer}

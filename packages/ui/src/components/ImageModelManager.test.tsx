@@ -8,6 +8,11 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 const { ImageModelManager } = await import('./ImageModelManager.js');
 const { api } = await import('../api.js');
 
+/** The catalog lives behind the page's "Add a model…" key. */
+async function openAddModel() {
+  await userEvent.click(await screen.findByRole('button', { name: 'Add a model…' }));
+}
+
 const GiB = 1024 ** 3;
 
 const IMAGE_MODEL = {
@@ -137,6 +142,8 @@ describe('ImageModelManager downloads', () => {
 
     render(<ImageModelManager />);
 
+    await openAddModel();
+
     await userEvent.click(await screen.findByRole('button', { name: 'Download' }));
     expect(api.pullImageModel).toHaveBeenCalledTimes(1);
 
@@ -145,10 +152,13 @@ describe('ImageModelManager downloads', () => {
       callbacks[0]?.({ type: 'error', error: 'network error' });
     });
 
+    // The failed download's Retry is on the page, under the dialog.
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
 
     await waitFor(() => expect(api.pullImageModel).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    await openAddModel();
     expect(screen.getByRole('button', { name: /Downloading/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
   });
@@ -175,6 +185,7 @@ describe('ImageModelManager downloads', () => {
       ],
     } as never);
     render(<ImageModelManager />);
+    await openAddModel();
 
     expect(await screen.findByText(/1 model is too large for this machine/)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Download' })).toBeNull();
@@ -220,6 +231,7 @@ describe('ImageModelManager downloads', () => {
       ],
     } as never);
     render(<ImageModelManager />);
+    await openAddModel();
 
     expect(await screen.findByText('46.0 GB')).toBeInTheDocument();
     expect(screen.getByText('needs ~52 GB memory')).toBeInTheDocument();

@@ -92,11 +92,9 @@ export function ownerStepQuestion(opts: {
           '',
           'To review:',
           '',
-          ...shown.map((file) =>
-            file.kind === 'artifact'
-              ? `- \`${file.path}\``
-              : `- \`${file.path}\` (in the project folder)`,
-          ),
+          // Both drawers are "the project" to the person; the card links
+          // each path wherever it is.
+          ...shown.map((file) => `- \`${file.path}\``),
           ...(more > 0 ? [`- …and ${more} more`] : []),
           ...(checks.length > 0 ? ['', ...checks] : []),
           '',

@@ -32,7 +32,21 @@ describe('CrewIntroCard', () => {
     ]);
     expect(screen.getByText('Trip Planner')).toBeInTheDocument();
     expect(screen.getByText('Crew Lead')).toBeInTheDocument();
-    expect(screen.getByText('Starts with “First draft”')).toBeInTheDocument();
+    // The plan's step name is not a schedule to read out.
+    expect(screen.queryByText(/Starts with|First draft/)).not.toBeInTheDocument();
+  });
+
+  it('introduces someone hired in conversation, with no task behind them', () => {
+    render(
+      <CrewIntroCard
+        intro={{
+          moment: 'hired',
+          members: [{ gezelId: 'g-tessa', name: 'Tessa', role: 'Copywriter' }],
+        }}
+      />,
+    );
+    expect(screen.getByText('Joined the crew')).toBeInTheDocument();
+    expect(screen.getByText('Copywriter')).toBeInTheDocument();
   });
 
   it('opens a chat with the gezel from Say hello', () => {

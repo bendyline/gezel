@@ -2,21 +2,28 @@ import {
   type FirstProject,
   type GezelSummary,
   type Poppetje as PoppetjeStruct,
+  firstProjectDraft,
   firstProjectsFor,
   interestArea,
 } from '@bendyline/gezel';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { GezelIcon } from '../../components/GezelIcon.js';
 import { InterestPicker } from '../../components/InterestPicker.js';
 import { ReportErrorLink } from '../../components/ReportErrorLink.js';
 import { queueComposerPrefill } from '../../components/composer-prefill.js';
 import {
   downloadPercent,
+  formatDownloadProgress,
   formatDownloadSize,
   formatDownloadTime,
   modelDisplay,
+  modelInstallStatus,
 } from '../../components/first-run-model-text.js';
-import { formatTimeLeft, installQuiet } from '../../components/install-rate.js';
+import {
+  formatTimeLeft,
+  installQuiet,
+  steadyBytesPerSecond,
+} from '../../components/install-rate.js';
 import type { FirstRunModel } from '../../components/useFirstRunModel.js';
 import { useInterests } from '../../components/useInterests.js';
 import { useShowPoppetjes } from '../../components/useShowPoppetjes.js';
@@ -37,6 +44,10 @@ import { greetingForHour } from './utils.js';
  * (security posture, display preferences) is a sensible default with one
  * muted line pointing at Settings. When the model lands the same surface
  * says "I'm ready", so the person never changes page.
+ *
+ * It asks for one thing at a time. Until the tools are on their way the
+ * welcome is only that ask; what to make, the film and the helpers arrive
+ * once the download is running, when there is time to read them.
  *
  * Nothing here is a model turn. It is static, so it is on screen before
  * anything can answer, and it never puts words in the meester's mouth that
@@ -68,8 +79,51 @@ function welcomeState(setup: WelcomeSetup | null, justReady: boolean): string {
   return setup.model.state.kind === 'off' ? 'connect' : setup.model.state.kind;
 }
 
+/**
+ * `asking`: the tools are still to be fetched, connected or retried, and the
+ * welcome shows only that. `open`: everything else it has to say.
+ */
+type WelcomeStage = 'asking' | 'open';
+
+/**
+ * The stage a settled state calls for; null while the inventory is being
+ * read. A check also runs between "downloading" and "ready", and the welcome
+ * holds its stage through it rather than folding away under someone watching
+ * the film.
+ */
+function settledWelcomeStage(setup: WelcomeSetup | null): WelcomeStage | null {
+  if (!setup || setup.hostModels) return 'open';
+  switch (setup.model.state.kind) {
+    case 'needs-download':
+    case 'off':
+    case 'failed':
+      return 'asking';
+    case 'checking':
+      return null;
+    default:
+      return 'open';
+  }
+}
+
+/**
+ * The tools are on their way, so a first request can be written now and
+ * sent when they arrive. The composer holds it; see `sendWhenReady`.
+ */
+export function canQueueFirstRequest(setup: WelcomeSetup | null): boolean {
+  if (!setup || setup.hostModels) return false;
+  const { kind } = setup.model.state;
+  return kind === 'installing' || kind === 'engine' || kind === 'ready';
+}
+
 const IDEAS_WHILE_FETCHING =
-  "While tools are downloading, let's get ready for our first conversation. Here are some ideas for things the crew can help you with.";
+  "While tools are downloading, let's get ready for our first conversation. Here are some ideas for things I can help you with.";
+
+/** A download that will take longer than this gets a line saying so. */
+const SLOW_DOWNLOAD_SECONDS = 2 * 60 * 60;
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 /** "I'm Florian", or "I'm your meester" when names are hidden. */
 function introduce(meesterName: string): string {
@@ -115,23 +169,30 @@ export function MeesterWelcome({
   const modelState = setup?.model.state.kind;
   const fetching = modelState === 'installing' || modelState === 'engine';
   const waitingForTools = Boolean(setup);
+  const settledStage = settledWelcomeStage(setup ?? null);
+  const heldStage = useRef<WelcomeStage>('asking');
+  useEffect(() => {
+    if (settledStage) heldStage.current = settledStage;
+  }, [settledStage]);
+  const askingForTools = (settledStage ?? heldStage.current) === 'asking';
   const interests = useInterests();
   // Latched for the visit: the first key pressed stamps the answer, and the
   // tray must not vanish under the person's finger.
-  const [asking, setAsking] = useState(false);
+  const [askingInterests, setAskingInterests] = useState(false);
   useEffect(() => {
-    if (interests.ask) setAsking(true);
+    if (interests.ask) setAskingInterests(true);
   }, [interests.ask]);
-  // The intro plays for all of first run, whatever state the tools are in
-  // (keyed to a running download it came and went with page reloads and
-  // models already on disk). Latched, so the tools landing never pulls the
-  // video from under someone watching it. A phone draws its own model list
-  // here and keeps its welcome as it was.
+  // The intro plays from the moment the tools are on their way, and is
+  // latched for the visit, so the tools landing never pulls the video from
+  // under someone watching it. Only the ask for tools holds it back. A phone
+  // draws its own model list here and keeps its welcome as it was.
   const firstRun = waitingForTools && !setup?.hostModels;
   const [showIntro, setShowIntro] = useState(false);
   useEffect(() => {
     if (firstRun) setShowIntro(true);
   }, [firstRun]);
+  // Send holds a request written now and sends it when the tools arrive.
+  const canQueue = firstRun && !askingForTools;
   const capabilities = runtimeCapabilities();
   const firsts = firstProjectsFor({
     interests: interests.areas,
@@ -143,6 +204,10 @@ export function MeesterWelcome({
   // to leave the same trip, language and party cards (2026-10-12).
   const served = new Set(firsts.map((first) => first.area));
   const unserved = interests.areas.filter((area) => !served.has(area));
+  // A first project that needs the person's own details asks for them here,
+  // and the composer holds only its opening words.
+  const [askedId, setAskedId] = useState<string | null>(null);
+  const asked = firsts.find((first) => first.id === askedId && first.ask);
 
   return (
     <div
@@ -163,115 +228,152 @@ export function MeesterWelcome({
       )}
       <div className="meester-welcome-body">
         <h2 className="meester-welcome-title">
-          {greeting}. {introduce(meesterName)} — I run this workshop.
+          {greeting}. {introduce(meesterName)} — I run things here.
         </h2>
 
         {setup && <WelcomeTools setup={setup} />}
 
-        {justReady && !setup && (
-          <p className="meester-welcome-ready" aria-live="polite">
-            I'm ready. What shall we make?
-          </p>
-        )}
+        {/* One thing at a time: while the tools are still to be asked for,
+            the ask above is the whole welcome. Interests, first projects, the
+            film and the helpers used to share the screen with it, and a new
+            person met six things to read before the one to press. */}
+        {!askingForTools && (
+          <>
+            {justReady && !setup && (
+              <p className="meester-welcome-ready" aria-live="polite">
+                I'm ready. What shall we make?
+              </p>
+            )}
 
-        {asking ? (
-          <div className="meester-welcome-interests">
-            <p className="meester-welcome-line">
-              {fetching
-                ? 'What would you like help with? Pick any.'
-                : 'What would you like help with? Pick any, and I will suggest a start.'}
-            </p>
-            <InterestPicker
-              label="What you would like help with"
-              selected={interests.areas}
-              onChange={(next) => void interests.save(next)}
-            />
-            <button
-              type="button"
-              className="gz-link-button meester-welcome-quiet-link"
-              onClick={() => {
-                if (interests.areas.length === 0) void interests.save([]);
-                setAsking(false);
-              }}
-            >
-              {interests.areas.length > 0 ? 'Done' : 'Not now'}
-            </button>
-          </div>
-        ) : fetching ? (
-          <p className="meester-welcome-line">{IDEAS_WHILE_FETCHING}</p>
-        ) : (
-          <p className="meester-welcome-line">
-            Tell me what you want to get done. I'll bring on the crew members it needs — a writer, a
-            planner, a researcher — and they'll work on it together.
-            {/* The intro already plays further down; a second copy of it is noise. */}
-            {!showIntro && (
-              <>
-                {' '}
+            {askingInterests ? (
+              <div className="meester-welcome-interests">
+                <p className="meester-welcome-line">
+                  {fetching
+                    ? 'What would you like help with? Pick any.'
+                    : 'What would you like help with? Pick any, and I will suggest a start.'}
+                </p>
+                <InterestPicker
+                  label="What you would like help with"
+                  selected={interests.areas}
+                  onChange={(next) => void interests.save(next)}
+                />
                 <button
                   type="button"
                   className="gz-link-button meester-welcome-quiet-link"
-                  aria-expanded={tourOpen}
-                  onClick={() => setTourOpen((open) => !open)}
+                  onClick={() => {
+                    if (interests.areas.length === 0) void interests.save([]);
+                    setAskingInterests(false);
+                  }}
                 >
-                  {tourOpen ? 'Hide the tour' : 'Take the 1-minute tour'}
+                  {interests.areas.length > 0 ? 'Done' : 'Not now'}
                 </button>
-              </>
+              </div>
+            ) : fetching ? (
+              <p className="meester-welcome-line">{IDEAS_WHILE_FETCHING}</p>
+            ) : (
+              <p className="meester-welcome-line">
+                Tell me what you want to get done. I'll get it started and tell you when it's ready.
+                {/* The intro already plays further down; a second copy of it is noise. */}
+                {!showIntro && (
+                  <>
+                    {' '}
+                    <button
+                      type="button"
+                      className="gz-link-button meester-welcome-quiet-link"
+                      aria-expanded={tourOpen}
+                      onClick={() => setTourOpen((open) => !open)}
+                    >
+                      {tourOpen ? 'Hide the tour' : 'Take the 1-minute tour'}
+                    </button>
+                  </>
+                )}
+              </p>
             )}
-          </p>
-        )}
 
-        {tourOpen && !fetching && !showIntro && (
-          <div className="meester-welcome-tour">
-            <IntroHandboekArticle />
-          </div>
-        )}
+            {tourOpen && !fetching && !showIntro && (
+              <div className="meester-welcome-tour">
+                <IntroHandboekArticle />
+              </div>
+            )}
 
-        {/* Under the picker while it is up; once it is put away this same line
-            moves up to lead the welcome, above the first projects. */}
-        {asking && fetching && <p className="meester-welcome-line">{IDEAS_WHILE_FETCHING}</p>}
+            {/* Under the picker while it is up; once it is put away this same
+                line moves up to lead the welcome, above the first projects. */}
+            {askingInterests && fetching && (
+              <p className="meester-welcome-line">{IDEAS_WHILE_FETCHING}</p>
+            )}
 
-        {/* First projects prefill the composer rather than sending, so the
-            person makes the sentence theirs first. A typed one ends on a board
-            the crew fills in; a craftbook one arrives with its book (and its
-            sample) attached. See FIRST_PROJECTS and firstProjectsFor. */}
-        <fieldset className="meester-welcome-openers gz-tray" aria-label="Something to start with">
-          {firsts.map((first) => (
-            <button
-              key={first.id}
-              type="button"
-              className="gz-key gz-key--stacked meester-welcome-opener"
-              onClick={() => startFirstProject(projectId, first)}
+            {/* First projects prefill the composer rather than sending. One
+                that needs the person's details asks for them and puts only its
+                opening words in the box; "Send an invoice" used to write an
+                illustrator's two clients there. A typed one ends on a board the
+                crew fills in; a craftbook one arrives with its book (and its
+                sample) attached. See FIRST_PROJECTS and firstProjectsFor. */}
+            <fieldset
+              className="meester-welcome-openers gz-tray"
+              aria-label="Something to start with"
             >
-              <span className="gz-key-label">{first.title}</span>
-              <span className="gz-key-hint">{first.hint}</span>
-            </button>
-          ))}
-        </fieldset>
-        {unserved.length > 0 && onBrowseForYou && (
-          <p className="meester-welcome-alternatives">
-            <button
-              type="button"
-              className="gz-link-button meester-welcome-quiet-link"
-              onClick={onBrowseForYou}
-            >
-              {unserved.length === 1
-                ? `Browse plans for ${interestArea(unserved[0]!).label.toLowerCase()}`
-                : 'Browse plans for what you picked'}
-            </button>
-          </p>
-        )}
-        <p className="meester-welcome-alternatives">Or tell me in your own words, below.</p>
+              {firsts.map((first) => (
+                <button
+                  key={first.id}
+                  type="button"
+                  className="gz-key gz-key--stacked meester-welcome-opener"
+                  aria-pressed={first.ask ? askedId === first.id : undefined}
+                  onClick={() => {
+                    setAskedId(first.ask ? first.id : null);
+                    startFirstProject(projectId, first);
+                  }}
+                >
+                  <span className="gz-key-label">{first.title}</span>
+                  <span className="gz-key-hint">{first.hint}</span>
+                </button>
+              ))}
+            </fieldset>
+            {unserved.length > 0 && onBrowseForYou && (
+              <p className="meester-welcome-alternatives">
+                <button
+                  type="button"
+                  className="gz-link-button meester-welcome-quiet-link"
+                  onClick={onBrowseForYou}
+                >
+                  {unserved.length === 1
+                    ? `Browse plans for ${interestArea(unserved[0]!).label.toLowerCase()}`
+                    : 'Browse plans for what you picked'}
+                </button>
+              </p>
+            )}
+            {asked?.ask ? (
+              <div className="meester-welcome-ask" aria-live="polite">
+                <p className="meester-welcome-line">
+                  <strong>{asked.ask.question}</strong> Finish the sentence below
+                  {canQueue ? ", and I'll start on it the moment my tools arrive." : '.'}
+                </p>
+                <p className="meester-welcome-alternatives">For example: {asked.ask.example}</p>
+              </div>
+            ) : (
+              <p className="meester-welcome-alternatives">
+                {canQueue
+                  ? "Write your first request below and press Send. I'll start on it the moment my tools arrive."
+                  : 'Or tell me in your own words, below.'}
+              </p>
+            )}
 
-        {showIntro && (
-          <section className="meester-welcome-intro" aria-labelledby="meester-welcome-intro-lead">
-            <p id="meester-welcome-intro-lead" className="meester-welcome-intro-lead">
-              Also, while we wait, here is a bit more info about gezel:
-            </p>
-            <IntroHandboekArticle variant="player" />
-          </section>
-        )}
+            {showIntro && (
+              <section
+                className="meester-welcome-intro"
+                aria-labelledby="meester-welcome-intro-lead"
+              >
+                <p id="meester-welcome-intro-lead" className="meester-welcome-intro-lead">
+                  {setup
+                    ? 'While we wait, here is a bit more about Gezel:'
+                    : 'Here is a bit more about Gezel:'}
+                </p>
+                <IntroHandboekArticle variant="player" />
+              </section>
+            )}
 
-        {helpers.length > 0 && <WelcomeHelpers helpers={helpers} />}
+            {helpers.length > 0 && <WelcomeHelpers helpers={helpers} />}
+          </>
+        )}
 
         {waitingForTools && (
           <p className="meester-welcome-defaults">
@@ -292,15 +394,21 @@ export function MeesterWelcome({
   );
 }
 
-/** Put a first project's sentence in the composer, with its craftbook attached when it has one. */
+/**
+ * Put a first project's sentence in the composer, with its craftbook attached
+ * when it has one. A first project that asks gets only its opening words, with
+ * the caret after them.
+ */
 function startFirstProject(projectId: string, first: FirstProject): void {
+  const draft = firstProjectDraft(first);
+  const options = { replace: true, focus: Boolean(first.ask) };
   if (first.kind === 'type') {
-    queueComposerPrefill(projectId, first.prompt, undefined, { replace: true });
+    queueComposerPrefill(projectId, draft, undefined, options);
     return;
   }
   queueComposerPrefill(
     projectId,
-    first.prompt,
+    draft,
     {
       origin: 'user',
       craftbookId: first.craftbookId,
@@ -310,7 +418,7 @@ function startFirstProject(projectId: string, first: FirstProject): void {
         ? { inputs: { [first.sample.param]: { from: 'sample', sampleId: first.sample.sampleId } } }
         : {}),
     },
-    { replace: true },
+    options,
   );
 }
 
@@ -350,7 +458,9 @@ export function MeesterSetupNote({
 
 function WelcomeHelpers({ helpers }: { helpers: readonly WelcomeHelper[] }) {
   const lead =
-    helpers.length === 1 ? 'A helper already works here:' : 'Two helpers already work here:';
+    helpers.length === 1
+      ? 'One crew member already works here:'
+      : 'Two crew members already work here:';
   return (
     <div className="meester-welcome-helpers">
       <p className="meester-welcome-helpers-lead">{lead}</p>
@@ -388,12 +498,9 @@ export function composerWaitingStatus(setup: WelcomeSetup): string {
       return 'looking for an AI model on this computer';
     case 'needs-download':
       return 'download tools (an AI model) first';
-    case 'installing': {
-      if (state.progress?.phase === 'verifying') return 'checking the AI model';
-      if (state.progress?.phase === 'extracting-metadata') return 'unpacking the AI model';
-      const pct = downloadPercent(state.progress);
-      return pct === null ? 'downloading the AI model' : `downloading the AI model · ${pct}%`;
-    }
+    case 'installing':
+      // The same words every other chat shows while this download runs.
+      return modelInstallStatus(state.progress);
     case 'engine': {
       if (state.error) return "the AI model couldn't be set up";
       const { progress } = state;
@@ -459,10 +566,20 @@ function WelcomeTools({ setup }: { setup: WelcomeSetup }) {
   if (state.kind === 'needs-download') {
     // The model and the engine it runs on, which downloads beside it.
     const total = state.sizeBytes ? state.sizeBytes + (state.engineBytes ?? 0) : null;
-    const size = total ? formatDownloadSize(total) : null;
-    const label = ['Fetch my tools', ...(size ? [size] : []), formatDownloadTime(total)].join(
-      ' · ',
-    );
+    const onDisk = state.resumeBytes ?? 0;
+    const resumed = total ? Math.min(onDisk, total) : onDisk;
+    // The key says how much; how long depends on the connection, so that is
+    // a sentence beneath it. A minute count on the key read as a promise, and
+    // on a slow connection the promise was off by hours.
+    const label = (
+      resumed > 0
+        ? [
+            'Resume fetching my tools',
+            ...(total ? [`${formatDownloadProgress(resumed, total)} done`] : []),
+          ]
+        : ['Fetch my tools', ...(total ? [formatDownloadSize(total)] : [])]
+    ).join(' · ');
+    const time = capitalize(formatDownloadTime(total ? total - resumed : null));
     return (
       <div className="meester-welcome-tools">
         <p className="meester-welcome-line">
@@ -480,6 +597,10 @@ function WelcomeTools({ setup }: { setup: WelcomeSetup }) {
             {model.busy ? 'Starting…' : label}
           </button>
         </div>
+        <p className="meester-welcome-progress-note">
+          {time} on a fast connection, longer on a slow one. You can keep using this computer, and
+          I'll pick up where I left off if it stops.
+        </p>
         <AlternativeLinks model={model} alternatives={state.alternatives} />
       </div>
     );
@@ -681,19 +802,30 @@ function AlternativeLinks({
 /** One quiet line under the meester while the tools arrive. */
 function FetchProgress({ model }: { model: FirstRunModel }) {
   const { state, rate, now } = model;
+  // Not `model.busy`: the tap that started this download holds it until the
+  // last byte, which would keep Pause disabled for the whole of it.
+  const [pausing, setPausing] = useState(false);
   if (state.kind !== 'installing') return null;
   const { progress } = state;
   const pct = downloadPercent(progress);
+  const downloading = progress?.phase === 'downloading';
   const parts = ['Fetching my tools'];
+  let slow = false;
   if (progress?.phase === 'verifying') parts[0] = 'Checking my tools';
   else if (progress?.phase === 'extracting-metadata') parts[0] = 'Unpacking my tools';
-  else if (pct !== null) {
-    parts.push(`${pct}%`);
-    if (rate.bytesPerSecond && progress) {
-      parts.push(formatTimeLeft(progress.totalBytes - progress.bytesWritten, rate.bytesPerSecond));
+  else if (progress && pct !== null) {
+    // Amounts, not a percent: "8%" of an unknown whole says nothing about
+    // how much is left to come.
+    parts.push(formatDownloadProgress(progress.bytesWritten, progress.totalBytes));
+    // No estimate, and no word about the connection, until the speed settles.
+    const speed = steadyBytesPerSecond(rate);
+    if (speed) {
+      const remaining = progress.totalBytes - progress.bytesWritten;
+      parts.push(formatTimeLeft(remaining, speed));
+      slow = remaining / speed > SLOW_DOWNLOAD_SECONDS;
     }
   }
-  const quiet = progress?.phase === 'downloading' ? installQuiet(rate, now) : 'moving';
+  const quiet = downloading ? installQuiet(rate, now) : 'moving';
   return (
     <div className="meester-welcome-progress">
       <div
@@ -709,7 +841,27 @@ function FetchProgress({ model }: { model: FirstRunModel }) {
           style={pct !== null ? { width: `${pct}%` } : undefined}
         />
       </div>
-      <p className="meester-welcome-progress-label">{parts.join(' · ')}</p>
+      <p className="meester-welcome-progress-label">
+        <span>{parts.join(' · ')}</span>
+        {downloading && (
+          <button
+            type="button"
+            className="gz-link-button meester-welcome-quiet-link"
+            disabled={pausing}
+            onClick={() => {
+              setPausing(true);
+              void model.pause().finally(() => setPausing(false));
+            }}
+          >
+            Pause
+          </button>
+        )}
+      </p>
+      {quiet === 'moving' && slow && (
+        <p className="meester-welcome-progress-note">
+          This connection is slow, so this will take a while. You can leave it running.
+        </p>
+      )}
       {quiet === 'quiet' && (
         <p className="meester-welcome-progress-note">
           Still coming — it arrives in large pieces, so this can pause for a while.

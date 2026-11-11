@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { StreamingSessionBase } from '@bendyline/gezel/local-loop';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type RunningInferenceService, startService } from '../../inference-service.js';
-import type { LLMProvider } from '../../providers/types.js';
+import { engineUnsupportedError } from '../../providers/engine-unsupported.js';
+import { type LLMProvider, ModelNotInstalledError } from '../../providers/types.js';
 
 vi.mock('../../memory/embeddings.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../memory/embeddings.js')>()),
@@ -141,5 +142,38 @@ describe('an on-device engine failure on /v1/chat/completions', () => {
     const res = await post(chat);
     expect(res.status).toBe(500);
     expect(await res.json()).toMatchObject({ error: { code: 'provider_error' } });
+  });
+
+  // `"model": "mlx"` on Windows. As a 500 the service's opaque-error
+  // middleware replaced this sentence with `internal_error`.
+  it("reports an engine this computer cannot run as the caller's 400, with its reason", async () => {
+    const wrongComputer = engineUnsupportedError('MLX runs on Apple Silicon Macs only.');
+    running = await startFailingEngine(wrongComputer);
+    const res = await post(chat);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: {
+        message: 'MLX runs on Apple Silicon Macs only.',
+        type: 'invalid_request_error',
+        code: 'engine_unsupported',
+      },
+    });
+  });
+});
+
+describe('a model that is not downloaded', () => {
+  const message = new ModelNotInstalledError('llama-cpp', 'granite4.2-3b-q4').message;
+
+  it('keeps the sentence the chat UI recognizes it by', () => {
+    // packages/ui/src/components/chat-error-copy.ts matches this phrase.
+    expect(message).toMatch(/^Model "granite4.2-3b-q4" is not available locally for provider/);
+  });
+
+  it('says how to tell a downloaded model from the rest of the list', () => {
+    // GET /v1/models is the whole catalog, so "list local models" sent a
+    // caller to pick another id that failed the same way.
+    expect(message).not.toMatch(/list local models/i);
+    expect(message).toContain('"availability" is "available"');
+    expect(message).toContain('POST /v1/models/ensure');
   });
 });

@@ -6,6 +6,10 @@ import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 export type EngagementMode = AIEngagementMode;
 export type WorkshopTempo = 'gezellig' | 'bedrijvig' | 'druk' | 'dolle-boel';
 
+/**
+ * The stored ids stay Dutch (they are config values); a person reads plain
+ * English. The Meester is the only Dutch title anyone sees.
+ */
 const TEMPOS: {
   id: WorkshopTempo;
   label: string;
@@ -14,31 +18,31 @@ const TEMPOS: {
 }[] = [
   {
     id: 'gezellig',
-    label: 'Gezellig',
-    hint: 'cozy',
+    label: 'Relaxed',
+    hint: 'Rarely',
     description:
-      'Meester checks in rarely and warmly. 2-hour rapid cadence, 12-hour slow. Nudges sound like "no rush, let me know."',
+      'The Meester checks in about every 2 hours while a project is busy and every 12 hours once it goes quiet, in a warm, no-rush tone.',
   },
   {
     id: 'bedrijvig',
-    label: 'Bedrijvig',
-    hint: 'busy (default)',
+    label: 'Steady',
+    hint: 'The default',
     description:
-      'The standard pace. 20-minute rapid cadence, 6-hour slow. Nudges are neutral and structured.',
+      'Check-ins about every 20 minutes while a project is busy and every 6 hours once it goes quiet, in a neutral tone.',
   },
   {
     id: 'druk',
-    label: 'Druk',
-    hint: 'pressured',
+    label: 'Brisk',
+    hint: 'Often',
     description:
-      'Short gaps, direct tone. 8-minute rapid cadence, 1-hour slow. Meester expects a blocker-or-status answer.',
+      'Check-ins about every 8 minutes while a project is busy and every hour once it goes quiet. The Meester asks straight out for progress or what is in the way.',
   },
   {
     id: 'dolle-boel',
-    label: 'Dolle boel',
-    hint: 'madhouse',
+    label: 'Hectic',
+    hint: 'For fun',
     description:
-      "3-minute rapid cadence, 20-minute slow. Nudges arrive IN CAPS and end with 'this is fine 🔥'.",
+      'Check-ins about every 3 minutes while a project is busy and every 20 minutes once it goes quiet, written in capitals. Mostly for fun.',
   },
 ];
 
@@ -68,7 +72,7 @@ export function EngagementModePanel({
       id="settings-ai-engagement"
       className={`engagement-mode-${mode}`}
       title="AI engagement"
-      hint="Choose how independently your crew works, from taking initiative together to waiting for your messages or pausing entirely."
+      hint="Choose how independently Gezel works, from taking initiative to waiting for your messages or pausing entirely."
     >
       <div>
         <div

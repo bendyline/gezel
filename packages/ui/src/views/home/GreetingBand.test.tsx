@@ -19,7 +19,7 @@ vi.mock('./StatusReportPanel.js', () => ({
 vi.mock('./IntroHandboekArticle.js', () => ({
   IntroHandboekArticle: () => (
     <div data-testid="home-intro-article">
-      <button type="button">Open in Handboek →</button>
+      <button type="button">Open in Help →</button>
       <div role="radiogroup" aria-label="View as">
         <label>
           <input type="radio" name="intro-mode" checked readOnly />
@@ -136,6 +136,15 @@ describe('GreetingBand', () => {
     expect(screen.queryByRole('tab', { name: 'Status report' })).not.toBeInTheDocument();
   });
 
+  // Appended in the thread, the folder question scrolled the first result
+  // off the screen (2026-11-09). It is asked here instead, in place of the tip.
+  it('asks the folder question in the greeting tab, in place of the tip', () => {
+    renderBand({ invite: <section data-testid="folder-invite">Which folders?</section> });
+    const panel = screen.getByRole('tabpanel', { name: GREETING });
+    expect(panel).toContainElement(screen.getByTestId('folder-invite'));
+    expect(screen.queryByText('Tip of the day')).not.toBeInTheDocument();
+  });
+
   it('keeps tabs and actionable chips visible when collapsed, hiding the content', () => {
     renderBand({
       statusReport: REPORT,
@@ -155,7 +164,7 @@ describe('GreetingBand', () => {
       greetingForHour(new Date().getHours()),
       'Night shift',
       'Create',
-      'Handboek',
+      'Help',
     ]);
     expect(screen.getByRole('button', { name: '1 waiting on you' })).toBeVisible();
     expect(screen.queryByRole('tabpanel')).not.toBeInTheDocument();
@@ -198,7 +207,7 @@ describe('GreetingBand', () => {
     }
     const user = userEvent.setup();
     render(<StatefulBand />);
-    const handboek = screen.getByRole('tab', { name: 'Handboek' });
+    const handboek = screen.getByRole('tab', { name: 'Help' });
 
     await user.click(handboek);
     expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
@@ -280,7 +289,7 @@ describe('GreetingBand', () => {
   it('shows the Handboek article with read and watch choices in the tour', () => {
     renderBand({ tab: 'tour' });
     expect(screen.getByTestId('home-intro-article')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Open in Handboek/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Open in Help/ })).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: 'Read' })).toBeChecked();
     expect(screen.getByRole('radio', { name: 'Watch' })).not.toBeChecked();
     expect(screen.queryByText('What a meester is')).not.toBeInTheDocument();

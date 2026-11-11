@@ -2,10 +2,15 @@ import type { StartupHomeView } from '@bendyline/gezel';
 import { createElement } from 'react';
 import { flushSync } from 'react-dom';
 import { type Root, createRoot } from 'react-dom/client';
-import { AppBrand } from '../components/AppBrand.js';
-import { NavigationHome } from '../components/PrimaryNavigation.js';
 import { greetingForHour } from '../views/home/greeting.js';
 import { RAIL_DRAG_SLOP_PX, railDragHeight, railRollsUp } from '../views/home/sheet-rail.js';
+import {
+  StartupComposerFrame,
+  StartupNavigation,
+  StartupPlaceholder,
+  StartupTitlebar,
+  StartupWelcome,
+} from './Chrome.js';
 import { StartupReading } from './Reading.js';
 import type { StartupHomeBridge } from './types.js';
 import './startup.css';
@@ -17,17 +22,32 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', 
   return node;
 }
 
-export function mountStartup(bridge: StartupHomeBridge): void {
-  if (!bridge.active || document.getElementById('startup-home')) return;
+/**
+ * Draws the start screen and returns a function that tears it down, which
+ * only tests call: the handoff removes it in production. Every React root must
+ * be unmounted, or a lazy reader chunk that lands after jsdom is gone commits
+ * and React's deferred effect flush reads `window`.
+ */
+export function mountStartup(bridge: StartupHomeBridge): (() => void) | undefined {
+  if (!bridge.active || document.getElementById('startup-home')) return undefined;
   const snapshot = bridge.snapshot;
   const name = snapshot?.meester?.name || '';
   const root = element('div', 'startup-home');
   root.id = 'startup-home';
   root.dataset.platform = window.__GEZEL__?.platform || '';
   document.documentElement.dataset.platform = root.dataset.platform;
-  document.documentElement.dataset.sidebarSide = snapshot?.sidebar || 'right';
+  // The frame below is the live app's, so the rail follows the root's side
+  // attribute: none is the left, `right` the right. The desktop host fills
+  // `sidebar` from the config. With no snapshot, the side theme-init.js
+  // applied from the cache stands.
+  if (snapshot?.sidebar === 'right') document.documentElement.dataset.sidebarSide = 'right';
+  else if (snapshot) delete document.documentElement.dataset.sidebarSide;
   if (snapshot?.theme && snapshot.theme !== 'system')
     document.documentElement.dataset.theme = snapshot.theme;
+  // This screen draws the title bar before the app does, so main has to hear
+  // the theme from here too: at night the bar is a deeper sage, and the
+  // window controls main paints beside it must match from the first frame.
+  window.__GEZEL__?.setNativeTheme?.(snapshot?.theme ?? 'system');
   const view: StartupHomeView = {
     ...bridge.state,
     tab: bridge.state.tab === 'chat' ? ('greeting' as const) : bridge.state.tab,
@@ -44,7 +64,7 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   const right = element('div', 'app-header-right');
   const pill = element('div', 'activity-control startup-status');
   pill.append(element('span', 'activity-control-dot'));
-  const status = element('span', 'activity-control-label', 'Starting Gezel…');
+  const status = element('span', 'activity-control-label startup-status-label', 'Starting…');
   status.id = 'gezel-splash-status';
   status.setAttribute('role', 'status');
   status.setAttribute('aria-live', 'polite');
@@ -53,6 +73,10 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   header.append(right);
   root.append(header);
 
+  // A home nobody has used yet opens on the Meester's welcome, with no
+  // greeting tabs or sheet above it, so this screen draws that shape instead.
+  const welcome = snapshot?.welcome === true;
+  root.dataset.shape = welcome ? 'welcome' : 'workshop';
   const layout = element('div', 'app-body');
   const pane = element('main', 'app-main');
   const main = element('div', 'home-workshop');
@@ -74,9 +98,12 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   rail.setAttribute('aria-label', 'Roll up the greeting');
   sheet.append(content, rail);
   band.append(top, sheet);
+  // Where the conversation and the composer will stand: what is coming, in
+  // motion, and the composer's frame. A faint spinner and "Loading" at 40%
+  // ink sat here, easy to miss under a page that was about to change.
   const loading = element('div', 'startup-loading');
-  loading.setAttribute('role', 'status');
-  loading.append(element('span', 'home-loading-spinner'), element('span', '', 'Loading'));
+  const loadingRoot = createRoot(loading);
+  if (welcome) band.hidden = true;
   stage.append(band, loading);
   main.append(stage);
   pane.append(main);
@@ -116,10 +143,14 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   window.addEventListener('pagehide', save);
   window.addEventListener('beforeunload', save);
 
+  // The live Home's tabs: Night shift only when there is a night to read
+  // about, and Create, which opens once the workshop is ready.
   const choices: Array<[StartupHomeView['tab'], string]> = [
     ['greeting', greeting],
-    ['night', 'Night shift'],
-    ['tour', 'Handboek'],
+    ...(snapshot?.night || view.tab === 'night'
+      ? [['night', 'Night shift'] as [StartupHomeView['tab'], string]]
+      : []),
+    ['tour', 'Help'],
   ];
   const buttons = new Map<StartupHomeView['tab'], HTMLButtonElement>();
   function render(target = content) {
@@ -199,6 +230,13 @@ export function mountStartup(bridge: StartupHomeBridge): void {
     buttons.set(id, button);
     tabs.append(button);
   });
+  // Create opens only once the workshop is ready; it holds its place.
+  const create = element('button', 'gz-tabs-trigger home-workshop-tab', 'Create');
+  create.type = 'button';
+  create.disabled = true;
+  create.title = 'Opens when Gezel is ready';
+  create.dataset.state = 'inactive';
+  tabs.insertBefore(create, buttons.get('tour') ?? null);
   function setCollapsed(next: boolean) {
     collapsed = next;
     band.classList.toggle('home-workshop-greeting-collapsed', next);
@@ -256,23 +294,29 @@ export function mountStartup(bridge: StartupHomeBridge): void {
   render();
   const goHome = () => buttons.get('greeting')?.click();
   flushSync(() => {
-    brandRoot.render(createElement(AppBrand, { active: true, onClick: goHome }));
-    homeRoot.render(
-      createElement(NavigationHome, {
-        active: true,
-        onOpen: goHome,
-        label: createElement(
-          'span',
-          null,
-          'Home ',
-          name
-            ? createElement('span', { className: 'app-sidebar-home-meester' }, `· ${name}`)
-            : null,
-        ),
-      }),
+    brandRoot.render(createElement(StartupTitlebar, { onHome: goHome }));
+    homeRoot.render(createElement(StartupNavigation, { meesterName: name, onHome: goHome }));
+    loadingRoot.render(
+      welcome
+        ? createElement(
+            'div',
+            { className: 'startup-conversation' },
+            createElement(StartupWelcome, { snapshot, greeting }),
+            createElement(StartupComposerFrame),
+          )
+        : createElement(
+            'div',
+            { className: 'startup-conversation' },
+            createElement(
+              'div',
+              { className: 'startup-conversation-lines' },
+              createElement(StartupPlaceholder),
+            ),
+            createElement(StartupComposerFrame),
+          ),
     );
   });
-  const retry = element('button', 'startup-retry', 'Open workshop');
+  const retry = element('button', 'startup-retry', 'Open Gezel');
   retry.type = 'button';
   retry.hidden = true;
   right.append(retry);
@@ -282,7 +326,7 @@ export function mountStartup(bridge: StartupHomeBridge): void {
     busy = true;
     const finalState = current();
     bridge.save(finalState);
-    status.textContent = finalState.draft.trim() ? 'Saving your draft…' : 'Opening your workshop…';
+    status.textContent = finalState.draft.trim() ? 'Saving your draft…' : 'Opening Gezel…';
     root.inert = true;
     try {
       await accept(finalState);
@@ -300,12 +344,13 @@ export function mountStartup(bridge: StartupHomeBridge): void {
         brandRoot.unmount();
         homeRoot.unmount();
         contentRoot.unmount();
+        loadingRoot.unmount();
         root.remove();
       }, 160);
       window.__GEZEL_STARTUP__ = undefined;
       window.dispatchEvent(new CustomEvent('gezel:startup-finished', { detail: finalState }));
     } catch {
-      status.textContent = 'Still opening your workshop. Try again.';
+      status.textContent = 'Still opening Gezel. Try again.';
       retry.hidden = false;
       root.inert = false;
       busy = false;
@@ -333,6 +378,16 @@ export function mountStartup(bridge: StartupHomeBridge): void {
     },
   };
   window.dispatchEvent(new Event('gezel:startup-mounted'));
+  return () => {
+    window.removeEventListener('pagehide', save);
+    window.removeEventListener('beforeunload', save);
+    clearTimeout(saveTimer);
+    for (const renderer of [brandRoot, homeRoot, loadingRoot, ...readingRoots.values()]) {
+      renderer.unmount();
+    }
+    readingRoots.clear();
+    root.remove();
+  };
 }
 
 if (typeof window !== 'undefined') {

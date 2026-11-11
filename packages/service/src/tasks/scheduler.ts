@@ -21,6 +21,7 @@ import type { ChatManager } from '../chat/manager.js';
 import type { ActivityTracker } from '../fs/activity-tracker.js';
 import type { Store } from '../fs/store.js';
 import type { ProjectTaskSummary } from '../fs/task-status-index.js';
+import { checkFanoutBarrier } from './fanout-barrier.js';
 import {
   buildPlateauDiagnosisNote,
   buildStageOneNudge,
@@ -338,18 +339,17 @@ export class TaskScheduler {
     // A spawn host's post-fanout step is held by the fanout barrier while its
     // children work (`onStepActivated` declines to dispatch it); the settle
     // hook re-dispatches it when the last child settles. Until then the host
-    // is waiting, not stuck — the children own the progress.
-    if (task.spawnsCraftbook && !step.spawnFanout) {
-      const activeChildren = await this.manager
-        .listChildren(task.ref, { status: 'active' })
-        .catch(() => []);
-      if (activeChildren.length > 0) {
-        log.debug(
-          `[scheduler] ${task.ref} step "${step.id}": skip re-drive — ${activeChildren.length} fanout child(ren) still active`,
-        );
-        return;
-      }
+    // is waiting, not stuck — the children own the progress. With nobody left
+    // working and a child paused for help, re-driving the host would only
+    // spend turns on a gate that child owes, so the host pauses naming it.
+    const barrier = await checkFanoutBarrier(this.manager, task, step);
+    if (barrier.kind === 'held') {
+      log.debug(
+        `[scheduler] ${task.ref} step "${step.id}": skip re-drive — ${barrier.active} fanout child(ren) still active`,
+      );
+      return;
     }
+    if (barrier.kind === 'paused-crew') return;
     // Someone ELSE mid-turn in this project gates only the rungs that START a
     // model turn (re-drive, escalate). It used to gate the whole ladder,
     // including the pure-bookkeeping auto-advance below — and on a 1-slot
@@ -1233,9 +1233,7 @@ function stuckStepNudgeText(
       ? ` The deliverable \`${step.advanceWhen.file}\`${step.advanceWhen.artifact ? ' (in the artifacts drawer)' : ''} exists, but it has not cleared this step's progress gate yet. Continue from the existing file; do not claim it is missing.`
       : ` The deliverable \`${step.advanceWhen.file}\`${step.advanceWhen.artifact ? ' (in the artifacts drawer)' : ''} isn't there yet.`
     : '';
-  const howTo =
-    'Pick up where you left off: follow the step procedure in your prompt, write the deliverable with the tool it names, then call `advance_task_step` to hand off. ' +
-    'If you are genuinely blocked, say exactly what you need (or ask the user with `ask_user_question`) instead of going quiet.';
+  const howTo = `Pick up where you left off: follow the step procedure in your prompt, write the deliverable with the tool it names, then call \`advance_task_step({ ref: "${task.ref}", stepId: "${step.id}" })\` to hand off. If you are genuinely blocked, say exactly what you need (or ask the user with \`ask_user_question\`) instead of going quiet.`;
   return `You're still assigned step \`${step.id}\` ("${step.name}") of task ${task.ref}, and it hasn't progressed.${deliverable} ${howTo}`;
 }
 

@@ -29,6 +29,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { api } from '../api.js';
+import { speaksAsMainCrewMember } from '../labels.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
@@ -76,9 +77,11 @@ import {
   cssAttrValue,
   findLastForSession,
   formatProviderLabel,
+  hadWrapUpAtLoad,
   latestWrapUpKey,
   mergeTerminalEntries,
   mergeTimelineMessages,
+  newestMessageAt,
   projectFileOpener,
   referencedFilesOf,
   turnFailureShownElsewhere,
@@ -644,6 +647,13 @@ export function ChatTimelineView({
    * load, so only one that arrives afterwards is scrolled to.
    */
   const wrapUpSeenRef = useRef<string | null | undefined>(undefined);
+  /**
+   * The newest message this scope's first load returned ('' when it was
+   * empty, null until it answers). Content held for a finished task shows
+   * only for a wrap-up at or before it: one that lands during the visit must
+   * leave the finished card alone on screen (see `hadWrapUpAtLoad`).
+   */
+  const [loadedThroughAt, setLoadedThroughAt] = useState<string | null>(null);
   /** Coalesces growth from multiple independently streaming bubbles. */
   const liveFollowRafRef = useRef<number | null>(null);
 
@@ -693,11 +703,13 @@ export function ChatTimelineView({
     lastRowCountRef.current = 0;
     lastScrollHeightRef.current = 0;
     wrapUpSeenRef.current = undefined;
+    setLoadedThroughAt(null);
     void (async () => {
       try {
         const res = await loadTimeline({ limit: PAGE_SIZE });
         if (cancelled) return;
         setMessages(res.messages);
+        setLoadedThroughAt(newestMessageAt(res.messages));
         setHasMore(res.hasMore);
         setOldestAt(res.nextCursor);
         // Project-scoped responses populate `terminalEntries`; other
@@ -944,21 +956,23 @@ export function ChatTimelineView({
     void refetchGezels();
   }, [refetchGezels]);
 
-  // A crew introduction names gezels hired moments ago, after the roster was
-  // read. Look again once per unknown id, so a portrait fills in rather than
-  // a letter, and a gezel deleted since never sets off a refetch loop.
+  // A crew introduction or a request's tracker names gezels hired moments
+  // ago, after the roster was read. Look again once per unknown id, so a
+  // portrait fills in rather than a letter, and a gezel deleted since never
+  // sets off a refetch loop.
   const crewLookedUpRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    const unknown = messages.flatMap(
-      (m) =>
-        m.crewIntroduction?.members
-          .map((member) => member.gezelId)
-          .filter((id) => !gezels.has(id) && !crewLookedUpRef.current.has(id)) ?? [],
+    const named = [
+      ...messages.flatMap((m) => m.crewIntroduction?.members.map((member) => member.gezelId) ?? []),
+      ...[...requestTracks.values()].flatMap((t) => [t.leadGezelId, t.line?.gezelId, ...t.crew]),
+    ];
+    const unknown = named.filter(
+      (id): id is string => !!id && !gezels.has(id) && !crewLookedUpRef.current.has(id),
     );
     if (unknown.length === 0) return;
     for (const id of unknown) crewLookedUpRef.current.add(id);
     void refetchGezels();
-  }, [messages, gezels, refetchGezels]);
+  }, [messages, requestTracks, gezels, refetchGezels]);
 
   // Keep cached gezels live so identity changes made elsewhere (font,
   // name, model, icon) reflect in already-rendered bubbles without a
@@ -978,14 +992,18 @@ export function ChatTimelineView({
     return () => window.removeEventListener('gezel:gezel-updated', onUpdated);
   }, []);
 
-  // Project list — only loaded when we need to label cross-project rows
-  // (the global Meester surface). Cheap, and read again once when a finished
-  // task names a project created after it was read (a kickoff's own).
+  // Project list: labels cross-project rows (the global Meester surface) and
+  // says who each project's main crew member is, for the star beside their
+  // name. Cheap, and read again once when a message or a finished task names
+  // a project created after it was read (a kickoff's own).
   const [projectsReadFor, setProjectsReadFor] = useState(0);
   const projectLookedUpRef = useRef<Set<string>>(new Set());
   useEffect(() => {
+    // Nothing is known until the first read lands; asking again before then
+    // would only repeat it.
+    if (projects.size === 0) return;
     const unknown = messages
-      .map((m) => m.deliverable?.projectId)
+      .flatMap((m) => [m.projectId, m.deliverable?.projectId])
       .filter(
         (id): id is string => !!id && !projects.has(id) && !projectLookedUpRef.current.has(id),
       );
@@ -993,8 +1011,8 @@ export function ChatTimelineView({
     for (const id of unknown) projectLookedUpRef.current.add(id);
     setProjectsReadFor((n) => n + 1);
   }, [messages, projects]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: projectsReadFor is the "read again" signal.
   useEffect(() => {
-    if (!showProjectName && projectsReadFor === 0) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -1010,7 +1028,7 @@ export function ChatTimelineView({
     return () => {
       cancelled = true;
     };
-  }, [showProjectName, projectsReadFor]);
+  }, [projectsReadFor]);
 
   // Build the question lookup. We always pull *all* questions (pending +
   // answered) so message-attached cards can collapse to their answered
@@ -2474,9 +2492,10 @@ export function ChatTimelineView({
     // from the top: pinned, a phone opened on the meester's openers with the
     // greeting that explains them scrolled away.
     if (rows.length === 0) return;
-    // A task that just finished lands its wrap-up, and on Home an invitation
-    // follows it. Pinned to the bottom, the thread scrolled past the finished
-    // card to the invitation (2026-10-11), so the card comes to the top.
+    // A task that just finished lands its wrap-up. Pinned to the bottom, the
+    // thread scrolled past the finished card to what followed it, then Home's
+    // folder invitation (2026-10-11), so the card comes to the top. The
+    // invitation itself now waits for a later visit (`hadWrapUpAtLoad`).
     const wrapUp = latestWrapUpKey(messages);
     const freshWrapUp =
       wrapUpSeenRef.current !== undefined && wrapUp !== null && wrapUp !== wrapUpSeenRef.current;
@@ -3333,8 +3352,14 @@ export function ChatTimelineView({
     /** The tracked request's lead, who speaks for the crew in the fold's title. */
     lead?: string;
     error?: string;
+    /** Its request finished, or is still going: a failed turn inside was retried. */
+    workWentOn?: boolean;
   } | null = null;
   let foldLead: string | undefined;
+  // A worker's failed turn that the runtime retried left "stopped before
+  // finishing" under a Ready card. The tracker says how the request stands;
+  // the fold says stopped only when the request did.
+  let foldWorkWentOn = false;
   const flushFold = () => {
     if (!fold) return;
     const done = fold;
@@ -3345,7 +3370,7 @@ export function ChatTimelineView({
         names={done.lead ? [done.lead] : done.names}
         live={done.sessions.some((sid) => liveRef.current.has(sid))}
         needsYou={done.sessions.some((sid) => openQuestionSessions.has(sid))}
-        {...(done.error ? { error: done.error } : {})}
+        {...(done.error && !done.workWentOn ? { error: done.error } : {})}
       >
         {done.nodes}
       </WorkingNotes>,
@@ -3482,6 +3507,9 @@ export function ChatTimelineView({
           return drift ? { driftLabel: drift } : {};
         })()}
         {...(!roleBasedNameOnlyMode && gezel?.role ? { authorRole: gezel.role } : {})}
+        {...(speaksAsMainCrewMember(projects.get(m.projectId), m.gezelId, gezel?.role)
+          ? { authorMainCrewMember: true }
+          : {})}
         {...(m.from ? { from: m.from } : {})}
         {...(m.nudge ? { nudge: true } : {})}
         {...(m.origin === 'system' ? { origin: 'system' as const } : {})}
@@ -3596,6 +3624,9 @@ export function ChatTimelineView({
           return drift ? { driftLabel: drift } : {};
         })()}
         {...(!roleBasedNameOnlyMode && gezel?.role ? { authorRole: gezel.role } : {})}
+        {...(speaksAsMainCrewMember(projects.get(slot.projectId), slot.gezelId, gezel?.role)
+          ? { authorMainCrewMember: true }
+          : {})}
         segments={slot.segments}
         {...(onOpenReference ? { onOpenReference } : {})}
         onFocusTask={focusTask}
@@ -3883,7 +3914,10 @@ export function ChatTimelineView({
     }
     if (!nestedHere) flushFold();
     if (sessionDepth === 0) emitQueuedBefore(newestActivityMs(item));
-    if (sessionDepth === 0) foldLead = undefined;
+    if (sessionDepth === 0) {
+      foldLead = undefined;
+      foldWorkWentOn = false;
+    }
     if (nestedHere && !fold) {
       fold = {
         key: `working-notes:${sid}:${item.at}`,
@@ -3891,6 +3925,7 @@ export function ChatTimelineView({
         sessions: [],
         names: [],
         ...(foldLead ? { lead: foldLead } : {}),
+        ...(foldWorkWentOn ? { workWentOn: true } : {}),
       };
     }
     const out = nestedHere && fold ? fold.nodes : els;
@@ -4030,6 +4065,10 @@ export function ChatTimelineView({
           roleBasedNameOnlyMode,
         );
       }
+      if (sessionDepth === 0) {
+        foldWorkWentOn =
+          track.state === 'ready' || track.state === 'working' || track.state === 'waiting';
+      }
       children.push(
         <RequestTracker
           key={`request:${track.key}`}
@@ -4038,6 +4077,11 @@ export function ChatTimelineView({
           debugMode={debugMode}
           roleBasedNameOnlyMode={roleBasedNameOnlyMode}
           {...(openTrackedFile ? { onOpenFile: openTrackedFile } : {})}
+          {...(projects.get(track.deliverable?.projectId ?? track.projectId)
+            ? {
+                projectName: projects.get(track.deliverable?.projectId ?? track.projectId)!.name,
+              }
+            : {})}
         />,
       );
     }
@@ -4088,6 +4132,7 @@ export function ChatTimelineView({
             sessionId={stickyPayload.assistantInfo.sessionId}
             userMsg={stickyPayload.userMsg}
             gezels={gezels}
+            projects={projects}
             debugMode={debugMode}
           />
         ) : (
@@ -4097,6 +4142,7 @@ export function ChatTimelineView({
               assistantInfo: { kind: 'message', msg: stickyPayload.assistantInfo.msg },
             }}
             gezels={gezels}
+            projects={projects}
             debugMode={debugMode}
           />
         ))}
@@ -4122,7 +4168,7 @@ export function ChatTimelineView({
           : els}
         {pendingQueued.length > 0 && renderQueuedTasks(pendingQueued, true)}
         {els.length > 0 &&
-          (!trailingContentAfterWrapUp || messages.some((m) => m.synthetic === 'task-wrapup')) &&
+          (!trailingContentAfterWrapUp || hadWrapUpAtLoad(messages, loadedThroughAt)) &&
           trailingContent}
         <div ref={responseRunwayRef} className="timeline-response-runway" aria-hidden="true" />
       </div>

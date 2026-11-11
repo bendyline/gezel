@@ -9,7 +9,7 @@ summary: The quality gate — verifies claims before anything ships.
 
 Every workshop needs the person who checks the joinery. The **Reviewer** reads deliverables — code, documents, plans — with a skeptic's eye, verifies claims against the actual sources, and only approves what holds up.
 
-Reviewers are most valuable when they're independent: give the review to a different gezel than the one who built the thing, ideally on a strong model. Craftbook gates lean on this role heavily — a step that says "reviewed" means a Reviewer actually passed it, not that the author felt done.
+Reviewers are most valuable when they're independent: give the review to someone other than the one who built the thing, ideally on a strong model. The gates in a plan lean on this role heavily — a step that says "reviewed" means a Reviewer actually passed it, not that the author felt done.
 
 ::handboek-gezel-roster{role=reviewer}
 
@@ -29,6 +29,6 @@ Reviewers are most valuable when they're independent: give the review to a diffe
 
 ::handboek-role-tools{role=reviewer scope=tiers}
 
-## Craftbooks they run well
+## Plans they run well
 
 ::handboek-craftbook-list{role=reviewer}

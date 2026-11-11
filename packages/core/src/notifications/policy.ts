@@ -93,7 +93,7 @@ function morningTitle(intent: NightShiftReviewIntent): string | null {
     intent.tasksCompleted > 0 ||
     intent.reports.length > 0 ||
     hasNightShiftIndexing(intent.indexing);
-  return worked ? 'Your crew worked overnight' : 'Your morning review is ready';
+  return worked ? 'Gezel worked overnight' : 'Your morning review is ready';
 }
 
 function firstLine(text: string, max = 140): string {

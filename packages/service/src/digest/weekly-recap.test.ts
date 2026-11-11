@@ -57,7 +57,7 @@ describe('writeWeeklyRecap', () => {
     const body = artifacts.get('default:reports/weekly-recap-2026-W41.md')!;
     expect(body).toContain('worked 2 nights of 3 recorded nights');
     expect(body).toContain('3 tasks finished, 1 report written, 1 change proposal drafted');
-    expect(body).toContain("1 night: Your crew couldn't work last night");
+    expect(body).toContain("1 night: Gezel couldn't work last night");
     expect(body).toContain('**Pictures**: `reports/digest-2026-W41.md`');
 
     expect(await writeWeeklyRecap(deps, monday)).toBeNull();

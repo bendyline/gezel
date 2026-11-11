@@ -19,6 +19,11 @@ shapes were handled badly at exactly the sizes that matter:
 - **A spreadsheet converts to prose.** It gets a markdown shadow, so a gezel
   can read *about* the numbers but cannot aggregate them.
 
+Amended 2026-11-09: a small CSV was left out as already readable, and that
+was not enough. A model read a 189-row sales CSV, summed it by hand, and
+reported wrong weekday totals. Outside a code folder every CSV with rows now
+becomes a table; see [observation-corpora.md](../observation-corpora.md) §11.
+
 ## Decision
 
 Derive tables from workspace CSV, TSV and XLSX files, automatically and

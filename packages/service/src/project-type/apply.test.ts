@@ -684,11 +684,13 @@ describe('seed policy, overlay, and roster reuse', () => {
     const overlayThird = await store.readProjectTypeOverlay(project.id);
     expect(overlayThird?.seeds[0]?.sha256).toBe(overlaySecond?.seeds[0]?.sha256);
 
-    // The default policy still overwrites the user's file (original behavior).
+    // An explicit `overwrite` still replaces the user's file. (Re-applying the
+    // type a project runs preserves by default; see upgrade.test.ts.)
     const fourth = await applyProjectType(deps(), {
       projectId: project.id,
       typeId: 'language-trainer',
       params: { language: 'German' },
+      seedPolicy: 'overwrite',
       reuseRosterGezels: true,
     });
     expect(fourth.seedsSkipped).toEqual([]);

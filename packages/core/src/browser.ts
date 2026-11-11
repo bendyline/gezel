@@ -39,6 +39,7 @@ export * from './inferred-project.js';
 export * from './growth-cosmetics.js';
 export * from './growth/index.js';
 export * from './security/policy.js';
+export * from './app-endpoints.js';
 export * from './security/package-scripts.js';
 export * from './security/egress-indicators.js';
 export * from './gezel-display.js';
@@ -54,6 +55,19 @@ export * from './keyed-lock.js';
 export * from './redact.js';
 export * from './ollama-models.js';
 export * from './model-fit.js';
+export * from './model-import/index.js';
+export {
+  LLAMA_CPP_ARCHITECTURES,
+  LLAMA_CPP_GGUF_SUPPORT_COMMIT,
+  LLAMA_CPP_GGUF_SUPPORT_TAG,
+  LLAMA_CPP_REMOVED_TENSOR_TYPES,
+  LLAMA_CPP_TENSOR_TYPES,
+} from './native/llama-cpp-gguf-support.js';
+export {
+  MLX_MODEL_TYPES,
+  MLX_MODEL_TYPE_ALIASES,
+  MLX_VLM_SUPPORT_VERSION,
+} from './native/mlx-model-support.js';
 export * from './llama-cpp-launch.js';
 export * from './llama-cpp-backend-exclusion.js';
 export * from './llama-cpp-spec.js';
@@ -64,8 +78,12 @@ export * from './model-quantization.js';
 export * from './fitness-badge.js';
 export * from './recommendation.js';
 export * from './media-memory.js';
+export * from './media-memory-coefficients.js';
+export * from './video-geometry.js';
+export * from './video-size.js';
 export * from './image-size.js';
 export * from './image-model-choice.js';
+export * from './video-model-choice.js';
 export * from './image-lora-choice.js';
 export * from './image-prompting.js';
 export * from './image-cues.js';
@@ -79,6 +97,7 @@ export * from './poppetje/index.js';
 export * from './project-types/taxonomy.js';
 export * from './project-holds-code.js';
 export * from './project-types/composition.js';
+export * from './project-types/upgrade.js';
 export * from './app-subject.js';
 export * from './project-types/brief-route.js';
 export * from './project-types/script-tool-args.js';
@@ -91,11 +110,13 @@ export * from './deliverable.js';
 export * from './task-owned-paths.js';
 export * from './task-deliverable.js';
 export * from './task-person-name.js';
+export * from './save-copy-name.js';
 export * from './request-track/identity.js';
 export * from './request-track/stage.js';
 export * from './request-track/eta.js';
 export * from './request-track/duration-seeds.js';
 export * from './request-track/resolve.js';
+export * from './request-track/title.js';
 export * from './binary-document.js';
 export * from './yaml-valid.js';
 export * from './scorecard/index.js';

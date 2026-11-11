@@ -96,6 +96,7 @@ describe('Sidebar', () => {
     vi.mocked(api.listDocuments).mockResolvedValue({ files: [] } as never);
     vi.mocked(api.readDocument).mockResolvedValue({ content: '' } as never);
     vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock' } as never);
+    vi.mocked(api.listKnowledgeCatalogs).mockResolvedValue({ catalogs: [] } as never);
   });
 
   it.each([
@@ -118,23 +119,22 @@ describe('Sidebar', () => {
     expect(api.revealDocuments).toHaveBeenCalledOnce();
   });
 
-  it('renders Home, groups, and area links', async () => {
+  it('renders Home, the groups, and the plain links', async () => {
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     expect(screen.getByTestId('sidebar-meester')).toHaveClass('app-sidebar-home');
     expect(screen.getByTestId('sidebar-group-projects')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-group-documents')).toBeInTheDocument();
     expect(screen.getByTestId('sidebar-group-gezels')).toBeInTheDocument();
-    // Tasks / History are top-level links per the nav design.
+    // Tasks, Plans, Scripts and History fold into the Workshop group.
+    expect(screen.getByTestId('sidebar-group-workshop')).toBeInTheDocument();
     // Benchmarks is intentionally NOT here — it is the "Benchmarks" tab in
     // Settings (see AREA_LINKS in Sidebar.tsx).
-    // Scripts is gated behind the "Show advanced features" flag (off here).
-    expect(screen.getByTestId('sidebar-area-tasks')).toBeInTheDocument();
-    expect(screen.getByTestId('sidebar-area-history')).toBeInTheDocument();
     expect(screen.queryByTestId('sidebar-area-benchmarks')).not.toBeInTheDocument();
     expect(screen.getByTestId('sidebar-area-settings')).toBeInTheDocument();
   });
 
   it('warms destinations on pointer and keyboard intent before selection', async () => {
+    window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ workshop: true }));
     const onPreload = vi.fn();
     render(
       <Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} onPreload={onPreload} />,
@@ -305,7 +305,7 @@ describe('Sidebar', () => {
     );
 
     const working = await screen.findByRole('button', {
-      name: 'Maya is working. Open gezel.',
+      name: 'Maya is working. Open their page.',
     });
     expect(working.querySelectorAll('.project-row-thinking-dot')).toHaveLength(3);
 
@@ -385,10 +385,15 @@ describe('Sidebar', () => {
   });
 
   it('hides the Scripts area link unless advanced features are on', async () => {
+    window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ workshop: true }));
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock', meesterGezelId: 'g1' } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     // Config (showAdvancedFeatures unset) resolves async; wait for the
     // sidebar to settle, then confirm Scripts is absent.
-    await screen.findByTestId('sidebar-area-tasks');
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-meester')).toHaveTextContent('Home · Maya'),
+    );
+    expect(screen.getByTestId('sidebar-area-tasks')).toBeInTheDocument();
     expect(screen.queryByTestId('sidebar-area-scripts')).not.toBeInTheDocument();
   });
 
@@ -398,12 +403,16 @@ describe('Sidebar', () => {
       showAdvancedFeatures: true,
     } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    // Advanced features also open the Workshop group Scripts lives in.
     expect(await screen.findByTestId('sidebar-area-scripts')).toBeInTheDocument();
   });
 
   it('hides the Knowledge area link until a catalog is registered', async () => {
+    vi.mocked(api.getConfig).mockResolvedValue({ provider: 'mock', meesterGezelId: 'g1' } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
-    await screen.findByTestId('sidebar-area-tasks');
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-meester')).toHaveTextContent('Home · Maya'),
+    );
     expect(screen.queryByTestId('sidebar-area-knowledge')).not.toBeInTheDocument();
   });
 
@@ -444,7 +453,10 @@ describe('Sidebar', () => {
       projects: [{ id: 'default', name: 'Default' } as Project],
     } as never);
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
-    expect(await screen.findByText('No projects created yet.')).toBeInTheDocument();
+    // An empty group offers the way to start rather than only saying so.
+    expect(
+      await screen.findByRole('button', { name: 'Start your first project' }),
+    ).toBeInTheDocument();
   });
 
   it('keeps the current Default project visible and selected after restore', async () => {
@@ -458,7 +470,7 @@ describe('Sidebar', () => {
     expect(currentProject).toHaveClass('active');
     expect(currentProject).toHaveAttribute('aria-current', 'page');
     expect(currentProject.closest('li')).toHaveClass('app-sidebar-proj-row', 'active');
-    expect(screen.queryByText('No projects created yet.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Start your first project')).not.toBeInTheDocument();
   });
 
   /**
@@ -474,6 +486,51 @@ describe('Sidebar', () => {
 
     const row = await screen.findByRole('button', { name: 'Scripts' });
     expect(row).toHaveClass('active');
+  });
+
+  it('gives a hidden Workshop area one row, inside the group and in its usual place', async () => {
+    window.localStorage.setItem('gezel:nav:sidebar-stay-open', '1');
+    const selection: RecentTab = { kind: 'area', area: 'scripts', at: 0, order: 0 };
+    const { container } = render(
+      <Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+    expect(screen.getAllByRole('button', { name: 'Scripts' })).toHaveLength(1);
+    const workshop = container.querySelector('[data-group="workshop"]');
+    expect(
+      Array.from(workshop?.querySelectorAll('[data-testid^="sidebar-area-"]') ?? []).map((link) =>
+        link.getAttribute('data-testid'),
+      ),
+    ).toEqual([
+      'sidebar-area-tasks',
+      'sidebar-area-craftbooks',
+      'sidebar-area-scripts',
+      'sidebar-area-history',
+    ]);
+    // The plain links below hold no second copy.
+    expect(
+      Array.from(
+        container.querySelectorAll('.app-sidebar-links [data-testid^="sidebar-area-"]'),
+      ).map((link) => link.getAttribute('data-testid')),
+    ).toEqual(['sidebar-area-settings']);
+  });
+
+  it('still surfaces a hidden area outside Workshop among the plain links', async () => {
+    const selection: RecentTab = { kind: 'area', area: 'handboek', at: 0, order: 0 };
+    const { container } = render(
+      <Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />,
+    );
+
+    expect(await screen.findByTestId('sidebar-area-handboek')).toHaveClass('active');
+    expect(
+      Array.from(
+        container.querySelectorAll('.app-sidebar-links [data-testid^="sidebar-area-"]'),
+      ).map((link) => link.getAttribute('data-testid')),
+    ).toEqual(['sidebar-area-handboek', 'sidebar-area-settings']);
+    expect(
+      container.querySelector('[data-group="workshop"] [data-testid="sidebar-area-handboek"]'),
+    ).toBeNull();
   });
 
   it('does not add a transient row for an area that already has a group header', async () => {
@@ -564,10 +621,10 @@ describe('Sidebar', () => {
     ).toBeInTheDocument();
     // p4 is poisoned + active → poisoned beats working.
     expect(
-      screen.getByRole('button', { name: /Delta: last turn failed — go to it in the chat/ }),
+      screen.getByRole('button', { name: /Delta: a reply didn't finish\. Go to it in the chat/ }),
     ).toBeInTheDocument();
     // p2 is only working → animated thinking indicator.
-    expect(screen.getByRole('button', { name: /Beta: a gezel is working/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Beta: Gezel is working/ })).toBeInTheDocument();
     // p3 is idle with a non-default status → the status dot.
     const gammaRow = screen.getByText('Gamma').closest('li');
     const stableStatus = gammaRow?.querySelector('.project-row-status-stable');
@@ -645,7 +702,7 @@ describe('Sidebar', () => {
     );
     await screen.findByText('Alpha');
 
-    fireEvent.click(screen.getByRole('button', { name: /Alpha: last turn failed/ }));
+    fireEvent.click(screen.getByRole('button', { name: /Alpha: a reply didn't finish/ }));
 
     // Selects the project, flips it to the Chat tab, and points the
     // timeline at the session whose turn failed.
@@ -895,6 +952,19 @@ describe('Sidebar', () => {
     expect(await screen.findByText('Gamma')).toBeInTheDocument();
   });
 
+  it('re-reads its projects when the event stream opens again after a stall', async () => {
+    render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    await screen.findByText('Alpha');
+    // The project was announced while the stream was down, so no
+    // gezel:project-created event ever arrives for it.
+    vi.mocked(api.listProjects).mockResolvedValue({
+      projects: [...PROJECTS, { id: 'p3', name: 'Gamma' } as Project],
+    } as never);
+    fireEvent(window, new CustomEvent('gezel:events-reconnected'));
+
+    expect(await screen.findByText('Gamma')).toBeInTheDocument();
+  });
+
   it('folds in a newly created gezel when the roster-change signal fires', async () => {
     window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ gezels: true }));
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
@@ -967,7 +1037,8 @@ describe('Sidebar', () => {
     expect(screen.getByTestId('app-sidebar')).toHaveStyle({ width: '320px' });
   });
 
-  it('grows the default right sidebar when its grip is dragged left', () => {
+  it('grows a right sidebar when its grip is dragged left', () => {
+    window.localStorage.setItem('gezel:sidebar-side', 'right');
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     const grip = screen.getByRole('separator', { name: 'Resize sidebar' });
 
@@ -979,8 +1050,7 @@ describe('Sidebar', () => {
     expect(window.localStorage.getItem('gezel:nav:sidebar-width')).toBe('280');
   });
 
-  it('grows a left sidebar when its grip is dragged right', () => {
-    window.localStorage.setItem('gezel:sidebar-side', 'left');
+  it('grows the default left sidebar when its grip is dragged right', () => {
     render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     const grip = screen.getByRole('separator', { name: 'Resize sidebar' });
 
@@ -1021,6 +1091,279 @@ describe('Sidebar', () => {
     expect(label.closest('button')?.getAttribute('title')).toBe(
       'Maya — Crew Lead · Manages projects',
     );
+  });
+
+  // The builder's tools (Tasks, Plans, Scripts, History) fold into one group so
+  // the rail opens on the places an owner uses. Folding is not hiding: the
+  // group is one click away and each area keeps its own availability checks.
+  describe('Workshop group', () => {
+    const railOrder = (container: HTMLElement) =>
+      Array.from(container.querySelectorAll('[data-testid]'))
+        .map((element) => element.getAttribute('data-testid') ?? '')
+        .filter((id) => /^sidebar-(meester|group-(?!toggle-)|area-)/.test(id));
+    const storedGroups = () =>
+      JSON.parse(window.localStorage.getItem('gezel:nav:groups') ?? '{}') as Record<
+        string,
+        boolean | undefined
+      >;
+    /** Config has loaded once Home carries the Meester's name. */
+    const configLoaded = () =>
+      waitFor(() => expect(screen.getByTestId('sidebar-meester')).toHaveTextContent('Home · Maya'));
+
+    it('starts closed, after Crew and before Settings, and opens from its title or caret', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'mock',
+        meesterGezelId: 'g1',
+      } as never);
+      const onOpenArea = vi.fn();
+      const { container } = render(
+        <Sidebar selection={null} onSelect={vi.fn()} onOpenArea={onOpenArea} />,
+      );
+      await configLoaded();
+
+      const title = screen.getByTestId('sidebar-group-workshop');
+      expect(title).toHaveTextContent('More');
+      expect(title).toHaveAttribute('aria-expanded', 'false');
+      expect(screen.getByTestId('sidebar-group-toggle-workshop')).toHaveAttribute(
+        'aria-expanded',
+        'false',
+      );
+      // No screen of its own, so nothing to add.
+      expect(container.querySelector('[data-group="workshop"] .app-sidebar-add')).toBeNull();
+      expect(railOrder(container)).toEqual([
+        'sidebar-meester',
+        'sidebar-group-projects',
+        'sidebar-group-documents',
+        'sidebar-group-gezels',
+        'sidebar-group-workshop',
+        'sidebar-area-settings',
+      ]);
+      // The default is not a stored choice.
+      expect(storedGroups().workshop).toBeUndefined();
+
+      fireEvent.click(title);
+      expect(title).toHaveAttribute('aria-expanded', 'true');
+      expect(railOrder(container)).toEqual([
+        'sidebar-meester',
+        'sidebar-group-projects',
+        'sidebar-group-documents',
+        'sidebar-group-gezels',
+        'sidebar-group-workshop',
+        'sidebar-area-tasks',
+        'sidebar-area-craftbooks',
+        'sidebar-area-history',
+        'sidebar-area-settings',
+      ]);
+      expect(storedGroups().workshop).toBe(true);
+      // The title only opens and closes the group.
+      expect(onOpenArea).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTestId('sidebar-area-history'));
+      expect(onOpenArea).toHaveBeenCalledWith('history');
+
+      fireEvent.click(screen.getByTestId('sidebar-group-toggle-workshop'));
+      expect(screen.queryByTestId('sidebar-area-tasks')).not.toBeInTheDocument();
+      expect(storedGroups().workshop).toBe(false);
+    });
+
+    it('starts open for someone whose interests include software', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'mock',
+        interests: { areas: ['home', 'software'] },
+      } as never);
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+      expect(await screen.findByTestId('sidebar-area-tasks')).toBeInTheDocument();
+      expect(screen.getByTestId('sidebar-area-history')).toBeInTheDocument();
+      expect(screen.getByTestId('sidebar-group-workshop')).toHaveAttribute('aria-expanded', 'true');
+      expect(storedGroups().workshop).toBeUndefined();
+    });
+
+    it('stays closed for interests that are not software', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'mock',
+        meesterGezelId: 'g1',
+        interests: { areas: ['home', 'business'] },
+      } as never);
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+      await configLoaded();
+
+      expect(screen.queryByTestId('sidebar-area-tasks')).not.toBeInTheDocument();
+    });
+
+    it('starts open when advanced features are on', async () => {
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'mock',
+        showAdvancedFeatures: true,
+      } as never);
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+      expect(await screen.findByTestId('sidebar-area-tasks')).toBeInTheDocument();
+      expect(screen.getByTestId('sidebar-group-workshop')).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    it('lets a stored choice win over the default, either way', async () => {
+      window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ workshop: false }));
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'mock',
+        meesterGezelId: 'g1',
+        showAdvancedFeatures: true,
+        interests: { areas: ['software'] },
+      } as never);
+      const closed = render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+      await configLoaded();
+      expect(screen.queryByTestId('sidebar-area-tasks')).not.toBeInTheDocument();
+      closed.unmount();
+
+      window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ workshop: true }));
+      vi.mocked(api.getConfig).mockResolvedValue({
+        provider: 'mock',
+        meesterGezelId: 'g1',
+      } as never);
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+      await configLoaded();
+      expect(screen.getByTestId('sidebar-area-tasks')).toBeInTheDocument();
+    });
+
+    it('keeps its stored choice when another group is toggled', async () => {
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+      await screen.findByText('Alpha');
+
+      fireEvent.click(screen.getByTestId('sidebar-group-toggle-projects'));
+      expect(storedGroups()).toMatchObject({ projects: false });
+      // Still the default, so a later change of interests can open it.
+      expect(storedGroups().workshop).toBeUndefined();
+
+      fireEvent.click(screen.getByTestId('sidebar-group-workshop'));
+      fireEvent.click(screen.getByTestId('sidebar-group-toggle-projects'));
+      expect(storedGroups()).toMatchObject({ projects: true, workshop: true });
+    });
+
+    it('opens when one of its areas becomes the destination, and lets it close again', async () => {
+      // Pinned open, so the rail does not fold to icons in these list areas.
+      window.localStorage.setItem('gezel:nav:sidebar-stay-open', '1');
+      window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ workshop: false }));
+      const area = (name: 'tasks' | 'history') =>
+        ({ kind: 'area', area: name, at: 0, order: 0 }) as const;
+      const show = (selection: RecentTab | null) => (
+        <Sidebar selection={selection} onSelect={vi.fn()} onOpenArea={vi.fn()} />
+      );
+      const { rerender } = render(show(null));
+      await screen.findByText('Alpha');
+      expect(screen.queryByTestId('sidebar-area-tasks')).not.toBeInTheDocument();
+
+      rerender(show(area('tasks')));
+      const tasks = await screen.findByTestId('sidebar-area-tasks');
+      expect(tasks).toHaveClass('active');
+      expect(tasks).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByTestId('sidebar-group-workshop')).toHaveAttribute('aria-expanded', 'true');
+      // Opening itself is not the person's choice, so it is not stored as one.
+      expect(storedGroups().workshop).toBe(false);
+
+      // Closing it while there keeps it closed.
+      fireEvent.click(screen.getByTestId('sidebar-group-toggle-workshop'));
+      expect(screen.queryByTestId('sidebar-area-tasks')).not.toBeInTheDocument();
+      rerender(show(area('tasks')));
+      expect(screen.queryByTestId('sidebar-area-tasks')).not.toBeInTheDocument();
+
+      // Another of its areas opens it again, and it stays open on leaving.
+      rerender(show(area('history')));
+      expect(await screen.findByTestId('sidebar-area-history')).toHaveClass('active');
+      rerender(show({ kind: 'project', id: 'p1', at: 0, order: 0 }));
+      expect(screen.getByTestId('sidebar-area-history')).not.toHaveClass('active');
+    });
+
+    it('shows one icon on the icon rail while closed, and opens the rail and the group from it', async () => {
+      window.localStorage.setItem('gezel:nav:sidebar-collapsed', '1');
+      const onOpenArea = vi.fn();
+      render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={onOpenArea} />);
+      await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+
+      expect(screen.getByTestId('app-sidebar')).toHaveClass('collapsed');
+      const icon = screen.getByTestId('sidebar-group-workshop');
+      expect(icon).toHaveAttribute('title', 'More');
+      expect(icon.querySelector('svg')).not.toBeNull();
+      expect(screen.queryByTestId('sidebar-group-toggle-workshop')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('sidebar-area-tasks')).not.toBeInTheDocument();
+
+      fireEvent.click(icon);
+      expect(screen.getByTestId('app-sidebar')).not.toHaveClass('collapsed');
+      expect(screen.getByTestId('sidebar-area-tasks')).toBeInTheDocument();
+      expect(storedGroups().workshop).toBe(true);
+      expect(window.localStorage.getItem('gezel:nav:sidebar-collapsed')).toBe('0');
+      expect(onOpenArea).not.toHaveBeenCalled();
+    });
+
+    it('lists its children as icons on the icon rail while open', async () => {
+      window.localStorage.setItem('gezel:nav:sidebar-collapsed', '1');
+      window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ workshop: true }));
+      const onOpenArea = vi.fn();
+      const { container } = render(
+        <Sidebar selection={null} onSelect={vi.fn()} onOpenArea={onOpenArea} />,
+      );
+      await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+
+      expect(screen.getByTestId('app-sidebar')).toHaveClass('collapsed');
+      expect(railOrder(container)).toEqual([
+        'sidebar-meester',
+        'sidebar-group-projects',
+        'sidebar-group-documents',
+        'sidebar-group-gezels',
+        'sidebar-group-workshop',
+        'sidebar-area-tasks',
+        'sidebar-area-craftbooks',
+        'sidebar-area-history',
+        'sidebar-area-settings',
+      ]);
+      const list = screen.getByTestId('sidebar-area-tasks').closest('ul');
+      expect(list).toHaveClass('app-sidebar-list', 'app-sidebar-list-rail');
+      expect(list?.closest('[data-group]')).toHaveAttribute('data-group', 'workshop');
+      // Entity lists are still dropped from the icon rail.
+      expect(screen.queryByText('Alpha')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByTestId('sidebar-area-tasks'));
+      expect(onOpenArea).toHaveBeenCalledWith('tasks');
+      expect(screen.getByTestId('app-sidebar')).toHaveClass('collapsed');
+    });
+
+    it('lists its children on the icon rail while the current area is one of them', async () => {
+      window.localStorage.setItem('gezel:nav:groups', JSON.stringify({ workshop: false }));
+      const history = { kind: 'area', area: 'history', at: 0, order: 0 } as const;
+      render(<Sidebar selection={history} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+
+      // History brings its own list, so the rail is folded to icons.
+      expect(screen.getByTestId('app-sidebar')).toHaveClass('collapsed');
+      expect(screen.getByTestId('sidebar-area-history')).toHaveClass('active');
+      expect(screen.getByTestId('sidebar-area-tasks')).toBeInTheDocument();
+      expect(screen.getAllByRole('button', { name: 'History' })).toHaveLength(1);
+
+      // Closed in the wide rail while there, the icon rail still shows them:
+      // the current destination always has a row.
+      fireEvent.click(screen.getByRole('button', { name: 'Expand sidebar' }));
+      fireEvent.click(screen.getByTestId('sidebar-group-toggle-workshop'));
+      expect(screen.queryByTestId('sidebar-area-history')).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('button', { name: 'Collapse sidebar' }));
+      expect(screen.getByTestId('sidebar-area-history')).toHaveClass('active');
+    });
+
+    it('is not rendered when none of its areas is available on this host', async () => {
+      const bridge = window.__GEZEL__;
+      window.__GEZEL__ = {
+        token: 'test-token',
+        capabilities: { ...OFFLINE_RUNTIME_CAPABILITIES, tasks: false, scripts: false },
+      };
+      try {
+        vi.mocked(api.getConfig).mockResolvedValue({ showAdvancedFeatures: true } as never);
+        render(<Sidebar selection={null} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+        await waitFor(() => expect(api.listProjects).toHaveBeenCalled());
+
+        expect(screen.getByTestId('sidebar-group-gezels')).toBeInTheDocument();
+        expect(screen.queryByTestId('sidebar-group-workshop')).not.toBeInTheDocument();
+        expect(screen.queryByText('More')).not.toBeInTheDocument();
+      } finally {
+        window.__GEZEL__ = bridge;
+      }
+    });
   });
 
   // Install-health notices moved off the Home screen into the rail. They are
@@ -1142,7 +1485,7 @@ describe('Sidebar on an offline host', () => {
       expect(screen.getByText('Crew')).toBeInTheDocument();
       expect(screen.getByText('Tasks')).toBeInTheDocument();
       expect(await screen.findByText('Scripts')).toBeInTheDocument();
-      expect(screen.queryByText('Craftbooks')).not.toBeInTheDocument();
+      expect(screen.queryByText('Plans')).not.toBeInTheDocument();
       expect(screen.queryByText('History')).not.toBeInTheDocument();
       expect(api.listKnowledgeCatalogs).not.toHaveBeenCalled();
       view.unmount();

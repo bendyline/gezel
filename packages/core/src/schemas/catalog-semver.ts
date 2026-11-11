@@ -66,3 +66,14 @@ export function compareSemver(a: string, b: string): number {
   }
   return 0;
 }
+
+/**
+ * Sort comparator: newest version first. Tolerates folder names that are
+ * not strict semver by falling back to a plain string order, so a stray
+ * folder never throws out of a directory listing. A string sort alone put
+ * 1.9.0 above 1.10.0.
+ */
+export function newestVersionFirst(a: string, b: string): number {
+  if (isSemver(a) && isSemver(b)) return compareSemver(b, a);
+  return a < b ? 1 : a > b ? -1 : 0;
+}

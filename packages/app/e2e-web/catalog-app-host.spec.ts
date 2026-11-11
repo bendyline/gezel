@@ -125,7 +125,8 @@ for (const app of catalogPages()) {
       if (await posts.count()) await posts.click();
       await frame.locator('[data-post="workshop-note"]').click();
       await expect(frame.getByRole('dialog')).toContainText('A real post to review with the crew.');
-      await expect(page.locator('.page-chat-slot')).toBeHidden();
+      // The conversation stays on screen, dimmed with the page, until the dialog closes.
+      await expect(page.locator('.page-chat-slot')).toHaveAttribute('data-dimmed', 'true');
       await frame.locator('[data-move="draft"]').click();
       await expect(frame.locator('#d-meta')).toContainText(/draft/i);
       expect(
@@ -133,6 +134,7 @@ for (const app of catalogPages()) {
       ).toContain('status: draft');
       await frame.getByRole('button', { name: 'Close', exact: true }).click();
       await expect(page.locator('.page-chat-slot')).toBeVisible();
+      await expect(page.locator('.page-chat-slot')).not.toHaveAttribute('data-dimmed');
     }
     await expect(frame.locator('#app-load-error')).toBeHidden();
     await page.screenshot({ path: info.outputPath(`${app.id}-host.png`) });

@@ -199,7 +199,7 @@ export function CraftbookStepPanel({
               className="secondary"
               onClick={() => void onSetEntry(step.id)}
               disabled={busy || isEntry}
-              title="Make this the craftbook's entry step"
+              title="Make this the plan's entry step"
             >
               Set as entry
             </button>
@@ -208,7 +208,7 @@ export function CraftbookStepPanel({
               className="danger"
               onClick={() => void onRemove(step.id)}
               disabled={busy || steps.length <= 1}
-              title={steps.length <= 1 ? 'A craftbook needs at least one step' : 'Delete this step'}
+              title={steps.length <= 1 ? 'A plan needs at least one step' : 'Delete this step'}
             >
               Delete
             </button>
@@ -255,7 +255,7 @@ export function CraftbookStepPanel({
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
-              <Select.Item value="__inherit">Inherit from gezel</Select.Item>
+              <Select.Item value="__inherit">Inherit from whoever runs the step</Select.Item>
               <Select.Item value="off">Off — tools only</Select.Item>
               <Select.Item value="lean">Lean — paths and hints</Select.Item>
               <Select.Item value="balanced">Balanced — a few excerpts</Select.Item>

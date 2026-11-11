@@ -190,7 +190,7 @@ describe('gezel-roster macro', () => {
     const { markdown, figures } = await expandMacros('::handboek-gezel-roster{role=meester}', {
       ...ctx('app', device),
     });
-    expect(markdown).toContain('You have two meester gezellen.');
+    expect(markdown).toContain('You have two crew members in the Meester role.');
     expect(markdown).toContain('- ![Alice](poppetje/g1.headshot.svg) **Alice** *Meester*');
     expect(markdown).toContain('- ![Jack](poppetje/g2.headshot.svg) **Jack** *Meester*');
     expect(markdown).not.toContain('Coordinator:');
@@ -228,21 +228,21 @@ describe('gezel-roster macro', () => {
     const { markdown, figures } = await expandMacros('::handboek-gezel-roster{role=researcher}', {
       ...ctx('agent', device),
     });
-    expect(markdown).toContain('one researcher gezel: **Iris**');
+    expect(markdown).toContain('You have one crew member in the researcher role: **Iris**');
     expect(figures).toHaveLength(0);
   });
 
   it('reads naturally without a role filter', async () => {
     const { markdown } = await expandMacros('::handboek-gezel-roster', { ...ctx('agent', device) });
-    expect(markdown).toContain('You have three gezellen:');
-    expect(markdown).not.toContain('gezel gezellen');
+    expect(markdown).toContain('You have three crew members:');
+    expect(markdown).not.toContain(' role');
   });
 
   it('suggests the Meester when the role has no gezels yet', async () => {
     const { markdown } = await expandMacros('::handboek-gezel-roster{role=reviewer}', {
       ...ctx('app', device),
     });
-    expect(markdown).toContain("don't have a reviewer gezel yet");
+    expect(markdown).toContain('No one on your crew has the reviewer role yet');
   });
 });
 

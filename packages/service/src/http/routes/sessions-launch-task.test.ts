@@ -116,7 +116,8 @@ describe('POST /api/sessions/:id/launch-task', () => {
 
     expect(out.reused).toBe(false);
     expect(out.task.projectId).toBe(projectId);
-    expect(out.task.title).toBe('Topic Deck');
+    // Titled with the request, not with the plan that runs it.
+    expect(out.task.title).toBe('A short deck about Delft');
     expect(out.task.launchSessionId).toBe(session.id);
     expect(out.task.createdBy).toEqual({ kind: 'user' });
     expect(out.task.origin?.kind).toBe('craftbook-invocation');
@@ -227,6 +228,8 @@ describe('POST /api/sessions/:id/launch-task', () => {
     expect(res.status).toBe(201);
     const out = (await res.json()) as LaunchTaskFromSessionResponse;
     expect(out.task.projectId).toBe('default');
+    // No words to name it by, so the plan's name stands in.
+    expect(out.task.title).toBe('Topic Deck');
     expect(out.task.craftbookParams?.topic).toBe('Windmills');
     expect(out.task.description).toBe('Run the "Topic Deck" craftbook against this project.');
     expect(out.userMessage.content).toBe('');
@@ -236,11 +239,13 @@ describe('POST /api/sessions/:id/launch-task', () => {
     const session = await openSession();
     const res = await launch(session.id, {
       message: 'A short deck about Delft, overnight',
-      launch: { craftbookId: 'topic-deck', params: {}, tonight: true },
+      launch: { craftbookId: 'topic-deck', params: {}, tonight: true, title: 'Delft by night' },
     });
     expect(res.status).toBe(201);
     const out = (await res.json()) as LaunchTaskFromSessionResponse;
     expect(out.task.nightShift).toMatchObject({ enabled: true });
+    // A title the launch carries wins over the message.
+    expect(out.task.title).toBe('Delft by night');
   });
 
   it('previews a trigger-phrase proposal for a coordinator, and never a prelude for it', async () => {

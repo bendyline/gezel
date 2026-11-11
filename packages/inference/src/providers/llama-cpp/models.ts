@@ -37,7 +37,10 @@ import { createReadStream } from 'node:fs';
 import { link, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import {
+  type ChatModelManifest,
   createLogger,
+  isImportedChatModel,
+  isLocalFileChatModel,
   llamaCppBackendExclusion,
   llamaCppBackendLabel,
   llamaCppDraftModelApplies,
@@ -54,6 +57,7 @@ import {
   catalogPayloadFingerprint,
   describeCatalogPayload,
 } from '../../models/catalog-payload-identity.js';
+import { writeImportedModelEntry } from '../../models/imports/entry-store.js';
 import {
   type IncompleteModelDownloadInfo,
   MODEL_HASH_READ_BUFFER_BYTES,
@@ -489,7 +493,12 @@ export class LlamaCppModelManager {
       let name: string | undefined;
       if (isSafeId(row.id)) {
         const detail = await this.catalog.get('chat-model', row.id).catch(() => null);
-        if (detail && detail.manifest.kind === 'chat-model' && this.srcBlock(detail.manifest)) {
+        if (
+          detail &&
+          detail.manifest.kind === 'chat-model' &&
+          this.srcBlock(detail.manifest) &&
+          !isLocalFileChatModel(detail.manifest)
+        ) {
           resumable = true;
           name = detail.manifest.name;
         }
@@ -536,7 +545,10 @@ export class LlamaCppModelManager {
 
       const detail = await this.catalog.get('chat-model', id).catch(() => null);
       const catalogManifest = detail?.manifest.kind === 'chat-model' ? detail.manifest : undefined;
-      const canUpdate = Boolean(catalogManifest && this.srcBlock(catalogManifest));
+      // A model copied in from a file has nowhere to be fetched from again.
+      const canUpdate = Boolean(
+        catalogManifest && this.srcBlock(catalogManifest) && !isLocalFileChatModel(catalogManifest),
+      );
       const name = catalogManifest?.name ?? legacyName;
       rows.push({
         id,
@@ -652,6 +664,28 @@ export class LlamaCppModelManager {
     await removeModelDir(join(this.modelsRoot, id), this.modelsRoot);
   }
 
+  /**
+   * Record a reviewed model from outside the catalog so {@link install} can
+   * fetch it: its manifest goes beside where the weights will land, and the
+   * catalog's imported-models source serves it from there. Only the HF
+   * importer calls this, after its checks passed (`models/imports/`).
+   */
+  async prepareImportedModel(manifest: ChatModelManifest, tuningFrom?: string): Promise<void> {
+    if (this.engine !== 'llama-cpp') {
+      throw new Error('only the llama.cpp engine takes models from outside the catalog');
+    }
+    if (!isImportedChatModel(manifest) || !isSafeId(manifest.id)) {
+      throw new Error(`not an imported model: ${manifest.id}`);
+    }
+    if (this.activeInstalls.has(manifest.id)) {
+      throw new Error(`"${manifest.name}" is already downloading`);
+    }
+    if (await modelExistsOnlyReadOnly(this.storageRoots, manifest.id)) {
+      throw readOnlyModelError(manifest.id);
+    }
+    await writeImportedModelEntry(this.modelsRoot, manifest, tuningFrom);
+  }
+
   /** Provider-owned snapshot used by the streaming `.gezmodel` exporter. */
   async getModelBundleSource(id: string): Promise<ModelBundleSource> {
     if (!isSafeId(id)) throw new Error(`unsafe model id: ${id}`);
@@ -682,6 +716,11 @@ export class LlamaCppModelManager {
     stagedModelDir: string;
     installedManifest: Record<string, unknown>;
     replace: boolean;
+    /**
+     * SHA-256 per file the caller already computed while receiving the bytes
+     * in this process (a local import). Spares re-reading tens of gigabytes.
+     */
+    precomputedSha256?: Record<string, string>;
   }): Promise<void> {
     if (!isSafeId(opts.id)) throw new Error(`unsafe model id: ${opts.id}`);
     const parsed = opts.installedManifest as Partial<InstalledManifest>;
@@ -713,7 +752,7 @@ export class LlamaCppModelManager {
     readGgufSummary(safeBundleModelPath(opts.stagedModelDir, parsed.weightsFilename));
     const importedManifest: InstalledManifest = {
       ...parsed,
-      fileSha256: await hashModelPayloadFiles(opts.stagedModelDir),
+      fileSha256: await hashModelPayloadFiles(opts.stagedModelDir, opts.precomputedSha256),
     } as InstalledManifest;
     await writeFile(
       join(opts.stagedModelDir, 'manifest.json'),
@@ -790,6 +829,13 @@ export class LlamaCppModelManager {
         return;
       }
       const manifest = detail.manifest;
+      if (isLocalFileChatModel(manifest)) {
+        yield {
+          type: 'error',
+          error: `"${manifest.name}" was added from a file on this computer, so there is nothing to download. Add the file again to restore it.`,
+        };
+        return;
+      }
       const installSrc = this.srcBlock(manifest);
       if (!installSrc) {
         yield {

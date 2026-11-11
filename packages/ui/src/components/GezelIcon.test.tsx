@@ -38,4 +38,11 @@ describe('GezelIcon SVG isolation', () => {
     expect(container.querySelector('img, svg')).toBeNull();
     expect(screen.getByText('P')).toBeVisible();
   });
+
+  // A crew member hired moments ago first showed as "M", then as a figure.
+  it('draws a quiet placeholder, not a letter, while the roster is still loading', () => {
+    render(<GezelIcon name="Minji" pending />);
+    expect(screen.getByTestId('gezel-icon-pending')).toBeInTheDocument();
+    expect(screen.queryByText('M')).not.toBeInTheDocument();
+  });
 });

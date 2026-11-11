@@ -280,7 +280,7 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
           {project.readOnly && (
             <span
               className="office-pane-badge"
-              title="Crew members cannot change files in this folder. They edit this document through the pane."
+              title="Gezel cannot change files in this folder. It edits this document through the pane."
             >
               Read-only folder
             </span>
@@ -320,7 +320,7 @@ export function OfficePane({ ready, host }: { ready: PaneReady; host: OfficeHost
       {outOfReach && chosen && provider && (
         <output className="office-pane-notice">
           {chosen.name} runs on {providerLabel(provider)}, which can't reach this document. Choose
-          another gezel to read or edit it.
+          someone else to read or edit it.
         </output>
       )}
       <iframe

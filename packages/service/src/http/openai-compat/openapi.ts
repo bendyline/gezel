@@ -298,7 +298,7 @@ export function buildOpenApiDoc(version: string): OpenApiDoc {
       },
       '/v1/models': {
         get: {
-          summary: 'List selectable gezels and models across every configured provider.',
+          summary: 'List selectable crew members and models across every configured provider.',
           security: [{ bearerAuth: ['openai'] }],
           responses: {
             '200': {

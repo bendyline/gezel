@@ -62,23 +62,39 @@ const FIT_LABEL: Record<BootstrapChatModel['fit'], string> = {
 
 /** Catalog chat models for `engine`, recommended first, the way the first-run picker ranks them. */
 export async function availableChatModels(
-  client: ModelChoiceClient,
+  client: ModelChoiceClient & Partial<Pick<GezelClient, 'getNativeEngineStatus'>>,
   engine: ChatEngine,
-): Promise<{ ranked: BootstrapChatModel[]; installed: Set<string>; pinned?: string }> {
+): Promise<{
+  ranked: BootstrapChatModel[];
+  installed: Set<string>;
+  pinned?: string;
+  gpuUnmeasured?: boolean;
+}> {
   if (engine === 'ds4') {
     throw new CliError('`--available` lists mlx and llama-cpp models; pass one with --provider.');
   }
-  const [memory, catalog, installed, config] = await Promise.all([
+  const [memory, catalog, installed, config, native] = await Promise.all([
     client.getMemoryProfile(),
     client.listCatalogItems('chat-model'),
     installedChatModels(client, engine),
     client.getConfig(),
+    client.getNativeEngineStatus?.().catch(() => undefined),
   ]);
   const pinned = config.defaultModel?.[engine];
+  // An AMD or Intel graphics card is read through llama-server. Before the
+  // engine is installed the profile falls back to main memory, and the first
+  // row was the model for a computer with no graphics card at all: Gemma 4 E2B
+  // on a 32 GB card, beside models the same table scored at 97% (2026-11-10).
+  const gpuUnmeasured =
+    engine === 'llama-cpp' &&
+    memory.source === 'system-ram-fallback' &&
+    !!native?.platformKey &&
+    !native.engines.some((entry) => entry.name === 'llama-server' && entry.installed);
   return {
     ranked: rankChatModels(catalog.items, recoDevice(memory), engine as BootstrapChatProvider),
     installed: new Set(installed),
     ...(pinned ? { pinned } : {}),
+    ...(gpuUnmeasured ? { gpuUnmeasured } : {}),
   };
 }
 
@@ -95,8 +111,13 @@ export function formatAvailableChatModels(input: {
    * not measured.
    */
   measured?: ReadonlyMap<string, string>;
+  /**
+   * The engine that reads this computer's graphics card is not installed yet,
+   * so the ranking saw main memory only. No row is called recommended then.
+   */
+  gpuUnmeasured?: boolean;
 }): string {
-  const { engine, ranked, installed, pinned, measured } = input;
+  const { engine, ranked, installed, pinned, measured, gpuUnmeasured } = input;
   if (ranked.length === 0) return `(no ${engine} chat models in the catalog for this machine)`;
   const width = Math.max(...ranked.map((model) => model.id.length));
   const measuredWidth = measured
@@ -105,11 +126,13 @@ export function formatAvailableChatModels(input: {
   // Not "best first": the recommendation is a deliberate first download, often
   // smaller and lower-scoring than larger models that also fit.
   const lines = [
-    `${engine} chat models for this machine, the recommended first download on top, then by catalog ranking:`,
+    gpuUnmeasured
+      ? `${engine} chat models, ranked by this computer's main memory only (its graphics card is not measured yet):`
+      : `${engine} chat models for this machine, the recommended first download on top, then by catalog ranking:`,
   ];
   ranked.forEach((model, index) => {
     const notes = [
-      index === 0 ? 'recommended' : '',
+      index === 0 && !gpuUnmeasured ? 'recommended' : '',
       installed.has(model.id) ? 'installed' : '',
       model.id === pinned ? 'in use' : '',
     ].filter(Boolean);
@@ -122,6 +145,12 @@ export function formatAvailableChatModels(input: {
   });
   const flag = providerFlag(engine, input.platformDefault);
   const smallest = [...ranked].sort((a, b) => a.approxSizeBytes - b.approxSizeBytes)[0]!;
+  if (gpuUnmeasured) {
+    lines.push(
+      '',
+      'Gezel reads a graphics card through its engine, which is not installed yet. Run `gezel native install`, then list again to see the model recommended for this computer.',
+    );
+  }
   lines.push(
     '',
     `Download one with \`gezel model pull <id>${flag}\`. The smallest is ${smallest.id} (${formatDownloadSize(smallest.approxSizeBytes)}).`,

@@ -95,13 +95,25 @@
 .request-tracker-actual {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
-.request-tracker-overdue {
+/* Who joined the crew for this request; their cards are under "Who's helping?". */
+.request-tracker-joined {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.request-tracker-overdue,
+.request-tracker-paused {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 0.4rem;
   font-size: var(--text-sm);
   color: var(--text);
+}
+.request-tracker-paused-note {
+  flex-basis: 100%;
+  font-size: var(--text-xs);
+  color: var(--text-muted);
 }
 .request-tracker-more > summary {
   cursor: pointer;

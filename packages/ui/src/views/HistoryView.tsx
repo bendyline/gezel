@@ -28,15 +28,16 @@ import '../styles/history.css';
 const KINDS: Array<{ value: string; label: string }> = [
   { value: '', label: 'All kinds' },
   { value: 'session', label: 'Chat threads' },
-  { value: 'gezel.created', label: 'Gezel created' },
-  { value: 'gezel.deleted', label: 'Gezel removed' },
-  { value: 'gezel.renamed', label: 'Gezel renamed' },
-  { value: 'gezel.settings.updated', label: 'Gezel settings updated' },
+  { value: 'gezel.created', label: 'Crew member created' },
+  { value: 'gezel.deleted', label: 'Crew member removed' },
+  { value: 'gezel.renamed', label: 'Crew member renamed' },
+  { value: 'gezel.settings.updated', label: 'Crew member settings updated' },
   { value: 'icon.generated', label: 'Icon generated' },
   { value: 'icon.reverted', label: 'Icon reverted' },
   { value: 'project.created', label: 'Project created' },
   { value: 'project.inferred', label: 'Project found for a folder' },
   { value: 'project.updated', label: 'Project updated' },
+  { value: 'project.type.updated', label: 'Project type updated' },
   { value: 'project.about.updated', label: 'Project about updated' },
   { value: 'project.mission.updated', label: 'Project mission updated' },
   { value: 'project.voorman.changed', label: 'Project crew lead changed' },
@@ -336,7 +337,7 @@ export function HistoryView({
             value={gezelFilter || '__ALL__'}
             onValueChange={(v) => setGezelFilter(v === '__ALL__' ? '' : v)}
           >
-            <Select.Trigger aria-label="Filter history by gezel">
+            <Select.Trigger aria-label="Filter history by crew member">
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
@@ -386,7 +387,7 @@ export function HistoryView({
         <p className="muted">
           {q.trim() || projectFilter || gezelFilter || kindFilter
             ? 'No matching entries. Try another search or change the filters.'
-            : 'No entries yet. Create a gezel, edit a project, or have a chat — events will show up here.'}
+            : 'No entries yet. Add a crew member, edit a project, or have a chat — events will show up here.'}
         </p>
       )}
 
@@ -520,20 +521,20 @@ const DETAIL_FIELD_LABELS: Record<string, string> = {
   appId: 'App',
   archived: 'Status',
   at: 'When',
-  bookCatalogId: 'Craftbook',
+  bookCatalogId: 'Plan',
   bytes: 'Size',
   capabilityFloor: 'Capability floor',
   caseId: 'Case',
   changed: 'Changed fields',
-  craftbookId: 'Craftbook',
+  craftbookId: 'Plan',
   createdAt: 'Started',
   credentialName: 'Credential',
   durationMs: 'Duration',
   fieldIds: 'Fields',
   fromPath: 'From',
   fromSteps: 'Steps before',
-  gezel: 'Gezel',
-  gezelId: 'Gezel',
+  gezel: 'Crew member',
+  gezelId: 'Crew member',
   id: 'Reference',
   inputTokens: 'Input tokens',
   lastActivityAt: 'Last activity',
@@ -942,12 +943,13 @@ function formatBytes(bytes: number): string {
  * event types never regress to identifiers.
  */
 const KIND_LABELS: Record<string, string> = {
-  'gezel.created': 'Gezel created',
-  'gezel.renamed': 'Gezel renamed',
-  'gezel.settings.updated': 'Gezel settings',
+  'gezel.created': 'Crew member created',
+  'gezel.renamed': 'Crew member renamed',
+  'gezel.settings.updated': 'Crew member settings',
   'project.created': 'Project created',
   'project.inferred': 'Folder project',
   'project.updated': 'Project updated',
+  'project.type.updated': 'Project type updated',
   'project.about.updated': 'Project brief',
   'project.mission.updated': 'Mission updated',
   'project.voorman.changed': 'Crew lead changed',
@@ -959,7 +961,7 @@ const KIND_LABELS: Record<string, string> = {
   'document.updated': 'Document edited',
   'document.renamed': 'Document renamed',
   'document.deleted': 'Document deleted',
-  'craftbook.created': 'Craftbook created',
+  'craftbook.created': 'Plan created',
   'task.created': 'Task created',
   'tool.called': 'Tool call',
   'meester.changed': 'Meester changed',

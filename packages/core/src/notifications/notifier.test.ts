@@ -19,7 +19,7 @@ function morningCard(id = 'q1'): ChatEventEnvelope {
         projectId: 'default',
         gezelId: 'wren',
         sessionId: '',
-        prompt: 'Overnight your crew read 1,204 files.',
+        prompt: 'Overnight Gezel read 1,204 files.',
         createdAt: NOW.toISOString(),
         intent: {
           kind: 'night-shift-review',
@@ -77,8 +77,8 @@ describe('EarnedNotifier', () => {
     advance(5_000);
     expect(delivered).toEqual([
       {
-        title: 'Your crew worked overnight',
-        body: 'Overnight your crew read 1,204 files.',
+        title: 'Gezel worked overnight',
+        body: 'Overnight Gezel read 1,204 files.',
         view: 'home',
         kinds: ['morning'],
       },

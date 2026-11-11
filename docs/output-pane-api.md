@@ -83,7 +83,8 @@ All return `{ element, update, destroy }`. `ui.components.version` is 2 when
 dialog and inline forms, `tabs`, and `minItems` are present; feature-detect
 before using them, since an older host draws every form as a disclosure. A
 component dialog marks its host element `data-gezel-dialog-open`, which
-`appLayout` treats like an open page dialog. The SDK's page types contain
+the chat component treats like an open page dialog: the host dims the
+conversation to the dialog's backdrop and leaves the dialog uncovered. The SDK's page types contain
 their complete option contracts; see the
 [application authoring example](handboek/technical/gezel-page-apis.md#building-a-full-page-workspace)
 and the [app UX guide](handboek/technical/gezel-app-ux-guide.md) for when to use each.

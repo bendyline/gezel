@@ -49,6 +49,28 @@ describe('startup home', () => {
     expect(again.state.draft).toBe('');
   });
 
+  // The service rewrites the snapshot only after a launch has painted, and one
+  // saved before the default moved says `right` for everyone who never chose.
+  it("takes the rail's side from the config, whatever the snapshot says", async () => {
+    const path = await home();
+    const snapshot = { version: 1, savedAt: '2026-10-19', meester: null };
+    const side = async (config: object, saved?: string) => {
+      await writeFile(join(path, 'config.json'), JSON.stringify(config));
+      await writeFile(
+        join(path, 'startup-home.json'),
+        JSON.stringify(saved ? { ...snapshot, sidebar: saved } : snapshot),
+      );
+      const host = new StartupHomeHost();
+      await host.load(path);
+      return host.snapshot?.sidebar;
+    };
+    expect(await side({}, 'right')).toBe('left');
+    expect(await side({})).toBe('left');
+    expect(await side({ sidebarSide: 'right' }, 'left')).toBe('right');
+    expect(await side({ sidebarSide: 'left' }, 'right')).toBe('left');
+    expect(await side({ sidebarSide: 'middle' }, 'right')).toBe('left');
+  });
+
   it('isolates local and remote drafts and never shows local content for a remote connection', async () => {
     const path = await home();
     const local = new StartupHomeHost();

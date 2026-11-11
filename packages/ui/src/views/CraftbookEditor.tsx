@@ -14,6 +14,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { CraftbookChatPane } from '../components/CraftbookChatPane.js';
 import { CraftbookStepPanel } from '../components/CraftbookStepPanel.js';
+import { DeepLinkDialogs } from '../components/DeepLinkDialogs.js';
 import { MarkdownField } from '../components/MarkdownField.js';
 import { StepTracker } from '../components/StepTracker.js';
 import type { RecentTabInput } from '../components/recent-tabs.js';
@@ -49,12 +50,15 @@ function toUpdateBody(book: Craftbook) {
  * (reorderable, no lifecycle status) + the docked page for whichever is
  * selected. Local craftbooks are editable; bundled/project books render
  * read-only with a "Copy to edit" affordance (the PATCH route refuses
- * non-local books anyway).
+ * non-local books anyway). Using a plan comes first: "Start a task" opens
+ * the same launch form New Task does, and copying is the secondary key.
  */
 export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEditorProps) {
   const [book, setBook] = useState<Craftbook | null>(null);
   const [resolvedSource, setResolvedSource] = useState<Source>(source ?? 'local');
   const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  // The open launch form, keyed so a second click opens a fresh one.
+  const [launchKey, setLaunchKey] = useState<number | null>(null);
   // Overview / AI assist / each bench step form one mutually-exclusive tab
   // set, as in TaskDetail. `null` means Overview or AI assist is showing.
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
@@ -226,19 +230,36 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
                 nameDraft.current = e.target.value;
               }}
               onBlur={saveName}
-              aria-label="Craftbook name"
+              aria-label="Plan name"
             />
           )}
           <span className="task-ref">{book.id}</span>
           <span className={`task-badge task-badge-${resolvedSource}`}>{resolvedSource}</span>
+          {/* A project's own plan runs only inside that project, which this
+            page does not know; it starts from that project's New task. */}
+          {resolvedSource !== 'project' && (
+            <button type="button" className="primary" onClick={() => setLaunchKey(Date.now())}>
+              Start a task
+            </button>
+          )}
           {readOnly && (
-            <button type="button" className="primary" onClick={() => void fork()} disabled={busy}>
+            <button type="button" className="secondary" onClick={() => void fork()} disabled={busy}>
               Copy to edit
             </button>
           )}
         </div>
         {error && <p className="error small">{error}</p>}
       </header>
+      {launchKey !== null && (
+        <DeepLinkDialogs
+          target={{ kind: 'craftbook', id: book.id, key: launchKey }}
+          onClose={() => setLaunchKey(null)}
+          onUnavailable={() => {
+            setLaunchKey(null);
+            setError('The launch form could not open. Try again in a moment.');
+          }}
+        />
+      )}
 
       <div
         className={`task-bench-row craftbook-bench-row${
@@ -246,7 +267,7 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
         }${selectedStepId !== null ? ' has-selected-step' : ''}`}
       >
         <div className="task-bench-sidebar">
-          <fieldset className="task-tab-rail" aria-label="Craftbook view">
+          <fieldset className="task-tab-rail" aria-label="Plan view">
             <button
               type="button"
               aria-pressed={selectedStepId === null && tab === 'overview'}
@@ -273,7 +294,7 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
           onSelect={setSelectedStepId}
           entryStepId={book.entryStepId}
           busy={busy}
-          ariaLabel="Craftbook steps"
+          ariaLabel="Plan steps"
           addLabel="Add step"
           variant="bench"
           {...(readOnly ? {} : { onAddStep, onReorder })}
@@ -300,11 +321,11 @@ export function CraftbookEditor({ craftbookId, source, onChanged }: CraftbookEdi
           <div className="task-step-field full-width">
             <span className="task-step-field-label">Description</span>
             <MarkdownField
-              accessibleName="Craftbook description"
+              accessibleName="Plan description"
               key={`cbdesc-${book.id}`}
               value={book.description ?? ''}
               readOnly={readOnly}
-              placeholder="What this craftbook is for and when to reach for it."
+              placeholder="What this plan is for and when to reach for it."
               onCommit={(md) => {
                 descDraft.current = md;
                 saveDesc();

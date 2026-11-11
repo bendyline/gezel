@@ -2,6 +2,7 @@
  * Projects IDE — the two-column project view and its entity tabs. One page-level
  * frame per tab so the gallery shows each surface in context.
  */
+import { GezelClient } from '@bendyline/gezel-client';
 import { LAYOUT_TOLERANCE_PX } from '../e2e/helpers/layout.js';
 import { expect, test } from './fixtures/test.js';
 import { setTheme, settle } from './helpers/determinism.js';
@@ -21,6 +22,12 @@ const TABS = [
 ];
 
 test.describe('projects IDE', () => {
+  // One test opens the builder's view; the world goes back to an owner's.
+  test.afterEach(async ({ daemon }) => {
+    const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
+    await client.updateConfig({ showAdvancedFeatures: false }).catch(() => {});
+  });
+
   test('restored Default workspace stays named in the project navigation', async ({ page }) => {
     await page.addInitScript(() => {
       window.localStorage.setItem(
@@ -37,8 +44,16 @@ test.describe('projects IDE', () => {
     await expect(currentProject.locator('.app-sidebar-item-label')).toHaveText('Default');
   });
 
-  test('compact status key shows and updates project status', async ({ page, world }, testInfo) => {
+  test('compact status key shows and updates project status', async ({
+    page,
+    world,
+    daemon,
+  }, testInfo) => {
     test.skip(!world, 'requires the seeded world');
+    // The status key is a builder's readout: an owner's bar shows a project's
+    // status only once it is paused, and Settings holds the control.
+    const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
+    await client.updateConfig({ showAdvancedFeatures: true });
     await gotoHome(page);
     await openProject(page, world!.projectId);
     const trigger = page.getByRole('button', { name: /^Project status:/ });

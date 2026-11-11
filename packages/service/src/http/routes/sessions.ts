@@ -4,6 +4,8 @@ import {
   type ChatSessionSource,
   CreateChatSessionRequestSchema,
   InterruptSessionRequestSchema,
+  IntroduceCrewRequestSchema,
+  type IntroduceCrewResponse,
   LaunchTaskFromSessionRequestSchema,
   type LaunchTaskFromSessionResponse,
   SearchSessionsRequestSchema,
@@ -12,6 +14,7 @@ import {
   UpdateQueuedMessageRequestSchema,
   composeCraftbookLaunch,
   createLogger,
+  deriveTaskTitle,
   errorMessageWithCause,
   getEngagementMode,
   isEngagementAllowed,
@@ -448,7 +451,8 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       const launched = await ctx.taskLauncher.launch(
         target.projectId,
         {
-          title: launch.title?.trim() || book.name,
+          // Named for what the person asked for, not for the plan that runs it.
+          title: launch.title?.trim() || deriveTaskTitle(text) || book.name,
           description: composed.description,
           craftbookId: launch.craftbookId,
           ...(launch.craftbookSourceId ? { craftbookSourceId: launch.craftbookSourceId } : {}),
@@ -506,6 +510,20 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       reused: false,
     };
     return c.json(out, 201);
+  });
+
+  // A hiring tool's follow-up: introduce the gezels this session's turn just
+  // hired, in the thread the person reads. Answered at once: the card waits
+  // for the hiring turn to reply, and that turn is waiting on this call.
+  app.post('/:id/crew-introduction', async (c) => {
+    const id = c.req.param('id');
+    const body = IntroduceCrewRequestSchema.parse(await c.req.json());
+    if (!(await ctx.chat.getSessionRecord(id))) return c.json({ error: 'not found' }, 404);
+    void ctx.chat
+      .postHireIntroduction(id, body.gezelIds)
+      .catch((err) => log.warn(`[http] crew introduction failed for ${id}: ${String(err)}`));
+    const out: IntroduceCrewResponse = { accepted: true };
+    return c.json(out, 202);
   });
 
   // Read by the failed-turn card after a capacity denial: whether Retry can

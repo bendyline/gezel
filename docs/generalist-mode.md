@@ -15,10 +15,11 @@ orchestration wraps a piece of work. Two things hang off it:
 | Facet | `on` | `off` | `auto` (default, incl. unset) |
 |---|---|---|---|
 | **Task execution** (`resolveTaskExecutionMode`) | `generalist` | `stepwise` | `generalist` for hosted frontier providers (copilot, anthropic, anthropic-cli, openai, codex-cli); `stepwise` for every on-device model at every tier |
-| **Kickoff shape** (`resolveGeneralistKickoff`, the Meester's `start_project`) | solo lead (Builder template) | crew | solo for frontier providers **and** local `medium` (the measured 2026-07-17 rule); crew otherwise |
+| **New project shape** (`resolveNewProjectMode`: the Meester's `start_project` and the app's New project) | solo (one multirole gezel, usually a Builder) | crew under a crew lead | whatever the install's default model works best under: crew when its preferred task strategy is `stepwise`, solo for `generalist` and for `outcome` with or without the recipe |
 
-Both live in [core/src/generalist-mode.ts](../packages/core/src/generalist-mode.ts).
-The resolver ignores the tier for task execution on purpose: the single-session
+The task resolver lives in [core/src/generalist-mode.ts](../packages/core/src/generalist-mode.ts)
+and the project one in [core/src/task-strategy.ts](../packages/core/src/task-strategy.ts).
+The task resolver ignores the tier on purpose: the single-session
 plus union-tool-surface semantics are unmeasured on local engines, where tool
 schemas dominate prompt mass. The eval campaign (§8) decides whether local
 `medium` joins.
@@ -40,8 +41,9 @@ migrated once by `Store.ensureLayout` and is never written by current code.
 - **One continuous session.** Adjacent steps already shared a session when the
   same gezel owned them; a generalist task extends that to every step,
   including when a send is queued behind the current turn (the re-pin waits
-  for the queue to drain) and when the caller did not label the handoff as a
-  self-handoff. A fresh session is opened only when the provider or model
+  for the queue to drain), when the caller did not label the handoff as a
+  self-handoff, and when a gate loop-back starts a later pass of the step the
+  session is already on. A fresh session is opened only when the provider or model
   changed under the task (logged as `generalist continuity broken`), or on a
   retry whose prior transcript ended in a context overflow or a
   compaction-loop halt — resuming that transcript would replay the failure.
@@ -90,19 +92,54 @@ migrated once by `Store.ensureLayout` and is never written by current code.
 | Routing skip | `TaskRunner.tickOnce` floor derivation |
 | Outline + anchor | `renderTaskOutline` in [chat/instructions.ts](../packages/service/src/chat/instructions.ts) |
 | Union surface | `generalistSteps` / `unionStepKit` in [chat/session-tool-surface.ts](../packages/service/src/chat/session-tool-surface.ts) |
-| Kickoff env to the MCP child | `GEZEL_GENERALIST_KICKOFF=on|off` (was `GEZEL_EXECUTION_DENSITY`) |
+| New project shape | `resolveNewProjectMode` in [core/src/task-strategy.ts](../packages/core/src/task-strategy.ts); `ChatManager.newProjectMode`; `autoMode` in [projects/create-project.ts](../packages/service/src/projects/create-project.ts) |
+| Kickoff env to the MCP child | `GEZEL_GENERALIST_KICKOFF=on|off` (was `GEZEL_EXECUTION_DENSITY`), `on` when a new project is solo |
 | Log marker (evals read it) | `[tasks] <ref> generalist-mode resolved=<mode> setting=<s> provider=<p> tier=<t>` |
 
-## 4. Why the kickoff keeps a local-medium exception
+## 4. A new project's shape follows the default model
 
-The 2026-07-17 paired A/B (llama.cpp, N=3 core) measured *solo kickoff* for
-local 12–45B models: flat ≥ scaffold on every scenario, zero regressions over
-24 paired trials. That mechanism is unchanged, so its rule is kept. The v2
-task-execution semantics are a different mechanism and are unmeasured on local
-engines; they stay off under `auto` until §8 says otherwise. A consequence to
-know about: `anthropic` / `openai` SDK installs on `auto` now get solo kickoff
-as well (the frontier rule applies to every hosted provider); `off` is the
-escape hatch.
+A project is made as a crew under a crew lead or as one multirole gezel
+working alone (`project.mode`). When nobody names the shape, it follows the
+task strategy the install's default model works best under
+(`resolvePreferredTaskStrategy`: `config.taskStrategy` when it names one,
+else what `auto` picks for the default provider's default model, including a
+model's measured `tuning.taskStrategy`):
+
+| Preferred strategy | Shape | Main gezel |
+|---|---|---|
+| `stepwise` | crew | a crew lead (`voorman` template) |
+| `generalist`, `outcome` (recipe as advice or goal only) | solo | a Builder, or the role the work calls for |
+
+Stepwise work is split among a specialist per step, so it wants a crew and
+someone to hand it out; every other strategy has one owner for the whole
+task. Two surfaces use the rule, through `ChatManager.newProjectMode`:
+
+- **The Meester's `start_project`.** The session's MCP child reads
+  `GEZEL_GENERALIST_KICKOFF=on|off` (`on` = solo), and the routing words in
+  the Meester's prompt follow the same value.
+- **The app's New project**, which sends `autoMode` on the create request.
+  Other callers of `POST /api/projects` that name no `mode` still get a crew.
+
+The shape is written on the project when it is made and never re-read: a
+later change of model or setting leaves existing projects as they are (owner
+decision, 2026-11-10).
+
+**The main gezel is reused.** A new project is led by the crew member the
+person already has from that template (one Builder, one crew lead), and a new
+one is made only when there is none: the Meester's paths go through
+`ensureMainGezel` (`POST /api/gezels/ensure` with `templateId`), the app's
+through `ensureProjectBuilder` / `ensureProjectVoorman`. Sessions belong to a
+gezel and a project together, so one gezel's projects stay apart. Before this
+every Meester-started project added a crew member.
+
+This replaced the kickoff rule `resolveGeneralistKickoff` (kept, deprecated,
+for the published API and the phone): solo for hosted frontier providers and
+local `medium` only, from the 2026-07-17 paired A/B (llama.cpp, N=3 core:
+flat ≥ scaffold on every scenario, zero regressions over 24 paired trials).
+Under the new rule every on-device tier gets a solo project under `auto`,
+because `auto` runs unmeasured on-device models as goal-only outcome tasks.
+Small and large local tiers were never measured on a solo kickoff; `off`, or
+`taskStrategy: stepwise`, is the escape hatch back to a crew.
 
 ## 5. Known gaps
 
@@ -341,6 +378,29 @@ re-pin for the same owner, a handoff otherwise), the guard tells a session
 that also owns the new step to end its turn and wait for the re-pin, and
 the claim-check nudge counts `write_artifact` as a deliverable write, which
 it did not before.
+
+**Found by the GPT-6.1 Sol frontier run through codex-cli (fixed
+2026-11-10):** three review books paused while the model was working
+normally. A review gate routed the task back to the writer while the
+owner's turn was still open, and that turn's end-of-turn auto-advance, pinned
+to the review step, approved the re-activated writer step on the report its
+earlier pass had left; the next turn re-judged the untouched verdict, so
+research-report reached the plateau pause on one real rejection. The
+handoff for the earlier review pass then saw its step "still active" (it was
+active again, on a newer pass) and spent its retries until content-accuracy-review
+and corpus-synthesis paused with `step_stalled`, and the newer pass's dispatch
+opened a second session because the owner's one session was already pinned
+to that step id. Now a session pinned to another step never auto-advances the
+active one (when that step has a procedure, and so a dispatch of its own), a
+handoff judges its outcome by the pass it was dispatched for
+(`ChatManager.ownsHandoffPass`; a gate self-loop its own turn adopted stays
+its pass), a re-pin whose pass ended while the session was busy is dropped,
+a later pass of the same step reuses the owner's session, and the
+current-turn reactivation hook adopts the runner's dispatch only for a
+self-loop (`tasks/current-turn-reactivation.ts`), so the routed-to step's own
+dispatch is no longer dropped as a duplicate. The runner's cancel of a
+superseded dispatch now names its pass, and the chat side leaves alone a turn
+the shared session has since started for another step or pass.
 
 **Found by the reference run's generalist `refactor-module` cell (fixed
 2026-09-19 in the evals source):** the owner shipped a passing refactor (29

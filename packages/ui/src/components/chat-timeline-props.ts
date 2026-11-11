@@ -67,9 +67,11 @@ export interface ChatTimelineViewProps {
    */
   trailingContent?: import('react').ReactNode;
   /**
-   * Hold {@link trailingContent} until the conversation holds a finished
-   * task's wrap-up: the meester's folder invitation follows the first thing
-   * the crew made, not the first thing the person said.
+   * Hold {@link trailingContent} for a conversation that already held a
+   * finished task's wrap-up when it loaded. The meester's folder invitation
+   * follows something the crew made, and never arrives on top of it: a
+   * wrap-up that lands during the visit leaves the finished card alone on
+   * screen, and the invitation waits for the next visit.
    */
   trailingContentAfterWrapUp?: boolean;
   /**

@@ -10,9 +10,11 @@ import type { ReactNode } from 'react';
  * the ask, the crew, one line of who is working, and the finished thing;
  * the whole transcript is one click away.
  *
- * The line is also the one place a stopped worker's failure shows, in a
- * muted tone: the person needs to know the work stopped, not to read a
- * stack of error banners.
+ * The line also says when a worker stopped, in a muted tone and without the
+ * reason: the person needs to know the work stopped, not to read the engine's
+ * error, which stays one click away inside the fold. It once read "Malika
+ * stopped: Not enough graphics memory to load qwen3.5-9b-q4 (about 6.3 GB on
+ * the card)…" in a first conversation.
  *
  * A worker waiting on the person is the exception to folding: the line says
  * so and the fold opens, so the question card inside is in view.
@@ -54,7 +56,7 @@ export function WorkingNotes({
             : live
               ? `${who} ${several ? 'are' : 'is'} working…`
               : error
-                ? `${who} stopped: ${error}`
+                ? `${who} stopped before finishing`
                 : `${who}'s working notes`}
         </span>
         <span className="timeline-working-notes-toggle">Working notes</span>
@@ -65,7 +67,7 @@ export function WorkingNotes({
 }
 
 function joinNames(names: readonly string[]): string {
-  if (names.length === 0) return 'The crew';
+  if (names.length === 0) return 'Gezel';
   if (names.length === 1) return names[0]!;
   if (names.length === 2) return `${names[0]} and ${names[1]}`;
   return `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;

@@ -19,9 +19,9 @@ flows, including write denial, partial failures and resetting demo state.
 
 An AI App is a reusable experience that runs *inside* Gezel: a tailored project, a purpose-built crew, repeatable craftbooks, scripts, data, and an optional interactive dashboard. A language trainer, research room, board game, or client-service workspace can all use the same underlying pieces while feeling like a distinct application.
 
-"Gezel app" and "AI App" name that experience. The **project type** is its reusable composition and setup recipe; the **project** is one person's instance. You can build a useful app with only a page and a folder, then add a gezel or a craftbook when the work calls for one. You do not need every component in every app.
+"Gezel app" and "AI App" name that experience. The **project type** is its reusable composition and setup recipe; the **project** is one person's instance. You can build a useful app with only a page and a folder, then add a crew member or a craftbook when the work calls for one. You do not need every component in every app.
 
-For the interface, read [Using the Gezel page APIs](gezel-page-apis.md) and the [app page style guide](gezel-app-page-style-guide.md). The complete [page API reference](https://github.com/bendyline/gezel/blob/main/docs/output-pane-api.md) and [project-type specification](https://github.com/bendyline/gezel/blob/main/docs/project-types.md) provide the precise runtime contracts. These three Handboek guides are the starting path for people and AI agents building an app.
+For the interface, read [Using the Gezel page APIs](gezel-page-apis.md) and the [app page style guide](gezel-app-page-style-guide.md). The complete [page API reference](https://github.com/bendyline/gezel/blob/main/docs/output-pane-api.md) and [project-type specification](https://github.com/bendyline/gezel/blob/main/docs/project-types.md) provide the precise runtime contracts. These three Help guides are the starting path for people and AI agents building an app.
 
 The project type is the composition root and installer. Public AI Apps arrive through the [project-type collection](https://gezel.com/docs/project-types-index/); private or experimental apps travel as `.gezapp` packages. Both start life as the same thing: a source folder you can build with the command line, by hand, or with an AI agent — this article is the guide to that folder.
 
@@ -46,7 +46,7 @@ cd ~/the/folder/for/it && gezel app apply my-app
 
 The `--with-page` scaffold includes a working records page. Run `gezel app demo . --out ../my-app-demo` and open the generated `pages/dashboard/index.html` for a standalone demo with resettable, in-memory sample data. The exporter supplies the shared bootstrap, components and fonts; app source does not bundle them. Inside Gezel it reads the real `data.json`, inherits the shared body/UI/heading fonts, follows host theme changes, and displays failures without switching to sample data. It includes loading, empty, pending, and retry states and cleans up its subscriptions. The browser preview is read-only; embedded and shared-site actions remain subject to host permissions.
 
-The scaffold exposes `add_record` to the keeper and `page_add_record` to the page, both backed by the same `records-store` script. This distinction matters: a name in `pages.tools` is excluded from the gezel's roster. Keep separate names when both audiences need an action. The sample uses button and keyboard handlers because the page sandbox does not allow native form submissions. Extend this starting point using the style/API guides, and test your new actions against a real host as well as the demo.
+The scaffold exposes `add_record` to the keeper and `page_add_record` to the page, both backed by the same `records-store` script. This distinction matters: a name in `pages.tools` is excluded from the model's tool roster. Keep separate names when both audiences need an action. The sample uses button and keyboard handlers because the page sandbox does not allow native form submissions. Extend this starting point using the style/API guides, and test your new actions against a real host as well as the demo.
 
 Three worked samples of graded size live in [examples/apps](https://github.com/bendyline/gezel/tree/main/examples/apps) — `example-journal` (the minimal shape), `example-habit-tracker` (state, tools, a live page), and `example-reading-circle` (a crew, craftbooks, schedules, dependencies). Copying the smallest one that fits beats starting empty.
 
@@ -56,7 +56,7 @@ For shared page APIs, inspect the [Media Library](https://github.com/bendyline/g
 
 The other on-ramp is to prototype the experience as an ordinary project first: settle the crew roles in conversation, work through each craftbook, run the scripts by hand, and decide which files are durable state versus generated artifacts.
 
-When the composition feels right, ask a gezel with the project-management tools to export the type applied to that project. Gezel writes a `.gezapp` into the project artifacts — and a `.gezapp` is a renamed zip of exactly the source layout below, so unzip it, drop in a small `gezapp.json`, and keep iterating with `validate` and `pack`.
+When the composition feels right, ask someone on the crew who has the project-management tools to export the type applied to that project. Gezel writes a `.gezapp` into the project artifacts — and a `.gezapp` is a renamed zip of exactly the source layout below, so unzip it, drop in a small `gezapp.json`, and keep iterating with `validate` and `pack`.
 
 ## The source folder
 
@@ -102,9 +102,9 @@ Craftbooks also have two homes. A procedure private to this app lives embedded a
 | Part | What it contributes |
 | --- | --- |
 | Project type | Identity, version, setup params, project templates, crew roster, and references to every other part |
-| Gezel role templates | Each crew member's name, role, and `about.md` working character; one entry can be the crew lead (`voorman: true`), or a solo type presents its one gezel under a custom `leadLabel`. Browse the [role collection](https://gezel.com/docs/role-catalog/) before writing a new one |
+| Role templates | Each crew member's name, role, and `about.md` working character; one entry can be the crew lead (`voorman: true`), or a solo type presents its one crew member under a custom `leadLabel`. Browse the [role collection](https://gezel.com/docs/role-catalog/) before writing a new one |
 | Craftbooks | Repeatable procedures installed into each project — embedded (type-private) or referenced catalog items |
-| Scripts and tools | Capability-declared TypeScript run in Gezel's sandbox; a `tools` entry exposes a script as a schema-validated tool for a gezel or the page |
+| Scripts and tools | Capability-declared TypeScript run in Gezel's sandbox; a `tools` entry exposes a script as a schema-validated tool for the model or the page |
 | Output page | A read-limited HTML/CSS/JS experience pinned into the project's Output tab |
 | Data | Ordinary JSON, Markdown, and media files seeded into the workspace or artifacts |
 | Schedules | Consent-gated scheduled or Night Shift craftbook runs |
@@ -114,13 +114,13 @@ Nothing installs merely because Gezel detects a suitable project type: adoption 
 
 ## Design the contract before building the interface
 
-Write a short brief with five decisions: what the person does, which files are authoritative, which actions change them, where judgment needs a gezel, and what successful completion looks like. Map each decision to an existing part of the platform:
+Write a short brief with five decisions: what the person does, which files are authoritative, which actions change them, where judgment needs a model, and what successful completion looks like. Map each decision to an existing part of the platform:
 
 | Requirement | Put it here |
 | --- | --- |
 | Show, search, filter, or chart existing content | A type-owned page using the shared page APIs |
 | Store a record or calculate a deterministic result | A capability-declared SDK script, exposed through a tool when needed |
-| Make a judgment, explain, research, or converse | A focused gezel role with the tools it actually needs |
+| Make a judgment, explain, research, or converse | A focused crew role with the tools it actually needs |
 | Carry out a repeatable multi-step job | A craftbook with clear inputs, step ownership, and completion gates |
 | Set up the experience | The project type's params, about/mission, crew, scripts, seeds, and project defaults |
 
@@ -151,7 +151,7 @@ Add `params` only for choices the person needs to make. `nameTemplate`, `aboutTe
 
 A custom role is a `gezel-templates` item with an identity manifest, a version manifest, and an `about.md`. Reference its template id in `gezels[]`, marking the crew lead with `voorman: true` when appropriate. Reuse a suitable existing role before adding a new one. A role template defines expertise, temperament, working style, and boundaries; it does not define one person's project brief. Keep tool listings out of its prose because Gezel injects the actual available tools at runtime.
 
-A custom craftbook turns a job into a sequence that can be checked. Define its input parameters, a valid `entryStepId`, unique step ids, the role responsible for each step, concrete outputs, and success gates. Use a script for calculation or mechanical file manipulation and a gezel for judgment. Do not ask a model to reconstruct data already available to a script. Use `{{task.dir}}` for task-owned outputs instead of inventing global paths. See [Craftbooks](../conceptual/craftbooks-overview.md), [the script SDK](writing-scripts-with-gezel-sdk.md), and the complete [Reading Circle sample](https://github.com/bendyline/gezel/tree/main/examples/apps/example-reading-circle) for a crew with both embedded and reusable craftbooks.
+A custom craftbook turns a job into a sequence that can be checked. Define its input parameters, a valid `entryStepId`, unique step ids, the role responsible for each step, concrete outputs, and success gates. Use a script for calculation or mechanical file manipulation and a model for judgment. Do not ask a model to reconstruct data already available to a script. Use `{{task.dir}}` for task-owned outputs instead of inventing global paths. See [Plans](../conceptual/craftbooks-overview.md), [the script SDK](writing-scripts-with-gezel-sdk.md), and the complete [Reading Circle sample](https://github.com/bendyline/gezel/tree/main/examples/apps/example-reading-circle) for a crew with both embedded and reusable craftbooks.
 
 Validate craftbook documents against schemas exported by the installed CLI rather than guessing step or gate fields. Reusable catalog craftbooks carry a `test.json` sidecar; that sidecar is not proof the workflow has run successfully. Exercise a representative task and its gates. Schedules reference the craftbook id and should make their consent behavior explicit; start with `consent: "ask"` for work the person has not yet enabled.
 
@@ -168,11 +168,19 @@ In the Gezel repository, public catalog content belongs in the sibling Gilde che
 
 The private source packer folds script sidecars into the version manifest. That preprocessing is specific to the source-package path: when authoring Gilde directly, follow its released-payload conventions and validators. Never hand-edit a released version; add a new version. Exported hashes, dependency locks, and catalog-root indexes are generated, not authored.
 
+### New versions reach existing projects
+
+Projects made from an earlier version of an app move to a newer one on their own, within the same major version, when the update would change nothing the person made: the page, tool declarations and scripts move together, and their data, edited About text and settings stay. An update that would replace a script edited in the project, add crew, connect a tool service, start a recurring run, or write new files into a person's folder waits for them to approve it in the project. Apps installed from a `.gezapp` always wait for approval. Write versions so this is safe:
+
+- A minor or patch version must read every data file an earlier version of the same major wrote. Change a data file's shape only in a new major version; existing projects stay on their major.
+- A param added within a major needs a `default`, or projects made earlier are not offered the update.
+- Keep page and script changes in step: they ship together, so a page may call a tool its own version's script provides.
+
 ## Scripts, tools, and the Output page
 
 Each script declares its capabilities, inputs, outputs, and whether it is an action or gate through `@bendyline/gezel-sdk`; the [Writing scripts with gezel-sdk](writing-scripts-with-gezel-sdk.md) article covers that contract. Adoption copies the scripts into the project with provenance.
 
-A `tools` entry gives a script a stable name, a JSON Schema `inputs` object validated before every run, and static `bind` values so several narrow tools can share one script without letting the caller replace the bound operation. A tool listed in `pages.tools` is page-only — kept off the model's roster — and can carry a `reaction` that summons a named gezel when the page invokes it, with the tool output interpolated into the reaction prompt.
+A `tools` entry gives a script a stable name, a JSON Schema `inputs` object validated before every run, and static `bind` values so several narrow tools can share one script without letting the caller replace the bound operation. A tool listed in `pages.tools` is page-only — kept off the model's roster — and can carry a `reaction` that summons a named crew member when the page invokes it, with the tool output interpolated into the reaction prompt.
 
 Design tools a small local model can use. These rules come from running app requests on Gemma 4 E4B and 12B, where each one fixed a request that otherwise failed:
 
@@ -231,7 +239,7 @@ Before handing over the app:
 2. Create or apply the app in an isolated test project. Verify the actual folder binding, permission denials, and every state-changing action. A folder explorer must leave originals unchanged.
 3. Exercise the main craftbook with representative inputs and confirm its outputs and gates. Check disabled/consent-required schedules without silently arming them.
 4. Test the page's live and standalone flows, light/dark themes, keyboard navigation, narrow layout, empty content, unavailable capabilities, and failed actions. Dispose watches and media players. A page with a conversation gets a [sample conversation](gezel-page-apis.md#the-sample-conversation) for its demo; then ask the real crew lead the same suggestions on a small local model, so the demo never promises what the app cannot do.
-5. If upgrading, check user-modified content and seed drift. Document any unsupported migration or reconciliation rather than overwriting it as a convenience.
+5. If upgrading, apply the new version to a project made with the old one (`gezel app apply <id>`, or `gezel app status` to see what is on offer) and confirm its data still loads. Document any unsupported migration rather than overwriting data as a convenience.
 6. Report what shipped, what was tested, which host modes are supported, and whether the normal app consumes the new catalog version yet.
 
 ## What still needs improvement
@@ -241,9 +249,9 @@ The authoring loop above is real, but the surrounding lifecycle still has gaps:
 | Gap | What is needed |
 | --- | --- |
 | Project-to-app export | Export packages the catalog definition; a diff-and-review flow that turns organic project changes (edited scripts, new craftbooks, a redesigned page) into a new version does not exist yet |
-| Import interface | The desktop app still routes import through project artifacts and gezel tools; file picking, bundle review, and conflict handling belong in the UI the way the CLI already has them |
-| Updates and drift | `gezel app status` reports per-seed drift and `apply` preserves user-modified seeds, but scripts still overwrite on upgrade and there is no three-way reconcile view |
-| Schema evolution | App data-version declarations, migrations, backup, and rollback for custom records |
+| Import interface | The desktop app still routes import through project artifacts and model tools; file picking, bundle review, and conflict handling belong in the UI the way the CLI already has them |
+| Updates and drift | Updates keep the person's data, edits and settings, and an edited script is saved before it is replaced; there is no three-way merge of an edited script yet |
+| Schema evolution | App data-version declarations and migrations, so an existing project can cross a major version, plus backup and rollback for custom records |
 | Dashboard surface | First-class page templates, an in-app development preview, diagnostics, and possibly more than one app-owned project tab |
 | Craftbook test harness | `test.json` sidecars are validated at authoring time, but the eval harness does not yet run an installed app's craftbook tests |
 | Signing and registries | v1 signature status is `unsigned`; a signing story and a private registry path alongside public Gilde contributions |

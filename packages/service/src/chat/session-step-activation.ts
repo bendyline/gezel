@@ -46,6 +46,25 @@ export function servesEarlierActivation(
 }
 
 /**
+ * True when `record` is bound to a pass of a DIFFERENT step of this task than
+ * `step`. A gate that routes the task back to another step re-activates that
+ * step under its own dispatch while the turn that triggered it is still pinned
+ * to the gated step, so that turn's ending says nothing about the new pass.
+ */
+export function servesAnotherStep(
+  record: ActivationBinding,
+  taskRef: string,
+  step: Pick<TaskCraftbookStep, 'id'>,
+): boolean {
+  return (
+    record.taskRef === taskRef &&
+    record.stepId !== undefined &&
+    record.stepActivationId !== undefined &&
+    record.stepId !== step.id
+  );
+}
+
+/**
  * Bind `record` to `activation`, clearing a binding that belonged to the
  * step it was pinned to before. Returns whether anything changed.
  */

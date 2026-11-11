@@ -76,9 +76,7 @@ describe('ogKicker', () => {
   });
 
   it('names the area for every other page', () => {
-    expect(ogKicker({ id: 'craftbook/powerpoint-deck', area: 'craftbooks' })).toBe(
-      'gezel · Craftbooks',
-    );
+    expect(ogKicker({ id: 'craftbook/powerpoint-deck', area: 'craftbooks' })).toBe('gezel · Plans');
   });
 });
 

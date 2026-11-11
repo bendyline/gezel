@@ -118,7 +118,7 @@ export function InstallModelTuningEditor({
             {...(inherited ? { inherited } : {})}
             {...(resolvedProfileId ? { tuningProfileId: resolvedProfileId } : {})}
             onSave={onSaveOverride}
-            scopeLabel={`every gezel using ${modelId}`}
+            scopeLabel={`everyone using ${modelId}`}
           />
         </div>
       </details>
@@ -207,7 +207,7 @@ function PresetPicker({
       label="Preset"
       controlId={controlId}
       className="install-preset-picker"
-      hint={`Applies to every gezel using ${modelId}. Individual crew members can override it in their detail pane.${hint ? ` ${hint}` : ''}`}
+      hint={`Applies to everyone using ${modelId}. Individual crew members can override it in their detail pane.${hint ? ` ${hint}` : ''}`}
     >
       <div className="gz-setting-row">
         <select

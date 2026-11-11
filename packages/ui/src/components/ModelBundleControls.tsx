@@ -44,12 +44,25 @@ export type ModelBundleExportState =
   | { phase: 'error'; filename: string; message: string };
 
 /** Small Models-screen affordance; the global controller owns the file input. */
-export function ImportModelBundleButton({ className }: { className?: string }) {
+export function ImportModelBundleButton({
+  className,
+  title,
+  onStart,
+}: {
+  className?: string;
+  title?: string;
+  /** Runs before the file picker opens, e.g. to close the dialog holding this key. */
+  onStart?: () => void;
+}) {
   return (
     <button
       type="button"
       className={className}
-      onClick={() => window.dispatchEvent(new Event('gezel:import-model-bundle'))}
+      title={title}
+      onClick={() => {
+        onStart?.();
+        window.dispatchEvent(new Event('gezel:import-model-bundle'));
+      }}
     >
       Import .gezmodel
     </button>

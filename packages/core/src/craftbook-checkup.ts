@@ -93,7 +93,7 @@ export function craftbookCheckup(book: CraftbookCheckupInput): CraftbookCheckupF
       findings.push({
         kind: 'step-role',
         stepId: step.id,
-        message: `${named} has no role, so whoever owns the task does it. Name the kind of gezel it needs (a writer, a researcher, a reviewer).`,
+        message: `${named} has no role, so whoever owns the task does it. Name the role it needs (a writer, a researcher, a reviewer).`,
       });
     }
     if (!step.prompt?.trim() && !step.description?.trim()) {

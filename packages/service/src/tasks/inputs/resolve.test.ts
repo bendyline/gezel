@@ -120,7 +120,7 @@ describe('planTaskInputs — workspace sources', () => {
   it('refuses a folder with nothing the book reads, naming the accepted types', async () => {
     await put(workspace, 'pics/cover.png');
     await expect(plan({ params: { source: 'pics' } })).rejects.toThrow(
-      /no files this craftbook reads \(\.md, \.docx\)/,
+      /no files this plan reads \(\.md, \.docx\)/,
     );
   });
 

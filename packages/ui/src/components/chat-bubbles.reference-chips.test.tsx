@@ -34,6 +34,24 @@ describe('MessageBubble reference chips', () => {
     expect(screen.queryByText('Files:')).not.toBeInTheDocument();
   });
 
+  // Its card had moved to the request's tracker, and "Files: report.docx
+  // report.md sources.md" still sat under the wrap-up (2026-11-09).
+  it('drops the file list under a wrap-up whose card is in the tracker', () => {
+    render(
+      // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
+      <MessageBubble
+        role="assistant"
+        synthetic="task-wrapup"
+        content="Open it to review, or tell me what you would like changed."
+        authorLabel="Dejan"
+        authorIcon={null}
+        projectId="bakery"
+        referencedFiles={[pdf, draft]}
+      />,
+    );
+    expect(screen.queryByText('Files:')).not.toBeInTheDocument();
+  });
+
   it('keeps the file list under a wrap-up in debug mode', () => {
     render(
       // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.

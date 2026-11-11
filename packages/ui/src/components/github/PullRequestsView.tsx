@@ -185,7 +185,7 @@ function PrDetailPanel({ projectId, num }: { projectId: string; num: number }) {
                       background: 'var(--code-bg, #f6f8fa)',
                       padding: '0.5rem',
                       overflow: 'auto',
-                      fontSize: '0.8rem',
+                      fontSize: 'var(--text-xs)',
                     }}
                   >
                     {f.patch}

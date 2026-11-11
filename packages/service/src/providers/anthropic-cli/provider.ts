@@ -302,6 +302,7 @@ export class AnthropicCliProvider implements LLMProvider {
       queue: this.queue,
       pool: this.pool,
       ...(opts.mcpServer ? { mcpServer: opts.mcpServer } : {}),
+      ...(opts.toolAllowlist ? { toolAllowlist: opts.toolAllowlist } : {}),
       ...(opts.extraMcpServers ? { extraMcpServers: opts.extraMcpServers } : {}),
       ...(opts.onToolCall ? { onToolCall: opts.onToolCall } : {}),
       ...(opts.knownSecretValues ? { knownSecretValues: opts.knownSecretValues } : {}),

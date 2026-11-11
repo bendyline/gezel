@@ -123,7 +123,7 @@ export function DraftPlanCard({
       <div className="pending-question-context-row">
         <span className="muted">Plan · draft</span>
         <span className="pending-question-context-title">{task.title}</span>
-        <span className="pending-question-context-status status-draft">draft</span>
+        <span className="pending-question-context-status status-draft">Draft</span>
       </div>
       <div className="pending-question-document-preview">
         <RenderedMarkdown markdown={renderPlanDocument(task)} register="report" />
@@ -156,7 +156,7 @@ export function DraftPlanCard({
           className="pending-question-skip subtle"
           onClick={() => refresh()}
           disabled={busy !== null}
-          title="Re-fetch after the gezel edits the plan."
+          title="Re-fetch after the plan is edited."
         >
           Refresh
         </button>

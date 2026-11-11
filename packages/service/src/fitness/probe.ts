@@ -463,7 +463,10 @@ export async function runFitnessProbe(
       try {
         activeTurn = 'short';
         turnStartedAt = now();
-        await session.sendAndWait(GENERATION_PROMPT, { timeoutMs: generationMs, queue });
+        evidence.generationText = await session.sendAndWait(GENERATION_PROMPT, {
+          timeoutMs: generationMs,
+          queue,
+        });
       } catch (err) {
         const unfinished = unfinishedTurn(err, 'short', turnStartedAt);
         if (!unfinished) {

@@ -211,13 +211,13 @@ export type NightShiftQuietReason = (typeof NIGHT_SHIFT_QUIET_REASONS)[number];
 export function describeQuietNight(reason: NightShiftQuietReason): string {
   switch (reason) {
     case 'asleep':
-      return "Your crew couldn't work last night: the computer was asleep or gezel wasn't running.";
+      return "Gezel couldn't work last night: it wasn't running, or the computer was asleep.";
     case 'stopped':
       return 'The night shift was stopped last night, so nothing ran.';
     case 'quota-held':
       return "Last night's work waited because your cloud plan's quota reserve was reached.";
     case 'on-battery':
-      return 'Your crew waited last night because the computer was running on battery.';
+      return 'Gezel waited last night because the computer was running on battery.';
     case 'no-work':
       return 'The night shift ran, but nothing came of it.';
   }
@@ -261,7 +261,7 @@ export function formatNightShiftSummary(counts: {
   } else if (leftBehind.length > 0) {
     summary = `The night shift left ${joinList(leftBehind)} for you.`;
   } else if (swept.length > 0) {
-    summary = `Overnight your crew ${joinList(swept)}.`;
+    summary = `Overnight Gezel ${joinList(swept)}.`;
   } else {
     summary = describeQuietNight(counts.quiet?.reason ?? 'no-work');
   }

@@ -1,6 +1,6 @@
 import { expect, test } from '../e2e-web/fixtures/test.js';
 import { setTheme } from '../e2e-web/helpers/determinism.js';
-import { expectHandboekArticle } from '../e2e-web/helpers/handboek.js';
+import { expectHandboekArticle, openFirstHandboekArticle } from '../e2e-web/helpers/handboek.js';
 import { gotoHome, openAreaView } from '../e2e-web/helpers/nav.js';
 import { shot } from '../e2e-web/helpers/shot.js';
 import { expectNear } from '../e2e/helpers/layout.js';
@@ -9,6 +9,7 @@ test('Handboek renders its article in both themes', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByTestId('sidebar-area-knowledge')).toBeAttached();
   await openAreaView(page, 'knowledge');
+  await openFirstHandboekArticle(page);
   await expectHandboekArticle(page);
   const view = page.getByTestId('knowledge-view');
   for (const theme of ['light', 'dark'] as const) {
@@ -56,7 +57,7 @@ test('composer supports a typed draft in both themes', async ({ page }) => {
 test('project creation shows its starting points and configuration', async ({ page }) => {
   await gotoHome(page);
   await page.getByRole('button', { name: 'New project', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'New Project', exact: true });
+  const dialog = page.getByRole('dialog', { name: 'New project', exact: true });
   await expect(dialog.getByRole('radio', { name: 'General', exact: true })).toBeVisible();
   const gallery = await dialog.getByRole('radiogroup', { name: 'Project type' }).boundingBox();
   const footer = await dialog.locator('.gz-npd-pick-footer').boundingBox();

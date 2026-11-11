@@ -51,6 +51,13 @@ export function readMlxModelGeometry(
     log.debug(`model geometry unreadable in ${modelDir}: ${String(err)}`);
     return undefined;
   }
+  return mlxModelGeometryFromConfig(raw);
+}
+
+/** {@link readMlxModelGeometry} for a `config.json` already parsed (a model not yet downloaded). */
+export function mlxModelGeometryFromConfig(
+  raw: Record<string, unknown>,
+): Omit<WindowedKvInput, 'kvCacheType'> | undefined {
   const cfg = (
     typeof raw.text_config === 'object' && raw.text_config !== null ? raw.text_config : raw
   ) as Record<string, unknown>;

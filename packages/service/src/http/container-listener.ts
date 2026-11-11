@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isIP } from 'node:net';
+import { DEFAULT_CONTAINER_PORT } from '@bendyline/gezel';
 import { type ServerType, serve } from '@hono/node-server';
 import type { MiddlewareHandler } from 'hono';
 import type { TokenRecord, TokenStore } from './token-store.js';
@@ -27,9 +28,10 @@ declare module 'hono' {
  * and Windows, so publishing 6228 either fails to start the container or,
  * when the container comes up first, knocks out the machine service. The
  * docs publish this same port on both sides, which keeps the setup link
- * (built from it) right without `GEZEL_PUBLIC_URL`.
+ * (built from it) right without `GEZEL_PUBLIC_URL`. The number itself is in
+ * core, where the command line reads it to print the same address.
  */
-export const DEFAULT_CONTAINER_PORT = 6230;
+export { DEFAULT_CONTAINER_PORT };
 
 /**
  * Routes that trust "can read this account's runtime/" or "is on this

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import type {
   CatalogItemDetail,
   CatalogItemSummary,
@@ -6,7 +6,7 @@ import type {
   CatalogKind,
   GezappRegistry,
 } from '@bendyline/gezel';
-import { GezappRegistrySchema } from '@bendyline/gezel';
+import { GezappRegistrySchema, isSemver } from '@bendyline/gezel';
 import { aiAppItemsDir, aiAppsRegistryFile } from '@bendyline/gezel/paths';
 import { BundledSource, type CatalogSource } from './source.js';
 
@@ -16,6 +16,9 @@ const AI_APP_KINDS: ReadonlySet<CatalogKind> = new Set([
   'craftbook-template',
 ]);
 
+/** The `sourceId` every item from an installed `.gezapp` carries. */
+export const INSTALLED_AI_APPS_SOURCE_ID = 'installed-ai-apps';
+
 /**
  * Dynamic catalog source over the active `.gezapp` registry. Package versions
  * stay mounted as units under `~/.gezel/ai-apps/`; the importer never flattens
@@ -23,7 +26,7 @@ const AI_APP_KINDS: ReadonlySet<CatalogKind> = new Set([
  * remain tractable.
  */
 export class InstalledAiAppsSource implements CatalogSource {
-  readonly id = 'installed-ai-apps';
+  readonly id = INSTALLED_AI_APPS_SOURCE_ID;
   readonly label = 'AI Apps';
 
   constructor(
@@ -56,7 +59,9 @@ export class InstalledAiAppsSource implements CatalogSource {
       const item = await source.get(kind, id, version);
       if (item) return this.rescope(item);
     }
-    return null;
+    const retained = version ? await this.retainedSource(id, version) : null;
+    const item = retained ? await retained.get(kind, id, version) : null;
+    return item ? this.rescope(item) : null;
   }
 
   async listVersions(kind: CatalogKind, id: string): Promise<CatalogItemVersionInfo[]> {
@@ -81,7 +86,8 @@ export class InstalledAiAppsSource implements CatalogSource {
       const content = await source.readItemFile(kind, id, relPath, version);
       if (content) return content;
     }
-    return null;
+    const retained = version ? await this.retainedSource(id, version) : null;
+    return retained ? retained.readItemFile(kind, id, relPath, version) : null;
   }
 
   async listItemFiles(kind: CatalogKind, id: string): Promise<string[]> {
@@ -107,16 +113,37 @@ export class InstalledAiAppsSource implements CatalogSource {
     const registry = await this.registry();
     return registry.apps
       .filter((entry) => entry.enabled)
-      .map(
-        (entry) =>
-          new BundledSource({
-            dataDir: aiAppItemsDir(this.home, entry.appId, entry.version),
-            id: `gezapp:${entry.appId}@${entry.version}`,
-            label: this.label,
-            noIndex: true,
-            ...(this.gezelVersion !== undefined ? { gezelVersion: this.gezelVersion } : {}),
-          }),
-      );
+      .map((entry) => this.slice(entry.appId, entry.version));
+  }
+
+  private slice(appId: string, version: string): BundledSource {
+    return new BundledSource({
+      dataDir: aiAppItemsDir(this.home, appId, version),
+      id: `gezapp:${appId}@${version}`,
+      label: this.label,
+      noIndex: true,
+      ...(this.gezelVersion !== undefined ? { gezelVersion: this.gezelVersion } : {}),
+    });
+  }
+
+  /**
+   * An older version of an installed, enabled app, still on disk. Installing
+   * a newer `.gezapp` mounts only the new slice; projects stamped with the old
+   * version read their page and scripts from here until they are updated.
+   * Explicit-version reads only: listings and "latest" never see it.
+   */
+  private async retainedSource(appId: string, version: string): Promise<BundledSource | null> {
+    // The version reaches a path; callers can pass it from a query string.
+    if (!isSemver(version)) return null;
+    const registry = await this.registry();
+    const entry = registry.apps.find((app) => app.appId === appId && app.enabled);
+    if (!entry || entry.version === version) return null;
+    try {
+      if (!(await stat(aiAppItemsDir(this.home, appId, version))).isDirectory()) return null;
+    } catch {
+      return null;
+    }
+    return this.slice(appId, version);
   }
 
   private rescope<T extends CatalogItemSummary | CatalogItemDetail>(item: T): T {

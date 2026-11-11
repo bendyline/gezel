@@ -87,11 +87,16 @@ describe('project search links', () => {
     expect(response.status).toBe(200);
     expect(search).toHaveBeenCalledWith(
       'vehicle suspension',
-      expect.objectContaining({ projectIds: ['default', linked.id], includeShared: true }),
+      expect.objectContaining({
+        projectIds: ['default', linked.id],
+        includeShared: true,
+        // A cold embedder never holds the search past the tool timeout.
+        coldEmbedderBudgetMs: 20_000,
+      }),
     );
     expect(craftbookMocks.suggestCraftbooks).toHaveBeenCalledWith(
       expect.objectContaining({ catalog: svc.context.catalog, store: svc.context.store }),
-      { projectId: 'default', query: 'vehicle suspension', topK: 5 },
+      { projectId: 'default', query: 'vehicle suspension', topK: 5, coldEmbedderBudgetMs: 3_000 },
     );
     expect(await response.json()).toMatchObject({
       results: [],

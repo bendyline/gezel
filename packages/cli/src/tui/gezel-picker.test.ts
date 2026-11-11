@@ -67,7 +67,7 @@ describe('buildGezelPickerItems', () => {
     });
     expect(sectionsOf(items)).toEqual([
       'In this project',
-      'Your other gezels',
+      'The rest of your crew',
       'Core roles',
       'More roles',
     ]);

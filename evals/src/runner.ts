@@ -14,6 +14,7 @@ import {
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client/node';
 import { startAutoAnswerer } from './auto-answer.ts';
+import { keepCodexRollouts } from './codex-rollouts.ts';
 import { seedDocblocksBrowser, seedDocblocksRuntime } from './docblocks-runtime.ts';
 import { type EngineContextRecord, extractEngineContext } from './engine-context.ts';
 import {
@@ -5476,6 +5477,8 @@ async function finalize(args: {
   // result.json is now the authoritative terminal artifact; drop the early
   // "running" marker so the live viewer no longer treats this as in-flight.
   await rm(join(args.runDir, 'status.json'), { force: true }).catch(() => {});
+
+  await keepCodexRollouts(args.trialHome, args.runDir).catch(() => 0);
 
   // Cleanup trial temp dir. Run dir is preserved.
   try {

@@ -86,9 +86,9 @@ export function ChatRecipientPicker({
         className="chat-recipient-popover"
         align="end"
         side="top"
-        aria-label="Choose a gezel"
+        aria-label="Choose a crew member"
       >
-        <span className="chat-recipient-popover-label">Choose a gezel</span>
+        <span className="chat-recipient-popover-label">Choose a crew member</span>
         {searchable && (
           <input
             className="chat-recipient-search"

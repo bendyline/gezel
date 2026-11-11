@@ -111,14 +111,25 @@ export function FixedFunctionAboutPanel({ gezel, onUpdated }: FixedFunctionAbout
             Your message text is passed as <code>{ff.promptKey}</code>.
           </span>
         </div>
-        {ff.requiresInputImage && (
+        {ff.tool === 'generate_video' ? (
           <div className="ff-about-row">
             <span className="ff-label">Pictures</span>
             <span>
-              Changes the pictures you attach, or the last one it made in the thread. A message with
-              neither is turned away.
+              {ff.requiresInputImage
+                ? 'Animates the first picture you attach; your words say how it should move. A message without a picture is turned away.'
+                : 'Animates the first picture you attach, when its video model can; your words say how it should move.'}
             </span>
           </div>
+        ) : (
+          ff.requiresInputImage && (
+            <div className="ff-about-row">
+              <span className="ff-label">Pictures</span>
+              <span>
+                Changes the pictures you attach, or the last one it made in the thread. A message
+                with neither is turned away.
+              </span>
+            </div>
+          )
         )}
         {gezel.description && <p className="muted">{gezel.description}</p>}
       </div>

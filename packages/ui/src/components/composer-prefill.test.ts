@@ -20,6 +20,7 @@ describe('composer prefill handoff', () => {
     expect(takeComposerPrefill('project-prefill-test')).toEqual({
       markdown: 'Please inspect this failure.',
       replace: false,
+      focus: false,
     });
     expect(takeComposerPrefill('project-prefill-test')).toBeUndefined();
 
@@ -51,6 +52,7 @@ describe('a prefill with its task attached', () => {
     expect(takeComposerPrefill('default')).toEqual({
       markdown: 'Tidy up this spreadsheet.',
       replace: false,
+      focus: false,
     });
     expect(takeComposerTaskLaunch('default')).toEqual(launch);
     expect(takeComposerTaskLaunch('default')).toBeUndefined();
@@ -71,8 +73,20 @@ describe('a prefill with its task attached', () => {
     expect(takeComposerPrefill('default')).toEqual({
       markdown: 'Plan a trip to Lisbon.',
       replace: true,
+      focus: false,
     });
     expect(takeComposerTaskLaunch('default')).toBeNull();
     expect(takeComposerTaskLaunch('default')).toBeUndefined();
+  });
+
+  it('asks for the caret after an opening the person is meant to finish, once', () => {
+    queueComposerPrefill('default', 'Plan a trip to ', undefined, { replace: true, focus: true });
+    expect(takeComposerPrefill('default')).toEqual({
+      markdown: 'Plan a trip to ',
+      replace: true,
+      focus: true,
+    });
+    queueComposerPrefill('default', 'Tidy up this spreadsheet.');
+    expect(takeComposerPrefill('default')?.focus).toBe(false);
   });
 });

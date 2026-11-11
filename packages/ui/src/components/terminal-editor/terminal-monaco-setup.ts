@@ -92,11 +92,11 @@ async function registerTerminalMonaco(): Promise<void> {
     colors: {
       // Both backgrounds track the squisq editor the chat composer types
       // into (#f6f1e7 light; dark `--surface`, the night ramp's inset paper
-      // #29231e in foundation.css) — the two compose modes share one frame,
+      // #252423 in foundation.css) — the two compose modes share one frame,
       // so a terminal surface on its own colour reads as a different panel
       // bolted into the same box. Monaco cannot read CSS variables, so this
       // hex moves with `--gezel-paper-inset` in the dark theme blocks.
-      'editor.background': '#29231e',
+      'editor.background': '#252423',
       'editor.lineHighlightBackground': '#00000000',
       'editor.lineHighlightBorder': '#00000000',
     },

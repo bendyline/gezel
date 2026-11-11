@@ -23,9 +23,10 @@
    ────────────────────────────────────────────────────────────────── */
 .home-workshop {
   /* Paper & ink */
-  /* A pale mushroom beige puts a little brown warmth back into the
-     workshop without reviving the old yellow parchment cast. The
-     darker paper steps remain available for inset controls and rules. */
+  /* The workshop paper is the parchment hue with less color in it, so
+     Home is warm without the old yellow cast and without leaning rose
+     beside the rail. The darker paper steps remain available for inset
+     controls and rules. */
   --paper: var(--home-workshop-paper);
   --paper-2: color-mix(in srgb, var(--gezel-paper-workshop) 72%, var(--gezel-paper-inset));
   --paper-3: color-mix(in srgb, var(--gezel-paper-workshop) 42%, var(--gezel-paper-inset));
@@ -80,7 +81,7 @@
   overflow: hidden;
 }
 
-/* Dusk is the global walnut ramp: the paper and ink formulas above resolve
+/* Dusk is the global night ramp: the paper and ink formulas above resolve
    against foundation's dark primitives, so Home and the rail share one
    temperature. Only what cannot follow the day's formulas changes here:
    lines lift with cream and terracotta, cards take the inset step instead of
@@ -353,7 +354,7 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  font-size: 12.5px;
+  font-size: var(--text-2xs);
   white-space: nowrap;
   color: var(--ink-2);
   padding: 5px 12px;
@@ -372,7 +373,7 @@
    hover the collapse button uses. */
 .home-workshop-chip-action {
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--text-2xs);
   cursor: pointer;
 }
 .home-workshop-chip-action:hover,
@@ -413,7 +414,7 @@
   all: unset;
   cursor: pointer;
   color: var(--ink-3);
-  font-size: 12px;
+  font-size: var(--text-2xs);
   width: 18px;
   height: 18px;
   display: inline-flex;
@@ -677,12 +678,12 @@
 }
 .home-workshop-rail-hint {
   font-family: var(--mono);
-  font-size: 10px;
+  font-size: var(--text-2xs);
   color: var(--ink-3);
   white-space: nowrap;
 }
 .home-workshop-rail-empty {
-  font-size: 12.5px;
+  font-size: var(--text-2xs);
   color: var(--ink-3);
   font-family: var(--font-display);
   font-style: italic;
@@ -709,7 +710,7 @@
   gap: 0.6rem;
   padding: 3rem 1.25rem;
   color: var(--text-muted, rgba(0, 0, 0, 0.55));
-  font-size: 0.95rem;
+  font-size: var(--text-md);
   animation: home-loading-appear 0.25s ease 0.6s both;
 }
 
@@ -1033,7 +1034,12 @@
 
 /* First-run folder step (FolderOnboardingStep): folder cards over the
    overnight question. The cards are checkboxes, not keys — several may be
-   chosen at once — so they carry a border and an accent wash when picked. */
+   chosen at once — so they carry a border and an accent wash when picked.
+   It is asked on the greeting, under the headline, once a finished result
+   has been opened; never in the conversation. */
+.home-workshop-folder-invite {
+  margin-top: 1rem;
+}
 .folder-onboarding {
   margin: 0 0 1.25rem;
   padding: 1rem 1.25rem 1.1rem;
@@ -1080,7 +1086,7 @@
   margin-top: 0.75rem;
 }
 
-/* Add a folder (AddFolderSheet): the folder's preview, then the night shift
+/* Add a folder (AddFolderSheet): the folder's preview, then the Night Shift
    checkbox and, when enabled, what the crew will do. */
 .add-folder-sheet {
   width: min(520px, calc(100vw - 2rem));

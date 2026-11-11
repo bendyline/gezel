@@ -231,8 +231,11 @@ function capitalizeFirstWord(title: string): string {
 const LEAD_IN_RE =
   /^(?:(?:hi|hey|hello)[,!.]?\s+(?=\S+\s+\S))?(?:(?:could|can|would|will) you\s+|please\s+|kindly\s+|i(?:'d| would) like (?:you )?to\s+|i want (?:you )?to\s+|help me(?: to)?\s+)+/i;
 
-/** Clause breaks a long sentence may be cut at without losing its sense. */
-const CLAUSE_BREAK_RE = /\s*(?:[,;:]|\s[-–—]\s)\s*/g;
+/**
+ * Clause breaks a long sentence may be cut at without losing its sense. A
+ * comma inside a number ("$1,200") is not one.
+ */
+const CLAUSE_BREAK_RE = /\s*(?:,(?!\d)|[;:]|\s[-–—]\s)\s*/g;
 
 /** Glue a title should not end on once it has been cut short. */
 const TRAILING_GLUE_RE = /(?:\s+(?:a|an|and|at|by|for|from|in|of|on|or|the|to|with))+$/i;
@@ -241,16 +244,16 @@ const TRAILING_GLUE_RE = /(?:\s+(?:a|an|and|at|by|for|from|in|of|on|or|the|to|wi
  * Cut a sentence to the title limit: at the last clause break that keeps
  * most of it, else at a word, with an ellipsis to say there is more.
  */
-function fitSentence(sentence: string): string {
-  if (sentence.length <= THREAD_TITLE_MAX_LENGTH) return sentence;
+function fitSentence(sentence: string, max = THREAD_TITLE_MAX_LENGTH): string {
+  if (sentence.length <= max) return sentence;
   let clause = '';
   for (const match of sentence.matchAll(CLAUSE_BREAK_RE)) {
     const head = sentence.slice(0, match.index).trim();
-    if (head.length > THREAD_TITLE_MAX_LENGTH) break;
+    if (head.length > max) break;
     clause = head;
   }
-  if (clause.length >= THREAD_TITLE_MAX_LENGTH * 0.6) return clause;
-  const room = sentence.slice(0, THREAD_TITLE_MAX_LENGTH - 1);
+  if (clause.length >= max * 0.6) return clause;
+  const room = sentence.slice(0, max - 1);
   const boundary = room.lastIndexOf(' ');
   const head = (boundary > 0 ? room.slice(0, boundary) : room)
     .replace(/[\s,;:.-]+$/, '')
@@ -273,6 +276,66 @@ export function deriveThreadTitle(input: string): string {
   if (!words) return 'Untitled';
   const titled = capitalizeFirstWord(words);
   return fitSentence(prefix ? `${prefix}: ${titled}` : titled) || 'Untitled';
+}
+
+/**
+ * A request for a piece of work usually opens with a making verb and an
+ * article ("Write a…", "Make me an…", "I need a…"). The article is required,
+ * so "Make sense of this sheet" and "Write three ads" keep their verb.
+ */
+const MAKING_FRAME_RE =
+  /^(?:write|create|make|draft|build|prepare|generate|produce|compose|design|put together|give me|get me|i need|i want|we need|i(?:'d| would) like)\s+(?:(?:me|us)\s+)?(?:up\s+)?(?:a|an|the|some)\s+/i;
+
+/**
+ * Title a task with the thing the person asked for, in their own words:
+ * "Write a one-page catering proposal for Harbor Books" is the task
+ * "One-page catering proposal for Harbor Books". A task started from chat
+ * used to carry its plan's name, so every Word document a person asked for
+ * was listed as "Word Document from Content or Research". Undefined when the
+ * message names nothing to make.
+ */
+export function deriveTaskTitle(input: string): string | undefined {
+  const { sentence: topic } = selectTopic(input);
+  const sentence = topic.replace(/[.!?,;:]+$/g, '').trim();
+  const peeled = sentence.replace(LEAD_IN_RE, '').trim();
+  const subject = peeled.replace(MAKING_FRAME_RE, '').trim();
+  const words = [subject, peeled, sentence].find(
+    (candidate) => candidate && meaningfulTokens(candidate).length > 0,
+  );
+  if (!words) return undefined;
+  return fitSentence(taskSubject(capitalizeFirstWord(words)), TASK_TITLE_MAX_LENGTH) || undefined;
+}
+
+/**
+ * A task's title is read on a card, not in a narrow list, so it may run a
+ * little longer than a thread's before it is cut.
+ */
+export const TASK_TITLE_MAX_LENGTH = 72;
+
+/** A first clause shorter than this ("Short, friendly…") is not yet the thing asked for. */
+const TASK_SUBJECT_MIN_LENGTH = 20;
+
+/** A closing "on December 12" or "by Friday", which a title can lose before its subject. */
+const CLOSING_WHEN_RE = /^(.+)\s+(?:on|by|before|until|due)\s+[^,;:]+$/i;
+
+/**
+ * The thing asked for, out of the sentence that asks for it: what follows
+ * the first colon or comma is detail, and a closing date goes before any
+ * word of the subject does. "One-page catering proposal for the Harbor Books
+ * holiday party on December 12: coffee, pastries…" was cut to "…Harbor Books
+ * holiday…".
+ */
+function taskSubject(sentence: string): string {
+  const first = sentence.matchAll(CLAUSE_BREAK_RE).next().value;
+  const head = first ? sentence.slice(0, first.index).trim() : sentence;
+  const subject = head.length >= TASK_SUBJECT_MIN_LENGTH ? head : sentence;
+  if (subject.length <= TASK_TITLE_MAX_LENGTH) return subject;
+  const shorter = CLOSING_WHEN_RE.exec(subject)?.[1]?.trim();
+  return shorter &&
+    shorter.length <= TASK_TITLE_MAX_LENGTH &&
+    shorter.length >= TASK_TITLE_MAX_LENGTH / 2
+    ? shorter
+    : subject;
 }
 
 export type ThreadTitleMessage = Pick<

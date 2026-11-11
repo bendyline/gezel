@@ -162,8 +162,8 @@ export function WorkspaceIssueFixDialog({
               <h3>Assign issue fix</h3>
             </Dialog.Title>
             <Dialog.Description className="muted small">
-              This creates an assigned task and starts its specialist chat immediately. Your files
-              aren’t touched — the fix arrives as a change proposal you review and apply.
+              This creates an assigned task and starts its chat immediately. Your files aren’t
+              touched — the fix arrives as a change proposal you review and apply.
             </Dialog.Description>
 
             <label>
@@ -182,20 +182,20 @@ export function WorkspaceIssueFixDialog({
             </label>
 
             <label>
-              <span>Gezel</span>
+              <span>Crew member</span>
               <GezelPicker
                 gezels={candidates}
                 value={selectedGezelId}
                 onValueChange={(id) => setSelectedGezelId(id ?? '')}
-                placeholder={`No ${roleLabel.toLowerCase()} gezel available`}
-                ariaLabel="Gezel assigned to fix this issue"
+                placeholder={`No ${roleLabel.toLowerCase()} available`}
+                ariaLabel="Crew member assigned to fix this issue"
                 disabled={busy || candidates.length === 0}
               />
             </label>
             {candidates.length === 0 && (
               <p className="workspace-issue-fix-missing" role="alert">
-                No {roleLabel.toLowerCase()} gezel is available. Choose another role or add one to
-                the crew first.
+                No {roleLabel.toLowerCase()} is available. Choose another role or add one to the
+                crew first.
               </p>
             )}
 

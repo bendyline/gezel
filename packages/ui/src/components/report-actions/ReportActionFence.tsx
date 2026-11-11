@@ -92,7 +92,7 @@ function ReportActionCard({
   const state = view?.state ?? 'suggested';
   const kindLabel =
     action.kind === 'fire-craftbook'
-      ? `Craftbook: ${action.craftbookId}`
+      ? `Plan: ${action.craftbookId}`
       : action.kind === 'create-task'
         ? `Delegate task${action.role ? ` — ${action.role}` : ''}`
         : `Apply ${action.edits.length} file edit${action.edits.length === 1 ? '' : 's'}`;

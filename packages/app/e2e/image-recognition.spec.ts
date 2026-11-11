@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 /**
- * Settings → Workloads → Image recognition.
+ * Settings → Image recognition, under "More settings".
  *
  * Drives the real Electron shell to the new workload panel and captures a
  * screenshot, so the tab is verified where the user actually sees it rather
@@ -11,9 +11,11 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { captureScreenshot } from './helpers/screenshot.js';
+import { revealSettingsNavItem } from './helpers/settings-nav.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -36,8 +38,7 @@ test.describe('Image recognition settings', () => {
       }),
     });
     page = await app.firstWindow();
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(3000);
+    await waitForAppReady(page);
   });
 
   test.afterAll(async () => {
@@ -45,11 +46,13 @@ test.describe('Image recognition settings', () => {
     await rm(home, { recursive: true, force: true }).catch(() => {});
   });
 
-  test('appears under Workloads and renders the policy tray', async () => {
+  test('appears under More settings and renders the policy tray', async () => {
     await page.getByTestId('sidebar-area-settings').click();
     await page.waitForTimeout(800);
 
+    // "More settings" starts folded.
     const navItem = page.getByRole('button', { name: 'Image recognition' });
+    await revealSettingsNavItem(page, navItem);
     await expect(navItem).toBeVisible({ timeout: 10000 });
     await navItem.click();
     await page.waitForTimeout(600);

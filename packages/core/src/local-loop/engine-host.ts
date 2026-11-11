@@ -6,6 +6,11 @@
  */
 
 import type { ProviderQueue } from '../runtime/provider-queue.js';
+import type {
+  DegenerateEngineReport,
+  DraftAcceptanceSample,
+  DraftAcceptanceVerdict,
+} from './degenerate-output.js';
 
 /** A tool as the model is offered it (OpenAI function-tool shape). */
 export interface LocalToolDefinition {
@@ -82,6 +87,20 @@ export interface LocalEngineHost {
   toolGrammarFloorFor(toolCount: number): ToolGrammarFallback;
   noteToolGrammarFloor(toolCount: number, tier: ToolGrammarFallback): void;
   noteForcedToolChoiceUnsupported(): void;
+  /**
+   * The turn loop gave up on the engine's output (see degenerate-output.ts).
+   * Restart the engine without saving anything it holds, and drop the saved
+   * prompt state this session would restore, since a corrupted snapshot
+   * restored into a fresh engine fails the same way. Resolves true when the
+   * engine was restarted. Optional: a host that cannot restart its engine
+   * leaves it out and the turn simply ends.
+   */
+  recoverFromDegenerateOutput?(report: DegenerateEngineReport): Promise<boolean>;
+  /**
+   * Judge one reply's draft acceptance against this engine process's own
+   * record. Optional; only hosts that can restart their engine supply it.
+   */
+  judgeDraftAcceptance?(sample: DraftAcceptanceSample): DraftAcceptanceVerdict;
   // Method syntax: the host keeps its own session type.
   _registerActiveSession(session: object): void;
   _deregisterActiveSession(session: object): void;

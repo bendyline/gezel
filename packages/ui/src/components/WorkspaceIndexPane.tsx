@@ -333,18 +333,20 @@ export function workspaceIndexLabel(status: WorkspaceIndexStatus | null): string
     case 'stale':
       return 'Index out of date';
     case 'never':
-      return 'Not indexed';
+      return 'Not scanned yet';
     case 'disabled':
       return 'Indexing off';
   }
 }
 
+/** A first scan that has not run yet is neutral, not a warning. */
 export function indexTone(
   status: WorkspaceIndexStatus | null,
-): 'checking' | 'fresh' | 'indexing' | 'stale' | 'disabled' {
+): 'checking' | 'fresh' | 'indexing' | 'stale' | 'disabled' | 'waiting' {
   if (!status) return 'checking';
   if (status.state === 'disabled') return 'disabled';
   if (status.state === 'indexing') return 'indexing';
+  if (status.state === 'never') return 'waiting';
   if (status.state === 'fresh') return status.aiScanPending ? 'indexing' : 'fresh';
   return 'stale';
 }

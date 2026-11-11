@@ -36,13 +36,26 @@ export async function gotoMeesterChat(page: Page): Promise<void> {
   ).toBeFocused();
 }
 
-/** Click a sidebar area link (tasks | craftbooks | scripts | history | settings). */
+/** The rail's Workshop group holds these links and starts closed. */
+const WORKSHOP_AREAS = new Set(['tasks', 'craftbooks', 'scripts', 'history']);
+
+/**
+ * Click a sidebar area link (tasks | craftbooks | scripts | history |
+ * knowledge | settings), opening the Workshop group first when the link is
+ * one of its children and is not showing.
+ */
 export async function openArea(page: Page, area: string): Promise<void> {
-  await page.getByTestId(`sidebar-area-${area}`).click();
+  const link = page.getByTestId(`sidebar-area-${area}`);
+  if (WORKSHOP_AREAS.has(area) && !(await link.isVisible())) await expandGroup(page, 'workshop');
+  await link.click();
   await settle(page);
 }
 
-/** Expand a sidebar group (projects | gezels | documents) if collapsed. */
+/**
+ * Expand a sidebar group (projects | gezels | documents | workshop) if
+ * collapsed. Only Workshop's title reports and toggles its state; the other
+ * titles open their area.
+ */
 export async function expandGroup(page: Page, id: string): Promise<void> {
   const toggle = page.getByTestId(`sidebar-group-${id}`);
   await toggle.waitFor({ state: 'visible', timeout: 10_000 });

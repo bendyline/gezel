@@ -156,3 +156,88 @@ describe('ProjectOverviewView data tables', () => {
     await waitFor(() => expect(screen.queryByText('Data tables')).toBeNull());
   });
 });
+
+describe('ProjectOverviewView before the first scan', () => {
+  const notScanned = /hasn't scanned this workspace yet/;
+
+  it('promises a map and architecture summary only to a codebase', async () => {
+    const { api } = await import('../api.js');
+    vi.mocked(api.toolMapRepo).mockResolvedValue({
+      root: '/w',
+      languages: [],
+      areas: [],
+      entryPoints: [],
+      keyFiles: [],
+      fileCount: 0,
+      indexed: false,
+    } as never);
+    vi.mocked(api.getProjectIndexStatus).mockResolvedValue({ state: 'never' } as never);
+    const invoices = {
+      id: 'office',
+      name: 'Bakery Office',
+      projectType: {
+        id: 'freelance-office',
+        version: '1.1.0',
+        source: 'bundled',
+        appliedAt: '2026-11-09T00:00:00Z',
+        category: 'money',
+      },
+    } as never;
+    const { unmount } = render(<ProjectOverviewView projectId="office" project={invoices} />);
+    await waitFor(() => expect(api.toolMapRepo).toHaveBeenCalled());
+    expect(screen.queryByText(notScanned)).toBeNull();
+    unmount();
+
+    const game = {
+      id: 'p1',
+      name: 'Winkel',
+      detectedProjectType: { id: 'browser-game', score: 0.7, scannedAt: '2026-07-01T00:00:00Z' },
+    } as never;
+    render(<ProjectOverviewView projectId="p1" project={game} />);
+    expect(await screen.findByText(notScanned)).toBeInTheDocument();
+  });
+
+  it('words recent activity as plain sentences, without ids or versions', async () => {
+    const { api } = await import('../api.js');
+    vi.mocked(api.listHistory).mockResolvedValue({
+      entries: [
+        {
+          entryType: 'event',
+          id: 'e3',
+          at: '2026-11-09T21:00:00Z',
+          kind: 'task.status.changed',
+          projectId: 'office',
+          summary: 'Task office/1 → complete',
+          details: { ref: 'office/1', status: 'complete', previous: 'active' },
+        },
+        {
+          entryType: 'event',
+          id: 'e2',
+          at: '2026-11-09T20:59:00Z',
+          kind: 'task.created',
+          projectId: 'office',
+          summary: 'Created task office/1 — "First draft"',
+          details: { ref: 'office/1', title: 'First draft' },
+        },
+        {
+          entryType: 'event',
+          id: 'e1',
+          at: '2026-11-09T20:58:00Z',
+          kind: 'project.updated',
+          projectId: 'office',
+          summary: 'Applied project type freelance-office@1.1.0',
+          details: { projectType: 'freelance-office', version: '1.1.0' },
+        },
+      ],
+    } as never);
+    render(
+      <ProjectOverviewView projectId="office" project={{ id: 'office', name: 'O' } as never} />,
+    );
+    const activity = await screen.findByTestId('overview-activity');
+    expect(activity).toHaveTextContent('Finished "First draft"');
+    expect(activity).toHaveTextContent('New task: First draft');
+    expect(activity).toHaveTextContent('Set up as Freelance Office');
+    expect(activity).not.toHaveTextContent('office/1');
+    expect(activity).not.toHaveTextContent('1.1.0');
+  });
+});

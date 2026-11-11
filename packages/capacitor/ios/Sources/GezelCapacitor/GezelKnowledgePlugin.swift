@@ -46,6 +46,15 @@ public final class GezelKnowledgePlugin: CAPPlugin, CAPBridgedPlugin {
             guard let self else { return }
             self.locked { self.backgrounded = false }
         })
+        // A search finishes before the reply it feeds starts, so the encoder
+        // can give its memory to the chat model, which on a 6 GB iPhone needs
+        // it. The runtime posts this on its inference queue and waits.
+        observers.append(center.addObserver(forName: Self.modelWillRun, object: nil, queue: nil) { [weak self] _ in
+            self?.releaseEncoder(wait: true)
+        })
+        observers.append(center.addObserver(forName: UIApplication.didReceiveMemoryWarningNotification, object: nil, queue: nil) { [weak self] _ in
+            self?.releaseEncoder(wait: false)
+        })
     }
     deinit {
         observers.forEach(NotificationCenter.default.removeObserver)
@@ -55,6 +64,24 @@ public final class GezelKnowledgePlugin: CAPPlugin, CAPBridgedPlugin {
         #endif
     }
     private func locked<T>(_ body: () -> T) -> T { lock.lock(); defer { lock.unlock() }; return body() }
+
+    /// `GezelNativeRuntime.willRunModelNotification`, named rather than imported
+    /// so this plugin still builds against a staged runtime that predates it.
+    static let modelWillRun = Notification.Name("GezelRuntimeWillRunModel")
+
+    /// Unloads the query model; the next search loads it again. A search in
+    /// progress finishes first, since this runs on the encoder's queue.
+    private func releaseEncoder(wait: Bool) {
+        #if canImport(GezelSpeech)
+        let release = { [self] in
+            locked {
+                if let engine { gezel_speech_release(engine) }
+                warm = nil
+            }
+        }
+        if wait { encoder.sync(execute: release) } else { encoder.async(execute: release) }
+        #endif
+    }
 
     @objc public func info(_ call: CAPPluginCall) {
         // Capacitor serves app files at /_capacitor_file_<absolute path>, honoring Range.
@@ -188,13 +215,6 @@ public final class GezelKnowledgePlugin: CAPPlugin, CAPBridgedPlugin {
         }
         store.cancel()
         // The query model holds hundreds of megabytes; load it again on the next search.
-        encoder.async { [self] in
-            #if canImport(GezelSpeech)
-            locked {
-                if let engine { gezel_speech_release(engine) }
-                warm = nil
-            }
-            #endif
-        }
+        releaseEncoder(wait: false)
     }
 }

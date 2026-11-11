@@ -625,6 +625,65 @@ describe('ChatManager — fixed-function gezels', () => {
     }, 30_000);
   });
 
+  describe('a video gezel given a picture', () => {
+    async function makeVideoGezel(requiresInputImage = false) {
+      const gezel = await store.createGezel({
+        name: 'Lumière',
+        role: 'Video generator',
+        frontmatter: {
+          fixedFunction: {
+            tool: 'generate_video',
+            promptKey: 'prompt',
+            ...(requiresInputImage ? { requiresInputImage: true } : {}),
+          },
+        },
+      });
+      await store.writeConfig({ provider: 'copilot', videoGenerationConfirmation: 'always-allow' });
+      return { gezel, session: await manager.ensureOrCreateSession({ gezelId: gezel.id }) };
+    }
+
+    async function attachPicture(name: string): Promise<string> {
+      const engine = await svc.context.imageProvider.current();
+      const { png } = await engine.generate({ prompt: name, width: 32, height: 24 });
+      const path = `prompts/2026-11-09-0001/message_files/${name}.png`;
+      await store.writeProjectArtifactBinary('default', path, png);
+      return `![${name}](artifacts/${path})`;
+    }
+
+    it('animates the attached picture and keeps its markdown out of the prompt', async () => {
+      const { session } = await makeVideoGezel();
+      const reply = await manager.send(
+        session.id,
+        `${await attachPicture('cat')}\n\nthe cat turns its head and blinks, the camera drifting slowly closer as the afternoon light shifts across the windowsill and dust floats in the beam`,
+      );
+      expect(reply.toolCalls?.[0]?.success).toBe(true);
+      const args = reply.toolCalls?.[0]?.argsFull ?? '';
+      expect(args).not.toContain('![cat]');
+      expect(args).toContain('prompts/2026-11-09-0001/message_files/cat.png');
+      expect(args).toContain('requireImageToVideo');
+      expect(reply.content).toMatch(/^Animated your picture into a \d+×\d+ video with /);
+      const engine = (await svc.context.videoProvider.current()) as unknown as {
+        lastInputImageBytes: number;
+      };
+      expect(engine.lastInputImageBytes).toBeGreaterThan(0);
+    }, 30_000);
+
+    it('moves a picture sent without words gently instead of inventing a scene', async () => {
+      const { session } = await makeVideoGezel();
+      const reply = await manager.send(session.id, await attachPicture('lake'));
+      expect(reply.toolCalls?.[0]?.argsFull ?? '').toContain('the camera slowly pushes in');
+    }, 30_000);
+
+    it('turns away a message without a picture when it only animates', async () => {
+      const { session } = await makeVideoGezel(true);
+      const reply = await manager.send(session.id, 'a waterfall at dawn');
+      expect(reply.content).toBe(
+        'Nothing to animate yet. Attach a picture, then say how it should move.',
+      );
+      expect(reply.toolCalls).toBeUndefined();
+    }, 30_000);
+  });
+
   it('does not write about.md for fixed-function gezels', async () => {
     const gezel = await store.createGezel(makeWriteDocFf());
 

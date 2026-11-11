@@ -234,7 +234,7 @@ export function AmbientDashboardCard() {
     <SettingsSection
       id="settings-ambient-display"
       title="Ambient display"
-      hint="When on, your meester composes a dashboard of what moved across your projects — roughly once an hour while the workshop changes — and renders it as an image made to be shown as a wallpaper or lock screen. Images land in the ambient folder; the newest one is always available as latest.png."
+      hint="When on, your meester composes a dashboard of what moved across your projects — roughly once an hour while work is moving — and renders it as an image made to be shown as a wallpaper or lock screen. Images land in the ambient folder; the newest one is always available as latest.png."
     >
       <SettingCheck
         label="Generate an ambient dashboard"

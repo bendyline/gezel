@@ -112,10 +112,12 @@ export const FixedFunctionConfigSchema = z.object({
   /** Defaults merged into every call; user text on `promptKey` always wins. */
   defaults: z.record(z.string(), z.unknown()).optional(),
   /**
-   * `generate_image` only: the gezel changes a picture it is given. The
-   * pictures attached to the message, else the one it made last in the
-   * thread, go to the tool as `inputImages`; a message with neither is
-   * refused rather than drawn from the words alone.
+   * The gezel works on a picture it is given. For `generate_image` it
+   * changes it: the pictures attached to the message, else the one it made
+   * last in the thread, go to the tool as `inputImages`. For
+   * `generate_video` it animates the first picture attached. A message
+   * without one is refused rather than drawn from the words alone. (A video
+   * gezel without the flag still animates a picture it is sent.)
    */
   requiresInputImage: z.boolean().optional(),
 });
@@ -601,6 +603,11 @@ export const GroundingEvidenceSchema = z.object({
   tool: z.string().optional(),
   /** The start of what the model saw, for a hover card. */
   excerpt: z.string().max(800).optional(),
+  /**
+   * The query that calculated it, for a table query: the person sees the
+   * working behind a number instead of taking a sum on trust.
+   */
+  query: z.string().max(2000).optional(),
 });
 export type GroundingEvidence = z.infer<typeof GroundingEvidenceSchema>;
 
@@ -924,7 +931,8 @@ const ChatMessageObject = z.object({
    *   thread's gezel tells the owner what was made, with the files it wrote
    *   as `referencedFiles` and the finished one as `deliverable`.
    * - `'crew-introduction'` — a gezel was hired for a task launched from
-   *   this thread; the thread's gezel introduces them before they start.
+   *   this thread, or by this thread's gezel in conversation; the thread
+   *   introduces them.
    *
    * UI renders these as muted bubbles; the model sees them as normal
    * assistant turns (the role label is what matters to the API).
@@ -1704,6 +1712,17 @@ const ChatEventVariants = [
     type: z.literal('project_deleted'),
     projectId: z.string(),
     name: z.string(),
+  }),
+  /**
+   * The daemon changed a project on its own (today: moved it to a newer
+   * version of its app). Emitted on the project + global streams so an open
+   * project view refetches and its Output page reloads. Not a renderable
+   * timeline event; the chat surfaces ignore it.
+   */
+  z.object({
+    type: z.literal('project_updated'),
+    projectId: z.string(),
+    reason: z.enum(['project-type']).optional(),
   }),
   /**
    * A task the owner launched from a chat thread finished and its wrap-up

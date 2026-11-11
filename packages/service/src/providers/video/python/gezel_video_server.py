@@ -44,7 +44,7 @@ import threading
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def log(msg: str) -> None:
@@ -131,7 +131,9 @@ class Engine:
         vae_dtype: Optional[str] = None,
         audio: bool = False,
         sigmas: Optional[List[float]] = None,
+        memory_trace: bool = False,
     ) -> None:
+        self.memory_trace = memory_trace
         self.model_dir = model_dir
         self.family = family
         self.accelerator = accelerator
@@ -336,12 +338,20 @@ class Engine:
         # serves both t2v and i2v, so we don't reload 47 GB just to switch.
         if self._pipe is not None and self._pipe_sig == sig:
             return self._pipe
+        # Let go of the other pipeline first: building beside it held both
+        # sets of weights at once, twice the memory the render was admitted for.
+        if self._pipe is not None:
+            self._pipe = None
+            self._pipe_sig = None
+            _release_device_memory()
         # The TS warm-up status parser matches "loading <family> <kind> pipeline".
         log(f"loading {self.family} {kind} pipeline ({sig}) on {self._device()} …")
         self._pipe = self._build_pipeline(pipe_class)
         self._pipe_sig = sig
         self._ltx_condition = is_condition
         log("pipeline ready")
+        if self.memory_trace:
+            _log_component_bytes(self._pipe)
         return self._pipe
 
     # ── generation ────────────────────────────────────────────────────
@@ -379,10 +389,14 @@ class Engine:
                 generator = torch.Generator(device=device if device != "mps" else "cpu")
                 generator = generator.manual_seed(int(seed))
 
+            trace = _MemoryTrace(self.accelerator) if self.memory_trace else None
+
             def on_step(_pipe, step_index, _timestep, callback_kwargs):
                 # diffusers calls this after each denoising step; emit a
                 # line the TS side parses into onProgress.
                 log(f"step {step_index + 1}/{steps}")
+                if trace is not None and step_index + 1 >= steps:
+                    trace.enter("decode")
                 return callback_kwargs
 
             kwargs: Dict[str, Any] = dict(
@@ -408,11 +422,29 @@ class Engine:
             if generator is not None:
                 kwargs["generator"] = generator
             if want_i2v:
-                kwargs["image"] = _decode_image(input_image_b64)
-            if self.family == "ltx2" and self.accelerator != "cuda":
-                _set_vae_tiling(pipe, width * height > LTX2_TILE_ABOVE_PIXELS)
+                kwargs["image"] = _decode_image(input_image_b64, (width, height))
+            # The daemon decides tiling from the same memory price it admitted
+            # the render with (core `chooseVideoVaeDecode`); CUDA always tiles.
+            vae_tiling = req.get("vaeTiling")
+            if self.accelerator != "cuda":
+                if isinstance(vae_tiling, bool):
+                    _set_vae_tiling(pipe, vae_tiling)
+                elif self.family == "ltx2":
+                    _set_vae_tiling(pipe, width * height > LTX2_TILE_ABOVE_PIXELS)
 
-            result = pipe(**kwargs)
+            if trace is not None:
+                log(f"memory job {width}x{height}x{num_frames}")
+                trace.start("encode")
+                _enter_sample_after_prompt(pipe, trace)
+            try:
+                result = pipe(**kwargs)
+            except BaseException:
+                if trace is not None:
+                    trace.finish()
+                raise
+            finally:
+                if trace is not None:
+                    pipe.__dict__.pop("encode_prompt", None)
             frames = result.frames[0]
             # LTX-2 also returns a synchronized audio waveform [B, C, samples].
             audio = getattr(result, "audio", None)
@@ -420,20 +452,26 @@ class Engine:
 
         # Encode to mp4 in a temp file (the encoders want a path), read the
         # bytes back, and pull a PNG poster from the first frame.
-        with tempfile.TemporaryDirectory() as tmp:
-            out_path = os.path.join(tmp, "out.mp4")
-            if self.audio and audio is not None:
-                # Mux the LTX-2 audio track alongside the frames.
-                _encode_video_with_audio()(
-                    video=frames,
-                    fps=fps,
-                    audio=audio[0].float().cpu(),
-                    audio_sample_rate=audio_sample_rate,
-                    output_path=out_path,
-                )
-            else:
-                _export_silent_video(frames, out_path, fps)
-            video_bytes = Path(out_path).read_bytes()
+        if trace is not None:
+            trace.enter("mux")
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                out_path = os.path.join(tmp, "out.mp4")
+                if self.audio and audio is not None:
+                    # Mux the LTX-2 audio track alongside the frames.
+                    _encode_video_with_audio()(
+                        video=frames,
+                        fps=fps,
+                        audio=audio[0].float().cpu(),
+                        audio_sample_rate=audio_sample_rate,
+                        output_path=out_path,
+                    )
+                else:
+                    _export_silent_video(frames, out_path, fps)
+                video_bytes = Path(out_path).read_bytes()
+        finally:
+            if trace is not None:
+                trace.finish()
 
         poster_b64 = _poster_png_b64(frames[0])
         return {
@@ -539,11 +577,181 @@ def _encode_video_with_audio():  # noqa: ANN202 - the diffusers muxer
     return encode_video
 
 
-def _decode_image(b64: str):  # noqa: ANN201 - PIL image
-    from PIL import Image
+def _decode_image(b64: str, size: Optional[Tuple[int, int]] = None):  # noqa: ANN201 - PIL image
+    """The picture to animate, center-cropped and resized to the clip's size
+    when given one: the pipelines stretch a picture of another shape."""
+    from PIL import Image, ImageOps
 
     raw = base64.b64decode(b64)
-    return Image.open(io.BytesIO(raw)).convert("RGB")
+    image = Image.open(io.BytesIO(raw)).convert("RGB")
+    if size and image.size != size:
+        image = ImageOps.fit(image, size, Image.LANCZOS)
+    return image
+
+
+def _release_device_memory() -> None:
+    """Return freed tensors to the device so the next pipeline has the room."""
+    import gc
+
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+    except Exception:  # noqa: BLE001 - best effort
+        pass
+
+
+class _MemoryTrace:
+    """Device-memory peaks per phase of one render (``--memory-trace``).
+
+    The video bench reads one peak for a whole clip; these lines say which
+    phase set it, so the estimator's encode / sample / decode terms can be
+    fitted apart. CUDA has an exact peak counter, reset at each phase. MPS
+    has only a current reading (``driver_allocated_memory``, which includes
+    the allocator's cache), so a thread polls it every 100 ms. The process's
+    lifetime maximum resident size is logged beside it on every backend.
+    """
+
+    POLL_SECONDS = 0.1
+
+    def __init__(self, accelerator: str) -> None:
+        self.accelerator = accelerator
+        self.phase: Optional[str] = None
+        self.peak = 0
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def _reading(self) -> int:
+        import torch
+
+        if self.accelerator == "cuda":
+            return int(torch.cuda.max_memory_reserved())
+        if self.accelerator == "mps":
+            return int(torch.mps.driver_allocated_memory())
+        return 0
+
+    def _poll(self) -> None:
+        while not self._stop.wait(self.POLL_SECONDS):
+            try:
+                value = self._reading()
+            except Exception:  # noqa: BLE001 - a trace never fails a render
+                return
+            with self._lock:
+                self.peak = max(self.peak, value)
+
+    def start(self, phase: str) -> None:
+        self._reset(phase)
+        if self.accelerator == "mps":
+            self._thread = threading.Thread(target=self._poll, daemon=True)
+            self._thread.start()
+
+    def enter(self, phase: str) -> None:
+        if phase == self.phase:
+            return
+        self._report()
+        self._reset(phase)
+
+    def finish(self) -> None:
+        """Stop polling and report the last phase. Safe to call twice."""
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=1)
+            self._thread = None
+        self._report()
+        self.phase = None
+
+    def _reset(self, phase: str) -> None:
+        if self.accelerator == "cuda":
+            try:
+                import torch
+
+                torch.cuda.reset_peak_memory_stats()
+            except Exception:  # noqa: BLE001
+                pass
+        with self._lock:
+            self.phase = phase
+            self.peak = 0
+        try:
+            value = self._reading()
+        except Exception:  # noqa: BLE001
+            value = 0
+        with self._lock:
+            self.peak = max(self.peak, value)
+
+    def _report(self) -> None:
+        if self.phase is None:
+            return
+        try:
+            value = self._reading()
+        except Exception:  # noqa: BLE001
+            value = 0
+        with self._lock:
+            peak = max(self.peak, value)
+        log(
+            f"memory phase={self.phase} device_peak={peak} "
+            f"process_max={_process_max_resident_bytes()} accel={self.accelerator}"
+        )
+
+
+def _enter_sample_after_prompt(pipe, trace: _MemoryTrace) -> None:  # noqa: ANN001
+    """The text encoder runs before the first step; sampling starts when it returns.
+
+    The wrapper sits on the instance for this one call, so a pipeline without
+    ``encode_prompt`` simply reports encoding and sampling as one phase.
+    """
+    original = getattr(pipe, "encode_prompt", None)
+    if original is None:
+        return
+
+    def encode_prompt(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        out = original(*args, **kwargs)
+        trace.enter("sample")
+        return out
+
+    pipe.__dict__["encode_prompt"] = encode_prompt
+
+
+def _process_max_resident_bytes() -> int:
+    """Lifetime maximum resident size: bytes on macOS, KiB on Linux."""
+    try:
+        import resource
+
+        peak = int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)
+    except Exception:  # noqa: BLE001 - not on Windows
+        return 0
+    return peak if sys.platform == "darwin" else peak * 1024
+
+
+def _log_component_bytes(pipe) -> None:  # noqa: ANN001
+    """Each loaded component's weights at the precision they were loaded in."""
+    parts = []
+    for name, component in getattr(pipe, "components", {}).items():
+        params = getattr(component, "parameters", None)
+        if not callable(params):
+            continue
+        try:
+            total = sum(p.numel() * p.element_size() for p in params())
+            total += sum(b.numel() * b.element_size() for b in component.buffers())
+        except Exception:  # noqa: BLE001
+            continue
+        parts.append(f"{name}={total}")
+    log(f"memory components {' '.join(parts)}")
+
+
+def _log_versions() -> None:
+    """The library versions a measured constant was taken with."""
+    found = []
+    for module in ("torch", "diffusers", "transformers", "accelerate"):
+        try:
+            found.append(f"{module}={__import__(module).__version__}")
+        except Exception:  # noqa: BLE001
+            found.append(f"{module}=missing")
+    log(f"memory versions {' '.join(found)}")
 
 
 def _poster_png_b64(frame: Any) -> str:
@@ -634,6 +842,11 @@ def main() -> int:
         type=_parse_sigmas,
         help="comma-separated fixed denoising schedule (distilled checkpoints)",
     )
+    parser.add_argument(
+        "--memory-trace",
+        action="store_true",
+        help="log per-phase device-memory peaks and component sizes (calibration)",
+    )
     args = parser.parse_args()
 
     # Belt-and-suspenders: the supervisor sets these too, but pin offline
@@ -653,7 +866,10 @@ def main() -> int:
         vae_dtype=args.vae_dtype,
         audio=args.audio,
         sigmas=args.sigmas,
+        memory_trace=args.memory_trace,
     )
+    if args.memory_trace:
+        _log_versions()
     server = ThreadingHTTPServer((args.host, args.port), make_handler(engine))
     log(
         f"listening on http://{args.host}:{args.port} (family={args.family}, "

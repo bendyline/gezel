@@ -16,12 +16,12 @@ const SCOPES: { id: FolderScope; label: string; help: string }[] = [
   {
     id: 'documents',
     label: 'Documents library',
-    help: 'The shared documents folder crew members read and write across projects.',
+    help: 'The shared documents folder Gezel reads and writes across projects.',
   },
   {
     id: 'gezels',
     label: 'Crew',
-    help: 'Each gezel’s about, threads, memories, and icons. Installed toolsets (npm packages) stay on this device.',
+    help: 'Each crew member’s about, threads, memories, and icons. Installed toolsets (npm packages) stay on this device.',
   },
   {
     id: 'projects',

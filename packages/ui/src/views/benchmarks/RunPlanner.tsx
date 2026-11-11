@@ -35,9 +35,9 @@ const GENERALIST_CHOICES = [
   {
     value: undefined,
     label: 'Default',
-    hint: 'Whatever this install would do: one gezel for hosted models, a crew for on-device ones.',
+    hint: 'Whatever this install would do: one generalist for hosted models, a specialist per step for on-device ones.',
   },
-  { value: 'on', label: 'On', hint: 'One gezel owns each task from start to finish.' },
+  { value: 'on', label: 'On', hint: 'One generalist owns each task from start to finish.' },
   { value: 'off', label: 'Off', hint: 'Each step goes to the specialist its recipe names.' },
 ] as const;
 

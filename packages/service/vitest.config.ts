@@ -76,6 +76,10 @@ const INTEGRATION_SUITES = [
   // Script runner sandbox spawns + nested runs.
   'src/scripts/*.test.ts',
   'src/workspace/derive.test.ts',
+  // pnpm 11 installs into a folder with no node_modules before `pnpm run`, so
+  // each approved run here is a sandboxed install plus a script: ~0.4 s warm,
+  // past 5 s cold under the full suite (2026-11-11).
+  'src/workspace/scripts.test.ts',
   'src/tasks/manager-scripts.test.ts',
   'src/gezels/ensure.test.ts',
 ];

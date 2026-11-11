@@ -59,6 +59,28 @@ export function floatOpt(name: string, v: string | undefined): number | undefine
   return n;
 }
 
+/** A local picture file as the base64 a generate request carries. */
+export async function readPictureOpt(path: string): Promise<{ data: string; mimeType: string }> {
+  let data: Buffer;
+  try {
+    data = await readFile(path);
+  } catch (err) {
+    throw new CliError(
+      `could not read --image ${path}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const ext = path.toLowerCase().split('.').pop();
+  const mimeType =
+    ext === 'jpg' || ext === 'jpeg'
+      ? 'image/jpeg'
+      : ext === 'webp'
+        ? 'image/webp'
+        : ext === 'gif'
+          ? 'image/gif'
+          : 'image/png';
+  return { data: data.toString('base64'), mimeType };
+}
+
 /**
  * Fetch a freshly-generated artifact's bytes from the daemon and write
  * them to a local file. Defaults the destination to the artifact's own

@@ -14,8 +14,8 @@ test.describe('craftbooks', () => {
     await expect(page.getByTestId('craftbooks-view')).toBeVisible();
 
     const workspace = page.getByTestId('craftbooks-view');
-    const library = page.getByRole('complementary', { name: 'Craftbook library' });
-    const editor = page.getByRole('region', { name: 'Craftbook editor' });
+    const library = page.getByRole('complementary', { name: 'Plan library' });
+    const editor = page.getByRole('region', { name: 'Plan editor' });
     const [workspaceBox, libraryBox, editorBox] = await Promise.all([
       workspace.boundingBox(),
       library.boundingBox(),
@@ -52,7 +52,7 @@ test.describe('craftbooks', () => {
         area: 'craftbooks',
         clip: editor,
         selector: '.craftbook-tab [data-testid=craftbook-editor]',
-        description: 'Craftbook editor — the seeded "Fixture Craftbook" steps',
+        description: 'Plan editor — the seeded "Fixture Craftbook" steps',
       });
     }
   });

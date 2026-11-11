@@ -76,7 +76,7 @@ export function pathsEqual(a: string, b: string): boolean {
 
 function defaultAbout(name: string, wd: string): string {
   // Must be ≥ 60 chars (CreateProjectRequestSchema.about.min(60)).
-  return `${name} is a workspace opened in VSCode at ${wd}. Gezels working here treat the folder as the project root for code edits, tasks, and artifacts. Update this description from the gezel desktop app when the project takes shape.`;
+  return `${name} is a workspace opened in VSCode at ${wd}. Gezel treats the folder as the project root for code edits, tasks, and artifacts. Update this description from the gezel desktop app when the project takes shape.`;
 }
 
 function defaultMission(name: string): string {

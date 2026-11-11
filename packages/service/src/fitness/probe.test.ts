@@ -34,6 +34,10 @@ interface ScriptedTurn {
   streamThenTimeout?: { chunks: string[]; gapMs: number };
 }
 
+/** A reply long enough to read as language, for turns whose text is beside the point. */
+const STORY =
+  'The journeyman planed the last board, fitted the drawer, and stood back to see the masterpiece the guild would judge.';
+
 /** Test clock the probe and the fake session share, so delta spans are real. */
 class FakeClock {
   ms = 1_700_000_000_000;
@@ -163,10 +167,7 @@ const VALID_CALL: ExternalToolCall = {
 
 describe('runFitnessProbe', () => {
   it('happy path: two turns, admitted record with measured t/s and staleness keys', async () => {
-    const session = new FakeSession([
-      { text: 'a story about a carpenter', tokensPerSec: 25.2 },
-      { calls: [VALID_CALL] },
-    ]);
+    const session = new FakeSession([{ text: STORY, tokensPerSec: 25.2 }, { calls: [VALID_CALL] }]);
     const record = await runFitnessProbe(
       deps({ getProviderForModel: async () => fakeProvider(session) }),
       { provider: 'llama-cpp', modelId: 'gemma4-e4b-q4', trigger: 'manual' },
@@ -185,7 +186,7 @@ describe('runFitnessProbe', () => {
   it('records warm short-prompt speed plus practical 20K-context TTFT, prefill, and decode', async () => {
     const session = new FakeSession([
       {
-        text: 'short story',
+        text: STORY,
         tokensPerSec: 130,
         promptTokens: 349,
         completionTokens: 180,
@@ -193,7 +194,7 @@ describe('runFitnessProbe', () => {
         ttftMs: 400,
       },
       {
-        text: 'representative story',
+        text: STORY,
         tokensPerSec: 25,
         promptTokens: 19_804,
         completionTokens: 160,
@@ -300,7 +301,7 @@ describe('runFitnessProbe', () => {
 
   it('invalid tool args → probed but not admitted (toolRoundTrip fails)', async () => {
     const session = new FakeSession([
-      { text: 'story', tokensPerSec: 20 },
+      { text: STORY, tokensPerSec: 20 },
       { calls: [{ id: 'c', name: 'write_file', arguments: '{broken proeve' }] },
     ]);
     const record = await runFitnessProbe(
@@ -316,7 +317,7 @@ describe('runFitnessProbe', () => {
 
   it('prose instead of a call → probed, toolRoundTrip fail quoting the prose', async () => {
     const session = new FakeSession([
-      { text: 'story', tokensPerSec: 20 },
+      { text: STORY, tokensPerSec: 20 },
       { text: 'I am unable to create files.' },
     ]);
     const record = await runFitnessProbe(
@@ -357,7 +358,7 @@ describe('runFitnessProbe', () => {
 
   it('observed thinking with no manifest budget fails the reasoningBudget check', async () => {
     const session = new FakeSession([
-      { text: 'story', tokensPerSec: 20, reasoning: 'let me think…' },
+      { text: STORY, tokensPerSec: 20, reasoning: 'let me think…' },
       { calls: [VALID_CALL] },
     ]);
     const record = await runFitnessProbe(
@@ -373,7 +374,7 @@ describe('runFitnessProbe', () => {
   });
 
   it('mlx probes ask for the mlx launch ctx and ignore GEZEL_LLAMA_NUM_CTX', async () => {
-    const session = new FakeSession([{ text: 'story', tokensPerSec: 42 }, { calls: [VALID_CALL] }]);
+    const session = new FakeSession([{ text: STORY, tokensPerSec: 42 }, { calls: [VALID_CALL] }]);
     const asked: string[] = [];
     const record = await runFitnessProbe(
       deps({
@@ -401,7 +402,7 @@ describe('runFitnessProbe', () => {
   });
 
   it('ds4 probes use the ds4 launch ctx and ignore GEZEL_LLAMA_NUM_CTX', async () => {
-    const session = new FakeSession([{ text: 'story', tokensPerSec: 42 }, { calls: [VALID_CALL] }]);
+    const session = new FakeSession([{ text: STORY, tokensPerSec: 42 }, { calls: [VALID_CALL] }]);
     const asked: string[] = [];
     const record = await runFitnessProbe(
       deps({
@@ -426,7 +427,7 @@ describe('runFitnessProbe', () => {
   });
 
   it('context fit uses min(GGUF ctx, launch ctx): small GGUF window fails the floor', async () => {
-    const session = new FakeSession([{ text: 'story', tokensPerSec: 20 }, { calls: [VALID_CALL] }]);
+    const session = new FakeSession([{ text: STORY, tokensPerSec: 20 }, { calls: [VALID_CALL] }]);
     const record = await runFitnessProbe(
       deps({
         getProviderForModel: async () => fakeProvider(session),
@@ -477,7 +478,7 @@ describe('runFitnessProbe — a slow model that never finishes', () => {
   });
 
   it('scales turn budgets by the reasoning allowance the model was licensed', async () => {
-    const session = new FakeSession([{ text: 'story', tokensPerSec: 8 }, { calls: [VALID_CALL] }]);
+    const session = new FakeSession([{ text: STORY, tokensPerSec: 8 }, { calls: [VALID_CALL] }]);
     await runFitnessProbe(
       deps({
         getProviderForModel: async () => fakeProvider(session),
@@ -492,7 +493,7 @@ describe('runFitnessProbe — a slow model that never finishes', () => {
   });
 
   it('leaves the floor alone for a model with no reasoning budget', async () => {
-    const session = new FakeSession([{ text: 'story', tokensPerSec: 40 }, { calls: [VALID_CALL] }]);
+    const session = new FakeSession([{ text: STORY, tokensPerSec: 40 }, { calls: [VALID_CALL] }]);
     await runFitnessProbe(
       deps({
         getProviderForModel: async () => fakeProvider(session),
@@ -508,7 +509,7 @@ describe('runFitnessProbe — a slow model that never finishes', () => {
     const clock = new FakeClock();
     const session = new FakeSession(
       [
-        { text: 'short story', tokensPerSec: 12 },
+        { text: STORY, tokensPerSec: 12 },
         {
           streamThenTimeout: {
             chunks: Array.from({ length: 20 }, () => 'y'.repeat(400)),

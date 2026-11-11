@@ -81,6 +81,7 @@ import {
   type CodexPermissionMode,
   type ExpectedDeliverable,
   type FactualLookupPreference,
+  type GeneralistMode,
   type GezelConfig,
   type GezelDetail,
   type GezelGender,
@@ -91,6 +92,7 @@ import {
   KeyedLock,
   type ModelTier,
   NEW_THREAD_TITLE,
+  type NewProjectMode,
   type ProjectFileEntry,
   type Question,
   type ScriptMeta,
@@ -137,7 +139,7 @@ import {
   pronounFormsForGender,
   redactCredentials,
   resolveAsk,
-  resolveGeneralistKickoff,
+  resolveNewProjectMode,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
   roleDeliverableScripts,
@@ -182,7 +184,7 @@ import {
 import { SCRIPT_DENY_NET_BOUNDARY_ENV, SCRIPT_NETWORK_ALLOWED_ENV } from '@bendyline/gezel-mcp';
 import { gezelPaths } from '@bendyline/gezel/paths';
 import type { SessionQueueState } from '@bendyline/gezel/queue-status';
-import { SessionSendQueue } from '@bendyline/gezel/runtime';
+import { SessionSendQueue, isProviderRateLimitError } from '@bendyline/gezel/runtime';
 import { createAppToolRelayTransport } from '../app-tools/relay-mcp-transport.js';
 import {
   type AppToolBinding,
@@ -443,7 +445,7 @@ import {
 } from './context-forcefit.js';
 import { CraftbookOfferCache } from './craftbook-offer-cache.js';
 import { triggerCandidatesFromListing, triggerPhrasePlan } from './craftbook-trigger-route.js';
-import { crewIntroductionText } from './crew-introduction.js';
+import { crewHireText, crewIntroductionText } from './crew-introduction.js';
 import {
   isExpectedBinaryDocumentDeliverablePath,
   isExpectedImageDeliverablePath,
@@ -460,10 +462,13 @@ import {
   formatExpectedDeliverableAnnotation,
   normalizeExpectedDeliverablePath,
 } from './expected-deliverable.js';
+import { fanoutShardRecoveryText, openFanoutShardStep } from './fanout-shard-recovery.js';
 import { fileHandoffIntentKey, staleWorkspaceFileRequest } from './file-handoff-intent.js';
 import {
   IMAGE_EDITOR_NEEDS_INSTRUCTION,
   IMAGE_EDITOR_NEEDS_PICTURE,
+  VIDEO_ANIMATE_DEFAULT_PROMPT,
+  VIDEO_ANIMATOR_NEEDS_PICTURE,
   cleanGenerativePrompt,
   expandVideoPrompt,
   fixedFunctionEditSources,
@@ -477,10 +482,12 @@ import {
   checkpointGapForStep,
   classifyExecutionTierFor,
   isContextOverflowError,
+  renderRateLimitRetry,
   renderWriteBailContinuation,
   resolveExecutionModelFor,
   sessionContextPoisoned,
 } from './generalist-continuity.js';
+import { handoffRetryDelayMs } from './handoff-retry-delay.js';
 import {
   IMG2IMG_EDIT_STRENGTH,
   classifyImageFollowUp,
@@ -1387,6 +1394,10 @@ function providerQueueIsBusy(provider: LLMProvider): boolean {
   return Boolean(
     snapshot && snapshot.running + snapshot.queuedInteractive + snapshot.queuedBackground > 0,
   );
+}
+
+function handoffPassKey(taskRef: string, stepId: string): string {
+  return `${taskRef}\u0000${stepId}`;
 }
 
 export class ChatManager extends LocalEngineRuntime {
@@ -2440,12 +2451,88 @@ export class ChatManager extends LocalEngineRuntime {
       if (record.stepActivationId !== args.previousActivationAt) continue;
       if (!this.inflight.has(sessionId)) continue;
       bindStepActivation(record, args.activationAt);
+      // The handoff whose turn keeps the repair keeps the pass with it.
+      const claim = this.handoffPasses.get(handoffPassKey(args.taskRef, args.stepId));
+      if (claim?.sessionId === sessionId && claim.activation === args.previousActivationAt) {
+        claim.activation = args.activationAt;
+      }
       void this.store.writeSession(record).catch((err) => {
         log.warn(
           `session ${sessionId.slice(0, 8)}: persisting adopted step activation failed: ${err instanceof Error ? err.message : err}`,
         );
       });
     }
+  }
+
+  /**
+   * The handoff driving each task step's current pass, keyed by task ref and
+   * step id. A gate loop-back re-activates a step under a new dispatch while an
+   * earlier handoff's turn may still run in the same session (a generalist
+   * owner keeps one), so "the step is still active" no longer says whether
+   * that earlier handoff failed.
+   */
+  private readonly handoffPasses = new Map<
+    string,
+    { token: symbol; sessionId: string; activation: string | undefined }
+  >();
+
+  private claimHandoffPass(
+    taskRef: string,
+    stepId: string,
+    sessionId: string,
+    activation: string | undefined,
+  ): symbol {
+    const token = Symbol(`${taskRef}/${stepId}`);
+    this.handoffPasses.set(handoffPassKey(taskRef, stepId), { token, sessionId, activation });
+    return token;
+  }
+
+  private releaseHandoffPass(taskRef: string, stepId: string, token: symbol): void {
+    const key = handoffPassKey(taskRef, stepId);
+    if (this.handoffPasses.get(key)?.token === token) this.handoffPasses.delete(key);
+  }
+
+  /**
+   * Whether the handoff holding `token` still drives `task`'s current pass of
+   * `stepId`: no newer handoff claimed the step, and the step has not been
+   * re-activated since, except by a gate self-loop its own turn adopted.
+   */
+  private ownsHandoffPass(taskRef: string, stepId: string, token: symbol, task: Task): boolean {
+    const claim = this.handoffPasses.get(handoffPassKey(taskRef, stepId));
+    if (claim?.token !== token) return false;
+    const current = currentStepActivation(task, stepId);
+    return claim.activation === undefined || current === undefined || current === claim.activation;
+  }
+
+  /**
+   * TaskRunner's cancel for a dispatch it judged superseded. One session can
+   * carry several of a task's dispatches (a generalist owner's one transcript,
+   * a same-gezel continuation), and the runner keeps an earlier pass's
+   * dispatch while that session stays busy. When the session has since been
+   * re-pinned to another step or pass, its live turn serves that one, and
+   * cancelling it would abort healthy work for a dispatch that already ended.
+   */
+  async cancelSupersededHandoff(
+    sessionId: string,
+    pass?: { taskRef: string; stepId: string; activationAt?: string },
+  ): Promise<{ cancelled: boolean }> {
+    const record = this.states.get(sessionId)?.record;
+    if (
+      pass &&
+      record?.taskRef === pass.taskRef &&
+      record.stepId !== undefined &&
+      (record.stepId !== pass.stepId ||
+        (pass.activationAt !== undefined &&
+          record.stepActivationId !== undefined &&
+          record.stepActivationId !== pass.activationAt))
+    ) {
+      log.debug(
+        `[chat] session ${sessionId.slice(0, 8)} now serves ${record.taskRef}/${record.stepId}; ` +
+          `its turn is not cancelled for the superseded ${pass.stepId} dispatch`,
+      );
+      return { cancelled: false };
+    }
+    return this.cancelInflight(sessionId, 'task-superseded');
   }
 
   /**
@@ -2640,6 +2727,21 @@ export class ChatManager extends LocalEngineRuntime {
    */
   isSessionTurnPending(sessionId: string): boolean {
     return this.inflight.has(sessionId) || this.sendQueue.depth(sessionId) > 0;
+  }
+
+  /**
+   * True while any session in the project is running a turn or holds an
+   * unstarted send. An app update waits for this to clear: it swaps the
+   * scripts a turn may be calling.
+   */
+  isProjectTurnPending(projectId: string): boolean {
+    for (const [sessionId, entry] of this.inflight) {
+      if (this.inflightSession(sessionId, entry)?.projectId === projectId) return true;
+    }
+    for (const [sessionId, state] of this.states) {
+      if (state.record.projectId === projectId && this.sendQueue.depth(sessionId) > 0) return true;
+    }
+    return false;
   }
 
   /**
@@ -4213,7 +4315,10 @@ export class ChatManager extends LocalEngineRuntime {
       !args.resumeExisting &&
       selfHandoff &&
       previous?.gezelId === args.gezelId &&
-      previous.stepId !== dispatchStepId &&
+      // A generalist owner's later pass of the SAME step (a gate loop-back)
+      // continues that transcript too. A fresh session ran beside it as a
+      // second owner on corpus-synthesis (GPT-6.1 Sol, 2026-11-10).
+      (previous.stepId !== dispatchStepId || generalistTask) &&
       // A generalist task keeps its one transcript even with a send queued
       // behind the current turn: the re-pin below waits for that queue to
       // drain, so the queued input runs under the old step before the
@@ -4456,6 +4561,14 @@ export class ChatManager extends LocalEngineRuntime {
     // UI, not as a tool-call error in the voorman's chat. Retry on "already
     // in flight" so the handoff lands even if the next gezel was mid-turn.
     const handoffSession = session;
+    const passToken = this.claimHandoffPass(
+      args.taskRef,
+      dispatchStepId,
+      handoffSession.id,
+      dispatchActivationId,
+    );
+    const ownsPass = (task: Task) =>
+      this.ownsHandoffPass(args.taskRef, dispatchStepId, passToken, task);
     this.trackBackground(
       (async () => {
         if (reusedAcrossSteps) {
@@ -4480,6 +4593,27 @@ export class ChatManager extends LocalEngineRuntime {
             await new Promise<void>((resolve) =>
               this.runAfterSessionIdle(handoffSession.id, resolve),
             );
+          }
+          // The wait can outlast this dispatch's pass: the step completed, or a
+          // gate looped the task and a newer dispatch holds the step. Re-pinning
+          // anyway told the owner the task "has advanced to `report`" while it
+          // sat on `evaluate`, and the turn fought the scope guard
+          // (content-accuracy-review, GPT-6.1 Sol, 2026-11-10).
+          const waitedTask = parsedTaskRef
+            ? await this.readEffectiveTask(parsedTaskRef.projectId, parsedTaskRef.num)
+            : null;
+          // A task that stopped meanwhile is re-dispatched by whatever resumes it.
+          if (
+            waitedTask &&
+            (taskEffectiveStatus(waitedTask) !== 'active' ||
+              waitedTask.activeStepId !== dispatchStepId ||
+              !ownsPass(waitedTask))
+          ) {
+            log.info(
+              `[chat] handoff for ${args.taskRef}/${dispatchStepId} outlived its pass while session ` +
+                `${handoffSession.id.slice(0, 8)} was busy; leaving the task to its current dispatch`,
+            );
+            return;
           }
           const live = this.states.get(handoffSession.id);
           const record =
@@ -4517,6 +4651,15 @@ export class ChatManager extends LocalEngineRuntime {
         // bad child across dozens of batches far less likely to strand the
         // host after the provider has already spent its own corrective turns.
         const maxHandoffSendAttempts = 3;
+        // A turn the model service refused for rate (HTTP 429) did not fail
+        // the step; the provider only said "slower". It is re-sent without
+        // spending bounded recovery, and the provider queue's throttle makes
+        // the re-send wait for capacity. Bounded too, so a service that never
+        // relents still ends in the normal pause for help.
+        const maxRateLimitRetries = 8;
+        let rateLimitRetries = 0;
+        let rateLimitRetryPending = false;
+        let shardLeftStepOpen = false;
         for (let attempt = 1; attempt <= maxHandoffSendAttempts; attempt += 1) {
           const gap = await checkpointGapForStep(
             this.store,
@@ -4525,12 +4668,24 @@ export class ChatManager extends LocalEngineRuntime {
             attempt,
             artifactCheckpointOutcome,
           );
-          const message =
-            attempt === 1
+          const message = rateLimitRetryPending
+            ? renderRateLimitRetry(args.taskRef, dispatchStepId)
+            : attempt === 1
               ? seed
               : requiresExactOutcome && dispatchStep?.prompt?.trim()
                 ? `The automatic handoff turn ended before fixed-action step \`${dispatchStepId}\` completed (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}).${artifactCheckpointOutcome && dispatchStep?.advanceWhen?.file ? ` The step advances only once \`${dispatchStep.advanceWhen.file}\` is written and passes its check; anything the procedure asks for before that file still counts, but the step stays open until that file exists.${gap ? ` Right now ${gap}.` : ''}` : ''} Execute the exact procedure now. Do not call \`read_task_notes\` or \`advance_task_step\`; use only the procedure's declared tools and stop after its required durable action:\n\n${dispatchStep.prompt.trim()}`
-                : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
+                : shardLeftStepOpen
+                  ? fanoutShardRecoveryText({
+                      stepId: dispatchStepId,
+                      ...(dispatchStep?.advanceWhen?.file
+                        ? { file: dispatchStep.advanceWhen.file }
+                        : {}),
+                      attempt: attempt - 1,
+                      of: maxHandoffSendAttempts - 1,
+                    })
+                  : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
+          shardLeftStepOpen = false;
+          rateLimitRetryPending = false;
           try {
             const sendStartedAt = nowIso();
             await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
@@ -4565,6 +4720,16 @@ export class ChatManager extends LocalEngineRuntime {
                 taskEffectiveStatus(afterSend) === 'active' &&
                 afterSend.activeStepId === dispatchStepId
               ) {
+                // Active again is not still active: a gate loop-back that
+                // re-entered the step began a newer pass with its own
+                // dispatch. Retrying this one spent its budget on a pass the
+                // task had judged and paused the newer one as `step_stalled`.
+                if (!ownsPass(afterSend)) {
+                  log.info(
+                    `[chat] ${args.taskRef}/${dispatchStepId}: handoff turn ended after a newer pass of the step began; that pass's dispatch carries it`,
+                  );
+                  break;
+                }
                 throw new Error(
                   `fixed-action handoff returned without completing ${args.taskRef}/${dispatchStepId}`,
                 );
@@ -4578,7 +4743,8 @@ export class ChatManager extends LocalEngineRuntime {
               if (
                 afterBail &&
                 taskEffectiveStatus(afterBail) === 'active' &&
-                afterBail.activeStepId === dispatchStepId
+                afterBail.activeStepId === dispatchStepId &&
+                ownsPass(afterBail)
               ) {
                 log.info(
                   `[chat] ${args.taskRef}/${dispatchStepId}: handoff turn ended on an immediate-write bail with the step still active — sending one continuation`,
@@ -4590,6 +4756,24 @@ export class ChatManager extends LocalEngineRuntime {
                 );
               }
             }
+            if (!requiresExactOutcome) {
+              // See fanout-shard-recovery.ts: an ordinary step waits for the
+              // stuck-step sweep, but a host and its siblings wait on a shard.
+              const openShard = await openFanoutShardStep(this.store, {
+                taskRef: args.taskRef,
+                stepId: dispatchStepId,
+                session:
+                  this.states.get(handoffSession.id)?.record ??
+                  (await this.store
+                    .getSession(handoffSession.gezelId, handoffSession.id)
+                    .catch(() => null)),
+                since: sendStartedAt,
+              });
+              if (openShard) {
+                shardLeftStepOpen = true;
+                throw new Error(openShard);
+              }
+            }
             break;
           } catch (error) {
             // A turn someone stopped on purpose (Stop, interrupt, emergency
@@ -4597,11 +4781,53 @@ export class ChatManager extends LocalEngineRuntime {
             // handoff, and re-sending it undoes the stop. Shutdown also
             // refuses every later send.
             if (this.shuttingDown || turnCancelReasonOf(error)) throw error;
-            if (attempt === maxHandoffSendAttempts) throw error;
+            // An engine that declined to start the turn needs time, not
+            // another send 40 ms later into the same refusal. The task is
+            // read after the wait, so a Stop pressed meanwhile still holds.
+            if (attempt < maxHandoffSendAttempts) {
+              const retryDelayMs = handoffRetryDelayMs(error, attempt);
+              if (retryDelayMs > 0) {
+                await new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
+                if (this.shuttingDown) throw error;
+              }
+            }
             const parsed = parseTaskRef(args.taskRef);
             const currentTask = parsed
               ? await this.readEffectiveTask(parsed.projectId, parsed.num)
               : null;
+            // Neither retried nor exhausted: the failure belongs to a pass the
+            // task left, and exhausting would pause the pass that replaced it.
+            if (
+              currentTask &&
+              taskEffectiveStatus(currentTask) === 'active' &&
+              currentTask.activeStepId === dispatchStepId &&
+              !ownsPass(currentTask)
+            ) {
+              log.info(
+                `[chat] handoff turn for ${args.taskRef}/${dispatchStepId} failed after a newer pass of the step began; not retried`,
+              );
+              return;
+            }
+            if (
+              isProviderRateLimitError(error) &&
+              rateLimitRetries < maxRateLimitRetries &&
+              currentTask &&
+              taskEffectiveStatus(currentTask) === 'active' &&
+              currentTask.activeStepId === dispatchStepId
+            ) {
+              rateLimitRetries += 1;
+              rateLimitRetryPending = true;
+              // Not a failed attempt. The provider thread is intact, so no
+              // reset: the re-send continues it once the queue admits it.
+              attempt -= 1;
+              log.warn(
+                `[chat] handoff turn for ${args.taskRef}/${dispatchStepId} was rate limited by the model service; ` +
+                  `re-sending when the provider has capacity (${rateLimitRetries}/${maxRateLimitRetries}, bounded recovery unspent): ` +
+                  `${error instanceof Error ? error.message : String(error)}`,
+              );
+              continue;
+            }
+            if (attempt === maxHandoffSendAttempts) throw error;
             if (
               !currentTask ||
               taskEffectiveStatus(currentTask) !== 'active' ||
@@ -4628,37 +4854,39 @@ export class ChatManager extends LocalEngineRuntime {
             );
           }
         }
-      })().catch(async (err) => {
-        const detail = err instanceof Error ? err.message : String(err);
-        const cancelReason = this.shuttingDown ? 'service-restart' : turnCancelReasonOf(err);
-        if (cancelReason) {
-          // Not a failed handoff, so never "paused for help". After a
-          // shutdown the task stays active and rehydrates on the next boot;
-          // otherwise whoever stopped the turn owns what happens next: Stop
-          // pauses the task, an interrupt carries on in this session, and a
-          // superseding dispatch already holds the step.
-          log.info(
-            `[chat] handoff for ${args.taskRef}/${dispatchStepId ?? '(unpinned)'} ended by ${cancelReason}; not retried`,
-          );
-          return;
-        }
-        log.error(
-          `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}): ${detail}`,
-        );
-        if (this.handoffExhausted && dispatchStepId) {
-          await this.handoffExhausted({
-            taskRef: args.taskRef,
-            stepId: dispatchStepId,
-            gezelId: args.gezelId,
-            detail,
-          }).catch((hookErr: unknown) => {
-            log.warn(
-              `[chat] handoff-exhausted handler failed for ${args.taskRef}/${dispatchStepId}:`,
-              hookErr instanceof Error ? hookErr.message : hookErr,
+      })()
+        .catch(async (err) => {
+          const detail = err instanceof Error ? err.message : String(err);
+          const cancelReason = this.shuttingDown ? 'service-restart' : turnCancelReasonOf(err);
+          if (cancelReason) {
+            // Not a failed handoff, so never "paused for help". After a
+            // shutdown the task stays active and rehydrates on the next boot;
+            // otherwise whoever stopped the turn owns what happens next: Stop
+            // pauses the task, an interrupt carries on in this session, and a
+            // superseding dispatch already holds the step.
+            log.info(
+              `[chat] handoff for ${args.taskRef}/${dispatchStepId ?? '(unpinned)'} ended by ${cancelReason}; not retried`,
             );
-          });
-        }
-      }),
+            return;
+          }
+          log.error(
+            `[chat] handoff send failed for session ${handoffSession.id} (${args.gezelId}): ${detail}`,
+          );
+          if (this.handoffExhausted && dispatchStepId) {
+            await this.handoffExhausted({
+              taskRef: args.taskRef,
+              stepId: dispatchStepId,
+              gezelId: args.gezelId,
+              detail,
+            }).catch((hookErr: unknown) => {
+              log.warn(
+                `[chat] handoff-exhausted handler failed for ${args.taskRef}/${dispatchStepId}:`,
+                hookErr instanceof Error ? hookErr.message : hookErr,
+              );
+            });
+          }
+        })
+        .finally(() => this.releaseHandoffPass(args.taskRef, dispatchStepId, passToken)),
     );
     return { sessionId: handoffSession.id };
   }
@@ -6275,7 +6503,7 @@ export class ChatManager extends LocalEngineRuntime {
           kind: 'chat.mention.fanout',
           projectId: primary.projectId,
           gezelId: primary.gezelId,
-          summary: `Mentioned ${historyTargets.length} gezel${
+          summary: `Mentioned ${historyTargets.length} crew member${
             historyTargets.length === 1 ? '' : 's'
           }`,
           details: {
@@ -10206,6 +10434,18 @@ export class ChatManager extends LocalEngineRuntime {
     if (editor && editSources.length === 0) {
       return endWithNotice(IMAGE_EDITOR_NEEDS_PICTURE, IMAGE_EDITOR_NEEDS_PICTURE);
     }
+    // A video gezel animates the first picture attached to the message. One
+    // that only animates turns away a message without a picture rather than
+    // making a clip from the words alone.
+    const animatePictures =
+      ff.tool === 'generate_video' ? fixedFunctionEditSources(userText, sessionId) : [];
+    if (
+      ff.tool === 'generate_video' &&
+      ff.requiresInputImage === true &&
+      animatePictures.length === 0
+    ) {
+      return endWithNotice(VIDEO_ANIMATOR_NEEDS_PICTURE, VIDEO_ANIMATOR_NEEDS_PICTURE);
+    }
 
     let pool: McpBridgePool;
     try {
@@ -10217,8 +10457,8 @@ export class ChatManager extends LocalEngineRuntime {
     if (!pool.hasTool(ff.tool)) {
       const stepBlock = await this.stepPolicyExcludingTool(record, ff.tool);
       const reason = stepBlock
-        ? `step "${stepBlock.stepId}" of task ${stepBlock.taskRef} does not allow ${ff.tool} (its tool policy excludes it), and this gezel can only call ${ff.tool}`
-        : `MCP tool "${ff.tool}" is not registered for this gezel — check the install or the tool's MCP server`;
+        ? `step "${stepBlock.stepId}" of task ${stepBlock.taskRef} does not allow ${ff.tool} (its tool policy excludes it), and ${gezel.name} can only call ${ff.tool}`
+        : `MCP tool "${ff.tool}" is not registered for ${gezel.name} — check the install or the tool's MCP server`;
       return endWithNotice(`${ff.tool} failed: ${reason}`, reason);
     }
 
@@ -10239,6 +10479,8 @@ export class ChatManager extends LocalEngineRuntime {
         ? await resolveFixedFunctionTaskImageArgs(this.store, record, userText)
         : null;
     let promptValue = taskImageArgs?.prompt ?? stripGezelMentions(userText);
+    // A picture's markdown is not words for the model to render.
+    if (ff.tool === 'generate_video') promptValue = stripMarkdownImages(promptValue);
     if (editor) {
       promptValue = stripMarkdownImages(promptValue);
       if (!promptValue) {
@@ -10346,12 +10588,18 @@ export class ChatManager extends LocalEngineRuntime {
     // prompt into a detailed shot using the gezel's own model. Long prompts
     // pass through untouched, and any failure falls back to the stripped
     // text — so this only ever helps, never blocks a generation.
-    if (ff.tool === 'generate_video') {
-      promptValue = await expandVideoPrompt(promptValue, (input, timeoutMs) =>
-        this.oneShotCompletion(input, timeoutMs, {
-          gezelId: record.gezelId,
-          jobLabel: `video prompt · ${gezel.name}`,
-        }),
+    if (ff.tool === 'generate_video' && animatePictures.length > 0 && !promptValue.trim()) {
+      // A picture with no words: animate it gently rather than invent a scene.
+      promptValue = VIDEO_ANIMATE_DEFAULT_PROMPT;
+    } else if (ff.tool === 'generate_video') {
+      promptValue = await expandVideoPrompt(
+        promptValue,
+        (input, timeoutMs) =>
+          this.oneShotCompletion(input, timeoutMs, {
+            gezelId: record.gezelId,
+            jobLabel: `video prompt · ${gezel.name}`,
+          }),
+        { mode: animatePictures.length > 0 ? 'animate' : 'text' },
       );
     }
     const callArgs: Record<string, unknown> =
@@ -10384,6 +10632,11 @@ export class ChatManager extends LocalEngineRuntime {
             ...refinementArgs,
             [promptKey]: promptValue,
             ...(taskImageArgs?.saveAs ? { saveAs: taskImageArgs.saveAs } : {}),
+            // An attached picture is what the person asked to animate: the
+            // route refuses rather than quietly make a clip from words.
+            ...(animatePictures[0]
+              ? { inputImage: { artifactPath: animatePictures[0] }, requireImageToVideo: true }
+              : {}),
           };
 
     let assistantText: string;
@@ -12139,7 +12392,8 @@ export class ChatManager extends LocalEngineRuntime {
   async postCrewIntroduction(
     task: Task,
     gezelId: string,
-    step: TaskCraftbookStep,
+    // The step they start on; absent for someone hired mid-step to help.
+    step: TaskCraftbookStep | undefined,
     moment: 'kickoff' | 'joined' = 'joined',
   ): Promise<string | null> {
     const thread = await findOwnerThread(this.store, task);
@@ -12161,17 +12415,9 @@ export class ChatManager extends LocalEngineRuntime {
     const members: CrewMember[] = [];
     for (const id of ids) {
       if (id === thread.gezelId || introduced.has(id)) continue;
-      const gezel = await this.store.getGezel(id).catch(() => null);
-      if (!gezel) continue;
-      const role = gezel.role?.trim() ? plainRoleTitle(gezel.role) : undefined;
-      const purpose = firstSentence(gezel.description);
-      members.push({
-        gezelId: id,
-        name: gezel.name,
-        ...(role ? { role } : {}),
-        ...(purpose ? { purpose } : {}),
-        ...(id === gezelId ? { stepName: step.name } : {}),
-      });
+      const member = await this.crewMemberFor(id);
+      if (!member) continue;
+      members.push({ ...member, ...(step && id === gezelId ? { stepName: step.name } : {}) });
     }
     // The gezel lookups awaited; take the thread as it is now, and drop anyone
     // a concurrent post introduced meanwhile.
@@ -12193,6 +12439,86 @@ export class ChatManager extends LocalEngineRuntime {
     };
     const { record } = await this.appendToThread(target, message);
     return record.id;
+  }
+
+  /** A gezel as an introduction card shows them, or null when they are gone. */
+  private async crewMemberFor(gezelId: string): Promise<CrewMember | null> {
+    const gezel = await this.store.getGezel(gezelId).catch(() => null);
+    if (!gezel) return null;
+    const role = gezel.role?.trim() ? plainRoleTitle(gezel.role) : undefined;
+    const purpose = firstSentence(gezel.description);
+    return {
+      gezelId,
+      name: gezel.name,
+      ...(role ? { role } : {}),
+      ...(purpose ? { purpose } : {}),
+    };
+  }
+
+  /**
+   * Introduce gezels a chat turn hired (`create_gezel`, `ensure_gezel`, a
+   * delegation that had to recruit), in the thread the person reads. Before
+   * this, only a task's crew was introduced: a copywriter hired in
+   * conversation joined the roster without a word, and seven of a bakery
+   * owner's ten crew members arrived that way in one session (2026-11-09).
+   *
+   * `sessionId` is the session whose tool call hired them. Inside a task's
+   * session they joined that task's crew, so they are introduced as its
+   * other hires are, in its owner's thread. Anywhere else the card goes to
+   * the session's root thread, after the hiring turn has replied, so it
+   * follows the words that name them. Each gezel is introduced once per
+   * thread. Returns the ids it introduced.
+   */
+  async postHireIntroduction(sessionId: string, gezelIds: readonly string[]): Promise<string[]> {
+    const find = async (id: string) =>
+      this.states.get(id)?.record ?? (await this.store.findSessionById(id).catch(() => null));
+    let thread = await find(sessionId);
+    const seen = new Set<string>();
+    while (thread && !thread.taskRef && thread.parentSession && !seen.has(thread.id)) {
+      seen.add(thread.id);
+      thread = await find(thread.parentSession.sessionId);
+    }
+    if (!thread) return [];
+    const ids = [...new Set(gezelIds)];
+    if (thread.taskRef) {
+      const ref = parseTaskRef(thread.taskRef);
+      const task = ref ? await this.store.readTask(ref.projectId, ref.num).catch(() => null) : null;
+      if (!task) return [];
+      const introduced: string[] = [];
+      for (const id of ids) {
+        if (await this.postCrewIntroduction(task, id, undefined, 'joined')) introduced.push(id);
+      }
+      return introduced;
+    }
+    if (thread.archived) return [];
+    const threadId = thread.id;
+    const started = Date.now();
+    while (this.isSessionTurnPending(threadId) && Date.now() - started < KICKOFF_SETTLE_MAX_MS) {
+      await new Promise((resolve) => setTimeout(resolve, KICKOFF_SETTLE_POLL_MS));
+    }
+    const members: CrewMember[] = [];
+    for (const id of ids) {
+      if (id === thread.gezelId) continue;
+      const member = await this.crewMemberFor(id);
+      if (member) members.push(member);
+    }
+    // Read the thread as it is now: the wait and the lookups above let a
+    // task's own introduction name the same gezel first.
+    const target = (await find(threadId)) ?? thread;
+    if (target.archived) return [];
+    const already = new Set(
+      target.messages.flatMap((m) => m.crewIntroduction?.members.map((x) => x.gezelId) ?? []),
+    );
+    const fresh = members.filter((m) => !already.has(m.gezelId));
+    if (fresh.length === 0) return [];
+    await this.appendToThread(target, {
+      role: 'assistant',
+      content: crewHireText(fresh),
+      at: nowIso(),
+      synthetic: 'crew-introduction',
+      crewIntroduction: { moment: 'hired', members: fresh },
+    });
+    return fresh.map((m) => m.gezelId);
   }
 
   /**
@@ -12402,6 +12728,30 @@ export class ChatManager extends LocalEngineRuntime {
       catalog: this.catalog,
       providerName,
       ...(gezelId ? { gezelId } : {}),
+    });
+  }
+
+  /**
+   * The shape a new project takes when nobody chose one (the Meester's
+   * `start_project`, the app's New project): a crew under a crew lead, or
+   * one gezel working alone. It follows the strategy the install's default
+   * model works best under, read now; the project keeps the shape it was
+   * made with. An unreadable model profile falls back to the provider's
+   * default pick.
+   */
+  async newProjectMode(config?: GezelConfig): Promise<NewProjectMode> {
+    const cfg = config ?? (await this.store.readConfig());
+    const providerName = resolveDefaultProviderName(cfg);
+    const named = cfg.taskStrategy && cfg.taskStrategy !== 'auto';
+    const model = named
+      ? undefined
+      : await this.executionModelProfile(providerName).catch(() => undefined);
+    return resolveNewProjectMode({
+      taskStrategy: cfg.taskStrategy,
+      generalistMode: effectiveGeneralistModeSetting(cfg),
+      providerName,
+      tier: model?.tier,
+      affinity: model?.affinity,
     });
   }
 
@@ -14530,8 +14880,7 @@ export class ChatManager extends LocalEngineRuntime {
         };
         this.events.publish(scope, {
           type: 'warning',
-          message:
-            "MCP bridge to your tools failed to start — this gezel can't run any actions this turn (no write_file, read_file, run_installed_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.",
+          message: `MCP bridge to your tools failed to start — ${gezel.name} can't run any actions this turn (no write_file, read_file, run_installed_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.`,
         });
         return;
       }
@@ -14581,7 +14930,7 @@ export class ChatManager extends LocalEngineRuntime {
           };
           this.events.publish(scope, {
             type: 'warning',
-            message: `This gezel has ${liveToolNames.length} tools registered (${cappedSurfaceCount} count toward the selection limit), which is heavy for a ${tier} on-device model. Small models tend to lose track of tool selection past ~${tierToolCap} and may produce empty replies. Consider trimming the toolset roster, or pointing this gezel at a larger model in Settings.`,
+            message: `${gezel.name} has ${liveToolNames.length} tools registered (${cappedSurfaceCount} count toward the selection limit), which is heavy for a ${tier} on-device model. Small models tend to lose track of tool selection past ~${tierToolCap} and may produce empty replies. Consider trimming the toolset roster, or pointing ${gezel.name} at a larger model in Settings.`,
           });
         }
       }
@@ -15532,11 +15881,10 @@ export class ChatManager extends LocalEngineRuntime {
           ? false
           : (config.mlxSharedBandPrefix?.enabled ?? true));
 
-    const generalistKickoff = resolveGeneralistKickoff(
-      effectiveGeneralistModeSetting(config),
-      record.providerName,
-      localModelTier,
-    );
+    // What `start_project` makes from this session, and the routing words in
+    // the prompt that go with it: a solo lead (`on`) or a crew (`off`).
+    const generalistKickoff: GeneralistMode =
+      (await this.newProjectMode(config)) === 'solo' ? 'on' : 'off';
     const systemInstructions = buildInstructions({
       name: gezel?.name ?? 'Agent',
       // Session stamp wins over the live config flag: a TUI-created
@@ -16209,7 +16557,11 @@ export class ChatManager extends LocalEngineRuntime {
       // plays inline. Same pattern as the surgical-edit `diff` above.
       const gv =
         info.name === 'generate_video' && sc && typeof sc === 'object'
-          ? (sc as { gezelVideo?: { artifactPath?: unknown; mimeType?: unknown } }).gezelVideo
+          ? (
+              sc as {
+                gezelVideo?: { artifactPath?: unknown; mimeType?: unknown; posterPath?: unknown };
+              }
+            ).gezelVideo
           : undefined;
       const videos: ChatMessageToolCall['videos'] =
         gv && typeof gv.artifactPath === 'string' && gv.artifactPath.length > 0
@@ -16220,6 +16572,9 @@ export class ChatManager extends LocalEngineRuntime {
                   typeof gv.mimeType === 'string' && gv.mimeType.length > 0
                     ? gv.mimeType
                     : 'video/mp4',
+                ...(typeof gv.posterPath === 'string' && gv.posterPath.length > 0
+                  ? { posterPath: gv.posterPath }
+                  : {}),
               },
             ]
           : undefined;

@@ -8,14 +8,21 @@ export const NAVIGATION_AREA_LABELS: Record<RecentTabArea, string> = {
   gezels: 'Crew',
   documents: 'Documents',
   tasks: 'Tasks',
-  craftbooks: 'Craftbooks',
+  craftbooks: 'Plans',
   scripts: 'Scripts',
   history: 'History',
-  handboek: 'Handboek',
+  handboek: 'Help',
   knowledge: 'Knowledge',
   benchmarks: 'Benchmarks',
   settings: 'Settings',
 };
+
+/**
+ * The rail's folded group of builder areas (Tasks, Plans, Scripts, History).
+ * A plain word on purpose: neither "workshop" nor "workbench" is a name the
+ * person has to learn. The live rail and the startup frame both read it.
+ */
+export const NAVIGATION_MORE_LABEL = 'More';
 
 /** Shared navigation presentation; hosts own entities, capabilities and routing. */
 export function PrimaryNavigation({
@@ -115,10 +122,17 @@ export function NavigationArea({
 
 export interface NavigationGroupProps extends Omit<HTMLAttributes<HTMLDivElement>, 'id'> {
   id?: string;
-  area: RecentTabArea;
+  /** The area the title opens. A group with no area of its own passes `id`,
+   *  `label` and `icon`, and leaves `onOpen` out: its title then opens and
+   *  closes the group, the same as its caret. */
+  area?: RecentTabArea;
   label?: string;
+  icon?: ReactNode;
   expanded?: boolean;
   collapsed?: boolean;
+  /** The children are plain icon links, so an open group keeps listing them
+   *  when the rail is collapsed to icons. Entity lists are dropped there. */
+  railChildren?: boolean;
   active?: boolean;
   disabled?: boolean;
   unavailableReason?: string;
@@ -135,9 +149,11 @@ export interface NavigationGroupProps extends Omit<HTMLAttributes<HTMLDivElement
 export function NavigationGroup({
   id,
   area,
-  label = NAVIGATION_AREA_LABELS[area],
+  label = area ? NAVIGATION_AREA_LABELS[area] : '',
+  icon,
   expanded = true,
   collapsed = false,
+  railChildren = false,
   active = false,
   disabled = false,
   unavailableReason,
@@ -152,8 +168,10 @@ export function NavigationGroup({
   className = '',
   ...props
 }: NavigationGroupProps) {
-  const groupId = id ?? area;
+  const groupId = id ?? area ?? 'group';
   const reasonId = `navigation-${groupId}-unavailable`;
+  const titleToggles = !onOpen && onToggle !== undefined;
+  const listed = expanded && (!collapsed || railChildren);
   const header = (
     <div className={`app-sidebar-group-header${active ? ' active' : ''}`}>
       {!collapsed && onToggle && (
@@ -187,18 +205,19 @@ export function NavigationGroup({
       <button
         type="button"
         className="app-sidebar-group-toggle"
-        onClick={onOpen}
+        onClick={onOpen ?? onToggle}
         onPointerEnter={onPreload}
         onFocus={onPreload}
         onPointerDown={onPreload}
         disabled={disabled}
         aria-current={active ? 'page' : undefined}
+        aria-expanded={titleToggles ? listed : undefined}
         aria-describedby={unavailableReason ? reasonId : undefined}
         title={label}
         data-testid={`sidebar-group-${groupId}`}
       >
         <span className="app-sidebar-item-icon">
-          <AreaIcon area={area} size={18} />
+          {icon ?? (area ? <AreaIcon area={area} size={18} /> : null)}
         </span>
         <span className="app-sidebar-item-label app-sidebar-group-label">{label}</span>
       </button>
@@ -240,7 +259,11 @@ export function NavigationGroup({
           {unavailableReason}
         </p>
       )}
-      {expanded && !collapsed && children && <ul className="app-sidebar-list">{children}</ul>}
+      {listed && children && (
+        <ul className={`app-sidebar-list${collapsed ? ' app-sidebar-list-rail' : ''}`}>
+          {children}
+        </ul>
+      )}
       {after}
     </div>
   );

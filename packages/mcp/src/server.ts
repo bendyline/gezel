@@ -214,6 +214,7 @@ import {
   craftbookRequiredInputs,
   craftbookSuggestionGuidance,
   normalizeCraftbookInvocationParams,
+  requestedTaskTitle,
   suggestedCraftbookInvocation,
 } from './craftbook-routing.js';
 import { resolveCraftbookVersionArg } from './craftbook-version-arg.js';
@@ -409,6 +410,17 @@ const fetchImpl: typeof fetch =
   (certPath ? createTrustingFetch({ cert: readFileSync(certPath, 'utf8') }) : createPatientFetch());
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
+
+/**
+ * Have the gezels this turn just hired introduced in the thread the person
+ * reads. The project kickoffs do not call it: a task introduces its own crew
+ * as it starts. Best-effort, because a missed card must never fail the hire.
+ */
+function introduceHires(...gezelIds: string[]): void {
+  if (!sessionId || gezelIds.length === 0) return;
+  void api.introduceCrew(sessionId, { gezelIds }).catch(() => {});
+}
+
 const { resolveProjectId, resolveGezelId, availableGezelsHint, parseRef } = createEntityResolvers({
   api,
   projectId,
@@ -1752,6 +1764,7 @@ async function fetchRepoReviewNextHint(projectId: string): Promise<string> {
 
 async function handoffFetchedRepoReview(projectId: string): Promise<string> {
   const reviewer = await api.ensureGezel({ jobTitle: 'Code Reviewer' });
+  if (reviewer.action !== 'reused') introduceHires(reviewer.gezelId);
   const message = await fetchRepoReviewHandoffMessage(projectId);
   const res = await api.messageGezel(reviewer.gezelId, {
     fromGezelId: gezelId,
@@ -4567,6 +4580,7 @@ server.tool(
         ...(templateId && model ? { model } : {}),
       });
     }
+    introduceHires(created.id);
     return {
       content: [
         {
@@ -4637,7 +4651,9 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Applied project type ${applied.typeId}@${applied.version} to ${resolvedProject}. Crew: ${gz || 'no gezels'}. Installed ${applied.scriptsInstalled.length} script(s); seeded ${applied.workspaceSeeded.length} file(s).`,
+            text: applied.upgradedFrom
+              ? `Updated ${resolvedProject} from ${applied.typeId}@${applied.upgradedFrom} to ${applied.version}. Data files the person changed were kept (${applied.seedsSkipped.length}).`
+              : `Applied project type ${applied.typeId}@${applied.version} to ${resolvedProject}. Crew: ${gz || 'no gezels'}. Installed ${applied.scriptsInstalled.length} script(s); seeded ${applied.workspaceSeeded.length} file(s).`,
           },
         ],
       };
@@ -5032,6 +5048,8 @@ const invokeCraftbookRootTurnCache = new RootTurnInvocationCache<CraftbookLaunch
 async function currentRootTurnContext(): Promise<{
   rootTurnId: string;
   userText?: string;
+  /** What the person asked for in this turn, as a task title. */
+  requestTitle?: string;
 } | null> {
   if (!sessionId) return null;
   try {
@@ -5047,9 +5065,11 @@ async function currentRootTurnContext(): Promise<{
       return null;
     }
     const latestUser = [...session.messages].reverse().find((message) => message.role === 'user');
+    const requestTitle = requestedTaskTitle(undefined, session.messages);
     return {
       rootTurnId,
       ...(latestUser?.content.trim() ? { userText: latestUser.content.trim() } : {}),
+      ...(requestTitle ? { requestTitle } : {}),
     };
   } catch (err) {
     // Fail open: inability to read the transcript must not block a legitimate
@@ -5426,7 +5446,10 @@ server.tool(
       .describe(
         'Existing project id or name. Defaults to the current project; this tool does not create a new project. Use start_project when the user requests a new project.',
       ),
-    title: z.string().optional().describe('Optional task title. Defaults to the craftbook name.'),
+    title: z
+      .string()
+      .optional()
+      .describe("Optional task title. Defaults to the person's request, else the craftbook name."),
     description: z
       .string()
       .optional()
@@ -5474,6 +5497,10 @@ async function runInvokeCraftbook({
   outputPath?: string;
   tonight?: boolean;
 }) {
+  // Work goes to a project only when the call names one. One-and-done work
+  // (a report, a proposal, a deck) stays in this session's project, which
+  // for the Meester's thread is Default; a project the thread set up earlier
+  // is not a reason to file unrelated work there (owner decision, 2026-11-10).
   const resolvedProject = project ? await resolveProjectId(project) : projectId;
   try {
     const rootTurn = await currentRootTurnContext();
@@ -5490,12 +5517,17 @@ async function runInvokeCraftbook({
       ...(tonight ? { tonight: true } : {}),
     };
     const rootTurnId = rootTurn?.rootTurnId ?? null;
-    const launchInvocation = rootTurnId
-      ? {
-          ...invocation,
-          craftbookInvocationKey: rootTurnInvocationKey(rootTurnId, invocation),
-        }
-      : invocation;
+    // The dedupe key is made from what the model sent. The title the task
+    // carries is the person's request when the model gave none; the plan's
+    // name is the last resort.
+    const taskTitle = title?.trim() || rootTurn?.requestTitle;
+    const launchInvocation = {
+      ...invocation,
+      ...(taskTitle ? { title: taskTitle } : {}),
+      ...(rootTurnId
+        ? { craftbookInvocationKey: rootTurnInvocationKey(rootTurnId, invocation) }
+        : {}),
+    };
     const launched = rootTurnId
       ? await invokeCraftbookRootTurnCache.run({
           rootTurnId,
@@ -6271,6 +6303,7 @@ server.tool(
     const res = await api.ensureGezel({
       jobTitle,
     });
+    if (res.action !== 'reused') introduceHires(res.gezelId);
     const headline =
       res.action === 'reused'
         ? `Reused ${res.name} (${res.role}) — existing gezel, match score ${res.matchScore?.toFixed(2) ?? '?'}`
@@ -6324,6 +6357,7 @@ server.tool(
   async ({ templateId }) => {
     const { name, gender } = await pickFreshGezelName();
     const created = await api.createGezelFromTemplate(templateId, { name, gender });
+    introduceHires(created.id);
     return {
       content: [
         {
@@ -6753,6 +6787,7 @@ server.tool(
     const ensured = await api.ensureGezel({
       jobTitle,
     });
+    if (ensured.action !== 'reused') introduceHires(ensured.gezelId);
     // Self-ask preflight. `ensureGezel` returns the asker themselves
     // when the asker's own role already matches the requested role
     // (e.g. a Developer calling `ask_specialist({ role: 'developer' })`).
@@ -6976,6 +7011,7 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
         });
         if (repoGuard) return repoGuard;
         const ensured = await api.ensureGezel({ jobTitle });
+        if (ensured.action !== 'reused') introduceHires(ensured.gezelId);
         const normalizedMessage = normalizeFileHandoffMessage(task, expectedDeliverable);
         const res = await api.messageGezel(ensured.gezelId, {
           fromGezelId: gezelId,
@@ -7062,6 +7098,7 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
         });
         if (repoGuard) return repoGuard;
         const ensured = await api.ensureGezel({ jobTitle });
+        if (ensured.action !== 'reused') introduceHires(ensured.gezelId);
         if (ensured.gezelId === gezelId) {
           return {
             content: [
@@ -7293,19 +7330,36 @@ const SPECIALIST_TEMPLATE_IDS: Readonly<Record<string, string>> = {
   'image-generator': 'illustrator',
 };
 
-async function createSpecialistFromTemplate(
-  role: string,
-  identity: ReturnType<typeof pickUnusedGezelName>,
-) {
-  const preferred = SPECIALIST_TEMPLATE_IDS[role];
-  if (preferred) {
-    try {
-      return { ...(await api.createGezelFromTemplate(preferred, identity)), templateId: preferred };
-    } catch {
-      /* fall through to the role's own template */
-    }
-  }
-  return { ...(await api.createGezelFromTemplate(role, identity)), templateId: role };
+interface MainGezel {
+  id: string;
+  name: string;
+  templateId: string;
+  /** Someone the person already had, as against one made for this project. */
+  reused: boolean;
+}
+
+/**
+ * A new project's main gezel: the crew member already made from this
+ * template when there is one, else a new one from it. One Builder or crew
+ * lead can run several projects, because a session belongs to a gezel and a
+ * project together and their work stays apart. Before this every project the
+ * Meester started added a crew member: seven of a bakery owner's ten arrived
+ * that way in one session (owner decision, 2026-11-10). `role` is what to
+ * recruit by when the catalog does not carry the template.
+ */
+async function ensureMainGezel(templateId: string, role = templateId): Promise<MainGezel> {
+  const ensured = await api.ensureGezel({ jobTitle: role, templateId });
+  return {
+    id: ensured.gezelId,
+    name: ensured.name,
+    templateId: ensured.templateId ?? templateId,
+    reused: ensured.action === 'reused',
+  };
+}
+
+/** "Recruited Dejan as crew lead", or "Dejan takes it on as crew lead" for someone already on the crew. */
+function mainGezelClause(gezel: MainGezel, as: string): string {
+  return gezel.reused ? `${gezel.name} takes it on as ${as}` : `Recruited ${gezel.name} as ${as}`;
 }
 
 function normalizeSpecialistRole(value: string | undefined): string {
@@ -7705,11 +7759,7 @@ async function runBinaryDocumentProject(
       mode: 'crew',
       lead: 'none',
     });
-    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
-    const voorman = await api.createGezelFromTemplate('voorman', {
-      name: gezelName,
-      gender: gezelGender,
-    });
+    const voorman = await ensureMainGezel('voorman');
     await api.updateProject(project.id, { voormanGezelId: voorman.id });
     const effectiveTaskDescription = buildBinaryDocumentTaskDescription(
       {
@@ -7786,11 +7836,7 @@ async function runPromotedStartJobAsProject(input: {
       mode: 'crew',
       lead: 'none',
     });
-    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
-    const voorman = await api.createGezelFromTemplate('voorman', {
-      name: gezelName,
-      gender: gezelGender,
-    });
+    const voorman = await ensureMainGezel('voorman');
     await api.updateProject(project.id, { voormanGezelId: voorman.id });
     const effectiveTaskDescription = buildKickoffTaskDescription({
       ...brief,
@@ -7843,7 +7889,7 @@ async function runPromotedStartJobAsProject(input: {
           dispatchEntry: true,
         });
     const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as crew lead. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started project "${brief.name}" (${project.id}). ${mainGezelClause(voorman, 'crew lead')}. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult('start_project', brief.name, project.id, resultText);
     return {
       content: [
@@ -8141,8 +8187,10 @@ server.tool(
 
 /**
  * The whole new-project path, in order: an exact binary document, a project
- * type the brief names, the flat solo project under generalist kickoff, a
- * repository redirect, and otherwise a crew project led by a fresh voorman.
+ * type the brief names, the solo project when the default model works best
+ * with one owner (`GEZEL_GENERALIST_KICKOFF`, from `resolveNewProjectMode`),
+ * a repository redirect, and otherwise a crew project led by a crew lead.
+ * Either shape reuses the main gezel the person already has (`ensureMainGezel`).
  * `start_project` and `start_work`'s `new-project` option are the same
  * decision, so they share this one dispatcher.
  */
@@ -8216,11 +8264,7 @@ async function runStartProject(
       mode: 'crew',
       lead: 'none',
     });
-    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
-    const voorman = await api.createGezelFromTemplate('voorman', {
-      name: gezelName,
-      gender: gezelGender,
-    });
+    const voorman = await ensureMainGezel('voorman');
     await api.updateProject(project.id, { voormanGezelId: voorman.id });
     const effectiveTaskDescription = buildKickoffTaskDescription({
       ...brief,
@@ -8279,7 +8323,7 @@ async function runStartProject(
           dispatchEntry: true,
         });
     const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as crew lead. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started project "${brief.name}" (${project.id}). ${mainGezelClause(voorman, 'crew lead')}. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(tool, brief.name, project.id, resultText);
     return {
       content: [
@@ -8740,11 +8784,10 @@ async function runFlatProject(
       missionObjectives: normalizeMarkdown(brief.missionObjectives),
       mode: 'solo',
     });
-    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
-    const builder = await createSpecialistFromTemplate(effectiveSpecialistRole, {
-      name: gezelName,
-      gender: gezelGender,
-    });
+    const builder = await ensureMainGezel(
+      SPECIALIST_TEMPLATE_IDS[effectiveSpecialistRole] ?? effectiveSpecialistRole,
+      effectiveSpecialistRole,
+    );
     await api.updateProject(project.id, { voormanGezelId: builder.id });
     const effectiveTaskDescription = buildKickoffTaskDescription({
       ...brief,
@@ -8800,7 +8843,7 @@ async function runFlatProject(
           ],
           dispatchEntry: true,
         });
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${builder.name} as lead (template: ${builder.templateId}). Created task ${task.ref} ("${task.title}") and handed ${builder.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${builder.name} is on it and they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started project "${brief.name}" (${project.id}). ${mainGezelClause(builder, 'lead')} (template: ${builder.templateId}). Created task ${task.ref} ("${task.title}") and handed ${builder.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${builder.name} is on it and they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(cacheTool, brief.name, project.id, resultText);
     return {
       content: [
@@ -10295,7 +10338,7 @@ server.tool(
 
 server.tool(
   'how_do_i',
-  "Consult the Handboek — gezel's built-in documentation — for meta questions about gezel itself: what a role can do, how craftbooks / projects / memory / models work, where files live, how to set something up. Ask in plain language and answer from what it returns instead of guessing.",
+  "Consult Help — Gezel's built-in documentation — for meta questions about gezel itself: what a role can do, how craftbooks / projects / memory / models work, where files live, how to set something up. Ask in plain language and answer from what it returns instead of guessing.",
   {
     question: z
       .string()
@@ -10310,7 +10353,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: 'The Handboek has no matching article. Answer from your own knowledge of gezel and say so when unsure.',
+            text: 'Help has no matching article. Answer from your own knowledge of Gezel and say so when unsure.',
           },
         ],
       };
@@ -10675,7 +10718,7 @@ server.tool(
           ? ` Styles this model has: ${styles.map((s) => s.name).join(', ')}.`
           : '';
       if (styles?.length) imageStylesShown.add(meta.model);
-      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${styleLine}${settingsLine}${skippedLine}${guideLine}${stylesLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call. To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
+      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${styleLine}${settingsLine}${skippedLine}${guideLine}${stylesLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call.${(await installedVideoAnimates()) ? ` To animate it, pass \`{ inputImage: { artifactPath: "${artifactPath}" } }\` to generate_video.` : ''} To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];
@@ -10717,9 +10760,28 @@ server.tool(
   },
 );
 
+/**
+ * Whether an installed video model animates pictures, so an image result
+ * only offers what this computer can do. Checked at most once a minute.
+ */
+let videoAnimatesCache: { at: number; value: Promise<boolean> } | undefined;
+function installedVideoAnimates(): Promise<boolean> {
+  const now = Date.now();
+  if (!videoAnimatesCache || now - videoAnimatesCache.at > 60_000) {
+    videoAnimatesCache = {
+      at: now,
+      value: api
+        .listInstalledVideoModels()
+        .then((res) => res.defaultImageToVideoModel !== undefined)
+        .catch(() => false),
+    };
+  }
+  return videoAnimatesCache.value;
+}
+
 server.tool(
   'generate_video',
-  "Generate a short video clip from a text prompt (and optionally a starting image for image-to-video). Routes through the local bundled diffusers engine (LTX by default). The encoded MP4 is written to the project's `artifacts/generated/` folder and a workspace copy is dropped at `assets/generated/` for HTML `<video src>` references. Video generation is slow and GPU-intensive — it pauses the chat model while it runs — so the user may see a one-time confirmation card before each call (they can choose Always allow to silence it). Omit width, height, numFrames, fps, and steps unless the user explicitly asked for specific values. On error the tool returns a message directing the user to the Video generation settings.",
+  "Generate a short video clip from a text prompt, or animate a picture: pass it as `inputImage` and it becomes the first frame, so the prompt should describe how it moves. Renders on this computer's video engine. The clip is written to the project's `artifacts/generated/` folder (MP4, or WebM when MP4 cannot be made) and a workspace copy is dropped at `assets/generated/` for HTML `<video src>` references. Video generation is slow and GPU-intensive — it pauses the chat model while it runs — so the user may see a one-time confirmation card before each call (they can choose Always allow to silence it). Omit width, height, numFrames, fps, and steps unless the user explicitly asked for specific values. On error the tool returns a message directing the user to the Video generation settings.",
   {
     prompt: z.string().min(1).describe('What the video should depict.'),
     negativePrompt: z.string().optional().describe('Concepts to avoid.'),
@@ -10761,7 +10823,19 @@ server.tool(
         }),
       ])
       .optional()
-      .describe('Optional starting image for image-to-video (I2V-capable models only).'),
+      .describe(
+        "A picture to animate: it becomes the clip's first frame and sets its shape. To animate a picture you made with generate_image, pass its artifactPath.",
+      ),
+    requireImageToVideo: z
+      .boolean()
+      .optional()
+      .describe(
+        'Set when animating the picture is the point: the call fails rather than make a clip from the words alone if no installed model animates pictures.',
+      ),
+    aspectRatio: z
+      .enum(IMAGE_ASPECT_RATIOS)
+      .optional()
+      .describe("The clip's shape. Omit to use the picture's shape, or the model's default."),
     saveAs: z
       .string()
       .optional()
@@ -10782,6 +10856,8 @@ server.tool(
         ...(args.steps ? { steps: args.steps } : {}),
         ...(args.seed !== undefined ? { seed: args.seed } : {}),
         ...(args.inputImage ? { inputImage: args.inputImage } : {}),
+        ...(args.requireImageToVideo ? { requireImageToVideo: true } : {}),
+        ...(args.aspectRatio ? { aspectRatio: args.aspectRatio } : {}),
         ...(args.saveAs ? { saveAs: args.saveAs } : {}),
         projectId,
         ...(gezelId ? { gezelId } : {}),
@@ -10790,18 +10866,26 @@ server.tool(
         // the tool call (chat can't embed the clip itself).
         inline: true,
       });
-      const { meta, artifactPath, workspacePath, b64Poster } = res;
+      const { meta, artifactPath, workspacePath, b64Poster, posterPath, posterMimeType } = res;
       const workspaceLine = workspacePath
         ? `\n\nTo display this video in HTML, copy this exact tag verbatim — do not add any prefix, do not change the filename:\n\`<video src="${workspacePath}" controls></video>\``
         : '\n\nNOTE: workspace copy was skipped (project has an external workingDir not approved for writes).';
-      const summary = `Generated a ${meta.widthPx}×${meta.heightPx} video with ${meta.model} (${meta.numFrames} frames @ ${meta.fps}fps, seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms). The user sees the clip in an inline player below the tool call. The clip is at \`${artifactPath}\` — read its bytes with \`read_artifact\` if needed.${workspaceLine}`;
+      const skipped = meta.i2vSkippedReason
+        ? `\n\nThe picture was not used: ${meta.i2vSkippedReason}`
+        : '';
+      const notes = `${skipped}${meta.settingsNotes?.length ? `\n\n${meta.settingsNotes.join(' ')}` : ''}`;
+      const summary = `Generated a ${meta.widthPx}×${meta.heightPx} video with ${meta.model} (${meta.numFrames} frames @ ${meta.fps}fps, seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms). The user sees the clip in an inline player below the tool call. The clip is at \`${artifactPath}\` — read its bytes with \`read_artifact\` if needed.${workspaceLine}${notes}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];
       // A poster image block lets vision-capable agents "see" the result
       // on the next turn; the chat UI renders the player (below) instead.
       if (b64Poster) {
-        content.push({ type: 'image' as const, data: b64Poster, mimeType: 'image/png' });
+        content.push({
+          type: 'image' as const,
+          data: b64Poster,
+          mimeType: posterMimeType ?? 'image/png',
+        });
       }
       // Report the already-written mp4 by PATH (never base64 — a multi-MB
       // clip in the transcript would be ruinous). The bridge forwards
@@ -10809,7 +10893,13 @@ server.tool(
       // `gezelVideo` to the persisted `videos[]` the UI plays inline.
       return {
         content,
-        structuredContent: { gezelVideo: { artifactPath, mimeType: meta.mimeType } },
+        structuredContent: {
+          gezelVideo: {
+            artifactPath,
+            mimeType: meta.mimeType,
+            ...(posterPath ? { posterPath } : {}),
+          },
+        },
       };
     } catch (err) {
       let msg = err instanceof Error ? err.message : String(err);

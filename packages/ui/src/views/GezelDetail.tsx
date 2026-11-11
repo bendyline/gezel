@@ -44,6 +44,10 @@ import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
 import { useSocialMode } from '../components/useSocialMode.js';
+import {
+  useRestoredViewPart,
+  useViewLocation,
+} from '../components/view-history/ViewHistoryContext.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { type ItemSlot, Poppetje, PoppetjeItem } from '../poppetje/index.js';
 import { Dialog, Select, Tabs } from '../primitives/index.js';
@@ -54,6 +58,21 @@ import './GezelDetail.css';
 import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 
 type DetailTab = 'about' | 'appearance' | 'growth' | 'chat' | 'toolsets' | 'memories' | 'settings';
+
+/** Each tab's name as its trigger shows it, for the history menu. */
+const DETAIL_TAB_LABELS: Record<DetailTab, string> = {
+  chat: 'Chat',
+  about: 'About',
+  appearance: 'Appearance',
+  growth: 'Growth',
+  toolsets: 'Toolsets',
+  memories: 'Memories',
+  settings: 'Settings',
+};
+
+function isDetailTab(value: unknown): value is DetailTab {
+  return typeof value === 'string' && value in DETAIL_TAB_LABELS;
+}
 
 interface GezelDetailProps {
   gezelId: string;
@@ -81,7 +100,11 @@ export function GezelDetail({
   const [generatingAbout, setGeneratingAbout] = useState(false);
   const [applyingAbout, setApplyingAbout] = useState(false);
   const [aboutRev, setAboutRev] = useState(0);
-  const [detailTab, setDetailTab] = useState<DetailTab>('chat');
+  // Back to this gezel reopens the tab it was left on.
+  const restoredPart = useRestoredViewPart('gezel');
+  const [detailTab, setDetailTab] = useState<DetailTab>(() =>
+    isDetailTab(restoredPart?.value) ? restoredPart.value : 'chat',
+  );
   const [projectPickerSlot, setProjectPickerSlot] = useState<HTMLSpanElement | null>(null);
   const [showIterate, setShowIterate] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
@@ -104,6 +127,22 @@ export function GezelDetail({
       ? 'chat'
       : detailTab;
   const generationEngineLabel = useGenerationEngineLabel(selected?.fixedFunction);
+  // The view stack: each tab is a place. Reported once the gezel has loaded,
+  // since which tabs exist depends on it.
+  useViewLocation('gezel', {
+    part:
+      selected?.id === gezelId
+        ? {
+            key: activeDetailTab,
+            value: activeDetailTab,
+            label: DETAIL_TAB_LABELS[activeDetailTab],
+          }
+        : null,
+    title: selected?.id === gezelId ? selected.name : undefined,
+    onRestore: (part) => {
+      if (isDetailTab(part.value)) setDetailTab(part.value);
+    },
+  });
 
   const selectedRef = useRef<GezelDetailData | null>(null);
   const saveAbout = useCallback(
@@ -228,7 +267,7 @@ export function GezelDetail({
   if (error) {
     return (
       <div className="placeholder">
-        <p>Couldn't open this gezel: {error}</p>
+        <p>Couldn't open this crew member: {error}</p>
       </div>
     );
   }
@@ -270,7 +309,7 @@ export function GezelDetail({
             <input
               ref={renameInputRef}
               className="rename-input"
-              aria-label="Gezel name"
+              aria-label="Crew member name"
               value={renameDraft}
               onChange={(e) => setRenameDraft(e.target.value)}
               onBlur={() => void commitRename()}
@@ -283,7 +322,7 @@ export function GezelDetail({
                 type="button"
                 className="gezel-name-editable"
                 onClick={startRename}
-                title="Rename gezel"
+                title={`Rename ${selected.name}`}
               >
                 {selected.name}
               </button>
@@ -296,13 +335,16 @@ export function GezelDetail({
             // font is set from the Appearance tab, same as any other
             // gezel.)
             <div className="provider-override">
-              <span className="gezel-role muted small ff-header-tag" title="Fixed-function gezel">
+              <span
+                className="gezel-role muted small ff-header-tag"
+                title="Fixed-function crew member"
+              >
                 Fixed-function · forwards to <code>{selected.fixedFunction.tool}</code>
               </span>
               {generationEngineLabel && (
                 <span
                   className="gezel-role muted small ff-header-tag"
-                  title="Generation model used by this gezel"
+                  title={`Generation model ${selected.name} uses`}
                 >
                   {generationEngineLabel}
                 </span>
@@ -1232,7 +1274,7 @@ function HeaderModelName({
           type="button"
           className="gezel-header-model-name"
           onClick={onOpenSettings}
-          title="Change this gezel's model in Settings"
+          title="Change this crew member's model in Settings"
         >
           {name}
         </button>
@@ -1418,7 +1460,7 @@ function GezelSettingsPanel({
       {effectiveProvider === 'copilot' && (
         <SettingKeys
           label="Sandbox"
-          description="Deny the Copilot CLI's built-in tools (bash, web_fetch, file edit, grep) and force this gezel through our MCP tools."
+          description="Deny the Copilot CLI's built-in tools (bash, web_fetch, file edit, grep) and force this crew member through our MCP tools."
           options={[
             { value: 'default', label: 'Inherit' },
             { value: 'on', label: 'On' },
@@ -1434,7 +1476,7 @@ function GezelSettingsPanel({
       {effectiveProvider === 'codex-cli' && (
         <SettingKeys
           label="Access"
-          description="Override this gezel's Codex execution posture. A project-level choice still takes precedence."
+          description="Override this crew member's Codex execution posture. A project-level choice still takes precedence."
           options={[
             { value: 'inherit', label: 'Inherit' },
             { value: 'plan', label: 'Plan' },
@@ -1584,7 +1626,7 @@ function GezelFontPicker({
     >
       <Select.Trigger
         className="gezel-font-picker"
-        title="Font used for this gezel's chat bubbles"
+        title="Font used for this crew member's chat bubbles"
         style={preview ? { fontFamily: preview } : undefined}
         aria-label="Chat bubble font"
       >

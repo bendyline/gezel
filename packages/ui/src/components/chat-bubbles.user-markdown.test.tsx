@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { MessageBubble } from './chat-bubbles.js';
+import { MessageBubble, RenderedMarkdown } from './chat-bubbles.js';
 
 vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'light' }));
 
@@ -66,6 +66,42 @@ describe('MessageBubble user markdown', () => {
 
     expect(container.querySelector('.squisq-page-hero-title')).toBeNull();
     expect(screen.getAllByText('1. Immediate Relief: Staff Schedules')).toHaveLength(1);
+  });
+
+  // Squisq's page register sizes in rem: a reply's heading came out near 32px
+  // over 15px prose, and its numbered list as "01 / 02" numerals.
+  it('keeps a reply with a heading and a numbered list at chat scale', () => {
+    const { container } = render(
+      // biome-ignore lint/a11y/useValidAriaRole: MessageBubble's domain role selects the message author; it is not forwarded as an ARIA role.
+      <MessageBubble
+        role="assistant"
+        content={[
+          '## Plan for Saturday',
+          '',
+          '1. Order the bread',
+          '2. Confirm the van',
+          '3. Print the menus',
+        ].join('\n')}
+        authorLabel="Zara"
+        authorIcon={null}
+      />,
+    );
+
+    const page = container.querySelector('.msg-body-rendered .squisq-page');
+    expect(page).toHaveClass('squisq-page--document');
+    // The heading is prose and the list is a list, not a banner over a
+    // typed item section with its own numerals.
+    expect(container.querySelector('.squisq-page-banner-title')).toBeNull();
+    expect(container.querySelector('.squisq-page-items')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Plan for Saturday' })).toBeInTheDocument();
+    expect(container.querySelectorAll('.msg-body-rendered ol > li')).toHaveLength(3);
+  });
+
+  it('leaves the report register on the page it had', () => {
+    const { container } = render(
+      <RenderedMarkdown markdown={'## Night report\n\nAll quiet.'} register="report" />,
+    );
+    expect(container.querySelector('.squisq-page')).not.toHaveClass('squisq-page--document');
   });
 
   it('uses the same Squisq renderer for ordinary user prose', () => {

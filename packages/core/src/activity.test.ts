@@ -326,4 +326,45 @@ describe('Activity shows one row per request', () => {
     expect(items.find((i) => i.section === 'ready')?.questionIds).toEqual(['ready-2']);
     expect(live?.map((r) => r.state)).toEqual(['ready', 'working']);
   });
+
+  // A result used to leave Activity for good the moment its card was
+  // dismissed, so the panel showed nothing of what had been made.
+  it('keeps a finished request on record once its result is put away', async () => {
+    const { resolveRequestTracks } = await import('./request-track/resolve.js');
+    const { stepDurationEstimates } = await import('./request-track/eta.js');
+    const bakery = await import('./request-track/fixtures/bakery.js');
+    const tasks = [bakery.invoices, bakery.invoiceShard, bakery.priceList];
+    const receipt: Question = {
+      id: 'ready-2',
+      projectId: 'default',
+      gezelId: 'mees',
+      sessionId: 'mees-thread',
+      taskRef: 'bakery/2',
+      prompt: '**Price list** is finished.',
+      intent: { kind: 'task-finished', taskRef: 'bakery/2' },
+      createdAt: bakery.T(28),
+    };
+    const tracks = (questions: Question[]) =>
+      resolveRequestTracks({
+        tasks,
+        threads: new Map([[bakery.meesterThread.id, bakery.meesterThread]]),
+        inflight: [bakery.draftTurn],
+        waiting: [],
+        questions,
+        leadOf: (projectId) => (projectId === 'bakery' ? 'dejan' : 'mees'),
+        estimates: stepDurationEstimates([]),
+        now: bakery.NOW,
+      });
+    const shared = { tasks, inflight: [bakery.draftTurn], waiting: [], queues: queues() };
+    const priceList = `mees-thread@${bakery.T(20)}`;
+
+    const open = resolveActivity({ ...shared, questions: [receipt], requests: tracks([receipt]) });
+    expect(open.items.find((i) => i.section === 'ready')?.requestKey).toBe(priceList);
+    expect(open.earlier).toBeUndefined();
+
+    const putAway = resolveActivity({ ...shared, questions: [], requests: tracks([]) });
+    expect(putAway.items.map((i) => i.section)).toEqual(['working']);
+    expect(putAway.earlier?.map((r) => r.key)).toEqual([priceList]);
+    expect(putAway.requests?.map((r) => r.key)).not.toContain(priceList);
+  });
 });

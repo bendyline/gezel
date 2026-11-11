@@ -199,7 +199,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
       if (!endpointsEnabled) reasons.push('Connected-app model serving is turned off.');
       if (!versionSupported) reasons.push(codexVersionReason(detection));
       if (!findHarnessModel(models, state.model, state.gezelId)) {
-        reasons.push('The configured gezel or local model is no longer available.');
+        reasons.push('The configured crew member or local model is no longer available.');
       }
       if (profile === null) reasons.push('The managed Codex profile is missing.');
       if (!tokenRecord || !isExactHarnessToken(tokenRecord, CODEX_SETUP_APP_NAME)) {
@@ -319,7 +319,7 @@ export function createCodexSetupManager(opts: CreateCodexSetupManagerOptions): C
       if (!selected) {
         throw new CodexSetupError(
           'model_not_available',
-          `The selected gezel or local model is not available for Codex: ${input.model}`,
+          `The selected crew member or local model is not available for Codex: ${input.model}`,
           404,
         );
       }

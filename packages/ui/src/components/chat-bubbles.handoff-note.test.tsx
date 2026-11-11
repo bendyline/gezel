@@ -69,6 +69,6 @@ describe('MessageBubble hand-off note', () => {
     );
 
     expect(screen.getByText('System')).toBeInTheDocument();
-    expect(screen.getByText('automatic')).toBeInTheDocument();
+    expect(screen.getByText('Automatic')).toBeInTheDocument();
   });
 });

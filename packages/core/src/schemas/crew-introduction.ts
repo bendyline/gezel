@@ -20,13 +20,27 @@ export const CrewMemberSchema = z.object({
 export type CrewMember = z.infer<typeof CrewMemberSchema>;
 
 /**
- * The crew a task brought, introduced in the thread that launched it.
- * `kickoff` is the lead and whoever starts the work, posted as the task
- * begins; `joined` is a gezel hired for a later step, posted as they start.
+ * Crew introduced in the thread the owner reads. `kickoff` is the lead and
+ * whoever starts the work, posted as a task begins; `joined` is a gezel hired
+ * for a later step, posted as they start. Both name their task. `hired` is a
+ * gezel the thread's own gezel hired in conversation ("find me a
+ * copywriter"): no task stands behind it, so it carries no `taskRef`.
  */
 export const CrewIntroductionSchema = z.object({
-  taskRef: z.string(),
-  moment: z.enum(['kickoff', 'joined']),
+  taskRef: z.string().optional(),
+  moment: z.enum(['kickoff', 'joined', 'hired']),
   members: z.array(CrewMemberSchema).min(1),
 });
 export type CrewIntroduction = z.infer<typeof CrewIntroductionSchema>;
+
+/** `POST /api/sessions/:id/crew-introduction`: gezels this session's turn just hired. */
+export const IntroduceCrewRequestSchema = z.object({
+  gezelIds: z.array(z.string().min(1)).min(1).max(8),
+});
+export type IntroduceCrewRequest = z.infer<typeof IntroduceCrewRequestSchema>;
+
+/** The introduction is posted once the hiring turn has replied, so this only acknowledges it. */
+export const IntroduceCrewResponseSchema = z.object({
+  accepted: z.literal(true),
+});
+export type IntroduceCrewResponse = z.infer<typeof IntroduceCrewResponseSchema>;

@@ -181,7 +181,7 @@ export async function setRoster(
 ): Promise<ProjectDetail> {
   const project = await requireProject(repo, id);
   if (!(await repo.exists(`gezels/${safeId(gezelId)}/gezel.md`)))
-    throw new Error('This gezel does not exist');
+    throw new Error('This crew member does not exist');
   const roster = new Set(project.gezelIds ?? []);
   if (add) roster.add(gezelId);
   else roster.delete(gezelId);

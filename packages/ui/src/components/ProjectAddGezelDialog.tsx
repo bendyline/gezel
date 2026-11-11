@@ -388,13 +388,15 @@ export function ProjectAddGezelDialog({
         <Dialog.Content className="project-add-gezel-dialog">
           <Dialog.Title asChild>
             <h3>
-              {selectedTemplate ? `Customize ${templateTitle(selectedTemplate)}` : 'Add Gezel'}
+              {selectedTemplate
+                ? `Customize ${templateTitle(selectedTemplate)}`
+                : 'Add crew member'}
             </h3>
           </Dialog.Title>
           <Dialog.Description className="muted small">
             {selectedTemplate
               ? `Give this new ${plainRoleTitle(selectedTemplate.manifest.role)} a name and appearance before adding them to ${project.name}.`
-              : `Choose someone from your workshop or add a new role to ${project.name}.`}
+              : `Choose someone already on your crew or add a new role to ${project.name}.`}
           </Dialog.Description>
 
           {error && <p className="error small project-add-gezel-error">{error}</p>}
@@ -505,7 +507,7 @@ export function ProjectAddGezelDialog({
                                 <span className="project-add-gezel-option-copy">
                                   <span className="project-add-gezel-option-name">{rendered}</span>
                                   <span className="muted small">
-                                    {option.gezel.role ?? 'Gezel'} · {option.affinity.reason}
+                                    {option.gezel.role ?? 'Crew member'} · {option.affinity.reason}
                                   </span>
                                 </span>
                                 <span className="gz-badge">{badge}</span>
@@ -545,7 +547,7 @@ export function ProjectAddGezelDialog({
                 )}
 
                 <section aria-labelledby="project-add-existing-title">
-                  <h4 id="project-add-existing-title">From your workshop</h4>
+                  <h4 id="project-add-existing-title">Already on your crew</h4>
                   {visibleGezels.length > 0 ? (
                     <ul className="project-add-gezel-list">
                       {visibleGezels.map((gezel) => {
@@ -568,7 +570,7 @@ export function ProjectAddGezelDialog({
                               <span className="project-add-gezel-option-copy">
                                 <span className="project-add-gezel-option-name">{rendered}</span>
                                 <span className="muted small">
-                                  {gezel.role ?? 'Gezel'} · ready to add
+                                  {gezel.role ?? 'Crew member'} · ready to add
                                 </span>
                               </span>
                             </button>
@@ -579,16 +581,16 @@ export function ProjectAddGezelDialog({
                   ) : (
                     <p className="muted small project-add-gezel-empty">
                       {otherAvailableGezels.length > 0
-                        ? 'No workshop crew members match that search.'
+                        ? 'No crew members match that search.'
                         : suggestedOptions.some((option) => option.kind === 'existing')
-                          ? 'No other workshop crew members are available.'
-                          : 'Every available gezel is already on this project.'}
+                          ? 'No other crew members are available.'
+                          : 'Every available crew member is already on this project.'}
                     </p>
                   )}
                 </section>
 
                 <section aria-labelledby="project-add-role-title">
-                  <h4 id="project-add-role-title">Add a new gezel for a role</h4>
+                  <h4 id="project-add-role-title">Add a new crew member for a role</h4>
                   {!loading && visibleTemplates.length > 0 ? (
                     <ul className="project-add-gezel-list">
                       {visibleTemplates.map((template) => (
@@ -625,7 +627,7 @@ export function ProjectAddGezelDialog({
                           ? 'No new roles match that search.'
                           : suggestedOptions.some((option) => option.kind === 'template')
                             ? 'No other role types are available.'
-                            : 'Every role type already has a gezel.'}
+                            : 'Every role type already has a crew member.'}
                       </p>
                     )
                   )}

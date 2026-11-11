@@ -176,7 +176,8 @@ contextBridge.exposeInMainWorld('__GEZEL__', {
   openPath: (target) => ipcRenderer.invoke('gezel:open-path', target),
   // References-pane file actions stay behind main-process IPC: the renderer
   // identifies a daemon-scoped file, while Electron owns native dialogs and
-  // OS file-manager integration.
+  // OS file-manager integration. A save request may carry `suggestedName`,
+  // the name the dialog offers; main makes it safe again.
   saveReferenceCopy: (request) => ipcRenderer.invoke('gezel:save-reference-copy', request),
   showReferenceInFolder: (request) => ipcRenderer.invoke('gezel:show-reference-in-folder', request),
   onNavigate: (callback) => {

@@ -1,5 +1,5 @@
 import type { RecentTabArea } from '@bendyline/gezel';
-import type { JSX } from 'react';
+import type { JSX, ReactNode } from 'react';
 
 interface AreaIconProps {
   area: RecentTabArea;
@@ -16,6 +16,39 @@ interface AreaIconProps {
  */
 export function AreaIcon({ area, size = 14, className }: AreaIconProps) {
   return (
+    <Glyph size={size} className={className}>
+      {AREA_PATHS[area]}
+    </Glyph>
+  );
+}
+
+/**
+ * The navigation rail's Workshop group: a workbench with a vise. Workshop
+ * is a group of areas, not an area, so it has no `RecentTabArea` to key on.
+ */
+export function WorkshopIcon({ size = 14, className }: Omit<AreaIconProps, 'area'>) {
+  return (
+    <Glyph size={size} className={className}>
+      <path d="M3 9h18v3H3z" />
+      <path d="M6 12v8" />
+      <path d="M18 12v8" />
+      <path d="M6 17h12" />
+      <path d="M13 9V5.5h4V9" />
+      <path d="M10 7.2h3" />
+    </Glyph>
+  );
+}
+
+function Glyph({
+  size,
+  className,
+  children,
+}: {
+  size: number;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
     <svg
       width={size}
       height={size}
@@ -29,7 +62,7 @@ export function AreaIcon({ area, size = 14, className }: AreaIconProps) {
       aria-hidden="true"
       focusable="false"
     >
-      {AREA_PATHS[area]}
+      {children}
     </svg>
   );
 }

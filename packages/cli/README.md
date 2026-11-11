@@ -1,7 +1,7 @@
 # @bendyline/gezel-cli
 
-The `gezel` command line: assemble a team of AI companions (*gezels*) and put
-them to work from your terminal.
+The `gezel` command line: put AI to work on your files and projects from your
+terminal.
 
 ## Quick start
 
@@ -69,12 +69,16 @@ Run `gezel --help`, or `--help` on any command, for every option.
 | `gezel do <craftbook…>` | Start a craftbook as a task in this folder's project: its name, then required values, `key=value` parameters, and your request. `--wait` follows it to the end |
 | `gezel <craftbook> …` | Shorthand for `gezel do <craftbook> …`, matched exactly on the craftbook's command name; built-in commands always win |
 | `gezel craftbook list [words…]` | List the craftbooks `gezel do` can start in this folder's project (command name, title, category); words filter by command, title, and tags. `--json` for scripts |
+| `gezel craftbook show <craftbook>` | What one craftbook does, what it takes before your request, and where it saves |
 | `gezel workflow <name-or-file> [args…]` | Run a repository workflow from `.gezel/workflows/<name>.mjs` or a module path |
 | `gezel task list\|show\|create` | Tasks across every project |
 | `gezel task wait\|resume\|pause <ref>` | Follow a task to the end, retry a paused task and follow it, or pause one task |
 | `gezel task notes <ref>` | A task's notes, including pause reasons and failed checks (`--warnings` adds runtime warnings) |
-| `gezel agent list\|create\|show\|output-limit` | Manage your gezels (the command name is historical) |
-| `gezel project list\|create\|install\|indexing` | Manage projects, their npm packages, and background indexing (`gezel env` is the same command) |
+| `gezel agent list\|create\|show\|output-limit` | Manage your crew (the command name is historical) |
+| `gezel project list\|create\|install\|indexing\|edits` | Manage projects, their npm packages, background indexing, and whether Gezel may change files in the folder (`gezel env` is the same command) |
+| `gezel integrations list\|approve\|deny\|token` | The apps connected to this Gezel: answer one that asked to connect, or make and revoke app keys |
+| `gezel integrations address` | Where other programs reach this Gezel's models |
+| `gezel integrations ollama [on\|off]` | A plain-HTTP port on this computer that needs no key (`http://127.0.0.1:11434/v1`, and Ollama's own paths); off until you turn it on |
 | `gezel skills list\|import\|convert` | Find SKILL.md skills and turn them into craftbooks |
 | `gezel app …` | Build, install, apply, and serve AI Apps (`.gezapp`): `new`, `validate`, `pack`, `add`, `update`, `list`, `show`, `apply`, `status`, `serve`, `enable`, `disable`, `remove`, `schemas` |
 | `gezel model list\|pull\|use\|export` | On-device chat models. `list --available` shows the catalog models that fit this machine, with sizes; `pull <id>` downloads one, plus the engine it runs on if that is missing; `use <id>` makes chats use a downloaded model (a pull does this itself when no working default is set); `export <id> [file]` writes a portable, checksum-verified `.gezmodel` |
@@ -84,12 +88,12 @@ Run `gezel --help`, or `--help` on any command, for every option.
 | `gezel create-image\|create-video\|create-audio` | Generate an image, a video, or spoken audio |
 | `gezel knowledge …` | Build, check, and search `.gezk` knowledge catalogs (`init`, `build`, `validate`, `inspect`, `export-parquet`, `search`, `nearby`), and manage the ones installed in Gezel (`available`, `install`, `list`, `remove`, `find`) |
 | `gezel secret list\|set\|remove` | Provider keys, stored write-only |
-| `gezel security external-services [on\|off]` | Whether gezels may use web search and other outside services |
+| `gezel security external-services [on\|off]` | Whether Gezel may use web search and other outside services |
 | `gezel mode [mode]` | Show or set how active the AI may be: `read-only`, `reactive`, `reactive+tasks`, or `full-play` |
 | `gezel start` / `status` / `stop` | Start, check, or stop your Gezel service (see [Starting and stopping](#starting-and-stopping)) |
 | `gezel doctor` | Check the installation |
 | `gezel cleanup` | Show or reclaim the space Gezel uses on this device (`--redownloadable`, `--models`, `--dry-run`, …) |
-| `gezel backup <file>` / `restore <file>` | Write your gezels, projects, and documents to a backup file, or bring them back (`restore --list` looks first) |
+| `gezel backup <file>` / `restore <file>` | Write your crew, projects, and documents to a backup file, or bring them back (`restore --list` looks first) |
 | `gezel handboek export --out <dir>` | Render the Handboek, Gezel's built-in documentation, as a static website |
 
 ## Starting and stopping
@@ -112,12 +116,13 @@ emergency brake on it and says the service is managed by the operating system.
 
 Inside the interactive app, `/mode` switches the same four activity levels and
 `/model` lists every installed model, with **Download a new model** to fetch
-another; the download is selected for the active gezel and starts a fresh chat.
+another; the download is selected for the active crew member and starts a fresh
+chat.
 `/continue` processes due schedules and picks up the current project's active
 tasks, and `/nightshift start|stop|list` manages Night Shift. `/allow edits` and
 `/disallow edits` let Gezel's own tools and background work edit the current
 project, or make it read-only for them; `codexedits` and `claudeedits` do the
-same for gezels that run on the Codex or Claude command-line tools.
+same when Gezel runs on the Codex or Claude command-line tools.
 
 ## One-shot prompts and pipelines
 
@@ -180,7 +185,7 @@ Three settings help with long unattended batches:
 
 ## Craftbooks from the command line
 
-A craftbook is a recipe for a piece of work that gezels carry out as a task.
+A craftbook is a recipe for a piece of work that Gezel carries out as a task.
 `gezel craftbook list` shows the ones you can start in the current folder's
 project, and `gezel craftbook list deck` narrows the list by command, title,
 and tags.
@@ -213,6 +218,19 @@ timeout leaves the task running. When a task is blocked, `--wait` prints why
 (its latest note) and points to `gezel task notes <ref>`. Progress goes to
 stderr; `--json` writes the result to stdout. `resume` retries a paused task
 with its saved recipe. Answer pending questions in Gezel before waiting again.
+
+A folder's project starts read-only. Most craftbooks keep what they make in
+the task's own folder, which `--out <dir>` copies out when the task finishes.
+Some save into the folder itself, such as a deck or a web page;
+`gezel craftbook show <craftbook>` says which. At a terminal `gezel do` asks
+before it starts one of those. In a script, add `--allow-edits`, or run
+`gezel project edits on` once in the folder. A task that stops because the
+folder is read-only prints that command and the `gezel task resume` that
+continues it.
+
+Some craftbooks need a file or a branch before the request.
+`gezel craftbook show <craftbook>` prints the start line with those in place,
+for example `gezel do meeting-notes-to-actions <source> "your request"`.
 
 ### Repository workflows
 
@@ -336,7 +354,7 @@ download only when you choose on-device models. Straight away you can use:
   first use, and one-shot prompts (`gezel run "…"`) once a model is set up.
 - Cloud providers: OpenAI, Anthropic, GitHub Copilot, and any OpenAI-compatible
   endpoint.
-- Your gezels, projects, and tasks (`gezel agent`, `gezel project`,
+- Your crew, projects, and tasks (`gezel agent`, `gezel project`,
   `gezel task`).
 - `gezel skills convert` and `gezel handboek export`, which need no running
   service at all.
@@ -405,7 +423,7 @@ machine-wide service, that service owns 6228. A current machine-wide service
 only runs models: the CLI never sends it projects, keys, or tools, and your own
 service uses it for model downloads and inference. While you upgrade from an
 older desktop release, an older machine-wide service that still holds your
-gezels and projects is used instead; `--standalone` skips it.
+crew and projects is used instead; `--standalone` skips it.
 
 Your own service may reuse two things the desktop app's machine install
 publishes, read-only: its downloaded models (your own models take precedence,
@@ -431,7 +449,7 @@ gezel --home /path/to/another-home                 # a separate Gezel home
 
 `--home <dir>` (or an explicit `GEZEL_HOME`) implies `--standalone`. A home you
 name with `--home` is also kept separate from what the Gezel desktop app's
-machine install publishes: its shared gezels and projects, and the models it
+machine install publishes: its shared crew and projects, and the models it
 downloaded. Set `GEZEL_DISABLE_MACHINE_SHARED=0` to include them anyway. Your
 default home, `~/.gezel`, still sees them.
 

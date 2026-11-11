@@ -636,7 +636,7 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
               : provenance.kind === 'user'
                 ? 'From your machine-wide library (~/.gezel/scripts). Edits here apply everywhere it is referenced.'
                 : provenance.kind === 'craftbook'
-                  ? `Part of the ${provenance.ref} craftbook — updates to the craftbook replace this file, so direct edits would be lost.`
+                  ? `Part of the ${provenance.ref} plan — updates to the plan replace this file, so direct edits would be lost.`
                   : `Generated from import ${provenance.ref} — re-syncing the import replaces this file.`}
           </span>
           {runtimeCapabilities().scriptAuthoring && provenance.kind !== 'user' && (
@@ -781,7 +781,7 @@ export function ScriptEditorView({ projectId, scriptName, scope }: ScriptEditorV
       <ConfirmDialog
         open={confirmEditAnyway}
         title="Edit a managed script?"
-        message="This file is replaced wholesale when its craftbook or import updates — your edits would be lost then. Making your own copy is the safe way to customize it."
+        message="This file is replaced wholesale when its plan or import updates — your edits would be lost then. Making your own copy is the safe way to customize it."
         confirmLabel="Edit anyway"
         danger
         onConfirm={() => {
@@ -860,7 +860,7 @@ function AboutPanel({
               : provenance.kind === 'user'
                 ? 'Your machine-wide library (~/.gezel/scripts).'
                 : provenance.kind === 'craftbook'
-                  ? `Installed by the ${provenance.ref} craftbook.`
+                  ? `Installed by the ${provenance.ref} plan.`
                   : `Generated from import ${provenance.ref}.`
             : 'A script of this project.'}
         </p>

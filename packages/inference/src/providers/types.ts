@@ -680,8 +680,12 @@ export class ModelNotInstalledError extends Error {
   readonly providerName: string;
   readonly modelId: string;
   constructor(providerName: string, modelId: string) {
+    // The first sentence is matched by the chat UI (chat-error-copy.ts), so
+    // its wording stays. The advice after it used to say "list local models
+    // via GET /v1/models", but that list is the whole catalog: a caller who
+    // picked the next id from it got this same error again (2026-11-10).
     super(
-      `Model "${modelId}" is not available locally for provider "${providerName}". List local models via GET /v1/models, or download it first via POST /v1/models/ensure.`,
+      `Model "${modelId}" is not available locally for provider "${providerName}". GET /v1/models lists every model Gezel knows; the ones whose "availability" is "available" are downloaded and ready. To download this one, POST /v1/models/ensure.`,
     );
     this.name = 'ModelNotInstalledError';
     this.providerName = providerName;

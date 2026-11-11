@@ -240,7 +240,7 @@ export async function buildSiteCatalog(
         area: 'technical',
         order: 4.5,
         summary:
-          'Toolsets you can add to a gezel, and connectors that bring outside data into a project.',
+          'Toolsets you can add to a crew member, and connectors that bring outside data into a project.',
         generated: true,
         subcategory: HOW_GEZEL_WORKS,
       },
@@ -274,15 +274,15 @@ export async function buildSiteCatalog(
     {
       entry: {
         id: 'craftbooks-index',
-        title: 'Every craftbook',
+        title: 'Every plan',
         area: 'craftbooks',
         order: 0,
         generated: true,
       },
       markdown: [
-        '# Every craftbook',
+        '# Every plan',
         '',
-        `Craftbooks are step-by-step plans your crew follows to produce a real piece of work. Each one names its steps, who runs them, and the checks the result must pass. There are ${craftbooks.length} of them, grouped here by the kind of work they do.`,
+        `Plans are step-by-step procedures Gezel follows to produce a real piece of work. Each one names its steps, the role that runs each, and the checks the result must pass. There are ${craftbooks.length} of them, grouped here by the kind of work they do.`,
       ].join('\n'),
       html: craftbookGalleryHtml(craftbooks, craftbookArt),
       listed: false,
@@ -320,7 +320,7 @@ function modelCatalogMarkdown(
     '',
     `## Chat models (${chat.length})`,
     '',
-    'The models your gezels think and write with, recommended first. **Measured** is the share of tasks the model (or another build of it) passed in its most recent full [scorecard](model-scorecard) round, preferring the general set, with the machine that round ran on. Follow it to every round on the model’s page. Rounds are not comparable with each other, and a number from a workstation is not a promise about a laptop.',
+    'The models Gezel thinks and writes with, recommended first. **Measured** is the share of tasks the model (or another build of it) passed in its most recent full [scorecard](model-scorecard) round, preferring the general set, with the machine that round ran on. Follow it to every round on the model’s page. Rounds are not comparable with each other, and a number from a workstation is not a promise about a laptop.',
     '',
     '| Model | Measured | Size | Context | Tools | Best for | Runs on | License |',
     '| --- | --- | --- | --- | --- | --- | --- | --- |',
@@ -342,7 +342,7 @@ function modelCatalogMarkdown(
       '',
       `## Image models (${images.length})`,
       '',
-      'Models your crew can use to draw pictures, icons and illustrations. Gezel works out what each one needs from its files and offers only the ones your machine can run.',
+      'Models Gezel can use to draw pictures, icons and illustrations. Gezel works out what each one needs from its files and offers only the ones your machine can run.',
       '',
       '| Model | Size | Commercial use | License |',
       '| --- | --- | --- | --- |',
@@ -488,7 +488,7 @@ function chatModelMarkdown(m: ChatModelManifest, scorecard: ScorecardDataset): s
     '| --- | --- |',
     ...facts.filter(([, v]) => v).map(([k, v]) => row([k, cell(v)])),
     '',
-    'Gezel downloads this model the first time a gezel needs it, checks the file against its published hash, and applies tuned settings for it.',
+    'Gezel downloads this model the first time it is needed, checks the file against its published hash, and applies tuned settings for it.',
     '',
     ...measuredResultsMarkdown(scorecard, m.id),
   ];
@@ -509,14 +509,14 @@ function toolsetCatalogMarkdown(
   const lines = [
     '# Add-on toolsets and connectors',
     '',
-    'Every gezel starts with the built-in tool groups that fit its role, described in [Tools and toolsets](tools-and-toolsets). This page lists what you can add on top.',
+    'Every crew member starts with the built-in tool groups that fit their role, described in [Tools and toolsets](tools-and-toolsets). This page lists what you can add on top.',
   ];
   if (addOns.length > 0) {
     lines.push(
       '',
       '## Add-on toolsets',
       '',
-      'Extra tools from Gezel’s own catalog. Add one to a gezel from its Toolsets tab.',
+      'Extra tools from Gezel’s own catalog. Add one to a crew member from their Toolsets tab.',
       '',
       '| Toolset | What it does |',
       '| --- | --- |',
@@ -528,7 +528,7 @@ function toolsetCatalogMarkdown(
       '',
       '## Connectors',
       '',
-      'Connectors copy data from outside services, such as mail, calendars and issue trackers, into a project as searchable files. Your crew works on that local copy, never on the live account.',
+      'Connectors copy data from outside services, such as mail, calendars and issue trackers, into a project as searchable files. Gezel works on that local copy, never on the live account.',
       '',
       '| Connector | What it brings in |',
       '| --- | --- |',
@@ -540,7 +540,7 @@ function toolsetCatalogMarkdown(
       '',
       '## Community servers',
       '',
-      `Gezel’s toolset browser also lists about ${roundDown(communityCount).toLocaleString('en-US')} MCP servers from the public community registry, marked **Community**. They are third-party projects, so review one before you add it to a crew. You can also bring your own: see [Custom MCP toolsets](tools-and-toolsets#custom-mcp-toolsets).`,
+      `Gezel’s toolset browser also lists about ${roundDown(communityCount).toLocaleString('en-US')} MCP servers from the public community registry, marked **Community**. They are third-party projects, so review one before you add it. You can also bring your own: see [Custom MCP toolsets](tools-and-toolsets#custom-mcp-toolsets).`,
     );
   }
   return lines.join('\n');
@@ -550,7 +550,7 @@ function roleCatalogMarkdown(roles: GezelTemplateManifest[]): string {
   return [
     '# Every role template',
     '',
-    'A role template is a ready-made character for your crew: a name, a job, and a working style that shapes how they think and talk. The Meester picks from these when it builds a crew, and you can add any of them yourself with **New Gezel**. The core roles each have their own page in [Roles](roles-index).',
+    'A role template is a ready-made character for your crew: a name, a job, and a working style that shapes how they think and talk. The Meester picks from these when a job calls for one, and you can add any of them yourself with **New crew member**. The core roles each have their own page in [Roles](roles-index).',
     '',
     '| Role | What they do |',
     '| --- | --- |',
@@ -563,14 +563,14 @@ function roleCatalogMarkdown(roles: GezelTemplateManifest[]): string {
 function roleTemplateMarkdown(r: GezelTemplateManifest, about: string | undefined): string {
   const lines = [`# ${r.name}`, '', r.description.trim()];
   if (r.meesterCandidate) {
-    lines.push('', 'This character can also act as your Meester, the gezel who runs the crew.');
+    lines.push('', 'This character can also act as your Meester, the one you talk to first.');
   }
   if (about?.trim()) {
     lines.push(
       '',
       '## How they work',
       '',
-      'This is the character brief Gezel gives the model, word for word. It shapes how this gezel thinks, works and talks.',
+      'This is the character brief Gezel gives the model, word for word. It shapes how this character thinks, works and talks.',
       '',
       demoteHeadings(about.trim()),
     );

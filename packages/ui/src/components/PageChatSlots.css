@@ -25,6 +25,29 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
+/* A page modal is open. Clicks fall through to the page, whose backdrop
+   answers them; the transparent border shows the dimmed page beneath. */
+.page-chat-slot[data-dimmed="true"] {
+  pointer-events: none;
+  border-color: transparent;
+  isolation: isolate;
+}
+/* The page's own backdrop color arrives inline; this matches the app
+   components' dialog backdrop when a page does not report one. */
+.page-chat-slot-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  background: rgb(28 24 20 / 0.36);
+}
+[data-theme="dark"] .page-chat-slot-scrim {
+  background: rgb(0 0 0 / 0.56);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .page-chat-slot-scrim {
+    background: rgb(0 0 0 / 0.56);
+  }
+}
 .page-chat {
   height: 100%;
   min-width: 0;

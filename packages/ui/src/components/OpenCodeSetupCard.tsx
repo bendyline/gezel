@@ -93,12 +93,12 @@ export function OpenCodeSetupCard({
       emptyModelsNote="No crew members or inference models compatible with the OpenCode tool loop are available yet."
       intro={
         <>
-          OpenCode keeps its own tools, permissions, and conversation loop while a gezel supplies
-          the character, model, and tuning. Gezel writes its own settings file and points OpenCode
-          at it with one command. You can also let Gezel add a small plugin of its own to OpenCode,
-          so the gezel provider is simply there in every session. Either way, your own OpenCode
-          settings, conversations, and permissions are never edited. Your whole eligible crew is
-          offered, so you can switch between them from OpenCode's model picker.
+          OpenCode keeps its own tools, permissions, and conversation loop while a crew member
+          supplies the character, model, and tuning. Gezel writes its own settings file and points
+          OpenCode at it with one command. You can also let Gezel add a small plugin of its own to
+          OpenCode, so Gezel's provider is simply there in every session. Either way, your own
+          OpenCode settings, conversations, and permissions are never edited. Your whole eligible
+          crew is offered, so you can switch between them from OpenCode's model picker.
         </>
       }
       repairExplainer="Repair writes a fresh settings file for this Gezel and keeps a copy of the existing one next to it."
@@ -136,7 +136,7 @@ export function OpenCodeSetupCard({
           }
         : {})}
       modelRow={{
-        label: 'Default gezel',
+        label: 'Default crew member',
         value: card.model,
         onChange: card.setModel,
         disabled: card.selectionDisabled,
@@ -234,11 +234,11 @@ export function OpenCodeSetupCard({
             settings file for <strong>{selectedOption?.label ?? card.model}</strong>.{' '}
             {selectedOption && isGezelOption(selectedOption) ? (
               <>
-                This gezel&apos;s character, {selectedOption.modelLabel ?? 'model'}, and tuning will
-                guide OpenCode.{' '}
+                Their character, {selectedOption.modelLabel ?? 'model'}, and tuning will guide
+                OpenCode.{' '}
               </>
             ) : (
-              <>OpenCode will use it as a raw inference model without a gezel persona. </>
+              <>OpenCode will use it as a raw inference model without a persona. </>
             )}
             The file holds the local connection and app-scoped credential
             {status?.configPath ? (
@@ -322,8 +322,8 @@ export function OpenCodeSetupCard({
             , so every OpenCode session on this computer offers the <strong>gezel</strong> provider
             without the command above. It holds no password — it reads Gezel's own settings when
             OpenCode starts, and does nothing at all when Gezel is not running. It does not change
-            which model OpenCode starts with; pick a gezel from OpenCode's own model picker. Your
-            own OpenCode configuration, sessions, and permissions stay untouched, and{' '}
+            which model OpenCode starts with; pick a crew member from OpenCode's own model picker.
+            Your own OpenCode configuration, sessions, and permissions stay untouched, and{' '}
             <code>opencode --pure</code> always starts without it.
             {confirmation === 'replace-plugin' ? (
               <> The file it replaces is kept as a .backup copy beside it, so nothing is lost.</>

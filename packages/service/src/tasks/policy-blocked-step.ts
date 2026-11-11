@@ -1,6 +1,7 @@
 import {
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   type NormalizedStepGate,
+  PROJECT_EDITS_CLI_COMMAND,
   type Task,
   type TaskCraftbookStep,
   createLogger,
@@ -41,7 +42,9 @@ interface Blocker {
   logLine: string;
 }
 
-const WRITES_OFF_FIXES = `- Enable "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings.\n- Change the step's deliverable to the artifacts drawer (\`artifact: true\`, written with \`write_artifact\`) — the drawer stays writable when workspace writes are off.`;
+// The command comes first: a task started from a terminal has no Project →
+// Settings to open, and `gezel do` prints this line when it finds it here.
+const WRITES_OFF_FIXES = `- Allow it: run \`${PROJECT_EDITS_CLI_COMMAND}\` in the project's folder, or enable "${MANAGED_WORKSPACE_WRITE_SETTING_LABEL}" in Project → Settings.\n- Change the step's deliverable to the artifacts drawer (\`artifact: true\`, written with \`write_artifact\`) — the drawer stays writable when workspace writes are off.`;
 
 /**
  * Pause a task whose newly-activated step owes a workspace file nobody may
@@ -68,7 +71,9 @@ export async function pauseIfStepUnsatisfiable(
   if (!files) return false;
   const fileList = files.map((f) => `\`${f}\``).join(', ');
   await pauseBlockedStep(tasks, projectId, task, step.id, {
-    note: `# Step unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) must produce workspace ${fileList}, but managed workspace writes are OFF for this project — no managed task assignee has \`write_file\`, so the step cannot complete through this path. The step was not dispatched.\n\nFix one of these, then set the task active again:\n\n${WRITES_OFF_FIXES}\n- Create the file(s) by hand and re-run the step.`,
+    // The first sentence is what `gezel do --wait` prints, so it has to say
+    // the whole problem in plain words and fit on a line or two.
+    note: `# Step unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) must write ${fileList} into the project folder, and Gezel may not change files in this project. Managed workspace writes are OFF, so no task assignee has \`write_file\`, and nobody was started on the step.\n\nFix one of these, then set the task active again:\n\n${WRITES_OFF_FIXES}\n- Create the file(s) by hand and re-run the step.`,
     detail: `Step "${step.name}" must write workspace ${fileList}, but managed workspace writes are off for this project.`,
     logLine: `[tasks] ${task.ref} step "${step.id}" targets workspace ${fileList} but workspace writes are off — pausing instead of dispatching`,
   });
@@ -110,7 +115,7 @@ export async function holdUnsatisfiableGate(
     const fileList = files.length > 0 ? files.map((f) => `\`${f}\``).join(', ') : 'files';
     message = `This gate cannot be met right now: it requires workspace ${fileList} to change, but managed workspace writes are OFF for this project. The task is paused for a human decision; do not retry. See the task notes for the fixes.`;
     blocker = {
-      note: `# Gate unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) is gated on workspace ${fileList}, but managed workspace writes are OFF for this project — no managed task assignee can create or edit workspace files, so retrying cannot succeed. No completion attempt was consumed.\n\nFix one of these, then set the task active again:\n\n${WRITES_OFF_FIXES}\n- Create or fix the file(s) by hand from the content in task notes.`,
+      note: `# Gate unsatisfiable — task paused\n\nStep "${step.name}" (\`${step.id}\`) is checked against ${fileList} in the project folder, and Gezel may not change files in this project. Managed workspace writes are OFF, so no task assignee can create or edit workspace files and retrying cannot succeed. No completion attempt was consumed.\n\nFix one of these, then set the task active again:\n\n${WRITES_OFF_FIXES}\n- Create or fix the file(s) by hand from the content in task notes.`,
       detail: `The gate requires workspace ${fileList}, but managed workspace writes are off for this project.`,
       logLine: `[gate] ${task.ref} step "${step.id}" gate is unsatisfiable (workspace writes off) — pausing without consuming an attempt`,
     };

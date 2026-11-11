@@ -37,8 +37,14 @@ describe('MessageBubble deliverable', () => {
     const onFileReference = renderWrapUp();
 
     const card = screen.getByRole('region', { name: 'Your PowerPoint deck' });
-    expect(within(card).getByText('deck.pptx')).toBeInTheDocument();
-    expect(card).toHaveTextContent('In the project folder · powerpoint/task-13 · 46.9 KB');
+    // The card says what the file is and how big, never where it is stored;
+    // the path is the file name's tooltip.
+    expect(within(card).getByText('deck.pptx')).toHaveAttribute(
+      'title',
+      'powerpoint/task-13/deck.pptx',
+    );
+    expect(card.querySelector('.deliverable-card-meta')?.textContent).toMatch(/^46\.9 KB · /);
+    expect(card).not.toHaveTextContent(/In the project folder|powerpoint\/task-13/);
     // The inline path still links too — the daemon resolved it.
     expect(screen.getByRole('link', { name: 'powerpoint/task-13/deck.pptx' })).toBeInTheDocument();
 

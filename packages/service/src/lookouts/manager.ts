@@ -150,8 +150,8 @@ const ACTION_LABEL: Record<LookoutAction['kind'], string> = {
   speak: 'Spoken alert',
   push: 'Phone',
   email: 'Email',
-  'ask-gezel': 'Ask a gezel',
-  'run-craftbook': 'Craftbook',
+  'ask-gezel': 'Ask someone on the crew',
+  'run-craftbook': 'Plan',
 };
 
 export class LookoutManager implements CameraLookoutSink {
@@ -785,10 +785,10 @@ export class LookoutManager implements CameraLookoutSink {
       }
       case 'ask-gezel': {
         if (!actingGezel)
-          return { action: kind, status: 'held', reason: 'No gezel is available to take this on.' };
+          return { action: kind, status: 'held', reason: 'No one is available to take this on.' };
         if (test) return { action: kind, status: 'skipped', reason: 'Not sent on a test.' };
         if (!this.opts.deliverReaction)
-          return { action: kind, status: 'held', reason: 'Gezels are not available.' };
+          return { action: kind, status: 'held', reason: 'No one is available to take this on.' };
         const seed = lookoutGezelSeed({
           ...text,
           instruction: action.instruction,
@@ -808,7 +808,7 @@ export class LookoutManager implements CameraLookoutSink {
       case 'run-craftbook': {
         if (test) return { action: kind, status: 'skipped', reason: 'Not started on a test.' };
         if (!this.opts.runCraftbook)
-          return { action: kind, status: 'held', reason: 'Craftbooks are not available.' };
+          return { action: kind, status: 'held', reason: 'Plans are not available.' };
         if (await this.opts.liveRunFor?.(event.projectId, lookout.id).catch(() => false)) {
           return {
             action: kind,

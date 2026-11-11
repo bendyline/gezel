@@ -59,6 +59,7 @@ import {
   isSharedLibraryProject,
   nowIso,
   projectAllowsWorkspaceTables,
+  projectHoldsCode,
   projectManagedWorkspaceWritable,
 } from '@bendyline/gezel';
 import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
@@ -91,6 +92,7 @@ import {
   NIGHT_MAX_TABLES_PER_DRAIN,
   drainWorkspaceTables,
 } from '../observations/workspace-drain.js';
+import { workspaceTableMinBytes } from '../observations/workspace-tables.js';
 import { runSecurityScan } from '../security/scan.js';
 import { type AiShadowDeps, aiShadowFile } from './ai-shadow.js';
 import {
@@ -105,7 +107,7 @@ import {
   artifactsCollectionId,
   indexProjectArtifacts,
 } from './artifacts-indexer.js';
-import { classifyFile } from './classify.js';
+import { MAX_INDEXABLE_BYTES, classifyFile } from './classify.js';
 import type { ContentIndexStats } from './content-indexer.js';
 import {
   adjacentDocFilesPaths,
@@ -339,10 +341,12 @@ export class ContentIndex {
       // Wrapped rather than `.catch`ed because a Store that lacks the method
       // throws synchronously, which no promise catch would see.
       let tablesAllowed = false;
+      let holdsCode = true;
       try {
         const meta = await this.store.getProject(projectId);
         tablesAllowed =
           meta != null && meta.indexingEnabled !== false && projectAllowsWorkspaceTables(meta);
+        holdsCode = meta == null || projectHoldsCode(meta);
       } catch {
         tablesAllowed = false;
       }
@@ -352,6 +356,7 @@ export class ContentIndex {
           duck: this.duck,
           storageDir: this.store.projectArtifactsDir(projectId),
           workspaceDir,
+          minBytes: workspaceTableMinBytes(holdsCode, MAX_INDEXABLE_BYTES),
         }).catch((err) => {
           log.warn(`[index] derived-table drain failed for ${projectId}: ${String(err)}`);
         });
@@ -2745,10 +2750,12 @@ export class ContentIndex {
   async drainWorkspaceTablesAtNight(projectId: string): Promise<DrainResult | null> {
     if (!this.duck) return null;
     let allowed = false;
+    let holdsCode = true;
     try {
       const meta = await this.store.getProject(projectId);
       allowed =
         meta != null && meta.indexingEnabled !== false && projectAllowsWorkspaceTables(meta);
+      holdsCode = meta == null || projectHoldsCode(meta);
     } catch {
       allowed = false;
     }
@@ -2764,6 +2771,7 @@ export class ContentIndex {
         workspaceDir: opened.workspaceDir,
         maxTables: NIGHT_MAX_TABLES_PER_DRAIN,
         maxInlineBytes: NIGHT_MAX_INLINE_BYTES,
+        minBytes: workspaceTableMinBytes(holdsCode, MAX_INDEXABLE_BYTES),
       });
     } finally {
       opened.index.close();

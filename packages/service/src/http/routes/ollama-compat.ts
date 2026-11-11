@@ -7,6 +7,7 @@ import {
   MAX_EMBEDDING_INPUTS,
   createEmbeddings,
 } from '@bendyline/gezel-inference/internal/http/openai-compat/embeddings';
+import { engineFailure } from '@bendyline/gezel-inference/internal/http/openai-compat/engine-failure';
 import {
   type OllamaRequestOptions,
   overlayOllamaRequestTuning,
@@ -19,6 +20,7 @@ import {
   resolveModelTarget,
   translateMessagesWithPrefix,
 } from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
+import { providerListable } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
 import { ModelNotInstalledError } from '@bendyline/gezel-inference/internal/providers/types';
 import type {
   ExternalToolCall,
@@ -118,6 +120,22 @@ const OllamaOptionsSchema = z.object({
 /** Ollama structured output: `'json'` or a bare JSON schema object. */
 const OllamaFormatSchema = z.union([z.literal('json'), z.record(z.string(), z.unknown())]);
 
+/**
+ * A request that named an engine this computer can never run (MLX on
+ * Windows). The caller has to pick another model, so it gets the provider's
+ * own sentence as a 400. Rethrown, it became an opaque 500.
+ */
+function isCallersEngineChoice(err: unknown): err is Error {
+  return err instanceof Error && engineFailure(err).code === 'engine_unsupported';
+}
+
+/**
+ * Ollama's `think`: a boolean, or an effort word on models that take one.
+ * `false` answers without the reasoning phase; anything else keeps the
+ * model's own setting.
+ */
+const OllamaThinkSchema = z.union([z.boolean(), z.string().max(32)]);
+
 const OllamaChatRequestSchema = z.object({
   model: z.string().min(1),
   messages: z.array(OllamaMessageSchema).min(1),
@@ -125,6 +143,7 @@ const OllamaChatRequestSchema = z.object({
   tools: z.array(OllamaToolSchema).optional(),
   options: OllamaOptionsSchema.optional(),
   format: OllamaFormatSchema.optional(),
+  think: OllamaThinkSchema.optional(),
 });
 
 const OllamaGenerateRequestSchema = z.object({
@@ -135,6 +154,7 @@ const OllamaGenerateRequestSchema = z.object({
   stream: z.boolean().optional(),
   options: OllamaOptionsSchema.optional(),
   format: OllamaFormatSchema.optional(),
+  think: OllamaThinkSchema.optional(),
 });
 
 const OllamaEmbedRequestSchema = z.object({
@@ -380,8 +400,17 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
    */
   app.get('/tags', async (c) => {
     const now = new Date().toISOString();
+    // Listing the Claude or Codex command line runs it, and listing Ollama
+    // probes its port: only once the person chose them, as /v1/models does.
+    const [config, gezels] = await Promise.all([
+      ctx.store.readConfig().catch(() => null),
+      ctx.store.listGezels().catch(() => []),
+    ]);
+    const providers = PROVIDERS_FOR_TAGS.filter((provider) =>
+      providerListable(provider, config, gezels),
+    );
     const buckets = await Promise.all(
-      PROVIDERS_FOR_TAGS.map(async (provider) => {
+      providers.map(async (provider) => {
         try {
           const models = await ctx.chat.listModelsForProvider(provider);
           return models.map<OllamaTagsModel>((m) => ({
@@ -553,6 +582,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       provider = await ctx.chat.getProviderForModel(target.provider, target.model);
     } catch (err) {
       if (err instanceof ModelNotInstalledError) return c.json({ error: err.message }, 404);
+      if (isCallersEngineChoice(err)) return c.json({ error: err.message }, 400);
       throw err;
     }
 
@@ -560,7 +590,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})
       .catch(() => null);
     const tuning = defaults
-      ? overlayOllamaRequestTuning(defaults.tuning, parsed.options, parsed.format)
+      ? overlayOllamaRequestTuning(defaults.tuning, parsed.options, parsed.format, parsed.think)
       : null;
     const lengthCap = tuning?.sampling.maxTokens;
 
@@ -699,6 +729,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
         // Ollama's own envelope shape for an unknown model.
         return c.json({ error: err.message }, 404);
       }
+      if (isCallersEngineChoice(err)) return c.json({ error: err.message }, 400);
       throw err;
     }
 
@@ -733,7 +764,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       .resolveModelSessionDefaults(target.provider, target.model, target.tuningOverrides ?? {})
       .catch(() => null);
     const tuning = defaults
-      ? overlayOllamaRequestTuning(defaults.tuning, parsed.options, parsed.format)
+      ? overlayOllamaRequestTuning(defaults.tuning, parsed.options, parsed.format, parsed.think)
       : null;
     const lengthCap = tuning?.sampling.maxTokens;
 

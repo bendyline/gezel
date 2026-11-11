@@ -22,7 +22,7 @@ export const GEZEL_MCP_HELP = `Usage: gezel-mcp [--harness <app>] [--help] [--ve
 gezel-mcp is Gezel's tool server, spoken over MCP on stdin and stdout. You
 do not usually run it yourself.
 
-  gezel-mcp                  the full tool set Gezel gives its own gezels;
+  gezel-mcp                  the full tool set Gezel uses itself;
                              the Gezel service starts it for each chat
   gezel-mcp --harness <app>  Gezel's tools for another AI app: claude-code,
                              claude-desktop, codex, cursor or vscode

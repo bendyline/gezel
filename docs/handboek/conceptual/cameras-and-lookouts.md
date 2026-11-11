@@ -28,7 +28,7 @@ While any camera is watching, the titlebar says so, and the camera's light is on
 
 ## What it keeps
 
-Every time something happens in view (a person walks through, the cat comes in and sits down), gezel treats it as one **moment**. A moment is saved as a short note in the project with up to three pictures and what the vision model saw, so you and your crew can find it later: "when was the cat last in the mud room?"
+Every time something happens in view (a person walks through, the cat comes in and sits down), gezel treats it as one **moment**. A moment is saved as a short note in the project with up to three pictures and what the vision model saw, so you and Gezel can find it later: "when was the cat last in the mud room?"
 
 Saved pictures from **While moving** and **On a schedule** stay in a private folder on this computer, never in a synced folder. They're kept for as many days as you choose, up to a size limit, and the oldest go first. Moments are kept for 90 days.
 
@@ -37,7 +37,7 @@ Saved pictures from **While moving** and **On a schedule** stay in a private fol
 Under **Lookouts**, press **Add a lookout** and finish the sentence:
 
 - **When** the camera **sees** anything moving, a person, a pet, or something specific. For something specific, write a yes-or-no question like *Is a cat squatting or pooping on the floor?* Tick **Only when it is clearly happening** to wait for a second picture before acting.
-- **Then** tell you, play a sound, say something out loud, send it to your phone, email you, ask a gezel to follow up, or run a craftbook.
+- **Then** tell you, play a sound, say something out loud, send it to your phone, email you, ask someone on the crew to follow up, or run a plan.
 
 Each lookout acts at most once per moment, rests after it acts (10 minutes by default), and stops for the day at its limit. You can limit it to certain hours, snooze it for an hour, or press **Test** to hear and see exactly what it does.
 
@@ -48,13 +48,13 @@ The **Recently** list shows every time a lookout acted, the picture it acted on,
 - **Sounds, spoken alerts and notifications** work at every security level.
 - **Phone alerts** use the phone channel from Settings.
 - **Email** needs a mail account connected to the project and the **Free** security level. A lookout only ever emails the addresses you typed on it.
-- **Asking a gezel** and **running a craftbook** need Gezel to be set to run tasks. A gezel on a cloud model can't see the pictures unless you turn on **Let cloud AI see these pictures** for that camera; otherwise the action is held and the list says so.
+- **Asking someone on the crew** and **running a plan** need Gezel to be set to run tasks. If whoever follows up runs on a cloud model, they can't see the pictures unless you turn on **Let cloud AI see these pictures** for that camera; otherwise the action is held and the list says so.
 
-A gezel can **propose** a lookout, but it stays off until you approve it. Your crew can never turn on, change, or widen a lookout on its own.
+Gezel can **propose** a lookout, but it stays off until you approve it. It can never turn on, change, or widen a lookout on its own.
 
 ## Privacy
 
 - Pictures, motion detection and the vision model all run on this computer.
-- Only crew members that run on an on-device model see a camera's pictures. Others get a description made here, unless you allow cloud AI for that camera.
+- A camera's pictures are shown only to models that run on this computer. A cloud model gets a description made here, unless you allow cloud AI for that camera.
 - What the vision model writes is treated as untrusted: a sign held up to the camera can't send an email or start work, because lookouts act only on yes-or-no answers and your own instructions.
 - Removing a camera deletes the pictures it saved. The moments it recorded stay in the project until you delete them.

@@ -485,7 +485,7 @@ describe('FileMapView code context', () => {
     await openBlock('src/a.ts');
     await screen.findByText(FINDING.title);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Ask a developer gezel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Ask a developer' }));
     const taskLink = await screen.findByRole('button', { name: 'Open task p1/1' });
     expect(taskLink).toHaveTextContent('p1/1');
     expect(api.delegateSecurityFinding).toHaveBeenCalledWith('p1', {

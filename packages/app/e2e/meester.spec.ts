@@ -10,9 +10,11 @@ import { fileURLToPath } from 'node:url';
  */
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { captureScreenshot } from './helpers/screenshot.js';
+import { revealSettingsNavItem } from './helpers/settings-nav.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -33,8 +35,7 @@ test.beforeAll(async () => {
     }),
   });
   page = await app.firstWindow();
-  await page.waitForLoadState('domcontentloaded');
-  await page.waitForTimeout(2500);
+  await waitForAppReady(page);
 });
 
 test.afterAll(async () => {
@@ -75,8 +76,11 @@ test('Settings shows the meester with the dropdown pre-selected', async () => {
   await page.locator('[data-testid="sidebar-area-settings"]').click();
   await page.waitForTimeout(500);
   // The meester picker lives in the "Your team" section — Settings
-  // opens on "General" by default, so click into the team section.
-  await page.locator('.settings-nav button:has-text("Your team")').click();
+  // opens on "General" by default, so click into the team section, which
+  // sits under "More settings" (folded until opened).
+  const team = page.locator('.settings-nav button:has-text("Your team")');
+  await revealSettingsNavItem(page, team);
+  await team.click();
   await page.waitForTimeout(400);
   await captureScreenshot(page, {
     path: join(screenshotDir, 'meester-02-settings.png'),

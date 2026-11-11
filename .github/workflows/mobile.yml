@@ -26,6 +26,7 @@ on:
       - 'pnpm-workspace.yaml'
       - 'package.json'
       - '.github/actions/setup-workspace/**'
+      - '.github/actions/install-chromium/**'
       - '.github/workflows/mobile.yml'
   workflow_dispatch:
 
@@ -52,18 +53,11 @@ jobs:
           pnpm mobile:build
           pnpm mobile:check
       - name: Install browser test runtime
-        run: |
-          node --input-type=module <<'JS'
-          import { spawnSync } from 'node:child_process';
-          import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
-          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
-            const result = spawnSync('pnpm', ['--filter', '@bendyline/gezel-ui', 'exec', 'playwright', 'install', '--with-deps', 'chromium'], {
-              env: { ...process.env, ...leaseEnv }, stdio: 'inherit',
-            });
-            if (result.error) throw result.error;
-            process.exitCode = result.status ?? 1;
-          }, { command: 'Install the CI mobile browser test runtime' });
-          JS
+        # Not `--with-deps`: it only adds fonts from Ubuntu's Azure mirror, and
+        # that mirror failing DNS failed this job three times on 2026-11-11.
+        uses: ./.github/actions/install-chromium
+        with:
+          filter: '@bendyline/gezel-ui'
       - name: Check phone and tablet persistence
         shell: bash
         run: |

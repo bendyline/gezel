@@ -149,7 +149,7 @@ export function rankWorkOptions(input: WorkRankInput): SuggestWorkResult {
         id: 'task-here',
         projectId: input.projectId,
         name: 'A task in this project',
-        description: 'A general plan-and-do task for the current crew.',
+        description: 'A general plan-and-do task.',
       });
     }
   }
@@ -223,7 +223,7 @@ function askVerdict(inDefault: boolean): WorkGuidance {
       }
     : {
         kind: 'ask',
-        question: 'What should the crew do here?',
+        question: 'What would you like done here?',
         choices: ['A task in this project', 'Just talk it through'],
       };
 }

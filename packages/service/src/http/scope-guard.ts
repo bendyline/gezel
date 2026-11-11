@@ -389,6 +389,11 @@ async function isSessionRouteAllowed(
     if (/^\/report-actions\/(?:fire|dismiss)\/?$/.test(rest)) {
       return sessionDeny('report actions are fired from a first-party client');
     }
+    // Approving an app update can replace an edited script and write into a
+    // folder gezels hold no grant for. Reading what an update would do is open.
+    if (method !== 'GET' && /^\/project-type\/upgrade\/?$/.test(rest)) {
+      return sessionDeny('app updates are approved by the person in Gezel');
+    }
     // Connecting a source, pausing or editing one, and a camera's live feed
     // are the person's: a prompt-injected gezel must never bind or arm a
     // camera, read its pictures past the cloud-model rule, or change what a
@@ -663,6 +668,16 @@ async function isSessionRouteAllowed(
   // read 403, and the caller's fail-open swallowed it silently.
   if (method === 'GET' && path === `/api/sessions/${encodeURIComponent(sessionId(auth))}`) {
     return SESSION_ALLOW;
+  }
+  // A coordinator that just hired someone may have them introduced in its own
+  // thread. The card's words come from the gezel's record, never the caller.
+  if (
+    method === 'POST' &&
+    path === `/api/sessions/${encodeURIComponent(sessionId(auth))}/crew-introduction`
+  ) {
+    return auth.team
+      ? SESSION_ALLOW
+      : sessionDeny('introducing crew requires a coordinator session');
   }
   if (path === '/api/sessions' || path.startsWith('/api/sessions/')) {
     return sessionDeny('raw session routes require a first-party client');

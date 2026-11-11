@@ -1,13 +1,19 @@
-import type { Task } from '@bendyline/gezel';
+import { PROJECT_EDITS_CLI_COMMAND, type Task } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  blockedTaskDetails,
   blockedTaskReason,
+  craftbookBareSlots,
   craftbookDoLaunch,
+  craftbookFolderFiles,
+  describeCraftbook,
+  ensureProjectEdits,
   filterCraftbooks,
   parseCraftbookArguments,
   resolveCraftbookInvocation,
   summarizeTaskNote,
+  taskInputFailure,
   waitForTask,
 } from './craftbook-command.js';
 import type { StartCraftbook } from './tui/craftbook-start.js';
@@ -492,6 +498,201 @@ describe('blocked task reasons', () => {
     const client = { listTaskNotes: vi.fn() };
     const done = { ...blocked({ status: 'complete' }), outcome: 'complete' as const, exitCode: 0 };
     expect(await blockedTaskReason(client as never, done)).toBeUndefined();
+  });
+
+  it('names the command that unblocks a read-only folder, and how to continue', async () => {
+    // The service's own note for a step that must write into a folder Gezel
+    // may not change (policy-blocked-step.ts).
+    const note = [
+      '# Step unsatisfiable — task paused',
+      '',
+      'Step "Write the summary" (`summarize`) must write `summary.md` into the project folder, and Gezel may not change files in this project. Managed workspace writes are OFF.',
+      '',
+      'Fix one of these, then set the task active again:',
+      '',
+      `- Allow it: run \`${PROJECT_EDITS_CLI_COMMAND}\` in the project's folder, or enable the setting.`,
+    ].join('\n');
+    const client = {
+      listTaskNotes: vi.fn(async () => ({
+        notes: [{ id: 'a', at: '2026-11-10T20:00:47.612Z', author: 'system', text: note }],
+      })),
+    };
+    const details = await blockedTaskDetails(client as never, blocked({ ref: 'notes/2' }));
+    // The whole problem fits in the one line `gezel do --wait` prints.
+    expect(details.reason).toBe(
+      'Step unsatisfiable — task paused: Step "Write the summary" (`summarize`) must write `summary.md` into the project folder, and Gezel may not change files in this project.',
+    );
+    expect(details.hint).toContain('gezel project edits on');
+    expect(details.hint).toContain('gezel task resume notes/2');
+  });
+
+  it('offers no command for a pause that has none', async () => {
+    const client = {
+      listTaskNotes: vi.fn(async () => ({
+        notes: [{ id: 'a', at: '2026-11-10T20:00:00.000Z', author: 'system', text: PAUSE_NOTE }],
+      })),
+    };
+    expect((await blockedTaskDetails(client as never, blocked({}))).hint).toBeUndefined();
+  });
+});
+
+describe('a craftbook that saves into the project folder', () => {
+  const summarize = {
+    name: 'Summarize a Long Document',
+    steps: [
+      { id: 'scope', advanceWhen: { file: '{{workPath}}/scope.md', artifact: true } },
+      {
+        id: 'summarize',
+        advanceWhen: { file: 'summary.md' },
+        gate: { at: 'completion', checks: [{ kind: 'minBytes', file: 'summary.md', bytes: 500 }] },
+      },
+    ],
+  } as never;
+  const folder = { id: 'notes', workingDir: '/home/ada/notes' };
+  const client = (project: object = folder) => ({
+    getProject: vi.fn(async () => project),
+    updateProject: vi.fn(async () => ({ ...project, managedWorkspaceWritePolicy: 'allow' })),
+  });
+  const run = async (
+    c: ReturnType<typeof client>,
+    extra: { allow?: boolean; answer?: boolean; craftbook?: unknown } = {},
+  ) => {
+    const lines: string[] = [];
+    const confirm = vi.fn(async (_question: string) => extra.answer === true);
+    await ensureProjectEdits(c as never, {
+      projectId: 'notes',
+      craftbook: (extra.craftbook ?? summarize) as never,
+      allow: extra.allow === true,
+      prompter: extra.answer === undefined ? null : { confirm, secret: async () => '' },
+      write: (text) => lines.push(text),
+    });
+    return { lines: lines.join(''), confirm };
+  };
+
+  it('lists only what lands in the folder, never the task drawer', () => {
+    expect(craftbookFolderFiles(summarize)).toEqual(['summary.md']);
+  });
+
+  it('asks at a terminal and switches edits on for a yes', async () => {
+    const c = client();
+    const { confirm, lines } = await run(c, { answer: true });
+    expect(confirm.mock.calls[0]?.[0]).toContain(
+      'saves summary.md into /home/ada/notes, and Gezel may not change files there yet',
+    );
+    expect(c.updateProject).toHaveBeenCalledWith('notes', { managedWorkspaceWritePolicy: 'allow' });
+    expect(lines).toBe('Project edits: on\n');
+  });
+
+  it('starts anyway on a no, and says how to allow it later', async () => {
+    const c = client();
+    const { lines } = await run(c, { answer: false });
+    expect(c.updateProject).not.toHaveBeenCalled();
+    expect(lines).toContain('gezel project edits on');
+    expect(lines).toContain('--allow-edits');
+  });
+
+  it('takes --allow-edits as the answer when nobody is at a terminal', async () => {
+    const c = client();
+    const { lines } = await run(c, { allow: true });
+    expect(c.updateProject).toHaveBeenCalledWith('notes', { managedWorkspaceWritePolicy: 'allow' });
+    expect(lines).toContain('--allow-edits');
+  });
+
+  it('only warns in a script without the flag, and changes nothing', async () => {
+    const c = client();
+    const { lines } = await run(c);
+    expect(c.updateProject).not.toHaveBeenCalled();
+    expect(lines).toContain('Gezel may not change files there yet');
+  });
+
+  it('stays silent for a writable project and for a book that keeps to its task folder', async () => {
+    const writable = client({ ...folder, managedWorkspaceWritePolicy: 'allow' });
+    expect((await run(writable, { answer: true })).confirm).not.toHaveBeenCalled();
+    const drawerOnly = client();
+    const quiet = await run(drawerOnly, {
+      answer: true,
+      craftbook: {
+        name: 'Drawer',
+        steps: [{ id: 'a', advanceWhen: { file: 'x', artifact: true } }],
+      },
+    });
+    expect(quiet.confirm).not.toHaveBeenCalled();
+    expect(drawerOnly.getProject).not.toHaveBeenCalled();
+  });
+});
+
+describe('gezel craftbook show', () => {
+  const notesBook = { command: 'meeting-notes-to-actions', name: 'Meeting Notes to Action Items' };
+  const notes = {
+    description: 'Convert raw meeting notes into an assigned action-item list.\n\nMore detail.',
+    paramSchema: {
+      type: 'object',
+      required: ['source'],
+      properties: {
+        source: {
+          type: 'string',
+          title: 'Meeting notes or transcript',
+          input: { kind: 'file', accept: ['.md', '.txt'] },
+        },
+        tone: { type: 'string', enum: ['plain', 'formal'], default: 'plain' },
+        workPath: { type: 'string', default: '{{task.dir}}' },
+      },
+    },
+    steps: [{ id: 'extract', advanceWhen: { file: '{{workPath}}/actions.md', artifact: true } }],
+  } as never;
+
+  it('prints the start line the parser accepts, and what each parameter takes', () => {
+    const text = describeCraftbook(notesBook, notes);
+    expect(craftbookBareSlots(notes)).toEqual(['source']);
+    expect(text).toContain('gezel do meeting-notes-to-actions <source> "your request"');
+    expect(text).toContain(
+      'source  required, a file in this project (.md, .txt) — Meeting notes or transcript',
+    );
+    expect(text).toContain('tone    optional, one of: plain, formal, default plain');
+    expect(text).not.toContain('workPath');
+    expect(text).toContain('add --out <dir> to copy them out');
+  });
+
+  it('says when a book saves into the folder and needs edits allowed', () => {
+    const text = describeCraftbook({ command: 'blog-post', name: 'Blog Post' }, {
+      steps: [{ id: 'write', advanceWhen: { file: 'blog-post.md' } }],
+    } as never);
+    expect(text).toContain('Saves blog-post.md into the project folder');
+    expect(text).toContain('gezel project edits on');
+  });
+});
+
+describe('a launch refused over an input', () => {
+  const refused = (details: unknown) =>
+    new GezelApiError('422 on POST /api/projects/notes/tasks', 422, details);
+  const meeting = { command: 'meeting-notes-to-actions', name: 'Meeting Notes to Action Items' };
+
+  it('explains that the request landed in the input slot', () => {
+    const sentence = 'Turn notes.txt into action items';
+    const failure = taskInputFailure(
+      refused({
+        error: `"${sentence}" does not exist in this project.`,
+        code: 'task-input',
+        param: 'source',
+      }),
+      meeting,
+      { source: sentence },
+    );
+    expect(failure?.message).toContain('did not start');
+    expect(failure?.message).toContain('gezel do meeting-notes-to-actions <source> "your request"');
+    expect(failure?.message).toContain('gezel craftbook show meeting-notes-to-actions');
+    expect(failure?.message).not.toContain('422');
+  });
+
+  it('leaves a mistyped path as a plain message, and other failures alone', () => {
+    const typo = taskInputFailure(
+      refused({ error: '"nots.txt" does not exist.', code: 'task-input', param: 'source' }),
+      meeting,
+      { source: 'nots.txt' },
+    );
+    expect(typo?.message).not.toContain('comes before your request');
+    expect(taskInputFailure(refused({ error: 'nope' }), meeting, {})).toBeNull();
+    expect(taskInputFailure(new Error('boom'), meeting, {})).toBeNull();
   });
 });
 

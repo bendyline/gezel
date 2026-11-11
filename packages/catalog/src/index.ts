@@ -8,7 +8,16 @@ export {
   type ContentPackStats,
 } from './content-pack.js';
 export { LocalCatalogSource } from './local-source.js';
-export { InstalledAiAppsSource } from './installed-ai-apps-source.js';
+export {
+  INSTALLED_AI_APPS_SOURCE_ID,
+  InstalledAiAppsSource,
+} from './installed-ai-apps-source.js';
+export {
+  type CuratedChatModelLookup,
+  type ImportedChatModelReader,
+  type ImportedChatModelRecord,
+  ImportedChatModelsSource,
+} from './imported-models-source.js';
 export { categorizeToolset } from './categorize.js';
 export {
   applyDefaultCraftbookStepPolicies,

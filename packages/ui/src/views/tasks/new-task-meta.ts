@@ -3,12 +3,15 @@ import type {
   CraftbookCategory,
   CraftbookCategoryFamily,
   CraftbookTemplateManifest,
+  InterestAreaId,
   ProjectType,
 } from '@bendyline/gezel';
 import {
   CRAFTBOOK_CATEGORY_FAMILY_META,
   CRAFTBOOK_CATEGORY_META,
   CRAFTBOOK_ROLE_META,
+  FIRST_PROJECTS,
+  interestAreasForCraftbook,
   listProjectTypes,
   resolveCraftbookCategory,
   stringifyCraftbookParamValues,
@@ -43,6 +46,74 @@ export function toBookItems(items: CatalogItemSummary[]): BookItem[] {
     }
   }
   return out.sort((a, b) => a.manifest.name.localeCompare(b.manifest.name));
+}
+
+/**
+ * The For you shelf: the books serving the person's interest areas, ordered
+ * for someone starting out rather than by the alphabet. A small-business
+ * owner's shelf opened on "A/B Ad Copy Variations", "Audio Ad Spot" and
+ * "Audit Evidence Pack" because every book served the one area they picked
+ * and the tie fell to the name (2026-11-09).
+ *
+ * In order: the welcome's first projects for those areas (they pass their
+ * evals on small models), then books ready to try (a starter, a
+ * `first-project` tag, a sample), then the rest, and last whatever needs
+ * setting up first (a toolset to install, a connector to bind). Inside each
+ * group the person's first area leads; a book that declares the area as its
+ * own purpose beats one that only gets it from its category, and one
+ * written for that area alone beats a book that serves several.
+ */
+export function orderForYou(
+  books: readonly BookItem[],
+  chosen: readonly InterestAreaId[],
+  opts: {
+    starterIds?: readonly string[];
+    /** Beyond a required connector, which the manifest itself says. */
+    needsSetup?: (book: BookItem) => boolean;
+  } = {},
+): BookItem[] {
+  if (chosen.length === 0) return [];
+  const welcome = new Set(
+    FIRST_PROJECTS.flatMap((first) =>
+      first.kind === 'craftbook' && chosen.includes(first.area) ? [first.craftbookId] : [],
+    ),
+  );
+  const starters = new Set(opts.starterIds ?? []);
+  const needsSetup = (book: BookItem): boolean =>
+    (book.manifest.connectors ?? []).some((need) => !need.optional) ||
+    opts.needsSetup?.(book) === true;
+  const readiness = (book: BookItem): number => {
+    if (welcome.has(book.manifest.id)) return 0;
+    if (needsSetup(book)) return 3;
+    const tags = book.manifest.tags ?? [];
+    const ready =
+      starters.has(book.manifest.id) ||
+      tags.includes('starter') ||
+      tags.includes('first-project') ||
+      (book.manifest.samples?.length ?? 0) > 0;
+    return ready ? 1 : 2;
+  };
+  const keyed = books.flatMap((book, index) => {
+    const areas = interestAreasForCraftbook(book.manifest);
+    let rank = Number.POSITIVE_INFINITY;
+    for (const area of areas) {
+      const at = chosen.indexOf(area);
+      if (at !== -1 && at < rank) rank = at;
+    }
+    if (!Number.isFinite(rank)) return [];
+    const declared = (book.manifest.interests?.length ?? 0) > 0 ? 0 : 1;
+    const key = [readiness(book), rank, declared, areas.indexOf(chosen[rank]!), areas.length];
+    return [{ book, index, key }];
+  });
+  return keyed
+    .sort((a, b) => {
+      for (let i = 0; i < a.key.length; i++) {
+        const diff = a.key[i]! - b.key[i]!;
+        if (diff !== 0) return diff;
+      }
+      return a.index - b.index;
+    })
+    .map((entry) => entry.book);
 }
 
 export interface TaskLens {

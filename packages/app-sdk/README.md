@@ -471,6 +471,7 @@ Errors thrown by the SDK are `GezelSdkError` instances carrying both an HTTP `st
 - `engine_out_of_memory` — the computer ran out of memory and Linux stopped the on-device engine; the next request restarts it, but sending the same request into the same shortage fails the same way
 - `engine_not_ready` / `model_not_ready` — the engine or model is still downloading or loading
 - `context_length_exceeded` (HTTP 400) — the prompt is longer than the model's context window
+- `engine_unsupported` (HTTP 400) — the model names an engine this computer cannot run, such as `mlx` anywhere but an Apple-silicon Mac; pick a model from `app.models()`
 - `provider_error` — backend provider call failed for any other reason
 
 From the host entry:

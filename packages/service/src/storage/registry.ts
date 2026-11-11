@@ -78,6 +78,7 @@ const MODEL_ENGINES = [
   'video',
   'sd-cpp',
   'sd-cpp-loras',
+  'sd-cpp-video',
   'whisper-cpp',
   'recognition',
   'kokoro',
@@ -86,6 +87,7 @@ const MODEL_ENGINES = [
 /** What a person calls an engine's items where its id would mean nothing. */
 const MODEL_ENGINE_LABELS: Partial<Record<(typeof MODEL_ENGINES)[number], string>> = {
   'sd-cpp-loras': 'image style or fast mode',
+  'sd-cpp-video': 'video model',
 };
 
 export interface StoragePathEntry {
@@ -337,8 +339,8 @@ export const STORAGE_CATEGORIES: StorageCategoryDef[] = [
   {
     id: 'gezels',
     class: 'user-content',
-    label: 'Gezels',
-    description: 'Your gezellen, their instructions, chat history, and memories.',
+    label: 'Crew',
+    description: 'Your crew, their instructions, chat history, and memories.',
     deletable: true,
     inBackup: true,
     itemGranular: true,

@@ -18,13 +18,15 @@
  * `Task.executionMode` two-valued for older readers and the eval harness.
  *
  * `auto` follows evidence: the strategy the benchmark measured for the model
- * that will run the task (its catalog `tuning.taskStrategy`), else the
- * default for its kind of provider: outcome without the recipe on device,
- * `generalistMode`'s task rule everywhere else. See docs/task-strategies.md.
+ * that will run the task (its catalog `tuning.taskStrategy`, or for a hosted
+ * model {@link HOSTED_MODEL_TASK_STRATEGIES}), else outcome without the recipe
+ * on device and on a hosted frontier provider, and `generalistMode`'s task
+ * rule for anything else. See docs/task-strategies.md.
  */
 import {
   type GeneralistModeSetting,
   type TaskExecutionMode,
+  isFrontierProvider,
   resolveTaskExecutionMode,
 } from './generalist-mode.js';
 
@@ -79,6 +81,35 @@ export interface ModelStrategyAffinity {
   procedure?: 'advisory' | 'none' | undefined;
 }
 
+/**
+ * Measured strategies for hosted models, which have no Gilde catalog entry to
+ * carry `tuning.taskStrategy`. Keyed `<provider>:<model id>`: a measurement is
+ * of the model through that provider's tool loop, so the same model through
+ * another provider (Copilot, the Claude CLI) stays unmeasured and gets the
+ * provider default.
+ *
+ * - `anthropic:claude-sonnet-5-5`: recipe as advice matched one owner on every
+ *   quality measure at 0.35x the wall time and about a quarter of the cost
+ *   (18 books, 162 trials, 2026-11-09; evals/runs/frontier-2026-11-09/PREREG.md).
+ * - `codex-cli:gpt-6.1-sol`: both goal-based strategies qualified against one
+ *   owner, and goal only scored higher on judged quality than recipe as advice
+ *   (18 books, 162 trials, 2026-11-10;
+ *   evals/runs/frontier-sol-2026-11-09/PREREG.md).
+ */
+export const HOSTED_MODEL_TASK_STRATEGIES: Readonly<Record<string, ModelStrategyAffinity>> = {
+  'anthropic:claude-sonnet-5-5': { strategy: 'outcome', procedure: 'advisory' },
+  'codex-cli:gpt-6.1-sol': { strategy: 'outcome', procedure: 'none' },
+};
+
+/** A hosted model's measured strategy, or undefined when it was never measured. */
+export function hostedModelTaskStrategy(
+  providerName: string | undefined,
+  modelId: string | undefined,
+): ModelStrategyAffinity | undefined {
+  if (!providerName || !modelId) return undefined;
+  return HOSTED_MODEL_TASK_STRATEGIES[`${providerName}:${modelId}`];
+}
+
 export interface AutoTaskStrategy {
   strategy: TaskStrategy;
   /** Options the model's pick carries (outcome without a recipe). */
@@ -97,8 +128,11 @@ export interface AutoTaskStrategy {
  * `auto` for one model. An explicit `generalistMode` (`on` / `off`) is the
  * person's choice about task execution and wins over the model's
  * measurement; under `auto` the measurement wins. A model without one runs
- * outcome without the recipe on device and `generalistMode`'s task rule
- * elsewhere.
+ * outcome without the recipe on device and on a hosted frontier provider:
+ * both frontier models measured (Sonnet 5.5, GPT-6.1 Sol, 2026-11-10) beat
+ * one owner walking the recipe with a goal-based strategy, and goal only was
+ * Sol's pick. Anything else (the mock provider, an unknown name) keeps
+ * `generalistMode`'s task rule.
  */
 export function resolveAutoTaskStrategy(args: {
   generalistMode?: GeneralistModeSetting | undefined;
@@ -111,7 +145,7 @@ export function resolveAutoTaskStrategy(args: {
     args.affinity && isTaskStrategy(args.affinity.strategy) ? args.affinity : undefined;
   const explicit = args.generalistMode === 'on' || args.generalistMode === 'off';
   if (!measured || explicit) {
-    if (!explicit && ON_DEVICE_MODEL_PROVIDER_NAMES.includes(args.providerName ?? '')) {
+    if (!explicit && defaultsToGoalOnly(args.providerName)) {
       return { strategy: 'outcome', options: { procedure: 'none' }, source: 'tier', fallback };
     }
     return { strategy: fallback, source: 'tier', fallback };
@@ -126,6 +160,12 @@ export function resolveAutoTaskStrategy(args: {
   };
 }
 
+function defaultsToGoalOnly(providerName: string | undefined): boolean {
+  return (
+    ON_DEVICE_MODEL_PROVIDER_NAMES.includes(providerName ?? '') || isFrontierProvider(providerName)
+  );
+}
+
 export function isTaskStrategy(value: unknown): value is TaskStrategy {
   return typeof value === 'string' && (TASK_STRATEGIES as readonly string[]).includes(value);
 }
@@ -133,6 +173,54 @@ export function isTaskStrategy(value: unknown): value is TaskStrategy {
 /** The session semantics a strategy runs under. */
 export function executionModeForStrategy(strategy: TaskStrategy): TaskExecutionMode {
   return strategy === 'stepwise' ? 'stepwise' : 'generalist';
+}
+
+/**
+ * The strategy a model would get for a task nobody was assigned: the
+ * install's `taskStrategy` when it names one, else what `auto` picks for
+ * that model. The model is usually the install's default one.
+ */
+export function resolvePreferredTaskStrategy(args: {
+  taskStrategy?: TaskStrategySetting | undefined;
+  generalistMode?: GeneralistModeSetting | undefined;
+  providerName: string | undefined;
+  tier?: string | undefined;
+  affinity?: ModelStrategyAffinity | undefined;
+}): TaskStrategy {
+  if (args.taskStrategy && args.taskStrategy !== 'auto') return args.taskStrategy;
+  return resolveAutoTaskStrategy(args).strategy;
+}
+
+/** A project's shape: a crew under a crew lead, or one gezel working alone. */
+export type NewProjectMode = 'crew' | 'solo';
+
+/**
+ * The shape that suits a strategy. Stepwise work is split among a specialist
+ * per step, so it wants a crew and a crew lead to hand it out. Every other
+ * strategy has one owner for the whole task (generalist, and outcome with or
+ * without the recipe), so one multirole gezel runs the project alone.
+ */
+export function projectModeForTaskStrategy(strategy: TaskStrategy): NewProjectMode {
+  return strategy === 'stepwise' ? 'crew' : 'solo';
+}
+
+/**
+ * The shape a new project takes when nobody chose one: the Meester's
+ * `start_project` and the app's New project. It follows the strategy the
+ * install's default model works best under ({@link resolvePreferredTaskStrategy}),
+ * read when the project is made. The project keeps that shape when the model
+ * or the setting changes later (owner decision, 2026-11-10). This replaced
+ * the kickoff rule in `resolveGeneralistKickoff`, which kept a crew for every
+ * small on-device model.
+ */
+export function resolveNewProjectMode(args: {
+  taskStrategy?: TaskStrategySetting | undefined;
+  generalistMode?: GeneralistModeSetting | undefined;
+  providerName: string | undefined;
+  tier?: string | undefined;
+  affinity?: ModelStrategyAffinity | undefined;
+}): NewProjectMode {
+  return projectModeForTaskStrategy(resolvePreferredTaskStrategy(args));
 }
 
 /**

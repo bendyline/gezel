@@ -1155,6 +1155,75 @@ describe('measured accelerator headroom', () => {
     expect(sleep).not.toHaveBeenCalled();
   });
 
+  // An engine keeps its graphics memory until its process exits, which is
+  // after the pool has dropped its entry. A task's next step asked for the
+  // model its last step had just lost, 0.7 s before that shutdown finished,
+  // and was refused on a card that was about to be empty.
+  function slowShutdownPool() {
+    const broker = discreteBroker();
+    let alive = 0;
+    let finishShutdown!: () => void;
+    const shutdownGate = new Promise<void>((resolve) => {
+      finishShutdown = resolve;
+    });
+    class SlowShutdownProvider extends FakeProvider {
+      override async shutdown(): Promise<void> {
+        await shutdownGate;
+        alive -= 1;
+        await super.shutdown();
+      }
+    }
+    const made: FakeProvider[] = [];
+    const builder: ProviderBuilder = async ({ modelId, replicaIdx }) => {
+      alive += 1;
+      const provider = new SlowShutdownProvider(`${modelId}:${replicaIdx}`);
+      made.push(provider);
+      return { provider, residentBytes: 7 * GB };
+    };
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: builder },
+      vramHeadroom: async () => ({
+        freeBytes: alive > 0 ? 1 * GB : 12 * GB,
+        totalBytes: 12 * GB,
+      }),
+      sleep: async () => {},
+    });
+    return { pool, made, finishShutdown };
+  }
+
+  it('waits for a model that is still shutting down before loading it again', async () => {
+    const { pool, made, finishShutdown } = slowShutdownPool();
+    const key = makeEngineKey('mlx', 'writer', 0);
+    const first = await pool.ensure('mlx', 'writer', 0, 7 * GB);
+
+    const evicting = pool.evict(key);
+    expect(pool.has(key)).toBe(false);
+    const again = pool.ensure('mlx', 'writer', 0, 7 * GB);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    finishShutdown();
+    await evicting;
+
+    await expect(again).resolves.not.toBe(first);
+    expect(made).toHaveLength(2);
+    expect(pool.has(key)).toBe(true);
+  });
+
+  it('waits for another model that is still shutting down before reading the card', async () => {
+    const { pool, made, finishShutdown } = slowShutdownPool();
+    await pool.ensure('mlx', 'previous', 0, 7 * GB);
+
+    const evicting = pool.evict(makeEngineKey('mlx', 'previous', 0));
+    const next = pool.ensure('mlx', 'next', 0, 7 * GB);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    finishShutdown();
+    await evicting;
+
+    await expect(next).resolves.toBeDefined();
+    expect(made[0]?.shutdownCalls).toBe(1);
+    expect(pool.has(makeEngineKey('mlx', 'next', 0))).toBe(true);
+  });
+
   it('waits for the driver to publish VRAM reclaimed from an evicted model', async () => {
     const broker = discreteBroker();
     const made: FakeProvider[] = [];
@@ -1291,6 +1360,56 @@ describe('measured accelerator headroom', () => {
     );
     expect(made[0]?.shutdownCalls).toBe(0);
     expect(pool.has(bigKey)).toBe(true);
+  });
+
+  // The 1.26313.105 audit: with the card held by another program, a load
+  // unloaded every model this pool had, drained a busy task turn with no
+  // limit, and was refused anyway.
+  const cardHeldElsewhere = (made: FakeProvider[], lifecycle = false) => {
+    const broker = discreteBroker();
+    const builder: ProviderBuilder = async ({ modelId, replicaIdx }) => {
+      const provider = lifecycle
+        ? new LifecycleFakeProvider(`${modelId}:${replicaIdx}`)
+        : new FakeProvider(`${modelId}:${replicaIdx}`);
+      made.push(provider);
+      return { provider, residentBytes: modelId === 'resident' ? 2 * GB : 7 * GB };
+    };
+    const sleep = vi.fn(async () => {});
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: builder },
+      // Another program holds 9 GB of the 12 GB card whatever this pool does.
+      vramHeadroom: async () => ({ freeBytes: 3 * GB, totalBytes: 12 * GB }),
+      sleep,
+    });
+    return { pool, sleep };
+  };
+
+  it('keeps its warm models when unloading them could not make the room', async () => {
+    const made: FakeProvider[] = [];
+    const { pool, sleep } = cardHeldElsewhere(made);
+    await pool.ensure('mlx', 'resident', 0, 2 * GB);
+
+    await expect(pool.ensure('mlx', 'big', 0, 7 * GB)).rejects.toThrow(
+      /Not enough graphics memory to load big/,
+    );
+    expect(made[0]?.shutdownCalls).toBe(0);
+    expect(pool.has(makeEngineKey('mlx', 'resident', 0))).toBe(true);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('does not unload an engine whose process already stopped for card room', async () => {
+    const made: FakeProvider[] = [];
+    const { pool, sleep } = cardHeldElsewhere(made, true);
+    await pool.ensure('mlx', 'resident', 0, 2 * GB);
+    // Its idle timer stopped the process: the card holds none of it.
+    expect((made[0] as LifecycleFakeProvider).running).toBe(false);
+
+    await expect(pool.ensure('mlx', 'big', 0, 7 * GB)).rejects.toThrow(
+      /Not enough graphics memory to load big/,
+    );
+    expect(made[0]?.shutdownCalls).toBe(0);
+    expect(sleep).not.toHaveBeenCalled();
   });
 
   it('never blocks a spawn on an unusable reading', async () => {

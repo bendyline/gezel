@@ -77,6 +77,7 @@ import { COMPACT_LAYOUT_THRESHOLD_PX, useCompactLayout } from './useCompactLayou
 import { useComposerImageSettings } from './useComposerImageSettings.js';
 import { useComposerPromptAssist } from './useComposerPromptAssist.js';
 import { useComposerTaskLaunch } from './useComposerTaskLaunch.js';
+import { useModelDownloadStatus } from './useModelDownloadStatus.js';
 import { usePromptDraft } from './usePromptDraft.js';
 import { useRoleBasedNameOnlyMode } from './useRoleBasedNameOnlyMode.js';
 import { useWaitingForModel } from './useWaitingForModel.js';
@@ -318,6 +319,39 @@ export interface ChatComposerProps {
    * its Get started key, since setup is already on screen.
    */
   waitingStatus?: string;
+  /**
+   * The surface holds a first request until the model can answer (the
+   * meester's welcome while the tools download). While true, Send and Enter
+   * queue the draft rather than refusing it, and it goes out the moment the
+   * wait ends. `false` still marks the surface as the queue's owner, so its
+   * ordinary send retires a flag an earlier window left behind; surfaces
+   * that never queue leave it undefined.
+   */
+  sendWhenReady?: boolean;
+}
+
+/**
+ * Home's "send when the AI model is ready" flag. In localStorage so a window
+ * reloaded during the download still sends the first request when the model
+ * lands; the draft itself is already on disk.
+ */
+const SEND_WHEN_READY_KEY = 'gezel:home:send-when-ready';
+
+function readSendWhenReady(): boolean {
+  try {
+    return window.localStorage.getItem(SEND_WHEN_READY_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeSendWhenReady(queued: boolean): void {
+  try {
+    if (queued) window.localStorage.setItem(SEND_WHEN_READY_KEY, '1');
+    else window.localStorage.removeItem(SEND_WHEN_READY_KEY);
+  } catch {
+    // Storage is unavailable; the queue still holds for this window.
+  }
 }
 
 interface ComposerNarrateButtonProps {
@@ -419,6 +453,7 @@ export function ChatComposer({
   taskLaunch: taskLaunchProps,
   imageGenerator,
   waitingStatus,
+  sendWhenReady,
 }: ChatComposerProps) {
   const attachmentsEnabled =
     runtimeCapabilities().chatAttachments && features?.attachments !== false;
@@ -470,6 +505,24 @@ export function ChatComposer({
   // and state only for button feedback.
   const draftSubmissionPendingRef = useRef(false);
   const [draftSubmissionPending, setDraftSubmissionPending] = useState(false);
+  // A request written while the model is still arriving: Send holds it and it
+  // goes out when the wait ends (see `sendWhenReady`). The ref is what the
+  // effects decide on; the state only repaints the toolbar.
+  const queuedForReadyRef = useRef(false);
+  const [queuedForReady, setQueuedForReadyState] = useState(false);
+  const setQueuedForReady = useCallback((queued: boolean) => {
+    queuedForReadyRef.current = queued;
+    setQueuedForReadyState(queued);
+    writeSendWhenReady(queued);
+  }, []);
+  // Whatever takes the words away, or swaps them for others, takes the queue
+  // with it: only the request the person pressed Send on may go out unasked.
+  // The surface that owns the queue also drops a flag it has not read back
+  // yet, so one left by an earlier window cannot attach to different words.
+  const ownsReadyQueue = sendWhenReady !== undefined;
+  const cancelQueuedForReady = useCallback(() => {
+    if (queuedForReadyRef.current || ownsReadyQueue) setQueuedForReady(false);
+  }, [ownsReadyQueue, setQueuedForReady]);
   /**
    * How many turns are ahead of this one on the provider queue, when
    * we're in the `queued` state. The service only emits the `queued`
@@ -552,6 +605,37 @@ export function ChatComposer({
   // when it mounts. Bump this revision whenever the host needs to seed or
   // clear the editor; draftRef supplies the content for the fresh mount.
   const [editorRevision, setEditorRevision] = useState(0);
+  // A prefill the person is meant to finish ("Plan a trip to") leaves the
+  // caret after its words, so typing carries on the sentence.
+  const [caretAtEndRequest, setCaretAtEndRequest] = useState(0);
+  useEffect(() => {
+    if (!caretAtEndRequest) return;
+    let frame = 0;
+    let tries = 0;
+    const place = () => {
+      const editor = composerRef.current?.querySelector<HTMLElement>('.squisq-wysiwyg-editor');
+      // The remounted editor fills in a frame or two after it appears.
+      if (!editor?.textContent?.trim()) {
+        if (tries++ < 30) frame = window.requestAnimationFrame(place);
+        return;
+      }
+      editor.focus({ preventScroll: true });
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      range.collapse(false);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      // Markdown drops a paragraph's trailing space, so "Plan a trip to "
+      // arrived as "Plan a trip to" and the next word ran into it. Type the
+      // space as the person would, so the editor keeps it.
+      if (/\s$/.test(draftRef.current) && !/\s$/.test(editor.textContent ?? '')) {
+        document.execCommand('insertText', false, ' ');
+      }
+    };
+    frame = window.requestAnimationFrame(place);
+    return () => window.cancelAnimationFrame(frame);
+  }, [caretAtEndRequest]);
   // Drain a queued prefill into the editor. Runs on mount (covers the
   // navigate-to-chat-then-mount case) AND on `COMPOSER_PREFILL_EVENT` (covers an
   // already-mounted composer — the Output pane camera button while the
@@ -571,6 +655,9 @@ export function ChatComposer({
       ? queued.markdown
       : mergeComposerPrefill(draftRef.current, queued.markdown);
     if (merged === null) return;
+    // A starter fills in a sentence for the person to make theirs. It must
+    // not ride out on a Send pressed for what was here before.
+    cancelQueuedForReady();
     draftRef.current = merged;
     draftUpdateRef.current(merged);
     draftEditVersionRef.current += 1;
@@ -579,7 +666,8 @@ export function ChatComposer({
     setIntentPreviewText(merged);
     setOpenCommandQuery(parseOpenChatQuery(merged));
     setEditorRevision((revision) => revision + 1);
-  }, [projectId]);
+    if (queued.focus) setCaretAtEndRequest((request) => request + 1);
+  }, [projectId, cancelQueuedForReady]);
   useEffect(() => {
     consumePrefill();
     const onPrefill = (e: Event) => {
@@ -740,7 +828,10 @@ export function ChatComposer({
   const engagementOff = engagementMode === 'off';
   // The draft can still be written; it just can't go anywhere yet.
   const waitingForModel = useWaitingForModel(gezelId, recipientGezels);
-  const waitingDetail = waitingStatus ?? 'no AI model is downloaded';
+  // Away from Home, a running first download still names itself, in Home's words.
+  const downloadStatus = useModelDownloadStatus(waitingForModel && waitingStatus === undefined);
+  const waitingDetail = waitingStatus ?? downloadStatus ?? 'no AI model is downloaded';
+  const queuedDetail = `sends when the AI model is ready · ${waitingDetail}`;
   const localTurnRef = useRef<LocalTurnStream | null>(null);
   const localTurnSequenceRef = useRef(0);
   // Live session id — initialized from the prop and updated the first time
@@ -1076,6 +1167,8 @@ export function ChatComposer({
       draftUpdateRef.current(source);
       if (sourceChanged) draftEditVersionRef.current += 1;
       if (sourceChanged) promptAssistNoteEditRef.current(source);
+      // A queued request can be edited; one the person erased is withdrawn.
+      if (sourceChanged && !source.trim()) cancelQueuedForReady();
       setDraftNonEmpty(source.trim().length > 0);
       setIntentPreviewText(source);
       setOpenCommandQuery(parseOpenChatQuery(source));
@@ -1099,7 +1192,7 @@ export function ChatComposer({
       const next = extractMentionTokens(source);
       setMentioned((prev) => (sameMentionTokens(prev, next) ? prev : next));
     },
-    [onTerminalEscape],
+    [onTerminalEscape, cancelQueuedForReady],
   );
 
   // The task dialog's brief is this draft under another name. Its edits land
@@ -1314,7 +1407,18 @@ export function ChatComposer({
       return;
     }
     if (!gezelId || turnActive) return;
-    if (engagementOff || waitingForModel) return;
+    if (engagementOff) return;
+    if (waitingForModel) {
+      // Nothing can answer yet. Where the surface promised to hold a first
+      // request, hold it: it goes out when the wait ends.
+      const launch = taskLaunch.attached;
+      const sendable = launch ? taskLaunch.readiness.ready : draftRef.current.trim().length > 0;
+      if (sendWhenReady && sendable) setQueuedForReady(true);
+      return;
+    }
+    // An ordinary send also retires a flag left by a window that closed
+    // before the model arrived.
+    cancelQueuedForReady();
     // The attachment effect may not yet have cleared an obsolete suggestion.
     // User-picked tasks survive edits; inferred tasks need a matching preview.
     const attachedLaunch =
@@ -1590,6 +1694,9 @@ export function ChatComposer({
     turnActive,
     engagementOff,
     waitingForModel,
+    sendWhenReady,
+    setQueuedForReady,
+    cancelQueuedForReady,
     beginDraftSubmission,
     clearAcceptedDraft,
     ensureSessionId,
@@ -1618,6 +1725,48 @@ export function ChatComposer({
     imageSettings.enabled,
     imageSettings.sendFields,
   ]);
+
+  // A window reloaded while the model downloads comes back with the request
+  // it was holding. Read once the surface can queue again, which is also
+  // when the download is known to still be running.
+  useEffect(() => {
+    if (!sendWhenReady || !readSendWhenReady()) return;
+    queuedForReadyRef.current = true;
+    setQueuedForReadyState(true);
+  }, [sendWhenReady]);
+
+  // The queue belongs to one request in one thread. Another recipient,
+  // another thread or another draft is a different request, and nobody
+  // pressed Send on that one. A draft arriving where there was none is the
+  // composer filing (or reopening) the same words, so it keeps the queue.
+  const queuedAddressRef = useRef({ gezelId, sessionId, selectedDraftId });
+  useEffect(() => {
+    const previous = queuedAddressRef.current;
+    queuedAddressRef.current = { gezelId, sessionId, selectedDraftId };
+    const moved =
+      previous.gezelId !== gezelId ||
+      previous.sessionId !== sessionId ||
+      (previous.selectedDraftId !== undefined && previous.selectedDraftId !== selectedDraftId);
+    if (moved) cancelQueuedForReady();
+  }, [gezelId, sessionId, selectedDraftId, cancelQueuedForReady]);
+
+  // The wait ended. Send what was queued, once: only a wait this composer
+  // itself saw end counts, because "not waiting" is also what a mount reads
+  // before the first-run answer is in.
+  const sendRef = useRef(send);
+  sendRef.current = send;
+  const heldForModelRef = useRef(false);
+  useEffect(() => {
+    if (waitingForModel) {
+      heldForModelRef.current = true;
+      return;
+    }
+    if (!heldForModelRef.current) return;
+    heldForModelRef.current = false;
+    if (!queuedForReadyRef.current) return;
+    setQueuedForReady(false);
+    void sendRef.current();
+  }, [waitingForModel, setQueuedForReady]);
 
   const cancelWedged = useCallback(async () => {
     if (!wedged) return;
@@ -2062,8 +2211,10 @@ export function ChatComposer({
           // Expanded, the shell fills the frame the CSS handed it rather
           // than growing with the text: a tall empty box that only fills
           // as you type would put the caret somewhere different on every
-          // keystroke. Collapsed, it auto-grows from three lines.
-          minHeight={expanded ? '100%' : '120px'}
+          // keystroke. Collapsed, it rests at about two lines and grows with
+          // the draft: at three (120px) a 1280x720 window kept ten lines of
+          // conversation above a mostly empty box.
+          minHeight={expanded ? '100%' : '104px'}
           maxHeight={expanded ? '100%' : '50vh'}
           colorScheme={editorTheme}
           uxFont="var(--font-ui)"
@@ -2094,21 +2245,57 @@ export function ChatComposer({
           toolbarSlotRight={
             <>
               {/* Beside Send, so a held key always says why. A dimmed arrow
-                  alone read as broken. AI switched off has its own banner. */}
+                  alone read as broken. AI switched off has its own banner.
+                  A queued request is not a warning: it reads in the muted
+                  tone, with the way to take it back beside it. */}
               {waitingForModel && !engagementOff && (
                 <>
                   <output
-                    className="chat-composer-held"
+                    className={
+                      queuedForReady || sendWhenReady
+                        ? 'chat-composer-held chat-composer-held--queued'
+                        : 'chat-composer-held'
+                    }
                     aria-live="polite"
                     data-testid="chat-waiting-for-model"
-                    title={`Can't send yet: ${waitingDetail}`}
+                    title={
+                      queuedForReady
+                        ? `Queued: ${queuedDetail}`
+                        : sendWhenReady
+                          ? `Sends when ready: ${waitingDetail}`
+                          : `Can't send yet: ${waitingDetail}`
+                    }
                   >
                     <span className="chat-composer-held-dot" aria-hidden="true" />
                     <span className="chat-composer-held-text">
-                      <strong>Can't send yet:</strong> {waitingDetail}
+                      {queuedForReady ? (
+                        <>
+                          <strong>Queued:</strong> {queuedDetail}
+                        </>
+                      ) : sendWhenReady ? (
+                        // Send is live here and holds the request, so "can't
+                        // send" would argue with the key beside it.
+                        <>
+                          <strong>Sends when ready:</strong> {waitingDetail}
+                        </>
+                      ) : (
+                        <>
+                          <strong>Can't send yet:</strong> {waitingDetail}
+                        </>
+                      )}
                     </span>
                   </output>
-                  {waitingStatus === undefined && (
+                  {queuedForReady && (
+                    <button
+                      type="button"
+                      className="gz-link-button chat-composer-held-link"
+                      data-testid="chat-send-when-ready-cancel"
+                      onClick={cancelQueuedForReady}
+                    >
+                      Don't send
+                    </button>
+                  )}
+                  {!queuedForReady && waitingStatus === undefined && (
                     <button
                       type="button"
                       className="squisq-toolbar-button chat-composer-tool-btn chat-composer-tool-btn-word"
@@ -2223,7 +2410,7 @@ export function ChatComposer({
                   disabled={
                     !gezelId ||
                     engagementOff ||
-                    waitingForModel ||
+                    (waitingForModel && !sendWhenReady) ||
                     draftSubmissionPending ||
                     (taskLaunch.attached !== null && !taskLaunch.readiness.ready)
                   }
@@ -2244,7 +2431,11 @@ export function ChatComposer({
                     engagementOff
                       ? 'AI is disabled in Settings → General'
                       : waitingForModel
-                        ? `Can't send yet: ${waitingDetail}`
+                        ? queuedForReady
+                          ? 'Queued: sends when the AI model is ready'
+                          : sendWhenReady
+                            ? 'Enter to send as soon as the AI model is ready'
+                            : `Can't send yet: ${waitingDetail}`
                         : taskLaunch.attached && !taskLaunch.readiness.ready
                           ? taskLaunch.readiness.reason
                           : taskLaunch.attached

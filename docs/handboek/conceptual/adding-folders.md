@@ -1,13 +1,13 @@
 ---
 id: adding-folders
-title: "Adding folders: give your crew something to look after"
+title: "Adding folders: give Gezel something to look after"
 order: 7.4
-summary: Hand your crew a folder; they read it, work on it overnight, and never change a file.
+summary: Hand Gezel a folder; it reads the files, works on them overnight, and never changes one.
 ---
 
-# Adding folders: give your crew something to look after
+# Adding folders: give Gezel something to look after
 
-The quickest way to put your crew to work is to give them a folder: your
+The quickest way to put Gezel to work is to give it a folder: your
 Pictures, your Documents, a project you're writing, a codebase. Gezel asks
 which folders you'd like when you first start it, and you can add more any
 time with **Add a folder** (in the File menu, or the Existing Folder choice
@@ -20,14 +20,14 @@ index of it, but it never changes, moves or deletes a file unless you ask and
 approve. Everything gezel learns about the folder — the index, photo
 descriptions, summaries — lives in gezel's own folder, not yours.
 
-When your crew does want to change something, say a fix for a problem in your
+When Gezel does want to change something, say a fix for a problem in your
 code, it arrives as a **change proposal** you read and apply yourself. Nothing
 reaches your files until you click Apply.
 
 ## What you see before you add it
 
 Before anything is added, gezel shows you what the folder holds ("12,480
-photos · 1,204 only in iCloud") and what your crew will do with it tonight:
+photos · 1,204 only in iCloud") and what it will do with it tonight:
 
 - **Pictures:** read every file and describe your photos, so you can find one
   by what's in it, group them into outings, and propose albums. HEIC photos
@@ -45,7 +45,7 @@ app, so gezel leaves it alone.
 ## The crew that comes with it
 
 Every folder gets the **Librarian**, who reads, describes and reviews it. A
-code folder also gets a **Builder**, which is what lets your crew draft fixes
+code folder also gets a **Builder**, who drafts fixes
 overnight, and a photo folder a **Curator**, who looks after your albums. Gezel adds them once, when you add the folder; if you later take
 one off the folder, they stay off.
 
@@ -53,13 +53,13 @@ one off the folder, they stay off.
 
 New folders are worked on overnight by default, during the
 [Night Shift](night-shift.md). The folder's Overview shows what it holds and
-what your crew will do tonight, with one switch, **Work on this folder
+what Gezel will do tonight, with one switch, **Work on this folder
 overnight**, to turn that off. Turned off, the folder is still searchable;
-your crew just leaves it alone at night.
+Gezel just leaves it alone at night.
 
 Work that would send anything off this computer (a cloud model, a web
 search) is never switched on for you: it waits for your OK.
 
-To look through what your crew found, open the project's
+To look through what Gezel found, open the project's
 [Views](project-views.md) tab: the files on shelves, a timeline of what
 changed when, and the reports written about them.

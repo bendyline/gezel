@@ -12,7 +12,7 @@ interface Selection {
 }
 
 const SOURCE_GROUPS: Array<{ source: Source; label: string; hint: string }> = [
-  { source: 'local', label: 'My craftbooks', hint: 'editable' },
+  { source: 'local', label: 'My plans', hint: 'editable' },
   { source: 'project', label: 'Project', hint: 'read-only' },
   { source: 'bundled', label: 'Gilde catalog', hint: 'read-only' },
 ];
@@ -59,15 +59,17 @@ export function CraftbooksView() {
     setShowCompactDetail(true);
   }, []);
 
-  // Land on a craftbook instead of an empty editor pane: prefer the user's
-  // own books, then the catalog, in list order. Never stomps an existing
-  // selection.
+  // Land on the person's own plan when they have one. Otherwise nothing is
+  // selected and the pane says what plans are: opening on the catalog's
+  // alphabetical first ("A/B Ad Copy Variations") in its step editor told a
+  // new owner nothing (2026-11-09). Never stomps an existing selection, and
+  // runs once, so closing a book is not undone by the next refresh.
+  const landed = useRef(false);
   useEffect(() => {
-    if (selected || craftbooks.length === 0) return;
-    const first =
-      SOURCE_GROUPS.map((g) => craftbooks.find((c) => c.source === g.source)).find(Boolean) ??
-      craftbooks[0];
-    if (first) setSelected({ id: first.id, source: first.source });
+    if (landed.current || selected || craftbooks.length === 0) return;
+    landed.current = true;
+    const own = craftbooks.find((c) => c.source === 'local');
+    if (own) setSelected({ id: own.id, source: own.source });
   }, [selected, craftbooks]);
 
   const onCreated = useCallback(
@@ -94,28 +96,28 @@ export function CraftbooksView() {
     >
       {compact && showCompactDetail && (
         <button type="button" className="secondary" onClick={() => setShowCompactDetail(false)}>
-          Back to craftbooks
+          Back to plans
         </button>
       )}
       <div className="tasks-layout craftbooks-layout">
         <aside
           className="craftbooks-sidebar"
-          aria-label="Craftbook library"
+          aria-label="Plan library"
           hidden={compact && showCompactDetail}
         >
           <div className="craftbooks-toolbar">
             <label className="craftbooks-search-field">
-              <span className="sr-only">Search craftbooks</span>
+              <span className="sr-only">Search plans</span>
               <input
                 type="search"
                 className="craftbook-search"
-                placeholder="Search craftbooks…"
+                placeholder="Search plans…"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
             </label>
             <button type="button" className="primary" onClick={() => setCreating(true)}>
-              + New craftbook
+              + New plan
             </button>
           </div>
 
@@ -160,7 +162,7 @@ export function CraftbooksView() {
             })}
             {filtered.length === 0 && (
               <p className="muted craftbooks-empty">
-                No craftbooks{query ? ' match your search' : ' yet'}.
+                No plans{query ? ' match your search' : ' yet'}.
               </p>
             )}
           </div>
@@ -168,7 +170,7 @@ export function CraftbooksView() {
 
         <section
           className="task-detail-panel craftbooks-detail"
-          aria-label="Craftbook editor"
+          aria-label="Plan editor"
           hidden={compact && !showCompactDetail}
         >
           {selected ? (
@@ -179,10 +181,16 @@ export function CraftbooksView() {
               onChanged={() => void refresh()}
             />
           ) : (
-            <p className="placeholder">
-              Select a craftbook to edit it, or start a new one. Gilde books open read-only — make a
-              copy to edit them.
-            </p>
+            <div className="placeholder craftbooks-intro">
+              <p>
+                A plan is a recipe your crew follows step by step, such as an invoice run or a
+                newsletter issue. Pick one on the left to read its steps and start a task with it.
+              </p>
+              <p className="muted">
+                Plans from the catalog are read-only. Copy one to change it, or make your own with
+                New plan.
+              </p>
+            </div>
           )}
         </section>
       </div>
@@ -261,7 +269,7 @@ function NewCraftbookDialog({
       let body: Parameters<typeof api.createCraftbook>[0];
       if (mode === 'existing') {
         if (!base) {
-          setError('Pick a craftbook to base this on.');
+          setError('Pick a plan to base this on.');
           setBusy(false);
           return;
         }
@@ -293,7 +301,7 @@ function NewCraftbookDialog({
           .filter(Boolean)
           .map((n) => ({ name: n }));
         if (steps.length === 0) {
-          setError('A craftbook needs at least one step.');
+          setError('A plan needs at least one step.');
           setBusy(false);
           return;
         }
@@ -323,14 +331,10 @@ function NewCraftbookDialog({
         <Dialog.Overlay />
         <Dialog.Content className="new-craftbook-dialog">
           <Dialog.Title asChild>
-            <h3>New craftbook</h3>
+            <h3>New plan</h3>
           </Dialog.Title>
 
-          <div
-            className="new-craftbook-modes"
-            role="radiogroup"
-            aria-label="How to start the craftbook"
-          >
+          <div className="new-craftbook-modes" role="radiogroup" aria-label="How to start the plan">
             <button
               type="button"
               // biome-ignore lint/a11y/useSemanticElements: WAI-ARIA radiogroup of card buttons; a native <input type="radio"> can't host the strong+span card layout
@@ -353,23 +357,23 @@ function NewCraftbookDialog({
               disabled={busy}
             >
               <strong>Based on existing</strong>
-              <span className="muted small">Copy another craftbook's steps, then edit.</span>
+              <span className="muted small">Copy another plan's steps, then edit.</span>
             </button>
           </div>
 
           {mode === 'existing' && (
             <div className="new-craftbook-picker">
-              <span className="new-craftbook-field-label">Base craftbook</span>
+              <span className="new-craftbook-field-label">Base plan</span>
               <input
                 type="text"
                 className="craftbook-search"
-                placeholder="Search craftbooks…"
-                aria-label="Search base craftbooks"
+                placeholder="Search plans…"
+                aria-label="Search base plans"
                 value={baseQuery}
                 onChange={(e) => setBaseQuery(e.target.value)}
                 disabled={busy}
               />
-              <ul className="new-craftbook-picker-list" aria-label="Pick a craftbook to copy">
+              <ul className="new-craftbook-picker-list" aria-label="Pick a plan to copy">
                 {filteredBases.map((c) => (
                   <li key={`${c.source}:${c.id}`}>
                     <button
@@ -389,7 +393,7 @@ function NewCraftbookDialog({
                   </li>
                 ))}
                 {filteredBases.length === 0 && (
-                  <li className="muted small new-craftbook-picker-empty">No craftbooks match.</li>
+                  <li className="muted small new-craftbook-picker-empty">No plans match.</li>
                 )}
               </ul>
             </div>
@@ -416,7 +420,7 @@ function NewCraftbookDialog({
               placeholder={
                 mode === 'existing'
                   ? "Leave blank to keep the original's description."
-                  : 'What this craftbook is for.'
+                  : 'What this plan is for.'
               }
               disabled={busy}
             />

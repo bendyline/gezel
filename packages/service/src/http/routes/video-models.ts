@@ -1,3 +1,4 @@
+import { chooseVideoModel, videoModelAnimates } from '@bendyline/gezel';
 import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import {
   INVALID_MODEL_ID_CODE,
@@ -9,6 +10,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import type { SSEStreamingApi } from 'hono/streaming';
 import { videoCatalogFits, videoModelFit, wontRunRefusal } from '../../models/media-fit.js';
+import { LocalVideoProvider } from '../../providers/video/local-video.js';
 import { UnknownVideoModelError } from '../../providers/video/pull-registry.js';
 import { videoCpuReason } from '../../providers/video/venv.js';
 import type { EngineContext } from '../engine-context.js';
@@ -16,18 +18,39 @@ import { mediaFitContext } from './media-fit-context.js';
 
 export function videoModelRoutes(ctx: EngineContext): Hono {
   const app = new Hono();
-  const proxy = machineEngineProxy(ctx, '/api/video-gen', '/v1/remote/manage/video-gen', []);
+  // The model list is answered here even when a machine broker renders:
+  // `current()` already lists the broker's models, and the defaults follow
+  // this person's settings, not the service account's.
+  const proxy = machineEngineProxy(ctx, '/api/video-gen', '/v1/remote/manage/video-gen', [
+    '/api/video-gen/models',
+  ]);
 
   app.get('/models', proxy, async (c) => {
     const provider = await ctx.videoProvider.current();
-    const models = await provider.listInstalledModels();
+    const [models, config] = await Promise.all([
+      provider.listInstalledModels(),
+      ctx.store.readConfig().catch(() => undefined),
+    ]);
     const kind = providerKind(provider.name);
-    return c.json({ models: models.map((m) => ({ ...m, kind })) });
+    const defaultModelId = config?.defaultVideoModel;
+    const defaultModel = chooseVideoModel(models, { defaultModelId, hasSource: false });
+    const animator = models.some(videoModelAnimates)
+      ? chooseVideoModel(models, { defaultModelId, hasSource: true })
+      : undefined;
+    return c.json({
+      models: models.map((m) => ({ ...m, kind })),
+      ...(defaultModel ? { defaultModel } : {}),
+      ...(animator ? { defaultImageToVideoModel: animator } : {}),
+    });
   });
 
   app.get('/engine-status', proxy, async (c) => {
     const provider = await ctx.videoProvider.current();
-    const [engine, models] = await Promise.all([provider.health(), provider.listInstalledModels()]);
+    const [engine, models, engines] = await Promise.all([
+      provider.health(),
+      provider.listInstalledModels(),
+      provider instanceof LocalVideoProvider ? provider.engineHealth() : undefined,
+    ]);
     const cpuReason = engine.accelerator === 'cpu' ? videoCpuReason() : undefined;
     return c.json({
       engine: {
@@ -35,6 +58,7 @@ export function videoModelRoutes(ctx: EngineContext): Hono {
         kind: providerKind(provider.name),
         provider: provider.name,
         ...(cpuReason ? { cpuReason } : {}),
+        ...(engines ? { engines } : {}),
       },
       modelCount: models.length,
     });

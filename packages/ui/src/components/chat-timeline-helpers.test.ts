@@ -1,9 +1,11 @@
 import type { TimelineMessage } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
+  hadWrapUpAtLoad,
   isExpectedAvailabilityError,
   isRetryableFailedTurn,
   mergeTimelineMessages,
+  newestMessageAt,
   turnFailureShownElsewhere,
 } from './chat-timeline-helpers.js';
 
@@ -75,6 +77,46 @@ describe('mergeTimelineMessages', () => {
     const newest = message();
 
     expect(mergeTimelineMessages([older], [newest])).toEqual([older, newest]);
+  });
+});
+
+// Home's folder invitation follows finished work, but must not land on top
+// of a result the person is watching arrive.
+describe('hadWrapUpAtLoad', () => {
+  const asked = message({ at: '2026-09-01T10:00:00.000Z' });
+  const wrapUp = message({
+    role: 'assistant',
+    synthetic: 'task-wrapup',
+    at: '2026-09-01T10:10:00.000Z',
+  });
+
+  it('reads the newest message of the first load', () => {
+    expect(newestMessageAt([asked, wrapUp])).toBe('2026-09-01T10:10:00.000Z');
+    expect(newestMessageAt([wrapUp, asked])).toBe('2026-09-01T10:10:00.000Z');
+    expect(newestMessageAt([])).toBe('');
+  });
+
+  it('counts a wrap-up the thread opened with', () => {
+    expect(hadWrapUpAtLoad([asked, wrapUp], newestMessageAt([asked, wrapUp]))).toBe(true);
+  });
+
+  it('does not count one that landed during the visit', () => {
+    expect(hadWrapUpAtLoad([asked, wrapUp], newestMessageAt([asked]))).toBe(false);
+    // An empty thread at load, then the first request and its result.
+    expect(hadWrapUpAtLoad([asked, wrapUp], newestMessageAt([]))).toBe(false);
+  });
+
+  it('counts one on an older page, which was there all along', () => {
+    const earlier = message({
+      role: 'assistant',
+      synthetic: 'task-wrapup',
+      at: '2026-08-30T09:00:00.000Z',
+    });
+    expect(hadWrapUpAtLoad([earlier, asked], newestMessageAt([asked]))).toBe(true);
+  });
+
+  it('holds until the first load answers', () => {
+    expect(hadWrapUpAtLoad([asked, wrapUp], null)).toBe(false);
   });
 });
 

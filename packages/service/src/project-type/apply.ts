@@ -1,49 +1,51 @@
-import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import {
   type AppliedProjectType,
+  type AppliedScriptRecord,
   type AppliedSeedRecord,
-  type GezelSummary,
   type InstalledToolset,
   type ProjectTypeApplyPlan,
-  type ProjectTypeManifest,
+  type ProjectTypeOverlay,
   type ProjectTypeProvenance,
-  type ProjectTypeSchedule,
   type ProjectTypeSeedState,
   type ProjectTypeStatusResponse,
-  type Question,
-  type ScheduleMaterialization,
-  type SeedPlanState,
-  compareSemver,
   createLogger,
   gezelNamesInUse,
-  pickUnusedGezelName,
   projectTypeCrewMatch,
   projectTypeIcon,
-  projectTypeTemplateFrontmatter,
+  projectTypeScriptHeader,
   renderProjectTypeTemplate,
   seedParamDefaults,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
-import { slugifyEntityName as slugify } from '@bendyline/gezel/runtime';
-import { makeCraftbookResolver } from '../craftbook/resolve.js';
 import type { Store } from '../fs/store.js';
 import { installProjectTypeScripts } from '../scripts/install.js';
 import { parseCron } from '../tasks/cron.js';
-import { TaskManager } from '../tasks/manager.js';
 import {
-  SCHEDULE_HOST_STEP,
-  describeHostCadence,
-  hostCronExpression,
-  hostRecurrenceFields,
-} from '../tasks/schedule-host.js';
+  type AppliedCrewMember,
+  type ApplyProjectTypeDeps,
+  classifySeed,
+  crewPool,
+  docFingerprint,
+  fillCrewSlot,
+  materializeProjectTypeSchedules,
+  parseTemplateFrontmatter,
+  resolveProjectType,
+  semverGreater,
+  sha256Hex,
+  withProjectTypeApplyLock,
+} from './apply-common.js';
 import { installProjectTypeCraftbooks, resolveTypeCraftbook } from './craftbooks.js';
 import { listGezapps } from './gezapp.js';
+import { applyProjectTypeUpdateUnlocked, planProjectTypeUpgrade } from './upgrade.js';
 
 const log = createLogger('project-type');
+
+export type { ApplyProjectTypeDeps } from './apply-common.js';
+export { materializeProjectTypeSchedules } from './apply-common.js';
 
 export interface ApplyProjectTypeInput {
   projectId: string;
@@ -53,9 +55,10 @@ export interface ApplyProjectTypeInput {
   /** Param values collected at adoption, substituted into templates + seed files. */
   params?: Record<string, unknown>;
   /**
-   * Seed collision policy. `overwrite` (default — the original behavior)
-   * writes every declared seed. `preserve` keeps user-modified files
-   * (reported in `seedsSkipped`), judged against the overlay manifest.
+   * Seed collision policy. `overwrite` writes every declared seed (the
+   * default for a first apply). `preserve` keeps user-modified files
+   * (reported in `seedsSkipped`), judged against the overlay manifest; it is
+   * the default when the project already runs this type.
    */
   seedPolicy?: 'overwrite' | 'preserve';
   /**
@@ -63,85 +66,27 @@ export interface ApplyProjectTypeInput {
    * hires fresh. Lean types reuse regardless.
    */
   reuseRosterGezels?: boolean;
-}
-
-export interface ApplyProjectTypeDeps {
-  store: Store;
-  catalog: CatalogService;
-  home: string;
   /**
-   * The install's gezels when `store` is not the install — a staged create
-   * applies against an empty home, where nothing could otherwise be reused.
+   * `fresh` outfits the project from scratch. `upgrade` moves a project that
+   * already runs this type to `version` (default: the newest version of the
+   * same major in the project's own catalog source, else a refresh of the
+   * version it runs), keeping the person's data, edits and settings — see
+   * `upgrade.ts`. Default: `upgrade` when the project already runs `typeId`.
    */
-  installGezels?: readonly GezelSummary[];
-}
-
-type CrewCandidate = Pick<GezelSummary, 'id' | 'name' | 'role' | 'templateId' | 'fixedFunction'>;
-
-/**
- * Gezels who may fill a type's crew: the project's roster first, then the
- * rest of the install. Creating a Social Feed project once hired a second
- * Omroeper and a second Copywriter beside the ones the user already had.
- */
-async function crewPool(
-  deps: ApplyProjectTypeDeps,
-  rosterIds: readonly string[],
-): Promise<CrewCandidate[]> {
-  const roster = (
-    await Promise.all(rosterIds.map((id) => deps.store.getGezel(id).catch(() => null)))
-  ).filter((gezel): gezel is NonNullable<typeof gezel> => gezel !== null);
-  const install = deps.installGezels ?? (await deps.store.listGezels().catch(() => []));
-  const onRoster = new Set(roster.map((gezel) => gezel.id));
-  return [...roster, ...install.filter((gezel) => !onRoster.has(gezel.id))];
-}
-
-function sha256Hex(content: string | Buffer): string {
-  return createHash('sha256').update(content).digest('hex');
-}
-
-function semverGreater(a: string, b: string): boolean {
-  try {
-    return compareSemver(a, b) > 0;
-  } catch {
-    return a !== b && a.localeCompare(b) > 0;
-  }
-}
-
-/**
- * What one seed apply would do — shared by the real write path and the
- * preflight plan so they can never disagree. `priorSha` is the overlay's
- * record of what the app last wrote to this path.
- */
-function classifySeed(args: {
-  existing: Buffer | null;
-  renderedSha: string;
-  priorSha: string | undefined;
-  policy: 'overwrite' | 'preserve';
-}): SeedPlanState {
-  if (args.existing === null) return 'new';
-  const existingSha = sha256Hex(args.existing);
-  if (existingSha === args.renderedSha) return 'unchanged';
-  if (args.policy === 'preserve' && existingSha !== args.priorSha) return 'keep-modified';
-  return 'update';
+  mode?: 'fresh' | 'upgrade';
+  /**
+   * The person approved this apply with their own click. An update that
+   * would replace an edited script, add crew, connect a tool service, start
+   * a recurring run or write into a folder Gezel holds no grant for is
+   * refused without it (`ProjectTypeUpgradeNeedsOkError`). Never set from a
+   * model-reachable surface.
+   */
+  personApproved?: boolean;
+  /** Keep the project on this version; automatic app updates skip it. */
+  pin?: boolean;
 }
 
 export { renderProjectTypeTemplate, seedParamDefaults };
-
-const parseTemplateFrontmatter = projectTypeTemplateFrontmatter;
-
-async function resolveProjectType(
-  catalog: CatalogService,
-  typeId: string,
-  version?: string,
-): Promise<{ manifest: ProjectTypeManifest; source: string }> {
-  const detail = await catalog.get('project-type', typeId, undefined, version);
-  if (!detail || detail.manifest.kind !== 'project-type') {
-    throw new Error(
-      version ? `project type ${typeId}@${version} not found` : `project type ${typeId} not found`,
-    );
-  }
-  return { manifest: detail.manifest, source: detail.sourceId };
-}
 
 /**
  * Resolve and validate every catalog dependency needed by a project type
@@ -258,21 +203,40 @@ export async function preflightProjectType(
  * voorman), install its SDK scripts with provenance markers, seed its
  * workspace data files, and stamp `projectType` provenance on `project.json`.
  *
- * Idempotent-ish: re-applying re-renders docs and re-installs scripts (the
- * script installer no-ops on unchanged bodies), and re-creating a gezel whose
- * slug already exists is surfaced by the Store. Toolsets, script-tools, Output
- * pages, and schedules are recorded in the returned `deferred` set — their
- * materialization lands in later phases. See docs/project-types.md.
+ * Applying the type a project already runs is an update (`upgrade.ts`): it
+ * moves the project to a newer version of the same major, or refreshes the
+ * one it runs, keeping the person's data, edits and settings. Pass
+ * `mode: 'fresh'` to outfit from scratch regardless. See docs/project-types.md.
  */
 export async function applyProjectType(
   deps: ApplyProjectTypeDeps,
   input: ApplyProjectTypeInput,
 ): Promise<AppliedProjectType> {
+  return withProjectTypeApplyLock(deps.home, input.projectId, async () => {
+    const project = await deps.store.getProject(input.projectId);
+    if (!project) throw new Error(`project ${input.projectId} not found`);
+    const mode = input.mode ?? (project.projectType?.id === input.typeId ? 'upgrade' : 'fresh');
+    if (mode === 'upgrade' && project.projectType?.id === input.typeId) {
+      return applyProjectTypeUpdateUnlocked(deps, {
+        projectId: input.projectId,
+        ...(input.version !== undefined ? { version: input.version } : {}),
+        ...(input.params !== undefined ? { params: input.params } : {}),
+        ...(input.seedPolicy !== undefined ? { seedPolicy: input.seedPolicy } : {}),
+        ...(input.personApproved !== undefined ? { personApproved: input.personApproved } : {}),
+        ...(input.pin !== undefined ? { pin: input.pin } : {}),
+      });
+    }
+    return applyFresh(deps, input, project);
+  });
+}
+
+async function applyFresh(
+  deps: ApplyProjectTypeDeps,
+  input: ApplyProjectTypeInput,
+  project: NonNullable<Awaited<ReturnType<Store['getProject']>>>,
+): Promise<AppliedProjectType> {
   const { store, catalog, home } = deps;
   const { projectId, typeId, version } = input;
-
-  const project = await store.getProject(projectId);
-  if (!project) throw new Error(`project ${projectId} not found`);
 
   const { manifest, source } = await resolveProjectType(catalog, typeId, version);
 
@@ -320,51 +284,17 @@ export async function applyProjectType(
   const namesInUse = gezelNamesInUse(install);
   const taken = new Set<string>();
   for (const ref of manifest.gezels) {
-    const tpl = await catalog.get('gezel-template', ref.templateId).catch(() => null);
-    const role = tpl?.manifest.kind === 'gezel-template' ? tpl.manifest.role : undefined;
-    const reused = projectTypeCrewMatch(pool, { templateId: ref.templateId, role }, taken);
-    let gezelId: string;
-    let gezelName: string;
-    if (reused) {
-      gezelId = reused.id;
-      gezelName = reused.name;
-    } else {
-      if (!tpl || tpl.manifest.kind !== 'gezel-template') {
-        log.warn(
-          `[apply] project type ${typeId}: gezel template ${ref.templateId} not found — skipping`,
-        );
-        continue;
-      }
-      const { name, gender } = pickUnusedGezelName(namesInUse);
-      const extraFrontmatter = parseTemplateFrontmatter(tpl.manifest.frontmatter);
-      const created = await store.createGezel({
-        name,
-        role: tpl.manifest.role,
-        about: tpl.about ?? '',
-        gender,
-        templateId: ref.templateId,
-        templateVersion: tpl.manifest.version,
-        ...(extraFrontmatter ? { frontmatter: extraFrontmatter } : {}),
-      });
-      gezelId = created.id;
-      gezelName = created.name;
-      namesInUse.add(created.id).add(slugify(created.name));
-    }
-    taken.add(gezelId);
-    gezelsCreated.push({
-      id: gezelId,
-      name: gezelName,
-      templateId: ref.templateId,
-      voorman: ref.voorman,
-      ...(reused ? { reused: true } : {}),
+    const member: AppliedCrewMember | null = await fillCrewSlot(deps, {
+      projectId,
+      typeId,
+      ref,
+      pool,
+      taken,
+      namesInUse,
     });
-    if (ref.voorman && !voormanGezelId) voormanGezelId = gezelId;
-    // The type's crew belongs on the project roster — that is what makes a
-    // re-apply idempotent for every role, not just the voorman (whose roster
-    // join rides the provenance update).
-    await store.addGezelToProject(projectId, gezelId, { source: 'project-type' }).catch((err) => {
-      log.warn(`[apply] roster add failed for ${projectId}/${gezelId}: ${String(err)}`);
-    });
+    if (!member) continue;
+    gezelsCreated.push(member);
+    if (ref.voorman && !voormanGezelId) voormanGezelId = member.id;
   }
 
   // 3. Install SDK scripts with provenance markers.
@@ -374,6 +304,13 @@ export async function applyProjectType(
     typeId,
     manifest.version,
     manifest.scripts,
+  );
+  const overlayScripts: AppliedScriptRecord[] = Object.entries(manifest.scripts ?? {}).map(
+    ([name, body]) => ({
+      name,
+      sha256: sha256Hex(`${projectTypeScriptHeader(typeId, manifest.version)}${body}`),
+      typeVersion: manifest.version,
+    }),
   );
 
   // 3b. Copy-install the type's craftbooks into the project's workspace
@@ -519,6 +456,7 @@ export async function applyProjectType(
     ...(manifest.category ? { category: manifest.category } : {}),
     ...(params && Object.keys(params).length > 0 ? { params } : {}),
     appliedAt: new Date().toISOString(),
+    ...(input.pin ? { pinned: true } : {}),
   };
   await store.updateProject(projectId, {
     projectType: provenance,
@@ -566,12 +504,20 @@ export async function applyProjectType(
 
   // 8. Record the overlay manifest — the durable answer to "which files did
   //    the app deploy here, and what did the app-owned content hash to".
+  const docs: NonNullable<ProjectTypeOverlay['docs']> = {
+    ...(renderedAbout !== undefined ? { about: { sha256: docFingerprint(renderedAbout) } } : {}),
+    ...(renderedMission !== undefined
+      ? { mission: { sha256: docFingerprint(renderedMission) } }
+      : {}),
+  };
   await store.writeProjectTypeOverlay(projectId, {
     schemaVersion: 1,
     typeId,
     typeVersion: manifest.version,
     appliedAt,
     seeds: overlaySeeds,
+    scripts: overlayScripts,
+    ...(Object.keys(docs).length > 0 ? { docs } : {}),
   });
 
   return {
@@ -595,186 +541,6 @@ export async function applyProjectType(
       schedules: scheduleResult.failed,
     },
   };
-}
-
-/**
- * Turn a type's declared `schedules[]` into schedule-host tasks
- * (`{cron, spawnsCraftbook, assignee}`) on the existing task engine.
- * Consent rule from docs/project-types.md — never silently armed:
- * `auto` → active; `ask` → paused + a `schedule-approval` question;
- * `disabled` → paused, no question. Idempotent via `Task.origin`:
- * re-apply refreshes a changed cron but never touches the user's
- * arm/disarm decision and never re-asks an answered question.
- */
-export async function materializeProjectTypeSchedules(
-  deps: { store: Store; catalog: CatalogService },
-  args: {
-    projectId: string;
-    typeId: string;
-    manifest: ProjectTypeManifest;
-    voormanGezelId?: string;
-  },
-): Promise<{ schedules: ScheduleMaterialization[]; failed: number }> {
-  const { store, catalog } = deps;
-  const { projectId, typeId, manifest } = args;
-  if (manifest.schedules.length === 0) return { schedules: [], failed: 0 };
-
-  // Apply-owned manager over the SAME store instance: task numbering
-  // serializes through the store's per-project locks, and on the atomic
-  // create path the hosts + questions land inside the staged project dir
-  // and ride the publish (crash-safety inherited from the transaction).
-  const tasks = new TaskManager(store);
-  tasks.setCraftbookResolver(makeCraftbookResolver(store, catalog));
-
-  const existing = await store.listProjectTasks(projectId).catch(() => []);
-  const out: ScheduleMaterialization[] = [];
-  let failed = 0;
-  const keyCounts = new Map<string, number>();
-
-  for (const schedule of manifest.schedules) {
-    const n = (keyCounts.get(schedule.craftbook) ?? 0) + 1;
-    keyCounts.set(schedule.craftbook, n);
-    const scheduleKey = n === 1 ? schedule.craftbook : `${schedule.craftbook}#${n}`;
-
-    const hostCron = hostCronExpression(schedule);
-    try {
-      const prior = existing.find(
-        (t) =>
-          t.origin?.kind === 'project-type-schedule' &&
-          t.origin.typeId === typeId &&
-          t.origin.scheduleKey === scheduleKey,
-      );
-      if (prior) {
-        if (
-          (prior.status === 'active' || prior.status === 'paused') &&
-          (prior.cron?.expression !== hostCron || prior.cron?.overlap !== schedule.overlap)
-        ) {
-          await tasks.update(projectId, prior.num, {
-            cron: {
-              expression: hostCron,
-              ...(schedule.overlap ? { overlap: schedule.overlap } : {}),
-            },
-          });
-        }
-        // Crash-window repair: a paused ask-host with no question on record
-        // (question write died mid-apply) gets its question posted now; an
-        // answered or pending one is never duplicated.
-        if (prior.status === 'paused' && schedule.consent === 'ask') {
-          await writeScheduleApprovalQuestion(store, {
-            projectId,
-            typeId,
-            schedule,
-            taskRef: prior.ref,
-            gezelId: args.voormanGezelId ?? '',
-          });
-        }
-        out.push({
-          ref: prior.ref,
-          craftbook: schedule.craftbook,
-          cron: hostCron,
-          consent: schedule.consent,
-          status: prior.status === 'active' ? 'active' : 'paused',
-          created: false,
-        });
-        continue;
-      }
-
-      // Created ACTIVE then immediately consent-mapped: a draft may not
-      // carry cron (schema), create never dispatches a host (no entry
-      // dispatch for spawn hosts), and its first `nextTickAt` is in the
-      // future — so there is no fire window before the pause below.
-      const host = await tasks.create(
-        projectId,
-        {
-          title: `Schedule: ${schedule.craftbook}`,
-          description: `Recurring craftbook run installed by the "${typeId}" project type. ${describeHostCadence(schedule)} Each fire spawns a "${schedule.craftbook}" child task; this host never runs steps itself.`,
-          assignee: args.voormanGezelId
-            ? { kind: 'gezel', gezelId: args.voormanGezelId }
-            : { kind: 'user' },
-          steps: [{ ...SCHEDULE_HOST_STEP }],
-          spawnsCraftbookId: schedule.craftbook,
-          ...hostRecurrenceFields(schedule),
-          createdBy: { kind: 'user' },
-        },
-        { origin: { kind: 'project-type-schedule', typeId, scheduleKey } },
-      );
-
-      let status: 'active' | 'paused' = 'active';
-      if (schedule.consent !== 'auto') {
-        await tasks.setStatus(projectId, host.num, 'paused');
-        status = 'paused';
-      }
-      if (schedule.consent === 'ask') {
-        await writeScheduleApprovalQuestion(store, {
-          projectId,
-          typeId,
-          schedule,
-          taskRef: host.ref,
-          gezelId: args.voormanGezelId ?? '',
-        });
-      }
-      out.push({
-        ref: host.ref,
-        craftbook: schedule.craftbook,
-        cron: hostCron,
-        consent: schedule.consent,
-        status,
-        created: true,
-      });
-    } catch (err) {
-      log.warn(
-        `[apply] project type ${typeId}: schedule for '${schedule.craftbook}' failed: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      failed += 1;
-    }
-  }
-  return { schedules: out, failed };
-}
-
-async function writeScheduleApprovalQuestion(
-  store: Store,
-  args: {
-    projectId: string;
-    typeId: string;
-    schedule: ProjectTypeSchedule;
-    taskRef: string;
-    gezelId: string;
-  },
-): Promise<void> {
-  const all = await store.listProjectQuestions(args.projectId).catch(() => []);
-  // Any question for this host — answered or pending — means the user has
-  // seen (or will see) the ask; never post a duplicate.
-  if (all.some((q) => q.intent?.kind === 'schedule-approval' && q.taskRef === args.taskRef)) {
-    return;
-  }
-  const night = args.schedule.runMode === 'night-shift';
-  const question: Question = {
-    id: randomUUID(),
-    projectId: args.projectId,
-    gezelId: args.gezelId,
-    // Adoption has no live chat session; the answer route early-returns
-    // for this intent, so nothing tries to seed a turn from it.
-    sessionId: '',
-    prompt: night
-      ? `The "${args.typeId}" project type set up a recurring "${args.schedule.craftbook}" run for the Night Shift (at most once per night, inside your configured window). It was created paused and will not run until you enable it.`
-      : `The "${args.typeId}" project type set up a recurring "${args.schedule.craftbook}" run (cron \`${args.schedule.cron}\`, UTC). It was created paused and will not run until you enable it.`,
-    choices: ['Enable schedule', 'Keep paused'],
-    allowWriteIn: false,
-    multiSelect: false,
-    taskRef: args.taskRef,
-    intent: {
-      kind: 'schedule-approval',
-      typeId: args.typeId,
-      craftbookId: args.schedule.craftbook,
-      ...(night ? { runMode: 'night-shift' as const } : {}),
-      cron: hostCronExpression(args.schedule),
-      ...(args.schedule.overlap ? { overlap: args.schedule.overlap } : {}),
-    },
-    createdAt: new Date().toISOString(),
-  };
-  await store.writeQuestion(question);
 }
 
 /**
@@ -896,8 +662,17 @@ export async function projectTypeStatus(
       };
     }
   }
+  const upgrade = provenance
+    ? await planProjectTypeUpgrade(deps, projectId).catch((err) => {
+        log.warn(
+          `[status] ${projectId}: could not plan an app update: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return null;
+      })
+    : null;
   const updateAvailable = Boolean(
-    provenance && installedApp && semverGreater(installedApp.version, provenance.version),
+    upgrade ||
+      (provenance && installedApp && semverGreater(installedApp.version, provenance.version)),
   );
 
   const seedDest = async (recordPath: string): Promise<string | null> => {
@@ -924,7 +699,12 @@ export async function projectTypeStatus(
   }
   if (provenance) {
     try {
-      const { manifest } = await resolveProjectType(catalog, provenance.id, provenance.version);
+      const { manifest } = await resolveProjectType(
+        catalog,
+        provenance.id,
+        provenance.version,
+        provenance.source,
+      );
       const known = new Set((overlay?.seeds ?? []).map((seed) => seed.path));
       for (const rel of manifest.workspaceSeed) {
         if (!known.has(rel)) seeds.push({ path: rel, state: 'untracked' });
@@ -939,5 +719,12 @@ export async function projectTypeStatus(
     }
   }
 
-  return { projectId, provenance, installedApp, updateAvailable, seeds };
+  return {
+    projectId,
+    provenance,
+    installedApp,
+    updateAvailable,
+    ...(upgrade ? { latestVersion: upgrade.toVersion } : {}),
+    seeds,
+  };
 }

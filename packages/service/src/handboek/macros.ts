@@ -281,9 +281,15 @@ function formatNames(names: string[]): string {
   return `${bold.slice(0, -1).join(', ')} and ${bold[bold.length - 1]}`;
 }
 
+/** Meester is a title and keeps its capital in a sentence; other roles read lowercase. */
+function roleInProse(roleId: RoleId): string {
+  const label = ROLES[roleId].label;
+  return roleId === 'meester' ? label : label.toLowerCase();
+}
+
 /**
- * `::handboek-gezel-roster{role=meester}` — "You have two meester
- * gezellen" and a card per gezel. Personalized: app/agent modes only;
+ * `::handboek-gezel-roster{role=meester}` — "You have two crew members in
+ * the Meester role" and a card per gezel. Personalized: app/agent modes only;
  * the static site has no idea who your crew is.
  *
  * App mode emits one list item per gezel — figure, name, role label,
@@ -300,12 +306,11 @@ async function gezelRoster(attrs: Record<string, string>, ctx: MacroContext): Pr
   const matching = roleId ? all.filter((g) => resolveRoleId(g.role) === roleId) : all;
   if (matching.length === 0) {
     if (!roleId) return '';
-    const label = ROLES[roleId].label.toLowerCase();
-    return `You don't have a ${label} gezel yet — the Meester can create one for you.`;
+    return `No one on your crew has the ${roleInProse(roleId)} role yet — the Meester can add someone for you.`;
   }
-  const label = roleId ? `${ROLES[roleId].label.toLowerCase()} ` : '';
-  const plural = matching.length === 1 ? `${label}gezel` : `${label}gezellen`;
-  const count = `You have ${countWord(matching.length)} ${plural}`;
+  const members = matching.length === 1 ? 'crew member' : 'crew members';
+  const inRole = roleId ? ` in the ${roleInProse(roleId)} role` : '';
+  const count = `You have ${countWord(matching.length)} ${members}${inRole}`;
   if (ctx.mode === 'agent') {
     return `${count}: ${formatNames(matching.map((g) => g.name))}.`;
   }
@@ -340,7 +345,7 @@ function rosterCard(
 /** `::handboek-meester-card` — who your Meester is right now. */
 async function meesterCard(_attrs: Record<string, string>, ctx: MacroContext): Promise<string> {
   const generic =
-    'The Meester is your guildmaster: the first gezel you meet, and the one who helps you figure out which other gezellen you need.';
+    'The Meester is your guildmaster: the first one you meet, and the one who helps you work out what a job needs and who should take it.';
   if (ctx.mode === 'site') return generic;
   const meesterId = await ctx.device.meesterGezelId();
   if (!meesterId) return generic;
@@ -359,7 +364,7 @@ async function roleSummaryTable(): Promise<string> {
       `| [${r.label}](role/${r.id}) | ${r.summary} | ${r.capabilityFloor} | ${r.defaultBooks.join(', ') || '—'} |`,
   );
   return [
-    '| Role | What they do | Model floor | Default craftbooks |',
+    '| Role | What they do | Model floor | Default plans |',
     '| --- | --- | --- | --- |',
     ...rows,
   ].join('\n');
@@ -589,7 +594,7 @@ async function craftbookList(attrs: Record<string, string>, ctx: MacroContext): 
     const firstSentence = b.description.split(/\.\s/)[0]!.replace(/\.$/, '');
     return `| [${b.name}](craftbook/${b.id}) | ${firstSentence}. |`;
   });
-  return ['| Craftbook | What it does |', '| --- | --- |', ...rows].join('\n');
+  return ['| Plan | What it does |', '| --- | --- |', ...rows].join('\n');
 }
 
 /**
@@ -1478,15 +1483,13 @@ async function projectTypeComposition(
       (g) => `| ${g.templateId} | ${g.voorman ? 'Yes — leads the project' : 'No'} |`,
     );
     parts.push(
-      ['**Crew it sets up**', '', '| Gezel template | Crew lead |', '| --- | --- |', ...rows].join(
+      ['**Crew it sets up**', '', '| Role template | Crew lead |', '| --- | --- |', ...rows].join(
         '\n',
       ),
     );
   }
   if (manifest.craftbooks.length) {
-    parts.push(
-      `**Craftbooks it installs:** ${manifest.craftbooks.map((c) => `\`${c}\``).join(', ')}`,
-    );
+    parts.push(`**Plans it installs:** ${manifest.craftbooks.map((c) => `\`${c}\``).join(', ')}`);
   }
   if (manifest.toolsets.length) {
     parts.push(
@@ -1498,9 +1501,7 @@ async function projectTypeComposition(
       (s) =>
         `| ${s.runMode === 'night-shift' ? 'Night Shift (once per night)' : `\`${s.cron}\``} | ${s.craftbook} |`,
     );
-    parts.push(
-      ['**Scheduled work**', '', '| When | Craftbook |', '| --- | --- |', ...rows].join('\n'),
-    );
+    parts.push(['**Scheduled work**', '', '| When | Plan |', '| --- | --- |', ...rows].join('\n'));
   }
   return parts.join('\n\n');
 }
@@ -1530,5 +1531,5 @@ async function suggestedWork(attrs: Record<string, string>, ctx: MacroContext): 
     }
   }
   if (rows.length === 0) return '';
-  return ['| Role | Suggested craftbook | When |', '| --- | --- | --- |', ...rows].join('\n');
+  return ['| Role | Suggested plan | When |', '| --- | --- | --- |', ...rows].join('\n');
 }

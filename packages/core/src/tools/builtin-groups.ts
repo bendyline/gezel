@@ -210,7 +210,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
   },
   {
     id: 'craftbooks',
-    name: 'Craftbook Authoring',
+    name: 'Plan Authoring',
     description:
       "Read and write a whole craftbook, add/remove/reorder steps, set the entry step, and attach focused deliverable gates. `craftbook_write` is the atomic create/replace path; the large surgical update schema is loaded only inside an explicit craftbook-editing session. The unified surface targets either a task's embedded craftbook or a standalone local template.",
     tools: [
@@ -241,7 +241,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
   },
   {
     id: 'craftbook-launch',
-    name: 'Craftbook Launcher',
+    name: 'Plan Launcher',
     description:
       'Procedure-first task launch surface for coordinators: rank applicable craftbooks and invoke a selected recipe after its required setup is ready.',
     tools: ['list_craftbooks', 'suggest_craftbook', 'invoke_craftbook'],
@@ -381,7 +381,7 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
   },
   {
     id: 'handboek',
-    name: 'Handboek',
+    name: 'Help',
     description:
       "Consult gezel's built-in documentation for meta questions about gezel itself — roles, craftbooks, projects, memory, models, setup. In every role's kit so a gezel answers 'how does gezel work?' from the real docs instead of guessing.",
     tools: ['how_do_i'],

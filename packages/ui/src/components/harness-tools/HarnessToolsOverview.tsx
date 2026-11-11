@@ -127,7 +127,7 @@ export function HarnessToolsOverview({ tools }: { tools: HarnessTools }) {
 
           <Tray
             label="Memory"
-            hint="Saved memories go to the project the app is working in, labeled with the app, and every gezel there can see them."
+            hint="Saved memories go to the project the app is working in, labeled with the app, and Gezel can see them there."
             choices={MEMORY}
             value={config.memory}
             disabled={!config.enabled || saving}

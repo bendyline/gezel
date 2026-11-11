@@ -117,16 +117,16 @@
 }
 
 .settings-nav-item:hover {
-  background: rgba(176, 114, 76, 0.08);
+  background: var(--hover-bg);
 }
 
 .settings-nav-item-active {
-  background: rgba(176, 114, 76, 0.14);
+  background: var(--selected-bg);
   border-color: rgba(176, 114, 76, 0.28);
   color: var(--fg);
 }
 
-/* Visual grouping for collapsible nav groups (AI providers, Workloads) —
+/* Visual grouping for collapsible nav groups (AI providers, More settings) —
    a thin vertical rail on the left connects the children back to their
    parent header. The rail is painted on each <li> so that as the number
    of children changes (e.g. MLX-only on Mac, +llama.cpp when advanced) the
@@ -439,7 +439,7 @@ legend.gz-setting-label {
 .gz-setting-hint {
   margin: 0;
   color: var(--text-muted);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   line-height: 1.5;
 }
 
@@ -863,7 +863,7 @@ label.gz-setting-inline {
 }
 
 .machine-health-temperature-value-number {
-  font-size: 1.05rem;
+  font-size: var(--text-lg);
   font-weight: 600;
 }
 
@@ -1239,8 +1239,6 @@ label.gz-setting-inline {
 .connected-apps-kind {
   padding: 0.1rem 0.35rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 .connected-apps-scopes {
@@ -1525,7 +1523,7 @@ label.gz-setting-inline {
   padding: 0.1rem 0.45rem;
   border: 1px dashed var(--border);
   border-radius: var(--radius-md);
-  background: rgba(79, 125, 255, 0.05);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 
 /* "No LLM — passthrough" pill on fixed-function templates in the
@@ -1536,14 +1534,12 @@ label.gz-setting-inline {
   padding: 0.1rem 0.45rem;
   border-radius: var(--radius-sm);
   font-size: 0.75em;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
 }
 
 .gz-badge-passthrough {
-  background: rgba(79, 125, 255, 0.12);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
   color: var(--accent-text);
-  border: 1px solid rgba(79, 125, 255, 0.3);
+  border: 1px solid var(--border);
 }
 
 /* Wraps the install button + optional badge in the catalog grid. */
@@ -1668,11 +1664,11 @@ label.gz-setting-inline {
 }
 
 .name-chip:hover:not(:disabled) {
-  background: rgba(79, 125, 255, 0.08);
+  background: var(--hover-bg);
 }
 
 .name-chip-active {
-  background: rgba(79, 125, 255, 0.15);
+  background: var(--selected-bg);
   border-color: var(--accent);
   color: var(--accent-text);
 }
@@ -1768,6 +1764,12 @@ label.gz-setting-inline {
   flex-wrap: wrap;
   gap: 0.4rem;
   align-items: baseline;
+}
+
+/* The row's gap already spaces the generator's name from its label; the
+   link key's own side padding doubled it. */
+.ff-img-hint-have .link-btn {
+  padding-inline: 0;
 }
 
 .ff-img-hint-empty {
@@ -2064,7 +2066,7 @@ label.gz-setting-inline {
 
 /* green — index fresh and the AI scan has caught up. */
 .project-index-chip-fresh .project-index-dot {
-  background: rgba(80, 180, 100, 0.95);
+  background: var(--status-ready);
   box-shadow: 0 0 0 2px rgba(80, 180, 100, 0.18);
 }
 
@@ -2074,7 +2076,12 @@ label.gz-setting-inline {
   box-shadow: 0 0 0 2px rgba(220, 170, 60, 0.18);
 }
 
-/* red — index is out of date (stale or never built). */
+/* neutral — a new project's first scan has not run yet. Not an error. */
+.project-index-chip-waiting .project-index-dot {
+  background: var(--text-muted);
+}
+
+/* red — an index that exists is out of date. */
 .project-index-chip-stale .project-index-dot {
   background: rgba(214, 90, 80, 0.95);
   box-shadow: 0 0 0 2px rgba(214, 90, 80, 0.16);
@@ -2137,7 +2144,8 @@ label.gz-setting-inline {
   animation: project-index-pulse 1.2s ease-in-out infinite;
 }
 
-.project-index-panel-dot-disabled {
+.project-index-panel-dot-disabled,
+.project-index-panel-dot-waiting {
   background: var(--text-muted);
 }
 
@@ -2434,7 +2442,7 @@ label.gz-setting-inline {
 
 /* Green when the project is actively driven; muted when ambient work pauses. */
 .project-status-select-active .project-status-select-dot {
-  background: rgba(80, 180, 100, 0.95);
+  background: var(--status-ready);
   box-shadow: 0 0 0 2px rgba(80, 180, 100, 0.18);
 }
 .project-status-select-stable .project-status-select-dot {
@@ -2553,7 +2561,7 @@ label.gz-setting-inline {
 
 .project-controls-overflow-item:hover,
 .project-controls-overflow-item[aria-pressed="true"] {
-  background: rgba(127, 127, 127, 0.12);
+  background: var(--hover-bg);
 }
 
 .project-controls-overflow-item[disabled] {
@@ -2685,39 +2693,171 @@ label.gz-setting-inline {
   font-size: var(--text-sm);
 }
 
-/* Settings → Accounts (ADR 0029): the add-person and password forms keep the
-   settings rhythm; the rows reuse the Integrations row recipe. */
-.accounts-add,
-.accounts-password {
-  display: grid;
-  gap: 1rem;
-  margin-top: 1rem;
-  max-width: 28rem;
+/* Settings → Accounts (ADR 0029). People and browsers are ruled lists, not
+   boxed cards: a name, one muted line beneath it, and the row's actions at
+   its end. Adding someone and setting a password happen in dialogs, so no
+   form ever sits open on the page. */
+.accounts-list {
+  max-width: 48rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-bottom: 1px solid var(--border);
 }
 
-.accounts-form-actions {
+.accounts-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  min-height: 3rem;
+  padding: 0.6rem 0;
+  border-top: 1px solid var(--border);
+}
+
+.accounts-row-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+
+.accounts-row-name {
+  color: var(--text);
+  font-size: var(--text-md);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.accounts-row-off .accounts-row-name {
+  color: var(--text-muted);
+}
+
+/* "You", "This browser": a quiet word after the name, never a pill. */
+.accounts-row-tag {
+  margin-left: 0.5rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+
+.accounts-row-detail {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.accounts-row > button {
+  flex: 0 0 auto;
+}
+
+/* The row's menu key: quiet until hovered, so a column of them never
+   out-draws the names (the crew row's ⋮ follows the same rule). */
+.accounts-row-menu {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.accounts-row-menu:hover:not([disabled]),
+.accounts-row-menu[data-state="open"] {
+  color: var(--text);
+  background: rgba(127, 127, 127, 0.14);
+}
+
+.accounts-row-menu:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.accounts-row-menu[disabled] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.accounts-empty,
+.accounts-message {
+  max-width: 48rem;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.accounts-message {
+  color: var(--text);
+}
+
+.accounts-message.error {
+  color: var(--danger-text);
+}
+
+/* The add and password dialogs: one column of label, input, hint. The
+   generic `.gz-dialog label` rule is muted with a trailing margin, made for a
+   label wrapping its input; these fields keep label and hint as siblings. */
+.gz-dialog.accounts-dialog {
+  width: min(28rem, 90vw);
+  min-width: min(28rem, 90vw);
+}
+
+.accounts-dialog-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.accounts-dialog-description {
+  margin: -0.4rem 0 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+.accounts-dialog-field {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.gz-dialog .accounts-dialog-field label {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.accounts-dialog-field input {
+  box-sizing: border-box;
+  width: 100%;
+}
+
+.accounts-dialog-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.gz-dialog .accounts-dialog-check {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-}
-
-/* Text inputs as in the other Settings forms (.new-row); a key keeps its own
-   width instead of stretching across the form grid. */
-.accounts-add input,
-.accounts-password input {
-  padding: 0.4rem 0.5rem;
-  background: var(--panel);
-  color: inherit;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-}
-
-.accounts-add > button {
-  justify-self: start;
-}
-
-.accounts-status {
-  margin-left: 0.4rem;
-  font-weight: 400;
+  margin: -0.25rem 0 0;
   color: var(--text-muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.gz-dialog .accounts-dialog-check input {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
 }

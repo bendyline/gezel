@@ -7,10 +7,6 @@ import { basename, isAbsolute as isAbsolutePath, join as joinPath } from 'node:p
 import {
   type ApiCompatVerdict,
   GEZEL_VERSION,
-  IMAGE_ASPECT_RATIOS,
-  IMAGE_QUALITIES,
-  ImageAspectRatioSchema,
-  ImageQualitySchema,
   SCORECARD,
   type StorageJob,
   evaluateApiCompat,
@@ -64,11 +60,14 @@ import {
   withTransientConnection,
 } from '../connection.js';
 import {
-  blockedTaskReason,
+  blockedTaskDetails,
   craftbookDoLaunch,
+  describeCraftbook,
+  ensureProjectEdits,
   filterCraftbooks,
   parseCraftbookArguments,
   resolveCraftbookInvocation,
+  taskInputFailure,
   waitForTask,
 } from '../craftbook-command.js';
 import { ensureCraftbookSetup, ensureModelEngines, terminalPrompter } from '../craftbook-setup.js';
@@ -87,7 +86,7 @@ import {
   cliEngagementModeOption,
   parseCliEngagementMode,
 } from '../engagement-mode.js';
-import { enumOpt, floatOpt, intOpt, resolvePromptText, saveArtifact } from '../generate.js';
+import { registerGenerateCommands } from '../generate-command.js';
 import { resolveKnowledgeInstallSource } from '../knowledge-install.js';
 import { registerMcpCommands } from '../mcp-command.js';
 import {
@@ -139,7 +138,7 @@ import { unsupportedNodeMessage } from './node-version.js';
 const program = new Command();
 program
   .name('gezel')
-  .description('Gezel — assemble a team of AI companions (gezels) and put them to work.')
+  .description('Gezel — put AI to work on your files and projects, from your own computer.')
   .addHelpText(
     'after',
     '\nAny craftbook also runs by name: `gezel <craftbook> …` is `gezel do <craftbook> …`.',
@@ -829,8 +828,8 @@ program
 
 program
   .command('run [prompt...]')
-  .description('Run a prompt through a gezel and print the reply (use - to read stdin)')
-  .option('-g, --gezel <ref>', "gezel id or name (default: this project's crew lead)")
+  .description('Send a prompt to Gezel and print the reply (use - to read stdin)')
+  .option('-g, --gezel <ref>', "crew member id or name (default: this project's crew lead)")
   .addHelpText(
     'after',
     '\nExamples:\n  gezel run "Summarize this project"\n  printf \'Summarize these notes:\\nThe launch is Friday.\\n\' | gezel run -\n  gezel run - < prompt.txt\n\nA sole - reads UTF-8 stdin to EOF. Empty input is rejected.\nReplies go to stdout; diagnostics go to stderr.\nWith no model set up yet, a run in a terminal first offers to download one,\nthen runs the prompt.',
@@ -947,7 +946,11 @@ program
     `
 Bare values fill the craftbook's required parameters in order; key=value sets any
 parameter; every other word is your request, which becomes the task description.
-\`gezel craftbook list\` shows the craftbooks you can start here.
+\`gezel craftbook list\` shows the craftbooks you can start here, and
+\`gezel craftbook show <craftbook>\` what one takes and where it saves.
+
+A folder Gezel was pointed at starts read-only. A craftbook that saves into the
+folder asks first at a terminal; in a script, add --allow-edits.
 
 Examples:
   gezel do summarize-long "Summarize notes.txt for the board"
@@ -965,6 +968,10 @@ Examples:
   .option('--out <dir>', 'wait, then copy what the task made into this folder')
   .option('--json', 'emit one JSON result on stdout')
   .option(
+    '--allow-edits',
+    "let Gezel change files in this project's folder, when the craftbook saves into it",
+  )
+  .option(
     '--strict-sandbox',
     'require OS network isolation for custom scripts (CLI launches otherwise trust this recipe snapshot)',
   )
@@ -978,6 +985,7 @@ Examples:
         timeout: string;
         out?: string;
         json?: boolean;
+        allowEdits?: boolean;
         strictSandbox?: boolean;
         viaCraftbookShorthand?: boolean;
       },
@@ -1070,12 +1078,23 @@ Examples:
         return;
       }
       await setUp();
-      const created = await client.createTask(projectId, {
-        ...craftbookStartRequest(book),
-        ...craftbookDoLaunch(craftbook, parsed),
-        trustScripts: !opts.strictSandbox,
-        roleBasedNameOnlyMode: true,
+      await ensureProjectEdits(client, {
+        projectId,
+        craftbook,
+        allow: opts.allowEdits === true,
+        prompter: terminalPrompter(),
+        write: stderrProgress(),
       });
+      const created = await client
+        .createTask(projectId, {
+          ...craftbookStartRequest(book),
+          ...craftbookDoLaunch(craftbook, parsed),
+          trustScripts: !opts.strictSandbox,
+          roleBasedNameOnlyMode: true,
+        })
+        .catch((err: unknown) => {
+          throw taskInputFailure(err, book, parsed.params) ?? err;
+        });
       if (opts.wait || opts.out) {
         console.error(`started ${created.ref} — ${created.title}`);
         const waited = await printTaskWait(client, created.ref, { ...opts, timeoutMs });
@@ -1137,14 +1156,15 @@ async function printTaskWait(
         `${task.ref}: ${task.status}${task.activeStepId ? ` (${task.activeStepId})` : ''}`,
       ),
   });
-  const reason = await blockedTaskReason(client, result);
+  const { reason, hint } = await blockedTaskDetails(client, result);
   console.log(
     opts.json
-      ? JSON.stringify({ ...result, ...(reason ? { reason } : {}) })
+      ? JSON.stringify({ ...result, ...(reason ? { reason } : {}), ...(hint ? { hint } : {}) })
       : `${result.task.ref}: ${result.outcome}`,
   );
   if (!opts.json && result.outcome === 'blocked') {
     if (reason) console.error(reason);
+    if (hint) console.error(hint);
     console.error(`See its notes with \`gezel task notes ${result.task.ref}\`.`);
   }
   process.exitCode = result.exitCode;
@@ -1200,17 +1220,45 @@ craftbook
     }
     const width = Math.min(32, Math.max(...books.map((book) => book.command.length)) + 2);
     for (const book of books) console.log(`${book.command.padEnd(width)}${book.name}`);
-    console.error(`\nStart one with \`gezel do <command> "<your request>"\`.`);
+    // Some books need a file or a branch before the request, which the start
+    // line alone gets wrong: it used to end in a 422 naming the sentence.
+    console.error(
+      `\nStart one with \`gezel do <command> "<your request>"\`. \`gezel craftbook show <command>\` says what it takes first.`,
+    );
   });
 
-const agent = program.command('agent').description('Manage your gezels (your AI companions)');
+craftbook
+  .command('show <command...>')
+  .description('Show what a craftbook does, what it takes, and the command that starts it')
+  .option('--json', 'emit the craftbook as JSON')
+  .option('--no-start', 'Use a running service only; never start one')
+  .action(async (words: string[], opts: { json?: boolean; start?: boolean }) => {
+    const client = await connectForInspection(opts);
+    const preview = await previewRunProject(client, cliGlobals());
+    const projectId = preview.projectId ?? 'default';
+    const [config, result] = await Promise.all([
+      client.getConfig(),
+      client.listProjectCraftbooks(projectId),
+    ]);
+    const books = normalizeCraftbooks(result.items, config.showWorkInProgressFeatures === true);
+    const { book, args } = resolveCraftbookInvocation(books, words);
+    if (args.length > 0) throw new CliError(`craftbook not found: ${words.join(' ')}`);
+    const { craftbook: full } = await client.getCraftbook(book.id, {
+      projectId,
+      source: book.source,
+      version: book.version,
+    });
+    console.log(opts.json ? JSON.stringify(full) : describeCraftbook(book, full));
+  });
+
+const agent = program.command('agent').description('Manage your crew (your AI companions)');
 
 agent
   .command('output-limit <id> [tokens]')
   .description(
-    "Show or set one gezel's output-token limit, including reasoning; auto clears its override",
+    "Show or set one crew member's output-token limit, including reasoning; auto clears its override",
   )
-  .option('--json', 'Output the per-gezel override as JSON')
+  .option('--json', 'Output the override as JSON')
   .action(async (id: string, tokens: string | undefined, opts: { json?: boolean }) => {
     if (
       tokens !== undefined &&
@@ -1240,7 +1288,7 @@ agent
 
 agent
   .command('list')
-  .description('List your gezels')
+  .description('List your crew')
   .action(async () => {
     const client = await connectOwned(cliGlobals());
     const res = await client.listGezels();
@@ -1251,23 +1299,23 @@ agent
 
 agent
   .command('create <name>')
-  .description('Create a new gezel')
+  .description('Add a crew member')
   .option('-d, --description <text>', 'description')
   .option('-m, --model <model>', 'model identifier')
   .action(async (name: string, opts: { description?: string; model?: string }) => {
     const client = await connectOwned(cliGlobals());
     const created = await client.createGezel({ name, ...opts });
-    console.log(`created gezel ${created.id}`);
+    console.log(`created crew member ${created.id}`);
   });
 
 agent
   .command('show <id>')
-  .description('Show one gezel')
+  .description('Show one crew member')
   .action(async (id: string) => {
     const client = await connectOwned(cliGlobals());
     const a = await client.getGezel(id).catch((err: unknown) => {
       throw isNotFound(err)
-        ? new CliError(`No gezel with id "${id}". Run \`gezel agent list\` to see your gezels.`)
+        ? new CliError(`No crew member with id "${id}". Run \`gezel agent list\` to see your crew.`)
         : err;
     });
     console.log(a.parsed.source);
@@ -1425,11 +1473,11 @@ skills
     if (result.persona) console.error(`persona: ${result.persona.role}`);
   });
 
-const handboek = program.command('handboek').description('The built-in documentation (Handboek)');
+const handboek = program.command('handboek').description('The built-in documentation (Help)');
 
 handboek
   .command('export')
-  .description('Render the Handboek as a static HTML site for gezel.com (no daemon)')
+  .description('Render Help as a static HTML site for gezel.com (no daemon)')
   .requiredOption('--out <dir>', 'output directory')
   .option(
     '--css <href>',
@@ -1487,7 +1535,7 @@ handboek
         appsOut: opts.appsOut,
         openInGezel: opts.openInGezel === true,
       });
-      console.log(`Handboek exported: ${result.pages} pages → ${result.out}`);
+      console.log(`Help exported: ${result.pages} pages → ${result.out}`);
       if (result.apps) {
         console.log(`Apps library: ${result.apps.apps} apps, ${result.apps.demos} with demos`);
       }
@@ -2054,7 +2102,7 @@ task
 task
   .command('create <projectId> <title>')
   .description('Create a task with a single phase')
-  .option('-a, --assignee <gezelId>', 'gezel id to assign (default: user)')
+  .option('-a, --assignee <gezelId>', 'crew member id to assign (default: user)')
   .option('-p, --phase <name>', 'first phase name', 'Main')
   .option('-d, --description <text>', 'task description — what done looks like (min 40 chars)')
   .action(
@@ -2124,187 +2172,7 @@ task
   });
 
 // ── Generation: create-image / create-video / create-audio ──────────
-// One-shot calls into the configured generators. The prompt/text comes
-// from the variadic argument or `--file <path>`; `--model` overrides the
-// engine default. Output bytes are pulled back from the daemon and
-// written to a local file (cwd by default, or `--output`).
-
-interface GenCommonOpts {
-  file?: string;
-  model?: string;
-  project?: string;
-  output?: string;
-}
-
-program
-  .command('create-image [prompt...]')
-  .description('Generate an image from a prompt (or --file) via the configured image engine')
-  .option('-f, --file <path>', 'read the prompt from a text file instead of the argument')
-  .option('-m, --model <id>', 'image model catalog id (default: the engine default)')
-  .option('-n, --negative <text>', 'negative prompt')
-  .option('-W, --width <px>', 'width in pixels')
-  .option('-H, --height <px>', 'height in pixels')
-  .option('-a, --aspect <ratio>', `aspect ratio: ${IMAGE_ASPECT_RATIOS.join(', ')}`)
-  .option('-q, --quality <tier>', `size tier: ${IMAGE_QUALITIES.join(', ')} (default: standard)`)
-  .option('-s, --steps <n>', 'sampler steps (default: the model recommendation)')
-  .option('--seed <n>', 'seed for reproducible output')
-  .option('-p, --project <id>', 'project to write the artifact under', 'default')
-  .option('-o, --output <path>', 'write the image here (default: ./<artifact name>)')
-  .action(
-    async (
-      promptParts: string[],
-      opts: GenCommonOpts & {
-        negative?: string;
-        width?: string;
-        height?: string;
-        aspect?: string;
-        quality?: string;
-        steps?: string;
-        seed?: string;
-      },
-    ) => {
-      const aspect = enumOpt('aspect', opts.aspect, ImageAspectRatioSchema);
-      const quality = enumOpt('quality', opts.quality, ImageQualitySchema);
-      const prompt = await resolvePromptText(promptParts, opts.file, 'prompt');
-      const client = await connectOwned(cliGlobals());
-      const projectId = opts.project ?? 'default';
-      const width = intOpt('width', opts.width);
-      const height = intOpt('height', opts.height);
-      const steps = intOpt('steps', opts.steps);
-      const seed = intOpt('seed', opts.seed);
-      console.error(`generating image${opts.model ? ` (model ${opts.model})` : ''}...`);
-      let res: Awaited<ReturnType<typeof client.generateImage>>;
-      try {
-        res = await client.generateImage({
-          prompt,
-          projectId,
-          ...(opts.model ? { model: opts.model } : {}),
-          ...(opts.negative ? { negativePrompt: opts.negative } : {}),
-          ...(width !== undefined ? { width } : {}),
-          ...(height !== undefined ? { height } : {}),
-          ...(aspect ? { aspectRatio: aspect } : {}),
-          ...(quality ? { quality } : {}),
-          ...(steps !== undefined ? { steps } : {}),
-          ...(seed !== undefined ? { seed } : {}),
-        });
-      } catch (err) {
-        throw new CliError(
-          `image generation failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      const dest = await saveArtifact(client, projectId, res.artifactPath, opts.output);
-      const m = res.meta;
-      console.log(dest);
-      console.error(
-        `  model=${m.model} seed=${m.seed} steps=${m.steps} size=${m.widthPx}x${m.heightPx} time=${(m.durationMs / 1000).toFixed(1)}s`,
-      );
-    },
-  );
-
-program
-  .command('create-video [prompt...]')
-  .description('Generate a video from a prompt (or --file) via the configured video engine')
-  .option('-f, --file <path>', 'read the prompt from a text file instead of the argument')
-  .option('-m, --model <id>', 'video model catalog id (default: the engine default)')
-  .option('-n, --negative <text>', 'negative prompt')
-  .option('-W, --width <px>', 'width in pixels')
-  .option('-H, --height <px>', 'height in pixels')
-  .option('--frames <n>', 'number of frames')
-  .option('--fps <n>', 'frames per second')
-  .option('-s, --steps <n>', 'sampler steps')
-  .option('--seed <n>', 'seed for reproducible output')
-  .option('-p, --project <id>', 'project to write the artifact under', 'default')
-  .option('-o, --output <path>', 'write the video here (default: ./<artifact name>)')
-  .action(
-    async (
-      promptParts: string[],
-      opts: GenCommonOpts & {
-        negative?: string;
-        width?: string;
-        height?: string;
-        frames?: string;
-        fps?: string;
-        steps?: string;
-        seed?: string;
-      },
-    ) => {
-      const prompt = await resolvePromptText(promptParts, opts.file, 'prompt');
-      const client = await connectOwned(cliGlobals());
-      const projectId = opts.project ?? 'default';
-      const width = intOpt('width', opts.width);
-      const height = intOpt('height', opts.height);
-      const numFrames = intOpt('frames', opts.frames);
-      const fps = intOpt('fps', opts.fps);
-      const steps = intOpt('steps', opts.steps);
-      const seed = intOpt('seed', opts.seed);
-      console.error(
-        `generating video${opts.model ? ` (model ${opts.model})` : ''} — this can take a while...`,
-      );
-      let res: Awaited<ReturnType<typeof client.generateVideo>>;
-      try {
-        res = await client.generateVideo({
-          prompt,
-          projectId,
-          ...(opts.model ? { model: opts.model } : {}),
-          ...(opts.negative ? { negativePrompt: opts.negative } : {}),
-          ...(width !== undefined ? { width } : {}),
-          ...(height !== undefined ? { height } : {}),
-          ...(numFrames !== undefined ? { numFrames } : {}),
-          ...(fps !== undefined ? { fps } : {}),
-          ...(steps !== undefined ? { steps } : {}),
-          ...(seed !== undefined ? { seed } : {}),
-        });
-      } catch (err) {
-        throw new CliError(
-          `video generation failed: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      const dest = await saveArtifact(client, projectId, res.artifactPath, opts.output);
-      const m = res.meta;
-      console.log(dest);
-      console.error(
-        `  model=${m.model} seed=${m.seed} ${m.widthPx}x${m.heightPx} frames=${m.numFrames} fps=${m.fps} time=${(m.durationMs / 1000).toFixed(1)}s`,
-      );
-    },
-  );
-
-program
-  .command('create-audio [text...]')
-  .description('Synthesize speech from text (or --file) via the configured TTS engine')
-  .option('-f, --file <path>', 'read the text from a file instead of the argument')
-  .option('-m, --model <id>', 'TTS model catalog id (default: the engine default)')
-  .option('--voice <id>', 'voice id (default: the model/gezel default)')
-  .option('--speed <x>', 'speed multiplier, 0.25-4 (default: 1.0)')
-  .option('-p, --project <id>', 'project to write the artifact under', 'default')
-  .option('-o, --output <path>', 'write the audio here (default: ./<artifact name>)')
-  .action(async (textParts: string[], opts: GenCommonOpts & { voice?: string; speed?: string }) => {
-    const text = await resolvePromptText(textParts, opts.file, 'text');
-    const client = await connectOwned(cliGlobals());
-    const projectId = opts.project ?? 'default';
-    const speed = floatOpt('speed', opts.speed);
-    console.error('synthesizing speech...');
-    let res: Awaited<ReturnType<typeof client.synthesizeSpeech>>;
-    try {
-      res = await client.synthesizeSpeech({
-        text,
-        projectId,
-        ...(opts.model ? { model: opts.model } : {}),
-        ...(opts.voice ? { voice: opts.voice } : {}),
-        ...(speed !== undefined ? { speed } : {}),
-      });
-    } catch (err) {
-      throw new CliError(
-        `speech synthesis failed: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
-    if (!res.artifactPath) throw new CliError('speech synthesis returned no saved audio');
-    const dest = await saveArtifact(client, projectId, res.artifactPath, opts.output);
-    const m = res.meta;
-    console.log(dest);
-    console.error(
-      `  voice=${m.voice} model=${m.model} ${m.durationSeconds.toFixed(1)}s @ ${m.sampleRate}Hz`,
-    );
-  });
+registerGenerateCommands(program, () => connectOwned(cliGlobals()));
 
 // ── Native engine binaries ──────────────────────────────────────────
 const native = program.command('native').description('Manage native engine binaries');
@@ -2826,7 +2694,7 @@ program
 
 program
   .command('backup <file>')
-  .description('Write your gezels, projects, and documents to a backup file')
+  .description('Write your crew, projects, and documents to a backup file')
   .option('--no-workspaces', 'Leave project working files out of the backup')
   .option('--dry-run', 'Show what would be included without writing the file')
   .action(async (file: string, opts: { workspaces?: boolean; dryRun?: boolean }) => {
@@ -2852,7 +2720,7 @@ program
 
 program
   .command('restore <file>')
-  .description('Restore gezels, projects, and documents from a backup file')
+  .description('Restore your crew, projects, and documents from a backup file')
   .option('--list', 'Show what the backup holds without restoring anything')
   .option(
     '--only <item...>',
@@ -2861,7 +2729,7 @@ program
   .option('--replace', 'Overwrite items that already exist here')
   .option(
     '--settings',
-    'Also restore which gezels hold roles such as the meester (never providers, folders or security)',
+    'Also restore which crew members hold roles such as the Meester (never providers, folders or security)',
   )
   .action(
     async (

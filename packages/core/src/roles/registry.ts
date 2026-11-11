@@ -138,7 +138,7 @@ export const ROLES: Record<RoleId, RoleDefinition> = {
   meester: {
     id: 'meester',
     label: 'Meester',
-    summary: 'Coordinator: delegates work across the gezel workforce; does not build directly.',
+    summary: 'Coordinator: delegates work across the crew; does not build directly.',
     toolsetGroups: [
       'team-management',
       'tasks-readonly',

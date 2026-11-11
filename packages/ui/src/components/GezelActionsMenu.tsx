@@ -74,8 +74,8 @@ export function GezelActionsMenu({
   };
 
   const personalized = personalizeEuphemism(euphemism, gezel.name);
-  const actionLabel = boringMode ? 'Remove this gezel' : personalized;
-  const menuLabel = boringMode ? actionLabel : `${actionLabel}… (Remove this gezel)`;
+  const actionLabel = boringMode ? 'Remove this crew member' : personalized;
+  const menuLabel = boringMode ? actionLabel : `${actionLabel}… (Remove this crew member)`;
 
   return (
     <>
@@ -84,8 +84,8 @@ export function GezelActionsMenu({
           <button
             type="button"
             className={`gezel-actions-trigger${compact ? ' gezel-actions-trigger--row' : ''}`}
-            aria-label={boringMode ? 'Actions for this gezel' : `Actions for ${gezel.name}`}
-            title="Gezel actions"
+            aria-label={boringMode ? 'Actions for this crew member' : `Actions for ${gezel.name}`}
+            title="Crew member actions"
           >
             <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <circle cx="12" cy="5" r="1.6" />
@@ -112,8 +112,8 @@ export function GezelActionsMenu({
         title={`${actionLabel}?`}
         message={
           <>
-            This will permanently remove {boringMode ? 'this gezel' : gezel.name}, including their
-            chats, memories, and settings, from your system. You won't be able to get this gezel
+            This will permanently remove {boringMode ? 'this crew member' : gezel.name}, including
+            their chats, memories, and settings, from your system. You won't be able to get them
             back.
             {error && <span className="gezel-delete-error">{error}</span>}
           </>

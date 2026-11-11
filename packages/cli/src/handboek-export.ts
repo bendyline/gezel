@@ -190,9 +190,9 @@ export function openInGezelSection(entryId: string, siteUrl: string): string | u
 }
 
 const AREA_BLURBS: Record<HandboekArea, string> = {
-  conceptual: 'What gezel is, who your crew are, and how the pieces fit together.',
-  'gezel-roles': 'The roles a gezel can take, and what each one is good at.',
-  craftbooks: 'Step-by-step recipes your crew can run — one per job.',
+  conceptual: 'What gezel is, who does the work, and how the pieces fit together.',
+  'gezel-roles': 'The roles on a crew, and what each one is good at.',
+  craftbooks: 'Step-by-step plans Gezel can follow — one per job.',
   'project-types': 'Ready-made project setups, each with a crew and a bench.',
   technical: 'Architecture, file layout, providers, security, and the CLI.',
   'whats-new': 'What changed in each release, in plain language.',
@@ -381,15 +381,15 @@ export async function runHandboekExport(
   const landingSocial: SocialMeta | undefined = canonicalBase
     ? {
         url: canonicalBase,
-        title: 'The Gezel Handboek',
+        title: 'Gezel Help',
         image: ogBase ? `${ogBase}${ogCardPath(LANDING_CARD_ID)}` : undefined,
       }
     : undefined;
   if (ogBase) {
     cardPlans.push({
       id: LANDING_CARD_ID,
-      kicker: `${WORDMARK} · Handboek`,
-      headline: 'The Gezel Handboek',
+      kicker: `${WORDMARK} · Help`,
+      headline: 'Gezel Help',
     });
   }
   await writeFile(join(out, 'index.html'), landingPage(areas, css, siteUrl, landingSocial), 'utf8');
@@ -470,7 +470,7 @@ export function llmsTxt(
   base: string,
 ): string {
   const lines = [
-    '# Gezel Handboek',
+    '# Gezel Help',
     '',
     '> Gezel is a free, open-source app and platform for running a crew of AI agents on your own computer, with local models or a cloud plan you already have. Every article below is plain markdown.',
     '',
@@ -590,7 +590,7 @@ export interface SocialMeta {
   /** Canonical URL of this page. */
   url: string;
   /**
-   * Share title. The `<title>` element's `— Gezel Handboek` suffix is a
+   * Share title. The `<title>` element's `— Gezel Help` suffix is a
    * browser-tab affordance; on a card it just repeats `og:site_name`.
    */
   title: string;
@@ -672,7 +672,7 @@ function masthead(
     .join('\n');
   const wordmark = siteUrl ? `<a class="hb-wordmark" href="${esc(siteUrl)}">${WORDMARK}</a>\n` : '';
   return `<header class="hb-masthead">
-${wordmark}<a class="hb-brand" href="${up(depth)}">Gezel Handboek</a>
+${wordmark}<a class="hb-brand" href="${up(depth)}">Gezel Help</a>
 <nav class="hb-areanav">
 ${links}
 </nav>
@@ -714,7 +714,7 @@ function sidebar(areas: HandboekTocArea[], entry: HandboekTocEntry, depth: numbe
     return `<section>\n${heading}\n${list}\n${more}\n</section>`;
   });
   return `<aside class="hb-sidebar">
-<nav aria-label="Handboek sections">
+<nav aria-label="Help sections">
 ${sections.join('\n')}
 </nav>
 </aside>`;
@@ -797,14 +797,14 @@ function articlePage(args: {
   const scriptTags = scripts
     .map((name) => `<script defer src="${up(depth)}assets/${esc(name)}"></script>`)
     .join('\n');
-  return `${head(`${entry.title} — Gezel Handboek`, css, depth, entry.summary, social)}
+  return `${head(`${entry.title} — Gezel Help`, css, depth, entry.summary, social)}
 <body class="hb hb-article-page">
 ${masthead(areas, depth, siteUrl, entry.area)}
 <div class="hb-layout">
 ${sidebar(areas, entry, depth)}
 <main class="hb-main">
 <nav class="hb-breadcrumb" aria-label="Breadcrumb">
-<a href="${up(depth)}">Handboek</a>${area ? ` <span>/</span> <a href="${up(depth)}${esc(areaLanding(area))}/">${esc(area.title)}</a>` : ''}
+<a href="${up(depth)}">Help</a>${area ? ` <span>/</span> <a href="${up(depth)}${esc(areaLanding(area))}/">${esc(area.title)}</a>` : ''}
 </nav>
 <article class="hb-article">
 ${body}
@@ -821,7 +821,7 @@ ${scriptTags}
 
 function footer(depth: number): string {
   return `<footer class="hb-footer">
-<p><a href="${up(depth)}">Gezel Handboek</a> — documentation for gezel, a crew of AI companions that works for you, from your own computer.</p>
+<p><a href="${up(depth)}">Gezel Help</a> — documentation for gezel, a crew of AI companions that works for you, from your own computer.</p>
 </footer>`;
 }
 
@@ -876,12 +876,12 @@ ${list}
     })
     .join('\n');
 
-  return `${head('Gezel Handboek', css, 0, 'Documentation for gezel — a crew of AI companions that works for you, from your own computer.', social)}
+  return `${head('Gezel Help', css, 0, 'Documentation for gezel — a crew of AI companions that works for you, from your own computer.', social)}
 <body class="hb hb-home">
 ${masthead(areas, 0, siteUrl)}
 <main class="hb-main hb-home-main">
 <section class="hb-hero">
-<h1>The Gezel Handboek</h1>
+<h1>Gezel Help</h1>
 <p class="hb-lede">Gezel lets you assemble a crew of AI companions and put them to work — on your own computer, with your own files. This is their handboek: what they are, what they can do, and how to work with them.</p>
 </section>
 ${startBlock}

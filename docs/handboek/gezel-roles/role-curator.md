@@ -31,6 +31,6 @@ A photo folder you add gets a Curator as its lead, alongside the Librarian who r
 
 ::handboek-role-tools{role=curator scope=tiers}
 
-## Craftbooks they run well
+## Plans they run well
 
 ::handboek-craftbook-list{role=curator}

@@ -192,7 +192,7 @@ describe('inline tool cards', () => {
     // Outside <details> = visible while collapsed (structural, like the
     // failure notice above — jsdom renders closed expandos' children).
     expect(promoted?.closest('.msg-tool-history')).toBeNull();
-    expect(promoted).toHaveTextContent('Craftbook started');
+    expect(promoted).toHaveTextContent('Plan started');
     expect(promoted).toHaveTextContent('PowerPoint from Content is underway — 1 step.');
     // The collapsed list keeps the plain row (provenance, step count) but
     // suppresses its copy of the card.

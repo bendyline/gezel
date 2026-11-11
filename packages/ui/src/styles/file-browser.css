@@ -160,8 +160,11 @@ button.danger {
   margin-bottom: 0.75rem;
 }
 
+/* The name of what is open (a crew member, a document) is an entity title,
+   like a task's. */
 .detail-header h3 {
   margin: 0 0 0.15rem;
+  font-size: var(--text-title);
 }
 
 .detail-actions {
@@ -380,8 +383,6 @@ button.danger {
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   font-size: var(--text-2xs);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 
 /* Transient result of the last create / delete / import, under the header. */
@@ -428,7 +429,7 @@ button.danger {
 
 .file-tree-collapsed-label {
   writing-mode: vertical-rl;
-  font-size: var(--text-2xs, 0.68rem);
+  font-size: var(--text-2xs);
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
@@ -1281,7 +1282,8 @@ button.danger {
 }
 
 .workspace-index-state-disabled > span,
-.workspace-index-state-checking > span {
+.workspace-index-state-checking > span,
+.workspace-index-state-waiting > span {
   background: var(--text-muted);
 }
 
@@ -1366,6 +1368,38 @@ button.danger {
 .file-flat-notice-action {
   margin-left: auto;
   white-space: nowrap;
+}
+
+/* An app update waiting for the person: the flat notice over the Output page. */
+.project-type-update-notice {
+  flex-shrink: 0;
+}
+
+.project-type-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.project-type-update-dialog {
+  width: min(32rem, calc(100vw - 2rem));
+}
+
+.project-type-update-dialog > h3,
+.project-type-update-dialog > p {
+  margin: 0;
+}
+
+.project-type-update-section h4 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: var(--text-sm);
+}
+
+.project-type-update-section ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--text-sm);
 }
 
 /* ── Persistent "workspace writes enabled" banner ── */
@@ -1487,6 +1521,11 @@ button.danger {
   line-height: 1;
 }
 
+.msg-role-glyph-hat {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+
 .msg-role-project {
   margin-left: 0.4rem;
   font-size: var(--text-2xs);
@@ -1503,7 +1542,7 @@ button.danger {
 .msg-role-drift {
   margin-left: 0.4rem;
   padding: 0.05rem 0.45rem;
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   font-weight: 500;
   text-transform: none;
   letter-spacing: 0.02em;
@@ -1835,11 +1874,11 @@ button.danger {
 }
 
 .tree-row:hover {
-  background: rgba(127, 127, 127, 0.08);
+  background: var(--hover-bg);
 }
 
 .tree-row-selected {
-  background: rgba(176, 114, 76, 0.15);
+  background: var(--selected-bg);
 }
 
 /* Documents can be lifted from the tree and set into a folder. Keep the
@@ -2123,7 +2162,7 @@ button.tree-row-trailing-select {
 
 .workspace-index-health-score {
   color: var(--accent-text);
-  font-size: 1.55rem;
+  font-size: var(--text-title);
   font-weight: 700;
   line-height: 1;
 }

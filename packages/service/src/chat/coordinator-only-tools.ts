@@ -24,7 +24,7 @@ import { roleHasTeamScope } from './role-tool-filter.js';
  */
 export interface CoordinatorRouteProbe {
   readonly method: 'GET' | 'POST' | 'PUT' | 'DELETE';
-  /** `:project` / `:gezel` are the session's own; `:other` is another gezel. */
+  /** `:project` / `:gezel` / `:session` are the session's own; `:other` is another gezel. */
   readonly path: string;
   /** The request names the calling session as its origin (message / ask bodies). */
   readonly bindsOrigin?: true;

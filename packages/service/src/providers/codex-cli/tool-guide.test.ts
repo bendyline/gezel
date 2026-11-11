@@ -29,6 +29,22 @@ describe('codexToolGuide', () => {
     expect(guide).not.toContain('github');
   });
 
+  it('sends work for the hidden Gezel writers to Codex built-ins, but keeps the receipt runners', () => {
+    const guide = codexToolGuide([...taskStep, 'mcp__gezel__run_package_script']) ?? '';
+    expect(guide).toContain('`write_file`');
+    expect(guide).toContain('with your built-in file editing, shell or web search');
+    expect(guide).toContain('not a blocker');
+    expect(guide).toContain('Use `run_package_script` where your instructions name them');
+    expect(guide).not.toContain('`run_npx`');
+    expect(codexToolGuide(taskStep) ?? '').not.toContain('run records');
+  });
+
+  it('does not tell a read-only session to edit', () => {
+    const guide = codexToolGuide(taskStep, { canEdit: false }) ?? '';
+    expect(guide).toContain('### Calling Gezel tools');
+    expect(guide).not.toContain('write_file');
+  });
+
   it('leaves instructions alone when no Gezel tool is wired', () => {
     expect(codexToolGuide([])).toBeNull();
     expect(codexToolGuide(['mcp__github__*'])).toBeNull();

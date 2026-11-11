@@ -50,6 +50,7 @@ const CHECK_LABELS: ReadonlyArray<{
   label: string;
 }> = [
   { key: 'spawn', label: 'did not start' },
+  { key: 'coherence', label: 'garbled replies' },
   { key: 'toolRoundTrip', label: 'tool calls failed' },
   { key: 'throughput', label: 'slow decoding' },
   { key: 'reasoningBudget', label: 'unbounded reasoning' },
@@ -76,10 +77,22 @@ function neverRan(check: { detail: string; reached?: boolean }): boolean {
  * failed" at a model whose tool turn was never attempted, which is a defect
  * invented by the reporting rather than found by the probe.
  */
-function failingChecks(
-  record: ModelFitnessRecord,
-): ReadonlyArray<{ key: keyof ModelFitnessRecord['checks']; label: string }> {
-  return CHECK_LABELS.filter((c) => !record.checks[c.key].ok && !neverRan(record.checks[c.key]));
+function failingChecks(record: ModelFitnessRecord): ReadonlyArray<{
+  key: keyof ModelFitnessRecord['checks'];
+  label: string;
+  check: { ok: boolean; detail: string; reached?: boolean };
+}> {
+  const out: Array<{
+    key: keyof ModelFitnessRecord['checks'];
+    label: string;
+    check: { ok: boolean; detail: string; reached?: boolean };
+  }> = [];
+  for (const entry of CHECK_LABELS) {
+    // `coherence` is absent on records written before it was measured.
+    const check = record.checks[entry.key];
+    if (check && !check.ok && !neverRan(check)) out.push({ ...entry, check });
+  }
+  return out;
 }
 
 /**
@@ -199,7 +212,7 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
     // Falling back to `checks.spawn` here printed "engine spawned and served
     // the probe session" as the reason a check FAILED.
     const rawReason = cause
-      ? record.checks[cause.key].detail
+      ? cause.check.detail
       : record.checks.spawn.ok
         ? 'the probe stopped before it could say why — run it again'
         : record.checks.spawn.detail;
@@ -224,8 +237,8 @@ export function composeFitnessBadge(input: FitnessBadgeInput): FitnessBadge {
   if (!record.admitted) {
     const failing = failingChecks(record);
     const first = failing[0];
-    const reason = first ? record.checks[first.key].detail : undefined;
-    const detail = failing.map((c) => record.checks[c.key].detail).join(' ');
+    const reason = first ? first.check.detail : undefined;
+    const detail = failing.map((c) => c.check.detail).join(' ');
     return {
       tier: 'warn',
       label: first?.label ?? 'fitness concerns',

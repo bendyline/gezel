@@ -1029,6 +1029,7 @@ function EngineStatusPillForProvider({
       <button
         type="button"
         className={pillClassName}
+        data-density={density}
         onClick={() => {
           if (!open) {
             window.dispatchEvent(
@@ -1078,19 +1079,19 @@ function EngineStatusPillForProvider({
                   />
                 </span>
               ) : (
-                pillBusyLabel
+                <span className="engine-pill-phase">{pillBusyLabel}</span>
               )}
             </>
           ) : (
-            showKind && platformPillLabel
+            showKind && <span className="engine-pill-kind">{platformPillLabel}</span>
           )}
           {healthPresentation?.inline && (
-            <>
+            <span className="engine-pill-health-wrap">
               {' · '}
               <span className={`engine-pill-health engine-pill-health-${healthPresentation.tone}`}>
                 {healthPresentation.inline}
               </span>
-            </>
+            </span>
           )}
           {busy && elapsed > 0 && (
             <span className="engine-pill-elapsed">{` · ${elapsedLabel}`}</span>

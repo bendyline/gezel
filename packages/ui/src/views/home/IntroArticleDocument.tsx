@@ -1,6 +1,6 @@
 import { LinearDocView } from '@bendyline/squisq-react';
 import type { ComponentProps, MouseEventHandler } from 'react';
-import { GEZEL_LIGHT_SURFACE, gezelChatThemeForMode } from '../../components/chat-theme.js';
+import { gezelChatThemeForMode, gezelReadingSurfaceForMode } from '../../components/chat-theme.js';
 
 /** The readable Home article, shared by the daemon UI and local startup. */
 export function IntroArticleDocument({
@@ -19,7 +19,7 @@ export function IntroArticleDocument({
           doc={doc}
           className="gezel-article-view"
           theme={gezelChatThemeForMode(mode)}
-          surface={mode === 'light' ? GEZEL_LIGHT_SURFACE : undefined}
+          surface={gezelReadingSurfaceForMode(mode)}
           thinMargins
           imageDisplayMode="inline"
           showCover={false}

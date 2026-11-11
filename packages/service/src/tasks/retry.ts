@@ -26,8 +26,9 @@
  */
 
 import type { Task } from '@bendyline/gezel';
-import { createLogger, projectAllowsAmbientWork } from '@bendyline/gezel';
+import { createLogger, parseTaskRef, projectAllowsAmbientWork } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
+import { fanoutCrew, pausesForPausedCrew } from './fanout-barrier.js';
 import { type TaskManager, stepOwnerGezelId } from './manager.js';
 import type { TaskRunner } from './runner.js';
 
@@ -37,7 +38,12 @@ export interface TaskRetryDeps {
   store: Pick<Store, 'getProject' | 'getGezel'>;
   tasks: Pick<
     TaskManager,
-    'get' | 'setStatus' | 'appendNote' | 'resetStepRecoveryBudget' | 'ensureActiveStepEntered'
+    | 'get'
+    | 'setStatus'
+    | 'appendNote'
+    | 'resetStepRecoveryBudget'
+    | 'ensureActiveStepEntered'
+    | 'listChildren'
   >;
   taskRunner: Pick<TaskRunner, 'enqueueHandoff'>;
   /** Optional so tests can drive the helper without a ChatManager. */
@@ -71,12 +77,88 @@ export async function retryPausedTask(
   projectId: string,
   num: number,
 ): Promise<TaskRetryResult | null> {
+  return retryPaused(deps, projectId, num, new Set());
+}
+
+async function retryPaused(
+  deps: TaskRetryDeps,
+  projectId: string,
+  num: number,
+  seen: Set<string>,
+): Promise<TaskRetryResult | null> {
   const task = await deps.tasks.get(projectId, num);
   if (!task) return null;
   if (task.status !== 'paused') {
     return { task, dispatched: false, reason: 'not-paused' };
   }
+  seen.add(task.ref);
+  const crewRetry = await retryPausedCrew(deps, task, seen);
+  if (crewRetry) return crewRetry;
+  const result = await retryOwnStep(deps, task);
+  await resumeHostWaitingOnCrew(deps, task);
+  return result;
+}
 
+/**
+ * A spawn host paused because the crew its step waits on stopped
+ * (fanout-barrier.ts). Its own step was never the problem, so Try again
+ * restarts the paused children and the barrier keeps the host waiting for
+ * them. Returns null when the host is not in that state.
+ */
+async function retryPausedCrew(
+  deps: TaskRetryDeps,
+  host: Task,
+  seen: Set<string>,
+): Promise<TaskRetryResult | null> {
+  const step = host.craftbook.steps.find((candidate) => candidate.id === host.activeStepId);
+  if (!pausesForPausedCrew(host, step)) return null;
+  const paused = (await fanoutCrew(deps.tasks, host.ref)).paused.filter(
+    (child) => !seen.has(child.ref),
+  );
+  if (paused.length === 0) return null;
+  const results: TaskRetryResult[] = [];
+  for (const child of paused) {
+    const result = await retryPaused(deps, child.projectId, child.num, seen).catch(
+      (err: unknown) => {
+        log.warn(
+          `[tasks] retry of ${host.ref} could not restart ${child.ref}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return null;
+      },
+    );
+    if (result) results.push(result);
+  }
+  const dispatched = results.some((result) => result.dispatched);
+  log.info(
+    `[tasks] retry of ${host.ref} restarted ${results.length}/${paused.length} paused child(ren) its step "${step?.id}" waits on`,
+  );
+  const reason = dispatched ? undefined : results.find((result) => result.reason)?.reason;
+  return {
+    task: (await deps.tasks.get(host.projectId, host.num)) ?? host,
+    dispatched,
+    ...(reason ? { reason } : {}),
+  };
+}
+
+/**
+ * A paused host masks its children as paused, so a child retried while its
+ * host waits on it would be set active and never run. The child is working
+ * again, so the host resumes; the barrier holds its step until the child
+ * settles.
+ */
+async function resumeHostWaitingOnCrew(deps: TaskRetryDeps, child: Task): Promise<void> {
+  const ref = child.parentTaskRef ? parseTaskRef(child.parentTaskRef) : null;
+  if (!ref) return;
+  const host = await deps.tasks.get(ref.projectId, ref.num);
+  if (!host || host.status !== 'paused') return;
+  const step = host.craftbook.steps.find((candidate) => candidate.id === host.activeStepId);
+  if (!pausesForPausedCrew(host, step)) return;
+  await deps.tasks.setStatus(ref.projectId, ref.num, 'active');
+  log.info(`[tasks] retry of ${child.ref} resumed ${host.ref}, which was waiting on it`);
+}
+
+async function retryOwnStep(deps: TaskRetryDeps, task: Task): Promise<TaskRetryResult> {
+  const { projectId, num } = task;
   const stepId = task.activeStepId;
   if (stepId) {
     await deps.tasks.resetStepRecoveryBudget(projectId, num, stepId, {

@@ -222,7 +222,7 @@ export function NeedsInputPanel({
             size={20}
           />
           <span className="home-needs-input-author">
-            <strong>{gezel?.name ?? 'A gezel'}</strong>
+            <strong>{gezel?.name ?? 'Gezel'}</strong>
             {project && (
               <>
                 {' · '}

@@ -17,5 +17,7 @@ export function findDeepLinkArguments(argv: readonly string[]): GezelDeepLink[] 
 
 /** Same target, so a double click or a re-sent link opens one dialog. */
 export function deepLinkKey(link: GezelDeepLink): string {
-  return link.kind === 'home' ? 'home' : `${link.kind}:${link.id}`;
+  if (link.kind === 'home') return 'home';
+  if (link.kind === 'model') return `model:${link.repo}:${link.file ?? ''}`;
+  return `${link.kind}:${link.id}`;
 }

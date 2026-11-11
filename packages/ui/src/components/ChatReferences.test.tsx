@@ -1,9 +1,11 @@
 import { OFFLINE_RUNTIME_CAPABILITIES, type Task, initialPoppetjeForGezel } from '@bendyline/gezel';
 import { GezelApiError } from '@bendyline/gezel-client';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CHAT_RAIL_MIN_SPLIT_PX, ChatReferences } from './ChatReferences.js';
+import { DeliverableCard } from './DeliverableCard.js';
 
 const apiMocks = vi.hoisted(() => ({
   getTaskByRef: vi.fn(),
@@ -34,15 +36,18 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     initialMarkdown,
     fileName,
     readOnly,
+    showFormattingControls,
   }: {
     initialMarkdown: string;
     fileName?: string;
     readOnly?: boolean;
+    showFormattingControls?: boolean;
   }) => (
     <pre
       data-testid="reference-code-preview"
       data-file={fileName}
       data-readonly={String(Boolean(readOnly))}
+      data-formatting={String(showFormattingControls ?? true)}
     >
       {initialMarkdown}
     </pre>
@@ -556,8 +561,11 @@ describe('ChatReferences task picker', () => {
     await user.click(screen.getByRole('button', { name: 'Add task reference' }));
 
     const card = await screen.findByRole('region', { name: 'PowerPoint deck · in progress' });
-    expect(within(card).getByText('deck.pptx')).toBeInTheDocument();
-    expect(within(card).getByText(/In the project folder/)).toBeInTheDocument();
+    expect(within(card).getByText('deck.pptx')).toHaveAttribute(
+      'title',
+      'powerpoint/task-1/deck.pptx',
+    );
+    expect(card).not.toHaveTextContent(/In the project folder|powerpoint\/task-1/);
 
     await user.click(within(card).getByRole('button', { name: 'Open' }));
     await waitFor(() => {
@@ -774,10 +782,66 @@ describe('ChatReferences reference picker', () => {
     const source = screen.getByTestId('reference-code-preview');
     expect(source).toHaveAttribute('data-file', 'remote.html');
     expect(source).toHaveAttribute('data-readonly', 'true');
+    expect(source).toHaveAttribute('data-formatting', 'false');
     expect(source).toHaveTextContent(
       '<meta http-equiv="refresh" content="0;url=https://attacker.test">',
     );
     expect(container.querySelector('iframe')).toBeNull();
+  });
+
+  it('shows a .txt file as typed, with its line breaks and no editor keys', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    const policy = 'Catering policy\n\nMinimum order: $150.\nDeposit: 30%.';
+    apiMocks.previewReference.mockResolvedValue({ mode: 'text', content: policy });
+
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onWorkspaceReference }) => (
+          <button
+            type="button"
+            onClick={() => onWorkspaceReference('Catering/Catering policy.txt')}
+          >
+            Open policy
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open policy' }));
+    await waitFor(() => expect(container.querySelector('.plain-text-file')).not.toBeNull());
+    expect(container.querySelector('.plain-text-file')?.textContent).toBe(policy);
+    expect(screen.queryByTestId('reference-code-preview')).toBeNull();
+  });
+
+  it('keeps the file name whole in the viewer header, the full path on hover', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockRejectedValue(new Error('Preview unavailable in header test'));
+    const { container } = render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactReference }) => (
+          <button
+            type="button"
+            onClick={() => onArtifactReference('drafts/harbor-books-reminder-nov12.md')}
+          >
+            Open draft
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open draft' }));
+    const path = await waitFor(() => {
+      const found = container.querySelector('.chat-rail-viewer-path');
+      expect(found).not.toBeNull();
+      return found!;
+    });
+    expect(path).toHaveAttribute('title', 'drafts/harbor-books-reminder-nov12.md');
+    expect(path.querySelector('.chat-rail-viewer-path-folder')).toHaveTextContent(/^drafts\/$/);
+    expect(path.querySelector('.chat-rail-viewer-path-name')).toHaveTextContent(
+      /^harbor-books-reminder-nov12\.md$/,
+    );
   });
 
   it('offers native save-copy and containing-folder actions for the active file', async () => {
@@ -1117,5 +1181,188 @@ describe('ChatReferences reference picker', () => {
       kind: 'artifact',
       path: 'build/archive.bin',
     });
+  });
+});
+
+describe('ChatReferences result stage', () => {
+  const report = {
+    kind: 'artifact' as const,
+    path: 'tasks/2/report.md',
+    projectId: 'project-1',
+    modifiedAt: '2026-11-09T10:00:00.000Z',
+  };
+  const shownPath = (container: HTMLElement) =>
+    container.querySelector('.chat-rail-viewer-path')?.textContent;
+
+  /** A thread whose request finishes when "Finish the work" is pressed. */
+  function Thread() {
+    const [finished, setFinished] = useState(false);
+    return (
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactSeen, onArtifactReference }) => (
+          <>
+            <button type="button" onClick={() => onArtifactSeen('tasks/2/outline.md', 'project-1')}>
+              See outline
+            </button>
+            <button type="button" onClick={() => onArtifactSeen('tasks/2/notes.md', 'project-1')}>
+              See notes
+            </button>
+            <button
+              type="button"
+              onClick={() => onArtifactReference('tasks/2/outline.md', 'project-1')}
+            >
+              Follow the outline link
+            </button>
+            <button type="button" onClick={() => setFinished(true)}>
+              Finish the work
+            </button>
+            {finished && (
+              <DeliverableCard
+                deliverable={report}
+                projectId="project-1"
+                onOpen={(file) => onArtifactReference(file.path, 'project-1')}
+              />
+            )}
+          </>
+        )}
+      </ChatReferences>
+    );
+  }
+
+  beforeEach(() => {
+    activeWidth = 1200;
+    window.localStorage.removeItem('gezel:chat-rail-side-fraction');
+    // The stage is about which file and how wide, not about its rendering.
+    apiMocks.previewReference.mockRejectedValue(new Error('Preview unavailable in stage test'));
+  });
+
+  afterEach(() => {
+    window.localStorage.removeItem('gezel:chat-rail-side-fraction');
+  });
+
+  it('shows the file seen last when the person has chosen none', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Thread />);
+
+    await user.click(screen.getByRole('button', { name: 'See outline' }));
+    await waitFor(() => expect(shownPath(container)).toBe('tasks/2/outline.md'));
+    // It used to stay on the first file of the visit.
+    await user.click(screen.getByRole('button', { name: 'See notes' }));
+    await waitFor(() => expect(shownPath(container)).toBe('tasks/2/notes.md'));
+  });
+
+  it('puts a finished result on the stage, ahead of working files seen after it', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Thread />);
+
+    await user.click(screen.getByRole('button', { name: 'See outline' }));
+    await user.click(screen.getByRole('button', { name: 'Finish the work' }));
+    await waitFor(() => expect(shownPath(container)).toBe('tasks/2/report.md'));
+
+    await user.click(screen.getByRole('button', { name: 'See notes' }));
+    expect(shownPath(container)).toBe('tasks/2/report.md');
+    // Arriving is not opening: the pane keeps the width the person stored.
+    expect(container.querySelector('.chat-rail-body-wide')).toBeNull();
+  });
+
+  it('leaves a file the person picked by hand where it is', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Thread />);
+
+    await user.click(screen.getByRole('button', { name: 'See outline' }));
+    await user.click(screen.getByRole('button', { name: 'See notes' }));
+    await user.click(await screen.findByRole('tab', { name: 'Files' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'outline.md' }));
+    await waitFor(() => expect(shownPath(container)).toBe('tasks/2/outline.md'));
+
+    // Neither a newer sighting nor the finished result takes the pane back.
+    await user.click(screen.getByRole('button', { name: 'See notes' }));
+    await user.click(screen.getByRole('button', { name: 'Finish the work' }));
+    await screen.findByTestId('deliverable-card');
+    expect(shownPath(container)).toBe('tasks/2/outline.md');
+    // The result is still one click away in the list.
+    await user.click(screen.getByRole('tab', { name: 'Files' }));
+    expect(await screen.findByRole('menuitem', { name: 'report.md' })).toBeVisible();
+  });
+
+  it('gives a result opened from its card most of the rail, for this visit', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Thread />);
+    const rail = () => container.querySelector('.chat-rail-body') as HTMLElement;
+    const fraction = () => rail().style.getPropertyValue('--chat-rail-side-fraction');
+
+    await user.click(screen.getByRole('button', { name: 'Finish the work' }));
+    const card = await screen.findByTestId('deliverable-card');
+    await waitFor(() => expect(fraction()).toBe('0.3400'));
+    expect(screen.getByRole('button', { name: 'Wider' })).toBeInTheDocument();
+
+    await user.click(within(card).getByRole('button', { name: 'Open' }));
+    await waitFor(() => expect(rail()).toHaveClass('chat-rail-body-wide'));
+    expect(fraction()).toBe('0.6200');
+    // The conversation keeps a narrower floor so the grid can give the room.
+    expect(rail().style.getPropertyValue('--chat-rail-min-main-width')).toBe('360px');
+    expect(shownPath(container)).toBe('tasks/2/report.md');
+    // Wide is never stored.
+    expect(window.localStorage.getItem('gezel:chat-rail-side-fraction')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Narrower' }));
+    expect(rail()).not.toHaveClass('chat-rail-body-wide');
+    expect(fraction()).toBe('0.3400');
+    expect(rail().style.getPropertyValue('--chat-rail-min-main-width')).toBe('480px');
+    await user.click(screen.getByRole('button', { name: 'Wider' }));
+    expect(fraction()).toBe('0.6200');
+  });
+
+  it('keeps the stored width for a link followed inside a message', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Thread />);
+
+    await user.click(screen.getByRole('button', { name: 'Follow the outline link' }));
+    await waitFor(() => expect(shownPath(container)).toBe('tasks/2/outline.md'));
+    expect(container.querySelector('.chat-rail-body-wide')).toBeNull();
+  });
+
+  it('hands the width back to the person when they drag the grip', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<Thread />);
+    const rail = () => container.querySelector('.chat-rail-body') as HTMLElement;
+
+    await user.click(screen.getByRole('button', { name: 'Finish the work' }));
+    const card = await screen.findByTestId('deliverable-card');
+    await user.click(within(card).getByRole('button', { name: 'Open' }));
+    await waitFor(() => expect(rail()).toHaveClass('chat-rail-body-wide'));
+
+    // A click on the grip that moves nothing changes nothing.
+    const grip = screen.getByRole('separator', { name: 'Resize reference panel' });
+    fireEvent.mouseDown(grip, { clientX: 500 });
+    fireEvent.mouseUp(window);
+    expect(rail()).toHaveClass('chat-rail-body-wide');
+
+    // The drag starts from the width on screen: 60px right of a 1200px rail.
+    fireEvent.mouseDown(grip, { clientX: 500 });
+    fireEvent.mouseMove(window, { clientX: 560 });
+    fireEvent.mouseUp(window);
+    expect(rail()).not.toHaveClass('chat-rail-body-wide');
+    expect(rail().style.getPropertyValue('--chat-rail-side-fraction')).toBe('0.5700');
+    expect(window.localStorage.getItem('gezel:chat-rail-side-fraction')).toBe('0.5700');
+    expect(screen.getByRole('button', { name: 'Wider' })).toBeInTheDocument();
+  });
+
+  it('renders a document in the pane at document scale', async () => {
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockResolvedValue({
+      mode: 'text',
+      content: '# Catering proposal\n\nFor Harbor Books.',
+    });
+    const { container } = render(<Thread />);
+
+    await user.click(screen.getByRole('button', { name: 'Finish the work' }));
+    await waitFor(() =>
+      expect(container.querySelector('.chat-rail-viewer-markdown .squisq-page')).not.toBeNull(),
+    );
+    // Squisq's page register set this title at 44px in a pane under 400px.
+    expect(container.querySelector('.chat-rail-viewer-markdown .squisq-page')).toHaveClass(
+      'squisq-page--document',
+    );
   });
 });

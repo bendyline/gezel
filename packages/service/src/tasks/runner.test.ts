@@ -1727,6 +1727,56 @@ describe('TaskRunner — startup rehydration', () => {
     expect(runner.workSnapshot().queuedTaskRefs).toEqual(['p1/2']);
   });
 
+  it('does not dispatch a fanout host whose remaining child paused for help', async () => {
+    await store.createProject({ name: 'p1' });
+    const bea = await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    const childBook = fixtureCraftbook([
+      {
+        id: 'review',
+        name: 'review',
+        assignee: { kind: 'gezel', gezelId: bea.id },
+        createdAt: now,
+      },
+    ]);
+    const base = {
+      projectId: 'p1',
+      assignee: { kind: 'gezel' as const, gezelId: bea.id },
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' as const },
+    };
+    await store.writeTask({
+      ...base,
+      num: 1,
+      ref: 'p1/1',
+      title: 'fanout host',
+      status: 'active',
+      craftbook: fixtureCraftbook([
+        { id: 'collect', name: 'collect', assignee: base.assignee, createdAt: now },
+      ]),
+      spawnsCraftbook: childBook,
+      activeStepId: 'collect',
+    });
+    await store.writeTask({
+      ...base,
+      num: 2,
+      ref: 'p1/2',
+      title: 'paused child',
+      status: 'paused',
+      craftbook: childBook,
+      activeStepId: 'review',
+      parentTaskRef: 'p1/1',
+    });
+
+    const dispatcher = new FakeDispatcher(new Map([[bea.id, 'copilot']]));
+    const runner = new TaskRunner({ store, dispatcher });
+    const result = await runner.rehydrateFromStore({ projectId: 'p1' });
+
+    expect(result.taskRefs).toEqual([]);
+    expect(runner.workSnapshot().queuedTaskRefs).toEqual([]);
+  });
+
   it('can reconcile only night-shift work when a shift opens', async () => {
     await store.createProject({ name: 'p1' });
     const bea = await store.createGezel({ name: 'Bea' });

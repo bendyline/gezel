@@ -5,6 +5,7 @@ import {
   MAX_WRITE_REFUSALS,
   blocksWrite,
   personGivenText,
+  queriedTables,
   removeCitationMarkers,
 } from './evidence-ledger.js';
 
@@ -668,5 +669,45 @@ describe('removeCitationMarkers', () => {
         '- Born 1732 [1].\n  - Married 1759 [1, 2].\nSee [the article](https://x) [3].',
       ),
     ).toBe('- Born 1732.\n  - Married 1759.\nSee [the article](https://x).');
+  });
+});
+
+// The weekday totals in a bakery's sales answer were wrong and passed the
+// check, while the one number the engine would have calculated could not:
+// a query's result was not evidence at all (2026-11-09).
+describe('a calculated number', () => {
+  const sql =
+    'SELECT dayname(sold_on) AS day, sum(total) AS revenue FROM sales_october_2026 GROUP BY 1 ORDER BY 2 DESC';
+  const result =
+    '2 row(s).\n\n| day | revenue |\n| --- | --- |\n| Saturday | 15279.50 |\n| Sunday | 12330.50 |';
+
+  it('is checked against the query that calculated it, which the reply keeps', () => {
+    const ledger = new EvidenceLedger();
+    const label = ledger.labelToolResult('query_table', { sql }, result);
+    expect(label).toContain('[1]');
+    expect(label).toContain('Calculated from sales_october_2026');
+    const g = ledger.grounding('Saturday was the busiest day, with 15,279.50 in sales [1].');
+    expect(g?.problems).toEqual([]);
+    expect(g?.evidence[0]).toMatchObject({
+      tool: 'query_table',
+      title: 'Calculated from sales_october_2026',
+      query: sql,
+    });
+  });
+
+  it('still flags a number the query did not produce', () => {
+    const ledger = new EvidenceLedger();
+    ledger.labelToolResult('query_table', { sql }, result);
+    const g = ledger.grounding('Sunday brought in 4,182.50 [1].');
+    expect(g?.problems.map((p) => p.missing)).toEqual([['4182.50']]);
+  });
+
+  it('names the tables a query reads', () => {
+    expect(queriedTables(sql)).toEqual(['sales_october_2026']);
+    expect(queriedTables('select * from "Sales 2026" s join days d on s.d = d.d')).toEqual([
+      'Sales 2026',
+      'days',
+    ]);
+    expect(queriedTables('SELECT 1')).toEqual([]);
   });
 });

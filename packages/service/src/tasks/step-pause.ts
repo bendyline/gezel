@@ -1,7 +1,23 @@
 import { createLogger } from '@bendyline/gezel';
+import { isEngineRefusal } from '../chat/handoff-retry-delay.js';
 import type { TaskManager } from './manager.js';
 
 const log = createLogger('tasks');
+
+/**
+ * The task note a failed handoff leaves, which the pause card's "Open the
+ * task" leads the person to. An engine that refused the turn never ran the
+ * step, so the note says that in plain words instead of quoting the pool's
+ * message: "Not enough graphics memory to load qwen3.5-9b-q4 (about 6.3 GB
+ * on the card)…" sat on a bakery owner's task (default/2, 2026-11-09).
+ * A turn that ran and failed keeps its detail for whoever retries it.
+ */
+export function failedHandoffNote(stepId: string, detail: string): string {
+  if (isEngineRefusal(detail)) {
+    return `# Paused: this step couldn't start\n\nStep \`${stepId}\` never started. The computer didn't have room to load its model just then, usually because another model was still busy or unloading. Nothing was lost.\n\nTry again once other work has finished.`;
+  }
+  return `# Handoff failed — paused for help\n\nThe automatic handoff for step \`${stepId}\` failed after its bounded retries: ${detail}\n\nRetry the step, reassign it, or set the task active again.`;
+}
 
 export interface TaskStepRef {
   projectId: string;
@@ -34,7 +50,7 @@ export async function pauseTaskAfterFailedHandoff(
   if (!current || current.status !== 'active' || current.activeStepId !== stepId) return;
   await tasks
     .appendNote(projectId, num, {
-      text: `# Handoff failed — paused for help\n\nThe automatic handoff for step \`${stepId}\` failed after its bounded retries: ${detail}\n\nRetry the step, reassign it, or set the task active again.`,
+      text: failedHandoffNote(stepId, detail),
       author: { kind: 'user' },
       stepId,
     })

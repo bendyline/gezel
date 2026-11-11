@@ -1,17 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { pickChatPlaceholder, taskLaunchPlaceholder } from './chat-placeholder.js';
 
 describe('pickChatPlaceholder', () => {
-  it('substitutes the gezel name for meester variants', () => {
-    // Force the "role pool" branch (skip the quirky 15%).
-    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.2);
-    const text = pickChatPlaceholder({ role: 'meester', gezelName: 'Florian' });
-    expect(text).toContain('Florian');
-    spy.mockRestore();
+  it('gives the front door one sentence naming the meester', () => {
+    expect(pickChatPlaceholder({ role: 'meester', gezelName: 'Florian' })).toBe(
+      'Tell Florian what you want to get done, or ask how things are going.',
+    );
   });
 
-  it('substitutes both gezel and project for voorman variants', () => {
-    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.2);
+  it('substitutes both the crew lead and the project', () => {
     const text = pickChatPlaceholder({
       role: 'voorman',
       gezelName: 'Leo',
@@ -19,80 +16,40 @@ describe('pickChatPlaceholder', () => {
     });
     expect(text).toContain('Leo');
     expect(text).toContain("Eliza's Pet Shop");
-    spy.mockRestore();
   });
 
-  it('falls back to "this project" for voorman when no project is supplied', () => {
-    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.2);
-    const text = pickChatPlaceholder({ role: 'voorman', gezelName: 'Leo' });
-    expect(text).toContain('this project');
-    spy.mockRestore();
+  it('falls back to "this project" for a crew lead when no project is supplied', () => {
+    expect(pickChatPlaceholder({ role: 'voorman', gezelName: 'Leo' })).toContain('this project');
   });
 
-  it('uses the worker pool for "other" role', () => {
-    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.2);
+  it('gives any other crew member its own sentence', () => {
     const text = pickChatPlaceholder({ role: 'other', gezelName: 'Ambrose' });
     expect(text).toContain('Ambrose');
-    expect(text).not.toContain('project ideas'); // meester copy stays put
-    spy.mockRestore();
+    expect(text).not.toBe(pickChatPlaceholder({ role: 'meester', gezelName: 'Ambrose' }));
   });
 
-  it('occasionally serves the quirky universal pool', () => {
-    // Force the "quirky" branch (random < 0.15) and a specific pick.
-    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.01);
-    const text = pickChatPlaceholder({ role: 'other', gezelName: 'Tess' });
-    expect(text).toContain('Tess');
-    spy.mockRestore();
-  });
+  // One Home visit showed five different hints: each time the recipient's
+  // details loaded the pool rolled again. A place keeps its sentence.
+  it.each(['meester', 'voorman', 'other'] as const)(
+    'says the same thing every time for %s',
+    (role) => {
+      const args = { role, gezelName: 'Malika', projectName: 'Bakery' };
+      const first = pickChatPlaceholder(args);
+      for (let i = 0; i < 20; i += 1) expect(pickChatPlaceholder(args)).toBe(first);
+    },
+  );
 
-  it.each([
-    ['male', 0.6, 'need him'],
-    ['female', 0.6, 'need her'],
-    ['non-binary', 0.6, 'need them'],
-    [undefined, 0.6, 'need them'],
-    ['female', 0.3, 'hand her'],
-    ['female', 0.9, 'she has shipped'],
-  ] as const)('uses %s pronouns in worker copy', (gezelGender, poolPick, expected) => {
-    const spy = vi.spyOn(Math, 'random').mockReturnValueOnce(0.2).mockReturnValueOnce(poolPick);
-    const text = pickChatPlaceholder({
-      role: 'other',
-      gezelName: 'Lyudmyla',
-      gezelGender,
-    });
-    expect(text).toContain(expected);
-    spy.mockRestore();
-  });
+  // The same crew member read as "her" in one hint and "them" in the next,
+  // depending on whether her details had loaded. Hints repeat the name.
+  it.each(['meester', 'voorman', 'other'] as const)(
+    'names %s rather than guessing a pronoun',
+    (role) => {
+      const text = pickChatPlaceholder({ role, gezelName: 'Malika', projectName: 'Bakery' });
+      expect(text).not.toMatch(/\b(?:she|her|hers|he|him|his|they|them|their)\b/i);
+    },
+  );
 
-  it('uses assigned possessive and subject pronouns in voorman copy', () => {
-    const possessiveSpy = vi
-      .spyOn(Math, 'random')
-      .mockReturnValueOnce(0.2)
-      .mockReturnValueOnce(0.5);
-    expect(
-      pickChatPlaceholder({
-        role: 'voorman',
-        gezelName: 'Lyudmyla',
-        gezelGender: 'female',
-        projectName: 'Launch',
-      }),
-    ).toContain('approve her latest move');
-    possessiveSpy.mockRestore();
-
-    const subjectSpy = vi.spyOn(Math, 'random').mockReturnValueOnce(0.2).mockReturnValueOnce(0.7);
-    expect(
-      pickChatPlaceholder({
-        role: 'voorman',
-        gezelName: 'Owen',
-        gezelGender: 'male',
-        projectName: 'Launch',
-      }),
-    ).toContain('he will either know');
-    subjectSpy.mockRestore();
-  });
-
-  it('gives image generators directive copy and skips the quirky pool', () => {
-    // Even with random in the quirky band, a fixed-function tool wins.
-    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.01);
+  it('gives image generators directive copy', () => {
     const text = pickChatPlaceholder({
       role: 'other',
       gezelName: 'Udom',
@@ -100,29 +57,35 @@ describe('pickChatPlaceholder', () => {
     });
     expect(text).toContain('Udom');
     expect(text.toLowerCase()).toContain('image');
-    // No "ask them anything"-style conversational copy.
-    expect(text).not.toContain('Fire away');
-    spy.mockRestore();
+    expect(text).not.toContain('a question');
   });
 
   it('tells an image editor to attach a picture and say what to change', () => {
-    for (const r of [0.01, 0.99]) {
-      const spy = vi.spyOn(Math, 'random').mockReturnValue(r);
-      const text = pickChatPlaceholder({
-        role: 'other',
-        gezelName: 'Rembrandt',
-        fixedFunctionTool: 'generate_image',
-        fixedFunctionEdits: true,
-      });
-      expect(text).toContain('Rembrandt');
-      expect(text).toMatch(/attach/i);
-      expect(text).toMatch(/change/i);
-      spy.mockRestore();
-    }
+    const text = pickChatPlaceholder({
+      role: 'other',
+      gezelName: 'Rembrandt',
+      fixedFunctionTool: 'generate_image',
+      fixedFunctionEdits: true,
+    });
+    expect(text).toContain('Rembrandt');
+    expect(text).toMatch(/attach/i);
+    expect(text).toMatch(/change/i);
+  });
+
+  it('tells a video gezel that only animates to attach a picture and say how it moves', () => {
+    const text = pickChatPlaceholder({
+      role: 'other',
+      gezelName: 'Vesna',
+      fixedFunctionTool: 'generate_video',
+      fixedFunctionEdits: true,
+    });
+    expect(text).toContain('Vesna');
+    expect(text).toMatch(/attach/i);
+    expect(text).toMatch(/move/i);
+    expect(text).not.toMatch(/change/i);
   });
 
   it('gives video generators video-specific directive copy', () => {
-    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.2);
     const text = pickChatPlaceholder({
       role: 'other',
       gezelName: 'Vesna',
@@ -130,11 +93,9 @@ describe('pickChatPlaceholder', () => {
     });
     expect(text).toContain('Vesna');
     expect(text.toLowerCase()).toContain('video');
-    spy.mockRestore();
   });
 
   it('falls back to generic generator copy for an unknown fixed-function tool', () => {
-    const spy = vi.spyOn(Math, 'random').mockReturnValue(0.2);
     const text = pickChatPlaceholder({
       role: 'other',
       gezelName: 'Pieter',
@@ -142,94 +103,37 @@ describe('pickChatPlaceholder', () => {
     });
     expect(text).toContain('Pieter');
     expect(text).toContain('one tool');
-    spy.mockRestore();
   });
 
-  // Substituted values are not reliably capitalized: `gezelName` falls back to
-  // the lowercase "your meester" before the real name loads, and every pronoun
-  // form is lowercase. Templates that drop one straight after a sentence break
-  // used to render "…idea? your meester will help…" on the front door.
+  // `gezelName` falls back to the lowercase "your meester" before the real
+  // name loads; a hint that opens on the name must still open in capitals.
   describe('sentence casing', () => {
-    /** Every sentence opener in the string, ignoring known abbreviations. */
-    function sentenceOpeners(text: string): string[] {
-      return [
-        text.slice(0, 1),
-        ...[...text.matchAll(/(?:^|([^\s]*[.?!]["')\]]?)\s+)(\S)/gu)]
-          .filter(
-            (m) => !m[1] || !/\b(?:e\.g|i\.e|etc|vs|approx|no|fig|Mr|Mrs|Ms|Dr|St)\.$/i.test(m[1]),
-          )
-          .map((m) => m[2] ?? ''),
-      ].filter(Boolean);
-    }
-
-    /** Walk every variant of a pool by pinning the index-picking random. */
-    function eachVariant(pick: (poolPick: number) => string, poolSize = 8): string[] {
-      const out: string[] = [];
-      for (let i = 0; i < poolSize; i += 1) out.push(pick((i + 0.5) / poolSize));
-      return out;
-    }
-
-    // The exact reported defect.
-    it('capitalizes a lowercase name that lands after a question mark', () => {
-      const spy = vi.spyOn(Math, 'random').mockReturnValueOnce(0.2).mockReturnValueOnce(0.65);
-      const text = pickChatPlaceholder({ role: 'meester', gezelName: 'your meester' });
-      spy.mockRestore();
-      expect(text).toContain('Got a half-baked idea? Your meester will help');
-      expect(text).not.toContain('? your meester');
+    it.each(['meester', 'voorman', 'other'] as const)('never opens lowercase for %s', (role) => {
+      const text = pickChatPlaceholder({
+        role,
+        gezelName: 'your meester',
+        projectName: 'the pet shop',
+      });
+      expect(text.slice(0, 1)).toBe(text.slice(0, 1).toUpperCase());
     });
 
-    it.each(['meester', 'voorman', 'other'] as const)(
-      'never opens a sentence lowercase for %s, whatever the pool serves',
-      (role) => {
-        const texts = eachVariant((poolPick) => {
-          const spy = vi
-            .spyOn(Math, 'random')
-            .mockReturnValueOnce(0.2)
-            .mockReturnValueOnce(poolPick);
-          const t = pickChatPlaceholder({
-            role,
-            gezelName: 'your meester',
-            gezelGender: 'female',
-            projectName: 'the pet shop',
-          });
-          spy.mockRestore();
-          return t;
-        });
-        for (const text of texts) {
-          for (const opener of sentenceOpeners(text)) {
-            expect(opener, `lowercase sentence opener in: ${text}`).toBe(opener.toUpperCase());
-          }
-        }
-      },
-    );
-
-    it('leaves the quirky pool sentence-cased too', () => {
-      const texts = eachVariant((poolPick) => {
-        const spy = vi
-          .spyOn(Math, 'random')
-          .mockReturnValueOnce(0.01)
-          .mockReturnValueOnce(poolPick);
-        const t = pickChatPlaceholder({ role: 'other', gezelName: 'your meester' });
-        spy.mockRestore();
-        return t;
+    it('capitalizes a lowercase name that opens a generator hint', () => {
+      const text = pickChatPlaceholder({
+        role: 'other',
+        gezelName: 'your meester',
+        fixedFunctionTool: 'web_search',
       });
-      for (const text of texts) {
-        for (const opener of sentenceOpeners(text)) {
-          expect(opener, `lowercase sentence opener in: ${text}`).toBe(opener.toUpperCase());
-        }
-      }
+      expect(text.startsWith('Your meester forwards')).toBe(true);
     });
 
     // The generator copy contains `e.g. "log cabin…"`. A naive
     // capitalize-after-every-period would rewrite the quoted example.
     it('does not treat "e.g." as the end of a sentence', () => {
-      const spy = vi.spyOn(Math, 'random').mockReturnValue(0.2);
       const text = pickChatPlaceholder({
         role: 'other',
         gezelName: 'Vesna',
         fixedFunctionTool: 'generate_image',
       });
-      spy.mockRestore();
       expect(text).toContain('e.g. "log cabin under a rainbow."');
       expect(text).not.toContain('e.g. "Log cabin');
     });

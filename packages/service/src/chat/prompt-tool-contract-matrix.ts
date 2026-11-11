@@ -26,7 +26,7 @@ import {
   type ResolvedSecurityPolicy,
   type Task,
   renderCraftbookFocusBlock,
-  resolveGeneralistKickoff,
+  resolveNewProjectMode,
   resolveRoleId,
   resolveSecurityPolicy,
   roleForMatching,
@@ -645,7 +645,8 @@ export async function buildPromptContractMatrix(): Promise<PromptContractMatrixR
               about,
               role: roleManifest.role,
               providerName: provider,
-              generalistKickoff: resolveGeneralistKickoff(undefined, provider, tier),
+              generalistKickoff:
+                resolveNewProjectMode({ providerName: provider, tier }) === 'solo' ? 'on' : 'off',
               gezelId: session.gezelId,
               project: PROJECT,
               workspaceFiles: scenario.workspaceFiles,

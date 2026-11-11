@@ -110,8 +110,12 @@ holds one session's evidence:
   session's `grounding` hooks, after the output cap, so the ledger holds
   exactly what the model saw. The batch readers (`read_files`,
   `read_artifacts`) count like their single-file twins, numbered once per
-  file section. A third-party server's tools count when their names read as
-  lookups (`search_*`, `read_*`, `get_*`, `fetch_*`, … and nothing that
+  file section. `query_table` and `describe_table` count too: a number the
+  engine calculated is checked against the query's result, and the reply's
+  source reads "Calculated from <table>" with the SQL beside what it
+  returned (`GroundingEvidence.query`). Left out, a correct sum the engine
+  produced read as "not found in any source". A third-party server's tools
+  count when their names read as lookups (`search_*`, `read_*`, `get_*`, `fetch_*`, … and nothing that
   writes), through `isEvidenceTool`; gezel's own tools count only from the
   list, so a model cannot ground a claim by reading back its own task notes.
 - **Refusal remedies follow the source.** When the session's evidence so far
@@ -225,7 +229,9 @@ do.
 the turn added (with a 600-character excerpt each), the status counts, and up
 to 20 problem sentences, worst first. In the chat the markers become links
 and a Sources row lists the evidence and the unsourced statements (see
-[ux.md](ux.md)).
+[ux.md](ux.md)). The record keeps the session's numbers, which the ledger
+rebuilds from after a restart; the chat shows a reply's sources counted and
+numbered from what that reply cites, so its first source reads [1].
 
 **Apps run the same check.** The citation checker is published on its own as
 `@bendyline/gezel/grounding`: model-free, dependency-free and small enough to

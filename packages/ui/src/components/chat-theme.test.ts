@@ -15,9 +15,9 @@ describe('gezelChatTheme', () => {
     expect(gezelChatTheme.persistentLayers).toBeUndefined();
   });
 
-  it('uses the warm mushroom-beige reading surface', () => {
-    expect(GEZEL_LIGHT_SURFACE.background).toBe('#f1e9e1');
-    expect(GEZEL_LIGHT_SURFACE.backgroundLight).toBe('#e8dfd7');
+  it('uses the quiet cream reading surface', () => {
+    expect(GEZEL_LIGHT_SURFACE.background).toBe('#eeeae1');
+    expect(GEZEL_LIGHT_SURFACE.backgroundLight).toBe('#e5e0d6');
   });
 });
 

@@ -209,6 +209,8 @@ try {
 
   await page.goto(url);
   const nav = await navigation();
+  // Tasks sits in the More group, which starts closed.
+  await nav.getByRole('button', { name: 'More', exact: true }).click();
   for (const name of ['Projects', 'Documents', 'Crew', 'Tasks', 'Settings']) {
     assert.equal(await nav.getByRole('button', { name, exact: true }).isEnabled(), true);
   }
@@ -280,7 +282,7 @@ try {
   await page.getByText('Saved', { exact: true }).waitFor();
   await checkpoint('phone-document');
 
-  await (await navigation()).getByRole('button', { name: 'New gezel', exact: true }).click();
+  await (await navigation()).getByRole('button', { name: 'New crew member', exact: true }).click();
   await page.getByRole('textbox', { name: 'Name', exact: true }).fill('Ada Field Guide');
   await page.getByRole('textbox', { name: 'Role', exact: true }).fill('Nature observer');
   await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).click();
@@ -290,7 +292,7 @@ try {
 
   await openProject();
   await page.getByRole('tab', { name: 'Settings', exact: true }).click();
-  await page.getByRole('button', { name: 'Add Gezel', exact: true }).click();
+  await page.getByRole('button', { name: 'Add crew member', exact: true }).click();
   await page
     .getByRole('dialog')
     .getByRole('button', { name: /Ada Field Guide/ })
@@ -483,7 +485,8 @@ try {
     .waitFor();
   await checkpoint('phone-restored-project');
   await page.setViewportSize({ width: 1024, height: 768 });
-  await page.getByRole('button', { name: 'Collapse sidebar', exact: true }).waitFor();
+  // Below 1200px the desktop rail folds to icons until the person opens it.
+  await page.getByRole('button', { name: 'Expand sidebar', exact: true }).click();
   await openProject();
   await page.getByRole('tab', { name: 'Chat', exact: true }).first().click();
   await page.locator('[contenteditable="true"]').getByText('Review', { exact: false }).waitFor();

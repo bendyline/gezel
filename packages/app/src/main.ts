@@ -29,6 +29,7 @@ import {
   type ReferenceFileLocationRequest,
   ReferenceFileLocationRequestSchema,
   installProcessErrorHandlers,
+  saveCopyFileName,
   writeProcessOutput,
 } from '@bendyline/gezel';
 import {
@@ -117,9 +118,20 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const loopbackCertificatePin = createLoopbackCertificatePin();
 /** The renderer's `--titlebar`; the native window-control overlay must match it exactly. */
 const BRAND_SAGE = '#5c6a4a';
+/**
+ * The renderer's `--titlebar` in dark mode (`--gezel-sage-night`). The brand
+ * sage over a dark canvas was the brightest thing on the screen.
+ */
+const BRAND_SAGE_NIGHT = '#38412d';
 
 let connection: Connection | null = null;
 let mainWindow: Electron.BrowserWindow | null = null;
+/**
+ * Whether the renderer has said which theme the person chose. Until then the
+ * window keeps the day sage the splash is painted in: the OS preference alone
+ * would flash the night bar at someone who pinned gezel to Light.
+ */
+let titlebarThemeKnown = false;
 /** Permission snapshot carried by each capability URL's last HTML response. */
 const previewDocumentExternalServices = new Map<string, boolean>();
 const MAX_TRACKED_PREVIEW_DOCUMENTS = 512;
@@ -745,6 +757,9 @@ async function createWindow(): Promise<void> {
   // without ever becoming key or jumping to the foreground.
   if (e2e) mainWindow.showInactive();
 
+  // A window opened after the theme is known (macOS reopen) starts on it.
+  applyTitlebarTheme();
+
   // Electron supplies spellcheck results to the main process but does not
   // render a context menu for them. Install one at the window boundary so
   // every editable surface (including Squisq's Tiptap editor) gets native
@@ -1049,7 +1064,7 @@ async function showStartupError(
       title: 'Gezel hit a problem',
       message: 'Gezel hit an unexpected problem and needs to close.',
       detail:
-        'Nothing has been lost — your gezellen, projects, and chats are still on disk. ' +
+        'Nothing has been lost — your crew, projects, and chats are still on disk. ' +
         'No report is sent automatically. “Report on GitHub…” only opens an editable issue in your browser.',
       buttons: ['Close Gezel', 'Report on GitHub…'],
       defaultId: 0,
@@ -1092,7 +1107,7 @@ async function showStartupError(
   .detail { font-size: 12px; opacity: 0.7; word-break: break-word; }
 </style></head><body><main>
   <h1>Gezel couldn't start its background service</h1>
-  <p>Nothing has been lost — your gezellen, projects, and chats are still on disk.</p>
+  <p>Nothing has been lost — your crew, projects, and chats are still on disk.</p>
   <p>Open Gezel again. If it keeps happening, restart your computer — a
      background service from a previous version may still be holding on.</p>
   <div class="detail">${escapeHtml(err.message)}</div>
@@ -1482,9 +1497,14 @@ ipcMain.handle(
     if (!apiClient) return { ok: false, error: 'service is unavailable' };
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
     const filename = basename(request.path.replaceAll('\\', '/')) || 'reference';
+    // A finished file is offered under its work's title. The renderer's name
+    // is made safe again here and always keeps the file's own extension.
+    const suggested = (value as { suggestedName?: unknown }).suggestedName;
     const picked = await dialog.showSaveDialog(win as Electron.BrowserWindow, {
       title: 'Save copy as',
-      defaultPath: filename,
+      defaultPath:
+        (typeof suggested === 'string' ? saveCopyFileName(suggested, request.path) : undefined) ??
+        filename,
     });
     if (picked.canceled || !picked.filePath) return { ok: true };
     const partial = `${picked.filePath}.partial-${randomUUID()}`;
@@ -2053,8 +2073,31 @@ registerAmbientDisplayIpc(ipcMain, () => apiClient);
 ipcMain.on('gezel:set-native-theme', (_event, pref?: string) => {
   if (pref === 'system' || pref === 'light' || pref === 'dark') {
     nativeTheme.themeSource = pref;
+    titlebarThemeKnown = true;
+    applyTitlebarTheme();
   }
 });
+
+/**
+ * Repaint what the main process draws outside the renderer, the window
+ * background and the Windows/Linux window-control overlay, in the title bar
+ * color of the theme in effect. The renderer's `--titlebar` makes the same
+ * switch in CSS; a mismatch shows as a seam beside minimize/maximize/close.
+ */
+function applyTitlebarTheme(): void {
+  if (!titlebarThemeKnown || !mainWindow || mainWindow.isDestroyed()) return;
+  const color = nativeTheme.shouldUseDarkColors ? BRAND_SAGE_NIGHT : BRAND_SAGE;
+  mainWindow.setBackgroundColor(color);
+  if (process.platform === 'darwin') return;
+  try {
+    mainWindow.setTitleBarOverlay({ color, symbolColor: '#f3ede0', height: 39 });
+  } catch {
+    // A window without an overlay (a platform or mode that draws none).
+  }
+}
+
+// The OS theme changing under "Follow system" arrives here too.
+nativeTheme.on('updated', applyTitlebarTheme);
 
 // Tray sync: the renderer pushes the latest config after any change (it
 // already dispatches a `gezel:config-updated` window event; the preload
@@ -2800,7 +2843,7 @@ function installMenu(): void {
 
   const viewTabs: Array<{ label: string; view: string; key: string }> = [
     { label: 'Home', view: 'home', key: '1' },
-    { label: 'Gezellen', view: 'gezels', key: '2' },
+    { label: 'Crew', view: 'gezels', key: '2' },
     { label: 'Chat', view: 'chat', key: '3' },
     { label: 'Projects', view: 'projects', key: '4' },
     { label: 'Documents', view: 'documents', key: '5' },
@@ -2874,6 +2917,22 @@ function installMenu(): void {
     {
       label: 'View',
       submenu: [
+        // The page owns these keys (and the mouse's side buttons), so a key
+        // typed into a field stays with the field. The accelerators here are
+        // shown, not registered.
+        {
+          label: 'Back',
+          accelerator: isMac ? 'Cmd+[' : 'Alt+Left',
+          registerAccelerator: false,
+          click: () => navigateTo('history:back'),
+        },
+        {
+          label: 'Forward',
+          accelerator: isMac ? 'Cmd+]' : 'Alt+Right',
+          registerAccelerator: false,
+          click: () => navigateTo('history:forward'),
+        },
+        { type: 'separator' },
         ...viewTabs.map(
           (t): Electron.MenuItemConstructorOptions => ({
             label: t.label,

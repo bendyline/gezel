@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 import { GezelClient } from '../../client/src/client.js';
 import { craftbookTemplateManifestFromRuntime } from '../src/craftbook-doc.js';
@@ -464,6 +465,91 @@ describe('catalog project types on the portable host', () => {
       { headers: { Authorization: 'Bearer secret' } },
     );
     expect(outside.status).toBe(400);
+  });
+});
+
+describe('a phone catching a project up to the bundled version of its type', () => {
+  const header = (version: string) => `// @gezel-project-type: checkers@${version}\n`;
+  const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+
+  function checkers130(version = '1.3.0'): PortableProjectType {
+    const type = checkersType({
+      version,
+      availableVersions: [version],
+      workspaceSeed: ['game.json', 'stats.json'],
+      scripts: { 'game-store': `${GAME_STORE}// ${version}\n` },
+    });
+    type.files['stats.json'] = '{"wins":0}\n';
+    type.earlierVersions = {
+      '1.2.0': {
+        scripts: { 'game-store': sha(`${header('1.2.0')}${GAME_STORE}`) },
+        seeds: ['game.json'],
+        params: ['personality'],
+      },
+    };
+    return type;
+  }
+
+  async function projectAt120() {
+    const env = await setup();
+    const { project } = await env.client.createTypedProject({
+      name: 'Game',
+      projectType: { typeId: 'checkers' },
+    });
+    return { ...env, project };
+  }
+
+  it('moves scripts and the stamp, writes new seeds, and keeps the board', async () => {
+    const { store, files, project } = await projectAt120();
+    await files.write(
+      `projects/${project.id}/workspace/game.json`,
+      new TextEncoder().encode('{"turn":"gezel"}\n'),
+    );
+    const updated = await store.refreshTypedProject(checkers130(), project.id);
+    expect(updated?.projectType).toMatchObject({
+      version: '1.3.0',
+      params: { personality: 'peppy' },
+    });
+    const script = await store.readScriptSource(
+      { scope: 'project', projectId: project.id },
+      'game-store',
+    );
+    expect(projectTypeScriptProvenance(script!.source)).toBe('checkers@1.3.0');
+    expect(await store.readFile('workspace', project.id, 'stats.json')).toBe('{"wins":0}\n');
+    expect(await store.readFile('workspace', project.id, 'game.json')).toBe('{"turn":"gezel"}\n');
+    expect(await store.refreshTypedProject(checkers130(), project.id)).toBeNull();
+  });
+
+  it('leaves a project whose script was edited where it is', async () => {
+    const { store, files, project } = await projectAt120();
+    await files.write(
+      `projects/${project.id}/scripts/game-store.ts`,
+      new TextEncoder().encode(`${header('1.2.0')}${GAME_STORE}// mine\n`),
+    );
+    expect(await store.refreshTypedProject(checkers130(), project.id)).toBeNull();
+    expect((await store.getProject(project.id))?.projectType?.version).toBe('1.2.0');
+  });
+
+  it('never crosses a major version', async () => {
+    const { store, project } = await projectAt120();
+    const two = checkers130('2.0.0');
+    two.earlierVersions = {};
+    expect(await store.refreshTypedProject(two, project.id)).toBeNull();
+  });
+
+  it('catches up when its page opens', async () => {
+    const env = await projectAt120();
+    const later = new PortableProductService(env.store, {} as PortableInference, 'secret', {
+      projectTypes: async () => [checkers130()],
+    });
+    later.setContent({ templates: [template], craftbooks: [] });
+    await later.initialize();
+    const response = await later.fetch(
+      `https://gezel.local/api/projects/${env.project.id}/type/bootstrap?path=board/index.html`,
+      { headers: { Authorization: 'Bearer secret' } },
+    );
+    expect(response.status).toBe(200);
+    expect((await env.store.getProject(env.project.id))?.projectType?.version).toBe('1.3.0');
   });
 });
 

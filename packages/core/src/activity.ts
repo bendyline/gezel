@@ -103,7 +103,7 @@ export function resolveActivity(input: {
           item.detail =
             wait.reason === 'engagement-off'
               ? 'AI work is off. Change Activity in Settings to let this start.'
-              : 'Automatic work is paused. Gezellen still reply when you ask them.';
+              : 'Automatic work is paused. Gezel still replies when you ask.';
           item.heldByActivity = true;
           break;
         case 'night-shift':
@@ -120,7 +120,7 @@ export function resolveActivity(input: {
           item.detail = 'Waiting for other work to finish using the model.';
           break;
         default:
-          item.detail = 'Queued. Waiting for its gezel to be free.';
+          item.detail = 'Queued. Waiting for earlier work to finish.';
       }
     }
     items.set(item.id, item);
@@ -309,15 +309,28 @@ export function resolveActivity(input: {
       since: existing?.since ?? q.createdAt,
     });
   }
-  if (input.requests?.length) mergeRequests(items, input.requests);
+  const rowed = input.requests?.length ? mergeRequests(items, input.requests) : new Set<string>();
   const live = input.requests?.filter((r) => r.state !== 'ready' || r.trailing);
+  const earlier = (input.requests ?? [])
+    .filter((r) => r.kind === 'work' && r.state === 'ready' && !r.trailing && !rowed.has(r.key))
+    .sort((a, b) => finishedAt(b).localeCompare(finishedAt(a)))
+    .slice(0, ACTIVITY_EARLIER_LIMIT);
   return {
     items: [...items.values()],
     questions,
     queues,
     at: queues.at,
     ...(live?.length ? { requests: live } : {}),
+    ...(earlier.length ? { earlier } : {}),
   };
+}
+
+/** How many finished requests the panel keeps on record once their result is put away. */
+export const ACTIVITY_EARLIER_LIMIT = 12;
+
+/** When a finished request's result was last written, else when it was asked for. */
+function finishedAt(track: RequestTrack): string {
+  return track.deliverable?.modifiedAt ?? track.at;
 }
 
 const REQUEST_SECTIONS: Readonly<Record<RequestTrack['state'], ActivityItem['section']>> = {
@@ -339,9 +352,13 @@ function requestDetail(track: RequestTrack): string {
  * Fold every row that belongs to a request into one row for it: a task and
  * its shards, the step sessions running them, their questions, and the
  * finished-work receipt. A finished request adds a row only when it absorbed
- * one, so old work never floods Activity.
+ * one, so old work never floods Activity. Returns the requests given a row.
  */
-function mergeRequests(items: Map<string, ActivityItem>, requests: readonly RequestTrack[]): void {
+function mergeRequests(
+  items: Map<string, ActivityItem>,
+  requests: readonly RequestTrack[],
+): Set<string> {
+  const rowed = new Set<string>();
   for (const track of requests) {
     const refs = new Set(track.taskRefs);
     const sessions = new Set([...track.liveSessionIds]);
@@ -360,6 +377,7 @@ function mergeRequests(items: Map<string, ActivityItem>, requests: readonly Requ
       .map((item) => item.since)
       .filter((at): at is string => Boolean(at))
       .sort()[0];
+    rowed.add(track.key);
     const id = `request:${track.key}`;
     items.set(id, {
       id,
@@ -377,4 +395,5 @@ function mergeRequests(items: Map<string, ActivityItem>, requests: readonly Requ
       requestKey: track.key,
     });
   }
+  return rowed;
 }

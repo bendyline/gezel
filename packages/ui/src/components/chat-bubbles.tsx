@@ -23,7 +23,7 @@ import {
   parseTaskHandoffNote,
   promoteBareChannelNames,
 } from '@bendyline/gezel';
-import type { MediaProvider, SurfaceScheme } from '@bendyline/squisq';
+import type { MediaProvider } from '@bendyline/squisq';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { formatDebugBundle } from './chat-debug-bundle.js';
 import { humanizeChatError } from './chat-error-copy.js';
@@ -32,10 +32,6 @@ import { formatContextWindow } from './model-context.js';
 
 export { formatDebugBundle } from './chat-debug-bundle.js';
 
-// Chat-bubble light surface — shared with the Home intro's embedded
-// Handboek page; the scheme and its rationale live in
-// [chat-theme.ts](./chat-theme.ts).
-const CHAT_BUBBLE_LIGHT_SURFACE: SurfaceScheme = GEZEL_LIGHT_SURFACE;
 import { LinearDocView, MediaContext } from '@bendyline/squisq-react';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
 import type { FontFamily, Theme } from '@bendyline/squisq/schemas';
@@ -77,14 +73,20 @@ import { WorkChunksCount } from './WorkChunksCount.js';
 import { markdownToChatDoc, prepareChatMarkdown } from './chat-markdown.js';
 import type { OpenChatReference } from './chat-open-command.js';
 import {
-  GEZEL_LIGHT_SURFACE,
   gezelChatThemeForMode,
+  gezelReadingSurfaceForMode,
   gezelReportThemeForMode,
 } from './chat-theme.js';
 import { ToolAudioRow, ToolImageRow, ToolVideoRow } from './chat-tool-media.js';
-import { citationFromHref, evidenceTitle, linkifyCitations } from './citation-linkify.js';
+import {
+  citationFromHref,
+  evidenceTitle,
+  linkifyCitations,
+  replySources,
+} from './citation-linkify.js';
 import { formatElapsedClock } from './elapsed-time.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
+import { useFlaggedSentences } from './grounding-flags.js';
 import { shouldDisplayIntent } from './intent-display.js';
 import { knowledgeRefFromHref, linkifyKnowledgeRefs } from './knowledge-linkify.js';
 import {
@@ -100,6 +102,7 @@ import {
   formatPendingArgsPreview,
   parsePendingToolCalls,
 } from './pending-tool-calls.js';
+import { plainStatement } from './plain-markdown.js';
 import { type MarkdownWalkNode, isRawHtmlDump, toHtmlCodeFence } from './raw-html-dump.js';
 import { stripVisibleToolCallMarkup } from './strip-tool-call-markup.js';
 import { renderToolArgsFragment } from './tool-args-fragment.js';
@@ -234,6 +237,8 @@ export interface MessageBubbleProps {
    * ignore this. Pulled from the gezel's frontmatter at the call site.
    */
   authorRole?: string;
+  /** The speaker is the main crew member of the project they speak in: the star. */
+  authorMainCrewMember?: boolean;
   /**
    * Native-title tooltip for the author name + icon. Used to surface
    * "which provider + model is actually handling this session"
@@ -577,19 +582,33 @@ export function authorTitle(role: string | undefined, tooltip: string | undefine
 }
 
 /**
- * The mark beside a speaker's name in chat headers. Two well-known roles
- * get one — the meester (the front-door figure) a top hat, the crew lead a
- * star matching the sidebar — and every other role reads as text alone, so
- * there is no glyph to invent for each "Reviewer" or "Designer". It rides
- * with the name, so it stays when a narrow timeline drops the role.
+ * The mark beside a speaker's name in chat headers. Two speakers get one:
+ * the meester (the front-door figure) a top hat, and a project's main crew
+ * member the star, matching the project's crew list. The star follows the
+ * project, not the role: it marks a Builder working alone as it marks a
+ * crew lead (`speaksAsMainCrewMember`). Every other role reads as text
+ * alone, so there is no glyph to invent for each "Reviewer" or "Designer".
+ * It rides with the name, so it stays when a narrow timeline drops the
+ * role. The hat is drawn, not an emoji: the 🎩 broke the no-emoji rule
+ * (2026-11-09).
  */
-export function roleGlyph(role: string | undefined): ReactNode {
-  if (!role) return null;
-  const key = roleForMatching(role).toLowerCase().trim();
-  const glyph = key === 'meester' ? '🎩' : key === 'voorman' ? '⭐' : null;
-  return glyph ? (
+export function roleGlyph(role: string | undefined, mainCrewMember = false): ReactNode {
+  const key = role ? roleForMatching(role).toLowerCase().trim() : '';
+  if (key === 'meester') {
+    return (
+      <span className="msg-role-glyph msg-role-glyph-hat" aria-hidden>
+        <svg viewBox="0 0 16 16" width="1em" height="1em" focusable="false" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M4.5 2.5h7l-.6 7.5H5.1zM1.5 11.2c0-.5.4-.7.9-.7h11.2c.5 0 .9.2.9.7 0 1-2.9 1.8-6.5 1.8s-6.5-.8-6.5-1.8z"
+          />
+        </svg>
+      </span>
+    );
+  }
+  return mainCrewMember ? (
     <span className="msg-role-glyph" aria-hidden>
-      {glyph}
+      ⭐
     </span>
   ) : null;
 }
@@ -673,6 +692,7 @@ export function MessageBubble({
   authorPoppetje,
   authorIconOverride,
   authorRole,
+  authorMainCrewMember,
   authorTooltip,
   driftLabel,
   from,
@@ -733,14 +753,21 @@ export function MessageBubble({
   // a message saved before that behavior shipped) get cleaned up at
   // render time. Idempotent — text that's already been promoted is a
   // no-op.
+  // The sources this reply cites, numbered from 1 as its reader counts them;
+  // the ledger's numbers run across the whole session.
+  const citedSources = useMemo(
+    () => replySources(content, grounding?.evidence),
+    [content, grounding],
+  );
   const displayContent = useMemo(() => {
     const scrubbed = linkifyCitations(
       linkifyKnowledgeRefs(promoteBareChannelNames(stripVisibleToolCallMarkup(content))),
       grounding?.evidence,
+      citedSources.shownAs,
     );
     if (!referencedFiles || referencedFiles.length === 0) return scrubbed;
     return linkifyFileRefs(scrubbed, referencedFiles);
-  }, [content, referencedFiles, grounding]);
+  }, [content, referencedFiles, grounding, citedSources]);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [focusedCitation, setFocusedCitation] = useState<number | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -832,11 +859,13 @@ export function MessageBubble({
   // A wrap-up's finished card opens the work; its task id would be a second,
   // rawer way to say the same thing.
   const hasTasks = referencedTasks && referencedTasks.length > 0 && synthetic !== 'task-wrapup';
-  // Outside debug mode the finished card is the file list too: "Files:
-  // report.pdf report.md outline.md" under it named the drafts beside the
-  // deliverable. And a task's id is debug-mode text; the cards and the chat
+  // Outside debug mode a wrap-up never adds a file list: its finished card
+  // (here, or in the request's tracker) opens the work, and without one the
+  // wrap-up's own words link what was made. "Files: report.docx report.md
+  // sources.md" sat under a wrap-up whose card had moved to the tracker
+  // (2026-11-09). And a task's id is debug-mode text; the cards and the chat
   // rail open the task by name.
-  const showFiles = hasFiles && (debugMode || !(synthetic === 'task-wrapup' && deliverable));
+  const showFiles = hasFiles && (debugMode || synthetic !== 'task-wrapup');
   const showTaskChips = hasTasks && debugMode;
   const chips =
     showFiles || showTaskChips ? (
@@ -968,8 +997,15 @@ export function MessageBubble({
 
   // A factual-mode reply's sources: the evidence its [n] markers name, and
   // any statement no source showed. Collapsed until a citation is clicked.
-  const groundingEvidence = grounding?.evidence ?? [];
+  const groundingEvidence = citedSources.sources;
   const groundingIssues = grounding?.problems ?? [];
+  // The check's doubts sit on the sentence they are about, not only in the
+  // line under the reply.
+  const replyBodyRef = useRef<HTMLDivElement>(null);
+  useFlaggedSentences(
+    replyBodyRef,
+    role === 'user' ? [] : groundingIssues.map((issue) => issue.text),
+  );
   const groundingSources =
     role !== 'user' && (groundingEvidence.length > 0 || groundingIssues.length > 0) ? (
       <details
@@ -979,14 +1015,19 @@ export function MessageBubble({
       >
         <summary className="msg-retrieval-summary">
           {groundingEvidence.length} source{groundingEvidence.length === 1 ? '' : 's'}
-          {groundingIssues.length > 0 &&
-            ` · ${groundingIssues.length} statement${groundingIssues.length === 1 ? '' : 's'} not found in any source`}
+          {groundingIssues.length > 0 && (
+            <span className="msg-grounding-flagged">
+              {' · '}
+              {groundingIssues.length} statement{groundingIssues.length === 1 ? '' : 's'} to check,
+              marked above
+            </span>
+          )}
         </summary>
         {groundingIssues.length > 0 && (
           <ul className="msg-grounding-issues">
             {groundingIssues.map((issue) => (
               <li key={issue.text} className="msg-grounding-issue">
-                {issue.text}
+                {plainStatement(issue.text)}
                 <span className="msg-grounding-missing">
                   {issue.status === 'bad-citation'
                     ? ` — cites ${issue.missing.join(', ')}, which is not one of the sources`
@@ -999,20 +1040,36 @@ export function MessageBubble({
           </ul>
         )}
         <ul className="msg-retrieval-list">
-          {groundingEvidence.map((item) => (
-            <li key={item.n} className="msg-retrieval-item">
-              <details className="msg-retrieval-source" open={focusedCitation === item.n}>
+          {groundingEvidence.map((source) => (
+            <li key={source.n} className="msg-retrieval-item">
+              <details
+                className="msg-retrieval-source"
+                open={source.items.some((item) => item.n === focusedCitation)}
+              >
                 <summary className="msg-retrieval-source-summary">
                   <span className="msg-retrieval-source-label">
-                    [{item.n}] {evidenceTitle(item)}
+                    [{source.n}] {evidenceTitle(source.items[0]!)}
                   </span>
                 </summary>
                 <div className="msg-retrieval-source-body">
-                  {item.excerpt ? (
-                    <pre className="msg-retrieval-excerpt">{item.excerpt}</pre>
-                  ) : (
-                    <p className="msg-retrieval-empty">No excerpt was kept for this source.</p>
-                  )}
+                  {source.items.map((item) => (
+                    <Fragment key={item.n}>
+                      {item.query && (
+                        <>
+                          <p className="msg-grounding-query-label">How it was calculated</p>
+                          <pre className="msg-retrieval-excerpt msg-grounding-query">
+                            {item.query}
+                          </pre>
+                          <p className="msg-grounding-query-label">What it returned</p>
+                        </>
+                      )}
+                      {item.excerpt ? (
+                        <pre className="msg-retrieval-excerpt">{item.excerpt}</pre>
+                      ) : (
+                        <p className="msg-retrieval-empty">No excerpt was kept for this source.</p>
+                      )}
+                    </Fragment>
+                  ))}
                 </div>
               </details>
             </li>
@@ -1175,12 +1232,12 @@ export function MessageBubble({
                   className="msg-system-chip"
                   title="Sent by gezel itself to move the task along — you didn't write this"
                 >
-                  automatic
+                  Automatic
                 </span>
               )}
               {nudge && (
                 <span className="msg-nudge-chip" title="Sent while the previous turn was running">
-                  nudged
+                  Nudged
                 </span>
               )}
             </>
@@ -1189,7 +1246,7 @@ export function MessageBubble({
               <PersonLabel
                 name={authorLabel}
                 roleTitle={authorRole && plainRoleTitle(authorRole)}
-                badge={roleGlyph(authorRole)}
+                badge={roleGlyph(authorRole, authorMainCrewMember)}
                 face={
                   <GezelIcon
                     svg={authorIcon}
@@ -1281,6 +1338,7 @@ export function MessageBubble({
       ) : (
         // biome-ignore lint/a11y/useKeyWithClickEvents: event delegation to child <a>
         <div
+          ref={replyBodyRef}
           className="msg-body msg-body-rendered"
           onClick={handleBodyClick}
           style={isUser ? undefined : bodyStyle}
@@ -1595,6 +1653,8 @@ export interface StreamingBubbleProps {
   authorIconOverride?: boolean;
   /** Optional gezel role suffix, rendered to the right of the name. */
   authorRole?: string;
+  /** See {@link MessageBubbleProps.authorMainCrewMember}. */
+  authorMainCrewMember?: boolean;
   /** See {@link MessageBubbleProps.authorTooltip}. */
   authorTooltip?: string;
   /** See {@link MessageBubbleProps.driftLabel}. */
@@ -2088,6 +2148,7 @@ export function StreamingBubble({
   authorPoppetje,
   authorIconOverride,
   authorRole,
+  authorMainCrewMember,
   authorTooltip,
   driftLabel,
   localEngine,
@@ -2364,7 +2425,7 @@ export function StreamingBubble({
         <PersonLabel
           name={authorLabel}
           roleTitle={authorRole && plainRoleTitle(authorRole)}
-          badge={roleGlyph(authorRole)}
+          badge={roleGlyph(authorRole, authorMainCrewMember)}
           face={
             <GezelIcon
               svg={authorIcon}
@@ -2630,8 +2691,8 @@ export function StreamingBubble({
                   <>
                     Nothing back yet — {formatElapsedLong(silentFor)}. This turn hasn't started
                     producing output: it may still be waiting its turn on the engine behind another
-                    gezel, loading the model, or reading a long prompt. You can keep waiting, or
-                    stop it and start again.
+                    chat, loading the model, or reading a long prompt. You can keep waiting, or stop
+                    it and start again.
                   </>
                 ) : stalledSilence ? (
                   <>
@@ -3948,15 +4009,20 @@ export function RenderedMarkdown({
   // bubble bodies and the attachment previewer in
   // [ChatReferences.tsx](./ChatReferences.tsx) stay in lockstep.
   //
-  // In light mode we overlay the shared pale-brown reading surface. Its
-  // color matches the `--chat-bubble-bg` token used by the outer bubble,
-  // so the result appears seamlessly tinted. In dark mode we skip the
-  // surface overlay so the theme's own warm-tinted canvas comes through.
-  const surface = effective === 'light' ? CHAT_BUBBLE_LIGHT_SURFACE : undefined;
+  // Both modes overlay gezel's reading surface. Its color matches the
+  // `--chat-bubble-bg` token used by the outer bubble, so the result appears
+  // seamlessly tinted. Night used to skip the overlay, which left the
+  // theme's walnut on code blocks and its tan on muted text.
+  const surface = gezelReadingSurfaceForMode(effective);
   if (!doc) return <>{markdown}</>;
   // Chat history uses Squisq's thumbnail image mode so a pasted screenshot
   // doesn't steamroll the bubble — the user can click to open full-size
   // if needed (future follow-up).
+  //
+  // A reply renders in Squisq's document register, whose sizes are em-based
+  // and follow the bubble's own text. The page register sizes in rem: a
+  // heading in a reply came out near 32px over 15px prose, and a numbered
+  // list as "01 / 02" numerals. The report register keeps the page it had.
   const view = (
     <LinearDocView
       doc={doc}
@@ -3965,6 +4031,7 @@ export function RenderedMarkdown({
       thinMargins
       showCover={false}
       imageDisplayMode="thumbnail"
+      {...(register === 'chat' ? { variant: 'document' as const } : {})}
     />
   );
   if (!mediaProvider) return view;

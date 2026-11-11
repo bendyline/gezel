@@ -67,3 +67,38 @@ export const CAMERA_PIXELS_CLOUD_ENGINE =
 
 export const CAMERA_PIXELS_PAIRED_ENGINE =
   "This camera's pictures stay on this computer, so they can't be sent to another computer's image engine. Pick an image model on this computer, or turn on Let cloud AI see these pictures for this camera.";
+
+export const CAMERA_PIXELS_PAIRED_VIDEO_ENGINE =
+  "This camera's pictures stay on this computer, so they can't be sent to another computer's video engine. Pick a video model on this computer, or turn on Let cloud AI see these pictures for this camera.";
+
+/**
+ * Why a picture input must not reach the engine about to use it, or null.
+ * A camera keyframe whose pictures stay on this computer may go to an engine
+ * here, for a caller allowed to see it (the result goes back to the caller),
+ * and never to a paired server or a cloud model. Image editing and
+ * image-to-video both ask this. Base64 inputs carry no path, so only the
+ * routes that hand out a keyframe's bytes guard them.
+ */
+export async function cameraInputWithheld(
+  ctx: ServiceContext,
+  c: Context,
+  projectId: string,
+  inputs: ReadonlyArray<{ artifactPath: string } | { data: string }>,
+  engine: 'this-computer' | 'paired' | 'cloud',
+  medium: 'image' | 'video',
+): Promise<string | null> {
+  const project = await ctx.store.getProject(projectId).catch(() => null);
+  if (!project) return null;
+  for (const entry of inputs) {
+    if (!('artifactPath' in entry)) continue;
+    const stripped = entry.artifactPath.replace(/^artifacts\//, '');
+    const file = await ctx.store.resolveProjectArtifactReadPath(projectId, stripped);
+    if (!file || !(await cameraKeepsFileLocal(ctx, project, file))) continue;
+    if (engine === 'cloud') return CAMERA_PIXELS_CLOUD_ENGINE;
+    if (engine === 'paired') {
+      return medium === 'video' ? CAMERA_PIXELS_PAIRED_VIDEO_ENGINE : CAMERA_PIXELS_PAIRED_ENGINE;
+    }
+    if (!(await callerMaySeeFilePixels(ctx, c, project, file))) return CAMERA_PIXELS_WITHHELD;
+  }
+  return null;
+}

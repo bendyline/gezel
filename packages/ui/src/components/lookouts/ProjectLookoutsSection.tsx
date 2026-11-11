@@ -20,8 +20,8 @@ const ACTION_WORDS: Record<LookoutAction['kind'], string> = {
   speak: 'say something',
   push: 'send to my phone',
   email: 'email',
-  'ask-gezel': 'ask a gezel',
-  'run-craftbook': 'run a craftbook',
+  'ask-gezel': 'ask Gezel',
+  'run-craftbook': 'run a plan',
 };
 
 function conditionWords(lookout: Lookout): string {
@@ -204,7 +204,7 @@ export function ProjectLookoutsSection({ projectId }: { projectId: string }) {
       <li key={lookout.id} className="lookout-row">
         <div className="lookout-row-text">
           <strong>{lookout.name}</strong>
-          {proposed ? <span className="badge">Proposed by a gezel</span> : null}
+          {proposed ? <span className="badge">Proposed by Gezel</span> : null}
           {!proposed && !lookout.enabled ? <span className="badge">Off</span> : null}
           {snoozed ? <span className="badge">Snoozed</span> : null}
           <div className="small">{sentence(lookout, cameraName(lookout.source.bindingId))}</div>
@@ -329,7 +329,7 @@ export function ProjectLookoutsSection({ projectId }: { projectId: string }) {
       {data.lookouts.length === 0 && editing !== 'new' ? (
         <p className="muted">
           Tell a camera what to keep a lookout for and what to do when it sees it — play a sound,
-          tell you, or have a gezel follow up.
+          tell you, or have Gezel follow up.
         </p>
       ) : (
         <ul className="settings-list">{data.lookouts.map(row)}</ul>

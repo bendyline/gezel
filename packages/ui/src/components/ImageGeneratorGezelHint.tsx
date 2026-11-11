@@ -82,7 +82,7 @@ export function ImageGeneratorGezelHint() {
     <div className="ff-img-hint">
       {existing.length > 0 ? (
         <div className="ff-img-hint-have">
-          <span className="muted small">Image-generator gezel</span>
+          <span className="muted small">Image generator</span>
           {existing.length === 1 ? (
             <button
               type="button"
@@ -115,11 +115,11 @@ export function ImageGeneratorGezelHint() {
         <div className="ff-img-hint-empty">
           <p className="muted small">
             Once an engine is set up, the easiest way to use it from chat is to add an{' '}
-            <strong>image-generator gezel</strong>. They forward your @-mention text straight to{' '}
+            <strong>image generator</strong>. It forwards your @-mention text straight to{' '}
             <code>{IMAGE_GENERATOR_TOOL}</code> — no LLM in the middle.
           </p>
           <button type="button" className="primary" onClick={() => setShowInstall(true)}>
-            Add an image-generator gezel
+            Add an image generator
           </button>
         </div>
       )}
@@ -137,7 +137,7 @@ export function ImageGeneratorGezelHint() {
  * Skips the gilde browser — the user has already implicitly chosen the
  * template by clicking "Add an image-generator gezel" in the image-
  * settings panel. Collects a name (seeded from the same shared random
- * pool the regular `New Gezel` dialog uses, with a 🎲 to re-roll) and
+ * pool the regular `New Gezel` dialog uses, with a dice key to re-roll) and
  * shows the template description.
  */
 function ImageGeneratorInstallDialog({
@@ -220,7 +220,7 @@ function ImageGeneratorInstallDialog({
             }}
           >
             <Dialog.Title asChild>
-              <h3 style={{ margin: 0 }}>Add an image-generator gezel</h3>
+              <h3 style={{ margin: 0 }}>Add an image generator</h3>
             </Dialog.Title>
             <button type="button" className="gz-link-button" onClick={onClose} disabled={busy}>
               Cancel
@@ -264,7 +264,7 @@ function ImageGeneratorInstallDialog({
                 title="Pick a random name"
                 aria-label="Pick a random name"
               >
-                🎲
+                <span className="fa-solid fa-dice" aria-hidden="true" />
               </button>
               <button type="submit" className="primary" disabled={busy || !name.trim()}>
                 {busy ? 'Creating…' : 'Create'}

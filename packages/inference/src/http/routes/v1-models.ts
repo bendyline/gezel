@@ -80,6 +80,19 @@ export function providerChosen(
   return true;
 }
 
+/**
+ * Whether a model listing may enumerate `provider`. Every listing an app can
+ * call goes through this: Ollama's `/tags` kept running the person's Claude
+ * and Codex command lines after `/v1/models` stopped (1.26313.105 audit).
+ */
+export function providerListable(
+  provider: ProviderName,
+  config: Parameters<typeof providerChosen>[1],
+  gezels: Parameters<typeof providerChosen>[2],
+): boolean {
+  return !OPT_IN_PROVIDERS.has(provider) || providerChosen(provider, config, gezels);
+}
+
 interface V1ModelsRouteOptions {
   /** List only on-device engines plus downloadable on-device catalog entries. */
   localOnly?: boolean;
@@ -327,7 +340,7 @@ async function buildModelEntries(
   const providers = (options.localOnly ? LOCAL_PROVIDERS : PROVIDERS_TO_ENUMERATE).filter(
     (provider) =>
       (provider !== 'mlx' || resolveDistributionProfile().pythonProvisioning !== 'frozen-only') &&
-      (!OPT_IN_PROVIDERS.has(provider) || providerChosen(provider, config, gezels)),
+      providerListable(provider, config, gezels),
   );
   const buckets = await Promise.all(
     providers.map(async (provider) => {

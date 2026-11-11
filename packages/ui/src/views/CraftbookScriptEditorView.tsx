@@ -101,7 +101,7 @@ export function CraftbookScriptEditorView({
             else returnToCraftbook();
           }}
         >
-          Back to craftbook
+          Back to plan
         </button>
         <div className="script-editor-title">
           <span className="task-ref">{craftbookId}</span>
@@ -142,7 +142,7 @@ export function CraftbookScriptEditorView({
       <ConfirmDialog
         open={confirmLeave}
         title="Discard unsaved changes?"
-        message="Your script has unsaved changes. Keep editing to save them, or discard them and return to the craftbook."
+        message="Your script has unsaved changes. Keep editing to save them, or discard them and return to the plan."
         confirmLabel="Discard changes and return"
         cancelLabel="Keep editing"
         danger

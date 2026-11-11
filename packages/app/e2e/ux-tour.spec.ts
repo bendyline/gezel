@@ -22,6 +22,7 @@ import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { captureScreenshot } from './helpers/screenshot.js';
+import { unfoldSettingsGroups } from './helpers/settings-nav.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const appRoot = join(_dirname, '..');
@@ -106,10 +107,10 @@ test('01 - home workshop renders and a chat turn round-trips', async () => {
 
 test('02 - the home tour tab shows the intro article', async () => {
   // The greeting steps aside once a conversation starts, and 01 started one.
-  const tour = page.getByRole('tab', { name: 'Handboek' });
+  const tour = page.getByRole('tab', { name: 'Help' });
   await tour.click();
   await expect(tour).toHaveAttribute('aria-selected', 'true');
-  await expect(page.getByRole('button', { name: /Open in Handboek/ })).toBeVisible({
+  await expect(page.getByRole('button', { name: /Open in Help/ })).toBeVisible({
     timeout: 15_000,
   });
   await shot('03-home-tour-article.png');
@@ -118,7 +119,9 @@ test('02 - the home tour tab shows the intro article', async () => {
 });
 
 test('03 - sidebar groups expand and list entities', async () => {
-  for (const id of ['projects', 'gezels', 'documents']) {
+  // Workshop (Tasks, Plans, Scripts, History) starts closed; the tour opens
+  // it with the entity groups so the shot shows the whole rail.
+  for (const id of ['projects', 'gezels', 'documents', 'workshop']) {
     const toggle = page.locator(`[data-testid="sidebar-group-toggle-${id}"]`);
     if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
   }
@@ -128,8 +131,8 @@ test('03 - sidebar groups expand and list entities', async () => {
 
 test('04 - new-gezel dialog creates a gezel; its detail tab opens', async () => {
   test.setTimeout(60_000);
-  await page.locator('[aria-label="New gezel"]').click();
-  const dialog = page.getByRole('dialog', { name: 'New gezel', exact: true });
+  await page.locator('[aria-label="New crew member"]').click();
+  const dialog = page.getByRole('dialog', { name: 'New crew member', exact: true });
   await expect(dialog).toBeVisible();
   await shot('05-new-gezel-dialog.png');
 
@@ -233,13 +236,19 @@ test('10 - every settings section renders', async () => {
   await openArea('settings');
   await expect(page.locator('.settings-nav')).toBeVisible({ timeout: 15_000 });
   await page.waitForTimeout(800);
+  // Both nav groups start folded; the tour visits the sections inside them.
+  await unfoldSettingsGroups(page);
 
   // The nav's button set shifts as probes resolve (engine sections appear,
   // group toggles carry no label) — re-resolve by index on every pass and
-  // key screenshots by label so a mid-run change can't misfile a shot.
+  // key screenshots by label so a mid-run change can't misfile a shot. The
+  // "More settings" heading opens no page; clicking it would fold its group
+  // and drop every section after it from the tour.
   const seen = new Set<string>();
   for (let i = 0; ; i += 1) {
-    const buttons = page.locator('.settings-nav .settings-nav-item');
+    const buttons = page.locator(
+      '.settings-nav .settings-nav-item:not([data-testid="settings-nav-more"])',
+    );
     if (i >= (await buttons.count())) break;
     const btn = buttons.nth(i);
     const label = ((await btn.textContent()) ?? '').trim();

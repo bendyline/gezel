@@ -8,7 +8,7 @@ import { api } from '../api.js';
  * One-line strip of "is the local setup healthy?" pills — service
  * version, Node version, OS platform, and (when applicable) the
  * system-toolset bootstrap phase. Rendered during onboarding on Home
- * and again on Settings → General so the same signals stay reachable
+ * and again on Settings → About so the same signals stay reachable
  * after the Home strip has been collapsed.
  *
  * Each mount pulls health + system status once on its own. Cheap;
@@ -113,7 +113,7 @@ export function HealthStrip({ label }: { label?: string } = {}) {
       {config?.debugMode === true && (
         <span
           className="gz-status-pill gz-status-pill--debug"
-          title="Verbose diagnostics are being written to ~/.gezel/logs/. Turn off under Settings → General when you're done troubleshooting."
+          title="Verbose diagnostics are being written to ~/.gezel/logs/. Turn off under Settings → About when you're done troubleshooting."
         >
           ⚙ Debug mode on
         </span>

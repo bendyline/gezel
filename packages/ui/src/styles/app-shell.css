@@ -394,17 +394,19 @@
 }
 
 /* ── Titlebar keys ───────────────────────────────────────────────────────
-   One recipe for everything you press on the bar: the status pills, the
-   quota meter, and the icon keys in the header tray. The bar's own version
-   of keys in trays (docs/ux.md, "The titlebar: one line of keys"): a face a
-   touch darker than
-   the sage, a cream top highlight for lift, and an open or pressed key sunk
-   1px with an inset shadow. One height for all of them is what lets the
-   cluster read as a toolbar rather than a row of differently-sized tags.
-   Colors stay with each control (the Off crew glyph is red). The compact
-   header's 44px keys override size and face. */
+   One recipe for everything you press on the bar: Back and Forward, the
+   brand, the status keys, the quota meter and the icon keys (docs/ux.md,
+   "The titlebar: one line of keys"). A face a touch darker than the sage, a
+   cream top highlight for lift, and an open, pressed or current key sunk
+   1px with an inset shadow. The bar is the tray, so nothing on it sits in a
+   tray of its own: one key at one height is what lets the row read as a
+   toolbar rather than as parts from five kits (a tray of small flat keys, a
+   borderless brand tile, a well with a keycap in it, raised pills, and a
+   tray holding one key). Colors stay with each control (the Off crew glyph
+   is red). The compact header's 44px keys override size and face. */
 .app-header
   :is(
+    .app-header-brand,
     .activity-control,
     .engine-pill,
     .queue-meter-button,
@@ -412,7 +414,8 @@
     .quota-meter,
     .boekwachter-pill,
     .app-engagement-trigger,
-    .app-output-restore
+    .app-output-restore,
+    .app-history-key
   ) {
   height: var(--titlebar-control-h);
   padding-block: 0;
@@ -427,6 +430,7 @@
    that is open stays pressed while the pointer rests on it. */
 .app-header
   :is(
+    .app-header-brand:not(.active),
     .activity-control,
     .engine-pill,
     .queue-meter-button,
@@ -434,13 +438,15 @@
     .quota-meter,
     .boekwachter-pill:where(button),
     .app-engagement-trigger,
-    .app-output-restore
+    .app-output-restore,
+    .app-history-key:not(:disabled)
   ):hover {
   background: var(--titlebar-key-bg-hover);
 }
 
 .app-header
   :is(
+    .app-header-brand,
     .activity-control,
     .engine-pill,
     .queue-meter-button,
@@ -448,16 +454,19 @@
     .quota-meter,
     .boekwachter-pill:where(button),
     .app-engagement-trigger,
-    .app-output-restore
+    .app-output-restore,
+    .app-history-key:not(:disabled)
   ):active,
 .app-header
   :is(
+    .app-header-brand.active,
     .activity-control[data-state="open"],
     .engine-pill[aria-expanded="true"],
     .queue-meter-button-open,
     .quota-meter[aria-expanded="true"],
     .boekwachter-pill[data-state="open"],
-    .app-engagement-trigger[data-state="open"]
+    .app-engagement-trigger[data-state="open"],
+    .app-history-trail[data-state="open"]
   ) {
   background: var(--titlebar-key-pressed-bg);
   box-shadow: var(--titlebar-key-pressed-shadow);
@@ -485,25 +494,21 @@
     color-mix(in srgb, var(--danger) 60%, transparent);
 }
 
-/* The header tray: a slot routed into the bar holding its icon keys (the
-   crew activity menu, and Output's restore while that pane is maximized).
-   Outer height matches the pills; the keys inside sit a size smaller, the
-   way keys rest in every other tray. */
+/* The icon keys that close the cluster (the crew activity menu, and
+   Output's restore while that pane is maximized). They are keys like the
+   rest, square and the bar's one height. This used to be a recessed slot
+   with smaller keys in it; around a single key that read as a button with
+   two borders. */
 .app-header-tray {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 0.45rem;
   height: var(--titlebar-control-h);
-  padding: 2px;
-  border: 1px solid var(--titlebar-well-border);
-  border-radius: var(--radius-lg);
-  background: var(--titlebar-well-bg);
-  box-shadow: var(--titlebar-well-shadow);
 }
 
 .app-header-tray > :is(.app-engagement-trigger, .app-output-restore) {
   flex: 0 0 auto;
-  width: 26px;
+  width: var(--titlebar-control-h);
   height: 100%;
 }
 
@@ -529,6 +534,140 @@
   outline: none;
   box-shadow: var(--titlebar-key-shadow), inset 0 0 0 2px
     color-mix(in srgb, var(--titlebar-ink) 75%, transparent);
+}
+
+/* ── Back and forward ─────────────────────────────────────────────────────
+   Three keys joined into one beside the brand (docs/ux.md, "Back and
+   forward"): Back, Forward, and a narrow key that opens the trail of views
+   visited. They share their inner edges, so the three read as one control
+   with no tray around them. The group leads the bar, ahead of the brand, as
+   a browser's arrows do, and the brand tucks in closer to it than the bar's
+   usual gap so the pair reads as one group. Wide layouts only; the compact
+   bar has no room and the phone's Back walks the same stack. */
+.app-header-history {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: var(--titlebar-control-h);
+}
+
+.app-header .app-header-history > .app-history-key + .app-history-key {
+  margin-left: -1px;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.app-header .app-header-history > .app-history-key:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* The key being pressed or hovered draws its whole outline over its
+   neighbors' shared edges. */
+.app-header
+  .app-header-history
+  > .app-history-key:is(:hover, :active, :focus-visible):not(:disabled) {
+  z-index: 1;
+}
+
+.app-header-history + .app-header-brand {
+  margin-left: -0.75rem;
+}
+
+.app-header .app-header-history > .app-history-key {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: var(--titlebar-control-h);
+  height: 100%;
+  padding: 0;
+  color: var(--titlebar-ink);
+  cursor: pointer;
+}
+
+.app-header .app-header-history > .app-history-trail {
+  width: 20px;
+}
+
+.app-header-history > .app-history-key > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.app-header-history > .app-history-trail > svg {
+  width: 11px;
+  height: 11px;
+}
+
+/* Nowhere to go: the key keeps its place and its face, with a dimmed
+   arrow, so the group never changes shape as the trail grows. */
+.app-header .app-header-history > .app-history-key:disabled {
+  cursor: default;
+  color: color-mix(in srgb, var(--titlebar-ink) 38%, transparent);
+}
+
+.app-header-history > .app-history-key:focus-visible {
+  outline: none;
+  box-shadow: var(--titlebar-key-shadow), inset 0 0 0 2px
+    color-mix(in srgb, var(--titlebar-ink) 75%, transparent);
+}
+
+/* The narrowest bars keep Back and Forward and let the trail key go; right-
+   clicking either arrow still opens the trail. */
+@container app-header (max-width: 640px) {
+  .app-header-history > .app-history-trail {
+    display: none;
+  }
+
+  /* Forward closes the group once the trail key is gone. */
+  .app-header .app-header-history > .app-history-key:nth-last-child(2) {
+    border-top-right-radius: var(--radius-md);
+    border-bottom-right-radius: var(--radius-md);
+  }
+}
+
+.view-history-menu {
+  min-width: 14rem;
+  max-width: 22rem;
+}
+
+.view-history-menu-item {
+  align-items: flex-start;
+}
+
+.view-history-menu-mark {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin-top: 0.15rem;
+}
+
+.view-history-menu-mark > svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+.view-history-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.view-history-menu-title,
+.view-history-menu-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.view-history-menu-hint {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  font-weight: 400;
 }
 
 /* ── Unified titlebar search ──────────────────────────────────────────────
@@ -617,36 +756,23 @@
   opacity: 0.55;
 }
 
-/* The quick-open shortcut as a keycap resting at the well's far end: a key
-   in a tray, read as one. Shown only while the well is empty, so typed text
-   never runs under it. */
+/* The quick-open shortcut, as quiet words at the well's far end. It was a
+   keycap: a box inside the one box on the bar that is not a key. Shown only
+   while the well is empty, so typed text never runs under it. */
 .titlebar-search-shortcut {
   position: absolute;
-  right: 6px;
+  right: 10px;
   top: 50%;
   transform: translateY(-50%);
-  display: inline-flex;
-  align-items: center;
-  height: 18px;
-  padding: 0 5px;
-  border: 1px solid color-mix(in srgb, var(--titlebar-ink) 32%, transparent);
-  border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--titlebar-ink) 8%, transparent);
-  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.28);
-  color: color-mix(in srgb, var(--titlebar-ink) 86%, transparent);
+  color: color-mix(in srgb, var(--titlebar-ink) 58%, transparent);
   font-family: inherit;
   font-size: var(--text-2xs);
-  font-weight: 600;
-  letter-spacing: 0.02em;
   line-height: 1;
   pointer-events: none;
 }
 
 .titlebar-search:focus-within .titlebar-search-shortcut {
-  border-color: rgba(44, 53, 42, 0.28);
-  background: rgba(44, 53, 42, 0.06);
-  box-shadow: inset 0 -1px 0 rgba(44, 53, 42, 0.2);
-  color: rgba(44, 53, 42, 0.7);
+  color: rgba(44, 53, 42, 0.55);
 }
 
 /* On phone-width windows, spend the scarce titlebar room on the search well
@@ -745,7 +871,7 @@
 .search-results-header input {
   flex: 1;
   padding: 6px 10px;
-  font-size: var(--text-sm, 0.9rem);
+  font-size: var(--text-sm);
   border: 1px solid var(--border, #4443);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -753,7 +879,7 @@
 }
 
 .search-results-count {
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-xs);
   white-space: nowrap;
 }
 
@@ -768,7 +894,7 @@
 
 .search-results-note {
   margin: 8px 14px 0;
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-xs);
 }
 
 .search-results-body {
@@ -854,12 +980,12 @@
 }
 
 .search-results-title {
-  font-size: var(--text-sm, 0.9rem);
+  font-size: var(--text-sm);
 }
 
 .search-results-subtitle,
 .search-results-snippet {
-  font-size: var(--text-xs, 0.75rem);
+  font-size: var(--text-xs);
   overflow-wrap: anywhere;
 }
 
@@ -951,7 +1077,7 @@ button.search-palette-group-more:hover {
 
 .search-option.active,
 .search-option:hover {
-  background: var(--hover-bg, rgba(0, 0, 0, 0.06));
+  background: var(--hover-bg);
 }
 
 .search-option-title {
@@ -979,26 +1105,17 @@ button.search-palette-group-more:hover {
 }
 
 /* Brand mark in the status header — routes to the Meester home. */
-/* It stands the bar's one height like every other control, and its hover
-   and active faces go darker like the keys': a lighter face is what pulled
-   the cream mark below contrast and made the brand 2px taller than the bar. */
+/* It is a key like every other control on the bar: face, height, hover and
+   press come from the titlebar key recipe above, and on Home it sits latched.
+   It used to be a borderless tile that turned the search well's color when
+   current, so "sunken" meant a field, a tray and "you are here" at once. */
 .app-header-brand {
   align-self: center;
   display: inline-flex;
   align-items: center;
-  height: var(--titlebar-control-h);
-  padding: 0 8px;
-  background: transparent;
-  border: none;
-  border-radius: var(--radius-md);
+  padding-inline: 8px;
   font: inherit;
   cursor: pointer;
-}
-.app-header-brand:hover {
-  background: var(--titlebar-key-pressed-bg);
-}
-.app-header-brand.active {
-  background: var(--titlebar-well-bg);
 }
 
 /* Pending-questions toggle, parked just right of the brand. */
@@ -1126,7 +1243,7 @@ button.search-palette-group-more:hover {
 .engine-pill {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.45rem;
   padding-inline: 0.6rem;
   color: var(--titlebar-ink);
   font-size: var(--text-2xs);
@@ -1135,6 +1252,21 @@ button.search-palette-group-more:hover {
   max-width: 26rem;
   overflow: hidden;
   white-space: nowrap;
+}
+/* A status key keeps one width whatever it says. Sized to its words, the
+   key grew and shrank with every phase, progress bar and tick of the clock,
+   and pushed its neighbors about as it did. What does not fit is cut with an
+   ellipsis; the tooltip and the panel carry the whole of it. */
+.app-header .engine-pill {
+  width: var(--titlebar-status-w);
+}
+/* A crowded bar steps the key down to narrower fixed widths, never to a
+   width that follows its words. */
+.app-header .engine-pill[data-density="compact"] {
+  width: 7.5rem;
+}
+.app-header .engine-pill[data-density="tight"] {
+  width: 6rem;
 }
 .engine-pill-dot {
   width: 7px;
@@ -1169,10 +1301,38 @@ button.search-palette-group-more:hover {
     transform: scale(1.15);
   }
 }
+/* The key is a fixed width, so its words are laid out in a row that knows
+   what gives first: the phase and the health word shorten with an ellipsis,
+   the name, the progress bar's last pixels and the clock hold. */
 .engine-pill-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: pre;
+  font-variant-numeric: tabular-nums;
+}
+.engine-pill-label > * {
+  flex: 0 0 auto;
+}
+.engine-pill-label > :is(.engine-pill-phase, .engine-pill-health-wrap) {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-variant-numeric: tabular-nums;
+}
+.engine-pill-label > .engine-pill-progress {
+  flex: 0 1 4.5rem;
+  min-width: 1.5rem;
+}
+/* One engine on the bar needs no name while it works, and its rim and light
+   already say how hot it runs: the phase and the clock get the key. Two
+   engines keep their names, or two progress bars could not be told apart. */
+.app-header-right:not(:has(.engine-pill-root ~ .engine-pill-root))
+  .engine-pill-busy
+  :is(.engine-pill-kind, .engine-pill-health-wrap) {
+  display: none;
 }
 .engine-pill-elapsed {
   opacity: 0.65;
@@ -1198,6 +1358,7 @@ button.search-palette-group-more:hover {
    simultaneous local-engine pills never become anonymous progress bars. */
 .engine-pill-kind {
   margin-right: 0.4rem;
+  font-weight: 600;
 }
 /* Compact prefill progress bar — replaces the verbose "X / Y tokens
    · Z tok/s" label when an `engine_phase` event carries a progress
@@ -1236,7 +1397,7 @@ button.search-palette-group-more:hover {
   border-radius: var(--radius-sm);
   border: 1px solid rgba(243, 237, 224, 0.3);
   background: rgba(243, 237, 224, 0.12);
-  font-size: 0.65rem;
+  font-size: var(--text-2xs);
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.02em;
@@ -1512,7 +1673,7 @@ button.search-palette-group-more:hover {
 }
 .machine-memory-reservation-pools-label {
   color: var(--text-muted);
-  font-size: 0.64rem;
+  font-size: var(--text-2xs);
   line-height: 1.25;
 }
 .machine-memory-reservation-models {
@@ -1570,7 +1731,7 @@ button.search-palette-group-more:hover {
 button.machine-memory-unload-button {
   padding: 0.1rem 0.32rem;
   border-radius: var(--radius-sm);
-  font-size: 0.64rem;
+  font-size: var(--text-2xs);
   line-height: 1.2;
 }
 .machine-memory-unload-error {
@@ -2191,7 +2352,7 @@ button.machine-memory-unload-button {
   cursor: not-allowed;
 }
 .queue-meter-panel-action-cancel {
-  font-size: 0.95rem;
+  font-size: var(--text-md);
 }
 .queue-meter-panel-action-cancel:hover {
   color: #d97a6c;
@@ -2331,7 +2492,7 @@ button.machine-memory-unload-button {
   border-radius: var(--radius-sm);
   padding: 4px 10px;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--text-xs);
   font-weight: 500;
   line-height: 1.2;
   white-space: nowrap;
@@ -2883,16 +3044,10 @@ button.machine-memory-unload-button {
   background: linear-gradient(to left, var(--sidebar-pane-shadow), transparent);
 }
 
-/* Keep the native scrollbar on the sidebar's outside edge. Chromium follows
-   the scroll container's inline direction when placing a vertical scrollbar;
-   restore LTR on its children so only the scrollbar moves. */
-:root:not([data-sidebar-side="right"]) .app-sidebar-scroll {
-  direction: rtl;
-}
-
-:root:not([data-sidebar-side="right"]) .app-sidebar-scroll > * {
-  direction: ltr;
-}
+/* The rail's scrollbar is on its right on either side, where a scrollbar is
+   expected: against the content with the rail on the left, at the window's
+   edge with it on the right. A left rail used to reverse its inline direction
+   to push the bar to the window's edge, which put it on the far left. */
 
 /* Project maker's mark — a small tool stamp inherited from the project type.
    Unlike gezels, projects are workbenches rather than characters, so the tile
@@ -2966,7 +3121,7 @@ button.machine-memory-unload-button {
   outline-offset: 1px;
 }
 .project-row-status-active::before {
-  background: rgba(80, 180, 100, 0.95);
+  background: var(--status-ready);
   box-shadow: 0 0 0 2px rgba(80, 180, 100, 0.18);
 }
 .project-row-status-stable::before {
@@ -3428,9 +3583,11 @@ button.machine-memory-unload-button {
   font-size: var(--text-xs);
 }
 
+/* At 0.7rem the file icons centered 1px right of the header, Crew and
+   Workshop icons in the same column. */
 .app-sidebar-tree .tree-row > .tree-toggle,
 .app-sidebar-tree .tree-row > .tree-toggle-spacer {
-  margin-left: 0.7rem;
+  margin-left: calc(0.7rem - 1px);
 }
 
 /* Install-health pointer, directly beneath Settings. Deliberately the
@@ -3510,9 +3667,11 @@ button.machine-memory-unload-button {
   --sidebar-tab-surface: var(--bg);
 }
 
+/* Rows stand clear of both edges. The left is plain padding; the right is the
+   scrollbar's gutter plus a little padding, so a selected row never touches
+   the content beside a left rail and the bar has its own lane to appear in. */
 .app-sidebar .app-sidebar-scroll {
-  /* The scrollbar direction puts inline-start against the main pane. */
-  padding-inline-start: 0.75rem;
+  padding-left: 0.75rem;
 }
 
 /* Reserve the scrollbar gutter whether or not the list overflows, so Home
@@ -3520,6 +3679,51 @@ button.machine-memory-unload-button {
    handoff, whose rail holds only Home. */
 .app-sidebar:not(.collapsed) .app-sidebar-scroll {
   scrollbar-gutter: stable;
+}
+
+/* The rail's scrollbar shows only under the pointer. Everywhere else a bar
+   also shows while its container holds focus, but a rail row keeps focus
+   after it is opened, and beside the content a bar that stays painted reads
+   as a second edge. The gutter is kept, so nothing moves when it appears. */
+@media (hover: hover) and (pointer: fine) {
+  .app-sidebar .app-sidebar-scroll {
+    scrollbar-color: transparent transparent;
+  }
+
+  .app-sidebar .app-sidebar-scroll::-webkit-scrollbar-track:vertical {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  .app-sidebar .app-sidebar-scroll::-webkit-scrollbar-thumb:vertical {
+    background: transparent;
+  }
+
+  .app-sidebar:hover .app-sidebar-scroll {
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  .app-sidebar:hover .app-sidebar-scroll::-webkit-scrollbar-track:vertical {
+    background: var(--scrollbar-track);
+    border-color: var(--border);
+  }
+
+  .app-sidebar:hover .app-sidebar-scroll::-webkit-scrollbar-thumb:vertical {
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+
+  .app-sidebar:hover .app-sidebar-scroll::-webkit-scrollbar-thumb:vertical:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
+}
+
+@media (forced-colors: active) {
+  .app-sidebar .app-sidebar-scroll,
+  .app-sidebar:hover .app-sidebar-scroll {
+    scrollbar-color: auto;
+  }
 }
 
 .app-sidebar:not(.collapsed) .app-sidebar-home {
@@ -3622,12 +3826,12 @@ button.machine-memory-unload-button {
 }
 
 /* ── Sidebar on the right ───────────────────────────────────────────
-   The default layout (Settings → General → Sidebar position lets the
-   user flip back to left, which is the attribute-less CSS base above).
-   Reverse the body's flex axis so the sidebar sits after the main pane,
-   and mirror the sidebar's divider, resize grip, seam shadow, and
-   collapse toggle to the opposite edge so everything still hugs the
-   boundary with the content. */
+   The person's choice (Settings → General → Sidebar position); the left
+   is the default and the attribute-less CSS base above. Reverse the body's
+   flex axis so the sidebar sits after the main pane, and mirror the
+   sidebar's divider, resize grip, seam shadow, and collapse toggle to the
+   opposite edge so everything still hugs the boundary with the content.
+   The scrollbar stays on the rail's right, which is then the window's edge. */
 :root[data-sidebar-side="right"] .app-body {
   flex-direction: row-reverse;
 }
@@ -3651,62 +3855,6 @@ button.machine-memory-unload-button {
 
 :root[data-sidebar-side="right"] .app-sidebar-footer {
   justify-content: flex-start;
-}
-
-/* Settings already exposes a full-height content scrollbar against this seam.
-   When the navigation rail is also on the right, keeping its secondary track
-   painted at rest reads as a duplicate scrollbar. Preserve its gutter (and
-   therefore the layout), but reveal the track and thumb only while the rail is
-   hovered or contains keyboard focus. */
-:root[data-sidebar-side="right"] .app-body:has(> .app-main > .settings-layout) .app-sidebar-scroll {
-  scrollbar-color: transparent transparent;
-}
-
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar-scroll::-webkit-scrollbar-track {
-  background: transparent;
-  border-color: transparent;
-}
-
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar-scroll::-webkit-scrollbar-thumb {
-  background: transparent;
-}
-
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:hover
-  .app-sidebar-scroll,
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:has(:focus-visible)
-  .app-sidebar-scroll {
-  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-}
-
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:hover
-  .app-sidebar-scroll::-webkit-scrollbar-track,
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:has(:focus-visible)
-  .app-sidebar-scroll::-webkit-scrollbar-track {
-  background: var(--scrollbar-track);
-  border-color: var(--border);
-}
-
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:hover
-  .app-sidebar-scroll::-webkit-scrollbar-thumb,
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:has(:focus-visible)
-  .app-sidebar-scroll::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
 }
 
 /* Focus follows the selected row's complete perimeter. Keep the ring on
@@ -3749,6 +3897,16 @@ button.machine-memory-unload-button {
 .app-sidebar.collapsed .app-sidebar-scroll {
   padding-left: 0.2rem;
   padding-right: 0.2rem;
+}
+
+/* Workshop's children are plain area links, so the icon rail keeps them: an
+   open group, or one holding the current area, lists their icons under its
+   own, with no indent and the rail's row rhythm. */
+.app-sidebar.collapsed .app-sidebar-list.app-sidebar-list-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.1rem 0 0;
 }
 
 /* During a sidebar drag, neutralize iframes/webviews so they don't
@@ -3828,7 +3986,7 @@ body.app-resizing webview {
   button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.project-row-thinking):not(
     .gezel-row
   ).active {
-  background: rgba(176, 114, 76, 0.15);
+  background: var(--selected-bg);
 }
 
 /* The connection consent dialog's verification code (GrantConsentDialog),

@@ -8,6 +8,9 @@ import { createMockApi } from '../test-utils/mockApi.js';
 import { primitivesMock } from '../test-utils/primitivesMock.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
+// The owner's view by default; a test of the builder's readouts turns it on.
+const view = vi.hoisted(() => ({ builder: false }));
+vi.mock('../components/useBuilderView.js', () => ({ useBuilderView: () => view.builder }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 vi.mock('../primitives/Tabs.js', () => primitivesMock.Tabs);
 
@@ -63,6 +66,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     initialView,
     fileName,
     readOnly,
+    showFormattingControls,
   }: {
     initialMarkdown?: string;
     onChange?: (source: string) => void;
@@ -72,6 +76,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
     initialView?: string;
     fileName?: string;
     readOnly?: boolean;
+    showFormattingControls?: boolean;
   }) => (
     <div
       data-testid="editor"
@@ -80,6 +85,7 @@ vi.mock('@bendyline/squisq-editor-react', () => ({
       data-initial-view={initialView}
       data-file={fileName}
       data-readonly={String(Boolean(readOnly))}
+      data-formatting={String(showFormattingControls ?? true)}
     >
       <div data-testid="editor-toolbar-right">{toolbarSlotRight}</div>
       {onChange && (
@@ -271,6 +277,7 @@ const PROJECTS: Project[] = [
 
 describe('ProjectsView', () => {
   beforeEach(() => {
+    view.builder = false;
     consumeOpenFile('pj-alpha');
     consumeOpenFile('pj-beta');
     outsideInMocks.resolveLayout.mockReset().mockReturnValue(null);
@@ -404,14 +411,37 @@ describe('ProjectsView', () => {
     expect(screen.getByRole('button', { name: 'Archive project' })).toBeInTheDocument();
   });
 
+  // "Turn it on in Project Settings" set a tab no pane renders, leaving the
+  // project blank (1.26313.105 audit).
+  it('opens Project Settings from a "Turn it on in Project Settings" link', async () => {
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      ...CODE_TYPE,
+      name: 'Alpha',
+      packages: [],
+      status: 'active',
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent('gezel:open-project-settings', { detail: { projectId: 'pj-alpha' } }),
+      );
+    });
+
+    expect(screen.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('button', { name: 'Archive project' })).toBeInTheDocument();
+  });
+
   it('shows labeled creation keys when the project list is collapsed', async () => {
     render(<ProjectsView />);
     await screen.findByText('Alpha');
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse project list' }));
 
-    expect(screen.getByRole('button', { name: 'New Project' })).toHaveTextContent('+Project');
-    expect(screen.queryByRole('button', { name: /New Job/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'New project' })).toHaveTextContent('+Project');
+    expect(screen.queryByRole('button', { name: /New job/ })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Expand project list' })).toBeInTheDocument();
   });
 
@@ -463,7 +493,30 @@ describe('ProjectsView', () => {
     expect(within(roster).getByText('Developer')).toBeInTheDocument();
   });
 
-  it('adds an existing workshop gezel from Project Settings', async () => {
+  // An owner's status bar shows a project's status only once it is paused,
+  // so the control has to be reachable from Settings.
+  it('changes the project status from Project Settings', async () => {
+    const project = { id: 'pj-alpha', ...CODE_TYPE, name: 'Alpha', packages: [], status: 'active' };
+    vi.mocked(api.getProject).mockResolvedValue(project as never);
+    vi.mocked(api.updateProject).mockImplementation(
+      async (_id, patch) => ({ ...project, ...patch }) as never,
+    );
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+
+    const status = (await screen.findAllByTestId('mock-select')).find((select) =>
+      within(select).queryByRole('option', { name: 'Inactive' }),
+    );
+    expect(status).toHaveValue('active');
+    fireEvent.change(status as HTMLElement, { target: { value: 'inactive' } });
+    await waitFor(() =>
+      expect(api.updateProject).toHaveBeenCalledWith('pj-alpha', { status: 'inactive' }),
+    );
+  });
+
+  it('adds an existing crew member from Project Settings', async () => {
     vi.mocked(api.listGezels).mockResolvedValue({
       gezels: [
         {
@@ -496,7 +549,7 @@ describe('ProjectsView', () => {
     await screen.findByTestId('project-chat');
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
 
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Gezel' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add crew member' }));
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByText('Tomas')).not.toBeInTheDocument();
     fireEvent.click(within(dialog).getByRole('button', { name: /Amira/ }));
@@ -586,7 +639,7 @@ describe('ProjectsView', () => {
     render(<ProjectsView forceProjectId="pj-alpha" />);
     await screen.findByTestId('project-chat');
     fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Add Gezel' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Add crew member' }));
 
     const dialog = await screen.findByRole('dialog');
     expect(within(dialog).queryByRole('button', { name: /Meester/ })).not.toBeInTheDocument();
@@ -680,7 +733,7 @@ describe('ProjectsView', () => {
     // The crew roster and the voorman picker both render the role-based name
     // here, so there is deliberately more than one match.
     await screen.findAllByText('developer');
-    fireEvent.click(screen.getByRole('button', { name: 'Add Gezel' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add crew member' }));
     fireEvent.click(
       await screen.findByRole('button', { name: /Researcher.*Finds and checks evidence/ }),
     );
@@ -1221,6 +1274,8 @@ describe('ProjectsView', () => {
   });
 
   it('shows workspace indexing issues and toggles the index results pane', async () => {
+    // The index chip is a builder's readout.
+    view.builder = true;
     const editableProject = {
       id: 'pj-alpha',
       ...CODE_TYPE,
@@ -1616,6 +1671,34 @@ describe('ProjectsView', () => {
       await within(pane).findByText('Clear and useful, with one actionable omission.'),
     ).toBeInTheDocument();
     expect(api.toolFileReview).toHaveBeenCalledWith('pj-alpha', { path: 'notes/audit.md' });
+  });
+
+  it('opens a file in a read-only workspace without formatting keys, a .txt in Source', async () => {
+    vi.mocked(api.listProjectWorkspace).mockResolvedValue({
+      files: [{ name: 'policy.txt', path: 'Catering/policy.txt', isDirectory: false }],
+      truncated: false,
+    } as never);
+    vi.mocked(api.readProjectWorkspaceFile).mockResolvedValue({
+      path: 'Catering/policy.txt',
+      content: 'Minimum order: $150.\nDeposit: 30%.',
+    } as never);
+    vi.mocked(api.getProject).mockResolvedValue({
+      id: 'pj-alpha',
+      ...CODE_TYPE,
+      name: 'Alpha',
+      packages: [],
+      managedWorkspaceWritePolicy: 'deny',
+    } as never);
+
+    render(<ProjectsView forceProjectId="pj-alpha" />);
+    await screen.findByTestId('project-chat');
+    fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'policy.txt' }));
+
+    const editor = await screen.findByTestId('editor');
+    expect(editor).toHaveAttribute('data-readonly', 'true');
+    expect(editor).toHaveAttribute('data-formatting', 'false');
+    expect(editor).toHaveAttribute('data-initial-view', 'raw');
   });
 
   it('offers workspace file mutations only when the write policy allows them', async () => {
@@ -2295,7 +2378,7 @@ describe('ProjectsView', () => {
     } as never);
 
     render(<ProjectsView />);
-    fireEvent.click(screen.getByRole('button', { name: '+ New Project' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ New project' }));
 
     const gallery = await screen.findByRole('radiogroup', { name: 'Project type' });
     // The picker opens with nothing chosen — step 1 is the catalog alone.
@@ -2346,7 +2429,7 @@ describe('ProjectsView', () => {
     } as never);
 
     render(<ProjectsView />);
-    fireEvent.click(screen.getByRole('button', { name: '+ New Project' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ New project' }));
 
     const gallery = await screen.findByRole('radiogroup', { name: 'Project type' });
     await within(gallery).findByRole('radio', { name: 'Language Trainer' });
@@ -2386,7 +2469,7 @@ describe('ProjectsView', () => {
     } as never);
 
     render(<ProjectsView />);
-    fireEvent.click(screen.getByRole('button', { name: '+ New Project' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ New project' }));
     fireEvent.click(await screen.findByRole('radio', { name: 'Language Trainer' }));
 
     const nameInput = screen.getByLabelText(/^Name/);
@@ -2456,7 +2539,7 @@ describe('ProjectsView', () => {
     window.addEventListener('gezel:gezel-updated', rosterChanged);
     try {
       render(<ProjectsView />);
-      fireEvent.click(screen.getByRole('button', { name: '+ New Project' }));
+      fireEvent.click(screen.getByRole('button', { name: '+ New project' }));
       fireEvent.click(await screen.findByRole('radio', { name: 'Language Trainer' }));
       fireEvent.change(screen.getByLabelText(/^Name/), {
         target: { value: 'Spanish practice' },
@@ -2577,6 +2660,60 @@ describe('ProjectsView', () => {
       } as never);
       render(<ProjectsView forceProjectId="pj-alpha" />);
       expect(await screen.findByRole('tab', { name: 'Output' })).toBeInTheDocument();
+    });
+
+    it('puts an app update that waits for the person over the Output page', async () => {
+      activeWidth = 1024;
+      const projectType = {
+        id: 'shift-roster',
+        version: '1.0.0',
+        source: 'bundled',
+        appliedAt: '2026-11-02T00:00:00Z',
+      };
+      vi.mocked(api.getProject).mockImplementation(
+        async (id) => ({ id, name: 'Alpha', packages: [], projectType }) as never,
+      );
+      vi.mocked(api.listProjects).mockResolvedValue({
+        projects: [{ id: 'pj-alpha', ...CODE_TYPE, name: 'Alpha', projectType }],
+      } as never);
+      vi.mocked(api.getCatalogItem).mockResolvedValue({
+        sourceId: 'bundled',
+        kind: 'project-type',
+        manifest: {
+          kind: 'project-type',
+          id: 'shift-roster',
+          name: 'Shift Roster',
+          tools: [],
+          pages: { entry: 'roster/index.html', api: 1 },
+        },
+      } as never);
+      vi.mocked(api.getProjectTypeUpgrade).mockResolvedValue({
+        upgrade: {
+          projectId: 'pj-alpha',
+          typeId: 'shift-roster',
+          typeName: 'Shift Roster',
+          source: 'bundled',
+          fromVersion: '1.0.0',
+          toVersion: '1.1.0',
+          automatic: false,
+          needsOk: [{ kind: 'edited-script', items: ['roster-store'] }],
+          changes: {
+            page: true,
+            scripts: [{ name: 'roster-store', change: 'replace-edited' }],
+            seeds: [],
+            craftbooks: [],
+            about: 'unchanged',
+            mission: 'unchanged',
+            crew: [],
+            toolsets: [],
+            schedules: [],
+            settings: [],
+          },
+        },
+      } as never);
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      expect(await screen.findByText('An update for Shift Roster is ready.')).toBeInTheDocument();
+      expect(screen.getByTestId('output-preview')).toHaveAttribute('data-source', 'type');
     });
 
     it('spends no row on a name-only heading in a compact single-project tab', async () => {

@@ -940,9 +940,41 @@ describe('McpBridge', () => {
       const gates = fixTask?.craftbook.steps.map((step) => [step.advanceWhen, step.gate]);
       expect(gates?.length).toBeGreaterThan(0);
       expect(JSON.stringify(gates)).not.toContain('index.html');
+
+      // One Builder runs both projects. Every kickoff used to add a crew
+      // member, and seven of ten arrived that way in one session.
+      const first = await svc.context.store.getProject(projectId!);
+      const second = await svc.context.store.getProject(fixProjectId!);
+      expect(first?.voormanGezelId).toBeTruthy();
+      expect(second?.voormanGezelId).toBe(first?.voormanGezelId);
+      expect(fix).toContain('takes it on as lead');
     } finally {
       await flatBridge.stop();
     }
+  });
+
+  it('start_project reuses the crew lead the person already has', async () => {
+    const start = (name: string) =>
+      bridge.callTool('start_project', {
+        name,
+        about: `${name} is a test project that proves a second crew project is led by the crew lead the first one recruited, not by a new crew member.`,
+        missionObjectives: '- Coordinate the crew on one written plan\n- Nothing else',
+        taskDescription: `Plan the ${name} work with the crew and write down who does what.`,
+      });
+    const leadOf = async (result: string) => {
+      const id = result.match(/\(([a-z0-9-]+)\)/)?.[1];
+      expect(id).toBeTruthy();
+      const project = await svc.context.store.getProject(id!);
+      expect(project?.mode ?? 'crew').toBe('crew');
+      return project?.voormanGezelId;
+    };
+
+    const first = await leadOf(await start('Harvest Fair Crew'));
+    const again = await start('Winter Market Crew');
+
+    expect(first).toBeTruthy();
+    expect(await leadOf(again)).toBe(first);
+    expect(again).toContain('takes it on as crew lead');
   });
 
   it('start_project starts a typed project with its first task', async () => {

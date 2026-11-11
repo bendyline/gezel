@@ -61,7 +61,7 @@ describe('formatRateLimitNotice', () => {
       'en-US',
     );
     expect(notice?.text).toBe(
-      "You've used up your 5-hour Claude usage limit. Claude can't answer again until it resets today at 5:00 PM. Switch this gezel to another model to keep working in the meantime.",
+      "You've used up your 5-hour Claude usage limit. Claude can't answer again until it resets today at 5:00 PM. Switch to another model to keep working in the meantime.",
     );
   });
 

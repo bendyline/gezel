@@ -1,6 +1,7 @@
 import type { CatalogItemSummary, ImageModelManifest, InstalledImageModel } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { AddModelDialog, HuggingFaceHostingNote, ModelListHeading } from './AddModelDialog.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { ImageLoraManager } from './ImageLoraManager.js';
@@ -68,6 +69,8 @@ export function ImageModelManager({
 }: Props) {
   const [installed, setInstalled] = useState<InstalledImageModel[]>([]);
   const [installedError, setInstalledError] = useState<string | null>(null);
+  const [installedLoaded, setInstalledLoaded] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [toDelete, setToDelete] = useState<string | null>(null);
   const fit = useMediaModelFit('image');
   const [showAll, setShowAll] = useState(false);
@@ -83,6 +86,8 @@ export function ImageModelManager({
     } catch (err) {
       setInstalled([]);
       setInstalledError((err as Error).message);
+    } finally {
+      setInstalledLoaded(true);
     }
   }, []);
 
@@ -153,18 +158,22 @@ export function ImageModelManager({
         </div>
       )}
 
-      {(installed.length > 0 || installedError) && (
-        <div className="ollama-section">
-          <h4>Local models</h4>
-          {installedError && <p className="error">{installedError}</p>}
-          {showActivePicker && installed.length > 1 && (
-            <p className="muted small">
-              The <strong>active</strong> model is what the image-generator gezel and the{' '}
-              <code>render_image</code> tool use by default. A gezel can still ask for a specific
-              model per image; switching reloads the engine, which takes a moment.
-            </p>
-          )}
-          {installed.length > 0 && (
+      <div className="ollama-section">
+        <ModelListHeading title="Local models" onAdd={() => setAddOpen(true)} />
+        {installedError && <p className="error">{installedError}</p>}
+        {installedLoaded && !installedError && installed.length === 0 && (
+          <p className="muted small">No models on this device yet.</p>
+        )}
+        {showActivePicker && installed.length > 1 && (
+          <p className="muted small">
+            The <strong>active</strong> model is what an image generator and the{' '}
+            <code>render_image</code> tool use by default. Gezel can still ask for a specific model
+            per image; switching reloads the engine, which takes a moment.
+          </p>
+        )}
+        {installed.length > 0 && (
+          // Up to six columns do not fit a phone's panel; the table scrolls inside it.
+          <div className="ollama-model-table-wrap">
             <table className="ollama-model-table">
               <thead>
                 <tr>
@@ -237,9 +246,9 @@ export function ImageModelManager({
                 ))}
               </tbody>
             </table>
-          )}
-        </div>
-      )}
+          </div>
+        )}
+      </div>
 
       {localModels.length > 0 && (
         <ImageLoraManager
@@ -252,8 +261,11 @@ export function ImageModelManager({
         />
       )}
 
-      <div className="ollama-section ollama-section--flat ollama-section--download">
-        <h4>Download a model</h4>
+      <AddModelDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        description={<HuggingFaceHostingNote />}
+      >
         <HiddenModelsToggle
           hiddenCount={hiddenCount}
           showAll={showAll}
@@ -322,7 +334,7 @@ export function ImageModelManager({
             );
           }}
         />
-      </div>
+      </AddModelDialog>
 
       <ConfirmDialog
         open={toDelete !== null}

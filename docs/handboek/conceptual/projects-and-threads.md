@@ -13,17 +13,17 @@ A **project** is a scoped workspace: one goal, one set of files, one crew. "Plan
 
 Every project can carry:
 
-- **About** — a plain-language description of what the project is. Your crew reads it before every conversation, so the context is always there.
+- **About** — a plain-language description of what the project is. Gezel reads it before every conversation, so the context is always there.
 - **Mission objectives** — the success criteria. Write these like you'd brief a team.
-- **A crew lead** — the gezel in charge, if you name one.
+- **A main crew member** — the one the project is assigned to. Usually they do the work themselves; in a bigger project they lead a crew. See [Your crew](the-crew.md).
 
 ## Threads
 
-A **thread** is an individual session with a gezel — one conversation, with one gezel, inside one project. Threads persist: close the app, come back next week, and the conversation is still there. Each gezel keeps their own threads per project, so your researcher's threads don't tangle with your copywriter's. A thread contains the context that a gezel's model uses to respond to your requests.
+A **thread** is one conversation, with one of your crew, inside one project. Threads persist: close the app, come back next week, and the conversation is still there. Each of them keeps their own threads per project, so your researcher's threads don't tangle with your copywriter's. A thread contains the context that the model uses to respond to your requests.
 
 ## Artifacts
 
-When a gezel produces something that is an "accessory" to your files — a report, a script, an image, a spreadsheet — it lands in the project's **artifacts**. Artifacts are plain files on your disk, listed in the project's Artifacts tab, separate from your own files so nothing you own gets touched unless you ask.
+When Gezel produces something that is an "accessory" to your files — a report, a script, an image, a spreadsheet — it lands in the project's **artifacts**. Artifacts are plain files on your disk, listed in the project's Artifacts tab, separate from your own files so nothing you own gets touched unless you ask.
 
 ## The default project
 

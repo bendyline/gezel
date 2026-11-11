@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TaskPausedReasonSchema } from './question.js';
 import { TaskDeliverableSchema } from './referenced-file.js';
 
 /** The fixed stops a request passes, in order: Got it → Making it → Checking it → Ready. */
@@ -27,6 +28,12 @@ export const RequestTrackSchema = z.object({
   messageId: z.string().optional(),
   /** Their words, shortened. */
   summary: z.string(),
+  /**
+   * What the work is called, as the person would say it: the title of the
+   * task it is on, absent when that is only the plan's name. The finished-work
+   * card leads with it.
+   */
+  title: z.string().optional(),
   /** `work` has tasks; `conversation` is a reply still being written. */
   kind: z.enum(['work', 'conversation']),
   /** Who the person hears from: the project's lead, else the thread's gezel. */
@@ -61,10 +68,21 @@ export const RequestTrackSchema = z.object({
   liveSessionIds: z.array(z.string()),
   /** Everyone besides the lead who worked on it. */
   crew: z.array(z.string()),
+  /**
+   * Crew members hired for it after it started, in the order they joined:
+   * the thread's `joined` introductions for its tasks. The tracker folds
+   * those introductions away, so it names the newcomers itself.
+   */
+  joined: z.array(z.string()).optional(),
   deliverable: TaskDeliverableSchema.optional(),
   makerGezelId: z.string().optional(),
   /** Ready, with the thread's gezel still writing its closing reply. */
   trailing: z.boolean().optional(),
+  /**
+   * Its work stopped and waits for the person to restart it. `reason` is set
+   * when the runtime paused the task for help, absent when the person did.
+   */
+  paused: z.object({ taskRef: z.string(), reason: TaskPausedReasonSchema.optional() }).optional(),
   questionIds: z.array(z.string()),
 });
 export type RequestTrack = z.infer<typeof RequestTrackSchema>;

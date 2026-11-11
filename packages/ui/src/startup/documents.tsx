@@ -85,7 +85,7 @@ export function StartupDocuments({
             />
           ) : (
             <p className="home-workshop-night-summary">
-              Your night shift reports will appear when your workshop is ready.
+              Your night shift reports will appear when Gezel is ready.
             </p>
           )}
           {reports.length > 0 && (

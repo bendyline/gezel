@@ -75,11 +75,11 @@
 }
 
 .reports-list-item:hover {
-  background: color-mix(in srgb, var(--text-muted) 10%, transparent);
+  background: var(--hover-bg);
 }
 
 .reports-list-item[aria-current="true"] {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: var(--selected-bg);
 }
 
 .reports-list-title {

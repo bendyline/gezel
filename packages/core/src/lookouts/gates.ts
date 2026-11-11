@@ -79,10 +79,9 @@ export function lookoutActionGate(
       if (ctx.followUpsUsedToday >= LOOKOUT_DAILY_CEILINGS.followUps) {
         return { ok: false, reason: "Reached today's limit for AI follow-ups." };
       }
-      if (!ctx.actingProvider)
-        return { ok: false, reason: 'No gezel is available to take this on.' };
+      if (!ctx.actingProvider) return { ok: false, reason: 'No one is available to take this on.' };
       if (!ctx.actingProvider.local && !ctx.cameraAllowsCloud) {
-        const who = ctx.actingProvider.gezelName ?? 'This gezel';
+        const who = ctx.actingProvider.gezelName ?? 'Gezel';
         return {
           ok: false,
           reason: `${who} uses ${ctx.actingProvider.label}; the camera's pictures would leave this computer.`,

@@ -8,6 +8,7 @@ import {
   craftbookSuggestionGuidance,
   inferCraftbookJobParams,
   normalizeCraftbookInvocationParams,
+  requestedTaskTitle,
   suggestedCraftbookInvocation,
 } from './craftbook-routing.js';
 
@@ -199,6 +200,55 @@ describe('start_project binary craftbook routing', () => {
   });
 });
 
+describe('the title of a task started from a craftbook', () => {
+  const at = '2026-11-09T10:00:00.000Z';
+  const asked = {
+    role: 'user',
+    at,
+    content:
+      "Write a one-page catering proposal for Harbor Books' holiday party: 60 guests, a hot buffet and a dessert table.",
+  };
+
+  it("is the person's request, not the plan's name", () => {
+    expect(requestedTaskTitle(undefined, [asked, { role: 'assistant', content: 'On it.' }])).toBe(
+      "One-page catering proposal for Harbor Books' holiday party",
+    );
+  });
+
+  it('keeps a title the model gave', () => {
+    expect(requestedTaskTitle('  Holiday proposal ', [asked])).toBe('Holiday proposal');
+  });
+
+  it('reads an answer to a question beside the request it answers', () => {
+    expect(
+      requestedTaskTitle(undefined, [
+        asked,
+        { role: 'assistant', content: 'A document or a deck?' },
+        { role: 'user', content: '[Answer to: A document or a deck?] Selected: A document' },
+      ]),
+    ).toBe("One-page catering proposal for Harbor Books' holiday party");
+  });
+
+  it('leaves the plan to name a turn the person did not open', () => {
+    // A gezel's handoff, a page reaction and a hidden prompt are not requests.
+    expect(
+      requestedTaskTitle(undefined, [
+        asked,
+        { role: 'user', content: 'Please make the deck too.', from: { gezelId: 'g1' } },
+      ]),
+    ).toBeUndefined();
+    expect(
+      requestedTaskTitle(undefined, [
+        { role: 'user', content: '[Trip page]: Day 2 opened', origin: 'system' },
+      ]),
+    ).toBeUndefined();
+    expect(
+      requestedTaskTitle(undefined, [{ role: 'user', content: 'Continue.', hidden: true }]),
+    ).toBeUndefined();
+    expect(requestedTaskTitle(undefined, [])).toBeUndefined();
+  });
+});
+
 describe('craftbook input guidance', () => {
   const singleFile = {
     type: 'object',
@@ -240,10 +290,10 @@ describe('craftbook input guidance', () => {
     const text = craftbookInputFailureText({
       craftbookId: 'tidy-spreadsheet',
       param: 'source',
-      daemonMessage: 'Choose the spreadsheet this craftbook works on.',
+      daemonMessage: 'Choose the spreadsheet this plan works on.',
       paramSchema: singleFile,
     });
-    expect(text).toContain('Choose the spreadsheet this craftbook works on.');
+    expect(text).toContain('Choose the spreadsheet this plan works on.');
     expect(text).toContain('params.source = the workspace path of ONE file (.csv, .tsv)');
     expect(text).toContain('list_dir');
     expect(text).toContain('works on one file');
@@ -253,7 +303,7 @@ describe('craftbook input guidance', () => {
     const text = craftbookInputFailureText({
       craftbookId: 'x',
       param: 'source',
-      daemonMessage: 'Choose the folder this craftbook works on.',
+      daemonMessage: 'Choose the folder this plan works on.',
       paramSchema: undefined,
     });
     expect(text).toContain('params.source = the workspace path of the file or folder');

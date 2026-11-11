@@ -69,7 +69,7 @@ export function humanizeToolCall(
     case 'ask_specialist':
       return `Asked the ${str('role') ?? 'specialist'}${str('question') ? `: ${oneLine(str('question'), 50)}` : ''}`;
     case 'ensure_gezel':
-      return `Lined up a ${str('jobTitle') ?? str('role') ?? 'gezel'}`;
+      return `Lined up a ${str('jobTitle') ?? str('role') ?? 'crew member'}`;
     case 'create_task':
       return `Created task “${oneLine(str('title'), 50) ?? '…'}”`;
     case 'assign_task':
@@ -91,7 +91,7 @@ export function humanizeToolCall(
     case 'advance_task_step':
       return `Advanced ${str('ref') ?? 'the task'}`;
     case 'invoke_craftbook':
-      return `Started ${str('craftbookId') ?? 'a craftbook'}`;
+      return `Started ${str('craftbookId') ?? 'a plan'}`;
     case 'suggest_work':
       return 'Looked for the right way to do this';
     case 'start_work': {
@@ -115,7 +115,7 @@ export function humanizeToolCall(
     case 'list_tasks':
       return 'Listed the tasks';
     case 'list_gezels':
-      return 'Listed the team';
+      return 'Listed the crew';
     case 'generate_image': {
       const size =
         typeof a.width === 'number' && typeof a.height === 'number'

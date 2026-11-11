@@ -21,10 +21,12 @@ type ProbeState =
   | { kind: 'probe-failed'; error: string };
 
 /**
- * Settings subsection for video generation. Drives the bundled
- * diffusers/PyTorch engine (LTX). Unlike the image settings there's no
- * cloud option yet, but there IS an accelerator readout — generation on
- * the CPU fallback is so slow it warrants a prominent warning.
+ * Settings subsection for video generation. Two local engines render it:
+ * the diffusers/PyTorch server (the full LTX and Wan models) and sd.cpp
+ * (compact GGUF models on Metal, CUDA or Vulkan). Unlike the image settings
+ * there's no cloud option yet, but there IS an accelerator readout: when no
+ * engine reaches a GPU, generation is so slow it warrants a prominent
+ * warning.
  */
 export function VideoEngineSettings({ onModelsChanged }: Props) {
   const [probe, setProbe] = useState<ProbeState>({ kind: 'idle' });
@@ -69,6 +71,11 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
   const engineDown = probe.kind === 'probe-failed';
   const accelerator = 'status' in probe ? probe.status.engine.accelerator : undefined;
   const cpuReason = 'status' in probe ? probe.status.engine.cpuReason : undefined;
+  const engines = 'status' in probe ? (probe.status.engine.engines ?? []) : [];
+  const compactOnGpu = engines.some(
+    (e) => e.engine === 'sd-cpp' && e.status === 'ok' && e.backend && e.backend !== 'cpu',
+  );
+  const engineUnavailable = videoEngineUnavailable(engines);
 
   const onConfirmationChange = useCallback(async (mode: 'ask' | 'always-allow') => {
     setStatus('saving…');
@@ -109,13 +116,22 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
 
       <VideoGeneratorGezelHint />
 
-      {accelerator === 'cpu' && <CpuFallbackNotice memory={memory} cpuReason={cpuReason} />}
+      {accelerator === 'cpu' &&
+        (compactOnGpu ? (
+          <p className="muted small">
+            The larger video models run on the processor here, which takes hours for each clip. The
+            smaller models in the list run on your graphics card.
+          </p>
+        ) : (
+          <CpuFallbackNotice memory={memory} cpuReason={cpuReason} />
+        ))}
       {probe.kind === 'probe-failed' && (
         <p className="error">Couldn't reach the Gezel service. Details: {probe.error}</p>
       )}
 
       <VideoModelManager
         {...(engineDown ? { disabledReason: 'Video engine is not reachable.' } : {})}
+        engineUnavailable={engineUnavailable}
         {...(config?.defaultVideoModel
           ? { configuredDefaultModelId: config.defaultVideoModel }
           : {})}
@@ -133,7 +149,7 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
         <legend>Confirmation</legend>
         <p className="muted small">
           Video generation is long-running and monopolizes the GPU, pausing the chat model. Choose
-          whether the agent should ask before each generation.
+          whether Gezel should ask before each generation.
         </p>
         <div
           className="gz-tray"
@@ -169,6 +185,23 @@ export function VideoEngineSettings({ onModelsChanged }: Props) {
       {status && <p className="muted small">{status}</p>}
     </div>
   );
+}
+
+/**
+ * Why each engine this install cannot run models on, for the download list:
+ * an install without the sd.cpp engine still lists its compact models, but
+ * cannot download them. An engine status that predates per-engine entries
+ * names nothing, so nothing is disabled on its account.
+ */
+export function videoEngineUnavailable(
+  engines: ReadonlyArray<{ engine: string; status: string }>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of engines) {
+    if (e.status !== 'not-configured') continue;
+    out[e.engine] = "This model needs a video engine this install doesn't include.";
+  }
+  return out;
 }
 
 const VENDOR_LABEL: Record<'amd' | 'nvidia' | 'intel', string> = {

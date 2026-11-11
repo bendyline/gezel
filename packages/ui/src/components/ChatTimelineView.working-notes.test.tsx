@@ -194,8 +194,9 @@ describe('ChatTimelineView — content held for a finished task', () => {
     vi.mocked(api.listGezels).mockResolvedValue({ gezels: [] } as never);
   });
 
-  // The folder invitation follows the first thing the crew made.
-  it('shows the trailing invitation only once a task has wrapped up', async () => {
+  // The folder invitation follows something the crew made: a thread that
+  // opens on a finished task shows it, one with nothing finished does not.
+  it('shows the trailing invitation only in a thread that opens on a wrapped-up task', async () => {
     const withoutWrapUp = MESSAGES.filter((m) => m.synthetic !== 'task-wrapup');
     const { unmount } = render(
       <ChatTimelineView
@@ -224,5 +225,48 @@ describe('ChatTimelineView — content held for a finished task', () => {
       />,
     );
     expect(await screen.findByText('Want me to look after a folder?')).toBeInTheDocument();
+  });
+
+  // The invitation used to arrive with the wrap-up, and the view scrolled to
+  // it: the first finished result left the screen for a folder picker.
+  it('keeps the invitation off a result that lands during the visit', async () => {
+    const withoutWrapUp = MESSAGES.filter((m) => m.synthetic !== 'task-wrapup');
+    let reads = 0;
+    render(
+      <ChatTimelineView
+        scopeKey="global"
+        activeSessionId={undefined}
+        // The thread opens with the task still running; the wrap-up is in
+        // the next read, as it is when the task finishes while they watch.
+        loadTimeline={async () =>
+          ({
+            messages: reads++ === 0 ? withoutWrapUp : MESSAGES,
+            hasMore: false,
+          }) as ListTimelineResponse
+        }
+        streamUrl={() => 'https://example.invalid/events'}
+        trailingContent={<p>Want me to look after a folder?</p>}
+        trailingContentAfterWrapUp
+      />,
+    );
+
+    expect(await screen.findByText('Mira finished your trip plan.')).toBeInTheDocument();
+    expect(screen.queryByText('Want me to look after a folder?')).not.toBeInTheDocument();
+  });
+
+  it('still shows content that is not held for a finished task', async () => {
+    const withoutWrapUp = MESSAGES.filter((m) => m.synthetic !== 'task-wrapup');
+    render(
+      <ChatTimelineView
+        scopeKey="global"
+        activeSessionId={undefined}
+        loadTimeline={async () =>
+          ({ messages: withoutWrapUp, hasMore: false }) as ListTimelineResponse
+        }
+        streamUrl={() => 'https://example.invalid/events'}
+        trailingContent={<p>I still need my tools.</p>}
+      />,
+    );
+    expect(await screen.findByText('I still need my tools.')).toBeInTheDocument();
   });
 });

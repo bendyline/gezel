@@ -5,6 +5,7 @@ import {
   type SecurityPolicy,
   type SecurityPresetLevel,
   classifySecurityLevel,
+  projectManagedWorkspaceWritable,
   resolveSecurityPolicy,
   securityCapabilitiesOf,
   securityPolicyForLevel,
@@ -61,13 +62,13 @@ const SECURITY_SWITCHES: ReadonlyArray<{
     key: 'allowPackageScriptExecution',
     label: 'Run package scripts',
     description:
-      'Show or set on/off for gezels running package scripts and installed package binaries (outside the sandbox, with network access)',
+      'Show or set on/off for Gezel running package scripts and installed package binaries (outside the sandbox, with network access)',
   },
   {
     command: 'edit-package-scripts',
     key: 'allowPackageScriptEdits',
     label: 'Edit package scripts',
-    description: 'Show or set on/off for gezels adding or changing the scripts in package.json',
+    description: 'Show or set on/off for Gezel adding or changing the scripts in package.json',
   },
 ];
 
@@ -115,7 +116,8 @@ export function describeSecurityLevel(policy: SecurityPolicy): string[] {
   ];
 }
 
-function enabledValue(state: string | undefined): boolean | undefined {
+/** An optional `on`/`off` argument: undefined shows the setting, anything else is refused. */
+export function enabledValue(state: string | undefined): boolean | undefined {
   if (state === undefined) return undefined;
   if (state === 'on') return true;
   if (state === 'off') return false;
@@ -204,7 +206,7 @@ export function registerGrowthCommand(
 ): void {
   program
     .command('growth [state]')
-    .description('Show or set on/off for gezel growth: XP and the level-ups it offers')
+    .description('Show or set on/off for crew growth: XP and the level-ups it offers')
     .option('--json', 'Output the setting as JSON')
     .action(async (state: string | undefined, options: { json?: boolean }) => {
       const enabled = enabledValue(state);
@@ -244,6 +246,37 @@ export function registerProjectSettingsCommands(
         options.json
           ? JSON.stringify(result)
           : `${projectId}: workspace indexing ${result.indexingEnabled ? 'on' : 'off'}`,
+      );
+    });
+
+  // The terminal's Project → Settings switch. A folder Gezel was pointed at
+  // starts read-only, and a craftbook that saves into it pauses until this is
+  // on; without the command a server or a script had no way to turn it on.
+  env
+    .command('edits [state]')
+    .description(
+      "Show or set on/off for Gezel changing files in the current project's folder (off for a folder until you allow it)",
+    )
+    .option('--json', 'Output the project setting as JSON')
+    .action(async (state: string | undefined, options: { json?: boolean }) => {
+      const enabled = enabledValue(state);
+      const client = await connect();
+      const projectId = await projectFor(client);
+      const project =
+        enabled === undefined
+          ? await client.getProject(projectId)
+          : await client.updateProject(projectId, {
+              managedWorkspaceWritePolicy: enabled ? 'allow' : 'deny',
+            });
+      const result = { projectId, editsAllowed: projectManagedWorkspaceWritable(project) };
+      console.log(
+        options.json
+          ? JSON.stringify(result)
+          : `${projectId}: ${
+              result.editsAllowed
+                ? 'Gezel may change files in this project'
+                : 'Gezel may not change files in this project (read-only)'
+            }`,
       );
     });
 }

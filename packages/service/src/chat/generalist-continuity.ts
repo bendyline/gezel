@@ -3,6 +3,7 @@ import {
   type ModelTaskStrategy,
   type ProviderName,
   type Task,
+  hostedModelTaskStrategy,
   isLocalProvider,
   parseTaskRef,
 } from '@bendyline/gezel';
@@ -13,6 +14,7 @@ import {
 } from '@bendyline/gezel-inference/internal/chat/local-model-tier';
 import { resolveCatalogIdFromModelId } from '@bendyline/gezel-inference/internal/providers/catalog-model-config';
 import type { Store } from '../fs/store.js';
+import { hostedProviderDefaultModel } from '../providers/hosted-default-models.js';
 import { type StepSniffName, runStepSniff } from './step-sniff.js';
 
 /**
@@ -34,6 +36,16 @@ import { type StepSniffName, runStepSniff } from './step-sniff.js';
  */
 export function renderWriteBailContinuation(stepId: string): string {
   return `Your file write landed and the runtime closed that turn early. Step \`${stepId}\` is still active: it is not complete until its gate passes. Finish anything the step procedure in your prompt still requires, then call \`advance_task_step\` once.`;
+}
+
+/**
+ * Re-send after the model service refused a turn for rate (HTTP 429). The
+ * seed or retry text already sits in the transcript, so repeating it would
+ * read as a second request; this says only that the turn was cut short and
+ * where to pick up. Names no tool, so it fits fixed-action steps too.
+ */
+export function renderRateLimitRetry(taskRef: string, stepId: string): string {
+  return `The model service rate limited your previous turn (HTTP 429) before it finished; nothing about the task changed. Continue step \`${stepId}\` of task ${taskRef} from where you stopped: anything you already saved still counts, so do not redo it. Follow the step procedure in your prompt and finish the step as it says.`;
 }
 
 export { isContextOverflowError, sessionContextPoisoned } from '@bendyline/gezel';
@@ -63,7 +75,11 @@ export interface ExecutionModelProfile {
   tier: LocalModelTier;
   /** The model id the dispatch will use, when one is pinned or defaulted. */
   modelId?: string;
-  /** The model's measured task strategy: the gezel's override, else the catalog's. */
+  /**
+   * The model's measured task strategy: the gezel's override, else the
+   * catalog's, else for a hosted model `HOSTED_MODEL_TASK_STRATEGIES`, read
+   * for the provider's own default model when nothing names one.
+   */
   affinity?: ModelTaskStrategy;
 }
 
@@ -89,7 +105,15 @@ export async function resolveExecutionModelFor(args: {
     ? ((await resolveCatalogIdFromModelId(args.catalog, effectiveModel)) ?? effectiveModel)
     : effectiveModel;
   const manifest = catalogId ? await chatModelManifest(args.catalog, catalogId) : undefined;
-  const affinity = gezel?.parsed.frontmatter.tuning?.taskStrategy ?? manifest?.tuning?.taskStrategy;
+  const affinity =
+    gezel?.parsed.frontmatter.tuning?.taskStrategy ??
+    manifest?.tuning?.taskStrategy ??
+    (local
+      ? undefined
+      : hostedModelTaskStrategy(
+          args.providerName,
+          effectiveModel ?? hostedProviderDefaultModel(args.providerName),
+        ));
   const tier: LocalModelTier = local
     ? classifyLocalModelTier({
         providerName: args.providerName,

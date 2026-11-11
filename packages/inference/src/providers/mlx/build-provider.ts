@@ -8,6 +8,7 @@ import { gezelPaths } from '@bendyline/gezel/paths';
 import type { ConfigStore as Store } from '../../fs/config-store.js';
 import type { MlxRuntimeStatusBus } from '../../python/mlx-runtime-status-bus.js';
 import { noModelYetMessage, notReadyError } from '../active-install-message.js';
+import { engineUnsupportedError } from '../engine-unsupported.js';
 import { estimateExactPerSlotKvBytesF16 } from '../llama-cpp/offload-planner.js';
 import {
   CapacityDeniedError,
@@ -140,11 +141,9 @@ export async function buildMlxProvider(opts: {
   // MLX has no CPU / CUDA / Vulkan path — if we're not on darwin-arm64,
   // the model can't load even if mlx-lm is somehow installed.
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
-    const err = new Error(
+    throw engineUnsupportedError(
       'MLX runs on Apple Silicon Macs only. Switch to llama in Settings → On-device (llama).',
     );
-    (err as Error & { isActionable: boolean }).isActionable = true;
-    throw err;
   }
 
   if (!opts.uvRuntime) {

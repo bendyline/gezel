@@ -2197,7 +2197,7 @@ async function decideHomePreference(
     sourceMode: 'system-service',
     message:
       'The machine-wide background service is healthy but its data home has never been used, ' +
-      `while this account's per-user home has your gezellen and projects. Gezel connected to ` +
+      `while this account's per-user home has your crew and projects. Gezel connected to ` +
       'your per-user data and will keep doing so; change Hosting in Settings to switch.',
   };
 }

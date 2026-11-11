@@ -433,7 +433,7 @@ export function FileBrowserPane({
               />
             ) : treeMode ? (
               entries.length === 0 ? (
-                <p className="muted" style={{ padding: '0.5rem', fontSize: '0.85rem' }}>
+                <p className="muted" style={{ padding: '0.5rem', fontSize: 'var(--text-sm)' }}>
                   {emptyMessage}
                 </p>
               ) : (
@@ -479,7 +479,7 @@ export function FileBrowserPane({
               />
             )}
             {!customList && truncated && (
-              <p className="muted" style={{ padding: '0.5rem', fontSize: '0.8rem' }}>
+              <p className="muted" style={{ padding: '0.5rem', fontSize: 'var(--text-xs)' }}>
                 This folder has more files than can be shown — the listing is incomplete.
                 {source.reveal ? ` Use "${revealLabel}" above to browse everything.` : ''}
               </p>

@@ -1,5 +1,6 @@
 import {
   disablesThinking,
+  overlayOllamaRequestTuning,
   overlayOpenAiRequestTuning,
 } from '@bendyline/gezel-inference/internal/http/openai-compat/request-tuning';
 import type { ChatCompletionRequest } from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
@@ -63,5 +64,27 @@ describe('overlayOpenAiRequestTuning — reasoning_effort', () => {
     expect(disablesThinking('minimal')).toBe(true);
     expect(disablesThinking('low')).toBe(false);
     expect(disablesThinking(undefined)).toBe(false);
+  });
+});
+
+describe('overlayOllamaRequestTuning — think', () => {
+  it('turns thinking off for think: false and keeps the rest of the tuning', () => {
+    const out = overlayOllamaRequestTuning(base, { temperature: 0.1 }, undefined, false);
+    expect(out.reasoning).toEqual({ enableThinking: false, thinkingBudget: 2048 });
+    expect(out.sampling.temperature).toBe(0.1);
+    expect(base.reasoning.enableThinking).toBe(true);
+  });
+
+  it.each([undefined, true, 'high'])('leaves the model’s own setting for think=%s', (think) => {
+    expect(overlayOllamaRequestTuning(base, undefined, undefined, think).reasoning).toBe(
+      base.reasoning,
+    );
+  });
+
+  it('never turns thinking on for a model whose tuning leaves it off', () => {
+    const off: ResolvedTuning = { ...base, reasoning: { enableThinking: false } };
+    expect(overlayOllamaRequestTuning(off, undefined, undefined, true).reasoning).toEqual({
+      enableThinking: false,
+    });
   });
 });

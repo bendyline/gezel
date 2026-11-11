@@ -109,10 +109,10 @@ export function GezelTemplatePicker({
         type="button"
         className="ai-btn"
         onClick={() => setOpen(true)}
-        title="Replace this gezel's about.md with a gilde template"
+        title="Replace this crew member's about.md with a gilde template"
         aria-label="Use a template"
       >
-        📇
+        <span className="fa-regular fa-id-card" aria-hidden="true" />
       </button>
       <Dialog.Root
         open={open}
@@ -130,8 +130,8 @@ export function GezelTemplatePicker({
               <h3>Apply a template</h3>
             </Dialog.Title>
             <Dialog.Description className="muted small">
-              Replace this gezel's <code>about.md</code> with a template from the gilde. Current
-              content is overwritten — you can edit back to undo.
+              Replace this crew member's <code>about.md</code> with a template from the gilde.
+              Current content is overwritten — you can edit back to undo.
             </Dialog.Description>
             {!loading && sortedItems.length === 0 && (
               <p className="muted">No gilde templates available.</p>

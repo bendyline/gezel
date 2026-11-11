@@ -1,5 +1,5 @@
 import type { EngineStatusResponse } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { EngineMemoryBudgetPanel } from './EngineMemoryBudgetPanel.js';
 
@@ -12,6 +12,12 @@ interface Props {
   provider: 'llama-cpp' | 'mlx';
   /** Polling cadence in milliseconds. Default 2s — matches the plan. */
   pollMs?: number;
+  /**
+   * Settings that spend this budget (the page's parallel workers), drawn
+   * inside the frame below the slider. Shown on their own when the frame
+   * cannot be.
+   */
+  children?: ReactNode;
 }
 
 function fmtGB(bytes: number): string {
@@ -25,7 +31,7 @@ function fmtGB(bytes: number): string {
  * `/api/engines/status` so a `POST /reconcile` (or a chat-driven
  * spawn) lights up here within ~2s.
  */
-export function EngineBudgetStrip({ provider, pollMs = 2000 }: Props) {
+export function EngineBudgetStrip({ provider, pollMs = 2000, children }: Props) {
   const [status, setStatus] = useState<EngineStatusResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -64,15 +70,18 @@ export function EngineBudgetStrip({ provider, pollMs = 2000 }: Props) {
 
   if (error) {
     return (
-      <div style={{ fontSize: 12, color: 'var(--gz-color-muted, #888)' }}>
-        Engine status unavailable: {error}
-      </div>
+      <>
+        <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--gz-color-muted, #888)' }}>
+          Engine status unavailable: {error}
+        </div>
+        {children}
+      </>
     );
   }
   if (!status || !status.enforced) {
     // Cloud-only install or pre-boot — hide the strip rather than
     // showing 0 / 0 which would look like a bug.
-    return null;
+    return children ? <>{children}</> : null;
   }
 
   const ratio = status.budgetBytes > 0 ? status.committedBytes / status.budgetBytes : 0;
@@ -87,7 +96,7 @@ export function EngineBudgetStrip({ provider, pollMs = 2000 }: Props) {
         padding: '10px 14px',
         marginBottom: '1rem',
         background: 'var(--gz-color-surface, transparent)',
-        fontSize: 13,
+        fontSize: 'var(--text-xs)',
       }}
     >
       <div style={{ marginBottom: 6, fontWeight: 500 }}>Engine memory budget</div>
@@ -110,7 +119,7 @@ export function EngineBudgetStrip({ provider, pollMs = 2000 }: Props) {
           }}
         />
       </div>
-      <div style={{ fontSize: 12, color: 'var(--gz-color-muted, #888)' }}>
+      <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--gz-color-muted, #888)' }}>
         {fmtGB(status.committedBytes)} of {fmtGB(status.budgetBytes)} used
         {/* Name the pools on a discrete card. "38.3 GB" alone reads as system
             RAM, which is the pool a GPU user's models are mostly NOT in. */}
@@ -135,6 +144,7 @@ export function EngineBudgetStrip({ provider, pollMs = 2000 }: Props) {
         ) : null}
       </div>
       <EngineMemoryBudgetPanel status={status} onSaved={refresh} />
+      {children}
     </div>
   );
 }
