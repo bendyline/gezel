@@ -3589,9 +3589,11 @@ button.machine-memory-unload-button {
   font-size: var(--text-xs);
 }
 
+/* At 0.7rem the file icons centered 1px right of the header, Crew and
+   Workshop icons in the same column. */
 .app-sidebar-tree .tree-row > .tree-toggle,
 .app-sidebar-tree .tree-row > .tree-toggle-spacer {
-  margin-left: 0.7rem;
+  margin-left: calc(0.7rem - 1px);
 }
 
 /* Install-health pointer, directly beneath Settings. Deliberately the

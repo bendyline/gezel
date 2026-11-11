@@ -71,4 +71,12 @@ describe('MLX launcher ↔ sidecar argv contract', () => {
     // the saving, and over-reserving is the safe direction.
     expect(BUILDER).toMatch(/kvQuantArgs[\s\S]{0,160}kvBits > 0/);
   });
+
+  it('prices the Settings preview the way the launch plans', () => {
+    // The installed-model listing priced chats with the q8 discount while
+    // the launch refused it: Settings showed 4 chats at 52.7 GB for a model
+    // the engine ran at 3 chats and 66.2 GB.
+    const RUNTIME = readFileSync(join(HERE, '..', 'native', 'local-engine-runtime.ts'), 'utf8');
+    expect(RUNTIME).not.toMatch(/mlxKvBits/);
+  });
 });

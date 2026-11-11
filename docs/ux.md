@@ -970,7 +970,7 @@ block, sizes from the scale, `font-family` left to the global default except
 where a link needs forcing back to sans.
 
 **Section spacing in Settings.** A section that opens with its own heading
-("Download a model", "Installed catalogs") is a new subject and gets a 2rem
+("Installed catalogs", "Styles and fast mode") is a new subject and gets a 2rem
 gap above it; notices, errors, and progress boxes stay tight to the section
 they belong to. Stacked cards in a flat settings pane sit 2.5rem apart, since
 spacing is the only separator once the card chrome is stripped. Both rules
@@ -978,6 +978,22 @@ live in [styles/catalog.css](../packages/ui/src/styles/catalog.css);
 don't set a section's top margin inline. A page built from
 `SettingsSection` takes its spacing from the recipe in
 [Settings pages](#settings-pages) instead.
+
+**A model page shows what is on this device; the catalog opens on request.**
+The llama.cpp, MLX, Ollama, image, video and audio pages lead with their
+installed models under a heading whose right end holds **Add a model…**
+(`ModelListHeading`). That key opens `AddModelDialog`
+([components/AddModelDialog.tsx](../packages/ui/src/components/AddModelDialog.tsx)):
+the catalog, its filter and "Show all models" toggle, and at the left of the
+footer the other ways in (a model from Hugging Face or a file, a `.gezmodel`
+package), which close it before they open. The pages used to list the whole
+catalog under the installed models, so a page opened to check or tune a model
+read as a shop. With nothing installed, the section says "No models on this
+device yet." under its heading. A download keeps going when the dialog closes:
+the page's "Downloading…" section carries it, and a notice from a download
+that failed to start shows in the dialog while it is open. DwarfStar keeps
+one table of installed and downloadable builds, because its memory guidance
+has to be on a row before a download of hundreds of GB starts.
 
 **A media model row says what the model does, in plain words.** A video
 model's catalog row reads its size, the clip it makes when asked for
@@ -1358,7 +1374,15 @@ key. Rules:
   signed out. Sign in again.", never a wall of failed requests.
 - **Where people are added, say what they get.** Settings → Accounts says
   "Everyone here can do everything you can, including open a terminal."
-  until roles exist.
+  until roles exist, and the Add an account dialog says it again.
+- **Settings → Accounts opens on what accounts are for**, in the people
+  section's description: signing in from a web browser, one name and
+  password each, never needed by the desktop app or the command line.
+  People and browsers are ruled lists (a name, one muted line, the row's
+  actions at its end), never boxed cards. Add account is the page's one
+  filled key; each person's ⋮ menu holds Set a new password, Stop them
+  signing in, and Remove, which asks first. Adding someone and setting a
+  password open dialogs, so no form sits open on the page.
 
 ### The welcome
 

@@ -8,6 +8,7 @@ import { isRetiredModel } from '@bendyline/gezel';
 import type { OllamaPullChunk } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { AddModelDialog, ModelListHeading } from './AddModelDialog.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { LicenseButton } from './LicenseButton.js';
@@ -121,6 +122,8 @@ function asOllamaChatModel(
 export function OllamaModelManager({ enabled, onModelsChanged, compact = false }: Props) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [modelsError, setModelsError] = useState<string | null>(null);
+  const [modelsLoaded, setModelsLoaded] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [pulls, setPulls] = useState<Map<string, ActivePull>>(new Map());
   const [customPull, setCustomPull] = useState('');
   const [toDelete, setToDelete] = useState<string | null>(null);
@@ -155,6 +158,8 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
     } catch (err) {
       setModelsError((err as Error).message);
       setModels([]);
+    } finally {
+      setModelsLoaded(true);
     }
   }, []);
 
@@ -371,57 +376,62 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
         </div>
       )}
 
-      {(models.length > 0 || modelsError) && (
-        <div className="ollama-section">
-          <h4>{compact ? 'Models on this device' : 'Local models'}</h4>
-          {modelsError && <p className="error">{modelsError}</p>}
-          {models.length > 0 && (
-            <table className="ollama-model-table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Size</th>
-                  <th title="Effective per-turn context size Gezel sends to Ollama">
-                    Context size
-                  </th>
-                  <th>Tools</th>
-                  <th />
+      <div className="ollama-section">
+        <ModelListHeading
+          title={compact ? 'Models on this device' : 'Local models'}
+          onAdd={() => setAddOpen(true)}
+        />
+        {modelsError && <p className="error">{modelsError}</p>}
+        {enabled && modelsLoaded && !modelsError && models.length === 0 && (
+          <p className="muted small">No models on this device yet.</p>
+        )}
+        {models.length > 0 && (
+          <table className="ollama-model-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Size</th>
+                <th title="Effective per-turn context size Gezel sends to Ollama">Context size</th>
+                <th>Tools</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {models.map((m) => (
+                <tr key={m.id}>
+                  <td>
+                    <code>{m.id}</code>
+                  </td>
+                  <td>{m.parameterSize ?? '—'}</td>
+                  <td>{formatContextWindow(m.contextWindow)}</td>
+                  <td>
+                    {m.supportsTools ? (
+                      <span className="gz-status-pill gz-status-pill--ok">✓</span>
+                    ) : (
+                      <span className="gz-status-pill gz-status-pill--warn">no</span>
+                    )}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="gz-link-button"
+                      onClick={() => setToDelete(m.id)}
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {models.map((m) => (
-                  <tr key={m.id}>
-                    <td>
-                      <code>{m.id}</code>
-                    </td>
-                    <td>{m.parameterSize ?? '—'}</td>
-                    <td>{formatContextWindow(m.contextWindow)}</td>
-                    <td>
-                      {m.supportsTools ? (
-                        <span className="gz-status-pill gz-status-pill--ok">✓</span>
-                      ) : (
-                        <span className="gz-status-pill gz-status-pill--warn">no</span>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="gz-link-button"
-                        onClick={() => setToDelete(m.id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
-      <div className="ollama-section ollama-section--flat ollama-section--download">
-        <h4>Download a model</h4>
+      <AddModelDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        description="Ollama downloads these from its own model library at ollama.com."
+      >
         <MemoryBudgetLine memory={memory} showAll={showAll} setShowAll={setShowAll} />
         <CategoryTabs
           active={activeCategory}
@@ -540,7 +550,7 @@ export function OllamaModelManager({ enabled, onModelsChanged, compact = false }
             Download
           </button>
         </div>
-      </div>
+      </AddModelDialog>
 
       <ConfirmDialog
         open={toDelete !== null}

@@ -10,6 +10,11 @@ const { VideoModelManager, videoDefaultClip, videoModelAbilities } = await impor
 );
 const { api } = await import('../api.js');
 
+/** The catalog lives behind the page's "Add a model…" key. */
+async function openAddModel() {
+  await userEvent.click(await screen.findByRole('button', { name: 'Add a model…' }));
+}
+
 const TWO_MODELS = {
   models: [
     {
@@ -147,6 +152,7 @@ describe('VideoModelManager downloads', () => {
       ]) as never,
     );
     render(<VideoModelManager />);
+    await openAddModel();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Show all models' }));
     const tooLarge = await screen.findByRole('button', { name: 'Too large' });
@@ -168,6 +174,7 @@ describe('VideoModelManager downloads', () => {
     );
     vi.mocked(api.pullVideoModel).mockResolvedValue(undefined);
     render(<VideoModelManager />);
+    await openAddModel();
 
     await screen.findByText('may not fit this machine');
     await userEvent.click(screen.getByRole('button', { name: 'Download' }));
@@ -185,6 +192,7 @@ describe('VideoModelManager downloads', () => {
   it('shows everything when the daemon cannot say what fits', async () => {
     vi.mocked(api.getVideoModelFit).mockRejectedValue(new Error('404'));
     render(<VideoModelManager />);
+    await openAddModel();
     expect(await screen.findByRole('button', { name: 'Download' })).toBeEnabled();
   });
 
@@ -196,6 +204,8 @@ describe('VideoModelManager downloads', () => {
     }) as typeof api.pullVideoModel);
 
     render(<VideoModelManager />);
+
+    await openAddModel();
 
     await userEvent.click(await screen.findByRole('button', { name: 'Download' }));
     expect(api.pullVideoModel).toHaveBeenCalledTimes(1);
@@ -214,10 +224,13 @@ describe('VideoModelManager downloads', () => {
       callbacks[0]?.({ type: 'error', error: 'network error' });
     });
 
+    // The failed download's Retry is on the page, under the dialog.
+    await userEvent.click(screen.getByRole('button', { name: 'Done' }));
     await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
 
     await waitFor(() => expect(api.pullVideoModel).toHaveBeenCalledTimes(2));
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
+    await openAddModel();
     expect(screen.getByRole('button', { name: /Downloading/ })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Download' })).not.toBeInTheDocument();
   });
@@ -279,6 +292,7 @@ describe('what a video model does', () => {
         }}
       />,
     );
+    await openAddModel();
 
     expect(await screen.findByText('· Animates pictures')).toBeInTheDocument();
     expect(screen.getByText('1280×704, 5 s')).toBeInTheDocument();

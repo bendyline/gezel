@@ -2,6 +2,14 @@ import type { CatalogItemSummary, ChatModelCategory, ChatModelManifest } from '@
 import { isImportedChatModel, isRetiredModel } from '@bendyline/gezel';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
+import {
+  AddModelDialog,
+  HuggingFaceHostingNote,
+  LocalInstallNotices,
+  ModelListHeading,
+  NEEDS_ATTENTION_TITLE,
+  useCatalogItems,
+} from './AddModelDialog.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { HuggingFaceRepoLink, huggingFaceRepoUrl } from './HuggingFaceRepoLink.js';
@@ -77,6 +85,7 @@ type CategoryTab = ChatModelCategory | 'all';
  */
 export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   const {
+    modelsLoading,
     models,
     modelsError,
     incomplete,
@@ -108,12 +117,13 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   // False until the override endpoint answers — an older daemon or machine
   // broker 404s and the affordance hides rather than erroring per row.
   const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
-  const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
+  const [catalogItems, setCatalogItems] = useCatalogItems('chat-model');
+  const [addOpen, setAddOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const importedIds = useMemo(
     () =>
       new Set(
-        catalogItems
+        (catalogItems ?? [])
           .filter((item) => isImportedChatModel(asMlxEntry(item.manifest) ?? undefined))
           .map((item) => item.manifest.id),
       ),
@@ -138,7 +148,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
 
   const availableCategories = useMemo<CategoryTab[]>(() => {
     const present = new Set<ChatModelCategory>();
-    for (const item of catalogItems) {
+    for (const item of catalogItems ?? []) {
       const m = asMlxEntry(item.manifest);
       if (!m) continue;
       present.add(m.category ?? 'general');
@@ -146,6 +156,16 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
     const order: ChatModelCategory[] = ['general', 'coding', 'reasoning', 'vision', 'embedding'];
     return ['all' as CategoryTab, ...order.filter((c) => present.has(c))];
   }, [catalogItems]);
+
+  const installNotices = (
+    <LocalInstallNotices
+      mismatch={installMismatch}
+      error={installError}
+      warning={installWarning}
+      onDownloadAnyway={downloadAnyway}
+      onDismissMismatch={() => setInstallMismatch(null)}
+    />
+  );
 
   return (
     <div className="ollama-model-manager">
@@ -177,226 +197,193 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
         onDelete={(id) => setToDelete(id)}
       />
 
-      {installMismatch && (
-        <div className="ollama-section">
-          <div className="gz-status-pill gz-status-pill--warn" style={{ marginBottom: '0.5rem' }}>
-            ⚠ <code>{installMismatch.catalogId}</code> is newer on Hugging Face than the version
-            Gezel knows about
-          </div>
-          <p style={{ marginBottom: '0.5rem' }}>
-            The file <code>{installMismatch.file}</code> changed upstream, so its checksum no longer
-            matches what this version of Gezel pinned. This is almost always a harmless upstream fix
-            — model authors routinely re-publish chat templates and tokenizer configs — but we can't
-            verify it automatically. You can download the current version now, or wait for a Gezel
-            update with a refreshed catalog.
-          </p>
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button
-              type="button"
-              className="gz-link-button"
-              onClick={() => downloadAnyway(installMismatch.catalogId)}
-            >
-              Download anyway
-            </button>
-            <button
-              type="button"
-              className="gz-link-button"
-              onClick={() => setInstallMismatch(null)}
-            >
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-
-      {installError && (
-        <div className="ollama-section">
-          <p className="error" style={{ marginBottom: '0.5rem' }}>
-            {installError}
-          </p>
-        </div>
-      )}
-
-      {installWarning && (
-        <div className="ollama-section">
-          <div className="gz-status-pill gz-status-pill--warn" style={{ marginBottom: '0.5rem' }}>
-            ⚠ {installWarning.id}: {installWarning.message}
-          </div>
-        </div>
-      )}
+      {!addOpen && installNotices}
 
       {!compact && <SharedModelMigrationPanel engine="mlx" onModelsChanged={onModelsChanged} />}
 
-      {(models.length > 0 || modelsError) && (
-        <div className="ollama-section">
-          <h4>{compact ? 'Models on this device' : 'Local models'}</h4>
-          {modelsError && <p className="error">{modelsError}</p>}
-          {models.length > 0 && (
-            <div className="ollama-model-table-wrap">
-              <table className="ollama-model-table">
-                <colgroup>
-                  <col className="model-name-column" />
-                  <col />
-                  <col />
-                  <col />
-                  <col />
-                  <col />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Size</th>
-                    <th>Quant</th>
-                    <th title="Effective per-turn context size after Gezel's configured limit">
-                      Context size
-                    </th>
-                    <th title="Representative startup and decode speed with an approximately 20K-token prompt">
-                      Fitness
-                    </th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {models.map((m) => {
-                    const outOfDate = m.updateAvailable === true;
-                    const reinstalling = Boolean(installs.get(m.id));
-                    const fitnessKey = `mlx:${m.id}`;
-                    const entry = fitness.get(fitnessKey);
-                    return (
-                      <Fragment key={m.id}>
-                        <tr>
-                          <td className="model-name-table-cell">
-                            <div className="model-name-cell">
-                              <code>{m.id}</code>
-                              <div className="model-name-meta">
-                                {importedIds.has(m.id) && (
-                                  <span
-                                    className="gz-status-pill"
-                                    title="Added from Hugging Face. Gezel has not tested this model; its fitness check says how it runs on this computer."
-                                  >
-                                    From Hugging Face
-                                  </span>
-                                )}
-                                {outOfDate && (
-                                  <span
-                                    className="gz-status-pill gz-status-pill--warn"
-                                    title={
-                                      m.updateReason ??
-                                      'The catalog ships different model files than the copy on disk. Update to pick them up.'
-                                    }
-                                  >
-                                    out of date
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-                          <ModelSizeCell model={m} />
-                          <td title={quantizationTitle(m.quantization)}>
-                            {approximateQuantizationLabel(m.quantization)}
-                          </td>
-                          <td
-                            title={
-                              m.effectiveContextWindow
-                                ? m.overrideContextTokens !== undefined
-                                  ? `You've set this model to ${m.overrideContextTokens.toLocaleString()} tokens per turn; Gezel grants up to what memory allows (currently ${m.effectiveContextWindow.toLocaleString()}).`
-                                  : `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}.`
-                                : m.contextSizingStatus === 'restart-required'
-                                  ? 'This model is running with a different context window than the current sizing settings resolve to. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
-                                  : m.contextSizingStatus === 'insufficient-memory'
-                                    ? 'The requested context window does not fit in memory safely. Unload another model or free memory before trying again.'
-                                    : 'The effective context size is unavailable.'
-                            }
-                          >
-                            {m.contextSizingStatus === 'restart-required' ? (
-                              'Restart needed'
-                            ) : m.contextSizingStatus === 'insufficient-memory' ? (
-                              "Won't fit"
-                            ) : (
-                              <>
-                                {formatContextWindow(m.effectiveContextWindow)}
-                                {m.overrideContextTokens !== undefined && (
-                                  <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
-                                    custom
-                                  </span>
-                                )}
-                              </>
-                            )}
-                          </td>
-                          <ModelFitnessCell entry={entry} probing={probing.includes(fitnessKey)} />
-                          <td className="model-actions-table-cell">
-                            <div className="model-actions-cell">
-                              <div className="model-action-status">
-                                {m.readOnly && (
-                                  <span
-                                    className="muted small"
-                                    title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
-                                  >
-                                    Machine model
-                                  </span>
-                                )}
-                              </div>
-                              <div className="model-action-links">
-                                <ModelActionsMenu
-                                  engine="mlx"
-                                  model={{ ...m, updateAvailable: outOfDate }}
-                                  updating={reinstalling}
-                                  contextSupported={contextOverridesSupported}
-                                  contextEditorOpen={contextEditorFor === m.id}
-                                  onToggleContextEditor={() =>
-                                    setContextEditorFor((prev) => (prev === m.id ? null : m.id))
+      <div className="ollama-section">
+        <ModelListHeading
+          title={compact ? 'Models on this device' : 'Local models'}
+          onAdd={() => setAddOpen(true)}
+        />
+        {modelsError && <p className="error">{modelsError}</p>}
+        {!modelsLoading && !modelsError && models.length === 0 && (
+          <p className="muted small">No models on this device yet.</p>
+        )}
+        {models.length > 0 && (
+          <div className="ollama-model-table-wrap">
+            <table className="ollama-model-table">
+              <colgroup>
+                <col className="model-name-column" />
+                <col />
+                <col />
+                <col />
+                <col />
+                <col />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Size</th>
+                  <th>Quant</th>
+                  <th title="Effective per-turn context size after Gezel's configured limit">
+                    Context size
+                  </th>
+                  <th title="Representative startup and decode speed with an approximately 20K-token prompt">
+                    Fitness
+                  </th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {models.map((m) => {
+                  const outOfDate = m.updateAvailable === true;
+                  const reinstalling = Boolean(installs.get(m.id));
+                  const fitnessKey = `mlx:${m.id}`;
+                  const entry = fitness.get(fitnessKey);
+                  return (
+                    <Fragment key={m.id}>
+                      <tr>
+                        <td className="model-name-table-cell">
+                          <div className="model-name-cell">
+                            <code>{m.id}</code>
+                            <div className="model-name-meta">
+                              {importedIds.has(m.id) && (
+                                <span
+                                  className="gz-status-pill"
+                                  title="Added from Hugging Face. Gezel has not tested this model; its fitness check says how it runs on this computer."
+                                >
+                                  From Hugging Face
+                                </span>
+                              )}
+                              {outOfDate && (
+                                <span
+                                  className="gz-status-pill gz-status-pill--warn"
+                                  title={
+                                    m.updateReason ??
+                                    'The catalog ships different model files than the copy on disk. Update to pick them up.'
                                   }
-                                  fitnessAction={fitnessMenuAction(
-                                    entry,
-                                    probing.includes(fitnessKey),
-                                    () => {
-                                      void api
-                                        .runModelFitnessProbe('mlx', m.id)
-                                        .then(() => refreshFitness())
-                                        .catch(() => {});
-                                    },
-                                  )}
-                                  onUpdate={() => startInstall(m.id)}
-                                  updateLabel={{ idle: 'Download again', busy: 'Downloading…' }}
-                                  onDelete={() => setToDelete(m.id)}
-                                />
-                              </div>
+                                >
+                                  out of date
+                                </span>
+                              )}
                             </div>
+                          </div>
+                        </td>
+                        <ModelSizeCell model={m} />
+                        <td title={quantizationTitle(m.quantization)}>
+                          {approximateQuantizationLabel(m.quantization)}
+                        </td>
+                        <td
+                          title={
+                            m.effectiveContextWindow
+                              ? m.overrideContextTokens !== undefined
+                                ? `You've set this model to ${m.overrideContextTokens.toLocaleString()} tokens per turn; Gezel grants up to what memory allows (currently ${m.effectiveContextWindow.toLocaleString()}).`
+                                : `Gezel will grant up to ${m.effectiveContextWindow.toLocaleString()} tokens per turn${m.contextWindow ? `; the model advertises ${m.contextWindow.toLocaleString()} tokens` : ''}.`
+                              : m.contextSizingStatus === 'restart-required'
+                                ? 'This model is running with a different context window than the current sizing settings resolve to. Restart the local engine (or let it go idle) so Gezel can re-admit it — no memory change needed.'
+                                : m.contextSizingStatus === 'insufficient-memory'
+                                  ? 'The requested context window does not fit in memory safely. Unload another model or free memory before trying again.'
+                                  : 'The effective context size is unavailable.'
+                          }
+                        >
+                          {m.contextSizingStatus === 'restart-required' ? (
+                            'Restart needed'
+                          ) : m.contextSizingStatus === 'insufficient-memory' ? (
+                            "Won't fit"
+                          ) : (
+                            <>
+                              {formatContextWindow(m.effectiveContextWindow)}
+                              {m.overrideContextTokens !== undefined && (
+                                <span className="gz-budget-tag gz-budget-tag-custom model-context-custom-tag">
+                                  custom
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </td>
+                        <ModelFitnessCell entry={entry} probing={probing.includes(fitnessKey)} />
+                        <td className="model-actions-table-cell">
+                          <div className="model-actions-cell">
+                            <div className="model-action-status">
+                              {m.readOnly && (
+                                <span
+                                  className="muted small"
+                                  title="Provided by the machine-wide install (shared asset store). It can't be removed from here — manage it with the machine installer, or install a user-owned copy to shadow it."
+                                >
+                                  Machine model
+                                </span>
+                              )}
+                            </div>
+                            <div className="model-action-links">
+                              <ModelActionsMenu
+                                engine="mlx"
+                                model={{ ...m, updateAvailable: outOfDate }}
+                                updating={reinstalling}
+                                contextSupported={contextOverridesSupported}
+                                contextEditorOpen={contextEditorFor === m.id}
+                                onToggleContextEditor={() =>
+                                  setContextEditorFor((prev) => (prev === m.id ? null : m.id))
+                                }
+                                fitnessAction={fitnessMenuAction(
+                                  entry,
+                                  probing.includes(fitnessKey),
+                                  () => {
+                                    void api
+                                      .runModelFitnessProbe('mlx', m.id)
+                                      .then(() => refreshFitness())
+                                      .catch(() => {});
+                                  },
+                                )}
+                                onUpdate={() => startInstall(m.id)}
+                                updateLabel={{ idle: 'Download again', busy: 'Downloading…' }}
+                                onDelete={() => setToDelete(m.id)}
+                              />
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                      {contextEditorFor === m.id && (
+                        <tr className="model-context-editor-row">
+                          <td colSpan={6}>
+                            <ModelContextSliderPanel engine="mlx" model={m} onSaved={refresh} />
                           </td>
                         </tr>
-                        {contextEditorFor === m.id && (
-                          <tr className="model-context-editor-row">
-                            <td colSpan={6}>
-                              <ModelContextSliderPanel engine="mlx" model={m} onSaved={refresh} />
-                            </td>
-                          </tr>
-                        )}
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
-      <div className="ollama-section ollama-section--flat ollama-section--download">
-        <h4>Download a model</h4>
+      <AddModelDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        description={<HuggingFaceHostingNote />}
+        more={
+          <>
+            <button
+              type="button"
+              title="An MLX model from Hugging Face that isn't in this list. Gezel checks it first."
+              onClick={() => {
+                setAddOpen(false);
+                setImportOpen(true);
+              }}
+            >
+              From Hugging Face…
+            </button>
+            <ImportModelBundleButton
+              title="A model package exported from Gezel"
+              onStart={() => setAddOpen(false)}
+            />
+          </>
+        }
+      >
+        {installNotices}
         <p className="muted small" style={{ marginTop: 0 }}>
-          Models are hosted by{' '}
-          <a
-            href="https://huggingface.co"
-            target="_blank"
-            rel="noreferrer"
-            style={{ color: 'inherit' }}
-          >
-            Hugging Face
-          </a>
-          , a community library of open, freely available AI models. Your device downloads them
-          directly.
-        </p>
-        <p className="muted small">
           {memory
             ? 'Models that may not fit this machine, and retired models, are hidden by default. '
             : 'Retired models are hidden by default. '}
@@ -429,6 +416,7 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           kind="chat-model"
           emptyMessage="No MLX-format entries in the catalog yet."
           onItemsLoaded={setCatalogItems}
+          {...(catalogItems ? { initialItems: catalogItems } : {})}
           tagTooltips={TAG_TOOLTIPS}
           filter={(item: CatalogItemSummary) => {
             const m = asMlxEntry(item.manifest);
@@ -492,6 +480,9 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                   type="button"
                   disabled={installed || needsAttention || Boolean(inflight)}
                   onClick={() => startInstall(m.id)}
+                  {...(needsAttention && !installed && !inflight
+                    ? { title: NEEDS_ATTENTION_TITLE }
+                    : {})}
                 >
                   {installed
                     ? 'On device'
@@ -504,30 +495,14 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                           ? 'Verifying…'
                           : 'Reading metadata…'
                       : needsAttention
-                        ? 'Needs attention above'
+                        ? 'Needs attention'
                         : 'Download'}
                 </button>
               </div>
             );
           }}
         />
-      </div>
-
-      <div className="ollama-section ollama-section--flat">
-        <button type="button" className="secondary" onClick={() => setImportOpen(true)}>
-          Add a model…
-        </button>
-        <span className="muted small" style={{ marginLeft: '0.75rem' }}>
-          An MLX model from Hugging Face that isn't in this list. Gezel checks it first.
-        </span>
-      </div>
-
-      <div className="ollama-section ollama-section--flat">
-        <ImportModelBundleButton />
-        <span className="muted small" style={{ marginLeft: '0.75rem' }}>
-          Import from a gezel local model package
-        </span>
-      </div>
+      </AddModelDialog>
 
       <ConfirmDialog
         open={toDelete !== null}

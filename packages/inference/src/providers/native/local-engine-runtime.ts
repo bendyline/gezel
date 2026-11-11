@@ -1255,8 +1255,11 @@ export class LocalEngineRuntime {
         committedOtherBytes,
         concurrencySizingBytes: concurrencySizingBudget,
       } = capacity;
-      const kvBits = config.mlxKvBits ?? 0;
-      const kvCacheType = kvBits === 4 ? 'q4_0' : kvBits === 8 ? 'q8_0' : 'f16';
+      // Plan at f16 whatever the KV-bits setting says, as buildMlxProvider does:
+      // mlx-lm's batched cache is never quantized, so the launch refuses the
+      // discount. Taking it here priced a 262k-token Qwen 3.8 27B at 4 chats
+      // and 52.7 GB when the launch admitted 3 chats at 66.2 GB.
+      const kvCacheType = 'f16';
       const weightsResident = CapacityBroker.estimateResidentBytes(
         'mlx',
         installed.approxSizeBytes,

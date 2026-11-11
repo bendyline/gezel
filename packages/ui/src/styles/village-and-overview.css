@@ -816,6 +816,58 @@ button.filemap-review-issue:hover {
 .engine-spillover-tray {
   margin: 0.6rem 0;
 }
+/* Parallel workers, inside the budget frame because every worker spends
+   that budget; "Copies of the model" reuses the row under Advanced. */
+.engine-workers {
+  margin-top: 1.1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid var(--gz-color-border, var(--border));
+}
+.engine-workers h4,
+.engine-copies h4 {
+  margin: 0 0 0.25rem;
+  font-size: var(--text-md);
+}
+.engine-workers p,
+.engine-copies p {
+  max-width: 34rem;
+  margin-top: 0;
+}
+.engine-workers-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.6rem 0 0.35rem;
+  font-size: var(--text-sm);
+}
+.engine-workers-row > button.secondary {
+  min-width: 2rem;
+  padding: 0.2rem 0.5rem;
+}
+.engine-workers-count {
+  min-width: 1.75rem;
+  font-size: var(--text-md);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.engine-workers-total,
+.engine-workers-hint {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.engine-workers-hint {
+  margin: 0;
+}
+.engine-workers-message {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+.engine-workers-message.error {
+  color: var(--danger-text);
+}
 
 /* ── Project Overview tab (index-derived gestalt) ─────────────────────── */
 .project-overview {

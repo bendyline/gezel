@@ -5,6 +5,7 @@ import { CacheControlsPanel } from '../components/CacheControlsPanel.js';
 import { EngineBudgetStrip } from '../components/EngineBudgetStrip.js';
 import { EngineClonePicker } from '../components/EngineClonePicker.js';
 import { MlxModelManager } from '../components/MlxModelManager.js';
+import { ParallelWorkersPicker } from '../components/ParallelWorkersPicker.js';
 
 interface Props {
   config: ConfigResponse | null;
@@ -36,6 +37,11 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [error, setError] = useState<string | null>(null);
   const [resetStatus, setResetStatus] = useState<'idle' | 'resetting' | 'done'>('idle');
+  const workerModelId = config?.defaultModel?.mlx ?? null;
+  // With no default chosen and one model installed, that model is the one chats use.
+  const workerModel =
+    installed.find((model) => model.id === workerModelId) ??
+    (installed.length === 1 ? installed[0] : undefined);
 
   useEffect(() => {
     setBaseUrlDraft(config?.mlxBaseUrl ?? '');
@@ -242,22 +248,15 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
         <MlxModelManager onModelsChanged={handleModelsChanged} />
       </section>
 
-      <EngineBudgetStrip provider="mlx" />
-
-      <section style={{ marginBottom: '2rem' }}>
-        <h4 style={{ marginBottom: '0.5rem' }}>Concurrent replicas</h4>
-        <p className="muted small" style={{ marginTop: 0 }}>
-          Run multiple copies of the same model so unrelated sessions don't queue behind each other.
-          Weights are shared by the OS via mmap so disk cost stays at one model file; resident
-          memory grows because each clone keeps its own KV cache and activations.
-        </p>
-        <EngineClonePicker
+      <EngineBudgetStrip provider="mlx">
+        <ParallelWorkersPicker
           provider="mlx"
-          modelId={config?.defaultModel?.mlx ?? null}
+          model={workerModel}
           config={config}
           onConfigChanged={onConfigChanged}
+          onSaved={() => void refreshInstalled()}
         />
-      </section>
+      </EngineBudgetStrip>
 
       {error && (
         <div className="muted small" style={{ color: '#ff9b9b', marginTop: '1rem' }} role="alert">
@@ -268,20 +267,31 @@ export function MlxSettings({ config, onConfigChanged }: Props) {
         </div>
       )}
 
-      <section style={{ marginTop: '2rem' }}>
-        <CacheControlsPanel
-          providerName="mlx"
-          label="This Mac AI"
-          configuredBudgetMb={config?.cacheBudgetMb?.mlx}
-        />
-      </section>
-
       <details className="mlx-advanced" style={{ marginTop: '2rem' }}>
         <summary style={{ cursor: 'pointer' }}>
           <strong>Advanced</strong>
         </summary>
 
         <section style={{ marginTop: '1.25rem' }}>
+          <CacheControlsPanel
+            providerName="mlx"
+            label="This Mac AI"
+            configuredBudgetMb={config?.cacheBudgetMb?.mlx}
+          />
+        </section>
+
+        <section style={{ marginTop: '2rem' }}>
+          <EngineClonePicker
+            provider="mlx"
+            modelId={workerModel?.id ?? workerModelId}
+            modelName={workerModel?.name}
+            modelBytes={workerModel?.weightsResidentBytes}
+            config={config}
+            onConfigChanged={onConfigChanged}
+          />
+        </section>
+
+        <section style={{ marginTop: '2rem' }}>
           <h4 style={{ marginBottom: '0.35rem' }}>Python runtime</h4>
           {runtime ? (
             <div className="muted small" style={{ marginTop: '0.25rem' }}>

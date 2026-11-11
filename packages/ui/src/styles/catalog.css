@@ -1005,6 +1005,71 @@
   border-top: 1px solid var(--border);
 }
 
+/* The installed-models heading on an engine or media page, with its
+   "Add a model…" key at the right of the heading row. */
+.model-list-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.ollama-section .model-list-heading > h4 {
+  margin: 0;
+}
+
+.model-list-heading > button {
+  flex-shrink: 0;
+}
+
+/* The catalog a model page downloads from, opened by "Add a model…". Wide
+   enough for the two-column catalog card grid; only the body scrolls, so the
+   footer's keys stay put. */
+.add-model-dialog {
+  width: min(60rem, calc(100vw - 2rem));
+  min-width: 0;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 3rem);
+  overflow: hidden;
+}
+
+.add-model-dialog > :not(.add-model-dialog-body) {
+  flex-shrink: 0;
+}
+
+.add-model-dialog > h3,
+.add-model-dialog > p {
+  margin: 0;
+}
+
+.add-model-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-right: 0.35rem;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.add-model-dialog-body > :first-child {
+  margin-top: 0;
+}
+
+.add-model-dialog > .gz-dialog-actions {
+  flex-wrap: wrap;
+  margin-top: 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+/* Other ways to add a model sit at the left of the footer, Done at the right. */
+.add-model-dialog-more {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-right: auto;
+}
+
 /* Adding a model from Hugging Face: a link, a review with its checks, then
    the download and the post-download fitness check. Only the body scrolls,
    so the keys stay put. */

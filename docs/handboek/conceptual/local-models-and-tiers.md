@@ -41,7 +41,7 @@ You don't have to get this right up front. Set a default provider in Settings, a
 
 ## Adding a model that isn't in the catalog
 
-The catalog is a short list Gezel has tried. You can add other models too. Choose **Add a model…** under Settings → Models and paste a link to a model on [Hugging Face](https://huggingface.co), the public library most open models are published in. You can also choose a .gguf file that is already on your computer, for example one you downloaded with another app. On huggingface.co, a model's **Use this model** menu opens Gezel with that model ready to check.
+The catalog is a short list Gezel has tried. You can add other models too. Choose **Add a model…** on your engine's page in Settings, then **From Hugging Face or a file…**, and paste a link to a model on [Hugging Face](https://huggingface.co), the public library most open models are published in. You can also choose a .gguf file that is already on your computer, for example one you downloaded with another app. On huggingface.co, a model's **Use this model** menu opens Gezel with that model ready to check.
 
 Gezel runs local models from GGUF files on every computer, and from MLX models on Apple silicon Macs. On Hugging Face, look for a repository whose name ends in "-GGUF", or an MLX one from mlx-community. Before anything is added, Gezel checks that:
 

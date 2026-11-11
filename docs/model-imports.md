@@ -7,8 +7,10 @@ places:
 - **A Hugging Face MLX build** (Apple silicon Macs).
 - **GGUF files already on this computer.**
 
-They choose **Add a model…** under Settings → Models, or press **Use this
-model → Gezel** on a model page on huggingface.co, which sends
+They choose **Add a model…** on an engine page in Settings, then **From
+Hugging Face or a file…** under the catalog (**From Hugging Face…** on the MLX
+page), or press **Use this model → Gezel** on a model page on huggingface.co,
+which sends
 `gezel://model/huggingface/<owner>/<name>` (see [deep-links.md](deep-links.md)).
 
 Every catalog model was tried by a person before it shipped, so Gezel checks an

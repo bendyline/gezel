@@ -1,6 +1,7 @@
 import type { AudioCatalogModel, InstalledAudioModel } from '@bendyline/gezel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { AddModelDialog, ModelListHeading } from './AddModelDialog.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { LicenseButton } from './LicenseButton.js';
 import { RecommendedBadge } from './RecommendedBadge.js';
@@ -54,6 +55,8 @@ export function AudioModelManager({
   const [installed, setInstalled] = useState<InstalledAudioModel[]>([]);
   const [catalog, setCatalog] = useState<AudioCatalogModel[]>([]);
   const [installedError, setInstalledError] = useState<string | null>(null);
+  const [installedLoaded, setInstalledLoaded] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const [pulls, setPulls] = useState<Map<string, ActivePull>>(new Map());
   const [toDelete, setToDelete] = useState<string | null>(null);
   const pullsRef = useRef(pulls);
@@ -71,6 +74,8 @@ export function AudioModelManager({
     } catch (err) {
       setInstalled([]);
       setInstalledError((err as Error).message);
+    } finally {
+      setInstalledLoaded(true);
     }
   }, [kind]);
 
@@ -203,77 +208,81 @@ export function AudioModelManager({
         </div>
       )}
 
-      {(installed.length > 0 || installedError) && (
-        <div className="ollama-section">
-          <h4>Local models</h4>
-          {installedError && <p className="error">{installedError}</p>}
-          {showActivePicker && (
-            <p className="muted small">
-              The <strong>active</strong> model is the one transcription runs on. The engine binds
-              one model at a time, so switching reloads it — the next transcription takes a moment
-              longer.
-            </p>
-          )}
-          {installed.length > 0 && (
-            <table className="ollama-model-table">
-              <thead>
-                <tr>
+      <div className="ollama-section">
+        <ModelListHeading title="Local models" onAdd={() => setAddOpen(true)} />
+        {installedError && <p className="error">{installedError}</p>}
+        {installedLoaded && !installedError && installed.length === 0 && (
+          <p className="muted small">No models on this device yet.</p>
+        )}
+        {showActivePicker && (
+          <p className="muted small">
+            The <strong>active</strong> model is the one transcription runs on. The engine binds one
+            model at a time, so switching reloads it — the next transcription takes a moment longer.
+          </p>
+        )}
+        {installed.length > 0 && (
+          <table className="ollama-model-table">
+            <thead>
+              <tr>
+                {showActivePicker && (
+                  <th scope="col" className="gz-active-model-column">
+                    Active
+                  </th>
+                )}
+                <th>Name</th>
+                <th>Size</th>
+                <th>Added</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {installed.map((m) => (
+                <tr key={m.id}>
                   {showActivePicker && (
-                    <th scope="col" className="gz-active-model-column">
-                      Active
-                    </th>
+                    <td className="gz-active-model-column">
+                      <input
+                        type="radio"
+                        name={`active-${kind}-model`}
+                        className="gz-active-model-radio"
+                        aria-label={`Use ${m.name} as the active ${kind === 'stt' ? 'speech-to-text' : 'text-to-speech'} model`}
+                        checked={activeModelId === m.id}
+                        onChange={() => {
+                          // Re-selecting the active model would still reset the
+                          // provider and cold-reload a warm engine — no-op it.
+                          if (activeModelId !== m.id) void onSetActiveModel?.(m.id);
+                        }}
+                      />
+                    </td>
                   )}
-                  <th>Name</th>
-                  <th>Size</th>
-                  <th>Added</th>
-                  <th />
+                  <td>{m.name}</td>
+                  <td>{formatSize(m.approxSizeBytes)}</td>
+                  <td className="muted small">
+                    {m.installedAt
+                      ? new Date(m.installedAt).toLocaleDateString()
+                      : 'Included with app'}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      className="gz-link-button"
+                      onClick={() => setToDelete(m.id)}
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {installed.map((m) => (
-                  <tr key={m.id}>
-                    {showActivePicker && (
-                      <td className="gz-active-model-column">
-                        <input
-                          type="radio"
-                          name={`active-${kind}-model`}
-                          className="gz-active-model-radio"
-                          aria-label={`Use ${m.name} as the active ${kind === 'stt' ? 'speech-to-text' : 'text-to-speech'} model`}
-                          checked={activeModelId === m.id}
-                          onChange={() => {
-                            // Re-selecting the active model would still reset the
-                            // provider and cold-reload a warm engine — no-op it.
-                            if (activeModelId !== m.id) void onSetActiveModel?.(m.id);
-                          }}
-                        />
-                      </td>
-                    )}
-                    <td>{m.name}</td>
-                    <td>{formatSize(m.approxSizeBytes)}</td>
-                    <td className="muted small">
-                      {m.installedAt
-                        ? new Date(m.installedAt).toLocaleDateString()
-                        : 'Included with app'}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="gz-link-button"
-                        onClick={() => setToDelete(m.id)}
-                      >
-                        Delete
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      )}
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
 
-      <div className="ollama-section ollama-section--flat ollama-section--download">
-        <h4>Download a model</h4>
+      <AddModelDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        title={kind === 'stt' ? 'Add a speech-to-text model' : 'Add a text-to-speech model'}
+        description="These run on this device. Your device downloads them directly."
+      >
         {catalog.length === 0 ? (
           <p className="muted small">No models in the catalog yet.</p>
         ) : (
@@ -321,7 +330,7 @@ export function AudioModelManager({
             })}
           </div>
         )}
-      </div>
+      </AddModelDialog>
 
       <ConfirmDialog
         open={toDelete !== null}

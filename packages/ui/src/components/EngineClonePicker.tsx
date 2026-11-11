@@ -1,25 +1,40 @@
 import type { ConfigResponse } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { formatMemoryBytes } from './model-memory-copy.js';
 
 interface Props {
   provider: 'llama-cpp' | 'mlx';
-  /** The model id this picker controls clones for. Typically the default. */
+  /** The model id this picker controls copies for. Typically the default. */
   modelId: string | null;
+  /** Display name for `modelId`, when the installed list knows it. */
+  modelName?: string;
+  /** The model alone, which every extra copy loads again. */
+  modelBytes?: number;
   config: ConfigResponse | null;
   onConfigChanged: (cfg: ConfigResponse) => void;
 }
 
 /**
- * Compact clone-count picker for one model. Updates `config.localEngineReplicas[modelId]`
- * and triggers `POST /api/engines/reconcile` so the warm pool converges to the new
- * count without restart.
+ * Advanced → "Copies of the model" on the llama.cpp and MLX pages: how many
+ * times one model is loaded (`config.localEngineReplicas[modelId]`). A
+ * change triggers `POST /api/engines/reconcile` so the pool converges
+ * without a restart. Each copy runs its own parallel workers, sized from
+ * whatever memory is left, so the only fixed cost is the model itself.
+ * Parallel workers are the everyday control; this one is rarely needed.
  *
- * Bounded by `config.localEngineReplicasMax` (default 4). When the broker can't fit
- * the requested clones the snapshot polled by {@link EngineBudgetStrip} surfaces the
- * actual resident count — the picker doesn't second-guess; the broker is the truth.
+ * Bounded by `config.localEngineReplicasMax` (default 4). When the broker
+ * can't fit the requested copies, the budget bar shows what actually
+ * loaded; the broker is the truth, so this picker doesn't second-guess it.
  */
-export function EngineClonePicker({ provider, modelId, config, onConfigChanged }: Props) {
+export function EngineClonePicker({
+  provider,
+  modelId,
+  modelName,
+  modelBytes,
+  config,
+  onConfigChanged,
+}: Props) {
   const max = config?.localEngineReplicasMax ?? 4;
   const replicasMap = config?.localEngineReplicas ?? {};
   const initial = modelId ? (replicasMap[modelId] ?? 1) : 1;
@@ -53,50 +68,52 @@ export function EngineClonePicker({ provider, modelId, config, onConfigChanged }
     [modelId, max, provider, replicasMap, onConfigChanged],
   );
 
-  if (!modelId) {
-    return (
-      <div style={{ fontSize: 'var(--text-2xs)', color: 'var(--gz-color-muted, #888)' }}>
-        Pick a default model to enable clone control.
-      </div>
-    );
-  }
-
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-        padding: '0.5rem 0',
-        fontSize: 'var(--text-xs)',
-      }}
-    >
-      <span style={{ minWidth: 220 }}>
-        Clones of <b>{modelId}</b> kept resident:
-      </span>
-      <button
-        type="button"
-        onClick={() => void apply(value - 1)}
-        disabled={busy === 'saving' || value <= 1}
-        style={{ width: 28 }}
-      >
-        −
-      </button>
-      <span style={{ minWidth: 28, textAlign: 'center', fontVariantNumeric: 'tabular-nums' }}>
-        {value}
-      </span>
-      <button
-        type="button"
-        onClick={() => void apply(value + 1)}
-        disabled={busy === 'saving' || value >= max}
-        style={{ width: 28 }}
-      >
-        +
-      </button>
-      <span style={{ fontSize: 'var(--text-2xs)', color: 'var(--gz-color-muted, #888)' }}>
-        (max {max})
-      </span>
-      {busy === 'saved' ? <span style={{ fontSize: 'var(--text-2xs)' }}>saved ✓</span> : null}
+    <div className="engine-copies">
+      <h4>Copies of the model</h4>
+      <p className="muted small">{copiesSentence(modelBytes)}</p>
+      {modelId ? (
+        <div className="engine-workers-row">
+          <span>
+            Copies of <b>{modelName ?? modelId}</b>
+          </span>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void apply(value - 1)}
+            disabled={busy === 'saving' || value <= 1}
+            aria-label="One fewer copy"
+          >
+            −
+          </button>
+          <output className="engine-workers-count" aria-label="Copies of the model">
+            {value}
+          </output>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => void apply(value + 1)}
+            disabled={busy === 'saving' || value >= max}
+            aria-label="One more copy"
+          >
+            +
+          </button>
+          <span className="engine-workers-total">{max} at most</span>
+          {busy === 'saved' ? <output className="engine-workers-message">Saved</output> : null}
+        </div>
+      ) : (
+        <p className="engine-workers-hint">
+          Pick a default model to choose how many copies it gets.
+        </p>
+      )}
     </div>
   );
+}
+
+export function copiesSentence(modelBytes: number | undefined): string {
+  const cost =
+    modelBytes && modelBytes > 0
+      ? `Each extra copy needs at least ${formatMemoryBytes(modelBytes)} more, plus room for its own workers.`
+      : 'Each extra copy loads the model again, plus room for its own workers.';
+  return `Load the model more than once. ${cost} Rarely needed: more parallel workers usually do the job.`;
 }

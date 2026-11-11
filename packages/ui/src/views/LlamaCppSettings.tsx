@@ -12,6 +12,7 @@ import { EngineBudgetStrip } from '../components/EngineBudgetStrip.js';
 import { EngineClonePicker } from '../components/EngineClonePicker.js';
 import { LlamaCppModelManager } from '../components/LlamaCppModelManager.js';
 import { MachineHealthSettings } from '../components/MachineHealthSettings.js';
+import { ParallelWorkersPicker } from '../components/ParallelWorkersPicker.js';
 import {
   engineBackendLabel,
   engineGpuNotice,
@@ -253,6 +254,11 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
     config?.llamaCppNCpuFfn === undefined ? '' : String(config.llamaCppNCpuFfn),
   );
   const [installed, setInstalled] = useState<LlamaCppInstalledModel[]>([]);
+  const workerModelId = config?.defaultModel?.['llama-cpp'] ?? null;
+  // With no default chosen and one model installed, that model is the one chats use.
+  const workerModel =
+    installed.find((model) => model.id === workerModelId) ??
+    (installed.length === 1 ? installed[0] : undefined);
   const [saving, setSaving] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [contextSizing, setContextSizing] = useState<LlamaCppContextSizing>('adaptive');
   const [contextSizingLoading, setContextSizingLoading] = useState(true);
@@ -751,22 +757,15 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         />
       </section>
 
-      <EngineBudgetStrip provider="llama-cpp" />
-
-      <section style={{ marginBottom: '2rem' }}>
-        <h4 style={{ marginBottom: '0.5rem' }}>Concurrent replicas</h4>
-        <p className="muted small" style={{ marginTop: 0 }}>
-          Run multiple copies of the same model so unrelated sessions don't queue behind each other.
-          Weights are shared by the OS via mmap so disk cost stays at one model file; resident
-          memory grows because each clone keeps its own KV cache and activations.
-        </p>
-        <EngineClonePicker
+      <EngineBudgetStrip provider="llama-cpp">
+        <ParallelWorkersPicker
           provider="llama-cpp"
-          modelId={config?.defaultModel?.['llama-cpp'] ?? null}
+          model={workerModel}
           config={config}
           onConfigChanged={onConfigChanged}
+          onSaved={() => void refreshInstalled()}
         />
-      </section>
+      </EngineBudgetStrip>
 
       <MachineHealthSettings
         config={config}
@@ -1160,6 +1159,17 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           >
             Save
           </button>
+        </div>
+
+        <div style={{ marginTop: '1.5rem' }}>
+          <EngineClonePicker
+            provider="llama-cpp"
+            modelId={workerModel?.id ?? workerModelId}
+            modelName={workerModel?.name}
+            modelBytes={workerModel?.weightsResidentBytes}
+            config={config}
+            onConfigChanged={onConfigChanged}
+          />
         </div>
 
         <EngineLogViewer />
