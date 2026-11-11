@@ -66,6 +66,45 @@ describe('the navigation rail side', () => {
     expect(getSidebarSide()).toBe('right');
   });
 
+  // The start screen stamps the root from a saved snapshot. Settings shows
+  // `getSidebarSide()`, so a stamp nobody repaints is a rail on one side and
+  // a picker on the other.
+  it('repaints the resolved side over a stamp something else left', async () => {
+    const stale = () => document.documentElement.setAttribute('data-sidebar-side', 'right');
+
+    stale();
+    vi.mocked(api.getConfig).mockResolvedValue({} as never);
+    await syncSidebarSideFromConfig();
+    expect(getSidebarSide()).toBe('left');
+    expect(stamped()).toBeNull();
+
+    stale();
+    vi.mocked(api.getConfig).mockResolvedValue({ sidebarSide: 'left' } as never);
+    await syncSidebarSideFromConfig();
+    expect(stamped()).toBeNull();
+
+    document.documentElement.removeAttribute('data-sidebar-side');
+    window.localStorage.setItem(KEY, 'right');
+    vi.mocked(api.getConfig).mockResolvedValue({} as never);
+    await syncSidebarSideFromConfig();
+    expect(stamped()).toBe('right');
+  });
+
+  it('announces a change only when the side moved', async () => {
+    const heard = vi.fn();
+    window.addEventListener('gezel:sidebar-side-change', heard);
+    try {
+      vi.mocked(api.getConfig).mockResolvedValue({} as never);
+      await syncSidebarSideFromConfig();
+      expect(heard).not.toHaveBeenCalled();
+      vi.mocked(api.getConfig).mockResolvedValue({ sidebarSide: 'right' } as never);
+      await syncSidebarSideFromConfig();
+      expect(heard).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener('gezel:sidebar-side-change', heard);
+    }
+  });
+
   // theme-init.js runs before any bundle, so it repeats the default.
   it('paints the same side before the bundle loads', () => {
     runThemeInit();

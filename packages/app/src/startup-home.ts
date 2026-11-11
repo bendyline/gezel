@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import {
+  DEFAULT_SIDEBAR_SIDE,
   type StartupHomeSnapshot,
   StartupHomeSnapshotSchema,
   type StartupHomeView,
@@ -27,6 +28,7 @@ export class StartupHomeHost {
     const config = (await readSmallJson(join(home, 'config.json')).catch(() => null)) as {
       service?: { url?: string };
       hosting?: string;
+      sidebarSide?: unknown;
     } | null;
     const remote = typeof config?.service?.url === 'string' ? config.service.url : undefined;
     const scope = createHash('sha256')
@@ -41,7 +43,14 @@ export class StartupHomeHost {
       readSmallJson(this.stateFile).catch(() => null),
     ]);
     const parsed = StartupHomeSnapshotSchema.safeParse(snapshot);
-    this.snapshot = parsed.success ? parsed.data : null;
+    // The rail's side comes from the config, never the snapshot. A snapshot
+    // saved before the default moved to the left (2026-11-11) says `right` for
+    // everyone who never chose, and the service rewrites it only after this
+    // launch has painted: the start screen drew the rail on the right, and the
+    // app kept it there while Settings said Left.
+    const chosen = config?.sidebarSide;
+    const sidebar = chosen === 'left' || chosen === 'right' ? chosen : DEFAULT_SIDEBAR_SIDE;
+    this.snapshot = parsed.success ? { ...parsed.data, sidebar } : null;
     const view = StartupHomeViewSchema.safeParse(state);
     if (view.success) this.state = { ...view.data, focused: false };
   }

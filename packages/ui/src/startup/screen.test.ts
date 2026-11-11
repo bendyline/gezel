@@ -31,6 +31,7 @@ function bridge(): StartupHomeBridge {
 }
 afterEach(() => {
   for (const dispose of disposers.splice(0)) dispose();
+  document.documentElement.removeAttribute('data-sidebar-side');
   document.body.replaceChildren();
   delete window.__GEZEL_STARTUP__;
   vi.useRealTimers();
@@ -190,6 +191,37 @@ describe('the frame it draws', () => {
     expect(rail.querySelector('.startup-navigation-rest')?.hasAttribute('inert')).toBe(true);
     expect(document.querySelector('.startup-loading-line')).toHaveTextContent('Opening Gezel');
     expect(document.querySelector('.startup-composer')).not.toBeNull();
+  });
+
+  // The frame uses the live app's rules, which read the side off the root:
+  // no attribute is the left, `right` the right.
+  it('draws the rail on the side the snapshot names', () => {
+    const side = () => document.documentElement.getAttribute('data-sidebar-side');
+    const saved = (sidebar: 'left' | 'right') => {
+      document.body.replaceChildren();
+      const host = bridge();
+      host.snapshot = {
+        version: 1,
+        savedAt: '2026-11-11T08:00:00Z',
+        meester: { id: 'vanya', name: 'Vanya' },
+        theme: 'system',
+        sidebar,
+        status: null,
+        lastMessage: null,
+        night: null,
+      };
+      mountStartup(host);
+    };
+    saved('right');
+    expect(side()).toBe('right');
+    // Over a side the page already painted, such as theme-init.js's.
+    saved('left');
+    expect(side()).toBeNull();
+    // With no snapshot the painted side stands.
+    document.documentElement.setAttribute('data-sidebar-side', 'right');
+    document.body.replaceChildren();
+    mountStartup(bridge());
+    expect(side()).toBe('right');
   });
 
   it('shows the live tabs: Night shift only with a night to read about, and Create', () => {

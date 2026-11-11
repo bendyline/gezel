@@ -36,8 +36,12 @@ export function mountStartup(bridge: StartupHomeBridge): (() => void) | undefine
   root.id = 'startup-home';
   root.dataset.platform = window.__GEZEL__?.platform || '';
   document.documentElement.dataset.platform = root.dataset.platform;
-  // With no snapshot, the side theme-init.js applied from the cache stands.
-  if (snapshot?.sidebar) document.documentElement.dataset.sidebarSide = snapshot.sidebar;
+  // The frame below is the live app's, so the rail follows the root's side
+  // attribute: none is the left, `right` the right. The desktop host fills
+  // `sidebar` from the config. With no snapshot, the side theme-init.js
+  // applied from the cache stands.
+  if (snapshot?.sidebar === 'right') document.documentElement.dataset.sidebarSide = 'right';
+  else if (snapshot) delete document.documentElement.dataset.sidebarSide;
   if (snapshot?.theme && snapshot.theme !== 'system')
     document.documentElement.dataset.theme = snapshot.theme;
   // This screen draws the title bar before the app does, so main has to hear

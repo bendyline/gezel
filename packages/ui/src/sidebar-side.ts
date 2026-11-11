@@ -38,6 +38,15 @@ export function getSidebarSide(): SidebarSide {
 }
 
 /**
+ * Calls `listener` when the side changes, here or from the boot-time sync,
+ * and returns the unsubscribe. Shaped for `useSyncExternalStore`.
+ */
+export function onSidebarSideChange(listener: () => void): () => void {
+  window.addEventListener(CHANGE_EVENT, listener);
+  return () => window.removeEventListener(CHANGE_EVENT, listener);
+}
+
+/**
  * Persist the sidebar side, apply it immediately, and mirror it to the
  * gezel config so it survives Electron's ephemeral-port shuffle — same
  * reasoning as `setThemePref` in theme.ts. The config always gets the choice
@@ -63,13 +72,16 @@ export function applySidebarSide(side: SidebarSide): void {
 }
 
 /**
- * Boot-time reconciliation: pull `sidebarSide` from the gezel config and
- * apply it if it differs from the localStorage cache. Mirrors
- * `syncThemeFromConfig`. The early `theme-init.js` script has already
- * applied the cached value before first paint; this covers the case where
- * the config (cross-boot source of truth) disagrees with a stale cache. A
- * config with no choice in it leaves the cache alone: the cache only ever
- * holds a side the person picked, or nothing.
+ * Boot-time reconciliation: pull `sidebarSide` from the gezel config (the
+ * cross-boot source of truth), cache it, and paint the resolved side. Mirrors
+ * `syncThemeFromConfig`. A config with no choice in it leaves the cache alone:
+ * the cache only ever holds a side the person picked, or nothing.
+ *
+ * The side is painted every time, even when the cache already agrees. Two
+ * scripts stamp the root before this runs, `theme-init.js` from the cache and
+ * the start screen from its saved snapshot, and `getSidebarSide()` is what
+ * Settings shows. Painting only on a cache change left a start screen's
+ * `right` on the root while Settings said Left (2026-11-11).
  */
 export async function syncSidebarSideFromConfig(): Promise<void> {
   let serverSide: SidebarSide | undefined;
@@ -77,12 +89,12 @@ export async function syncSidebarSideFromConfig(): Promise<void> {
     const cfg = await api.getConfig();
     if (cfg.sidebarSide === 'left' || cfg.sidebarSide === 'right') serverSide = cfg.sidebarSide;
   } catch {
-    /* offline / boot race — keep whatever localStorage says */
+    /* offline / boot race — keep whatever is painted */
     return;
   }
-  if (!serverSide) return;
-  if (serverSide === getSidebarSide()) return;
-  cacheSide(serverSide);
-  applySidebarSide(serverSide);
-  window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
+  const before = getSidebarSide();
+  if (serverSide) cacheSide(serverSide);
+  const side = serverSide ?? before;
+  applySidebarSide(side);
+  if (side !== before) window.dispatchEvent(new CustomEvent(CHANGE_EVENT));
 }

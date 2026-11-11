@@ -1069,6 +1069,25 @@ change of default because the picker writes the side by name; only an
 install that never chose follows `DEFAULT_SIDEBAR_SIDE`. Every layout is
 built for both sides, and a spec that measures the rail checks both.
 
+The rail's scrollbar is on the rail's right on either side: against the
+content with the rail on the left, at the window's edge with it on the
+right. It is painted only while the pointer is over the rail and there is
+something to scroll. Other scroll areas also show their bar while they hold
+focus; the rail does not, because a row keeps focus after it is opened and a
+bar that stays painted beside the content reads as a second edge. Its gutter
+is always reserved, so rows never move when the bar appears, and that gutter
+plus a little padding keeps a selected row about 16px clear of the content.
+A selected row never touches the content area.
+
+The config is the one place the side is read from, and everything that
+paints the rail follows it: the start screen (the desktop host fills the
+side from `config.json`, never from the saved start-screen snapshot), the
+live app (the boot-time sync repaints the side every launch, even when
+nothing changed), and the Sidebar position keys (they follow the side live).
+The snapshot is rewritten only after a launch has painted, so on the first
+launch after the default moved it still said `right`: the start screen drew
+the rail there, the app kept it, and Settings showed Left.
+
 **One test splits the owner's view from the builder's.** A builder is
 someone who picked Software as an interest or turned advanced features on
 (`useBuilderView`). That one test sets three defaults, so they can never

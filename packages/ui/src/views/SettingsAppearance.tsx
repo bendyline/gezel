@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { type SidebarSide, getSidebarSide, setSidebarSide } from '../sidebar-side.js';
+import { useState, useSyncExternalStore } from 'react';
+import { getSidebarSide, onSidebarSideChange, setSidebarSide } from '../sidebar-side.js';
 import { type ThemePref, getThemePref, setThemePref } from '../theme.js';
 
 export function ThemePicker() {
@@ -25,7 +25,9 @@ export function ThemePicker() {
 }
 
 export function SidebarSidePicker() {
-  const [side, setSide] = useState<SidebarSide>(getSidebarSide);
+  // Followed, not read once: the boot-time sync can settle the side after
+  // this has drawn, and the key that is down must be the side the rail is on.
+  const side = useSyncExternalStore(onSidebarSideChange, getSidebarSide);
   return (
     <div className="provider-switch">
       {(['left', 'right'] as const).map((value) => (
@@ -34,10 +36,7 @@ export function SidebarSidePicker() {
           type="button"
           aria-pressed={side === value}
           className={`provider-pill${side === value ? ' provider-pill-active' : ''}`}
-          onClick={() => {
-            setSidebarSide(value);
-            setSide(value);
-          }}
+          onClick={() => setSidebarSide(value)}
         >
           {value === 'left' ? 'Left' : 'Right'}
         </button>

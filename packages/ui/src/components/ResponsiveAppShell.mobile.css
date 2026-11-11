@@ -17,7 +17,6 @@
 
 .responsive-app-shell[data-compact="true"] .app-sidebar-scroll {
   padding: 0.75rem;
-  direction: ltr;
 }
 
 /* The 44px floor is for fingers. A narrow desktop window driven by a mouse

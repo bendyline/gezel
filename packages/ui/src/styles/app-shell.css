@@ -3044,16 +3044,10 @@ button.machine-memory-unload-button {
   background: linear-gradient(to left, var(--sidebar-pane-shadow), transparent);
 }
 
-/* Keep the native scrollbar on the sidebar's outside edge. Chromium follows
-   the scroll container's inline direction when placing a vertical scrollbar;
-   restore LTR on its children so only the scrollbar moves. */
-:root:not([data-sidebar-side="right"]) .app-sidebar-scroll {
-  direction: rtl;
-}
-
-:root:not([data-sidebar-side="right"]) .app-sidebar-scroll > * {
-  direction: ltr;
-}
+/* The rail's scrollbar is on its right on either side, where a scrollbar is
+   expected: against the content with the rail on the left, at the window's
+   edge with it on the right. A left rail used to reverse its inline direction
+   to push the bar to the window's edge, which put it on the far left. */
 
 /* Project maker's mark — a small tool stamp inherited from the project type.
    Unlike gezels, projects are workbenches rather than characters, so the tile
@@ -3673,9 +3667,11 @@ button.machine-memory-unload-button {
   --sidebar-tab-surface: var(--bg);
 }
 
+/* Rows stand clear of both edges. The left is plain padding; the right is the
+   scrollbar's gutter plus a little padding, so a selected row never touches
+   the content beside a left rail and the bar has its own lane to appear in. */
 .app-sidebar .app-sidebar-scroll {
-  /* The scrollbar direction puts inline-start against the main pane. */
-  padding-inline-start: 0.75rem;
+  padding-left: 0.75rem;
 }
 
 /* Reserve the scrollbar gutter whether or not the list overflows, so Home
@@ -3683,6 +3679,51 @@ button.machine-memory-unload-button {
    handoff, whose rail holds only Home. */
 .app-sidebar:not(.collapsed) .app-sidebar-scroll {
   scrollbar-gutter: stable;
+}
+
+/* The rail's scrollbar shows only under the pointer. Everywhere else a bar
+   also shows while its container holds focus, but a rail row keeps focus
+   after it is opened, and beside the content a bar that stays painted reads
+   as a second edge. The gutter is kept, so nothing moves when it appears. */
+@media (hover: hover) and (pointer: fine) {
+  .app-sidebar .app-sidebar-scroll {
+    scrollbar-color: transparent transparent;
+  }
+
+  .app-sidebar .app-sidebar-scroll::-webkit-scrollbar-track:vertical {
+    background: transparent;
+    border-color: transparent;
+  }
+
+  .app-sidebar .app-sidebar-scroll::-webkit-scrollbar-thumb:vertical {
+    background: transparent;
+  }
+
+  .app-sidebar:hover .app-sidebar-scroll {
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  }
+
+  .app-sidebar:hover .app-sidebar-scroll::-webkit-scrollbar-track:vertical {
+    background: var(--scrollbar-track);
+    border-color: var(--border);
+  }
+
+  .app-sidebar:hover .app-sidebar-scroll::-webkit-scrollbar-thumb:vertical {
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+
+  .app-sidebar:hover .app-sidebar-scroll::-webkit-scrollbar-thumb:vertical:hover {
+    background: var(--scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
+}
+
+@media (forced-colors: active) {
+  .app-sidebar .app-sidebar-scroll,
+  .app-sidebar:hover .app-sidebar-scroll {
+    scrollbar-color: auto;
+  }
 }
 
 .app-sidebar:not(.collapsed) .app-sidebar-home {
@@ -3785,12 +3826,12 @@ button.machine-memory-unload-button {
 }
 
 /* ── Sidebar on the right ───────────────────────────────────────────
-   The default layout (Settings → General → Sidebar position lets the
-   user flip back to left, which is the attribute-less CSS base above).
-   Reverse the body's flex axis so the sidebar sits after the main pane,
-   and mirror the sidebar's divider, resize grip, seam shadow, and
-   collapse toggle to the opposite edge so everything still hugs the
-   boundary with the content. */
+   The person's choice (Settings → General → Sidebar position); the left
+   is the default and the attribute-less CSS base above. Reverse the body's
+   flex axis so the sidebar sits after the main pane, and mirror the
+   sidebar's divider, resize grip, seam shadow, and collapse toggle to the
+   opposite edge so everything still hugs the boundary with the content.
+   The scrollbar stays on the rail's right, which is then the window's edge. */
 :root[data-sidebar-side="right"] .app-body {
   flex-direction: row-reverse;
 }
@@ -3814,62 +3855,6 @@ button.machine-memory-unload-button {
 
 :root[data-sidebar-side="right"] .app-sidebar-footer {
   justify-content: flex-start;
-}
-
-/* Settings already exposes a full-height content scrollbar against this seam.
-   When the navigation rail is also on the right, keeping its secondary track
-   painted at rest reads as a duplicate scrollbar. Preserve its gutter (and
-   therefore the layout), but reveal the track and thumb only while the rail is
-   hovered or contains keyboard focus. */
-:root[data-sidebar-side="right"] .app-body:has(> .app-main > .settings-layout) .app-sidebar-scroll {
-  scrollbar-color: transparent transparent;
-}
-
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar-scroll::-webkit-scrollbar-track {
-  background: transparent;
-  border-color: transparent;
-}
-
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar-scroll::-webkit-scrollbar-thumb {
-  background: transparent;
-}
-
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:hover
-  .app-sidebar-scroll,
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:has(:focus-visible)
-  .app-sidebar-scroll {
-  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-}
-
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:hover
-  .app-sidebar-scroll::-webkit-scrollbar-track,
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:has(:focus-visible)
-  .app-sidebar-scroll::-webkit-scrollbar-track {
-  background: var(--scrollbar-track);
-  border-color: var(--border);
-}
-
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:hover
-  .app-sidebar-scroll::-webkit-scrollbar-thumb,
-:root[data-sidebar-side="right"]
-  .app-body:has(> .app-main > .settings-layout)
-  .app-sidebar:has(:focus-visible)
-  .app-sidebar-scroll::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
 }
 
 /* Focus follows the selected row's complete perimeter. Keep the ring on
