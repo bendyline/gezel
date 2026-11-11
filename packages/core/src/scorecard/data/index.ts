@@ -101,6 +101,15 @@ import run_2026_10_30_spark_native_0_1_54_final_six from './runs/2026-10-30-spar
 import run_2026_11_03_m5max_fixed_paired from './runs/2026-11-03-m5max-fixed-paired.json' with {
   type: 'json',
 };
+import run_2026_11_03_windows_saluki_native_0_1_57_original from './runs/2026-11-03-windows-saluki-native-0-1-57-original.json' with {
+  type: 'json',
+};
+import run_2026_11_06_windows_saluki_native_0_1_57_fanout from './runs/2026-11-06-windows-saluki-native-0-1-57-fanout.json' with {
+  type: 'json',
+};
+import run_2026_11_09_windows_saluki_native_0_1_57_round3 from './runs/2026-11-09-windows-saluki-native-0-1-57-round3.json' with {
+  type: 'json',
+};
 
 /** Every recorded sweep. Merged (and ordered by recency) by ../index.ts. */
 export const RUN_SHARDS: ScorecardDataset[] = [
@@ -138,6 +147,9 @@ export const RUN_SHARDS: ScorecardDataset[] = [
   run_2026_10_30_r9700_docblocks_activation as unknown as ScorecardDataset,
   run_2026_10_30_spark_native_0_1_54_final_six as unknown as ScorecardDataset,
   run_2026_11_03_m5max_fixed_paired as unknown as ScorecardDataset,
+  run_2026_11_03_windows_saluki_native_0_1_57_original as unknown as ScorecardDataset,
+  run_2026_11_06_windows_saluki_native_0_1_57_fanout as unknown as ScorecardDataset,
+  run_2026_11_09_windows_saluki_native_0_1_57_round3 as unknown as ScorecardDataset,
 ];
 
 /**
