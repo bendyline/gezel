@@ -14,7 +14,8 @@
  *   trial failures; the product needs the static check up front.
  */
 
-import type { ModelFitnessRecord } from '@bendyline/gezel';
+import type { FitnessCheck, ModelFitnessRecord } from '@bendyline/gezel';
+import { DegenerateRunDetector } from '@bendyline/gezel/local-loop';
 
 /** Below this decode rate agentic work degrades into stall territory. */
 export const DEFAULT_FITNESS_MIN_TPS = 3;
@@ -91,6 +92,11 @@ export interface FitnessEvidence {
   genTokensPerSecEstimated?: boolean;
   /** Measured decode t/s from the generation turn, or null when unmeasured. */
   genTokensPerSec: number | null;
+  /**
+   * The visible reply to the short generation turn, for the coherence check.
+   * `undefined` when that turn never completed.
+   */
+  generationText?: string;
   /** Set when the generation turn threw (timeout, engine error). */
   generationError?: string;
   /** Manifest `thinkingBudget` resolved for launch; undefined = none authored. */
@@ -158,10 +164,81 @@ export function buildFitnessChecks(ev: FitnessEvidence): {
             detail: `only ${ev.effectiveContextTokens.toLocaleString()} tokens of context — below the ${FITNESS_MIN_CONTEXT_TOKENS.toLocaleString()}-token floor agentic tool loops need`,
           };
 
-  const checks = { spawn, toolRoundTrip, throughput, reasoningBudget, contextFit };
+  const coherence =
+    ev.spawnError || ev.generationError || ev.generationIncomplete
+      ? notReached
+      : buildCoherenceCheck(ev.generationText);
+
+  const checks = { spawn, toolRoundTrip, throughput, reasoningBudget, contextFit, coherence };
   const admitted =
-    spawn.ok && toolRoundTrip.ok && throughput.ok && reasoningBudget.ok && contextFit.ok;
+    spawn.ok &&
+    toolRoundTrip.ok &&
+    throughput.ok &&
+    reasoningBudget.ok &&
+    contextFit.ok &&
+    coherence.ok;
   return { checks, admitted };
+}
+
+/**
+ * Conversation markers a reply should never contain. Seeing one means the
+ * engine laid the conversation out in a format the model was not trained on
+ * (the most common fault in a GGUF converted by hand), so it writes the
+ * turn structure out as text instead of ending its turn.
+ */
+const LEAKED_TURN_MARKER =
+  /<\|im_start\|>|<\|im_end\|>|<\|eot_id\|>|<\|start_header_id\|>|<\|end_header_id\|>|<start_of_turn>|<end_of_turn>|\[\/?INST\]|<\|endoftext\|>|<\|(?:assistant|user|system)\|>|<\/s>/;
+
+/** A run this long of one short unit is a loop, not prose. */
+const COHERENCE_RUN_CHARS = 160;
+/** The probe asks for ~150 words; fewer than this is not an answer. */
+const COHERENCE_MIN_WORDS = 15;
+
+/**
+ * Whether the short reply reads as language. Pure, and deliberately loose:
+ * the probe judges whether a model works at all, not how well it writes.
+ */
+export function buildCoherenceCheck(text: string | undefined): FitnessCheck {
+  if (text === undefined) return { ok: true, detail: 'reply not captured — non-gating pass' };
+  const trimmed = text.trim();
+  if (!trimmed) return { ok: false, detail: 'model replied with nothing' };
+  const marker = LEAKED_TURN_MARKER.exec(trimmed);
+  if (marker) {
+    return {
+      ok: false,
+      detail: `reply contains the conversation marker "${marker[0]}" — the model's conversation format does not match how it was trained`,
+    };
+  }
+  const detector = new DegenerateRunDetector('content', COHERENCE_RUN_CHARS);
+  for (let i = 0; i < trimmed.length; i += 32) {
+    const run = detector.observe(trimmed.slice(i, i + 32));
+    if (run) {
+      return {
+        ok: false,
+        detail: `reply repeats ${JSON.stringify(run.unit)} over and over (${run.length} characters)`,
+      };
+    }
+  }
+  const words = trimmed.match(/[\p{L}\p{N}']+/gu) ?? [];
+  if (words.length < COHERENCE_MIN_WORDS) {
+    return {
+      ok: false,
+      detail: `replied with ${words.length} word${words.length === 1 ? '' : 's'} to a request for about 150`,
+    };
+  }
+  const distinct = new Set(words.map((word) => word.toLowerCase())).size;
+  if (words.length >= 40 && distinct / words.length < 0.2) {
+    return {
+      ok: false,
+      detail: `reply cycles through ${distinct} distinct words in ${words.length}`,
+    };
+  }
+  const visible = trimmed.replace(/\s+/g, '');
+  const letters = (visible.match(/\p{L}/gu) ?? []).length;
+  if (visible.length > 0 && letters / visible.length < 0.5) {
+    return { ok: false, detail: 'reply is mostly symbols rather than words' };
+  }
+  return { ok: true, detail: `wrote a ${words.length}-word reply that reads as language` };
 }
 
 function buildToolRoundTripCheck(ev: FitnessEvidence): { ok: boolean; detail: string } {

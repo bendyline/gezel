@@ -2689,8 +2689,8 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             label={crewLeadLabel(selected)}
                             hint={
                               selected.mode === 'solo'
-                                ? 'The Builder handles this entire job. Team-management tools are stripped from their thread.'
-                                : 'Leads the crew. Every chat here knows who it is.'
+                                ? 'Does this project’s work from start to finish, without a crew to hand it to.'
+                                : 'Leads the crew and hands work to its members. Every chat here knows who it is.'
                             }
                           >
                             <GezelPicker

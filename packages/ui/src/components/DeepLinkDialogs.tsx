@@ -4,14 +4,23 @@ import { api } from '../api.js';
 import { deriveLaunchProjectId } from '../views/home/utils.js';
 import { NewProjectDialog } from '../views/projects/NewProjectDialog.js';
 import { NewTaskDialog } from '../views/tasks/NewTaskDialog.js';
+import { ModelImportDialog } from './ModelImportDialog.js';
 import { navigateToTab } from './nav-actions.js';
 
-export interface DeepLinkDialogTarget {
-  kind: 'app' | 'craftbook';
-  id: string;
-  /** A new link to the same item still opens a fresh dialog. */
-  key: number;
-}
+export type DeepLinkDialogTarget =
+  | {
+      kind: 'app' | 'craftbook';
+      id: string;
+      /** A new link to the same item still opens a fresh dialog. */
+      key: number;
+    }
+  | {
+      /** Hugging Face's "Use this model": the review, never a download. */
+      kind: 'model';
+      repo: string;
+      file?: string;
+      key: number;
+    };
 
 interface LaunchContext {
   projectId: string;
@@ -56,6 +65,15 @@ export function DeepLinkDialogs({
     };
   }, [target.kind]);
 
+  if (target.kind === 'model') {
+    return (
+      <ModelImportDialog
+        open
+        initial={{ repo: target.repo, ...(target.file ? { file: target.file } : {}) }}
+        onClose={onClose}
+      />
+    );
+  }
   if (target.kind === 'app') {
     return (
       <NewProjectDialog
@@ -80,7 +98,7 @@ export function DeepLinkDialogs({
     <NewTaskDialog
       open
       quickLaunch
-      initialCraftbookId={target.id}
+      initialCraftbookId={target.kind === 'craftbook' ? target.id : ''}
       defaultProjectId={launch.projectId}
       projects={launch.projects}
       gezels={launch.gezels}

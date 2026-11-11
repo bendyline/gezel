@@ -1,4 +1,4 @@
-import type { GezelSummary, TimelineMessage } from '@bendyline/gezel';
+import type { GezelSummary, Project, TimelineMessage } from '@bendyline/gezel';
 import {
   displayName,
   handoffHeadline,
@@ -6,6 +6,7 @@ import {
   parseTaskHandoffNote,
   plainRoleTitle,
 } from '@bendyline/gezel';
+import { speaksAsMainCrewMember } from '../labels.js';
 import { GezelIcon } from './GezelIcon.js';
 import { PersonLabel } from './PersonLabel.js';
 import { StreamingStatusLine, roleGlyph, useElapsedSeconds } from './chat-bubbles.js';
@@ -63,6 +64,7 @@ function previewifyMarkdown(s: string): string {
 export function ChatStickyHeader({
   payload,
   gezels,
+  projects,
   debugMode = false,
 }: {
   payload: {
@@ -72,6 +74,8 @@ export function ChatStickyHeader({
       | { kind: 'message'; msg: TimelineMessage };
   };
   gezels: Map<string, GezelSummary>;
+  /** Projects by id, to star the main crew member of the one being spoken in. */
+  projects?: ReadonlyMap<string, Project>;
   /** The tool count is machinery, like the rows it counts; debug mode only. */
   debugMode?: boolean;
 }): React.ReactNode {
@@ -121,7 +125,14 @@ export function ChatStickyHeader({
         <PersonLabel
           name={assistantName}
           roleTitle={assistantRole && plainRoleTitle(assistantRole)}
-          badge={roleGlyph(assistantRole)}
+          badge={roleGlyph(
+            assistantRole,
+            speaksAsMainCrewMember(
+              projects?.get(isLive ? (slotForLive?.projectId ?? '') : assistantInfo.msg.projectId),
+              assistantGezel?.id,
+              assistantGezel?.role,
+            ),
+          )}
           face={
             <GezelIcon
               svg={assistantGezel?.icon ?? null}

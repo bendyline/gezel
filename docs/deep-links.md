@@ -2,7 +2,8 @@
 
 gezel.com links into the desktop app. A reader on a craftbook or app page clicks
 **Run this in Gezel** or **Open in Gezel**, the browser asks whether to open
-Gezel, and the app opens that item's form.
+Gezel, and the app opens that item's form. Hugging Face's **Use this model**
+menu links a model page the same way.
 
 ## Targets
 
@@ -11,11 +12,13 @@ Gezel, and the app opens that item's form.
 | `gezel://app/<project-type-id>` | New Project on that type's form (`NewProjectDialog` with `initialTypeId`) |
 | `gezel://craftbook/<craftbook-id>` | That craftbook's launch form, in the project new work goes to (`NewTaskDialog` with `initialCraftbookId`) |
 | `gezel://docs/<article-id>` | That Handboek article in Knowledge |
+| `gezel://model/huggingface/<owner>/<name>[?file=<path.gguf>]` | The review of that Hugging Face model (`ModelImportDialog`), which checks it before anything downloads. See [model-imports.md](model-imports.md) |
 | `gezel://open`, or any gezel URL this build does not understand | Home |
 
 The parser is `parseGezelDeepLink` in [core deep-links.ts](../packages/core/src/deep-links.ts).
 Ids are lowercase catalog or article ids (`[a-z0-9][a-z0-9._-]*`, at most 128
-characters). A malformed id, an extra path segment, or an unknown target opens
+characters). A model link names a Hugging Face repo instead (`owner/name`, the
+Hub's own character set and case). A malformed id, an extra path segment, or an unknown target opens
 Home rather than guessing. A newer site linking to a target an older app does
 not know still brings the app forward.
 
@@ -26,7 +29,9 @@ not know still brings the app forward.
   Make something opens it. Any page on the web can send a `gezel://` link, so
   no target may have an effect of its own.
 - **A link carries no text.** Query strings are dropped. A page could otherwise
-  prefill a request the person never wrote.
+  prefill a request the person never wrote. The one exception is a model link's
+  `file`: an identifier with a strict grammar (`isSafeGgufRepoPath`), not text,
+  which the review shows and the person can change.
 - **One dialog per burst.** Main keeps only the latest pending link and drops a
   repeat of the same target within two seconds.
 - **Unknown ids fall back.** The dialogs already handle ids they do not offer:
@@ -82,5 +87,6 @@ not know still brings the app forward.
 - **Phones.** The phone app registers no URL scheme. `@capacitor/app` is not a
   dependency, Android has no intent filter, and iOS has no
   `CFBundleURLTypes`.
-- **Other targets.** Knowledge catalogs and models have no target yet, because
-  neither page can focus an item by id today.
+- **Other targets.** Knowledge catalogs and catalog models have no target yet,
+  because neither page can focus an item by id today. Models from Hugging Face
+  do (`gezel://model/...`), because the review dialog needs no page behind it.

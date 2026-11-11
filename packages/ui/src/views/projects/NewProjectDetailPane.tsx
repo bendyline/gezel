@@ -163,6 +163,12 @@ export function NewProjectBrief({ selection }: { selection: PaneSelection }) {
                 const memberTitle = isLegacyRoleTitle(member.templateId)
                   ? plainRoleTitle(member.templateId)
                   : memberName;
+                // The type's main crew member: its own title when it has one,
+                // "Crew lead" only where there is a crew to lead. A type with
+                // one crew member called them a crew lead of nobody.
+                const mainMark = member.voorman
+                  ? (catalogType?.leadLabel ?? (crew.length > 1 ? 'Crew lead' : undefined))
+                  : undefined;
                 return (
                   <figure key={member.templateId} className="gz-npd-crew-member">
                     <span className="gz-npd-crew-figure">
@@ -174,7 +180,7 @@ export function NewProjectBrief({ selection }: { selection: PaneSelection }) {
                     </span>
                     <figcaption>
                       {memberTitle}
-                      {member.voorman && <span className="gz-npd-crew-voorman">Crew lead</span>}
+                      {mainMark && <span className="gz-npd-crew-voorman">{mainMark}</span>}
                     </figcaption>
                   </figure>
                 );

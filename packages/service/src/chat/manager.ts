@@ -81,6 +81,7 @@ import {
   type CodexPermissionMode,
   type ExpectedDeliverable,
   type FactualLookupPreference,
+  type GeneralistMode,
   type GezelConfig,
   type GezelDetail,
   type GezelGender,
@@ -91,6 +92,7 @@ import {
   KeyedLock,
   type ModelTier,
   NEW_THREAD_TITLE,
+  type NewProjectMode,
   type ProjectFileEntry,
   type Question,
   type ScriptMeta,
@@ -137,7 +139,7 @@ import {
   pronounFormsForGender,
   redactCredentials,
   resolveAsk,
-  resolveGeneralistKickoff,
+  resolveNewProjectMode,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
   roleDeliverableScripts,
@@ -443,7 +445,7 @@ import {
 } from './context-forcefit.js';
 import { CraftbookOfferCache } from './craftbook-offer-cache.js';
 import { triggerCandidatesFromListing, triggerPhrasePlan } from './craftbook-trigger-route.js';
-import { crewIntroductionText } from './crew-introduction.js';
+import { crewHireText, crewIntroductionText } from './crew-introduction.js';
 import {
   isExpectedBinaryDocumentDeliverablePath,
   isExpectedImageDeliverablePath,
@@ -453,7 +455,6 @@ import {
   engineSwapWaitLabel,
   turnWaitsForEngineSwap,
 } from './engine-swap-wait.js';
-import { handoffRetryDelayMs } from './handoff-retry-delay.js';
 import type { ChatEventBus, PublishScope } from './events.js';
 import { EvidenceLedger, personGivenText } from './evidence-ledger.js';
 import {
@@ -486,6 +487,7 @@ import {
   resolveExecutionModelFor,
   sessionContextPoisoned,
 } from './generalist-continuity.js';
+import { handoffRetryDelayMs } from './handoff-retry-delay.js';
 import {
   IMG2IMG_EDIT_STRENGTH,
   classifyImageFollowUp,
@@ -12375,7 +12377,8 @@ export class ChatManager extends LocalEngineRuntime {
   async postCrewIntroduction(
     task: Task,
     gezelId: string,
-    step: TaskCraftbookStep,
+    // The step they start on; absent for someone hired mid-step to help.
+    step: TaskCraftbookStep | undefined,
     moment: 'kickoff' | 'joined' = 'joined',
   ): Promise<string | null> {
     const thread = await findOwnerThread(this.store, task);
@@ -12397,17 +12400,9 @@ export class ChatManager extends LocalEngineRuntime {
     const members: CrewMember[] = [];
     for (const id of ids) {
       if (id === thread.gezelId || introduced.has(id)) continue;
-      const gezel = await this.store.getGezel(id).catch(() => null);
-      if (!gezel) continue;
-      const role = gezel.role?.trim() ? plainRoleTitle(gezel.role) : undefined;
-      const purpose = firstSentence(gezel.description);
-      members.push({
-        gezelId: id,
-        name: gezel.name,
-        ...(role ? { role } : {}),
-        ...(purpose ? { purpose } : {}),
-        ...(id === gezelId ? { stepName: step.name } : {}),
-      });
+      const member = await this.crewMemberFor(id);
+      if (!member) continue;
+      members.push({ ...member, ...(step && id === gezelId ? { stepName: step.name } : {}) });
     }
     // The gezel lookups awaited; take the thread as it is now, and drop anyone
     // a concurrent post introduced meanwhile.
@@ -12429,6 +12424,86 @@ export class ChatManager extends LocalEngineRuntime {
     };
     const { record } = await this.appendToThread(target, message);
     return record.id;
+  }
+
+  /** A gezel as an introduction card shows them, or null when they are gone. */
+  private async crewMemberFor(gezelId: string): Promise<CrewMember | null> {
+    const gezel = await this.store.getGezel(gezelId).catch(() => null);
+    if (!gezel) return null;
+    const role = gezel.role?.trim() ? plainRoleTitle(gezel.role) : undefined;
+    const purpose = firstSentence(gezel.description);
+    return {
+      gezelId,
+      name: gezel.name,
+      ...(role ? { role } : {}),
+      ...(purpose ? { purpose } : {}),
+    };
+  }
+
+  /**
+   * Introduce gezels a chat turn hired (`create_gezel`, `ensure_gezel`, a
+   * delegation that had to recruit), in the thread the person reads. Before
+   * this, only a task's crew was introduced: a copywriter hired in
+   * conversation joined the roster without a word, and seven of a bakery
+   * owner's ten crew members arrived that way in one session (2026-11-09).
+   *
+   * `sessionId` is the session whose tool call hired them. Inside a task's
+   * session they joined that task's crew, so they are introduced as its
+   * other hires are, in its owner's thread. Anywhere else the card goes to
+   * the session's root thread, after the hiring turn has replied, so it
+   * follows the words that name them. Each gezel is introduced once per
+   * thread. Returns the ids it introduced.
+   */
+  async postHireIntroduction(sessionId: string, gezelIds: readonly string[]): Promise<string[]> {
+    const find = async (id: string) =>
+      this.states.get(id)?.record ?? (await this.store.findSessionById(id).catch(() => null));
+    let thread = await find(sessionId);
+    const seen = new Set<string>();
+    while (thread && !thread.taskRef && thread.parentSession && !seen.has(thread.id)) {
+      seen.add(thread.id);
+      thread = await find(thread.parentSession.sessionId);
+    }
+    if (!thread) return [];
+    const ids = [...new Set(gezelIds)];
+    if (thread.taskRef) {
+      const ref = parseTaskRef(thread.taskRef);
+      const task = ref ? await this.store.readTask(ref.projectId, ref.num).catch(() => null) : null;
+      if (!task) return [];
+      const introduced: string[] = [];
+      for (const id of ids) {
+        if (await this.postCrewIntroduction(task, id, undefined, 'joined')) introduced.push(id);
+      }
+      return introduced;
+    }
+    if (thread.archived) return [];
+    const threadId = thread.id;
+    const started = Date.now();
+    while (this.isSessionTurnPending(threadId) && Date.now() - started < KICKOFF_SETTLE_MAX_MS) {
+      await new Promise((resolve) => setTimeout(resolve, KICKOFF_SETTLE_POLL_MS));
+    }
+    const members: CrewMember[] = [];
+    for (const id of ids) {
+      if (id === thread.gezelId) continue;
+      const member = await this.crewMemberFor(id);
+      if (member) members.push(member);
+    }
+    // Read the thread as it is now: the wait and the lookups above let a
+    // task's own introduction name the same gezel first.
+    const target = (await find(threadId)) ?? thread;
+    if (target.archived) return [];
+    const already = new Set(
+      target.messages.flatMap((m) => m.crewIntroduction?.members.map((x) => x.gezelId) ?? []),
+    );
+    const fresh = members.filter((m) => !already.has(m.gezelId));
+    if (fresh.length === 0) return [];
+    await this.appendToThread(target, {
+      role: 'assistant',
+      content: crewHireText(fresh),
+      at: nowIso(),
+      synthetic: 'crew-introduction',
+      crewIntroduction: { moment: 'hired', members: fresh },
+    });
+    return fresh.map((m) => m.gezelId);
   }
 
   /**
@@ -12638,6 +12713,30 @@ export class ChatManager extends LocalEngineRuntime {
       catalog: this.catalog,
       providerName,
       ...(gezelId ? { gezelId } : {}),
+    });
+  }
+
+  /**
+   * The shape a new project takes when nobody chose one (the Meester's
+   * `start_project`, the app's New project): a crew under a crew lead, or
+   * one gezel working alone. It follows the strategy the install's default
+   * model works best under, read now; the project keeps the shape it was
+   * made with. An unreadable model profile falls back to the provider's
+   * default pick.
+   */
+  async newProjectMode(config?: GezelConfig): Promise<NewProjectMode> {
+    const cfg = config ?? (await this.store.readConfig());
+    const providerName = resolveDefaultProviderName(cfg);
+    const named = cfg.taskStrategy && cfg.taskStrategy !== 'auto';
+    const model = named
+      ? undefined
+      : await this.executionModelProfile(providerName).catch(() => undefined);
+    return resolveNewProjectMode({
+      taskStrategy: cfg.taskStrategy,
+      generalistMode: effectiveGeneralistModeSetting(cfg),
+      providerName,
+      tier: model?.tier,
+      affinity: model?.affinity,
     });
   }
 
@@ -15767,11 +15866,10 @@ export class ChatManager extends LocalEngineRuntime {
           ? false
           : (config.mlxSharedBandPrefix?.enabled ?? true));
 
-    const generalistKickoff = resolveGeneralistKickoff(
-      effectiveGeneralistModeSetting(config),
-      record.providerName,
-      localModelTier,
-    );
+    // What `start_project` makes from this session, and the routing words in
+    // the prompt that go with it: a solo lead (`on`) or a crew (`off`).
+    const generalistKickoff: GeneralistMode =
+      (await this.newProjectMode(config)) === 'solo' ? 'on' : 'off';
     const systemInstructions = buildInstructions({
       name: gezel?.name ?? 'Agent',
       // Session stamp wins over the live config flag: a TUI-created

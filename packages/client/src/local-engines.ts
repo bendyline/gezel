@@ -229,8 +229,11 @@ export interface ModelFitnessEntry {
     host: { totalRamBytes: number; gpuVramBytes: number | null; source: string };
     checks: Record<
       'spawn' | 'toolRoundTrip' | 'throughput' | 'reasoningBudget' | 'contextFit',
-      { ok: boolean; detail: string }
-    >;
+      { ok: boolean; detail: string; reached?: boolean }
+    > & {
+      /** Absent on records written before the coherence check existed. */
+      coherence?: { ok: boolean; detail: string; reached?: boolean };
+    };
   };
   /** Installed weights/version changed since the probe — treat as unprobed. */
   stale: boolean;

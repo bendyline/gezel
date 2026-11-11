@@ -9,6 +9,12 @@ export {
 } from './content-pack.js';
 export { LocalCatalogSource } from './local-source.js';
 export { InstalledAiAppsSource } from './installed-ai-apps-source.js';
+export {
+  type CuratedChatModelLookup,
+  type ImportedChatModelReader,
+  type ImportedChatModelRecord,
+  ImportedChatModelsSource,
+} from './imported-models-source.js';
 export { categorizeToolset } from './categorize.js';
 export {
   applyDefaultCraftbookStepPolicies,

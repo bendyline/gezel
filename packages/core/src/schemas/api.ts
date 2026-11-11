@@ -3766,6 +3766,12 @@ export type MessageGezelResponse = z.infer<typeof MessageGezelResponseSchema>;
 export const EnsureGezelRequestSchema = z.object({
   jobTitle: z.string().min(1),
   preferredName: z.string().optional(),
+  /**
+   * Exact gilde template id. A crew member already made from that template is
+   * reused, else one is created from exactly it. This is how a new project's
+   * main gezel is found: one Builder can run several projects.
+   */
+  templateId: z.string().min(1).optional(),
 });
 export type EnsureGezelRequest = z.infer<typeof EnsureGezelRequestSchema>;
 
@@ -3814,12 +3820,15 @@ export const ProjectForGezelSchema = z.object({
   projectName: z.string(),
   /**
    * Why the project is shown:
-   *   - `voorman` — the gezel runs this project
+   *   - `voorman` — the gezel is this project's main gezel
    *   - `assignment` — the gezel is on an active task / phase here
    *   - `session` — they have a non-archived chat session here
    *   - `fallback` — `default` always appears so the dropdown is never empty
    */
   precedence: z.enum(['voorman', 'assignment', 'session', 'fallback']),
+  /** On a `voorman` row: the project's shape and lead title, for what to call them there. */
+  mode: ProjectModeSchema.optional(),
+  leadLabel: z.string().optional(),
   /** Most recent session activity for this gezel in this project, when any. */
   lastActivityAt: z.string().optional(),
 });
@@ -4435,11 +4444,19 @@ export const CreateProjectRequestSchema = z.object({
    */
   mode: z.enum(['crew', 'solo']).optional(),
   /**
+   * With no `mode`, let the daemon pick the shape from the strategy the
+   * install's default model works best under (`resolveNewProjectMode`):
+   * a crew for stepwise, one gezel working alone otherwise. The app's New
+   * project sends it. Absent keeps `crew`, which callers written before this
+   * field rely on.
+   */
+  autoMode: z.boolean().optional(),
+  /**
    * `none` skips the lead the route otherwise seats (a Voorman for a crew
    * project, a Builder for a solo folder project). For callers that seat their
    * own lead right after creating the project: the Meester's kickoff macros
-   * mint a fresh Voorman, and with the route minting one too every kickoff
-   * roster carried two, one of them idle.
+   * seat the crew lead themselves, and with the route seating one too a
+   * kickoff roster could carry two, one of them idle.
    */
   lead: z.enum(['auto', 'none']).optional(),
   /**

@@ -48,6 +48,7 @@ import { createAppServeController } from './app-serve/controller.js';
 import { AppToolRelayRegistry } from './app-tools/relay-registry.js';
 
 import { createEngineComponents } from '@bendyline/gezel-inference/internal/engine-components';
+import { createImportedChatModelReader } from '@bendyline/gezel-inference/internal/models/imports/entry-store';
 import {
   startResponsivenessMonitor,
   syncPerfProfiling,
@@ -596,6 +597,7 @@ export async function startProductService(
   const catalog = new CatalogService(undefined, {
     localRoot: home,
     contentRoot: () => gildeUpdates.contentDataDir(),
+    importedChatModels: createImportedChatModelReader({ home }),
   });
   // The shared library's AI tier (summaries, media shadows) is gated on a
   // Boekwachter being on its roster, so a freshly created library opts in

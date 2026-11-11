@@ -15,7 +15,7 @@ Every project can carry:
 
 - **About** — a plain-language description of what the project is. Gezel reads it before every conversation, so the context is always there.
 - **Mission objectives** — the success criteria. Write these like you'd brief a team.
-- **A crew lead** — the crew member in charge, if you name one.
+- **A main crew member** — the one the project is assigned to. Usually they do the work themselves; in a bigger project they lead a crew. See [Your crew](the-crew.md).
 
 ## Threads
 

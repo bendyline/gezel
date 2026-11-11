@@ -1,7 +1,7 @@
 import type { GezelSummary, ProjectDetail } from '@bendyline/gezel';
 import { displayName, roleForMatching } from '@bendyline/gezel';
 import { type ReactNode, useMemo, useState } from 'react';
-import { crewLeadLabelLower } from '../labels.js';
+import { mainCrewMemberSubtitle } from '../labels.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { GezelIcon } from './GezelIcon.js';
 import {
@@ -119,7 +119,9 @@ export function ProjectCrewRoster({
               { name: gezel.name, roleBasedName: gezel.roleBasedName },
               roleBasedNameOnlyMode,
             );
-            const subtitle = isLead ? `⭐ ${crewLeadLabelLower(project)}` : gezel.role;
+            const subtitle = isLead
+              ? `⭐ ${mainCrewMemberSubtitle(project, gezel.role)}`
+              : gezel.role;
             return (
               <li
                 key={gezel.id}

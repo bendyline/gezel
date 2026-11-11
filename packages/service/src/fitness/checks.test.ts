@@ -198,3 +198,41 @@ describe('buildFitnessChecks — turns that ran out of budget mid-stream', () =>
     expect(checks.throughput.ok).toBe(true);
   });
 });
+
+describe('coherence', () => {
+  const story =
+    'The carpenter set down her plane and ran a hand along the long oak table. ' +
+    'Seven years of apprenticeship had led to this bench, these joints, this finish. ' +
+    'She checked each mortise twice, then a third time, because the guild would.';
+
+  it('passes a reply that reads as language', () => {
+    const { checks, admitted } = buildFitnessChecks(evidence({ generationText: story }));
+    expect(checks.coherence?.ok).toBe(true);
+    expect(admitted).toBe(true);
+  });
+
+  it('fails leaked conversation markers, which mean a mismatched format', () => {
+    const { checks, admitted } = buildFitnessChecks(
+      evidence({ generationText: `${story}<|im_end|>\n<|im_start|>user\nWrite more` }),
+    );
+    expect(checks.coherence?.ok).toBe(false);
+    expect(checks.coherence?.detail).toContain('<|im_end|>');
+    expect(admitted).toBe(false);
+  });
+
+  it('fails a looping or empty reply', () => {
+    expect(
+      buildFitnessChecks(evidence({ generationText: '/'.repeat(400) })).checks.coherence?.ok,
+    ).toBe(false);
+    expect(buildFitnessChecks(evidence({ generationText: '   ' })).checks.coherence?.ok).toBe(
+      false,
+    );
+    expect(
+      buildFitnessChecks(evidence({ generationText: 'the cat '.repeat(60) })).checks.coherence?.ok,
+    ).toBe(false);
+  });
+
+  it('is a non-gating pass when the reply was not captured', () => {
+    expect(buildFitnessChecks(evidence()).checks.coherence?.ok).toBe(true);
+  });
+});

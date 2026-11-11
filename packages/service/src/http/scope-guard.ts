@@ -664,6 +664,16 @@ async function isSessionRouteAllowed(
   if (method === 'GET' && path === `/api/sessions/${encodeURIComponent(sessionId(auth))}`) {
     return SESSION_ALLOW;
   }
+  // A coordinator that just hired someone may have them introduced in its own
+  // thread. The card's words come from the gezel's record, never the caller.
+  if (
+    method === 'POST' &&
+    path === `/api/sessions/${encodeURIComponent(sessionId(auth))}/crew-introduction`
+  ) {
+    return auth.team
+      ? SESSION_ALLOW
+      : sessionDeny('introducing crew requires a coordinator session');
+  }
   if (path === '/api/sessions' || path.startsWith('/api/sessions/')) {
     return sessionDeny('raw session routes require a first-party client');
   }

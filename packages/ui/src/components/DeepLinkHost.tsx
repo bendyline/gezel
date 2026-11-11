@@ -11,8 +11,9 @@ const DeepLinkDialogs = lazy(() =>
 );
 
 /**
- * Opens what a `gezel://` link from gezel.com asks for: an app's New Project
- * form, a craftbook's launch form, or a Handboek article. The forms are the
+ * Opens what a `gezel://` link asks for: an app's New Project form, a
+ * craftbook's launch form, a Handboek article, or the review of a Hugging
+ * Face model (from the Hub's "Use this model" menu). The forms are the
  * ones Home's Make something opens, so nothing starts until the person submits
  * one. Contract in docs/deep-links.md.
  */
@@ -27,10 +28,29 @@ export function DeepLinkHost({ onHome }: { onHome: () => void }) {
         runNavActions(openHandboekArticleActions(link.id));
         return;
       }
-      const offersApps = caps.projects && (caps.catalog || caps.projectTypes === true);
-      if ((link.kind === 'app' && offersApps) || (link.kind === 'craftbook' && caps.tasks)) {
+      if (link.kind === 'model') {
+        if (!caps.modelSettings) {
+          onHome();
+          return;
+        }
         opened += 1;
-        setTarget({ kind: link.kind, id: link.id, key: opened });
+        setTarget({
+          kind: 'model',
+          repo: link.repo,
+          ...(link.file ? { file: link.file } : {}),
+          key: opened,
+        });
+        return;
+      }
+      const offersApps = caps.projects && (caps.catalog || caps.projectTypes === true);
+      if (link.kind === 'app' && offersApps) {
+        opened += 1;
+        setTarget({ kind: 'app', id: link.id, key: opened });
+        return;
+      }
+      if (link.kind === 'craftbook' && caps.tasks) {
+        opened += 1;
+        setTarget({ kind: 'craftbook', id: link.id, key: opened });
         return;
       }
       onHome();

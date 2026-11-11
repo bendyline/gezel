@@ -176,6 +176,54 @@ export function executionModeForStrategy(strategy: TaskStrategy): TaskExecutionM
 }
 
 /**
+ * The strategy a model would get for a task nobody was assigned: the
+ * install's `taskStrategy` when it names one, else what `auto` picks for
+ * that model. The model is usually the install's default one.
+ */
+export function resolvePreferredTaskStrategy(args: {
+  taskStrategy?: TaskStrategySetting | undefined;
+  generalistMode?: GeneralistModeSetting | undefined;
+  providerName: string | undefined;
+  tier?: string | undefined;
+  affinity?: ModelStrategyAffinity | undefined;
+}): TaskStrategy {
+  if (args.taskStrategy && args.taskStrategy !== 'auto') return args.taskStrategy;
+  return resolveAutoTaskStrategy(args).strategy;
+}
+
+/** A project's shape: a crew under a crew lead, or one gezel working alone. */
+export type NewProjectMode = 'crew' | 'solo';
+
+/**
+ * The shape that suits a strategy. Stepwise work is split among a specialist
+ * per step, so it wants a crew and a crew lead to hand it out. Every other
+ * strategy has one owner for the whole task (generalist, and outcome with or
+ * without the recipe), so one multirole gezel runs the project alone.
+ */
+export function projectModeForTaskStrategy(strategy: TaskStrategy): NewProjectMode {
+  return strategy === 'stepwise' ? 'crew' : 'solo';
+}
+
+/**
+ * The shape a new project takes when nobody chose one: the Meester's
+ * `start_project` and the app's New project. It follows the strategy the
+ * install's default model works best under ({@link resolvePreferredTaskStrategy}),
+ * read when the project is made. The project keeps that shape when the model
+ * or the setting changes later (owner decision, 2026-11-10). This replaced
+ * the kickoff rule in `resolveGeneralistKickoff`, which kept a crew for every
+ * small on-device model.
+ */
+export function resolveNewProjectMode(args: {
+  taskStrategy?: TaskStrategySetting | undefined;
+  generalistMode?: GeneralistModeSetting | undefined;
+  providerName: string | undefined;
+  tier?: string | undefined;
+  affinity?: ModelStrategyAffinity | undefined;
+}): NewProjectMode {
+  return projectModeForTaskStrategy(resolvePreferredTaskStrategy(args));
+}
+
+/**
  * Resolve the install's strategy. `taskStrategy` wins when it names one;
  * otherwise the task half of `generalistMode` decides, which under `auto`
  * is generalist for frontier providers and stepwise for everything else.

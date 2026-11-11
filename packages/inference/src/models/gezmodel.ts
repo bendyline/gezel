@@ -6,6 +6,7 @@ import { type Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import {
   ChatModelIdentitySchema,
+  type ChatModelManifest,
   ChatModelManifestSchema,
   ChatModelVersionManifestSchema,
   type GezmodelBundleManifest,
@@ -15,6 +16,7 @@ import {
   type GezmodelImportProgress,
   type GezmodelImportReview,
   GezmodelImportReviewSchema,
+  sanitizeImportedChatModelManifest,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import * as yauzl from 'yauzl';
@@ -64,6 +66,8 @@ interface BundleOwner {
     installedManifest: Record<string, unknown>;
     replace: boolean;
   }): Promise<void>;
+  /** llama.cpp only: restore the catalog entry of a model added from Hugging Face. */
+  prepareImportedModel?(manifest: ChatModelManifest): Promise<void>;
 }
 
 interface ScannedEntry {
@@ -365,12 +369,22 @@ export class GezmodelManager {
     const installedManifest = await readJsonObject(
       join(extractedRoot, 'manifests', 'installed.json'),
     );
+    // A model added from Hugging Face travels with its catalog entry; without
+    // it the receiving machine would run the model on bare defaults.
+    const imported = sanitizeImportedChatModelManifest(
+      await readFile(join(extractedRoot, 'manifests', 'catalog.json'), 'utf8')
+        .then((raw) => JSON.parse(raw) as unknown)
+        .catch(() => null),
+    );
     await owner.importModelBundle({
       id: review.manifest.id,
       stagedModelDir: join(extractedRoot, 'model'),
       installedManifest,
       replace,
     });
+    if (imported && imported.id === review.manifest.id && owner.prepareImportedModel) {
+      await owner.prepareImportedModel(imported);
+    }
     await rm(stage, { recursive: true, force: true }).catch(() => {});
     return { engine: review.manifest.engine, id: review.manifest.id };
   }

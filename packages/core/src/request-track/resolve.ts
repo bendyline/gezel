@@ -134,7 +134,7 @@ function joinedCrewFor(thread: RequestThread | undefined, refs: ReadonlySet<stri
   for (const m of thread?.messages ?? []) {
     const intro = m.crewIntroduction;
     if (m.synthetic !== 'crew-introduction' || intro?.moment !== 'joined') continue;
-    if (!refs.has(intro.taskRef)) continue;
+    if (!intro.taskRef || !refs.has(intro.taskRef)) continue;
     for (const member of intro.members) ids.add(member.gezelId);
   }
   return [...ids];

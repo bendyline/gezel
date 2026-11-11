@@ -36,6 +36,19 @@ describe('CrewIntroCard', () => {
     expect(screen.queryByText(/Starts with|First draft/)).not.toBeInTheDocument();
   });
 
+  it('introduces someone hired in conversation, with no task behind them', () => {
+    render(
+      <CrewIntroCard
+        intro={{
+          moment: 'hired',
+          members: [{ gezelId: 'g-tessa', name: 'Tessa', role: 'Copywriter' }],
+        }}
+      />,
+    );
+    expect(screen.getByText('Joined the crew')).toBeInTheDocument();
+    expect(screen.getByText('Copywriter')).toBeInTheDocument();
+  });
+
   it('opens a chat with the gezel from Say hello', () => {
     const events: CustomEvent[] = [];
     const record = (e: Event) => events.push(e as CustomEvent);

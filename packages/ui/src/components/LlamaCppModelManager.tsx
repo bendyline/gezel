@@ -11,6 +11,8 @@ import {
   estimateLlamaCppResidentBytes,
   estimateManifestKvBytes,
   hardwareHint,
+  isImportedChatModel,
+  isLocalFileChatModel,
   isMoEFromTags,
   isRetiredModel,
   launchFitsNow,
@@ -29,6 +31,7 @@ import { LicenseButton } from './LicenseButton.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
 import { ModelFitnessCell, fitnessMenuAction } from './ModelFitnessCell.js';
+import { ModelImportDialog } from './ModelImportDialog.js';
 import { ModelSizeCell } from './ModelSizeCell.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
@@ -225,6 +228,7 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
   // broker 404s and the affordance hides rather than erroring per row.
   const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
+  const [importOpen, setImportOpen] = useState(false);
   const toggleVision = useCallback(
     async (modelId: string, next: boolean) => {
       setVisionSaving(modelId);
@@ -443,6 +447,16 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
                                     {hint.label}
                                   </span>
                                 )}
+                                {isImportedChatModel(catalogManifest) && (
+                                  <span
+                                    className="gz-status-pill"
+                                    title="Added from outside the catalog. Gezel has not tested this model; its fitness check says how it runs on this computer."
+                                  >
+                                    {isLocalFileChatModel(catalogManifest)
+                                      ? 'From a file'
+                                      : 'From Hugging Face'}
+                                  </span>
+                                )}
                                 {m.updateAvailable && (
                                   <span
                                     className="gz-status-pill gz-status-pill--warn"
@@ -602,6 +616,8 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
           filter={(item: CatalogItemSummary) => {
             const m = asLlamaCppEntry(item.manifest);
             if (!m) return false;
+            // Added from Hugging Face: listed above once downloaded, never offered here.
+            if (isImportedChatModel(m)) return false;
             if (!showAll && isRetiredModel(m)) return false;
             if (!showAll && llamaCppBackendExclusion(m.llamaCpp, backend)) return false;
             if (!showAll && memory) {
@@ -732,6 +748,16 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
       </div>
 
       <div className="ollama-section ollama-section--flat">
+        <button type="button" className="secondary" onClick={() => setImportOpen(true)}>
+          Add a model…
+        </button>
+        <span className="muted small" style={{ marginLeft: '0.75rem' }}>
+          One that isn't in this list, from Hugging Face or a .gguf file on this computer. Gezel
+          checks it first.
+        </span>
+      </div>
+
+      <div className="ollama-section ollama-section--flat">
         <ImportModelBundleButton />
         <span className="muted small" style={{ marginLeft: '0.75rem' }}>
           Import from a gezel local model package
@@ -741,11 +767,23 @@ export function LlamaCppModelManager({ onModelsChanged, compact = false, backend
       <ConfirmDialog
         open={toDelete !== null}
         title={`Delete ${toDelete ?? ''}?`}
-        message="This removes the downloaded model from your device. It stays available in the catalog — you can download it again any time."
+        message={
+          toDelete && isLocalFileChatModel(catalogById.get(toDelete))
+            ? 'This removes the model from your device. To use it again, add its file again.'
+            : toDelete && isImportedChatModel(catalogById.get(toDelete))
+              ? 'This removes the downloaded model from your device. To use it again, add it from Hugging Face.'
+              : 'This removes the downloaded model from your device. It stays available in the catalog — you can download it again any time.'
+        }
         confirmLabel="Delete"
         danger
         onConfirm={deleteOne}
         onCancel={() => setToDelete(null)}
+      />
+
+      <ModelImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onInstalled={() => void refresh()}
       />
     </div>
   );

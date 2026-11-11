@@ -811,7 +811,9 @@ export function NewProjectDialog({
           name: n,
           about: a,
           missionObjectives: m,
-          ...(isSolo ? { mode: 'solo' as const } : {}),
+          // A folder is worked by one Builder. Anything else takes the shape
+          // the default model works best in: a crew, or one crew member alone.
+          ...(isSolo ? { mode: 'solo' as const } : { autoMode: true }),
           ...(kind === 'folder' ? { workingDir: folderPath.trim() } : {}),
           ...(wantsGitHub && repo ? { github: { url: toGitHubUrl(repo) } } : {}),
         });

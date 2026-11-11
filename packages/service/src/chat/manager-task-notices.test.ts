@@ -132,6 +132,83 @@ describe('ChatManager — crew introduction', () => {
     const timeline = await store.listTimeline({ limit: 50 });
     expect(timeline.messages.some((m) => m.crewIntroduction?.moment === 'kickoff')).toBe(true);
   });
+
+  // Seven of ten crew members arrived unannounced in one session: only a
+  // task's crew was introduced, never someone hired in conversation.
+  it('introduces a gezel hired in conversation, with no task behind it', async () => {
+    const thread = await manager.createSession({ gezelId: 'ada' });
+    const hire = await store.createGezel({ name: 'Tessa', role: 'Copywriter' });
+
+    await expect(manager.postHireIntroduction(thread.id, [hire.id, 'ada'])).resolves.toEqual([
+      hire.id,
+    ]);
+    const intro = (await store.getSession('ada', thread.id))?.messages.at(-1);
+    expect(intro).toMatchObject({ role: 'assistant', synthetic: 'crew-introduction' });
+    expect(intro?.crewIntroduction).toEqual({
+      moment: 'hired',
+      members: [{ gezelId: hire.id, name: 'Tessa', role: 'Copywriter' }],
+    });
+    expect(intro?.content).toBe('**Tessa** (Copywriter) has joined your crew.');
+    // Once per thread, and nobody for an unknown id.
+    await expect(manager.postHireIntroduction(thread.id, [hire.id, 'nobody'])).resolves.toEqual([]);
+
+    // Hired from a helper's session, the card goes to the thread the person reads.
+    const helper = await manager.createSession({
+      gezelId: hire.id,
+      parentSession: { sessionId: thread.id, gezelId: 'ada', kind: 'delegation' },
+    });
+    const editor = await store.createGezel({ name: 'Ilse', role: 'Editor' });
+    const designer = await store.createGezel({ name: 'Ravi', role: 'Designer' });
+    await manager.postHireIntroduction(helper.id, [editor.id, designer.id]);
+    expect((await store.getSession('ada', thread.id))?.messages.at(-1)?.content).toBe(
+      '**Ilse** (Editor) and **Ravi** (Designer) have joined your crew.',
+    );
+    expect((await store.getSession(hire.id, helper.id))?.messages).toHaveLength(0);
+  });
+
+  it("introduces a gezel hired inside a task's session as joining that task", async () => {
+    const thread = await manager.createSession({ gezelId: 'ada' });
+    const lead = await store.createGezel({ name: 'Dejan', role: 'Voorman' });
+    const now = new Date().toISOString();
+    await store.writeTask({
+      projectId: 'default',
+      num: 4,
+      ref: 'default/4',
+      title: 'Spring menu',
+      status: 'active',
+      launchSessionId: thread.id,
+      assignee: { kind: 'gezel', gezelId: lead.id },
+      createdBy: { kind: 'gezel', gezelId: 'ada' },
+      craftbook: {
+        id: 'build-loop',
+        name: 'Build loop',
+        steps: [{ id: 'plan', name: 'Plan', createdAt: now }],
+        entryStepId: 'plan',
+        createdAt: now,
+        updatedAt: now,
+      },
+      activeStepId: 'plan',
+      createdAt: now,
+      updatedAt: now,
+    } as Task);
+    const worker = await manager.createSession({
+      gezelId: lead.id,
+      taskRef: 'default/4',
+      parentSession: { sessionId: thread.id, gezelId: 'ada', kind: 'task-entry' },
+    });
+    const hire = await store.createGezel({ name: 'Noor', role: 'Omroeper' });
+
+    await expect(manager.postHireIntroduction(worker.id, [hire.id])).resolves.toEqual([hire.id]);
+    const intro = (await store.getSession('ada', thread.id))?.messages.at(-1);
+    expect(intro?.crewIntroduction).toEqual({
+      taskRef: 'default/4',
+      moment: 'joined',
+      members: [{ gezelId: hire.id, name: 'Noor', role: 'Social Media Writer' }],
+    });
+    expect(intro?.content).toBe(
+      '**Dejan** asked **Noor** (Social Media Writer) to help with **Spring menu**.',
+    );
+  });
 });
 
 describe('ChatManager — task wrap-up', () => {

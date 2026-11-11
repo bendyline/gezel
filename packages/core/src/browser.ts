@@ -55,6 +55,19 @@ export * from './keyed-lock.js';
 export * from './redact.js';
 export * from './ollama-models.js';
 export * from './model-fit.js';
+export * from './model-import/index.js';
+export {
+  LLAMA_CPP_ARCHITECTURES,
+  LLAMA_CPP_GGUF_SUPPORT_COMMIT,
+  LLAMA_CPP_GGUF_SUPPORT_TAG,
+  LLAMA_CPP_REMOVED_TENSOR_TYPES,
+  LLAMA_CPP_TENSOR_TYPES,
+} from './native/llama-cpp-gguf-support.js';
+export {
+  MLX_MODEL_TYPES,
+  MLX_MODEL_TYPE_ALIASES,
+  MLX_VLM_SUPPORT_VERSION,
+} from './native/mlx-model-support.js';
 export * from './llama-cpp-launch.js';
 export * from './llama-cpp-backend-exclusion.js';
 export * from './llama-cpp-spec.js';

@@ -1,4 +1,4 @@
-import type { GezelSummary, TimelineMessage } from '@bendyline/gezel';
+import type { GezelSummary, Project, TimelineMessage } from '@bendyline/gezel';
 import { useCallback, useLayoutEffect, useSyncExternalStore } from 'react';
 import { ChatStickyHeader } from './ChatStickyHeader.js';
 import type { LiveSlot } from './chat-live-slot.js';
@@ -41,12 +41,14 @@ export function FrameCoalescedLiveStickyHeader({
   sessionId,
   userMsg,
   gezels,
+  projects,
   debugMode = false,
 }: {
   store: FrameCoalescedStore<LiveSlot>;
   sessionId: string;
   userMsg: TimelineMessage;
   gezels: Map<string, GezelSummary>;
+  projects?: ReadonlyMap<string, Project>;
   debugMode?: boolean;
 }): React.ReactNode {
   return (
@@ -57,6 +59,7 @@ export function FrameCoalescedLiveStickyHeader({
         <ChatStickyHeader
           payload={{ userMsg, assistantInfo: { kind: 'live', sessionId, slot } }}
           gezels={gezels}
+          {...(projects ? { projects } : {})}
           debugMode={debugMode}
         />
       )}

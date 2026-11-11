@@ -1,5 +1,5 @@
 import type { CatalogItemSummary, ChatModelCategory, ChatModelManifest } from '@bendyline/gezel';
-import { isRetiredModel } from '@bendyline/gezel';
+import { isImportedChatModel, isRetiredModel } from '@bendyline/gezel';
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { CatalogBrowser } from './CatalogBrowser.js';
@@ -11,6 +11,7 @@ import { LicenseButton } from './LicenseButton.js';
 import { ImportModelBundleButton } from './ModelBundleControls.js';
 import { ModelActionsMenu, ModelContextSliderPanel } from './ModelContextControls.js';
 import { ModelFitnessCell, fitnessMenuAction } from './ModelFitnessCell.js';
+import { ModelImportDialog } from './ModelImportDialog.js';
 import { ModelSizeCell } from './ModelSizeCell.js';
 import { SharedModelMigrationPanel } from './SharedModelMigrationPanel.js';
 import { UnrecognizedModels } from './UnrecognizedModels.js';
@@ -108,6 +109,16 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
   // broker 404s and the affordance hides rather than erroring per row.
   const [contextOverridesSupported, setContextOverridesSupported] = useState(false);
   const [catalogItems, setCatalogItems] = useState<CatalogItemSummary[]>([]);
+  const [importOpen, setImportOpen] = useState(false);
+  const importedIds = useMemo(
+    () =>
+      new Set(
+        catalogItems
+          .filter((item) => isImportedChatModel(asMlxEntry(item.manifest) ?? undefined))
+          .map((item) => item.manifest.id),
+      ),
+    [catalogItems],
+  );
   useEffect(() => {
     void api
       .getMemoryProfile()
@@ -258,6 +269,14 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
                             <div className="model-name-cell">
                               <code>{m.id}</code>
                               <div className="model-name-meta">
+                                {importedIds.has(m.id) && (
+                                  <span
+                                    className="gz-status-pill"
+                                    title="Added from Hugging Face. Gezel has not tested this model; its fitness check says how it runs on this computer."
+                                  >
+                                    From Hugging Face
+                                  </span>
+                                )}
                                 {outOfDate && (
                                   <span
                                     className="gz-status-pill gz-status-pill--warn"
@@ -414,6 +433,8 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
           filter={(item: CatalogItemSummary) => {
             const m = asMlxEntry(item.manifest);
             if (!m) return false;
+            // Added from Hugging Face: listed above once downloaded, never offered here.
+            if (isImportedChatModel(m)) return false;
             if (!showAll && isRetiredModel(m)) return false;
             if (activeCategory !== 'all' && (m.category ?? 'general') !== activeCategory) {
               return false;
@@ -493,6 +514,15 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
       </div>
 
       <div className="ollama-section ollama-section--flat">
+        <button type="button" className="secondary" onClick={() => setImportOpen(true)}>
+          Add a model…
+        </button>
+        <span className="muted small" style={{ marginLeft: '0.75rem' }}>
+          An MLX model from Hugging Face that isn't in this list. Gezel checks it first.
+        </span>
+      </div>
+
+      <div className="ollama-section ollama-section--flat">
         <ImportModelBundleButton />
         <span className="muted small" style={{ marginLeft: '0.75rem' }}>
           Import from a gezel local model package
@@ -502,11 +532,21 @@ export function MlxModelManager({ onModelsChanged, compact = false }: Props) {
       <ConfirmDialog
         open={toDelete !== null}
         title={`Delete ${toDelete ?? ''}?`}
-        message="This removes the downloaded model from your device. It stays available in the catalog — you can download it again any time."
+        message={
+          toDelete && importedIds.has(toDelete)
+            ? 'This removes the downloaded model from your device. To use it again, add it from Hugging Face.'
+            : 'This removes the downloaded model from your device. It stays available in the catalog — you can download it again any time.'
+        }
         confirmLabel="Delete"
         danger
         onConfirm={deleteOne}
         onCancel={() => setToDelete(null)}
+      />
+
+      <ModelImportDialog
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onInstalled={() => void refresh()}
       />
     </div>
   );

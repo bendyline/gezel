@@ -3,7 +3,7 @@ import type { ServiceContext } from '../http/context.js';
 import { detectAndPersistProjectType } from '../project-type/detect.js';
 import {
   type EnsureProjectLeadResult,
-  ensureFolderProjectBuilder,
+  ensureProjectBuilder,
   ensureProjectVoorman,
 } from '../workspace/import-sync.js';
 import { setUpAddedFolder } from './recruit-crew.js';
@@ -17,26 +17,44 @@ export type CreateProjectDeps = Pick<
 
 /**
  * Create a project the way `POST /api/projects` always has: store record,
- * a lead gezel up front, folder classification, the `project_created`
+ * its main gezel up front, folder classification, the `project_created`
  * event, and a background clone for GitHub-linked projects. Shared by the
  * route and by folder inference so both entry points create identical
  * projects.
+ *
+ * A caller that names no shape and sends `autoMode` (the app's New project)
+ * gets the one the install's default model works best in: a crew with a crew
+ * lead for stepwise, one Builder working alone otherwise. The shape is
+ * written on the project, so it stays when the model changes.
  */
 export async function createProjectWithLead(
   deps: CreateProjectDeps,
   body: CreateProjectRequest,
 ): Promise<ProjectDetail> {
-  const { recruitCrew: _recruitCrew, nightWork: _nightWork, ...record } = body;
+  const { recruitCrew: _recruitCrew, nightWork: _nightWork, autoMode, ...request } = body;
+  const chosen =
+    request.mode === undefined && autoMode
+      ? await deps.chat.newProjectMode().catch((err) => {
+          log.warn(`[projects] could not pick a shape for "${body.name}": ${String(err)}`);
+          return undefined;
+        })
+      : undefined;
+  const record = chosen ? { ...request, mode: chosen } : request;
   const created = await deps.store.createProject(record);
   // A folder the person added picks its lead by what it holds, after the
   // folder has been classified; see recruitCrewForFolder.
   const recruitCrew = body.recruitCrew === true && Boolean(body.workingDir);
-  // Give the project its lead up front so Chat never opens on an arbitrary
-  // alphabetical gezel. Folder-backed solo projects get a hands-on Builder;
-  // crew projects retain their Voorman. Runs synchronously because both the
-  // CLI and desktop open Chat immediately. Best-effort; never blocks creation.
+  // Give the project its main gezel up front so Chat never opens on an
+  // arbitrary alphabetical gezel. A solo project that is a folder, or whose
+  // shape was picked here, gets a hands-on Builder; a crew project its
+  // Voorman. Either is reused when the person already has one. A caller that
+  // asked for a solo project by name seats its own. Runs synchronously
+  // because both the CLI and desktop open Chat immediately. Best-effort;
+  // never blocks creation.
   const ensureLead =
-    body.workingDir && body.mode === 'solo' ? ensureFolderProjectBuilder : ensureProjectVoorman;
+    record.mode === 'solo' && (body.workingDir || chosen)
+      ? ensureProjectBuilder
+      : ensureProjectVoorman;
   const ensured =
     body.lead === 'none' || recruitCrew
       ? ({} as EnsureProjectLeadResult)

@@ -92,6 +92,7 @@ export function isAbsorbedCrewIntro(
   return (
     message.synthetic === 'crew-introduction' &&
     intro?.moment === 'joined' &&
+    intro.taskRef !== undefined &&
     refs.has(intro.taskRef)
   );
 }

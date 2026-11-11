@@ -534,6 +534,22 @@ describe('sessionRouteGuard', () => {
     expect((await app.request(`/api/sessions/${own}-2`)).status).toBe(403);
   });
 
+  it('lets a coordinator have its hires introduced in its own thread only', async () => {
+    const hired = jsonPost({ gezelIds: ['tessa'] });
+    const coordinator = sessionPolicyApp(session('proj-a', true));
+    expect(
+      (await coordinator.request('/api/sessions/proj-a/crew-introduction', hired)).status,
+    ).toBe(200);
+    expect((await coordinator.request('/api/sessions/other/crew-introduction', hired)).status).toBe(
+      403,
+    );
+    // Only a coordinator can hire, so only a coordinator introduces.
+    const worker = sessionPolicyApp(session('proj-a'));
+    expect((await worker.request('/api/sessions/proj-a/crew-introduction', hired)).status).toBe(
+      403,
+    );
+  });
+
   it('protects raw sessions, event streams, terminals, and unclassified admin routes', async () => {
     const app = sessionPolicyApp(session('proj-a'));
     expect((await app.request('/api/sessions')).status).toBe(403);

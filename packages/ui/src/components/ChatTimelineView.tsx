@@ -29,6 +29,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { api } from '../api.js';
+import { speaksAsMainCrewMember } from '../labels.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedProjectChatEvents } from '../shared-chat-events.js';
@@ -991,14 +992,18 @@ export function ChatTimelineView({
     return () => window.removeEventListener('gezel:gezel-updated', onUpdated);
   }, []);
 
-  // Project list — only loaded when we need to label cross-project rows
-  // (the global Meester surface). Cheap, and read again once when a finished
-  // task names a project created after it was read (a kickoff's own).
+  // Project list: labels cross-project rows (the global Meester surface) and
+  // says who each project's main crew member is, for the star beside their
+  // name. Cheap, and read again once when a message or a finished task names
+  // a project created after it was read (a kickoff's own).
   const [projectsReadFor, setProjectsReadFor] = useState(0);
   const projectLookedUpRef = useRef<Set<string>>(new Set());
   useEffect(() => {
+    // Nothing is known until the first read lands; asking again before then
+    // would only repeat it.
+    if (projects.size === 0) return;
     const unknown = messages
-      .map((m) => m.deliverable?.projectId)
+      .flatMap((m) => [m.projectId, m.deliverable?.projectId])
       .filter(
         (id): id is string => !!id && !projects.has(id) && !projectLookedUpRef.current.has(id),
       );
@@ -1006,8 +1011,8 @@ export function ChatTimelineView({
     for (const id of unknown) projectLookedUpRef.current.add(id);
     setProjectsReadFor((n) => n + 1);
   }, [messages, projects]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: projectsReadFor is the "read again" signal.
   useEffect(() => {
-    if (!showProjectName && projectsReadFor === 0) return;
     let cancelled = false;
     void (async () => {
       try {
@@ -1023,7 +1028,7 @@ export function ChatTimelineView({
     return () => {
       cancelled = true;
     };
-  }, [showProjectName, projectsReadFor]);
+  }, [projectsReadFor]);
 
   // Build the question lookup. We always pull *all* questions (pending +
   // answered) so message-attached cards can collapse to their answered
@@ -3502,6 +3507,9 @@ export function ChatTimelineView({
           return drift ? { driftLabel: drift } : {};
         })()}
         {...(!roleBasedNameOnlyMode && gezel?.role ? { authorRole: gezel.role } : {})}
+        {...(speaksAsMainCrewMember(projects.get(m.projectId), m.gezelId, gezel?.role)
+          ? { authorMainCrewMember: true }
+          : {})}
         {...(m.from ? { from: m.from } : {})}
         {...(m.nudge ? { nudge: true } : {})}
         {...(m.origin === 'system' ? { origin: 'system' as const } : {})}
@@ -3616,6 +3624,9 @@ export function ChatTimelineView({
           return drift ? { driftLabel: drift } : {};
         })()}
         {...(!roleBasedNameOnlyMode && gezel?.role ? { authorRole: gezel.role } : {})}
+        {...(speaksAsMainCrewMember(projects.get(slot.projectId), slot.gezelId, gezel?.role)
+          ? { authorMainCrewMember: true }
+          : {})}
         segments={slot.segments}
         {...(onOpenReference ? { onOpenReference } : {})}
         onFocusTask={focusTask}
@@ -4121,6 +4132,7 @@ export function ChatTimelineView({
             sessionId={stickyPayload.assistantInfo.sessionId}
             userMsg={stickyPayload.userMsg}
             gezels={gezels}
+            projects={projects}
             debugMode={debugMode}
           />
         ) : (
@@ -4130,6 +4142,7 @@ export function ChatTimelineView({
               assistantInfo: { kind: 'message', msg: stickyPayload.assistantInfo.msg },
             }}
             gezels={gezels}
+            projects={projects}
             debugMode={debugMode}
           />
         ))}

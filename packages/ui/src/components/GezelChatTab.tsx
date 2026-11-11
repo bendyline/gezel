@@ -7,6 +7,7 @@ import {
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api.js';
+import { crewLeadLabelLower } from '../labels.js';
 import { Select } from '../primitives/index.js';
 import { ChatComposer } from './ChatComposer.js';
 import { ChatReferences } from './ChatReferences.js';
@@ -305,7 +306,7 @@ export function GezelChatTab({
 function projectLabel(p: ProjectForGezel): string {
   switch (p.precedence) {
     case 'voorman':
-      return `${p.projectName} — crew lead`;
+      return `${p.projectName} — ${crewLeadLabelLower(p)}`;
     case 'assignment':
       return `${p.projectName} — assigned`;
     case 'session':

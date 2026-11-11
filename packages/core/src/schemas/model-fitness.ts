@@ -112,6 +112,14 @@ export const ModelFitnessRecordSchema = z.object({
     throughput: FitnessCheckSchema,
     reasoningBudget: FitnessCheckSchema,
     contextFit: FitnessCheckSchema,
+    /**
+     * The short reply reads as language: not empty, no leaked conversation
+     * markers (`<|im_end|>`, `[INST]`), no looping run. A model whose
+     * conversation format does not match its training fails here while
+     * passing every other axis. Optional: records written before it existed
+     * never measured it.
+     */
+    coherence: FitnessCheckSchema.optional(),
   }),
 });
 export type ModelFitnessRecord = z.infer<typeof ModelFitnessRecordSchema>;

@@ -12,6 +12,12 @@ function joinNames(parts: readonly string[]): string {
   return `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
 }
 
+/** "**Minji** (Office Administrator)". */
+function describeMember(member: CrewMember): string {
+  const label = crewRoleLabel(member);
+  return `**${member.name}**${label ? ` (${label})` : ''}`;
+}
+
 /**
  * The words a crew introduction says, for the model and for any surface
  * that shows text rather than cards. Who joined and as what, never the step
@@ -25,10 +31,6 @@ export function crewIntroductionText(
   moment: 'kickoff' | 'joined',
   opts: { leadName?: string } = {},
 ): string {
-  const describe = (m: CrewMember) => {
-    const label = crewRoleLabel(m);
-    return `**${m.name}**${label ? ` (${label})` : ''}`;
-  };
   const name = taskPersonName(task);
   const what = name ? `**${name}**` : 'this';
   if (moment === 'joined') {
@@ -36,10 +38,20 @@ export function crewIntroductionText(
     const label = crewRoleLabel(m);
     // The lead speaks for the crew: the person hears who asked for help,
     // not a roster change.
-    if (opts.leadName) return `**${opts.leadName}** asked ${describe(m)} to help with ${what}.`;
+    if (opts.leadName) {
+      return `**${opts.leadName}** asked ${describeMember(m)} to help with ${what}.`;
+    }
     return `I've brought **${m.name}** onto the crew${label ? ` as your ${label}` : ''} for ${what}.`;
   }
   // At kickoff the one without a step to start is the task's lead.
-  const parts = members.map((m) => (m.stepName ? describe(m) : `${describe(m)}, who leads it`));
+  const parts = members.map((m) =>
+    m.stepName ? describeMember(m) : `${describeMember(m)}, who leads it`,
+  );
   return `Your crew for ${what}: ${joinNames(parts)}.`;
+}
+
+/** A hire made in conversation: who joined, with no task to name. */
+export function crewHireText(members: readonly CrewMember[]): string {
+  const who = joinNames(members.map(describeMember));
+  return `${who} ${members.length === 1 ? 'has' : 'have'} joined your crew.`;
 }

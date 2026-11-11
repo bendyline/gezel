@@ -8,6 +8,10 @@ import type {
 } from '@bendyline/gezel';
 import { BuiltinToolsetsSource } from './builtin-toolsets.js';
 import { CommunitySource } from './community-source.js';
+import {
+  type ImportedChatModelReader,
+  ImportedChatModelsSource,
+} from './imported-models-source.js';
 import { InstalledAiAppsSource } from './installed-ai-apps-source.js';
 import { LocalCatalogSource } from './local-source.js';
 import { BundledSource, type CatalogSource } from './source.js';
@@ -25,6 +29,9 @@ import { BundledSource, type CatalogSource } from './source.js';
  *   5. CommunitySource — auto-imported entries from the upstream MCP
  *      registry (`data/community/`). Permissively-licensed only;
  *      treated as a second tier that the UI can label distinctly.
+ *   6. ImportedChatModelsSource — chat models a person added from Hugging
+ *      Face (`opts.importedChatModels`). Last, so no curated entry is ever
+ *      shadowed by one.
  *
  * UI + HTTP both go through this service.
  */
@@ -50,7 +57,13 @@ export class CatalogService {
    */
   constructor(
     sources?: CatalogSource[],
-    opts?: { localRoot?: string; contentRoot?: () => string; gezelVersion?: string },
+    opts?: {
+      localRoot?: string;
+      contentRoot?: () => string;
+      gezelVersion?: string;
+      /** Chat models added from Hugging Face, served after every other tier. */
+      importedChatModels?: ImportedChatModelReader;
+    },
   ) {
     this.contentRootProvider = opts?.contentRoot ?? null;
     if (sources && sources.length > 0) {
@@ -73,6 +86,18 @@ export class CatalogService {
         contentRoot ? () => join(contentRoot(), 'community') : undefined,
         gezelVersion,
       ),
+      ...(opts?.importedChatModels
+        ? [
+            new ImportedChatModelsSource(opts.importedChatModels, async (id) => {
+              const detail = await this.get('chat-model', id).catch(() => null);
+              return detail &&
+                detail.sourceId !== 'imported' &&
+                detail.manifest.kind === 'chat-model'
+                ? detail.manifest
+                : null;
+            }),
+          ]
+        : []),
     ];
   }
 

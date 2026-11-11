@@ -38,6 +38,7 @@ const CHECK_LABELS: Record<keyof ModelFitnessEntry['record']['checks'], string> 
   throughput: 'decodes fast enough',
   reasoningBudget: 'bounded reasoning',
   contextFit: 'room for a prompt',
+  coherence: 'writes readable replies',
 };
 
 export function renderFitness(entry: ModelFitnessEntry | undefined, probing: boolean): string[] {

@@ -11,8 +11,19 @@ describe('roleGlyph', () => {
     expect(container.textContent).not.toMatch(/\p{Extended_Pictographic}/u);
   });
 
-  it('marks no other role but the crew lead', () => {
+  // The star follows the project, not the role: a Builder working a project
+  // alone is its main crew member as much as a crew lead is (2026-11-10).
+  it('stars a project’s main crew member, whatever their role', () => {
+    for (const role of ['Builder', 'Voorman', undefined]) {
+      const { container, unmount } = render(<div>{roleGlyph(role, true)}</div>);
+      expect(container.textContent).toBe('⭐');
+      unmount();
+    }
+  });
+
+  it('marks nobody else', () => {
     expect(roleGlyph('Reviewer')).toBeNull();
+    expect(roleGlyph('Voorman')).toBeNull();
     expect(roleGlyph(undefined)).toBeNull();
   });
 });

@@ -1,5 +1,48 @@
 import { describe, expect, it } from 'vitest';
-import { hostedModelTaskStrategy, resolveAutoTaskStrategy } from './task-strategy.js';
+import {
+  hostedModelTaskStrategy,
+  projectModeForTaskStrategy,
+  resolveAutoTaskStrategy,
+  resolveNewProjectMode,
+  resolvePreferredTaskStrategy,
+} from './task-strategy.js';
+
+describe('resolveNewProjectMode', () => {
+  it('gives stepwise work a crew and every single-owner strategy one gezel alone', () => {
+    expect(projectModeForTaskStrategy('stepwise')).toBe('crew');
+    expect(projectModeForTaskStrategy('generalist')).toBe('solo');
+    expect(projectModeForTaskStrategy('outcome')).toBe('solo');
+  });
+
+  // The old kickoff rule kept a crew for every small on-device model.
+  it("follows the default model's preferred strategy under auto", () => {
+    for (const tier of ['tiny', 'small', 'medium', 'large']) {
+      expect(resolveNewProjectMode({ providerName: 'llama-cpp', tier })).toBe('solo');
+    }
+    expect(resolveNewProjectMode({ providerName: 'copilot', tier: 'cloud' })).toBe('solo');
+    // A model measured to work best step by step gets a crew.
+    expect(resolveNewProjectMode({ providerName: 'mlx', affinity: { strategy: 'stepwise' } })).toBe(
+      'crew',
+    );
+    // Nothing is known about this provider, so the task rule decides: stepwise.
+    expect(resolveNewProjectMode({ providerName: 'mock' })).toBe('crew');
+  });
+
+  it("lets the person's own settings decide before the model", () => {
+    const local = { providerName: 'llama-cpp', tier: 'small' };
+    expect(resolveNewProjectMode({ ...local, generalistMode: 'off' })).toBe('crew');
+    expect(resolveNewProjectMode({ providerName: 'mock', generalistMode: 'on' })).toBe('solo');
+    expect(resolveNewProjectMode({ ...local, taskStrategy: 'stepwise' })).toBe('crew');
+    expect(
+      resolveNewProjectMode({
+        providerName: 'mock',
+        taskStrategy: 'outcome',
+        generalistMode: 'off',
+      }),
+    ).toBe('solo');
+    expect(resolvePreferredTaskStrategy({ ...local, taskStrategy: 'auto' })).toBe('outcome');
+  });
+});
 
 describe('hostedModelTaskStrategy', () => {
   it('finds a measured hosted model only through the provider it was measured on', () => {

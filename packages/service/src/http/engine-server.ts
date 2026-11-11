@@ -33,6 +33,7 @@ import { imageModelRoutes } from './routes/image-models.js';
 import { llamaCppRoutes } from './routes/llama-cpp.js';
 import { mlxRoutes } from './routes/mlx.js';
 import { modelFitnessRoutes } from './routes/model-fitness.js';
+import { modelImportRoutes } from './routes/model-imports.js';
 import { nativeCapacityRoutes } from './routes/native-capacity.js';
 import { remoteServingManageRoutes } from './routes/remote-serving-manage.js';
 import { systemMemoryRoutes } from './routes/system-memory.js';
@@ -118,6 +119,7 @@ export function buildEngineApp(
   app.route('/v1/remote/models/ensure', v1ModelsEnsureRoutes(ctx));
   app.route('/v1/remote/manage/knowledge', v1KnowledgeAssetsRoutes({ catalog: ctx.catalog }));
   app.route('/v1/remote/manage/llama-cpp', llamaCppRoutes(ctx));
+  app.route('/v1/remote/manage/model-imports', modelImportRoutes(ctx));
   app.route('/v1/remote/manage/ds4', ds4Routes(ctx));
   app.route('/v1/remote/manage/mlx', mlxRoutes(ctx));
   app.route('/v1/remote/manage/engines', enginesRoutes(ctx));

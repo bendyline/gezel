@@ -13,6 +13,7 @@ import { CatalogService } from '@bendyline/gezel-catalog';
 import { createEngineComponents } from '@bendyline/gezel-inference/internal/engine-components';
 import { ConfigStore } from '@bendyline/gezel-inference/internal/fs/config-store';
 import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
+import { createImportedChatModelReader } from '@bendyline/gezel-inference/internal/models/imports/entry-store';
 import { migrateLegacySystemModels } from '@bendyline/gezel-inference/internal/models/storage-roots';
 import { resolveCatalogReasoningBudget } from '@bendyline/gezel-inference/internal/providers/catalog-model-config';
 import { EngineInference } from '@bendyline/gezel-inference/internal/providers/native/inference';
@@ -103,6 +104,7 @@ export async function startEngineService(
     const catalog = new CatalogService(undefined, {
       localRoot: home,
       contentRoot: () => gilde.contentDataDir(),
+      importedChatModels: createImportedChatModelReader({ home }),
     });
     await prepareNativeEngines(home, bootConfig);
     const mlxRuntimeStatus = new MlxRuntimeStatusBus();

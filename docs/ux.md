@@ -245,7 +245,10 @@ pacing of a transition. If a first-time user can't quite put a finger on
   Code that recognizes what a person typed (brief routing, intent matchers)
   keeps accepting British spellings too.
 - **No emojis in committed UI** (repeating the rule from CLAUDE.md). The
-  ⭐ Meester badge is the single sanctioned exception.
+  ⭐ is the single sanctioned exception, and it means one thing: the main
+  crew member of a place. It marks the Meester in the Crew list, and a
+  project's main crew member in that project's crew list and beside their
+  name in its chats (see "Every project has a main crew member").
 
 ## Permission requests
 
@@ -1492,7 +1495,12 @@ What the meester's thread shows after the person asks for something:
   (the first sentence of their description), and **Say hello**, which opens
   their chat. The lead and
   whoever starts the work are introduced as the task begins; a gezel hired
-  for a later step is introduced when they start. Each gezel is introduced
+  for a later step is introduced when they start. Someone hired in
+  conversation, with no task behind them ("find me a copywriter", or a
+  delegation that had to recruit), gets the same card once the reply that
+  hired them has finished, so it follows the words that name them
+  (`postHireIntroduction`; before 2026-11-10 they joined the roster without a
+  word). Each gezel is introduced
   once per thread. Neither the card nor the introduction's text names the
   step they start on: `Minji (Office Administrator) starts with "First
   draft"` read as a schedule in the plan's own words, and a small model
@@ -1578,6 +1586,42 @@ What the meester's thread shows after the person asks for something:
 - **A request with work behind it gets one tracker** (next section). Outside
   debug mode it stands for the cards, introductions and finished card above;
   the crew still arrives as cards once, at kickoff.
+
+### Every project has a main crew member
+
+A project is assigned one crew member (`voormanGezelId`, whatever the
+project's shape). What they do there differs, and the words follow what they
+do:
+
+| Project shape | What the main crew member does | Called |
+| --- | --- | --- |
+| Crew (`mode: 'crew'`) | Leads a crew and hands the work out | Crew lead |
+| Solo (`mode: 'solo'`) | Does the work alone, start to finish | Their own role: Builder, Writer |
+| A project type with its own title (`leadLabel`) | Whatever the type says | That title: Opponent, Coach |
+
+Nobody is asked which shape they want. A new project the Meester starts,
+or one made with New project, takes the shape the default AI model works best
+in: a crew when that model does best step by step, one crew member alone
+otherwise (`resolveNewProjectMode`, in docs/generalist-mode.md §4). A folder
+is always worked by one Builder. The project keeps its shape when the model
+changes later. Its main crew member is someone the person already has
+whenever there is one, so one Builder runs several projects and the crew does
+not grow by one for each.
+
+Working alone is the common shape, so never write "crew lead" for a
+project's main crew member without checking the shape. The picker in project
+settings is labeled **Crew Lead** on a crew project and **Main crew member**
+on a solo one (`crewLeadLabel`); the crew list shows the star and then
+"crew lead" or the person's own role (`mainCrewMemberSubtitle`). "builder"
+under a Writer's name on a document project is what this replaced.
+
+**The star marks the main crew member in both shapes.** It sits before
+their line in the project's crew list and beside their name in that
+project's chats, in the bubble header and the pinned header alike
+(`roleGlyph`, `speaksAsMainCrewMember`). It follows the project, never the
+role: a Builder who runs a project alone carries it there, and a crew lead
+speaking in a project they do not run does not. The Meester keeps the drawn
+top hat in chat. Default and the shared library have no main crew member.
 
 ### One request, one tracker
 

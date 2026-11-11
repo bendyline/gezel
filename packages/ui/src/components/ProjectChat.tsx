@@ -655,9 +655,11 @@ function ProjectChatBody({
             {...(terminalFocusRequest ? { terminalFocusRequest } : {})}
             {...(sessionFocusRequest ? { sessionFocusRequest } : {})}
             emptyPlaceholder={
-              isVoorman
-                ? `Talk to ${selectedName} about running "${project.name}" — planning tasks, delegating, or checking progress.`
-                : `Chat with ${selectedName} about the work on "${project.name}".`
+              !isVoorman
+                ? `Chat with ${selectedName} about the work on "${project.name}".`
+                : project.mode === 'solo'
+                  ? `Talk to ${selectedName} about "${project.name}" — what to make next, or how it is going.`
+                  : `Talk to ${selectedName} about running "${project.name}" — planning tasks, delegating, or checking progress.`
             }
           />
           <div className="project-chat-compose-shell">

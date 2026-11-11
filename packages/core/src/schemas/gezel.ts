@@ -931,7 +931,8 @@ const ChatMessageObject = z.object({
    *   thread's gezel tells the owner what was made, with the files it wrote
    *   as `referencedFiles` and the finished one as `deliverable`.
    * - `'crew-introduction'` — a gezel was hired for a task launched from
-   *   this thread; the thread's gezel introduces them before they start.
+   *   this thread, or by this thread's gezel in conversation; the thread
+   *   introduces them.
    *
    * UI renders these as muted bubbles; the model sees them as normal
    * assistant turns (the role label is what matters to the API).

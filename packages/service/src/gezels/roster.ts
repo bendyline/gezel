@@ -277,6 +277,8 @@ export async function rankProjectsForGezel(
         projectId: p.id,
         projectName: p.name,
         precedence: 'voorman',
+        ...(detail.mode ? { mode: detail.mode } : {}),
+        ...(detail.leadLabel ? { leadLabel: detail.leadLabel } : {}),
       });
       continue;
     }

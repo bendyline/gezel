@@ -162,8 +162,6 @@ describe('image-to-video through the generate route', () => {
     const h = harness([WORDS]);
     const res = await h.post({ prompt: 'waves', numFrames: 80 });
     expect(h.calls[0]?.numFrames).toBe(77);
-    expect((res.body.meta as { settingsNotes?: string[] }).settingsNotes?.[0]).toMatch(
-      /77 frames/,
-    );
+    expect((res.body.meta as { settingsNotes?: string[] }).settingsNotes?.[0]).toMatch(/77 frames/);
   });
 });

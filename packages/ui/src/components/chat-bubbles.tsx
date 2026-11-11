@@ -241,6 +241,8 @@ export interface MessageBubbleProps {
    * ignore this. Pulled from the gezel's frontmatter at the call site.
    */
   authorRole?: string;
+  /** The speaker is the main crew member of the project they speak in: the star. */
+  authorMainCrewMember?: boolean;
   /**
    * Native-title tooltip for the author name + icon. Used to surface
    * "which provider + model is actually handling this session"
@@ -584,16 +586,18 @@ export function authorTitle(role: string | undefined, tooltip: string | undefine
 }
 
 /**
- * The mark beside a speaker's name in chat headers. Two well-known roles
- * get one — the meester (the front-door figure) a top hat, the crew lead a
- * star matching the sidebar — and every other role reads as text alone, so
- * there is no glyph to invent for each "Reviewer" or "Designer". It rides
- * with the name, so it stays when a narrow timeline drops the role. The hat
- * is drawn, not an emoji: the 🎩 broke the no-emoji rule (2026-11-09).
+ * The mark beside a speaker's name in chat headers. Two speakers get one:
+ * the meester (the front-door figure) a top hat, and a project's main crew
+ * member the star, matching the project's crew list. The star follows the
+ * project, not the role: it marks a Builder working alone as it marks a
+ * crew lead (`speaksAsMainCrewMember`). Every other role reads as text
+ * alone, so there is no glyph to invent for each "Reviewer" or "Designer".
+ * It rides with the name, so it stays when a narrow timeline drops the
+ * role. The hat is drawn, not an emoji: the 🎩 broke the no-emoji rule
+ * (2026-11-09).
  */
-export function roleGlyph(role: string | undefined): ReactNode {
-  if (!role) return null;
-  const key = roleForMatching(role).toLowerCase().trim();
+export function roleGlyph(role: string | undefined, mainCrewMember = false): ReactNode {
+  const key = role ? roleForMatching(role).toLowerCase().trim() : '';
   if (key === 'meester') {
     return (
       <span className="msg-role-glyph msg-role-glyph-hat" aria-hidden>
@@ -606,7 +610,7 @@ export function roleGlyph(role: string | undefined): ReactNode {
       </span>
     );
   }
-  return key === 'voorman' ? (
+  return mainCrewMember ? (
     <span className="msg-role-glyph" aria-hidden>
       ⭐
     </span>
@@ -692,6 +696,7 @@ export function MessageBubble({
   authorPoppetje,
   authorIconOverride,
   authorRole,
+  authorMainCrewMember,
   authorTooltip,
   driftLabel,
   from,
@@ -1245,7 +1250,7 @@ export function MessageBubble({
               <PersonLabel
                 name={authorLabel}
                 roleTitle={authorRole && plainRoleTitle(authorRole)}
-                badge={roleGlyph(authorRole)}
+                badge={roleGlyph(authorRole, authorMainCrewMember)}
                 face={
                   <GezelIcon
                     svg={authorIcon}
@@ -1652,6 +1657,8 @@ export interface StreamingBubbleProps {
   authorIconOverride?: boolean;
   /** Optional gezel role suffix, rendered to the right of the name. */
   authorRole?: string;
+  /** See {@link MessageBubbleProps.authorMainCrewMember}. */
+  authorMainCrewMember?: boolean;
   /** See {@link MessageBubbleProps.authorTooltip}. */
   authorTooltip?: string;
   /** See {@link MessageBubbleProps.driftLabel}. */
@@ -2145,6 +2152,7 @@ export function StreamingBubble({
   authorPoppetje,
   authorIconOverride,
   authorRole,
+  authorMainCrewMember,
   authorTooltip,
   driftLabel,
   localEngine,
@@ -2421,7 +2429,7 @@ export function StreamingBubble({
         <PersonLabel
           name={authorLabel}
           roleTitle={authorRole && plainRoleTitle(authorRole)}
-          badge={roleGlyph(authorRole)}
+          badge={roleGlyph(authorRole, authorMainCrewMember)}
           face={
             <GezelIcon
               svg={authorIcon}

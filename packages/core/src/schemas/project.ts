@@ -223,10 +223,12 @@ export const ProjectTypeOverlaySchema = z.object({
 export type ProjectTypeOverlay = z.infer<typeof ProjectTypeOverlaySchema>;
 
 /**
- * Project shape. `crew` (the default) is the original behavior — the voorman
- * recruits and coordinates a team of specialists. `solo` is a "job": a single
- * Builder handles the whole project themselves and team-management MCP tools
- * are stripped from every session scoped here.
+ * Project shape: what the project's main gezel does. Every project is
+ * assigned one main gezel (`voormanGezelId`, whatever the shape). In `crew`
+ * (the default) they are a crew lead, who recruits specialists and hands the
+ * work out. In `solo` they do the work themselves, start to finish, in their
+ * own role (usually a Builder), and team-management MCP tools are stripped
+ * from every session scoped here.
  */
 export const ProjectModeSchema = z.enum(['crew', 'solo']);
 export type ProjectMode = z.infer<typeof ProjectModeSchema>;
@@ -598,6 +600,19 @@ export function projectLeadGezelId(
   meesterGezelId: string | undefined,
 ): string | undefined {
   return project.voormanGezelId ?? (project.id === 'default' ? meesterGezelId : undefined);
+}
+
+/**
+ * True when `gezelId` is the project's main gezel: the one it is assigned
+ * to, a crew lead in a `crew` project and the one who does the work in a
+ * `solo` one. The field is named for the first shape only because it
+ * predates the second. This is what the star marks.
+ */
+export function isProjectMainGezel(
+  project: { voormanGezelId?: string | undefined } | null | undefined,
+  gezelId: string | undefined,
+): boolean {
+  return Boolean(gezelId) && project?.voormanGezelId === gezelId;
 }
 
 /**

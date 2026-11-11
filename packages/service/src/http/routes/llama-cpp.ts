@@ -13,7 +13,8 @@ import { invalidateModelsCache } from './models.js';
  * (chat) lives in `chat-events.ts`; this file only deals with
  * sourcing the weights from Hugging Face.
  *
- * Mounted under `/api/llama-cpp` from `http/server.ts`.
+ * Mounted under `/api/llama-cpp` from `http/server.ts`. Models from outside
+ * the catalog are added through `model-imports.ts`.
  */
 export function llamaCppRoutes(ctx: EngineContext): Hono {
   const app = new Hono();

@@ -103,7 +103,10 @@ measured, Ornith 1.5 9B on Qwen 3.5 9B (2026-11-04), so a six-book screen
 settles only whether the recipe helps. Another size in a family gets the
 screen too.
 
-`generalistMode` still decides the Meester's kickoff shape. A system job is
+A new project's shape follows the same pick, read for the install's default
+model: a crew under a crew lead when it is `stepwise`, one multirole gezel
+working alone otherwise (`resolveNewProjectMode`; see
+[generalist-mode.md](generalist-mode.md) §4). A system job is
 always stepwise. Fanout children inherit the parent's strategy.
 
 The log marker the eval harness reads keeps its shape and gains a suffix:

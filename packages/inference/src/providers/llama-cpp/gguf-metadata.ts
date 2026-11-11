@@ -264,6 +264,33 @@ export interface GgufSummary {
   lazyTensorBytesTotal?: number;
   /** Number of GGUF split files represented by this summary. */
   shardCount?: number;
+  /** `general.type` — `model`, or `adapter` for a LoRA, when the converter wrote it. */
+  generalType?: string;
+  /** `adapter.type` — `lora` on adapter files. */
+  adapterType?: string;
+  /** `general.basename`. */
+  basename?: string;
+  /** `general.size_label` (`8B`, `30B-A3B`). */
+  sizeLabel?: string;
+  /** `general.license`. */
+  license?: string;
+  /** `general.organization`. */
+  organization?: string;
+  /** `general.base_model.N.repo_url` — what this file was converted or tuned from. */
+  baseModelUrls?: string[];
+  /** `tokenizer.ggml.model`; absent means the file carries no tokenizer. */
+  tokenizerModel?: string;
+  /** `<arch>.pooling_type`, set by embedding and reranker heads. */
+  poolingType?: number;
+  /** `split.count` — files a split model spans. */
+  splitCount?: number;
+  /**
+   * ggml tensor type id → tensors stored in it. Populated with
+   * `{ includeTensorTypes: true }`; describes this file only.
+   */
+  tensorTypeCounts?: Record<number, number>;
+  /** Parameters in this file's tensor table, with `{ includeTensorTypes: true }`. */
+  parameterCount?: number;
   /** Total on-disk size of the GGUF (a resident-footprint proxy for the planner). */
   fileSizeBytes: number;
   // Read stats — for confirming we really don't have to slurp the file.
@@ -280,6 +307,16 @@ export interface GgufSummary {
 // storm into sequential I/O, while skip() avoids reading ignored payloads.
 const READ_AHEAD_BYTES = 256 * 1024;
 
+/**
+ * Where the header bytes come from: a file descriptor, or the prefix of a
+ * remote file fetched with a ranged request. `read` follows readSync's
+ * contract: copy up to `length` bytes from `position`, return the count.
+ */
+interface GgufByteSource {
+  size: number;
+  read(buffer: Buffer, offset: number, length: number, position: number): number;
+}
+
 class Reader {
   private pos = 0;
   private bytesRead = 0;
@@ -287,12 +324,12 @@ class Reader {
   private readonly readAhead = Buffer.allocUnsafe(READ_AHEAD_BYTES);
   private readAheadStart = -1;
   private readAheadEnd = -1;
-  private fd: number;
+  private source: GgufByteSource;
   private fileSize: number;
 
-  constructor(fd: number, fileSize: number) {
-    this.fd = fd;
-    this.fileSize = fileSize;
+  constructor(source: GgufByteSource) {
+    this.source = source;
+    this.fileSize = source.size;
   }
 
   bytes(n: number): Buffer {
@@ -311,7 +348,7 @@ class Reader {
 
     if (n <= this.readAhead.length) {
       const available = Math.min(this.readAhead.length, this.fileSize - this.pos);
-      const got = readSync(this.fd, this.readAhead, 0, available, this.pos);
+      const got = this.source.read(this.readAhead, 0, available, this.pos);
       this.readOperations++;
       this.bytesRead += got;
       if (got < n) throw new Error(`unexpected EOF at offset ${this.pos + got}`);
@@ -327,7 +364,7 @@ class Reader {
     const buf = Buffer.allocUnsafe(n);
     let total = 0;
     while (total < n) {
-      const got = readSync(this.fd, buf, total, n - total, this.pos + total);
+      const got = this.source.read(buf, total, n - total, this.pos + total);
       this.readOperations++;
       if (got === 0) {
         throw new Error(`unexpected EOF at offset ${this.pos + total}`);
@@ -621,194 +658,284 @@ export function effectiveLazyTensorBytes(
 /** GGUF default tensor-data alignment when `general.alignment` is absent. */
 const DEFAULT_ALIGNMENT = 32;
 
-export function readGgufSummary(
-  path: string,
-  opts?: { includeTensors?: boolean; includeTensorSizes?: boolean },
-): GgufSummary {
+export interface ReadGgufSummaryOptions {
+  includeTensors?: boolean;
+  includeTensorSizes?: boolean;
+  /** Count tensors per ggml type and parameters per the dims (model-import checks). */
+  includeTensorTypes?: boolean;
+}
+
+export function readGgufSummary(path: string, opts?: ReadGgufSummaryOptions): GgufSummary {
   const fd = openSync(path, 'r');
   try {
-    const stat = fstatSync(fd);
-    const r = new Reader(fd, stat.size);
-
-    const magic = r.bytes(4).toString('ascii');
-    if (magic !== 'GGUF') {
-      throw new Error(`not a GGUF file: magic=${JSON.stringify(magic)}`);
-    }
-    const version = r.u32();
-    if (version < 2 || version > 3) {
-      // v1 had a different header shape (no 64-bit counts). v3 is
-      // current. Fail loud on anything outside this range.
-      throw new Error(`unsupported GGUF version ${version}`);
-    }
-    const tensorCount = r.u64();
-    const metadataCount = r.u64();
-
-    const summary: GgufSummary = {
-      magic,
-      version,
-      tensorCount,
-      metadataCount,
-      chatTemplateMissing: true,
-      fileSizeBytes: stat.size,
-      bytesRead: 0,
-      readOperations: 0,
-    };
-
-    let alignment = DEFAULT_ALIGNMENT;
-
-    for (let i = 0n; i < metadataCount; i++) {
-      const key = r.string();
-      const type = r.u32() as GgufValueType;
-
-      // Read the scalar-valued keys we care about; skip everything
-      // else. For arch-qualified keys like `llama.context_length` we
-      // match on the suffix since the arch prefix varies (llama,
-      // gemma, qwen2, ...).
-      if (key === 'general.alignment') {
-        const v = readUintScalar(r, type);
-        if (v !== undefined && v > 0) alignment = v;
-      } else if (key === 'general.architecture' && type === GgufValueType.STRING) {
-        summary.architecture = r.string();
-      } else if (key === 'general.name' && type === GgufValueType.STRING) {
-        summary.name = r.string();
-      } else if (key === 'general.file_type' && type === GgufValueType.UINT32) {
-        const ft = r.u32();
-        summary.fileType = ft;
-        summary.fileTypeName = FILE_TYPE_NAMES[ft] ?? `UNKNOWN_${ft}`;
-      } else if (key === 'tokenizer.chat_template' && type === GgufValueType.STRING) {
-        summary.chatTemplate = r.string();
-        summary.chatTemplateMissing = false;
-      } else if (key.endsWith('.context_length')) {
-        if (type === GgufValueType.UINT32) {
-          summary.contextLength = BigInt(r.u32());
-        } else if (type === GgufValueType.UINT64) {
-          summary.contextLength = r.u64();
-        } else {
-          r.skipValue(type);
-        }
-      } else if (key.endsWith('.nextn_predict_layers')) {
-        summary.nextnPredictLayers = readUintScalar(r, type);
-      } else if (key.endsWith('.expert_count')) {
-        summary.expertCount = readUintScalar(r, type);
-      } else if (key.endsWith('.expert_used_count')) {
-        summary.expertUsedCount = readUintScalar(r, type);
-      } else if (key.endsWith('.block_count')) {
-        summary.blockCount = readUintScalar(r, type);
-      } else if (key.endsWith('.embedding_length')) {
-        summary.embeddingLength = readUintScalar(r, type);
-      } else if (key.endsWith('.attention.head_count')) {
-        summary.headCount = readUintScalar(r, type);
-      } else if (key.endsWith('.attention.head_count_kv')) {
-        const detail = readUintScalarOrArrayDetail(r, type);
-        if (detail.mean !== undefined) summary.headCountKv = detail.mean;
-        if (detail.perLayer) summary.headCountKvPerLayer = detail.perLayer;
-      } else if (key.endsWith('.attention.key_length')) {
-        summary.keyLength = readUintScalar(r, type);
-      } else if (key.endsWith('.attention.value_length')) {
-        summary.valueLength = readUintScalar(r, type);
-      } else if (key.endsWith('.attention.sliding_window')) {
-        summary.slidingWindow = readUintScalar(r, type);
-      } else if (key.endsWith('.attention.sliding_window_pattern')) {
-        const pattern = readBoolArray(r, type);
-        if (pattern) summary.slidingWindowPattern = pattern;
-      } else if (key.endsWith('.attention.shared_kv_layers')) {
-        summary.sharedKvLayers = readUintScalar(r, type);
-      } else if (key.endsWith('.num_loops')) {
-        summary.loopCount = readUintScalar(r, type);
-      } else if (key.endsWith('.attention.key_length_swa')) {
-        summary.keyLengthSwa = readUintScalar(r, type);
-      } else if (key.endsWith('.attention.value_length_swa')) {
-        summary.valueLengthSwa = readUintScalar(r, type);
-      } else if (key.endsWith('.full_attention_interval')) {
-        summary.fullAttentionInterval = readUintScalar(r, type);
-      } else if (key.endsWith('.ssm.inner_size')) {
-        summary.ssmInnerSize = readUintScalar(r, type);
-      } else if (key.endsWith('.ssm.state_size')) {
-        summary.ssmStateSize = readUintScalar(r, type);
-      } else if (key.endsWith('.ssm.conv_kernel')) {
-        summary.ssmConvKernel = readUintScalar(r, type);
-      } else {
-        r.skipValue(type);
-      }
-    }
-
-    // Tensor-info section follows the metadata. `includeTensors` reads
-    // just the names — the ground-truth way to detect MoE (`*_exps`) and
-    // MTP (`nextn`/`eh_proj`) tensors. `includeTensorSizes` additionally
-    // sizes each tensor from the offset deltas: tensor data is packed in
-    // offset order with only alignment padding between entries, so
-    // `next.offset - this.offset` is exact to within one alignment unit
-    // (≤32 B/tensor) — and needs no per-quant GGML type-size table that
-    // would go stale as upstream adds formats.
-    if (opts?.includeTensors || opts?.includeTensorSizes) {
-      const names: string[] = [];
-      const infos: { name: string; offset: number }[] = [];
-      for (let i = 0n; i < tensorCount; i++) {
-        const name = r.string();
-        const nDims = r.u32();
-        for (let d = 0; d < nDims; d++) r.u64(); // dims
-        r.u32(); // ggml tensor type
-        const offset = r.u64(); // data offset, relative to the data section
-        names.push(name);
-        if (opts?.includeTensorSizes) infos.push({ name, offset: Number(offset) });
-      }
-      if (opts?.includeTensors) summary.tensorNames = names;
-
-      if (opts?.includeTensorSizes && infos.length > 0) {
-        const headerEnd = r.currentPos();
-        const dataStart = Math.ceil(headerEnd / alignment) * alignment;
-        const dataBytes = Math.max(0, stat.size - dataStart);
-        infos.sort((a, b) => a.offset - b.offset);
-        let expertTotal = 0;
-        let nonExpertTotal = 0;
-        let denseFfnTotal = 0;
-        let nonDenseFfnTotal = 0;
-        let lazyTensorTotal = 0;
-        const expertByLayer: number[] = [];
-        const denseFfnByLayer: number[] = [];
-        for (let i = 0; i < infos.length; i++) {
-          const info = infos[i] as { name: string; offset: number };
-          const end =
-            i + 1 < infos.length ? (infos[i + 1] as { offset: number }).offset : dataBytes;
-          const size = Math.max(0, end - info.offset);
-          if (EXPERT_TENSOR_RE.test(info.name)) {
-            expertTotal += size;
-            const block = BLOCK_INDEX_RE.exec(info.name);
-            if (block) {
-              const idx = Number(block[1]);
-              expertByLayer[idx] = (expertByLayer[idx] ?? 0) + size;
-            }
-          } else {
-            nonExpertTotal += size;
-          }
-          if (DENSE_FFN_TENSOR_RE.test(info.name)) {
-            denseFfnTotal += size;
-            const block = BLOCK_INDEX_RE.exec(info.name);
-            if (block) {
-              const idx = Number(block[1]);
-              denseFfnByLayer[idx] = (denseFfnByLayer[idx] ?? 0) + size;
-            }
-          } else {
-            nonDenseFfnTotal += size;
-          }
-          if (isLazyTensorCandidate(info.name)) {
-            lazyTensorTotal += size;
-          }
-        }
-        summary.expertBytesTotal = expertTotal;
-        summary.nonExpertBytes = nonExpertTotal;
-        summary.expertBytesByLayer = Array.from(expertByLayer, (v) => v ?? 0);
-        summary.denseFfnBytesTotal = denseFfnTotal;
-        summary.nonDenseFfnBytes = nonDenseFfnTotal;
-        summary.denseFfnBytesByLayer = Array.from(denseFfnByLayer, (v) => v ?? 0);
-        summary.lazyTensorBytesTotal = lazyTensorTotal;
-      }
-    }
-
-    summary.bytesRead = r.totalBytesRead();
-    summary.readOperations = r.totalReadOperations();
-    return summary;
+    const size = fstatSync(fd).size;
+    return parseGgufSummary(
+      {
+        size,
+        read: (buffer, offset, length, position) => readSync(fd, buffer, offset, length, position),
+      },
+      opts,
+    );
   } finally {
     closeSync(fd);
   }
+}
+
+/**
+ * The header did not fit in the bytes fetched so far. Fetch a longer prefix
+ * (up to the cap the caller accepts) and parse again.
+ */
+export class GgufPrefixTooShortError extends Error {
+  readonly prefixBytes: number;
+  constructor(prefixBytes: number) {
+    super(`the first ${prefixBytes} bytes do not hold the whole GGUF header`);
+    this.name = 'GgufPrefixTooShortError';
+    this.prefixBytes = prefixBytes;
+  }
+}
+
+/**
+ * Parse a GGUF header from the leading bytes of a file that is `totalSize`
+ * long, without the rest of it — a ranged read of a model on Hugging Face.
+ * Throws {@link GgufPrefixTooShortError} when the header runs past the prefix.
+ */
+export function readGgufSummaryFromPrefix(
+  prefix: Buffer,
+  totalSize: number,
+  opts?: ReadGgufSummaryOptions,
+): GgufSummary {
+  const source: GgufByteSource = {
+    size: Math.max(totalSize, prefix.length),
+    read: (buffer, offset, length, position) => {
+      if (position >= prefix.length) return 0;
+      const end = Math.min(prefix.length, position + length);
+      prefix.copy(buffer, offset, position, end);
+      return end - position;
+    },
+  };
+  try {
+    return parseGgufSummary(source, opts);
+  } catch (err) {
+    if (prefix.length < totalSize && err instanceof Error && /unexpected EOF/.test(err.message)) {
+      throw new GgufPrefixTooShortError(prefix.length);
+    }
+    throw err;
+  }
+}
+
+function parseGgufSummary(source: GgufByteSource, opts?: ReadGgufSummaryOptions): GgufSummary {
+  const r = new Reader(source);
+
+  const magic = r.bytes(4).toString('ascii');
+  if (magic !== 'GGUF') {
+    throw new Error(`not a GGUF file: magic=${JSON.stringify(magic)}`);
+  }
+  const version = r.u32();
+  if (version < 2 || version > 3) {
+    // v1 had a different header shape (no 64-bit counts). v3 is
+    // current. Fail loud on anything outside this range.
+    throw new Error(`unsupported GGUF version ${version}`);
+  }
+  const tensorCount = r.u64();
+  const metadataCount = r.u64();
+
+  const summary: GgufSummary = {
+    magic,
+    version,
+    tensorCount,
+    metadataCount,
+    chatTemplateMissing: true,
+    fileSizeBytes: source.size,
+    bytesRead: 0,
+    readOperations: 0,
+  };
+
+  let alignment = DEFAULT_ALIGNMENT;
+
+  for (let i = 0n; i < metadataCount; i++) {
+    const key = r.string();
+    const type = r.u32() as GgufValueType;
+
+    // Read the scalar-valued keys we care about; skip everything
+    // else. For arch-qualified keys like `llama.context_length` we
+    // match on the suffix since the arch prefix varies (llama,
+    // gemma, qwen2, ...).
+    if (key === 'general.alignment') {
+      const v = readUintScalar(r, type);
+      if (v !== undefined && v > 0) alignment = v;
+    } else if (key === 'general.architecture' && type === GgufValueType.STRING) {
+      summary.architecture = r.string();
+    } else if (key === 'general.name' && type === GgufValueType.STRING) {
+      summary.name = r.string();
+    } else if (key === 'general.type' && type === GgufValueType.STRING) {
+      summary.generalType = r.string();
+    } else if (key === 'adapter.type' && type === GgufValueType.STRING) {
+      summary.adapterType = r.string();
+    } else if (key === 'general.basename' && type === GgufValueType.STRING) {
+      summary.basename = r.string();
+    } else if (key === 'general.size_label' && type === GgufValueType.STRING) {
+      summary.sizeLabel = r.string();
+    } else if (key === 'general.license' && type === GgufValueType.STRING) {
+      summary.license = r.string();
+    } else if (key === 'general.organization' && type === GgufValueType.STRING) {
+      summary.organization = r.string();
+    } else if (/^general\.base_model\.\d+\.repo_url$/.test(key) && type === GgufValueType.STRING) {
+      const url = r.string();
+      const urls = summary.baseModelUrls ?? [];
+      if (urls.length < 8) urls.push(url);
+      summary.baseModelUrls = urls;
+    } else if (key === 'tokenizer.ggml.model' && type === GgufValueType.STRING) {
+      summary.tokenizerModel = r.string();
+    } else if (key === 'split.count') {
+      summary.splitCount = readUintScalar(r, type);
+    } else if (key.endsWith('.pooling_type')) {
+      summary.poolingType = readUintScalar(r, type);
+    } else if (key === 'general.file_type' && type === GgufValueType.UINT32) {
+      const ft = r.u32();
+      summary.fileType = ft;
+      summary.fileTypeName = FILE_TYPE_NAMES[ft] ?? `UNKNOWN_${ft}`;
+    } else if (key === 'tokenizer.chat_template' && type === GgufValueType.STRING) {
+      summary.chatTemplate = r.string();
+      summary.chatTemplateMissing = false;
+    } else if (key.endsWith('.context_length')) {
+      if (type === GgufValueType.UINT32) {
+        summary.contextLength = BigInt(r.u32());
+      } else if (type === GgufValueType.UINT64) {
+        summary.contextLength = r.u64();
+      } else {
+        r.skipValue(type);
+      }
+    } else if (key.endsWith('.nextn_predict_layers')) {
+      summary.nextnPredictLayers = readUintScalar(r, type);
+    } else if (key.endsWith('.expert_count')) {
+      summary.expertCount = readUintScalar(r, type);
+    } else if (key.endsWith('.expert_used_count')) {
+      summary.expertUsedCount = readUintScalar(r, type);
+    } else if (key.endsWith('.block_count')) {
+      summary.blockCount = readUintScalar(r, type);
+    } else if (key.endsWith('.embedding_length')) {
+      summary.embeddingLength = readUintScalar(r, type);
+    } else if (key.endsWith('.attention.head_count')) {
+      summary.headCount = readUintScalar(r, type);
+    } else if (key.endsWith('.attention.head_count_kv')) {
+      const detail = readUintScalarOrArrayDetail(r, type);
+      if (detail.mean !== undefined) summary.headCountKv = detail.mean;
+      if (detail.perLayer) summary.headCountKvPerLayer = detail.perLayer;
+    } else if (key.endsWith('.attention.key_length')) {
+      summary.keyLength = readUintScalar(r, type);
+    } else if (key.endsWith('.attention.value_length')) {
+      summary.valueLength = readUintScalar(r, type);
+    } else if (key.endsWith('.attention.sliding_window')) {
+      summary.slidingWindow = readUintScalar(r, type);
+    } else if (key.endsWith('.attention.sliding_window_pattern')) {
+      const pattern = readBoolArray(r, type);
+      if (pattern) summary.slidingWindowPattern = pattern;
+    } else if (key.endsWith('.attention.shared_kv_layers')) {
+      summary.sharedKvLayers = readUintScalar(r, type);
+    } else if (key.endsWith('.num_loops')) {
+      summary.loopCount = readUintScalar(r, type);
+    } else if (key.endsWith('.attention.key_length_swa')) {
+      summary.keyLengthSwa = readUintScalar(r, type);
+    } else if (key.endsWith('.attention.value_length_swa')) {
+      summary.valueLengthSwa = readUintScalar(r, type);
+    } else if (key.endsWith('.full_attention_interval')) {
+      summary.fullAttentionInterval = readUintScalar(r, type);
+    } else if (key.endsWith('.ssm.inner_size')) {
+      summary.ssmInnerSize = readUintScalar(r, type);
+    } else if (key.endsWith('.ssm.state_size')) {
+      summary.ssmStateSize = readUintScalar(r, type);
+    } else if (key.endsWith('.ssm.conv_kernel')) {
+      summary.ssmConvKernel = readUintScalar(r, type);
+    } else {
+      r.skipValue(type);
+    }
+  }
+
+  // Tensor-info section follows the metadata. `includeTensors` reads
+  // just the names — the ground-truth way to detect MoE (`*_exps`) and
+  // MTP (`nextn`/`eh_proj`) tensors. `includeTensorSizes` additionally
+  // sizes each tensor from the offset deltas: tensor data is packed in
+  // offset order with only alignment padding between entries, so
+  // `next.offset - this.offset` is exact to within one alignment unit
+  // (≤32 B/tensor) — and needs no per-quant GGML type-size table that
+  // would go stale as upstream adds formats.
+  if (opts?.includeTensors || opts?.includeTensorSizes || opts?.includeTensorTypes) {
+    const names: string[] = [];
+    const infos: { name: string; offset: number }[] = [];
+    const typeCounts: Record<number, number> = {};
+    let parameters = 0;
+    for (let i = 0n; i < tensorCount; i++) {
+      const name = r.string();
+      const nDims = r.u32();
+      if (nDims > 8) throw new Error(`implausible tensor rank ${nDims} for ${name}`);
+      let elements = 1;
+      for (let d = 0; d < nDims; d++) elements *= Number(r.u64());
+      const ggmlType = r.u32();
+      const offset = r.u64(); // data offset, relative to the data section
+      names.push(name);
+      if (opts?.includeTensorSizes) infos.push({ name, offset: Number(offset) });
+      if (opts?.includeTensorTypes) {
+        typeCounts[ggmlType] = (typeCounts[ggmlType] ?? 0) + 1;
+        parameters += elements;
+      }
+    }
+    if (opts?.includeTensors) summary.tensorNames = names;
+    if (opts?.includeTensorTypes) {
+      summary.tensorTypeCounts = typeCounts;
+      if (Number.isFinite(parameters)) summary.parameterCount = parameters;
+    }
+
+    if (opts?.includeTensorSizes && infos.length > 0) {
+      const headerEnd = r.currentPos();
+      const dataStart = Math.ceil(headerEnd / alignment) * alignment;
+      const dataBytes = Math.max(0, source.size - dataStart);
+      infos.sort((a, b) => a.offset - b.offset);
+      let expertTotal = 0;
+      let nonExpertTotal = 0;
+      let denseFfnTotal = 0;
+      let nonDenseFfnTotal = 0;
+      let lazyTensorTotal = 0;
+      const expertByLayer: number[] = [];
+      const denseFfnByLayer: number[] = [];
+      for (let i = 0; i < infos.length; i++) {
+        const info = infos[i] as { name: string; offset: number };
+        const end = i + 1 < infos.length ? (infos[i + 1] as { offset: number }).offset : dataBytes;
+        const size = Math.max(0, end - info.offset);
+        if (EXPERT_TENSOR_RE.test(info.name)) {
+          expertTotal += size;
+          const block = BLOCK_INDEX_RE.exec(info.name);
+          if (block) {
+            const idx = Number(block[1]);
+            expertByLayer[idx] = (expertByLayer[idx] ?? 0) + size;
+          }
+        } else {
+          nonExpertTotal += size;
+        }
+        if (DENSE_FFN_TENSOR_RE.test(info.name)) {
+          denseFfnTotal += size;
+          const block = BLOCK_INDEX_RE.exec(info.name);
+          if (block) {
+            const idx = Number(block[1]);
+            denseFfnByLayer[idx] = (denseFfnByLayer[idx] ?? 0) + size;
+          }
+        } else {
+          nonDenseFfnTotal += size;
+        }
+        if (isLazyTensorCandidate(info.name)) {
+          lazyTensorTotal += size;
+        }
+      }
+      summary.expertBytesTotal = expertTotal;
+      summary.nonExpertBytes = nonExpertTotal;
+      summary.expertBytesByLayer = Array.from(expertByLayer, (v) => v ?? 0);
+      summary.denseFfnBytesTotal = denseFfnTotal;
+      summary.nonDenseFfnBytes = nonDenseFfnTotal;
+      summary.denseFfnBytesByLayer = Array.from(denseFfnByLayer, (v) => v ?? 0);
+      summary.lazyTensorBytesTotal = lazyTensorTotal;
+    }
+  }
+
+  summary.bytesRead = r.totalBytesRead();
+  summary.readOperations = r.totalReadOperations();
+  return summary;
 }

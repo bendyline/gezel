@@ -289,7 +289,6 @@ import {
   staleTaskStepRefusal,
   taskStepMutationRejection,
 } from './task-step-authority.js';
-import { threadWorkProject } from './thread-work-project.js';
 import {
   ExecutionToolOutputSchema,
   GitToolOutputSchema,
@@ -411,6 +410,17 @@ const fetchImpl: typeof fetch =
   (certPath ? createTrustingFetch({ cert: readFileSync(certPath, 'utf8') }) : createPatientFetch());
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
+
+/**
+ * Have the gezels this turn just hired introduced in the thread the person
+ * reads. The project kickoffs do not call it: a task introduces its own crew
+ * as it starts. Best-effort, because a missed card must never fail the hire.
+ */
+function introduceHires(...gezelIds: string[]): void {
+  if (!sessionId || gezelIds.length === 0) return;
+  void api.introduceCrew(sessionId, { gezelIds }).catch(() => {});
+}
+
 const { resolveProjectId, resolveGezelId, availableGezelsHint, parseRef } = createEntityResolvers({
   api,
   projectId,
@@ -1754,6 +1764,7 @@ async function fetchRepoReviewNextHint(projectId: string): Promise<string> {
 
 async function handoffFetchedRepoReview(projectId: string): Promise<string> {
   const reviewer = await api.ensureGezel({ jobTitle: 'Code Reviewer' });
+  if (reviewer.action !== 'reused') introduceHires(reviewer.gezelId);
   const message = await fetchRepoReviewHandoffMessage(projectId);
   const res = await api.messageGezel(reviewer.gezelId, {
     fromGezelId: gezelId,
@@ -4569,6 +4580,7 @@ server.tool(
         ...(templateId && model ? { model } : {}),
       });
     }
+    introduceHires(created.id);
     return {
       content: [
         {
@@ -5461,22 +5473,6 @@ server.tool(
   async (args) => runInvokeCraftbook(args),
 );
 
-/**
- * Where work goes when the call names no project: this session's project,
- * except that a Default thread which already set up work in one project
- * carries on there (thread-work-project.ts). Only a coordinator can list every
- * project's tasks; anyone else, or a failed read, keeps this project.
- */
-async function unnamedWorkProject(): Promise<string> {
-  if (projectId !== 'default' || !sessionId || sessionTaskRef) return projectId;
-  try {
-    const [{ tasks }, { projects }] = await Promise.all([api.listTasks(), api.listProjects()]);
-    return threadWorkProject({ sessionId, tasks, projects }) ?? projectId;
-  } catch {
-    return projectId;
-  }
-}
-
 /** invoke_craftbook's body; start_work's craftbook and task-here options run it too. */
 async function runInvokeCraftbook({
   craftbookId,
@@ -5499,7 +5495,11 @@ async function runInvokeCraftbook({
   outputPath?: string;
   tonight?: boolean;
 }) {
-  const resolvedProject = project ? await resolveProjectId(project) : await unnamedWorkProject();
+  // Work goes to a project only when the call names one. One-and-done work
+  // (a report, a proposal, a deck) stays in this session's project, which
+  // for the Meester's thread is Default; a project the thread set up earlier
+  // is not a reason to file unrelated work there (owner decision, 2026-11-10).
+  const resolvedProject = project ? await resolveProjectId(project) : projectId;
   try {
     const rootTurn = await currentRootTurnContext();
     const effectiveDescription = description?.trim() || rootTurn?.userText;
@@ -6301,6 +6301,7 @@ server.tool(
     const res = await api.ensureGezel({
       jobTitle,
     });
+    if (res.action !== 'reused') introduceHires(res.gezelId);
     const headline =
       res.action === 'reused'
         ? `Reused ${res.name} (${res.role}) — existing gezel, match score ${res.matchScore?.toFixed(2) ?? '?'}`
@@ -6354,6 +6355,7 @@ server.tool(
   async ({ templateId }) => {
     const { name, gender } = await pickFreshGezelName();
     const created = await api.createGezelFromTemplate(templateId, { name, gender });
+    introduceHires(created.id);
     return {
       content: [
         {
@@ -6783,6 +6785,7 @@ server.tool(
     const ensured = await api.ensureGezel({
       jobTitle,
     });
+    if (ensured.action !== 'reused') introduceHires(ensured.gezelId);
     // Self-ask preflight. `ensureGezel` returns the asker themselves
     // when the asker's own role already matches the requested role
     // (e.g. a Developer calling `ask_specialist({ role: 'developer' })`).
@@ -7006,6 +7009,7 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
         });
         if (repoGuard) return repoGuard;
         const ensured = await api.ensureGezel({ jobTitle });
+        if (ensured.action !== 'reused') introduceHires(ensured.gezelId);
         const normalizedMessage = normalizeFileHandoffMessage(task, expectedDeliverable);
         const res = await api.messageGezel(ensured.gezelId, {
           fromGezelId: gezelId,
@@ -7092,6 +7096,7 @@ for (const { slug, jobTitle, label, hint } of DELEGATION_ROLE_SPECS) {
         });
         if (repoGuard) return repoGuard;
         const ensured = await api.ensureGezel({ jobTitle });
+        if (ensured.action !== 'reused') introduceHires(ensured.gezelId);
         if (ensured.gezelId === gezelId) {
           return {
             content: [
@@ -7323,19 +7328,36 @@ const SPECIALIST_TEMPLATE_IDS: Readonly<Record<string, string>> = {
   'image-generator': 'illustrator',
 };
 
-async function createSpecialistFromTemplate(
-  role: string,
-  identity: ReturnType<typeof pickUnusedGezelName>,
-) {
-  const preferred = SPECIALIST_TEMPLATE_IDS[role];
-  if (preferred) {
-    try {
-      return { ...(await api.createGezelFromTemplate(preferred, identity)), templateId: preferred };
-    } catch {
-      /* fall through to the role's own template */
-    }
-  }
-  return { ...(await api.createGezelFromTemplate(role, identity)), templateId: role };
+interface MainGezel {
+  id: string;
+  name: string;
+  templateId: string;
+  /** Someone the person already had, as against one made for this project. */
+  reused: boolean;
+}
+
+/**
+ * A new project's main gezel: the crew member already made from this
+ * template when there is one, else a new one from it. One Builder or crew
+ * lead can run several projects, because a session belongs to a gezel and a
+ * project together and their work stays apart. Before this every project the
+ * Meester started added a crew member: seven of a bakery owner's ten arrived
+ * that way in one session (owner decision, 2026-11-10). `role` is what to
+ * recruit by when the catalog does not carry the template.
+ */
+async function ensureMainGezel(templateId: string, role = templateId): Promise<MainGezel> {
+  const ensured = await api.ensureGezel({ jobTitle: role, templateId });
+  return {
+    id: ensured.gezelId,
+    name: ensured.name,
+    templateId: ensured.templateId ?? templateId,
+    reused: ensured.action === 'reused',
+  };
+}
+
+/** "Recruited Dejan as crew lead", or "Dejan takes it on as crew lead" for someone already on the crew. */
+function mainGezelClause(gezel: MainGezel, as: string): string {
+  return gezel.reused ? `${gezel.name} takes it on as ${as}` : `Recruited ${gezel.name} as ${as}`;
 }
 
 function normalizeSpecialistRole(value: string | undefined): string {
@@ -7735,11 +7757,7 @@ async function runBinaryDocumentProject(
       mode: 'crew',
       lead: 'none',
     });
-    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
-    const voorman = await api.createGezelFromTemplate('voorman', {
-      name: gezelName,
-      gender: gezelGender,
-    });
+    const voorman = await ensureMainGezel('voorman');
     await api.updateProject(project.id, { voormanGezelId: voorman.id });
     const effectiveTaskDescription = buildBinaryDocumentTaskDescription(
       {
@@ -7816,11 +7834,7 @@ async function runPromotedStartJobAsProject(input: {
       mode: 'crew',
       lead: 'none',
     });
-    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
-    const voorman = await api.createGezelFromTemplate('voorman', {
-      name: gezelName,
-      gender: gezelGender,
-    });
+    const voorman = await ensureMainGezel('voorman');
     await api.updateProject(project.id, { voormanGezelId: voorman.id });
     const effectiveTaskDescription = buildKickoffTaskDescription({
       ...brief,
@@ -7873,7 +7887,7 @@ async function runPromotedStartJobAsProject(input: {
           dispatchEntry: true,
         });
     const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as crew lead. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started project "${brief.name}" (${project.id}). ${mainGezelClause(voorman, 'crew lead')}. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult('start_project', brief.name, project.id, resultText);
     return {
       content: [
@@ -8171,8 +8185,10 @@ server.tool(
 
 /**
  * The whole new-project path, in order: an exact binary document, a project
- * type the brief names, the flat solo project under generalist kickoff, a
- * repository redirect, and otherwise a crew project led by a fresh voorman.
+ * type the brief names, the solo project when the default model works best
+ * with one owner (`GEZEL_GENERALIST_KICKOFF`, from `resolveNewProjectMode`),
+ * a repository redirect, and otherwise a crew project led by a crew lead.
+ * Either shape reuses the main gezel the person already has (`ensureMainGezel`).
  * `start_project` and `start_work`'s `new-project` option are the same
  * decision, so they share this one dispatcher.
  */
@@ -8246,11 +8262,7 @@ async function runStartProject(
       mode: 'crew',
       lead: 'none',
     });
-    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
-    const voorman = await api.createGezelFromTemplate('voorman', {
-      name: gezelName,
-      gender: gezelGender,
-    });
+    const voorman = await ensureMainGezel('voorman');
     await api.updateProject(project.id, { voormanGezelId: voorman.id });
     const effectiveTaskDescription = buildKickoffTaskDescription({
       ...brief,
@@ -8309,7 +8321,7 @@ async function runStartProject(
           dispatchEntry: true,
         });
     const entryName = await macroEntryAssigneeName(task, voorman.id, voorman.name);
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${voorman.name} as crew lead. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started project "${brief.name}" (${project.id}). ${mainGezelClause(voorman, 'crew lead')}. Created task ${task.ref} ("${task.title}") and handed its entry step to ${entryName} — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (get_task / read_task_notes when the user asks). Tell the user ${entryName} is on it; they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(tool, brief.name, project.id, resultText);
     return {
       content: [
@@ -8542,9 +8554,6 @@ server.tool(
     }
     const extra = details?.trim();
     const brief = extra && extra !== said ? `${said}\n\n${extra}` : said;
-    // A task with no project named or bound runs where invoke_craftbook would.
-    const taskProject = async () =>
-      project || resolvedProject !== projectId ? resolvedProject : await unnamedWorkProject();
     switch (parsed.kind) {
       case 'craftbook': {
         // An id no book has would reach the task API and come back as a bare
@@ -8577,7 +8586,7 @@ server.tool(
         const params = await boundCraftbookParams(resolvedProject, parsed.craftbookId, said);
         return runInvokeCraftbook({
           craftbookId: parsed.craftbookId,
-          project: await taskProject(),
+          project: resolvedProject,
           description: brief,
           ...(params ? { params } : {}),
         });
@@ -8585,7 +8594,7 @@ server.tool(
       case 'task-here':
         return runInvokeCraftbook({
           craftbookId: 'build-loop',
-          project: await taskProject(),
+          project: resolvedProject,
           description: brief,
         });
       case 'new-project':
@@ -8773,11 +8782,10 @@ async function runFlatProject(
       missionObjectives: normalizeMarkdown(brief.missionObjectives),
       mode: 'solo',
     });
-    const { name: gezelName, gender: gezelGender } = await pickFreshGezelName();
-    const builder = await createSpecialistFromTemplate(effectiveSpecialistRole, {
-      name: gezelName,
-      gender: gezelGender,
-    });
+    const builder = await ensureMainGezel(
+      SPECIALIST_TEMPLATE_IDS[effectiveSpecialistRole] ?? effectiveSpecialistRole,
+      effectiveSpecialistRole,
+    );
     await api.updateProject(project.id, { voormanGezelId: builder.id });
     const effectiveTaskDescription = buildKickoffTaskDescription({
       ...brief,
@@ -8833,7 +8841,7 @@ async function runFlatProject(
           ],
           dispatchEntry: true,
         });
-    const resultText = `Started project "${brief.name}" (${project.id}). Recruited ${builder.name} as lead (template: ${builder.templateId}). Created task ${task.ref} ("${task.title}") and handed ${builder.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${builder.name} is on it and they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
+    const resultText = `Started project "${brief.name}" (${project.id}). ${mainGezelClause(builder, 'lead')} (template: ${builder.templateId}). Created task ${task.ref} ("${task.title}") and handed ${builder.name} its entry step — they are starting now in a task-scoped session. No reply lands in this thread; progress accrues on the task (notes, gates, status — get_task / read_task_notes when the user asks). Tell the user ${builder.name} is on it and they can watch the work in the ${brief.name} project. ${PLAIN_WORDS_RELAY}`;
     recordMacroResult(cacheTool, brief.name, project.id, resultText);
     return {
       content: [

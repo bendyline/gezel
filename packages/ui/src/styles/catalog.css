@@ -1005,6 +1005,152 @@
   border-top: 1px solid var(--border);
 }
 
+/* Adding a model from Hugging Face: a link, a review with its checks, then
+   the download and the post-download fitness check. Only the body scrolls,
+   so the keys stay put. */
+.model-import-dialog {
+  width: min(40rem, calc(100vw - 2rem));
+  min-width: 0;
+  max-width: calc(100vw - 2rem);
+  max-height: calc(100dvh - 3rem);
+  overflow: hidden;
+}
+
+.model-import-dialog > :not(.model-import-dialog-body) {
+  flex-shrink: 0;
+}
+
+.model-import-dialog > h3,
+.model-import-dialog > p {
+  margin: 0;
+}
+
+.model-import-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding-right: 0.35rem;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.model-import-dialog > .gz-dialog-actions {
+  margin-top: 0;
+  padding-top: 0.65rem;
+  border-top: 1px solid var(--border);
+}
+
+.model-import-enter {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.model-import-enter input {
+  width: 100%;
+}
+
+.model-import-or {
+  margin: 0.35rem 0 0;
+}
+
+.model-import-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.model-import-review p {
+  margin: 0;
+}
+
+.model-import-identity {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.model-import-name {
+  overflow-wrap: anywhere;
+}
+
+.model-import-byline {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.6rem;
+  row-gap: 0.15rem;
+  align-items: baseline;
+}
+
+.model-import-notice {
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+
+.model-import-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.model-import-choice-trigger {
+  min-width: 14rem;
+}
+
+.model-import-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.model-import-check {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+}
+
+.model-import-check-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 500;
+}
+
+/* A status color never stands alone: the dot sits beside its word. */
+.model-import-dot {
+  flex: 0 0 auto;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--status-ready);
+}
+
+.model-import-check[data-status="warn"] .model-import-dot {
+  background: var(--status-attention);
+}
+
+.model-import-check[data-status="fail"] .model-import-dot {
+  background: var(--danger);
+}
+
+.model-import-check[data-status="fail"] .model-import-check-status {
+  color: var(--danger-text);
+}
+
+.model-import-check-text {
+  overflow-wrap: anywhere;
+}
+
+.model-import-blocked {
+  display: block;
+  color: var(--danger-text);
+}
+
 .catalog-ollama-meta {
   flex: 1;
   min-width: 0;
