@@ -8,7 +8,11 @@ personal reference and a 2,000,000-document Wikipedia-class corpus.
 
 ```bash
 npm install @bendyline/gezel-knowledge
+# Building a catalog and semantic search also need the embedding runtime:
+npm install @huggingface/transformers@^4.3.1
 ```
+
+Reading a catalog and full-text search work without `@huggingface/transformers`.
 
 ## What a `.gezk` is
 
@@ -26,6 +30,11 @@ the specification, JSON Schemas, conformance fixtures and a Python reference
 reader live in [bendyline/gezk](https://github.com/bendyline/gezk).
 
 ## Building a catalog
+
+Building embeds every passage, so it needs `@huggingface/transformers`
+(^4.3.1) installed beside this package. It is imported only when a build or a
+semantic search starts, so everything else works without it. The first build
+downloads the profile's embedding model (about 130 MB for `bge-small-en-v1.5`).
 
 ```ts
 import {
@@ -63,9 +72,7 @@ await compileKnowledgeCatalog({
 
 Every archive ships a `README.md` and `LICENSES/catalog.txt`; the compiler
 generates minimal ones from the catalog block unless you pass richer texts in
-`extraFiles`. Embedding requires `@huggingface/transformers` (^4.3.1) at
-runtime; the module is imported dynamically so everything else works without
-it. The `gezel knowledge` CLI wraps this same API (`init`, `build`,
+`extraFiles`. The `gezel knowledge` CLI wraps this same API (`init`, `build`,
 `validate`, `inspect`, `search`), entirely offline — no daemon.
 
 With a multimodal profile (`EMBEDDINGGEMMA_2_512_1`), pass `embedMedia` too and

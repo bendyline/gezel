@@ -55,6 +55,17 @@ function gb(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
+// node:sqlite blocks the thread inside its busy handler, so each try waits at
+// most `busy_timeout` and the backoff between tries leaves the event loop free.
+// A starved CI runner held two racing processes past one 1 s wait (2026-11-11).
+const CONTENDED_RETRY_DELAYS_MS = [50, 100, 200, 400, 800, 1600];
+
+function isContended(error: unknown): boolean {
+  const code = (error as { errcode?: unknown } | null)?.errcode;
+  const primary = typeof code === 'number' ? code & 0xff : null;
+  return primary === 5 || primary === 6;
+}
+
 /**
  * SQLite's process lock makes check-and-reserve atomic across GEZEL_HOME values.
  * Reservations survive a broker restart. A dead parent does not free the memory
@@ -85,6 +96,21 @@ export class DeviceCapacityLedger {
 
   async execute(command: NativeCapacityCommand): Promise<NativeCapacityReply> {
     const sample = await this.options.sample();
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.executeOnce(command, sample);
+      } catch (error) {
+        const delay = CONTENDED_RETRY_DELAYS_MS[attempt];
+        if (delay === undefined || !isContended(error)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  private async executeOnce(
+    command: NativeCapacityCommand,
+    sample: DeviceCapacitySample,
+  ): Promise<NativeCapacityReply> {
     await mkdir(this.options.directory, { recursive: true, mode: 0o700 });
     const path = join(this.options.directory, 'leases.sqlite');
     const db = new DatabaseSync(path);

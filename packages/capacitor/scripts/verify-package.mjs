@@ -2,7 +2,12 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { verifyCapacitorPackage, writeEmbeddingManifest } from './embedding-package.mjs';
-import { verifyProducerSources, verifyRuntime, verifySpeech } from './stage-native.mjs';
+import {
+  verifyPluginRuntimeApi,
+  verifyProducerSources,
+  verifyRuntime,
+  verifySpeech,
+} from './stage-native.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // Capacitor resolves <plugin>/package.json from the consumer. Without this
@@ -12,15 +17,19 @@ if (require.resolve('@bendyline/gezel-capacitor/package.json') !== path.join(roo
   throw new Error('Capacitor must be able to resolve the plugin package metadata.');
 const ios = await verifyRuntime(path.join(root, 'native/ios'), 'ios');
 const android = await verifyRuntime(path.join(root, 'native/android'), 'android');
-// scripts/publish-package.mjs sets this, so only a real publish refuses drift.
-const allowStale = process.env.GEZEL_REQUIRE_CURRENT_NATIVE !== '1';
-await verifyProducerSources(ios, path.resolve(root, '../..'), console.warn, { allowStale });
-await verifyProducerSources(android, path.resolve(root, '../..'), console.warn, { allowStale });
+const repo = path.resolve(root, '../..');
+// The package ships the pinned release as built; `native/runtime` changes reach
+// it when the pin moves, so drift is reported, never refused. Both platforms'
+// manifests record the same sources, so one report covers them.
+await verifyProducerSources(ios, repo, console.warn, { allowStale: true });
 if (ios.packageVersion !== android.packageVersion)
   throw new Error('Stage the same native version for both platforms before packing.');
-// Offline speech is why apps such as DocBlocks take this package; a publish
-// must never ship without it, or with a runtime from another release.
-if (!allowStale) {
+// What would break an app is the plugin naming runtime API this release lacks.
+await verifyPluginRuntimeApi({ capacitorRoot: root, repoRoot: repo, manifest: ios });
+// scripts/publish-package.mjs sets this for a real publish. Offline speech is
+// why apps such as DocBlocks take this package; a publish must never ship
+// without it, or with a runtime from another release.
+if (process.env.GEZEL_CAPACITOR_RELEASE === '1') {
   for (const target of ['ios', 'android']) {
     const speech = await verifySpeech(path.join(root, `native/speech-${target}`), target).catch(
       () => {

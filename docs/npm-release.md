@@ -571,14 +571,24 @@ engine resolver's: the pinned `SHA256SUMS_DIGEST` vouches for `SHA256SUMS`, whic
 vouches for each archive. A build someone staged on purpose (`0.0.0-ci.*` in
 `mobile-native.yml`) is left alone, except by a release.
 
-The plugin sources in the tarball must match those engines, and `prepack`
-compares each SDK's recorded `sources` with the checkout. A native release is
-cut from a merged commit, so a pull request that changes `native/runtime` cannot
-pin its own. Ordinary packs therefore only warn. **A release refuses that drift**:
-`publish-npm.yml` runs `stage-capacitor-native.mjs --require-current` before
-anything publishes, and `publish-package.mjs` sets
-`GEZEL_REQUIRE_CURRENT_NATIVE=1` for the publish itself. If the gate fails, cut a
-native release, pin it with `scripts/pin-native-release.mjs`, and dispatch again.
+**A release ships the pinned native release as built, and validates against
+it.** `native/runtime` moving past the pin is normal: a native release is cut
+from a merged commit, and those changes reach the package when the pin moves.
+`prepack` compares each SDK's recorded `sources` with the checkout and reports
+the drift; it never refuses it, in a release or out of one. What would break an
+app is the plugin (`ios/Sources`, `android/src`), which the app compiles against
+the staged runtime, naming runtime API that runtime lacks. Every pack runs
+`verifyPluginRuntimeApi` for that: it reads the pinned release's public
+declarations (the iOS SDK's Swift sources, the Android `-sources.jar`), finds
+the public names `native/runtime` has added since, and refuses a plugin whose
+code (not its comments or strings) uses one. Reach newer API in a way that
+still works without it, as the plugin does for `GezelRuntimeWillRunModel`.
+
+`publish-npm.yml` runs `stage-capacitor-native.mjs --release` before anything
+publishes. It replaces any staged build that is not the pin, verifies the pinned
+payloads against `SHA256SUMS`, and runs the checks above.
+`publish-package.mjs` sets `GEZEL_CAPACITOR_RELEASE=1` for the publish itself,
+which makes `prepack` insist on both speech runtimes (below).
 
 The offline speech runtime ships the same way: since the release after
 native-v0.1.57, each native release also carries

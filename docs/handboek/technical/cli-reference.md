@@ -104,6 +104,8 @@ gezel task list             tasks across every project (--status to filter)
 gezel task show <ref>       one task, such as default/12
 gezel task pause <ref>      pause one task without stopping the others
 gezel task resume <ref>     retry a paused task and wait for its result
+gezel task wait <ref>       wait for a task, then say where its result is
+                            (--out <dir> to copy what it made into that folder)
 gezel craftbook list [words]
                             craftbooks you can start in this folder's project
                             (words filter by command, title, and tags;
@@ -112,9 +114,10 @@ gezel craftbook show <craftbook>
                             what one does, what it takes before your request,
                             and where it saves
 gezel do <craftbook>        start a craftbook as a task in this folder's project
-                            (--wait to stay until it finishes; --out <dir> to
-                            wait and copy what it made into that folder;
-                            --allow-edits when it saves into the folder itself)
+                            (--wait to stay until it finishes and print where
+                            its result is; --out <dir> to wait and copy what it
+                            made into that folder; --allow-edits when it saves
+                            into the folder itself)
 gezel skills list           SKILL.md skills found in this project's workspace
 gezel skills import <path>  turn one of those skills into a craftbook
 ```

@@ -106,7 +106,7 @@ try {
   result = spawnPnpmSync(args, {
     cwd: packageDir,
     stdio: 'inherit',
-    env: { ...process.env, GEZEL_REQUIRE_CURRENT_NATIVE: '1' },
+    env: { ...process.env, GEZEL_CAPACITOR_RELEASE: '1' },
   });
   spawnError = result.error;
 } catch (error) {

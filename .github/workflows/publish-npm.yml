@@ -104,13 +104,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
 
-      # Capacitor's tarball carries the pinned native release's mobile SDKs, and
-      # its plugin sources must match them. A pull request cannot pin a native
-      # release built from its own merge, so nothing earlier enforces this, and
-      # publish-package.mjs refusing it mid-release would strand the packages
-      # that had already gone out. Fail here instead.
-      - name: Require the pinned native release to match its sources
-        run: node scripts/stage-capacitor-native.mjs --require-current
+      # Capacitor's tarball carries the pinned native release's mobile SDKs.
+      # Re-stage them from the pin and verify them, and check that the plugin
+      # names no runtime API that release lacks. Runtime changes made after the
+      # pin are reported here and ship when the pin moves; they do not block.
+      # publish-package.mjs refusing a bad payload mid-release would strand the
+      # packages that had already gone out, so fail here instead.
+      - name: Verify the pinned native release for Capacitor
+        run: node scripts/stage-capacitor-native.mjs --release
 
       # The prewarm runs service source under tsx, which loads the embedder
       # from inference's built `dist/` through its `./internal/*` export; that

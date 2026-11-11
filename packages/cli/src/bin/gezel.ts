@@ -129,7 +129,13 @@ import {
   resolveCleanupSelection,
   resolveRestoreSelection,
 } from '../storage-format.js';
-import { copyTaskOutput } from '../task-output.js';
+import {
+  type TaskOutput,
+  copyTaskOutput,
+  describeTaskOutput,
+  formatTaskOutput,
+  withCopiedOutput,
+} from '../task-output.js';
 import { craftbookStartRequest, normalizeCraftbooks } from '../tui/craftbook-start.js';
 import { closestCommand, unknownCommandMessage } from '../unknown-command.js';
 import { runWorkflow } from '../workflow-command.js';
@@ -952,8 +958,11 @@ parameter; every other word is your request, which becomes the task description.
 A folder Gezel was pointed at starts read-only. A craftbook that saves into the
 folder asks first at a terminal; in a script, add --allow-edits.
 
+When a task completes, --wait prints where its result is; --out <dir> also
+copies everything it made into that folder.
+
 Examples:
-  gezel do summarize-long "Summarize notes.txt for the board"
+  gezel do summarize-long "Summarize notes.txt for the board" --out ./board-summary
   gezel do ship feature/login --wait
   gezel do powerpoint-deck "A deck about Delft" audience=investors`,
   )
@@ -1097,15 +1106,7 @@ Examples:
         });
       if (opts.wait || opts.out) {
         console.error(`started ${created.ref} — ${created.title}`);
-        const waited = await printTaskWait(client, created.ref, { ...opts, timeoutMs });
-        if (opts.out && waited.outcome === 'complete') {
-          const dir = waited.task.artifactDir;
-          if (!dir) throw new CliError(`${created.ref} finished without a task folder to copy.`);
-          const copied = await copyTaskOutput(client, projectId, dir, opts.out);
-          console.error(
-            `copied ${copied.length} file${copied.length === 1 ? '' : 's'} to ${opts.out}`,
-          );
-        }
+        await printTaskWait(client, created.ref, { ...opts, timeoutMs });
       } else
         console.log(
           opts.json ? JSON.stringify(created) : `started ${created.ref} — ${created.title}`,
@@ -1144,24 +1145,65 @@ function printWorkflowResult(result: unknown, json?: boolean) {
   }
 }
 
+/**
+ * Follow a task to its end and report it. A completed task says where its
+ * result is: absolute paths when this computer can open them, and otherwise
+ * how to copy them here. `out` copies the task's folder there first.
+ */
 async function printTaskWait(
   client: GezelClient,
   ref: string,
-  opts: { json?: boolean; timeoutMs: number },
+  opts: { json?: boolean; timeoutMs: number; out?: string },
 ) {
   const result = await waitForTask(client, ref, {
     timeoutMs: opts.timeoutMs,
-    onProgress: (task) =>
+    onProgress: (task) => {
+      // The outcome line below says these, followed by where the result is.
+      if (task.status === 'complete' || task.status === 'canceled') return;
       console.error(
         `${task.ref}: ${task.status}${task.activeStepId ? ` (${task.activeStepId})` : ''}`,
-      ),
+      );
+    },
   });
   const { reason, hint } = await blockedTaskDetails(client, result);
-  console.log(
-    opts.json
-      ? JSON.stringify({ ...result, ...(reason ? { reason } : {}), ...(hint ? { hint } : {}) })
-      : `${result.task.ref}: ${result.outcome}`,
-  );
+  let copied: { folder: string; files: string[] } | undefined;
+  let output: TaskOutput | undefined;
+  if (result.outcome === 'complete') {
+    if (opts.out) {
+      const dir = result.task.artifactDir;
+      if (!dir) throw new CliError(`${result.task.ref} finished without a task folder to copy.`);
+      const files = await copyTaskOutput(client, result.task.projectId, dir, opts.out);
+      copied = { folder: resolvePath(opts.out), files };
+      if (!opts.json)
+        console.error(
+          `copied ${files.length} file${files.length === 1 ? '' : 's'} to ${copied.folder}`,
+        );
+    }
+    // The task is done whatever this lookup finds; never fail the command on it.
+    output = await describeTaskOutput(client, result.task).catch(() => undefined);
+  }
+  if (opts.json) {
+    console.log(
+      JSON.stringify({
+        ...result,
+        ...(reason ? { reason } : {}),
+        ...(hint ? { hint } : {}),
+        ...(output ? { output } : {}),
+        ...(copied ? { copied } : {}),
+      }),
+    );
+  } else {
+    console.log(`${result.task.ref}: ${result.outcome}`);
+    if (output) {
+      const shown = formatTaskOutput(
+        copied ? withCopiedOutput(output, copied.folder) : output,
+        result.task.ref,
+        { copied: copied !== undefined },
+      );
+      for (const line of shown.lines) console.log(line);
+      if (shown.hint) console.error(shown.hint);
+    }
+  }
   if (!opts.json && result.outcome === 'blocked') {
     if (reason) console.error(reason);
     if (hint) console.error(hint);
@@ -2066,8 +2108,9 @@ for (const verb of ['wait', 'resume'] as const) {
       'wait budget in seconds; timeout leaves the task running',
       '7200',
     )
+    .option('--out <dir>', 'when it completes, copy what the task made into this folder')
     .option('--json', 'emit one JSON result on stdout')
-    .action(async (ref: string, opts: { timeout: string; json?: boolean }) => {
+    .action(async (ref: string, opts: { timeout: string; json?: boolean; out?: string }) => {
       const timeoutMs = positiveSeconds(opts.timeout);
       const client = await connectOwned(cliGlobals());
       if (verb === 'resume') {

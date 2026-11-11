@@ -43,6 +43,11 @@ const runner = new ScriptRunner({
 });
 ```
 
+Leave out `executor` and the runner uses the service's Node sandbox, which
+starts a script only inside the operating system's sandbox (see
+[Running a script](https://www.npmjs.com/package/@bendyline/gezel-sdk#running-a-script)).
+The QuickJS executor needs none, so it works the same on every platform.
+
 Use the runner for product execution: it owns metadata/input validation,
 the AI activity setting, capability dispatch, output validation, run history, and
 secret redaction. The executor itself supplies none of those permissions.
@@ -140,11 +145,24 @@ host dispatcher. `console` methods use the SDK's log notification.
 **Await all asynchronous work at module level, then write output.** For example:
 
 ```ts
-import { gezel } from '@bendyline/gezel-sdk';
+import { defineScript, gezel } from '@bendyline/gezel-sdk';
+
+export const meta = defineScript({
+  name: 'count-artifacts',
+  description: 'Count the files in the project artifacts drawer.',
+  kind: 'action',
+  outputs: {
+    count: { type: 'number', description: 'How many artifacts the project has.' },
+  },
+  requires: ['artifacts.read'],
+} as const);
 
 const files = await gezel.artifacts.list();
 gezel.output({ count: files.length });
 ```
+
+Every script, however small, exports that `meta` block; the runner refuses a
+script without one.
 
 The runtime rejects module completion with pending host calls and rejects output
 while host calls are pending. Catching an awaited capability denial is supported,

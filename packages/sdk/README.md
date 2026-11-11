@@ -30,6 +30,25 @@ gezel.output({
 });
 ```
 
+## Running a script
+
+Save the script as `~/.gezel/projects/<projectId>/scripts/has-tests.ts`, or
+create it under **Scripts** in the Gezel app. The daemon then runs it on
+demand, as a craftbook step's hook, or as a completion gate.
+[Writing scripts with gezel-sdk](https://gezel.com/docs/writing-scripts-with-gezel-sdk/)
+covers inputs, capabilities and gates.
+
+The daemon's default executor is a Node sandbox that starts a script only inside
+the operating system's own sandbox: Seatbelt on macOS, a systemd or helper
+sandbox on Linux, and Microsoft's container launcher (MXC) on Windows. The
+desktop app installs the Windows launcher; a daemon installed from npm downloads
+it on first start when its security level allows app network traffic. Without
+one, the daemon refuses to start a script rather than run it unconfined, with
+`denyNet requires an enforceable OS network boundary`. To run scripts in your
+own process instead, use the QuickJS executor from
+[`@bendyline/gezel-script-runtime`](https://www.npmjs.com/package/@bendyline/gezel-script-runtime),
+which needs no operating-system sandbox.
+
 ## Entry points
 
 | Subpath | Contents |
