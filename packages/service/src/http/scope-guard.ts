@@ -389,6 +389,11 @@ async function isSessionRouteAllowed(
     if (/^\/report-actions\/(?:fire|dismiss)\/?$/.test(rest)) {
       return sessionDeny('report actions are fired from a first-party client');
     }
+    // Approving an app update can replace an edited script and write into a
+    // folder gezels hold no grant for. Reading what an update would do is open.
+    if (method !== 'GET' && /^\/project-type\/upgrade\/?$/.test(rest)) {
+      return sessionDeny('app updates are approved by the person in Gezel');
+    }
     // Connecting a source, pausing or editing one, and a camera's live feed
     // are the person's: a prompt-injected gezel must never bind or arm a
     // camera, read its pictures past the cloud-model rule, or change what a

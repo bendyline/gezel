@@ -357,6 +357,8 @@ import type {
   ProjectSearchResponse,
   ProjectTypeApplyPlan,
   ProjectTypeStatusResponse,
+  ProjectTypeUpgradeRequest,
+  ProjectTypeUpgradeResponse,
   PromptAssistRequest,
   PromptAssistResponse,
   PromptDraft,
@@ -4886,6 +4888,27 @@ export class GezelClient {
   /** Applied type vs installed AI App, plus per-seed drift. */
   projectTypeStatus(id: string): Promise<ProjectTypeStatusResponse> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/project-type/status`);
+  }
+
+  /**
+   * The app update this project could take now (`upgrade: null` when it runs
+   * the newest version of its major). Automatic updates run on their own;
+   * the others wait for {@link upgradeProjectType}.
+   */
+  getProjectTypeUpgrade(id: string): Promise<ProjectTypeUpgradeResponse> {
+    return this.request('GET', `/api/projects/${encodeURIComponent(id)}/project-type/upgrade`);
+  }
+
+  /**
+   * The person approves the update they were shown. 409 `stale_upgrade` when
+   * the offer is no longer `toVersion`. Owner credentials only.
+   */
+  upgradeProjectType(id: string, body: ProjectTypeUpgradeRequest): Promise<AppliedProjectType> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/project-type/upgrade`,
+      body,
+    );
   }
 
   /** Package an exact-version AI App into a `.gezapp` artifact. */

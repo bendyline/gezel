@@ -12,6 +12,7 @@ import type {
   Project,
   ProjectDetail,
   ProjectTabVisibility,
+  ProjectTypeUpgradePlan,
   WorkspaceIndexFile,
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
@@ -156,6 +157,11 @@ import { OFFERED_PROJECT_VIEWS, preloadProjectView } from './project-views/regis
 import { useProjectViews } from './project-views/useProjectViews.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
 import { ProjectOutsideInEditor } from './projects/ProjectOutsideInEditor.js';
+import {
+  ProjectTypeField,
+  ProjectTypeUpdateDialog,
+  ProjectTypeUpdateNotice,
+} from './projects/ProjectTypeUpdate.js';
 import {
   type OutsideInOpenFile,
   loadProjectFile,
@@ -671,8 +677,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [typePage, setTypePage] = useState<{
     entry: string;
     label: string;
+    version?: string;
     pageTools?: string[];
   } | null>(null);
+  // The app update this project could take (see project-type/upgrade.ts).
+  // Most run on their own; one that waits for the person shows a line over
+  // the Output page and a key in Settings.
+  const [typeUpdate, setTypeUpdate] = useState<ProjectTypeUpgradePlan | null>(null);
+  const [typeName, setTypeName] = useState<string | null>(null);
+  const [typeUpdateOpen, setTypeUpdateOpen] = useState(false);
+  const selectedIdRef = useRef<string | null>(null);
   const [gezels, setGezels] = useState<GezelSummary[]>(
     () => peekApiRead('listGezels')?.gezels ?? [],
   );
@@ -747,6 +761,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
       if (!detail?.projectId) return;
       if (!detail.project) {
         void refresh();
+        // The daemon changed the open project itself (an app update): reload
+        // it, so its Output page follows the new version.
+        const projectId = detail.projectId;
+        if (selectedIdRef.current === projectId) {
+          void api
+            .getProject(projectId)
+            .then((project) =>
+              setSelected((current) => (current?.id === projectId ? project : current)),
+            )
+            .catch(() => {});
+        }
         return;
       }
       setProjects((current) =>
@@ -2104,24 +2129,52 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             : new Set<string>();
         const pageTools = (pages?.tools ?? []).filter((name) => declared.has(name));
         if (!cancelled) {
+          setTypeName(detail.manifest.name);
           setTypePage(
             pages?.entry
               ? {
                   entry: pages.entry,
                   label: 'Dashboard',
+                  version: projectTypeProvenance.version,
                   ...(pageTools.length > 0 ? { pageTools } : {}),
                 }
               : null,
           );
         }
       } catch {
-        if (!cancelled) setTypePage(null);
+        if (!cancelled) {
+          setTypePage(null);
+          setTypeName(null);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [projectTypeProvenance?.id, projectTypeProvenance?.version, projectTypeProvenance?.source]);
+
+  useEffect(() => {
+    selectedIdRef.current = selected?.id ?? null;
+  }, [selected?.id]);
+
+  // The app update on offer for the open project, re-read whenever the
+  // version it runs changes (an update landed) or another project opens.
+  const selectedId = selected?.id;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: keyed on the project and the version it runs.
+  useEffect(() => {
+    let cancelled = false;
+    setTypeUpdate(null);
+    if (!selectedId || !projectTypeProvenance) return;
+    void api
+      .getProjectTypeUpgrade(selectedId)
+      .then((res) => {
+        if (!cancelled) setTypeUpdate(res?.upgrade ?? null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId, projectTypeProvenance?.id, projectTypeProvenance?.version]);
 
   // A pinned type page makes the pane worth showing even without a workspace
   // index.html — the user's explicit toggle still wins.
@@ -2386,6 +2439,21 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
           mode={createMode ?? 'crew'}
           onClose={() => setCreateMode(null)}
           onCreated={handleProjectCreated}
+        />
+      )}
+      {selected && typeUpdate && !typeUpdate.automatic && (
+        <ProjectTypeUpdateDialog
+          projectId={selected.id}
+          plan={typeUpdate}
+          open={typeUpdateOpen}
+          onOpenChange={setTypeUpdateOpen}
+          onUpdated={() => {
+            setTypeUpdate(null);
+            void api
+              .getProject(selected.id)
+              .then(setSelected)
+              .catch(() => {});
+          }}
         />
       )}
       {selected && workspaceIssueFixRequest && (
@@ -2654,6 +2722,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                   projectId={selected.id}
                   htmlFiles={workspaceHtmlFiles}
                   typePage={typePage ?? undefined}
+                  notice={
+                    typeUpdate && !typeUpdate.automatic ? (
+                      <ProjectTypeUpdateNotice
+                        plan={typeUpdate}
+                        onReview={() => setTypeUpdateOpen(true)}
+                      />
+                    ) : undefined
+                  }
                   initialMaximized={outputMaximized}
                   onMaximizedChange={saveOutputMaximized}
                   onClose={showOutputAsTab ? () => setTab('chat') : toggleOutput}
@@ -3109,6 +3185,15 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                                 </Select.Content>
                               </Select.Root>
                             </SettingField>
+                          )}
+
+                          {selected.projectType && typeName && (
+                            <ProjectTypeField
+                              typeName={typeName}
+                              version={selected.projectType.version}
+                              plan={typeUpdate}
+                              onReview={() => setTypeUpdateOpen(true)}
+                            />
                           )}
 
                           {runtimeCapabilities().catalog && (

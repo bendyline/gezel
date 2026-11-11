@@ -56,6 +56,7 @@ import type { SystemToolsetInstallRegistry } from '../system-toolsets/install-re
 import type { SystemStatusBus } from '../system-toolsets/status-bus.js';
 import type { SystemIdleState } from '../system/idle-state.js';
 
+import type { ProjectTypeUpgrader } from '../project-type/upgrader.js';
 import type { TaskLauncher } from '../tasks/launcher.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { NightShiftManager } from '../tasks/night-shift-manager.js';
@@ -83,6 +84,12 @@ export interface ServiceContext extends EngineContext {
    */
   appToolRelays: AppToolRelayRegistry;
   chat: ChatManager;
+  /**
+   * App updates: plans and applies moving a project to a newer version of
+   * its app, and runs the ones that need no one after boot and on catalog
+   * content changes. Absent on the machine-engine role.
+   */
+  projectTypeUpgrader?: ProjectTypeUpgrader;
   /** Iframe-shim runtime errors, looped back into chat preludes. */
   previewLog: PreviewLogBuffer;
   channels: ChannelManager;

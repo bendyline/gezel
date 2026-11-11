@@ -2662,6 +2662,60 @@ describe('ProjectsView', () => {
       expect(await screen.findByRole('tab', { name: 'Output' })).toBeInTheDocument();
     });
 
+    it('puts an app update that waits for the person over the Output page', async () => {
+      activeWidth = 1024;
+      const projectType = {
+        id: 'shift-roster',
+        version: '1.0.0',
+        source: 'bundled',
+        appliedAt: '2026-11-02T00:00:00Z',
+      };
+      vi.mocked(api.getProject).mockImplementation(
+        async (id) => ({ id, name: 'Alpha', packages: [], projectType }) as never,
+      );
+      vi.mocked(api.listProjects).mockResolvedValue({
+        projects: [{ id: 'pj-alpha', ...CODE_TYPE, name: 'Alpha', projectType }],
+      } as never);
+      vi.mocked(api.getCatalogItem).mockResolvedValue({
+        sourceId: 'bundled',
+        kind: 'project-type',
+        manifest: {
+          kind: 'project-type',
+          id: 'shift-roster',
+          name: 'Shift Roster',
+          tools: [],
+          pages: { entry: 'roster/index.html', api: 1 },
+        },
+      } as never);
+      vi.mocked(api.getProjectTypeUpgrade).mockResolvedValue({
+        upgrade: {
+          projectId: 'pj-alpha',
+          typeId: 'shift-roster',
+          typeName: 'Shift Roster',
+          source: 'bundled',
+          fromVersion: '1.0.0',
+          toVersion: '1.1.0',
+          automatic: false,
+          needsOk: [{ kind: 'edited-script', items: ['roster-store'] }],
+          changes: {
+            page: true,
+            scripts: [{ name: 'roster-store', change: 'replace-edited' }],
+            seeds: [],
+            craftbooks: [],
+            about: 'unchanged',
+            mission: 'unchanged',
+            crew: [],
+            toolsets: [],
+            schedules: [],
+            settings: [],
+          },
+        },
+      } as never);
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      expect(await screen.findByText('An update for Shift Roster is ready.')).toBeInTheDocument();
+      expect(screen.getByTestId('output-preview')).toHaveAttribute('data-source', 'type');
+    });
+
     it('spends no row on a name-only heading in a compact single-project tab', async () => {
       activeWidth = 390;
       render(<ProjectsView forceProjectId="pj-alpha" />);

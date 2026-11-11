@@ -3881,6 +3881,22 @@ event rather than a condition — Linux's out-of-memory killer stopping the
 engine — never takes the rail: the failed chat already said so, and the
 engine's tab keeps a count for whoever comes looking.
 
+**A project's app updates on its own; only an update that needs the person
+asks.** A project made from a project type moves to a newer version of it
+(same major) without a word when nothing of the person's is affected: the
+Output page reloads in place, and the Overview's activity reads "Shift Roster
+was updated". No banner, no toast, no version number. An update that would
+replace a script changed in the project, add crew, connect a tool service,
+start a recurring run, write into a folder Gezel holds no grant for, or that
+came from an AI App file waits for the person. It shows as one muted
+`.file-flat-notice` line over the Output page ("An update for Shift Roster is
+ready." with an **Update…** key) and as the "Set up as" row in the project's
+Settings → Preferences. **Update…** opens a plain `Dialog` that says what the
+update does and what stays the same, in sentences; versions appear only in the
+builder view (`useBuilderView`). The pieces live in
+[ProjectTypeUpdate.tsx](../packages/ui/src/views/projects/ProjectTypeUpdate.tsx);
+the rules for what an update keeps are in docs/project-types.md ("Upgrades").
+
 **The titlebar sheds words before it sheds pills.** The status cluster is
 open-ended — one engine pill per busy on-device engine, one queue chip per
 busy provider — so on a crowded bar something has to give. Never a pill:

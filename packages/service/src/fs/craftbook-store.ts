@@ -7,6 +7,7 @@ import {
   type CraftbookSummary,
   type ProjectCraftbookProvenance,
   ProjectCraftbookProvenanceSchema,
+  newestVersionFirst,
   nowIso,
 } from '@bendyline/gezel';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
@@ -30,6 +31,7 @@ export interface CraftbookStoreOptions {
   projectWorkspaceDir: (projectId: string) => Promise<string>;
   assertWorkspaceWritable: (
     projectId: string,
+    opts?: { userInitiated?: boolean },
   ) => Promise<
     | { ok: true; workspaceDir: string }
     | { ok: false; reason: WorkspaceWriteDeniedReason; workingDir: string }
@@ -262,7 +264,7 @@ export class CraftbookStore {
     }
     versions = versions.filter((v) => /^\d+\.\d+\.\d+/.test(v));
     if (versions.length === 0) return null;
-    const chosen = version ?? versions.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))[0]!;
+    const chosen = version ?? versions.sort(newestVersionFirst)[0]!;
     if (!versions.includes(chosen)) return null;
     const versionFile = craftbookTemplateVersionManifestFile(this.home, prefix, id, chosen);
     let raw: string;
@@ -435,7 +437,7 @@ export class CraftbookStore {
     }
     versions = versions.filter((v) => /^\d+\.\d+\.\d+/.test(v));
     if (versions.length === 0) return null;
-    const chosen = version ?? versions.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))[0]!;
+    const chosen = version ?? versions.sort(newestVersionFirst)[0]!;
     if (!versions.includes(chosen)) return null;
     const document = await readProjectCraftbookDocument(
       join(versionsDir, chosen),
@@ -480,8 +482,15 @@ export class CraftbookStore {
   }
 
   /** Persist a project-local craftbook (flat `.gezel/craftbooks/<id>/` layout). */
-  async writeProjectCraftbook(projectId: string, book: Craftbook): Promise<void> {
-    const gate = await this.assertWorkspaceWritable(projectId);
+  async writeProjectCraftbook(
+    projectId: string,
+    book: Craftbook,
+    opts?: { userInitiated?: boolean },
+  ): Promise<void> {
+    const gate = await this.assertWorkspaceWritable(
+      projectId,
+      opts?.userInitiated ? { userInitiated: true } : undefined,
+    );
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const dir = projectLocalCraftbookDir(gate.workspaceDir, book.id);
     const version = book.version ?? '1.0.0';
@@ -560,8 +569,12 @@ export class CraftbookStore {
     projectId: string,
     id: string,
     prov: ProjectCraftbookProvenance,
+    opts?: { userInitiated?: boolean },
   ): Promise<void> {
-    const gate = await this.assertWorkspaceWritable(projectId);
+    const gate = await this.assertWorkspaceWritable(
+      projectId,
+      opts?.userInitiated ? { userInitiated: true } : undefined,
+    );
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const dir = projectLocalCraftbookDir(gate.workspaceDir, id);
     await mkdir(dir, { recursive: true });

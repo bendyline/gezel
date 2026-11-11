@@ -1,9 +1,15 @@
+import { createHash } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { dirname, join, relative, sep } from 'node:path';
 import type { Plugin } from 'vite';
 import { BundledSource } from '../../catalog/src/source.js';
-import { type Craftbook, craftbookFromDoc, parseCraftbookDoc } from '../../core/src/browser.js';
+import {
+  type Craftbook,
+  craftbookFromDoc,
+  parseCraftbookDoc,
+  projectTypeScriptHeader,
+} from '../../core/src/browser.js';
 import { portableCatalogModels } from '../../core/src/runtime/portable-catalog.js';
 import { portableToolNames } from '../../core/src/runtime/product-tools.js';
 import { portableContentGap, supportsPortableContent } from './portable-content-support.js';
@@ -141,6 +147,53 @@ function embeddedCraftbooks(
   return books;
 }
 
+/**
+ * What each earlier version of a type in the bundled version's major put in
+ * a project: the hash of every script file it installed (provenance header
+ * included), its seed paths and its param names. A phone carries only the
+ * newest version, and this is how it tells a script the app installed from
+ * one the person edited when it moves a project forward.
+ */
+async function earlierVersions(typeDir: string, typeId: string, current: string) {
+  const major = current.split('.', 1)[0];
+  const out: Record<
+    string,
+    { scripts: Record<string, string>; seeds: string[]; params: string[] }
+  > = {};
+  for (const entry of await readdir(join(typeDir, 'versions'), { withFileTypes: true })) {
+    const version = entry.name;
+    if (!entry.isDirectory() || version === current || version.split('.', 1)[0] !== major) continue;
+    let manifest: {
+      scripts?: Record<string, string>;
+      workspaceSeed?: string[];
+      artifactsSeed?: string[];
+      params?: { properties?: Record<string, unknown> };
+    };
+    try {
+      manifest = JSON.parse(
+        await readFile(join(typeDir, 'versions', version, 'manifest.json'), 'utf8'),
+      );
+    } catch {
+      continue;
+    }
+    const scripts: Record<string, string> = {};
+    for (const [name, body] of Object.entries(manifest.scripts ?? {})) {
+      scripts[name] = createHash('sha256')
+        .update(`${projectTypeScriptHeader(typeId, version)}${body}`)
+        .digest('hex');
+    }
+    out[version] = {
+      scripts,
+      seeds: [
+        ...(manifest.workspaceSeed ?? []),
+        ...(manifest.artifactsSeed ?? []).map((rel) => `artifacts/${rel}`),
+      ],
+      params: Object.keys(manifest.params?.properties ?? {}),
+    };
+  }
+  return out;
+}
+
 /** Every file of a type version except its manifest, as text or base64. */
 async function versionFiles(versionDir: string) {
   const files: Record<string, string> = {};
@@ -200,15 +253,15 @@ async function portableProjectTypes(source: BundledSource, dataDir: string) {
       );
       continue;
     }
-    const versionDir = join(
+    const typeDir = join(
       dataDir,
       'project-types',
       manifest.id.slice(0, 2).toLowerCase(),
       manifest.id,
-      'versions',
-      manifest.version,
     );
+    const versionDir = join(typeDir, 'versions', manifest.version);
     const files = await versionFiles(versionDir);
+    const earlier = await earlierVersions(typeDir, manifest.id, manifest.version);
     const craftbooks = embeddedCraftbooks(manifest, files.files);
     // A type that exists to run craftbooks (a software project) has nothing to
     // offer here when none of them can run on a phone.
@@ -223,6 +276,7 @@ async function portableProjectTypes(source: BundledSource, dataDir: string) {
       item: { ...detail, logoUrl: undefined },
       ...files,
       ...(Object.keys(craftbooks).length ? { craftbooks } : {}),
+      ...(Object.keys(earlier).length ? { earlierVersions: earlier } : {}),
     });
   }
   return types;

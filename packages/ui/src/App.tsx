@@ -751,6 +751,15 @@ function FullApp() {
               }),
             );
           }
+          // The daemon changed a project on its own (an app update). Views
+          // holding that project reload it; its Output page follows.
+          if (ev.type === 'project_updated') {
+            window.dispatchEvent(
+              new CustomEvent('gezel:project-updated', {
+                detail: { projectId: ev.projectId },
+              }),
+            );
+          }
           // A shared gezel was recruited anywhere — most importantly via
           // `ensure_gezel` during a live project turn. Reuse the roster-change
           // event already consumed by the sidebar + Gezellen screen.

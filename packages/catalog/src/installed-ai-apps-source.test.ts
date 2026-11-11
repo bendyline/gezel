@@ -140,6 +140,45 @@ describe('InstalledAiAppsSource', () => {
     );
   });
 
+  // A project stamped with the version an app had before `gezel app add`
+  // installed a newer one keeps its page until it is updated.
+  it('still resolves an older installed version by exact pin', async () => {
+    await writeProjectType(home, 'roster', '1.0.0', {
+      id: 'roster',
+      name: 'Roster',
+      versions: ['1.0.0'],
+    });
+    await writeProjectType(home, 'roster', '1.1.0', {
+      id: 'roster',
+      name: 'Roster',
+      versions: ['1.1.0'],
+    });
+    await writeJson(aiAppsRegistryFile(home), {
+      schemaVersion: 1,
+      apps: [registryEntry('roster', '1.1.0', true)],
+    });
+    const source = new InstalledAiAppsSource(home);
+
+    expect((await source.get('project-type', 'roster'))?.manifest.version).toBe('1.1.0');
+    expect(await source.get('project-type', 'roster', '1.0.0')).toMatchObject({
+      sourceId: 'installed-ai-apps',
+      manifest: { version: '1.0.0' },
+    });
+    await expect(
+      source.readItemFile('project-type', 'roster', 'about.md', '1.0.0'),
+    ).resolves.toEqual(Buffer.from('Roster 1.0.0'));
+    expect(
+      (await source.listVersions('project-type', 'roster')).map((version) => version.version),
+    ).toEqual(['1.1.0']);
+    expect(await source.get('project-type', 'roster', '../1.0.0')).toBeNull();
+
+    await writeJson(aiAppsRegistryFile(home), {
+      schemaVersion: 1,
+      apps: [registryEntry('roster', '1.1.0', false)],
+    });
+    expect(await source.get('project-type', 'roster', '1.0.0')).toBeNull();
+  });
+
   it('degrades an invalid registry to empty and rejects unsupported kinds', async () => {
     await mkdir(dirname(aiAppsRegistryFile(home)), { recursive: true });
     await writeFile(aiAppsRegistryFile(home), '{not valid json', 'utf8');

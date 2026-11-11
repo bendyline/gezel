@@ -2696,6 +2696,6 @@ export const ToolsetConfigSchema = z.object({
 });
 export type ToolsetConfig = z.infer<typeof ToolsetConfigSchema>;
 
-export { compareSemver, isSemver } from './catalog-semver.js';
+export { compareSemver, isSemver, newestVersionFirst } from './catalog-semver.js';
 export * from './chat-model-sources.js';
 export * from './gezapp.js';

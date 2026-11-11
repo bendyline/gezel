@@ -104,6 +104,99 @@ export async function resolveTypeCraftbook(
 }
 
 /**
+ * What an app update does to one declared craftbook:
+ * - `install`: new in this version, not in the project yet.
+ * - `update`: the app's copy, untouched since install, with new content.
+ * - `unchanged`: already what this version ships.
+ * - `keep-edited`: the person changed the app's copy.
+ * - `keep-own`: the project holds a book of the same id the app never installed.
+ * - `keep-removed`: the older version shipped it and the project no longer has it.
+ * - `failed`: the book resolves nowhere for this version.
+ */
+export type ProjectTypeCraftbookChange =
+  | 'install'
+  | 'update'
+  | 'unchanged'
+  | 'keep-edited'
+  | 'keep-own'
+  | 'keep-removed'
+  | 'failed';
+
+export interface PlannedProjectTypeCraftbook {
+  id: string;
+  change: ProjectTypeCraftbookChange;
+  /** The version's book, for `install` and `update`. */
+  book?: Craftbook;
+}
+
+/**
+ * Classify a type version's craftbooks against the project, writing nothing.
+ * Unlike a first install, an update never overwrites a same-id book the app
+ * did not install and never brings back one the person deleted.
+ * `previousIds` is the older version's craftbook list, or null when that
+ * version no longer resolves (then a missing book counts as removed).
+ */
+export async function planProjectTypeCraftbooks(
+  deps: { store: Store; catalog: CatalogService },
+  input: CraftbookInstallInput & { previousIds: readonly string[] | null },
+): Promise<PlannedProjectTypeCraftbook[]> {
+  const now = new Date().toISOString();
+  const out: PlannedProjectTypeCraftbook[] = [];
+  for (const id of input.craftbookIds) {
+    const book = await resolveTypeCraftbook(deps.catalog, input, id, now).catch(() => null);
+    if (!book) {
+      out.push({ id, change: 'failed' });
+      continue;
+    }
+    const sidecar = await deps.store.readProjectCraftbookProvenance(input.projectId, id);
+    const existing = await deps.store.getProjectCraftbook(input.projectId, id).catch(() => null);
+    if (!existing) {
+      const removed = input.previousIds === null || input.previousIds.includes(id);
+      out.push(removed ? { id, change: 'keep-removed' } : { id, change: 'install', book });
+      continue;
+    }
+    if (!sidecar) {
+      out.push({ id, change: 'keep-own' });
+      continue;
+    }
+    const onDisk = craftbookContentHash(existing);
+    if (onDisk === craftbookContentHash(book)) {
+      out.push({ id, change: 'unchanged' });
+      continue;
+    }
+    out.push(
+      onDisk === sidecar.contentHash
+        ? { id, change: 'update', book }
+        : { id, change: 'keep-edited' },
+    );
+  }
+  return out;
+}
+
+/** Write one type craftbook and its provenance sidecar. */
+export async function writeProjectTypeCraftbook(
+  deps: { store: Store },
+  input: { projectId: string; typeId: string; typeVersion: string },
+  book: Craftbook,
+  opts?: { userInitiated?: boolean },
+): Promise<void> {
+  await deps.store.writeProjectCraftbook(input.projectId, book, opts);
+  await deps.store.writeProjectCraftbookProvenance(
+    input.projectId,
+    book.id,
+    {
+      installedBy: 'project-type',
+      typeId: input.typeId,
+      typeVersion: input.typeVersion,
+      bookVersion: book.version ?? '1.0.0',
+      contentHash: craftbookContentHash(book),
+      installedAt: new Date().toISOString(),
+    } satisfies ProjectCraftbookProvenance,
+    opts,
+  );
+}
+
+/**
  * Copy-install a type's declared craftbooks into the project
  * (`.gezel/craftbooks/`), stamping a provenance sidecar per book. The
  * copy rule from docs/project-types.md: craftbooks become user-editable

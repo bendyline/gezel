@@ -1019,6 +1019,13 @@ export class PortableProductService {
             })
             .catch(() => {});
       },
+      projectUpdated: (projectId: string) => {
+        this.eventBus.publishProjectEvent(projectId, {
+          type: 'project_updated',
+          projectId,
+          reason: 'project-type',
+        });
+      },
       deliverReaction: (args: {
         projectId: string;
         gezelId: string;

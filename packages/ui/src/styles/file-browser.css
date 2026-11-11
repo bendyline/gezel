@@ -1370,6 +1370,38 @@ button.danger {
   white-space: nowrap;
 }
 
+/* An app update waiting for the person: the flat notice over the Output page. */
+.project-type-update-notice {
+  flex-shrink: 0;
+}
+
+.project-type-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+}
+
+.project-type-update-dialog {
+  width: min(32rem, calc(100vw - 2rem));
+}
+
+.project-type-update-dialog > h3,
+.project-type-update-dialog > p {
+  margin: 0;
+}
+
+.project-type-update-section h4 {
+  margin: 0.75rem 0 0.25rem;
+  font-size: var(--text-sm);
+}
+
+.project-type-update-section ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--text-sm);
+}
+
 /* ── Persistent "workspace writes enabled" banner ── */
 
 /* ── Recent workspace-changes log (Settings tab) ── */

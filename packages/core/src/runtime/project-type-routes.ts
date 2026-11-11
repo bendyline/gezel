@@ -49,6 +49,8 @@ export interface PortableProjectTypeRouteHost {
   /** Run route work that changes the store, one at a time like every other route. */
   serial<T>(action: () => Promise<T>): Promise<T>;
   projectCreated(project: Project, hired: readonly string[]): void;
+  /** The runtime moved a project to the bundled version of its type. */
+  projectUpdated?(projectId: string): void;
   /** Summon a gezel's turn with a page reaction's seed; null when engagement is off. */
   deliverReaction(args: {
     projectId: string;
@@ -172,6 +174,15 @@ export async function handlePortableProjectTypeRoute(
     const path = normalizePagePath(query.get('path') ?? '');
     if (!path) throw new HttpStatusError('A page path is required');
     if (child === 'bootstrap') {
+      // Opening the page is when a project made with an earlier version of
+      // its type catches up: the page already comes from the bundled one.
+      const refreshed = await host
+        .serial(async () => {
+          host.assertNoConflict();
+          return host.store.refreshTypedProject(entry, id);
+        })
+        .catch(() => null);
+      if (refreshed) host.projectUpdated?.(id);
       const manifest = entry.item.manifest;
       const page = projectTypePageFile(entry, path);
       const bootstrap: PageApiBootstrap = {

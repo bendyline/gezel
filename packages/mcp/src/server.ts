@@ -4651,7 +4651,9 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Applied project type ${applied.typeId}@${applied.version} to ${resolvedProject}. Crew: ${gz || 'no gezels'}. Installed ${applied.scriptsInstalled.length} script(s); seeded ${applied.workspaceSeeded.length} file(s).`,
+            text: applied.upgradedFrom
+              ? `Updated ${resolvedProject} from ${applied.typeId}@${applied.upgradedFrom} to ${applied.version}. Data files the person changed were kept (${applied.seedsSkipped.length}).`
+              : `Applied project type ${applied.typeId}@${applied.version} to ${resolvedProject}. Crew: ${gz || 'no gezels'}. Installed ${applied.scriptsInstalled.length} script(s); seeded ${applied.workspaceSeeded.length} file(s).`,
           },
         ],
       };

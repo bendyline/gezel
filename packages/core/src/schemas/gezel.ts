@@ -1714,6 +1714,17 @@ const ChatEventVariants = [
     name: z.string(),
   }),
   /**
+   * The daemon changed a project on its own (today: moved it to a newer
+   * version of its app). Emitted on the project + global streams so an open
+   * project view refetches and its Output page reloads. Not a renderable
+   * timeline event; the chat surfaces ignore it.
+   */
+  z.object({
+    type: z.literal('project_updated'),
+    projectId: z.string(),
+    reason: z.enum(['project-type']).optional(),
+  }),
+  /**
    * A task the owner launched from a chat thread finished and its wrap-up
    * landed in that thread. Emitted on the project + global streams so the
    * app can raise one OS notification while the window is hidden. Only

@@ -20,6 +20,7 @@ import {
   ProjectAboutPreviewRequestSchema,
   type ProjectAboutPreviewResponse,
   ProjectFolderPreviewRequestSchema,
+  ProjectTypeUpgradeRequestSchema,
   ReferenceFileLocationRequestSchema,
   ReferenceFileLocationResponseSchema,
   ReplaceInProjectWorkspaceFileRequestSchema,
@@ -36,6 +37,7 @@ import {
   starterCraftbookIds,
   toolCallBlockedHistoryEntry,
 } from '@bendyline/gezel';
+import { INSTALLED_AI_APPS_SOURCE_ID } from '@bendyline/gezel-catalog';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   PathSafetyError,
@@ -92,6 +94,8 @@ import {
 } from '../../project-type/apply.js';
 import { TypedProjectCreateError, createTypedProject } from '../../project-type/create.js';
 import { GEZAPP_MAX_ARCHIVE_BYTES, importGezapp, packGezapp } from '../../project-type/gezapp.js';
+import { ProjectTypeUpgradeNeedsOkError } from '../../project-type/upgrade.js';
+import { StaleProjectTypeUpgradeError } from '../../project-type/upgrader.js';
 import { createProjectWithLead } from '../../projects/create-project.js';
 import { buildInferDeps } from '../../projects/infer-deps.js';
 import {
@@ -119,7 +123,7 @@ import {
 } from '../../workspace/npm.js';
 import { runWorkspaceScript } from '../../workspace/runner.js';
 import { checkPlaywrightApproval, runNpx, runPackageScript } from '../../workspace/scripts.js';
-import { isFirstPartyCaller } from '../auth.js';
+import { isFirstPartyCaller, isOwnerCaller } from '../auth.js';
 import { CAMERA_PIXELS_WITHHELD, callerMaySeeFilePixels } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 import { revealInFileManager } from '../file-manager.js';
@@ -556,15 +560,35 @@ export function projectRoutes(ctx: ServiceContext): Hono {
           ...(body.reuseRosterGezels !== undefined
             ? { reuseRosterGezels: body.reuseRosterGezels }
             : {}),
+          // A session token (a gezel's turn) never stands in for the person.
+          personApproved: isOwnerCaller(c),
+          pin: body.pin ?? body.version !== undefined,
         },
       );
-      await ctx.history.log({
-        kind: 'project.updated',
-        projectId: id,
-        summary: `Applied project type ${applied.typeId}@${applied.version}`,
-        details: { projectType: applied.typeId, version: applied.version },
-      });
-      if (applied.source.startsWith('gezapp:')) {
+      if (applied.upgradedFrom) {
+        const typeName =
+          (
+            await ctx.catalog
+              .get('project-type', applied.typeId, applied.source, applied.version)
+              .catch(() => null)
+          )?.manifest.name ?? applied.typeId;
+        if (ctx.projectTypeUpgrader) {
+          await ctx.projectTypeUpgrader.announce(id, typeName, applied, false);
+        } else {
+          await ctx.chat.resetProjectToolsets(id);
+        }
+      } else {
+        await ctx.history.log({
+          kind: 'project.updated',
+          projectId: id,
+          summary: `Applied project type ${applied.typeId}@${applied.version}`,
+          details: { projectType: applied.typeId, version: applied.version },
+        });
+        // The applied type's tool list is resolved when a session is built, so
+        // open sessions keep the old one until rebuilt.
+        await ctx.chat.resetProjectToolsets(id);
+      }
+      if (applied.source === INSTALLED_AI_APPS_SOURCE_ID) {
         await ctx.history.log({
           kind: 'ai-app.applied',
           projectId: id,
@@ -574,6 +598,49 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       }
       return c.json(applied);
     } catch (err) {
+      if (err instanceof ProjectTypeUpgradeNeedsOkError) {
+        return c.json({ error: 'needs_ok', hint: err.message, upgrade: err.plan }, 409);
+      }
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  /**
+   * The app update this project could take now (`{ upgrade: null }` when it
+   * runs the newest version of its major). `automatic` updates run on their
+   * own; the rest wait for the person (`POST` below).
+   */
+  app.get('/:id/project-type/upgrade', async (c) => {
+    const id = c.req.param('id');
+    const project = await ctx.store.getProject(id).catch(() => null);
+    if (!project) return c.json({ error: 'project not found' }, 404);
+    const upgrade = ctx.projectTypeUpgrader
+      ? await ctx.projectTypeUpgrader.plan(id).catch((err) => {
+          log.warn(`[projects] ${id}: app update plan failed: ${String(err)}`);
+          return null;
+        })
+      : null;
+    return c.json({ upgrade });
+  });
+
+  /**
+   * The person approves the update they were shown. Owner credentials only:
+   * this is the click that may replace an edited script or write into a
+   * folder Gezel holds no grant for.
+   */
+  app.post('/:id/project-type/upgrade', async (c) => {
+    if (!isOwnerCaller(c)) return c.json({ error: 'owner_only' }, 403);
+    const id = c.req.param('id');
+    const body = ProjectTypeUpgradeRequestSchema.parse(await c.req.json());
+    const project = await ctx.store.getProject(id).catch(() => null);
+    if (!project) return c.json({ error: 'project not found' }, 404);
+    if (!ctx.projectTypeUpgrader) return c.json({ error: 'app updates are unavailable here' }, 404);
+    try {
+      return c.json(await ctx.projectTypeUpgrader.upgrade(id, body.toVersion));
+    } catch (err) {
+      if (err instanceof StaleProjectTypeUpgradeError) {
+        return c.json({ error: 'stale_upgrade', hint: err.message, upgrade: err.current }, 409);
+      }
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
   });

@@ -119,6 +119,11 @@ function eventLine(
       if (type) return `Set up as ${typeName(type)}`;
       break;
     }
+    case 'project.type.updated': {
+      const name = text(details.typeName) ?? text(details.typeId);
+      if (name) return `${text(details.typeName) ? name : typeName(name)} was updated`;
+      break;
+    }
     case 'project.status.changed': {
       const status = text(details.status);
       if (status) return `Status changed to ${PROJECT_STATUS_LABELS[status] ?? status}`;

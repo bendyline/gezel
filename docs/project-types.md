@@ -231,10 +231,84 @@ creation from the gallery, or applying a type to an existing project):
   drift is detectable.
 - Content that stays **type-owned** is **referenced** from the installed type version:
   pages, tool declarations, detection profile. Fixes ship by installing a new version.
-- Provenance supports upgrades, but preservation is not uniform across all
-  copied content: seed and craftbook drift checks exist, while script upgrades
-  can overwrite a local edit. There is no general three-way reconciliation or
-  app-data migration framework. See the public authoring guide's lifecycle gaps.
+- A project runs one version of its type as a unit: the referenced page and tool
+  declarations and the copied scripts move together when the project is updated,
+  and the person's copies (data, edited about/mission, edited craftbooks) stay.
+  See "Upgrades" below.
+
+## Upgrades
+
+A project is stamped with the version of its type it was outfitted with
+(`projectType.version`), and every type-owned read follows that stamp. Moving the
+stamp is an **app update**, owned by
+[upgrade.ts](../packages/service/src/project-type/upgrade.ts) and run by
+[upgrader.ts](../packages/service/src/project-type/upgrader.ts).
+
+**Which version.** The newest version in the project's own catalog source
+(`provenance.source`; an installed AI App that reuses a Gilde id never takes over
+a Gilde project) that is not yanked, that this build can run, and that shares the
+stamp's **major** version (core `pickProjectTypeUpgradeTarget`). Nothing migrates
+app data yet and stores refuse a format stamp they do not know, so a data-shape
+change is a major bump and existing projects stay on their major. A version that
+adds a param with no default is not offered (it would render `{{placeholder}}`).
+If the stamp no longer resolves (a reverted catalog update), the newest
+same-major version is better than a page that 404s.
+
+**What moves and what stays.**
+
+| Part | On update |
+| --- | --- |
+| Page, tool declarations, page reads | Follow the stamp |
+| Scripts | An unmodified copy is replaced. An edited one (overlay hash, else a byte compare with the version its header names) waits for the person's OK, then is saved to `artifacts/app-updates/<type>/<from>/` and replaced. A script a version dropped is left |
+| Seeds | `preserve`: a changed or deleted data file stays as it is; a seed new in this version is written |
+| About / mission | Replaced only while they hold what the app last rendered (overlay `docs`, else the older version's rendering) |
+| Craftbooks | The app's untouched copy is updated; an edited copy, a same-id book the app never installed, and a deleted one stay |
+| Settings the type declares (`mode`, `leadLabel`, `leanProfile`, `indexingEnabled`, check-ins, tab visibility) | Take the new value only while the project still holds the old version's (core `upgradeProjectTypeSettings`) |
+| Crew | Existing slots untouched; a slot new in this version waits for the person's OK; a removed member is never re-hired |
+| http-mcp toolsets | An installed one is kept; a new one waits for the person's OK |
+| Schedules | Existing hosts refresh; a new `consent: 'auto'` schedule waits for the person's OK; a deleted host stays deleted |
+| Params | Schema defaults, then the stored values, then any the caller passes |
+
+**When it runs.** An update with nothing to ask (`plan.automatic`) runs on its own,
+two seconds after the daemon starts and whenever catalog content changes (a live
+Gilde update), for projects that are not archived, read-only, machine-shared or
+**pinned**, and only for Gilde (`bundled`) types: an installed AI App can be
+added by a model (`import_ai_app`), so its updates always wait for a click. A
+project with a turn running or a site being served waits until it is idle. Any
+other update waits for the person: the UI shows one line over the Output page and
+a key in Settings, and `POST /api/projects/:id/project-type/upgrade` (owner
+credentials only) applies it. Asking for an exact version at creation or apply
+pins the project; an update the person approves clears the pin.
+`GEZEL_DISABLE_PROJECT_TYPE_UPGRADES=1` turns the automatic sweep off (evals).
+
+**Re-applying is updating.** `applyProjectType` on a project that already runs the
+type takes the update path (pass `mode: 'fresh'` to outfit from scratch), so the
+apply route, `gezel app apply --refresh` and MCP `apply_project_type` keep the
+person's data too. A model-reachable caller can never approve what needs the
+person: those routes answer 409 `needs_ok` with the plan.
+
+**Crash safety.** There is no journal. Every step first checks whether its file
+already holds the target, writes are atomic, and the provenance stamp is the last
+write, so an update stopped part way leaves the old stamp and the next run
+finishes it. One apply runs per project at a time.
+
+**After an update** the project's sessions are rebuilt (their tool list is fixed
+at build time), a `project_updated` event reloads open views and the Output page,
+and History records `project.type.updated` ("Shift Roster was updated").
+
+**Installed AI Apps.** Installing a newer `.gezapp` mounts the new version only,
+but the older version's slice stays on disk and is still read by exact pin, so a
+project waiting for its update keeps a working page.
+
+**Phones** carry one version of each type and already serve its page and tool
+declarations. When a project's page opens, the phone moves its scripts and stamp
+to the bundled version (same major, not pinned) and writes seeds new in it,
+unless a script is not exactly what an earlier version installed: the bundle
+carries those hashes (`earlierVersions`), since a phone has no overlay.
+
+**Authoring rules** (also in Gilde's CONTRIBUTING): a minor or patch version must
+read data files written by every earlier version of its major; a data-shape break
+is a major version; a param added within a major needs a `default`.
 
 ## New primitives
 
@@ -708,10 +782,14 @@ plus both gezapp manifests, rendered live from core Zod). The CLI surface is
 9. **Phones** ✅ — bundled project types, typed creation, script tools, page bridge
    and reactions on the phone runtime, with the composition rules shared from core.
    See "On phones" above.
-10. **Later** (not yet built) — upgrade/drift UI, community submissions, a UI
-   download/upload affordance for `.gezapp` files (the flow is fully available to the
-   Meester via MCP today). The Windows denyNet boundary has landed (ADR 0022); Linux
-   script runs still need one.
+10. **App updates** ✅ — a project moves to newer versions of its type within the
+   major: on its own when nothing of the person's is affected, with their OK
+   otherwise. See "Upgrades" above.
+11. **Later** (not yet built) — community submissions, a three-way merge for an
+   edited script (today it is saved to the artifacts drawer and replaced), app-data
+   migrations across a major version, and a UI download/upload affordance for
+   `.gezapp` files (the flow is fully available to the Meester via MCP today). The
+   Windows denyNet boundary has landed (ADR 0022); Linux script runs still need one.
 
 ### Exemplars (the forcing functions)
 

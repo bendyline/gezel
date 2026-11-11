@@ -196,6 +196,10 @@ export class PortableStore {
   ) {
     return this.run((repo) => projectTypes.commitPortableTypedProject(repo, plan, applied));
   }
+  /** Move a typed project to the bundled version of its type; null when it stays. */
+  refreshTypedProject(entry: projectTypes.PortableProjectType, projectId: string) {
+    return this.run((repo) => projectTypes.refreshPortableTypedProject(repo, entry, projectId));
+  }
   updateProject(id: string, patch: UpdateProjectRequest): Promise<ProjectDetail> {
     return this.run((repo) => projects.updateProject(repo, id, patch));
   }

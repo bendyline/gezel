@@ -90,9 +90,8 @@ import { resolveCraftbookOwner, startCraftbookRun } from './tasks/craftbook-run.
 import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
 import { KnowledgeManager } from '@bendyline/gezel-inference/internal/knowledge/manager';
 import { createWorkerCatalogHost } from '@bendyline/gezel-inference/internal/knowledge/worker-host';
-import { warmEmbeddings } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import { openAccounts } from './accounts/boot.js';
-import { deferBootWork } from './boot-work.js';
+import { startBootMaintenance } from './boot-maintenance.js';
 import { FirstUseIndexingHold, defaultProviderCanAnswer } from './first-run/indexing-hold.js';
 import { OptionalDownloads } from './first-run/optional-downloads.js';
 import { ModelFitnessManager } from './fitness/manager.js';
@@ -185,6 +184,7 @@ import {
 import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
+import { ProjectTypeUpgrader } from './project-type/upgrader.js';
 import { PromptDraftManager } from './prompt-drafts/manager.js';
 import { PromptDraftSweeper } from './prompt-drafts/sweeper.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
@@ -267,10 +267,7 @@ import { gatherTaskReferences } from './tasks/references.js';
 import { TaskRunner } from './tasks/runner.js';
 import { runActivationGate, runSpawnFanout } from './tasks/runtime-activation.js';
 import { TaskScheduler } from './tasks/scheduler.js';
-import {
-  withdrawStaleServiceCards,
-  withdrawStaleServiceCardsEverywhere,
-} from './tasks/service-card-withdrawal.js';
+import { withdrawStaleServiceCards } from './tasks/service-card-withdrawal.js';
 import {
   type TaskStepRef,
   pauseTaskAfterFailedHandoff as pauseAfterFailedHandoff,
@@ -2335,6 +2332,20 @@ export async function startProductService(
     scriptRunner,
   });
 
+  const projectTypeUpgrader = new ProjectTypeUpgrader({
+    store,
+    catalog,
+    home,
+    history,
+    chatEvents,
+    isProjectBusy: (projectId) =>
+      chat.isProjectTurnPending(projectId) ||
+      (appServe?.list().some((site) => site.projectId === projectId) ?? false),
+    resetProjectSessions: (projectId) => chat.resetProjectToolsets(projectId),
+    automaticUpdates: process.env.GEZEL_DISABLE_PROJECT_TYPE_UPGRADES !== '1',
+  });
+  gildeUpdates.onContentChanged(() => projectTypeUpgrader.requestSweep('catalog content changed'));
+
   const context: ServiceContext = {
     serviceRole,
     distribution,
@@ -2342,6 +2353,7 @@ export async function startProductService(
     store,
     chatEvents,
     chat,
+    projectTypeUpgrader,
     appToolRelays,
     previewLog,
     channels,
@@ -2778,89 +2790,17 @@ export async function startProductService(
     .catch((err) => log.warn('[lookouts] load failed:', err instanceof Error ? err.message : err))
     .finally(() => liveConnectors.start());
 
-  // Idle-session summarization sweep: every hour, distill any non-archived
-  // session that's been quiet for `config.summarization.idleHours` (default
-  // 24h) into project memory. First pass runs ~60s after boot so a fresh
-  // process doesn't block startup.
-  const idleSummarizerTimer = setInterval(
-    () => {
-      chat.runIdleSummarizationSweep().catch((err) => {
-        log.warn('[summarize] idle sweep crashed:', err instanceof Error ? err.message : err);
-      });
-    },
-    60 * 60 * 1000,
-  );
-  idleSummarizerTimer.unref();
-  // Give back the provider sessions and MCP subprocesses of quiet sessions;
-  // finished task sessions otherwise hold theirs until the daemon stops.
-  const idleSessionTimer = setInterval(
-    () => {
-      chat.releaseIdleSessions().catch((err) => {
-        log.warn('[chat] idle session release failed:', err instanceof Error ? err.message : err);
-      });
-    },
-    5 * 60 * 1000,
-  );
-  idleSessionTimer.unref();
   const stopMemoryDiagnostics = startMemoryDiagnostics();
-  // Cancelled by stop(): deferred work that starts during shutdown can load a
-  // model worker that process.exit then aborts mid-load (see boot-work.ts).
-  const cancelBootWork: Array<() => void> = [];
-  cancelBootWork.push(
-    deferBootWork(
-      10_000,
-      () => {
-        void store.refreshStartupHome().catch(() => {});
-      },
-      () => stopping,
-    ),
-  );
-  cancelBootWork.push(
-    deferBootWork(
-      60_000,
-      () => {
-        chat.runIdleSummarizationSweep().catch(() => {
-          /* swallow */
-        });
-      },
-      () => stopping,
-    ),
-  );
-  // Cards whose task settled before the runtime withdrew them, or while it was down.
-  cancelBootWork.push(
-    deferBootWork(
-      30_000,
-      () => {
-        void withdrawStaleServiceCardsEverywhere({
-          store,
-          chatEvents,
-          listProjectIds: async () => (await store.listProjects()).map((project) => project.id),
-          readTask: (projectId, num) => store.readTask(projectId, num),
-        }).catch((err) => log.warn(`[tasks] stale card sweep failed: ${String(err)}`));
-      },
-      () => stopping,
-    ),
-  );
-  // Load the embedding pipeline before an interactive caller needs it. The
-  // titlebar search fans out over content on every query, so without this
-  // the model's one-time load lands on somebody's first keystroke. Deferred
-  // so it never competes with boot or the first-run model download.
-  cancelBootWork.push(
-    deferBootWork(
-      20_000,
-      () => {
-        void warmEmbeddings().then((warmed) => {
-          if (warmed) log.debug('[memory] embedding pipeline warmed');
-        });
-        void relevance.bootWarm().catch(() => {});
-        void mediaSearch
-          .bootWarm({ install: false })
-          .then(() => optionalDownloads.boot())
-          .catch(() => {});
-      },
-      () => stopping,
-    ),
-  );
+  const bootMaintenance = startBootMaintenance({
+    store,
+    chat,
+    chatEvents,
+    projectTypeUpgrader,
+    relevance,
+    mediaSearch,
+    optionalDownloads,
+    isStopping: () => stopping,
+  });
 
   return {
     context,
@@ -2873,7 +2813,7 @@ export async function startProductService(
     profile: 'full',
     async stop() {
       stopping = true;
-      for (const cancel of cancelBootWork) cancel();
+      bootMaintenance.stop();
       optionalDownloads.stop();
       // Model workers refuse new work from here and drain while the rest
       // shuts down; each is terminated once idle, never mid-run, because
@@ -2903,6 +2843,7 @@ export async function startProductService(
       xpRefresher.dispose();
       digestGenerator.stop();
       promptDraftSweeper.stop();
+      projectTypeUpgrader.stop();
       inputStaging.stopSweeping();
       gildeUpdates.stop();
       await shutdownStep('knowledge workers', async () => knowledge?.stop());
@@ -2951,8 +2892,6 @@ export async function startProductService(
       await shutdownStep('image recognition', () => recognition.shutdown());
       await shutdownStep('speech recognition', () => stt.shutdown());
       await shutdownStep('speech synthesis', () => tts.shutdown());
-      clearInterval(idleSummarizerTimer);
-      clearInterval(idleSessionTimer);
       stopMemoryDiagnostics();
       await shutdownStep('channels', () => channels.stop());
       await shutdownStep('app serve', async () => appServe?.stopAll());

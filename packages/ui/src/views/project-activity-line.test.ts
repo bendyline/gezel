@@ -61,6 +61,21 @@ describe('projectActivityLine', () => {
     ]);
   });
 
+  it('words an app update without its version numbers', () => {
+    expect(
+      projectActivityLine(
+        event('project.type.updated', 'Updated Shift Roster to version 1.1.0', {
+          typeId: 'shift-roster',
+          typeName: 'Shift Roster',
+          fromVersion: '1.0.0',
+          toVersion: '1.1.0',
+          automatic: true,
+        }),
+        PROJECT,
+      ),
+    ).toBe('Shift Roster was updated');
+  });
+
   it('names a task by number when its title is not in the list', () => {
     expect(
       projectActivityLine(

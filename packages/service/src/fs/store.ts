@@ -509,7 +509,7 @@ export class Store {
     this.craftbooks = new CraftbookStore({
       home: this.home,
       projectWorkspaceDir: (id) => this.projectWorkspaceDir(id),
-      assertWorkspaceWritable: (id) => this.assertWorkspaceWritable(id),
+      assertWorkspaceWritable: (id, opts) => this.assertWorkspaceWritable(id, opts),
     });
   }
 
@@ -3376,13 +3376,22 @@ export class Store {
        */
       properties?: Record<string, string>;
     },
+    opts?: {
+      /**
+       * Keep `updatedAt` as it was. For writes the system makes on its own,
+       * such as moving a project to a newer version of its app: `updatedAt`
+       * reads as "the person worked here".
+       */
+      preserveUpdatedAt?: boolean;
+    },
   ): Promise<ProjectDetail> {
-    return this.projectUpdateLocks.run(id, () => this.updateProjectUnlocked(id, patch));
+    return this.projectUpdateLocks.run(id, () => this.updateProjectUnlocked(id, patch, opts));
   }
 
   private async updateProjectUnlocked(
     id: string,
     patch: Parameters<Store['updateProject']>[1],
+    opts?: Parameters<Store['updateProject']>[2],
   ): Promise<ProjectDetail> {
     const meta = await this.tryGetProjectMeta(id);
     if (!meta) throw new Error(`project ${id} not found`);
@@ -3452,7 +3461,7 @@ export class Store {
           : undefined);
     const updated: Project = {
       ...meta,
-      updatedAt: isViewStateOnlyPatch(patch) ? meta.updatedAt : nowIso(),
+      updatedAt: opts?.preserveUpdatedAt || isViewStateOnlyPatch(patch) ? meta.updatedAt : nowIso(),
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.description !== undefined ? { description: patch.description } : {}),
       ...(patch.icon === null
@@ -7309,8 +7318,16 @@ export class Store {
     return this.craftbooks.getProjectCraftbook(projectId, id, version, options);
   }
 
-  async writeProjectCraftbook(projectId: string, book: Craftbook): Promise<void> {
-    await this.craftbooks.writeProjectCraftbook(projectId, book);
+  /**
+   * `userInitiated` waives only the external-folder consent, for a write the
+   * person approved with a click (an app update). Never from a model surface.
+   */
+  async writeProjectCraftbook(
+    projectId: string,
+    book: Craftbook,
+    opts?: { userInitiated?: boolean },
+  ): Promise<void> {
+    await this.craftbooks.writeProjectCraftbook(projectId, book, opts);
   }
 
   async deleteProjectCraftbook(projectId: string, id: string): Promise<void> {
@@ -7328,8 +7345,9 @@ export class Store {
     projectId: string,
     id: string,
     prov: ProjectCraftbookProvenance,
+    opts?: { userInitiated?: boolean },
   ): Promise<void> {
-    await this.craftbooks.writeProjectCraftbookProvenance(projectId, id, prov);
+    await this.craftbooks.writeProjectCraftbookProvenance(projectId, id, prov, opts);
   }
 }
 

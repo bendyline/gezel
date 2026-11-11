@@ -97,6 +97,7 @@ export * from './poppetje/index.js';
 export * from './project-types/taxonomy.js';
 export * from './project-holds-code.js';
 export * from './project-types/composition.js';
+export * from './project-types/upgrade.js';
 export * from './app-subject.js';
 export * from './project-types/brief-route.js';
 export * from './project-types/script-tool-args.js';

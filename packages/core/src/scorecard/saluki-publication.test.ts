@@ -46,8 +46,8 @@ describe('published Saluki laptop campaign', () => {
       judgments: [],
       notApplicableReviews: 1,
     });
-    expect(fanout.taskMeasurements?.[0].outputTokensPerSec).toBeUndefined();
-    expect(fanout.taskMeasurements?.[0].durationMs).toBeUndefined();
+    expect(fanout.taskMeasurements?.[0]?.outputTokensPerSec).toBeUndefined();
+    expect(fanout.taskMeasurements?.[0]?.durationMs).toBeUndefined();
     const last = results.find(
       (result) => result.runId === ids[2] && result.suiteId === 'complex-work',
     )!;

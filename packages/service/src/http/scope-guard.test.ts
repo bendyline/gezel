@@ -757,6 +757,22 @@ describe('sessionRouteGuard', () => {
     }
   });
 
+  // Approving an app update can replace a script the person edited and write
+  // into a folder gezels hold no grant for; reading the offer stays open.
+  it('keeps approving an app update first-party', async () => {
+    for (const team of [false, true]) {
+      const app = sessionPolicyApp(session('proj-a', team), undefined, () => true);
+      expect(
+        (await app.request('/api/projects/proj-a/project-type/upgrade', jsonPost({}))).status,
+      ).toBe(403);
+      expect((await app.request('/api/projects/proj-a/project-type/upgrade')).status).toBe(200);
+    }
+    const ui = sessionPolicyApp({ appId: 'desktop-client', scopes: ['ui'] });
+    expect(
+      (await ui.request('/api/projects/proj-a/project-type/upgrade', jsonPost({}))).status,
+    ).toBe(200);
+  });
+
   it('keeps shared documents available without the foreign-project fallback', async () => {
     const app = sessionPolicyApp(session('proj-a'));
     expect((await app.request('/api/documents/read?path=guidelines%2Fcoding.md')).status).toBe(200);

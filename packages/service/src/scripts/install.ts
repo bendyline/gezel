@@ -11,6 +11,7 @@ export {
   projectTypeScriptProvenance,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   craftbookShardPrefix,
   craftbookTemplateScriptsDir,
@@ -41,7 +42,7 @@ async function installOneScript(
   if (existing?.startsWith(provenanceLine) && existing.slice(provenanceLine.length) === body) {
     return false; // same version already installed
   }
-  await writeFile(dest, incoming, 'utf8');
+  await writeFileAtomic(dest, incoming);
   return true;
 }
 

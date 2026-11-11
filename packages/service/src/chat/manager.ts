@@ -2730,6 +2730,21 @@ export class ChatManager extends LocalEngineRuntime {
   }
 
   /**
+   * True while any session in the project is running a turn or holds an
+   * unstarted send. An app update waits for this to clear: it swaps the
+   * scripts a turn may be calling.
+   */
+  isProjectTurnPending(projectId: string): boolean {
+    for (const [sessionId, entry] of this.inflight) {
+      if (this.inflightSession(sessionId, entry)?.projectId === projectId) return true;
+    }
+    for (const [sessionId, state] of this.states) {
+      if (state.record.projectId === projectId && this.sendQueue.depth(sessionId) > 0) return true;
+    }
+    return false;
+  }
+
+  /**
    * True while this session has a turn pending on an on-device engine. A route
    * serving that turn's own tool call must not wait on another local model
    * call: the turn holds the engine's queue slot while it waits for the tool

@@ -532,8 +532,15 @@ export async function runAppStatus(
     if (status.updateAvailable) {
       console.log(`Update available: gezel app apply ${status.provenance.id}`);
     }
-  } else {
+  } else if (status.provenance.source === 'installed-ai-apps') {
     console.log(`App: ${applied} — no longer installed (project keeps its copies)`);
+  } else {
+    console.log(`App: ${applied} — from the ${status.provenance.source} catalog`);
+    if (status.latestVersion) {
+      console.log(
+        `Update available: ${status.latestVersion}. Gezel applies it on its own unless it would replace something changed here; then update from the project in Gezel.`,
+      );
+    }
   }
   if (status.seeds.length > 0) {
     const counts = new Map<string, number>();

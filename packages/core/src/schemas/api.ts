@@ -4655,6 +4655,11 @@ export const ApplyProjectTypeRequestSchema = z.object({
    * (lean types reuse regardless).
    */
   reuseRosterGezels: z.boolean().optional(),
+  /**
+   * Keep the project on this version: automatic app updates skip it. Defaults
+   * to true when `version` is given, false otherwise.
+   */
+  pin: z.boolean().optional(),
 });
 export type ApplyProjectTypeRequest = z.infer<typeof ApplyProjectTypeRequestSchema>;
 
@@ -4731,6 +4736,10 @@ export const AppliedProjectTypeSchema = z.object({
     /** Count of declared schedules that failed to materialize. */
     schedules: z.number(),
   }),
+  /** Set when this apply moved the project from an earlier version of the same type. */
+  upgradedFrom: z.string().optional(),
+  /** Edited scripts the update replaced, each saved first to the artifacts drawer. */
+  scriptsBackedUp: z.array(z.object({ name: z.string(), path: z.string() })).optional(),
 });
 export type AppliedProjectType = z.infer<typeof AppliedProjectTypeSchema>;
 
@@ -4813,9 +4822,99 @@ export const ProjectTypeStatusResponseSchema = z.object({
     .object({ appId: z.string(), version: z.string(), enabled: z.boolean() })
     .nullable(),
   updateAvailable: z.boolean(),
+  /** The version an app update would move this project to; absent when current. */
+  latestVersion: z.string().optional(),
   seeds: z.array(z.object({ path: z.string(), state: ProjectTypeSeedStateSchema })),
 });
 export type ProjectTypeStatusResponse = z.infer<typeof ProjectTypeStatusResponseSchema>;
+
+/**
+ * Why an app update waits for the person instead of running on its own:
+ * - `edited-script`: a script the app installed was changed here; it is saved
+ *   to the artifacts drawer before being replaced.
+ * - `new-crew`: the new version brings a crew member the project lacks.
+ * - `new-toolset`: the new version connects a tool service (http-mcp).
+ * - `new-schedule`: the new version adds a recurring run that starts on its own.
+ * - `folder-write`: new files would go into a folder Gezel holds no write grant for.
+ * - `network-access`: a script now asks for network access or a credential.
+ * - `other-source`: the app came from somewhere other than Gezel's own catalog.
+ * - `pinned`: the project was set up on this exact version on purpose.
+ */
+export const ProjectTypeUpgradeNeedsOkKindSchema = z.enum([
+  'edited-script',
+  'new-crew',
+  'new-toolset',
+  'new-schedule',
+  'folder-write',
+  'network-access',
+  'other-source',
+  'pinned',
+]);
+export type ProjectTypeUpgradeNeedsOkKind = z.infer<typeof ProjectTypeUpgradeNeedsOkKindSchema>;
+
+/** What an app update would do to one installed script. */
+export const ProjectTypeScriptChangeSchema = z.enum([
+  'add',
+  'unchanged',
+  'replace',
+  'replace-edited',
+]);
+export type ProjectTypeScriptChange = z.infer<typeof ProjectTypeScriptChangeSchema>;
+
+/** What an app update would do to the project's about or mission document. */
+export const ProjectTypeDocChangeSchema = z.enum(['unchanged', 'replace', 'keep-edited']);
+export type ProjectTypeDocChange = z.infer<typeof ProjectTypeDocChangeSchema>;
+
+/**
+ * `GET /:id/project-type/upgrade` — moving a project to a newer version of
+ * its app, computed without writing anything. `automatic` is true when
+ * nothing in `needsOk` applies; the daemon then runs it on its own.
+ */
+export const ProjectTypeUpgradePlanSchema = z.object({
+  projectId: z.string(),
+  typeId: z.string(),
+  /** The app's display name ("Shift Roster"). */
+  typeName: z.string(),
+  source: z.string(),
+  fromVersion: z.string(),
+  toVersion: z.string(),
+  automatic: z.boolean(),
+  needsOk: z.array(
+    z.object({
+      kind: ProjectTypeUpgradeNeedsOkKindSchema,
+      /** Script names, template ids, toolset ids, craftbook ids or paths, per kind. */
+      items: z.array(z.string()).default([]),
+    }),
+  ),
+  changes: z.object({
+    /** The app's page or tool declarations differ between the two versions. */
+    page: z.boolean(),
+    scripts: z.array(z.object({ name: z.string(), change: ProjectTypeScriptChangeSchema })),
+    seeds: z.array(z.object({ path: z.string(), state: SeedPlanStateSchema })),
+    craftbooks: z.array(z.string()),
+    about: ProjectTypeDocChangeSchema,
+    mission: ProjectTypeDocChangeSchema,
+    /** Gezel template ids for crew slots the new version adds. */
+    crew: z.array(z.string()),
+    toolsets: z.array(z.string()),
+    schedules: z.array(z.string()),
+    /** Project settings the app manages that would change (`mode`, `tabVisibility`, …). */
+    settings: z.array(z.string()),
+  }),
+});
+export type ProjectTypeUpgradePlan = z.infer<typeof ProjectTypeUpgradePlanSchema>;
+
+export const ProjectTypeUpgradeResponseSchema = z.object({
+  upgrade: ProjectTypeUpgradePlanSchema.nullable(),
+});
+export type ProjectTypeUpgradeResponse = z.infer<typeof ProjectTypeUpgradeResponseSchema>;
+
+/** `POST /:id/project-type/upgrade` — the person approves moving to `toVersion`. */
+export const ProjectTypeUpgradeRequestSchema = z.object({
+  /** The version the person saw; refused if the offer has moved on since. */
+  toVersion: z.string().min(1),
+});
+export type ProjectTypeUpgradeRequest = z.infer<typeof ProjectTypeUpgradeRequestSchema>;
 
 // ─ AI App management (global /api/ai-apps) ─────────────────────────
 //
