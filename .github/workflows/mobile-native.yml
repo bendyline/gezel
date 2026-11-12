@@ -90,7 +90,7 @@ jobs:
           import { spawnSync } from 'node:child_process';
           await withDependencyReadLease(process.cwd(), ({ leaseEnv }) => {
             for (const [command, ...args] of [
-              ['node', '--test', 'packages/mobile/scripts/swift-package.test.mjs', 'packages/mobile/scripts/verify-native-build.test.mjs', 'packages/mobile/scripts/release-candidate.test.mjs', 'packages/mobile/scripts/stage-native-assets.test.mjs', 'packages/capacitor/scripts/stage-native.test.mjs'],
+              ['node', '--test', 'packages/mobile/scripts/swift-package.test.mjs', 'packages/mobile/scripts/verify-native-build.test.mjs', 'packages/mobile/scripts/release-candidate.test.mjs', 'packages/mobile/scripts/stage-native-assets.test.mjs', 'packages/mobile/scripts/install-android-sdk-packages.test.mjs', 'packages/capacitor/scripts/stage-native.test.mjs'],
               ['python3', '-m', 'unittest', 'discover', '-s', 'native/mobile', '-p', 'test_*.py'],
               ['python3', '-m', 'unittest', 'discover', '-s', 'native/runtime', '-p', 'test_*.py'],
               ['python3', '-m', 'unittest', 'discover', '-s', 'packages/mobile/scripts', '-p', 'test_*.py'],
@@ -141,16 +141,11 @@ jobs:
           echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
           node --input-type=module <<'JS'
           import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
-          import { spawnSync } from 'node:child_process';
-          import path from 'node:path';
-          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
-            const sdkmanager = path.join(process.env.ANDROID_HOME, 'cmdline-tools/latest/bin/sdkmanager');
-            const result = spawnSync(sdkmanager, ['platforms;android-36', 'build-tools;36.0.0', 'cmake;3.31.6', 'ndk;28.2.13676358'], {
-              env: { ...process.env, ...leaseEnv, JAVA_HOME: process.env.JAVA_HOME_21_X64 }, stdio: 'inherit',
-            });
-            if (result.error) throw result.error;
-            if (result.status !== 0) throw new Error(`Android toolchain resolution exited with ${result.status}`);
-          }, { command: 'Resolve pinned Android CI toolchains' });
+          import { installAndroidSdkPackages } from './packages/mobile/scripts/install-android-sdk-packages.mjs';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) =>
+            installAndroidSdkPackages(['platforms;android-36', 'build-tools;36.0.0', 'cmake;3.31.6', 'ndk;28.2.13676358'], {
+              env: { ...process.env, ...leaseEnv, JAVA_HOME: process.env.JAVA_HOME_21_X64 },
+            }), { command: 'Resolve pinned Android CI toolchains' });
           JS
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
       - name: Resolve the exact pinned upstream source
@@ -592,16 +587,11 @@ jobs:
           echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
           node --input-type=module <<'JS'
           import { withDependencyMutationLease } from './scripts/dependency-lease.mjs';
-          import { spawnSync } from 'node:child_process';
-          import path from 'node:path';
-          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) => {
-            const command = path.join(process.env.ANDROID_HOME, 'cmdline-tools/latest/bin/sdkmanager');
-            const child = spawnSync(command, ['platforms;android-36', 'build-tools;36.0.0'], {
-              env: { ...process.env, ...leaseEnv, JAVA_HOME: process.env.JAVA_HOME_21_X64 }, stdio: 'inherit',
-            });
-            if (child.error) throw child.error;
-            if (child.status !== 0) throw new Error(`Android toolchain setup exited with ${child.status}`);
-          }, { command: 'Resolve external embedding consumer Android toolchains' });
+          import { installAndroidSdkPackages } from './packages/mobile/scripts/install-android-sdk-packages.mjs';
+          await withDependencyMutationLease(process.cwd(), ({ leaseEnv }) =>
+            installAndroidSdkPackages(['platforms;android-36', 'build-tools;36.0.0'], {
+              env: { ...process.env, ...leaseEnv, JAVA_HOME: process.env.JAVA_HOME_21_X64 },
+            }), { command: 'Resolve external embedding consumer Android toolchains' });
           JS
       - name: Build SDK packages and qualify the isolated consumer
         env:
