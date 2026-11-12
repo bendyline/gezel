@@ -332,6 +332,21 @@ describe('gezel knowledge (offline)', () => {
     expect(output).toContain('bge-small-en-v1.5@1');
   });
 
+  it('inspect says plainly when a folder or file is not a catalog', async () => {
+    const empty = join(dir, 'not-a-catalog');
+    await mkdir(empty, { recursive: true });
+    const folder = runKnowledgeInspect(empty);
+    await expect(folder).rejects.toMatchObject({ name: 'CliError' });
+    await expect(folder).rejects.toThrow(/has no manifest\.json — not an extracted catalog/);
+
+    const text = join(dir, 'notes.txt');
+    await writeFile(text, 'just some notes\n');
+    await expect(runKnowledgeInspect(text)).rejects.toMatchObject({
+      name: 'CliError',
+      message: expect.stringContaining('is not a readable .gezk archive'),
+    });
+  });
+
   it('search finds documents and cites knowledge:// URIs', async () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     await runKnowledgeSearch(archivePath, 'dovetail', { limit: 5 }, deps);

@@ -7,7 +7,11 @@ import type {
   RecentTabArea,
   SecurityPolicy,
 } from '@bendyline/gezel';
-import type { NightShiftStatusResponse, QuotaBucket, UsageResponse } from '@bendyline/gezel-client';
+import type {
+  NightShiftStatusResponse,
+  QueueStatusResponse,
+  QuotaBucket,
+} from '@bendyline/gezel-client';
 import {
   Suspense,
   lazy,
@@ -33,13 +37,17 @@ import { MacUninstallDialog } from './components/MacUninstallDialog.js';
 import { ModelBundleImportController } from './components/ModelBundleControls.js';
 import { NarrationStopButton } from './components/NarrationStopButton.js';
 import { ResponsiveAppShell } from './components/ResponsiveAppShell.js';
-import { SearchResultsOverlay } from './components/SearchResultsOverlay.js';
+import { SearchResultsHost } from './components/SearchResultsHost.js';
 import { Sidebar } from './components/Sidebar.js';
 import { StorageCleanupDialog } from './components/StorageCleanupDialog.js';
 import { TabContent } from './components/TabContent.js';
 import { TabErrorBoundary } from './components/TabErrorBoundary.js';
 import { TitlebarSearch } from './components/TitlebarSearch.js';
-import { ActivityProvider, useActivity } from './components/activity-context.js';
+import {
+  ActivityProvider,
+  type ActivityState,
+  useActivitySelector,
+} from './components/activity-context.js';
 import { WatchingIndicator } from './components/cameras/WatchingIndicator.js';
 import { projectRecipientKey, writeChatThreadSelection } from './components/chat-thread-memory.js';
 import { ENGAGEMENT_MODES } from './components/engagement-modes.js';
@@ -53,33 +61,38 @@ import {
   requestOutputPaneRestore,
 } from './components/output-pane-maximize.js';
 import { type RecentTabInput, tabKey, toRecentTab } from './components/recent-tabs.js';
-import {
-  loadHomeViewModule,
-  preloadTabContent,
-  preloadTabData,
-} from './components/tab-content-loaders.js';
+
 import { useBuilderView } from './components/useBuilderView.js';
 import { useHostNotifications } from './components/useHostNotifications.js';
 import { useIsFirstRun } from './components/useIsFirstRun.js';
 import { HistoryKeys } from './components/view-history/HistoryKeys.js';
 import {
   ViewHistoryProvider,
-  ViewLocationRoot,
   useViewHistoryApi,
   useViewHistoryState,
 } from './components/view-history/ViewHistoryContext.js';
 import { useHistoryShortcuts } from './components/view-history/useHistoryShortcuts.js';
 import { currentEntry, selectionKey } from './components/view-history/view-history.js';
+import { dataChanged } from './data/invalidation.js';
+import { useApiRead } from './data/use-api-read.js';
 import { readAppSurface } from './embedded/app-surface.js';
 import { type DocumentFocus, readDocumentFocus } from './embedded/document-focus.js';
 import { useBackNavigation } from './hooks/useBackNavigation.js';
 import { useResponsiveLayout } from './hooks/useResponsiveLayout.js';
 import { beginNavigation } from './nav-timing.js';
+import { KeepAliveHost } from './navigation/KeepAliveHost.js';
+import {
+  destinationFor,
+  loadHomeViewModule,
+  preloadTabContent,
+  prepareDestination,
+  readsAreKnown,
+} from './navigation/destinations.js';
+import { startIdleWarmup } from './navigation/idle-warmup.js';
 import { DropdownMenu } from './primitives/index.js';
-import { reconnectingStream } from './reconnecting-stream.js';
+import { forEachEvent, reconnectingStream } from './reconnecting-stream.js';
 import { runtimeCapabilities } from './runtime-capabilities.js';
 import { requestSettingsSection } from './settings-nav.js';
-import { invalidateApiReads } from './shared-api-reads.js';
 import { streamSharedAllChatEvents } from './shared-chat-events.js';
 import { syncSidebarSideFromConfig } from './sidebar-side.js';
 import { connectStartupHome, saveStartupDraft } from './startup/handoff.js';
@@ -172,6 +185,33 @@ function readEmbeddedParams(): {
 
 const EMBEDDED_PARAMS = readEmbeddedParams();
 
+/**
+ * The longest the current view holds after a click while the next one's reads
+ * arrive. Past it the next view shows and fills in: a held click must never
+ * feel ignored.
+ */
+const HOLD_MS = 120;
+
+/** Questions waiting per project, for the rail's badges. */
+function selectPendingByProject(state: ActivityState | null): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const item of state?.snapshot?.items ?? []) {
+    if (item.section === 'needs-you' && item.projectId) {
+      counts.set(
+        item.projectId,
+        (counts.get(item.projectId) ?? 0) + Math.max(1, item.questionIds.length),
+      );
+    }
+  }
+  return counts;
+}
+
+function sameCounts(a: Map<string, number>, b: Map<string, number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, count] of a) if (b.get(key) !== count) return false;
+  return true;
+}
+
 // A host that names a gezel opens the chat addressed to them. ProjectChat
 // reads this memory before its own lead/roster ranking.
 if (EMBEDDED_PARAMS?.gezelId) {
@@ -224,7 +264,6 @@ function FullApp() {
   const { back: historyBack, forward: historyForward } = viewHistory;
   useBackNavigation(compact, navigationOpen, openNavigation, viewHistory);
   useHistoryShortcuts(viewHistory);
-  const [usage, setUsage] = useState<UsageResponse | null>(null);
   const [outputPaneMaximized, setOutputPaneMaximized] = useState(false);
   // Per-project signals painted on the sidebar rows: which projects have a
   // gezel mid-turn (the animated "thinking" indicator), and how many pending
@@ -236,19 +275,8 @@ function FullApp() {
     new Map(),
   );
   const [activeTurnsReady, setActiveTurnsReady] = useState(false);
-  const activity = useActivity();
-  const pendingByProject = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const item of activity?.snapshot?.items ?? []) {
-      if (item.section === 'needs-you' && item.projectId) {
-        counts.set(
-          item.projectId,
-          (counts.get(item.projectId) ?? 0) + Math.max(1, item.questionIds.length),
-        );
-      }
-    }
-    return counts;
-  }, [activity?.snapshot]);
+  // The shell re-renders only when a badge count changes, not on every poll.
+  const pendingByProject = useActivitySelector(selectPendingByProject, sameCounts);
   // Projects with a "poisoned" session — last turn aborted, awaiting a user
   // turn to clear. Durable (survives reload) so it's seeded from a real fetch,
   // not the live stream; error/complete events + a 20s reconcile keep it fresh.
@@ -299,12 +327,18 @@ function FullApp() {
   // entity / area shown in the main pane (routed by TabContent). Persisted
   // to localStorage so the last view is restored on boot.
   const [selection, setSelection] = useState<RecentTab | null>(initialSelection);
+  // A pick whose view is still holding for its reads (see commitSelection).
+  // The rail highlights it at once; `undefined` means nothing is pending.
+  const [pendingSelection, setPendingSelection] = useState<RecentTab | null | undefined>(undefined);
+  const commitSequence = useRef(0);
   // Ref mirror so long-lived window-event listeners can read the latest
   // selection without re-subscribing.
   const selectionRef = useRef<RecentTab | null>(selection);
   useEffect(() => {
     selectionRef.current = selection;
   }, [selection]);
+  // Once the shell is up, load the code of likely next destinations while idle.
+  useEffect(() => startIdleWarmup(() => selectionRef.current), []);
 
   // Home takes the startup screen's handoff (its reading and any draft).
   // Leaving Home before it mounted (Cmd+, on macOS, a tray item, a
@@ -351,9 +385,27 @@ function FullApp() {
       const historyMode = options?.history ?? 'push';
       if (historyMode !== 'none') viewHistoryDispatch({ type: historyMode, selection: next });
       beginNavigation(next ? tabKey(next) : 'home');
-      preloadTabData(next);
-      startTransition(() => setSelection(next));
       setNavigationOpen(false);
+      // Start the destination's code and reads together. When its reads are
+      // not in memory yet, the current view holds (at most HOLD_MS) so the
+      // next one paints complete instead of filling in; the rail shows the
+      // pick at once. A newer pick supersedes an older one still holding.
+      const target = destinationFor(next);
+      const prepared = prepareDestination(target);
+      const sequence = ++commitSequence.current;
+      const show = () => {
+        if (commitSequence.current !== sequence) return;
+        setPendingSelection(undefined);
+        startTransition(() => setSelection(next));
+      };
+      if (readsAreKnown(target)) {
+        show();
+      } else {
+        setPendingSelection(next);
+        void Promise.race([prepared, new Promise((resolve) => setTimeout(resolve, HOLD_MS))]).then(
+          show,
+        );
+      }
       try {
         if (next) window.localStorage.setItem(SELECTION_STORAGE_KEY, JSON.stringify(next));
         else window.localStorage.removeItem(SELECTION_STORAGE_KEY);
@@ -607,24 +659,6 @@ function FullApp() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  const refreshUsage = useCallback(() => {
-    if (!runtimeCapabilities().daemonSettings) return;
-    // A fresh object every 10 s re-renders the whole tree, active view
-    // included, even when nothing moved.
-    api
-      .getUsage()
-      .then((next) =>
-        setUsage((prev) => (prev && JSON.stringify(prev) === JSON.stringify(next) ? prev : next)),
-      )
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    refreshUsage();
-    const interval = setVisibleInterval(refreshUsage, 10_000);
-    return () => interval();
-  }, [refreshUsage]);
-
   // Seed the mid-turn set from every in-flight turn (each tagged with its
   // projectId), and re-sync on an interval to self-heal any missed `done`.
   const reconcileActiveProjects = useCallback(() => {
@@ -671,123 +705,120 @@ function FullApp() {
   }, [refreshPoisoned]);
   useEffect(() => {
     const ctrl = new AbortController();
-    void (async () => {
-      try {
-        // The bridge lives as long as the window, so it opens again after a
-        // daemon stall ends the stream. Whatever was announced while it was
-        // down is re-read: the rail missed a project the Meester created.
-        for await (const env of reconnectingStream(
-          (signal) =>
-            streamSharedAllChatEvents({
-              url: api.allEventsUrl(),
-              headers: api.authHeader(),
-              signal,
-              fetch: api.getFetch(),
-            }),
-          {
-            signal: ctrl.signal,
-            onReconnect: () => {
-              invalidateApiReads();
-              window.dispatchEvent(new CustomEvent('gezel:events-reconnected'));
-              reconcileActiveProjects();
-              refreshPoisoned();
-            },
+    // The bridge lives as long as the window, so it opens again after a
+    // daemon stall ends the stream. Whatever was announced while it was
+    // down is re-read: the rail missed a project the Meester created.
+    void forEachEvent(
+      reconnectingStream(
+        (signal) =>
+          streamSharedAllChatEvents({
+            url: api.allEventsUrl(),
+            headers: api.authHeader(),
+            signal,
+            fetch: api.getFetch(),
+          }),
+        {
+          signal: ctrl.signal,
+          onReconnect: () => {
+            dataChanged();
+            window.dispatchEvent(new CustomEvent('gezel:events-reconnected'));
+            reconcileActiveProjects();
+            refreshPoisoned();
           },
-        )) {
-          const ev = (env as ChatEventEnvelope).event;
-          // Keep the sidebar "thinking" set live: a turn opens on user_message
-          // and closes on done/error/cancelled. Mount seed + 20s reconcile cover turns we
-          // joined mid-flight.
-          if (ev.type === 'user_message') {
-            activeSessionsRef.current.set(env.sessionId, {
-              projectId: env.projectId,
-              gezelId: env.gezelId,
-            });
-            recomputeActiveTurns();
-          } else if (ev.type === 'done' || ev.type === 'error' || ev.type === 'cancelled') {
-            if (activeSessionsRef.current.delete(env.sessionId)) recomputeActiveTurns();
-          }
-          // Poisoned tracking: a failed turn poisons the session (optimistic
-          // paint now, since the persisted lastTurnError lands a beat later);
-          // a successful turn's `complete` may clear it. Reconcile authoritatively.
-          if (ev.type === 'error') {
-            setPoisonedProjects((prev) => {
-              const m = new Map(prev);
-              m.set(env.projectId, {
-                sessionId: env.sessionId,
-                gezelId: env.gezelId,
-                error: ev.error,
-              });
-              return m;
-            });
-            refreshPoisoned();
-          } else if (ev.type === 'complete') {
-            refreshPoisoned();
-          }
-          // Night Shift flipped on/off (scheduled window, drain, or a
-          // manual shift) — reflect it in the header pill + menu live.
-          if (ev.type === 'night_shift') {
-            setNightShift({ active: ev.active, source: ev.source });
-          }
-          // A project was created anywhere (New Project dialog, or a
-          // `start_project` macro a gezel ran mid-chat). Re-broadcast as
-          // a window event the sidebar refreshes on, so the PROJECTS
-          // list folds it in live instead of after the next tab-focus
-          // poll.
-          if (ev.type === 'project_created') {
-            window.dispatchEvent(
-              new CustomEvent('gezel:project-created', {
-                detail: { id: ev.projectId, name: ev.name },
-              }),
-            );
-          }
-          // A project was deleted anywhere (the Project Actions menu, or a
-          // gezel via the API). Re-broadcast so the sidebar + Projects rail
-          // drop the row without waiting for a manual refresh.
-          if (ev.type === 'project_deleted') {
-            window.dispatchEvent(
-              new CustomEvent('gezel:project-deleted', {
-                detail: { projectId: ev.projectId, name: ev.name },
-              }),
-            );
-          }
-          // The daemon changed a project on its own (an app update). Views
-          // holding that project reload it; its Output page follows.
-          if (ev.type === 'project_updated') {
-            window.dispatchEvent(
-              new CustomEvent('gezel:project-updated', {
-                detail: { projectId: ev.projectId },
-              }),
-            );
-          }
-          // A shared gezel was recruited anywhere — most importantly via
-          // `ensure_gezel` during a live project turn. Reuse the roster-change
-          // event already consumed by the sidebar + Gezellen screen.
-          if (ev.type === 'gezel_created') {
-            window.dispatchEvent(
-              new CustomEvent('gezel:gezel-updated', {
-                detail: { id: ev.gezelId, name: ev.name },
-              }),
-            );
-          }
-          // Level-ups and recomputed XP reload the growth surfaces. OS
-          // notifications are not raised here: Electron's main process and
-          // the phone's host notifier own them (core `notifications`).
-          if (ev.type === 'growth_updated') {
-            window.dispatchEvent(
-              new CustomEvent('gezel:growth-updated', { detail: { gezelId: ev.gezelId } }),
-            );
-          }
-          if (ev.type === 'growth_level_up') {
-            window.dispatchEvent(
-              new CustomEvent('gezel:growth-updated', { detail: { gezelId: ev.gezelId } }),
-            );
-          }
+        },
+      ),
+      (env) => {
+        const ev = (env as ChatEventEnvelope).event;
+        // Keep the sidebar "thinking" set live: a turn opens on user_message
+        // and closes on done/error/cancelled. Mount seed + 20s reconcile cover turns we
+        // joined mid-flight.
+        if (ev.type === 'user_message') {
+          activeSessionsRef.current.set(env.sessionId, {
+            projectId: env.projectId,
+            gezelId: env.gezelId,
+          });
+          recomputeActiveTurns();
+        } else if (ev.type === 'done' || ev.type === 'error' || ev.type === 'cancelled') {
+          if (activeSessionsRef.current.delete(env.sessionId)) recomputeActiveTurns();
         }
-      } catch {
-        /* aborted */
-      }
-    })();
+        // Poisoned tracking: a failed turn poisons the session (optimistic
+        // paint now, since the persisted lastTurnError lands a beat later);
+        // a successful turn's `complete` may clear it. Reconcile authoritatively.
+        if (ev.type === 'error') {
+          setPoisonedProjects((prev) => {
+            const m = new Map(prev);
+            m.set(env.projectId, {
+              sessionId: env.sessionId,
+              gezelId: env.gezelId,
+              error: ev.error,
+            });
+            return m;
+          });
+          refreshPoisoned();
+        } else if (ev.type === 'complete') {
+          refreshPoisoned();
+        }
+        // Night Shift flipped on/off (scheduled window, drain, or a
+        // manual shift) — reflect it in the header pill + menu live.
+        if (ev.type === 'night_shift') {
+          setNightShift({ active: ev.active, source: ev.source });
+        }
+        // A project was created anywhere (New Project dialog, or a
+        // `start_project` macro a gezel ran mid-chat). Re-broadcast as
+        // a window event the sidebar refreshes on, so the PROJECTS
+        // list folds it in live instead of after the next tab-focus
+        // poll.
+        if (ev.type === 'project_created') {
+          window.dispatchEvent(
+            new CustomEvent('gezel:project-created', {
+              detail: { id: ev.projectId, name: ev.name },
+            }),
+          );
+        }
+        // A project was deleted anywhere (the Project Actions menu, or a
+        // gezel via the API). Re-broadcast so the sidebar + Projects rail
+        // drop the row without waiting for a manual refresh.
+        if (ev.type === 'project_deleted') {
+          window.dispatchEvent(
+            new CustomEvent('gezel:project-deleted', {
+              detail: { projectId: ev.projectId, name: ev.name },
+            }),
+          );
+        }
+        // The daemon changed a project on its own (an app update). Views
+        // holding that project reload it; its Output page follows.
+        if (ev.type === 'project_updated') {
+          window.dispatchEvent(
+            new CustomEvent('gezel:project-updated', {
+              detail: { projectId: ev.projectId },
+            }),
+          );
+        }
+        // A shared gezel was recruited anywhere — most importantly via
+        // `ensure_gezel` during a live project turn. Reuse the roster-change
+        // event already consumed by the sidebar + Gezellen screen.
+        if (ev.type === 'gezel_created') {
+          window.dispatchEvent(
+            new CustomEvent('gezel:gezel-updated', {
+              detail: { id: ev.gezelId, name: ev.name },
+            }),
+          );
+        }
+        // Level-ups and recomputed XP reload the growth surfaces. OS
+        // notifications are not raised here: Electron's main process and
+        // the phone's host notifier own them (core `notifications`).
+        if (ev.type === 'growth_updated') {
+          window.dispatchEvent(
+            new CustomEvent('gezel:growth-updated', { detail: { gezelId: ev.gezelId } }),
+          );
+        }
+        if (ev.type === 'growth_level_up') {
+          window.dispatchEvent(
+            new CustomEvent('gezel:growth-updated', { detail: { gezelId: ev.gezelId } }),
+          );
+        }
+      },
+    );
     return () => ctrl.abort();
   }, [recomputeActiveTurns, reconcileActiveProjects, refreshPoisoned]);
 
@@ -888,7 +919,7 @@ function FullApp() {
             {runtimeCapabilities().search && (
               <>
                 <TitlebarSearch compact={compact} />
-                <SearchResultsOverlay />
+                <SearchResultsHost />
               </>
             )}
             {/* The empty stretch between the brand and the status cluster is the
@@ -914,11 +945,7 @@ function FullApp() {
               {!firstRun && runtimeCapabilities().daemonSettings && (
                 <>
                   {builderView && <ClaudeCliPoolPill />}
-                  <QuotaMeters
-                    usage={usage}
-                    onOpenSettings={openProviderSettings}
-                    nearCapOnly={!builderView}
-                  />
+                  <QuotaMeters onOpenSettings={openProviderSettings} nearCapOnly={!builderView} />
                 </>
               )}
               {/* The header tray: icon keys set into one slot, read as a
@@ -970,10 +997,11 @@ function FullApp() {
           <ResponsiveAppShell
             compact={compact}
             navigationOpen={navigationOpen}
+            view={selection === null ? 'home' : selection.kind}
             navigation={
               <Sidebar
                 compact={compact}
-                selection={selection}
+                selection={pendingSelection === undefined ? selection : pendingSelection}
                 onSelect={commitSelection}
                 onOpenArea={openArea}
                 onPreload={preloadSelection}
@@ -984,9 +1012,13 @@ function FullApp() {
               />
             }
           >
-            <Suspense fallback={null}>
-              <ViewLocationRoot selection={selection}>
-                {selection === null ? (
+            {/* Recent destinations stay mounted but hidden, so coming back is
+                instant (navigation/KeepAliveHost.tsx). */}
+            <KeepAliveHost
+              selection={selection}
+              hiddenLimit={compact ? 1 : 3}
+              render={(tab, onCrash) =>
+                tab === null ? (
                   <HomeView
                     platform={window.__GEZEL__?.platform}
                     onNavigate={(v) => {
@@ -995,16 +1027,16 @@ function FullApp() {
                     }}
                   />
                 ) : (
-                  <TabErrorBoundary key={tabKey(selection)} resetKey={tabKey(selection)}>
+                  <TabErrorBoundary resetKey={tabKey(tab)} onError={onCrash}>
                     <TabContent
-                      tab={selection}
+                      tab={tab}
                       activeProjectsByGezel={activeProjectsByGezel}
                       activeTurnsReady={activeTurnsReady}
                     />
                   </TabErrorBoundary>
-                )}
-              </ViewLocationRoot>
-            </Suspense>
+                )
+              }
+            />
           </ResponsiveAppShell>
         </FirstRunProvider>
         {runtimeCapabilities().connections && <LookoutAlertToast />}
@@ -1745,48 +1777,31 @@ function quotaNearCap(buckets: readonly QuotaBucket[]): boolean {
   );
 }
 
+/** The quota providers with a turn running now. */
+function runningQuotaProviders(status: QueueStatusResponse): QuotaProviderKey[] {
+  return QUOTA_PROVIDERS.filter(
+    (provider) => (status.providers[provider.key]?.running ?? 0) > 0,
+  ).map((provider) => provider.key);
+}
+
+/**
+ * The title bar's quota readouts. They own their two polls, so a usage tick
+ * redraws these meters and nothing else.
+ */
 function QuotaMeters({
-  usage,
   onOpenSettings,
   nearCapOnly = false,
 }: {
-  usage: UsageResponse | null;
   onOpenSettings: (section: QuotaSettingsSection) => void;
   /** The owner's view: a provider's meter shows only once a cap is close. */
   nearCapOnly?: boolean;
 }) {
-  const [activeProviders, setActiveProviders] = useState<ReadonlySet<QuotaProviderKey>>(
-    () => new Set(),
-  );
-
-  useEffect(() => {
-    let mounted = true;
-    const refresh = () => {
-      void api
-        .getQueueStatus()
-        .then((status) => {
-          if (!mounted) return;
-          const next = new Set<QuotaProviderKey>();
-          for (const provider of QUOTA_PROVIDERS) {
-            if ((status.providers[provider.key]?.running ?? 0) > 0) next.add(provider.key);
-          }
-          setActiveProviders((current) => {
-            if (current.size === next.size && [...current].every((key) => next.has(key))) {
-              return current;
-            }
-            return next;
-          });
-        })
-        .catch(() => {});
-    };
-
-    refresh();
-    const interval = setVisibleInterval(refresh, QUOTA_ACTIVITY_POLL_MS);
-    return () => {
-      mounted = false;
-      interval();
-    };
-  }, []);
+  const usage = useApiRead('getUsage', [], { pollMs: 10_000 }).data;
+  const running = useApiRead('getQueueStatus', [], {
+    pollMs: QUOTA_ACTIVITY_POLL_MS,
+    select: runningQuotaProviders,
+  }).data;
+  const activeProviders = new Set(running ?? []);
 
   if (!usage) return null;
   return (

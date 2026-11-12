@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { gzipSync } from 'node:zlib';
@@ -10,11 +10,49 @@ export const DEFAULT_UI_STARTUP_BUDGET = Object.freeze({
   // Raised from 950_000 for Squisq 2.11.8, whose media-edit schema, narrated
   // segment transform, and animated-image inspection reach the startup graph
   // (~959 KB); moving those behind a lazy boundary upstream is the follow-up.
-  jsGzipBytes: 975_000,
+  // Lowered to about 1.5x the 2026-11-11 measurement (~519 KB) once search
+  // snippets stopped pulling Squisq's markdown stack and icon catalog into the
+  // shell; a cap at twice the real size would let all of it back unnoticed.
+  jsGzipBytes: 780_000,
   cssGzipBytes: 80_000,
   resourceCount: 44,
   forbiddenAssetNames: [/(?:^|\/)(?:pdf|docx|pptx|jszip|standalone-source)[-.]/i],
 });
+
+/**
+ * What a destination may load beyond the shell before it renders, from the
+ * route graph the UI build writes (packages/ui/scripts/vite-route-graph.ts).
+ * About 1.5x the 2026-11-12 measurement: Home 84 chunks / 1.30 MB gzip,
+ * Projects 89 / 1.22 MB, 481 chunks in all. The caps catch a large regression
+ * (a heavy library pulled into a view's first load), not drift.
+ */
+export const DEFAULT_ROUTE_BUDGET = Object.freeze({
+  destinations: Object.freeze({
+    HomeView: { chunks: 126, gzipBytes: 1_950_000 },
+    ProjectsView: { chunks: 134, gzipBytes: 1_850_000 },
+  }),
+  totalChunks: 720,
+});
+
+export function evaluateRouteBudget(graph, totalChunks, budget = DEFAULT_ROUTE_BUDGET) {
+  const failures = [];
+  for (const [name, cap] of Object.entries(budget.destinations)) {
+    const destination = graph.destinations?.[name];
+    if (!destination) {
+      failures.push(`route graph has no ${name}`);
+      continue;
+    }
+    const chunks = destination.files ?? destination.chunks?.length ?? 0;
+    if (chunks > cap.chunks) failures.push(`${name} loads ${chunks} chunks > ${cap.chunks}`);
+    if (destination.gzipBytes > cap.gzipBytes) {
+      failures.push(`${name} loads ${destination.gzipBytes} gzip bytes > ${cap.gzipBytes}`);
+    }
+  }
+  if (totalChunks > budget.totalChunks) {
+    failures.push(`${totalChunks} JS chunks in the build > ${budget.totalChunks}`);
+  }
+  return failures;
+}
 
 function attribute(tag, name) {
   return tag.match(new RegExp(`\\b${name}=["']([^"']+)["']`, 'i'))?.[1] ?? null;
@@ -125,6 +163,16 @@ async function main() {
     process.stdout.write(`${renderReport(metrics)}\n`);
   }
   const failures = evaluateUiStartupBudget(metrics);
+  const root = path.dirname(path.resolve(indexPath));
+  const graph = await readFile(path.join(root, 'route-graph.json'), 'utf8').then(
+    (text) => JSON.parse(text),
+    () => null,
+  );
+  if (graph) {
+    const assets = await readdir(path.join(root, 'assets'));
+    const totalChunks = assets.filter((name) => name.endsWith('.js')).length;
+    failures.push(...evaluateRouteBudget(graph, totalChunks));
+  }
   if (failures.length > 0) {
     process.stderr.write(`UI startup budget failed:\n- ${failures.join('\n- ')}\n`);
     process.exitCode = 1;

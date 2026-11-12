@@ -125,6 +125,43 @@ export const RecoMetaShape = {
   recoScore: z.number().int().positive().optional(),
 } as const;
 
+/**
+ * One build's docbench result on one engine: how well it does DocBlocks'
+ * single-request document work (review, writing, diagrams, slides, study
+ * aids, narration), 0–100. Written by the eval harness's publish step
+ * (`eval:docbench-publish`) from a complete, officially judged round whose
+ * judge passed its validity tests — never by hand. A different catalog
+ * `version` of the weights makes it stale (`docbenchScoreFor`).
+ */
+export const DocbenchCatalogScoreSchema = z.object({
+  /** The docbench version that measured it; scores compare only within one. */
+  version: z.string().min(1),
+  score: z.number().min(0).max(100),
+  /**
+   * 95% interval of the score, `[low, high]`. A fixed-length array rather
+   * than a tuple: Gilde's schema checker reads `items`, not `prefixItems`.
+   */
+  ci: z.array(z.number()).length(2),
+  /** Rank band within its round: models in one band are indistinguishable. */
+  band: z.number().int().positive(),
+  /** Family scores, 0–100: review, writing, visuals, presentations, study, narration. */
+  families: z.record(z.string(), z.number().min(0).max(100)),
+  /** Share of outputs the product could use at all. */
+  usableRate: z.number().min(0).max(1),
+  /** The catalog version of the weights that were measured. */
+  catalogVersion: z.string().min(1),
+  runId: z.string().min(1),
+  measuredAt: z.string().min(1),
+  judge: z.string().min(1),
+});
+export type DocbenchCatalogScore = z.infer<typeof DocbenchCatalogScoreSchema>;
+
+/** Measured benchmark results, by benchmark and then by engine (`llama-cpp`, `mlx`, …). */
+export const ChatModelBenchmarksSchema = z.object({
+  docbench: z.record(z.string(), DocbenchCatalogScoreSchema).optional(),
+});
+export type ChatModelBenchmarks = z.infer<typeof ChatModelBenchmarksSchema>;
+
 // ─ Identity layer ────────────────────────────────────────────────────
 //
 // Stable across versions. Changing identity ("the github toolset is now
@@ -1445,6 +1482,12 @@ export const ChatModelIdentitySchema = IdentityCommonSchema.extend({
    * See {@link ChatModelTuningSchema}.
    */
   tuning: ChatModelTuningSchema.optional(),
+  /**
+   * Measured results (docbench, by engine). Identity-level so a published
+   * score updates without a new release of the weights; each result records
+   * the weights' catalog version and goes stale when that changes.
+   */
+  benchmarks: ChatModelBenchmarksSchema.optional(),
 });
 export type ChatModelIdentity = z.infer<typeof ChatModelIdentitySchema>;
 
@@ -1572,6 +1615,8 @@ export const ChatModelManifestSchema = z.object({
    * a different family's output norms.
    */
   evalHints: EvalHintsSchema.optional(),
+  /** Measured results, forwarded from identity. See {@link ChatModelBenchmarksSchema}. */
+  benchmarks: ChatModelBenchmarksSchema.optional(),
   ollama: ChatModelOllamaSourceSchema.optional(),
   llamaCpp: ChatModelLlamaCppSourceSchema.optional(),
   mlx: ChatModelMlxSourceSchema.optional(),

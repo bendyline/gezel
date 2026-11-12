@@ -634,12 +634,20 @@ describe('EngineStatusPill — simultaneous local engines', () => {
 
     await user.click(await screen.findByRole('button', { description: /talkie-1930-13b-q4/ }));
 
+    const processToggle = await screen.findByRole('button', {
+      name: /Estimated video memory use/,
+    });
+    expect(processToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(processToggle).toHaveTextContent('Gezel ~26.0 GB · Other ~1.0 GB');
+    expect(screen.queryByText('Windows Desktop')).not.toBeInTheDocument();
+    await user.click(processToggle);
+    expect(processToggle).toHaveAttribute('aria-expanded', 'true');
+
     expect(await screen.findByText(/Gezel machine engine · gezel-llama-server/i)).toBeVisible();
     expect(screen.queryByText(/gezel-llama-server\.exe/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Gezel development engine · gezel-llama-server/i)).toBeVisible();
     expect(screen.getByText('Windows Desktop')).toBeVisible();
     expect(screen.queryByText(/dwm(?:\.exe)?/i)).not.toBeInTheDocument();
-    expect(screen.getByText('Estimated video memory use')).toBeVisible();
     expect(screen.getAllByText('~13.0 GB')).toHaveLength(2);
     expect(screen.getByText('~1.0 GB')).toBeVisible();
     expect(screen.getByText('Other processes')).toBeVisible();

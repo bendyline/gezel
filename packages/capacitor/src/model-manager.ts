@@ -94,6 +94,51 @@ export function catalogFit(
   };
 }
 
+/** A downloadable catalog entry that fits, with what ranking it needs. */
+interface RankableDownload {
+  readonly id: string;
+  readonly fitTier: 'fits' | 'tight' | undefined;
+  readonly item: MobileCatalogEntry;
+}
+
+/**
+ * How much a catalog download that only fits tightly is worth beside one that
+ * fits comfortably: a phone short of memory may stop a long reply early.
+ */
+const TIGHT_FIT_FACTOR = 0.8;
+
+/**
+ * Rank a phone's downloads for document work by docbench, the same question
+ * the desktop's `rateModelsForDevice(…, { quality: 'docbench' })` answers:
+ * which measured, open-license model that fits this device does DocBlocks'
+ * work best. Unmeasured or non-open models get no ranking rather than a
+ * number nobody measured; the best eligible one is recommended, and the rest
+ * score against it.
+ */
+export function catalogDocbenchRanking(
+  downloads: readonly RankableDownload[],
+): Map<string, NonNullable<ModelListEntry['docbench_recommendation']>> {
+  const value = (entry: RankableDownload) =>
+    (entry.item.docbench?.score ?? 0) * (entry.fitTier === 'tight' ? TIGHT_FIT_FACTOR : 1);
+  const eligible = downloads.filter(
+    (entry) => entry.item.docbench !== undefined && entry.item.licenseClass === 'open',
+  );
+  const out = new Map<string, NonNullable<ModelListEntry['docbench_recommendation']>>();
+  const best = eligible.reduce<RankableDownload | null>(
+    (top, entry) => (!top || value(entry) > value(top) ? entry : top),
+    null,
+  );
+  if (!best || value(best) <= 0) return out;
+  for (const entry of eligible) {
+    const recommended = entry === best;
+    out.set(entry.id, {
+      score: recommended ? 100 : Math.min(99, Math.round((100 * value(entry)) / value(best))),
+      recommended,
+    });
+  }
+  return out;
+}
+
 export interface MobileModelManagerOptions {
   catalog?: readonly MobileCatalogEntry[];
   pollIntervalMs?: number;
@@ -155,8 +200,15 @@ export function createMobileModelManager(
         const installed = inventory.models.find((entry) => `llama-cpp:${entry.id}` === model.id);
         const item =
           installed?.source && catalog.find((entry) => sameSource(entry.source, installed.source!));
-        return item ? { ...model, aliases: [`catalog:${item.source.catalogId}`] } : model;
+        return item
+          ? {
+              ...model,
+              aliases: [`catalog:${item.source.catalogId}`],
+              ...(item.docbench ? { docbench: item.docbench } : {}),
+            }
+          : model;
       });
+      const rankable: RankableDownload[] = [];
       if (llama)
         for (const item of catalog) {
           if (
@@ -183,6 +235,7 @@ export function createMobileModelManager(
             preparation: 'app-download',
             download_bytes: item.approxSizeBytes,
             ...(fit ? { fit } : {}),
+            ...(item.docbench ? { docbench: item.docbench } : {}),
             context_window: limits.contextSize,
             max_output_tokens: limits.maxTokens,
             availability: !fits ? 'unavailable' : active ? 'downloading' : 'download-required',
@@ -194,8 +247,23 @@ export function createMobileModelManager(
             capabilities: { ...llama.capabilities, tools: false, structuredOutput: false },
             supported_options: ['model', 'messages', 'stream', 'max_tokens'],
           });
+          if (fits) {
+            rankable.push({
+              id: `catalog:${item.source.catalogId}`,
+              fitTier: fit?.tier === 'tight' ? 'tight' : fit ? 'fits' : undefined,
+              item,
+            });
+          }
         }
-      return result;
+      const ranking = catalogDocbenchRanking(rankable);
+      return ranking.size === 0
+        ? result
+        : result.map((entry) => {
+            const docbenchRecommendation = ranking.get(entry.id);
+            return docbenchRecommendation
+              ? { ...entry, docbench_recommendation: docbenchRecommendation }
+              : entry;
+          });
     },
     async prepare(id, opts) {
       const releaseMonitor = acquireSuspendMonitor();

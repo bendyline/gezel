@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { CONTENT_PACK_FILENAME } from './content-pack.js';
 import { gildeDataDir, gildePackageRoot } from './gilde-data.js';
 
 /**
@@ -21,7 +22,13 @@ describe('gilde data resolution', () => {
     const root = gildePackageRoot();
     expect(existsSync(join(root, 'data', 'chat-models', 'index.json'))).toBe(true);
     expect(existsSync(join(root, 'data', 'craftbook-templates', 'index.json'))).toBe(true);
-    expect(existsSync(join(root, 'data', 'community', 'toolsets', 'index.json'))).toBe(true);
+    // A published gilde ships the community tier as one pack; a linked
+    // checkout (`pnpm link:gilde`) keeps it loose.
+    const community = join(root, 'data', 'community');
+    expect(
+      existsSync(join(community, CONTENT_PACK_FILENAME)) ||
+        existsSync(join(community, 'toolsets', 'index.json')),
+    ).toBe(true);
   });
 
   it('honors the GEZEL_GILDE_DATA_DIR override', () => {

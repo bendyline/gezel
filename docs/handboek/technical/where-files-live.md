@@ -56,7 +56,7 @@ A folder you add to gezel — Pictures, Documents, a code repository — stays w
 ## What you can safely do
 
 - **Read anything.** It's your data; nothing breaks by looking.
-- **Back up or sync the whole folder.** Copying the folder copies your entire workshop.
+- **Back up or sync the whole folder.** Copying the folder copies everything Gezel keeps.
 - **Edit with care.** Character files (`about.md`) and documents are meant to be edited — from the app or any text editor. For structured files (`config.json`, thread files), prefer the app so nothing gets malformed.
 
 A few subfolders are machinery rather than your data — `runtime/`, `service/`, `bin/`, `index/`, `logs/` hold the service's own working state and rebuildable caches. Leave those to gezel; deleting them is at worst an inconvenience, never data loss. The `ambient/` folder is regenerated too — point your wallpaper or lock-screen slideshow at it freely, but don't store your own images there.

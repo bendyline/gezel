@@ -72,6 +72,8 @@ export type TaskAdvancerOutcome =
       scriptRuns?: GateScriptDiagnostic[];
       /** Escalation rung of `message` (≥1 = deliver raw, it IS the directive). */
       escalationStage?: number;
+      /** An outcome review held the step; `message` is the review, delivered raw. */
+      review?: 'self' | 'fresh';
       /**
        * The task's active step after the hold. Differs from the held step when
        * the gate's `onReject` looped the task to another step.
@@ -138,9 +140,16 @@ export async function maybeAutoAdvanceOnObservableProgress(
     hook?: 'onExit';
     unsatisfiable?: boolean;
     scriptRuns?: GateScriptDiagnostic[];
+    review?: 'self' | 'fresh';
   };
 }> {
   if (!deps.taskAdvancer) return {};
+  // A teammate or a fresh-eyes review works for a task without being a task
+  // session, and may be the owner's own gezel. Keyed on assignment, the
+  // advance below read a review's reply as the owner finishing: the review
+  // advanced the step whose gate was waiting on that very review, and the
+  // task hung (review-fresh-confirm, Gemma 4 E4B, 2026-11-12).
+  if (state.record.subagentFor || state.record.reviewFocus) return {};
   const projectId = state.record.projectId;
   if (!projectId) return {};
   const gezelId = state.record.gezelId;
@@ -321,6 +330,7 @@ export async function maybeAutoAdvanceOnObservableProgress(
             ...(outcome.escalationStage !== undefined
               ? { escalationStage: outcome.escalationStage }
               : {}),
+            ...(outcome.review !== undefined ? { review: outcome.review } : {}),
           },
         };
       }
@@ -425,6 +435,7 @@ export async function maybeAutoAdvanceOnObservableProgress(
           ...(outcome.escalationStage !== undefined
             ? { escalationStage: outcome.escalationStage }
             : {}),
+          ...(outcome.review !== undefined ? { review: outcome.review } : {}),
         },
       };
     }

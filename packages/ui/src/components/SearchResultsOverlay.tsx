@@ -7,6 +7,7 @@ import { SearchMarkdownSnippet, searchSnippetIsMarkdown } from './SearchMarkdown
 import { highlightTokens } from './highlight-tokens.js';
 import { runNavActions } from './nav-actions.js';
 import { type SearchGroup, groupResults, resultToActions } from './search-nav.js';
+import { OPEN_SEARCH_RESULTS_EVENT } from './search-results-open.js';
 
 /**
  * The full search surface behind the titlebar palette's "See all results".
@@ -19,13 +20,13 @@ import { type SearchGroup, groupResults, resultToActions } from './search-nav.js
  * can request the full cap instead of inheriting the palette's 30.
  */
 
-const OPEN_EVENT = 'gezel:open-search-results';
+export { openSearchResults } from './search-results-open.js';
 
-export function openSearchResults(query: string): void {
-  window.dispatchEvent(new CustomEvent(OPEN_EVENT, { detail: { query } }));
-}
-
-export function SearchResultsOverlay() {
+/**
+ * `initialQuery` opens the overlay as it mounts: SearchResultsHost loads it
+ * on the first open, after that open's event has already fired.
+ */
+export function SearchResultsOverlay({ initialQuery }: { initialQuery?: string } = {}) {
   const [query, setQuery] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [groups, setGroups] = useState<SearchGroup[]>([]);
@@ -48,16 +49,20 @@ export function SearchResultsOverlay() {
   }, []);
 
   useEffect(() => {
-    const onOpen = (e: Event) => {
-      const q = (e as CustomEvent<{ query?: string }>).detail?.query?.trim();
-      if (!q) return;
+    const open = (q: string) => {
       setQuery(q);
       setDraft(q);
       void runSearch(q);
     };
-    window.addEventListener(OPEN_EVENT, onOpen);
-    return () => window.removeEventListener(OPEN_EVENT, onOpen);
-  }, [runSearch]);
+    const first = initialQuery?.trim();
+    if (first) open(first);
+    const onOpen = (e: Event) => {
+      const q = (e as CustomEvent<{ query?: string }>).detail?.query?.trim();
+      if (q) open(q);
+    };
+    window.addEventListener(OPEN_SEARCH_RESULTS_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_SEARCH_RESULTS_EVENT, onOpen);
+  }, [runSearch, initialQuery]);
 
   const close = useCallback(() => setQuery(null), []);
 

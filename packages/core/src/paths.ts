@@ -10,6 +10,7 @@ import {
 } from './storage-names.js';
 export {
   PROJECT_DIFFPACKS_DIR_NAME,
+  PROJECT_OUTCOME_REVIEW_DIR_NAME,
   PROJECT_PROMPTS_DIR_NAME,
   PROJECT_SHADOW_DIR_NAME,
   PROJECT_TABULAR_DIR_NAME,
@@ -475,6 +476,18 @@ export function projectLocalDir(root: string, projectId: string): string {
 /** Per-project `project.json` metadata file. Always local. */
 export function projectMetaFile(root: string, projectId: string): string {
   return join(projectStorageDir(root, projectId), 'project.json');
+}
+
+/**
+ * A project's own icon art, beside its `project.json`: `icon.svg` for a mark
+ * a model drew, `icon.png` / `icon.jpg` / `icon.webp` for an uploaded picture.
+ */
+export function projectIconArtFile(
+  root: string,
+  projectId: string,
+  format: 'svg' | 'png' | 'jpeg' | 'webp',
+): string {
+  return join(projectStorageDir(root, projectId), `icon.${format === 'jpeg' ? 'jpg' : format}`);
 }
 
 /** Durable user/worker lifecycle for indexed code findings. Account-private. */

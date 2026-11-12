@@ -18,6 +18,7 @@ import {
 } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
   type ExternalFolders,
+  PROJECT_OUTCOME_REVIEW_DIR_NAME,
   PROJECT_PROMPTS_DIR_NAME,
   PROJECT_SHADOW_DIR_NAME,
   PROJECT_TABULAR_DIR_NAME,
@@ -686,13 +687,16 @@ async function pathExists(full: string): Promise<boolean> {
  * part hijack a bare-filename lookup. Prompts holds the composer's drafts
  * (`draft.json`, `message.md`): the person's own unsent messages, not work
  * the crew made, and a draft's `message.md` must not answer a bare lookup.
+ * Outcome-review holds each review's record and a copy of the deliverables
+ * from before it: a bare `report.md` must find the report, not that copy.
  * `?hidden=1`, a listing of the subtree itself, and an explicit read still
- * reach all three.
+ * reach all four.
  */
 const RESERVED_ROOT_SKIP: ReadonlySet<string> = new Set([
   PROJECT_SHADOW_DIR_NAME,
   PROJECT_TABULAR_DIR_NAME,
   PROJECT_PROMPTS_DIR_NAME,
+  PROJECT_OUTCOME_REVIEW_DIR_NAME,
 ]);
 
 /**

@@ -28,6 +28,10 @@ await mkdir('dist/catalog', { recursive: true });
 for (const kind of CATALOG_KINDS)
   await cp(join(gildeRoot, 'data', kind), join('dist/catalog', kind), { recursive: true });
 await cp(join(gildeRoot, 'LICENSE'), 'dist/catalog/LICENSE');
+// Gilde's MIT LICENSE covers Bendyline's own catalog data; entries that
+// describe third-party content (Wikipedia-derived CC BY-SA catalogs, for
+// one) carry the license their manifest names. The notice says so.
+await cp('assets/catalog/NOTICE.md', 'dist/catalog/NOTICE.md');
 await writeFile(
   'dist/catalog/provenance.json',
   `${JSON.stringify(

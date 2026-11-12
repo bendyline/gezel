@@ -48,6 +48,7 @@ export const TaskStrategyOptionsSchema = z
     procedure: z.enum(['advisory', 'none']).optional(),
     subagents: z.boolean().optional(),
     contract: z.enum(['enforced', 'shown', 'hidden']).optional(),
+    review: z.enum(['self', 'fresh']).optional(),
   })
   .strict();
 
@@ -228,6 +229,12 @@ const TaskCraftbookStepLifecycleShape = {
    */
   redriveCount: z.number().int().nonnegative().optional(),
   lastRedriveAt: z.string().optional(),
+  /**
+   * Review rounds an outcome task's step has spent (`strategyOptions.review`).
+   * A round starts once the contract checks pass; a rejection holds the step
+   * without re-activating it, so this survives the fixes the round asks for.
+   */
+  outcomeReviewRounds: z.number().int().nonnegative().optional(),
   /**
    * Restart-resume bookkeeping. `restartResumeCount` = how many times this
    * step has been re-dispatched by boot rehydration after the process died
@@ -1041,6 +1048,8 @@ export const CompleteStepGateInfoSchema = z.object({
   infrastructureError: z.boolean().optional(),
   /** Present when an onExit hook, rather than the declarative gate, held completion. */
   hook: z.literal('onExit').optional(),
+  /** Present when an outcome review, rather than a failed check, held completion. */
+  review: z.enum(['self', 'fresh']).optional(),
   scriptRuns: z
     .array(
       z.object({

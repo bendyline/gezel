@@ -1,4 +1,5 @@
 import type { ModelImportReview } from '@bendyline/gezel';
+import { GezelApiError } from '@bendyline/gezel-client';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -145,15 +146,21 @@ describe('ModelImportDialog', () => {
   });
 
   it('starts from a pasted link and shows why one is refused', async () => {
+    // The real client throws its HTTP status line and keeps the daemon's
+    // sentence on `details`; the dialog must show the sentence.
     vi.mocked(api.reviewModelImport).mockRejectedValue(
-      new Error('This repository has no GGUF model files.'),
+      new GezelApiError('Gezel API error 422 on POST /api/model-imports/review', 422, {
+        error: 'This repository has no model Gezel can run.',
+      }),
     );
     render(<ModelImportDialog open onClose={() => {}} />);
     fireEvent.change(screen.getByLabelText(/Link to a model on Hugging Face/), {
       target: { value: 'someone/not-gguf' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Check model' }));
-    expect(await screen.findByRole('alert')).toBeTruthy();
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('This repository has no model Gezel can run.');
+    expect(alert.textContent).not.toContain('Gezel API error');
     expect(api.reviewModelImport).toHaveBeenCalledWith({ reference: 'someone/not-gguf' });
   });
 

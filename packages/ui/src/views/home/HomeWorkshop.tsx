@@ -1,5 +1,4 @@
 import type {
-  ChatEventEnvelope,
   MeesterStatusResponse,
   NightShiftReviewResponse,
   Poppetje as PoppetjeStruct,
@@ -10,12 +9,21 @@ import type {
 } from '@bendyline/gezel';
 import { isReadyQuestion } from '@bendyline/gezel';
 import type { ConfigResponse } from '@bendyline/gezel-client';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { api } from '../../api.js';
-import { useActivity } from '../../components/activity-context.js';
+import { type ActivityState, useActivitySelector } from '../../components/activity-context.js';
+import { sameJson } from '../../components/chat-timeline-helpers.js';
 import { navigateToTab, openUpdates } from '../../components/nav-actions.js';
+import { useAllChatEvents } from '../../components/use-chat-events.js';
 import { runtimeCapabilities } from '../../runtime-capabilities.js';
-import { streamSharedAllChatEvents } from '../../shared-chat-events.js';
 import {
   connectStartupHome,
   restoreStartupFocus,
@@ -48,6 +56,25 @@ const homeVisit: { greeted: boolean; leftAt: string | null; openedMorningFor: st
   leftAt: null,
   openedMorningFor: null,
 };
+
+/**
+ * The part of activity Home shows: the questions and how much waits on the
+ * person. Null outside the provider; `questions` is null until the first
+ * snapshot. Compared by value, so a poll that changes nothing here leaves
+ * Home alone.
+ */
+function selectHomeActivity(state: ActivityState | null) {
+  if (!state) return null;
+  const snapshot = state.snapshot;
+  return {
+    questions: snapshot?.questions ?? null,
+    needsYou: snapshot
+      ? snapshot.items
+          .filter((item) => item.section === 'needs-you')
+          .reduce((sum, item) => sum + Math.max(1, item.questionIds.length), 0)
+      : null,
+  };
+}
 
 /** Test seam: a fresh launch. */
 export function resetHomeVisit(): void {
@@ -258,11 +285,11 @@ export function HomeWorkshop({
   const [statusRunning, setStatusRunning] = useState(false);
   const [statusSettled, setStatusSettled] = useState(() => !runtimeCapabilities().background);
   const [tasks, setTasks] = useState<Task[]>([]);
-  const activity = useActivity();
+  const activity = useActivitySelector(selectHomeActivity, sameJson);
   const hasSharedActivity = activity !== null;
   const [localQuestions, setQuestions] = useState<Question[]>([]);
   const [localQuestionsLoaded, setLocalQuestionsLoaded] = useState(false);
-  const questions = activity?.snapshot?.questions ?? localQuestions;
+  const questions = activity?.questions ?? localQuestions;
 
   const activeProjectId = useMemo(
     () => deriveActiveProjectId(config, projects),
@@ -291,7 +318,11 @@ export function HomeWorkshop({
   // and again on any task audit event (a job the user owned being finished
   // elsewhere also drains the "waiting on you" chip).
   const activeProjectIdRef = useRef(activeProjectId);
-  activeProjectIdRef.current = activeProjectId;
+  // Kept current in the layout phase, before any effect reads it: a ref
+  // written during render keeps React Compiler from memoizing Home.
+  useLayoutEffect(() => {
+    activeProjectIdRef.current = activeProjectId;
+  });
   const refreshTasks = useCallback(() => {
     if (!runtimeCapabilities().tasks) return;
     const pid = activeProjectIdRef.current;
@@ -332,38 +363,24 @@ export function HomeWorkshop({
   }, []);
   useEffect(() => {
     refreshStatus();
-    const ctrl = new AbortController();
-    (async () => {
-      try {
-        for await (const env of streamSharedAllChatEvents({
-          url: api.allEventsUrl(),
-          headers: api.authHeader(),
-          signal: ctrl.signal,
-          fetch: api.getFetch(),
-        })) {
-          const ev = (env as ChatEventEnvelope).event;
-          if (ev.type === 'question_asked' || ev.type === 'question_answered') {
-            refreshQuestions();
-            continue;
-          }
-          if (ev.type === 'task_event') {
-            refreshTasks();
-            continue;
-          }
-          if (ev.type !== 'meester_status') continue;
-          if (ev.state === 'started') {
-            setStatusRunning(true);
-          } else {
-            setStatusRunning(false);
-            refreshStatus();
-          }
-        }
-      } catch {
-        /* stream ended (shutdown / navigation) */
-      }
-    })();
-    return () => ctrl.abort();
-  }, [refreshStatus, refreshQuestions, refreshTasks]);
+  }, [refreshStatus]);
+  useAllChatEvents(({ event: ev }) => {
+    if (ev.type === 'question_asked' || ev.type === 'question_answered') {
+      refreshQuestions();
+      return;
+    }
+    if (ev.type === 'task_event') {
+      refreshTasks();
+      return;
+    }
+    if (ev.type !== 'meester_status') return;
+    if (ev.state === 'started') {
+      setStatusRunning(true);
+    } else {
+      setStatusRunning(false);
+      refreshStatus();
+    }
+  });
 
   // Staleness decay: an old report falls back to the plain time-of-day
   // greeting rather than greeting the user with last week's news.
@@ -427,7 +444,7 @@ export function HomeWorkshop({
       ? latestReview
       : null;
   const questionsSettled = activity
-    ? activity.snapshot !== null
+    ? activity.questions !== null
     : !runtimeCapabilities().structuredQuestions || localQuestionsLoaded;
   const handover = startupReading
     ? startupHandover({
@@ -465,11 +482,7 @@ export function HomeWorkshop({
   const ownerTasks = visibleTasks.filter(
     (t) => t.assignee.kind === 'user' && t.status !== 'complete',
   );
-  const waitingOnYou = activity?.snapshot
-    ? activity.snapshot.items
-        .filter((item) => item.section === 'needs-you')
-        .reduce((sum, item) => sum + Math.max(1, item.questionIds.length), 0)
-    : pendingQuestions.length + ownerTasks.length;
+  const waitingOnYou = activity?.needsYou ?? pendingQuestions.length + ownerTasks.length;
 
   const chips: HomeChip[] = [];
   if (waitingOnYou > 0) {

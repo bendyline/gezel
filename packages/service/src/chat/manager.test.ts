@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { securityPolicyForLevel } from '@bendyline/gezel';
+import { type ChatMessage, nowIso, securityPolicyForLevel } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { resolveMlxEffectiveNumCtx } from '@bendyline/gezel-inference/internal/providers/mlx/build-provider';
 import {
@@ -2817,6 +2817,138 @@ describe('ChatManager — messageGezel (cross-gezel messaging)', () => {
     expect(contentFreeForward).toBeUndefined();
   });
 
+  describe('pictures a delegate made', () => {
+    // The shape `generate_image` reports; the relay takes the path from its tail.
+    const GENERATED =
+      'Generated 448×768 image with sd-turbo (seed 7, 4 steps, 900ms). The user already sees this image inline below the tool call. To read its bytes, call `read_artifact` with path `generated/image-7.png`.';
+    type ReplyInternals = {
+      inflight: Map<string, { userText: string; startedAt: number; origin: string }>;
+      attachReplyListener(args: {
+        targetSessionId: string;
+        fromSessionId: string;
+        toGezelId: string;
+        toName: string;
+        fromGezelId: string;
+        fromGezelName: string;
+        projectId: string;
+      }): void;
+    };
+    const completeTurn = (
+      sessionId: string,
+      content: string,
+      toolCalls: NonNullable<ChatMessage['toolCalls']>,
+    ) =>
+      events.publish(
+        { sessionId, gezelId: 'maya', projectId: 'default' },
+        { type: 'complete', message: { role: 'assistant', content, at: nowIso(), toolCalls } },
+      );
+
+    it('relays them with the reply and names their paths for the sender', async () => {
+      await store.createGezel({ name: 'Maya', role: 'Illustrator' });
+      const adaSession = await manager.createSession({ gezelId: 'ada' });
+      const mayaSession = await manager.createSession({ gezelId: 'maya' });
+      mock.script('Maya drew the rainbow: `artifacts/generated/image-7.png`.');
+      mock.script('NONE');
+      const internals = manager as unknown as ReplyInternals;
+      internals.attachReplyListener({
+        targetSessionId: mayaSession.id,
+        fromSessionId: adaSession.id,
+        toGezelId: 'maya',
+        toName: 'Maya',
+        fromGezelId: 'ada',
+        fromGezelName: 'Ada',
+        projectId: 'default',
+      });
+
+      // While Maya's delegated turn runs, what it makes is answered to Ada.
+      const delegatedTurn = { userText: 'draw', startedAt: Date.now(), origin: 'cross-gezel' };
+      internals.inflight.set(mayaSession.id, delegatedTurn);
+      expect(manager.turnAnswersGezel(mayaSession.id)).toEqual({ gezelName: 'Ada' });
+      internals.inflight.delete(mayaSession.id);
+
+      completeTurn(mayaSession.id, 'The rainbow is done.', [
+        {
+          name: 'generate_image',
+          durationMs: 900,
+          success: true,
+          resultText: GENERATED,
+          images: [{ path: 'sessions/s/tool-0-img-0.png', mimeType: 'image/png' }],
+        },
+        // A screenshot is not a picture Maya made for anyone.
+        {
+          name: 'browser_snapshot',
+          durationMs: 10,
+          success: true,
+          images: [{ path: 'sessions/s/tool-1-img-0.png', mimeType: 'image/png' }],
+        },
+      ]);
+      await waitForCondition(async () => {
+        const disk = await store.getSession('ada', adaSession.id);
+        return (disk?.messages.length ?? 0) >= 2;
+      });
+
+      const relayed = (await store.getSession('ada', adaSession.id))?.messages.find(
+        (m) => m.role === 'user',
+      );
+      expect(relayed?.content).toBe('[Message from Maya]: The rainbow is done.');
+      expect(relayed?.relayedImages).toEqual({
+        projectId: 'default',
+        images: [{ path: 'generated/image-7.png', mimeType: 'image/png' }],
+      });
+      const timelineRow = (await store.listTimeline({ gezelId: 'ada', limit: 50 })).messages.find(
+        (m) => m.role === 'user',
+      );
+      expect(timelineRow?.relayedImages).toEqual(relayed?.relayedImages);
+      // The sender's model is told the real path, nearest the reply's words,
+      // and the note stays out of what the person reads.
+      const senderSend = mock.calls.find(
+        (call) => call.kind === 'send' && call.prompt?.includes('[Message from Maya]'),
+      );
+      expect(senderSend?.prompt).toContain(
+        "Maya made a picture, and the person sees it with Maya's message below: `artifacts/generated/image-7.png`.",
+      );
+      expect(relayed?.sentPreamble).toContain('`artifacts/generated/image-7.png`');
+
+      // Once the reply has gone, a later turn of Maya's is read where it is written.
+      internals.inflight.set(mayaSession.id, delegatedTurn);
+      expect(manager.turnAnswersGezel(mayaSession.id)).toBeNull();
+      internals.inflight.delete(mayaSession.id);
+    });
+
+    it('relays a turn that made a picture but wrote nothing', async () => {
+      await store.createGezel({ name: 'Maya', role: 'Illustrator' });
+      const adaSession = await manager.createSession({ gezelId: 'ada' });
+      const mayaSession = await manager.createSession({ gezelId: 'maya' });
+      mock.script('Here it is.');
+      mock.script('NONE');
+      (manager as unknown as ReplyInternals).attachReplyListener({
+        targetSessionId: mayaSession.id,
+        fromSessionId: adaSession.id,
+        toGezelId: 'maya',
+        toName: 'Maya',
+        fromGezelId: 'ada',
+        fromGezelName: 'Ada',
+        projectId: 'default',
+      });
+
+      completeTurn(mayaSession.id, '', [
+        { name: 'generate_image', durationMs: 900, success: true, resultText: GENERATED },
+      ]);
+      await waitForCondition(async () => {
+        const disk = await store.getSession('ada', adaSession.id);
+        return (disk?.messages.length ?? 0) >= 2;
+      });
+
+      const relayed = (await store.getSession('ada', adaSession.id))?.messages.find(
+        (m) => m.role === 'user',
+      );
+      expect(relayed?.content).toBe('[Message from Maya]: Sent a picture.');
+      expect(relayed?.relayedImages?.images).toEqual([
+        { path: 'generated/image-7.png', mimeType: 'image/png' },
+      ]);
+    });
+  });
+
   it("delivers a turn-driving [Delivery failure] notice to the sender when the recipient's turn throws", async () => {
     await store.createGezel({ name: 'Maya', role: 'Developer' });
     const adaSession = await manager.createSession({ gezelId: 'ada' });
@@ -5250,6 +5382,40 @@ describe('ChatManager — askGezelAndWait (sync consultation)', () => {
     expect(consult?.taskRef).toBe('default/42');
   });
 
+  it('lets a gezel review its own work in a new read-only session', async () => {
+    const ownerSession = await manager.createSession({ gezelId: 'ada', taskRef: 'default/7' });
+    mock.script('VERDICT: PASS');
+    mock.script('NONE');
+
+    const res = await manager.askFreshEyes({
+      gezelId: 'ada',
+      projectId: 'default',
+      fromSessionId: ownerSession.id,
+      text: 'Review the work handed in for task default/7.',
+      subagentFor: { taskRef: 'default/7', ownerSessionId: ownerSession.id },
+    });
+
+    expect(res.outcome).toBe('reply');
+    if (res.outcome !== 'reply') return;
+    expect(res.text).toBe('VERDICT: PASS');
+    expect(res.sessionId).not.toBe(ownerSession.id);
+    const review = await store.getSession('ada', res.sessionId);
+    expect(review).toMatchObject({
+      reviewFocus: true,
+      consultationMode: true,
+      subagentFor: { taskRef: 'default/7', ownerSessionId: ownerSession.id },
+      parentSession: { sessionId: ownerSession.id, gezelId: 'ada', kind: 'consultation' },
+    });
+    expect(review?.taskRef).toBeUndefined();
+    expect(review?.messages[0]?.content).toBe('Review the work handed in for task default/7.');
+    const create = mock.calls.filter((c) => c.kind === 'create').at(-1);
+    const allowlist = create?.opts?.toolAllowlist;
+    expect(allowlist?.has('read_file')).toBe(true);
+    for (const tool of ['write_file', 'write_artifact', 'advance_task_step', 'ask_gezel']) {
+      expect(allowlist?.has(tool)).toBe(false);
+    }
+  });
+
   it('rejects self-asks with reason: self', async () => {
     const adaSession = await manager.createSession({ gezelId: 'ada' });
     const res = await manager.askGezelAndWait({
@@ -6115,6 +6281,43 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(creates).toHaveLength(2);
     expect(creates[1]!.opts!.claudeCliContext?.permissionModeOverride).toBe('acceptEdits');
     expect(mock.calls.some((call) => call.kind === 'disconnect')).toBe(true);
+  });
+
+  it('runs a fresh-eyes review read-only on both CLI providers, whatever the project allows', async () => {
+    for (const provider of ['anthropic-cli', 'codex-cli'] as const) {
+      await manager.shutdown();
+      mock = new MockProvider({ name: 'copilot' });
+      manager = new ChatManager({
+        store,
+        events,
+        memory: noopMemory,
+        getPort: () => 0,
+        getToken: () => 'test-token',
+        home,
+        providers: [[provider, mock]],
+        catalog: new CatalogService(),
+        secrets: new FileSecretStore(home),
+      });
+      await store.writeConfig({ provider, defaultModel: { [provider]: 'm' } });
+      await store.updateProject('default', {
+        claudePermissionMode: 'bypassPermissions',
+        codexPermissionMode: 'full',
+      });
+      const review = await manager.createSession({
+        gezelId: 'ada',
+        projectId: 'default',
+        consultationMode: true,
+        reviewFocus: true,
+      });
+      mock.script('VERDICT: PASS');
+      await manager.send(review.id, 'Review the work.');
+      const create = mock.calls.find((call) => call.kind === 'create');
+      const context =
+        provider === 'anthropic-cli'
+          ? create!.opts!.claudeCliContext
+          : create!.opts!.codexCliContext;
+      expect(context?.permissionModeOverride).toBe('plan');
+    }
   });
 
   it('rebuilds the live session when the catalog content root flips (live gilde update)', async () => {

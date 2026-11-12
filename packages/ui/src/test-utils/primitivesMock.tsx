@@ -219,6 +219,7 @@ const Tooltip = {
   Trigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
   Content: ({ children }: { children?: ReactNode }) => <>{children}</>,
   Portal: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  Hint: ({ children }: { children?: ReactNode }) => <>{children}</>,
 };
 
 const Popover = {

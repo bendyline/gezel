@@ -101,12 +101,17 @@ test('the first usable Home stays within its actual JavaScript budget', async ({
   await gotoHome(page);
   await expect(page.locator('[contenteditable="true"]').first()).toBeAttached();
   await page.waitForTimeout(1_000);
-  const bytes = await page.evaluate(() =>
-    performance
+  const bytes = await page.evaluate(() => {
+    // Stop at the idle warm-up (navigation/idle-warmup.ts IDLE_WARMUP_MARK):
+    // it loads other views' code ~2 s after mount, and when CI drew the
+    // composer late it landed inside this window and added ~780 KB.
+    const warmup =
+      performance.getEntriesByName('gezel:idle-warmup')[0]?.startTime ?? Number.POSITIVE_INFINITY;
+    return performance
       .getEntriesByType('resource')
-      .filter((entry) => new URL(entry.name).pathname.endsWith('.js'))
-      .reduce((sum, entry) => sum + (entry as PerformanceResourceTiming).decodedBodySize, 0),
-  );
+      .filter((entry) => entry.startTime < warmup && new URL(entry.name).pathname.endsWith('.js'))
+      .reduce((sum, entry) => sum + (entry as PerformanceResourceTiming).decodedBodySize, 0);
+  });
   // Includes immediately lazy-loaded Home/composer dependencies which the
   // HTML modulepreload budget cannot see. Baseline was 5.59 MiB decoded.
   expect(bytes).toBeGreaterThan(0);

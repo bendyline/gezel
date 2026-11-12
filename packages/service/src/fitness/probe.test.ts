@@ -1,3 +1,4 @@
+import { composeFitnessBadge } from '@bendyline/gezel';
 import type { TurnStatsEvent } from '@bendyline/gezel-inference/internal/providers/streaming-session';
 import type {
   ExternalToolCall,
@@ -32,6 +33,8 @@ interface ScriptedTurn {
    * call broken.
    */
   streamThenTimeout?: { chunks: string[]; gapMs: number };
+  /** Stream these chunks, then reject with `error` (a provider-side abort). */
+  streamThenFail?: { chunks: string[]; error: string };
 }
 
 /** A reply long enough to read as language, for turns whose text is beside the point. */
@@ -87,6 +90,12 @@ class FakeSession {
         this.clock?.advance(turn.streamThenTimeout.gapMs);
       }
       throw new Error('[llama-cpp] timed out after 576s');
+    }
+    if (turn.streamThenFail) {
+      for (const chunk of turn.streamThenFail.chunks) {
+        for (const h of this.deltaHandlers) h(chunk);
+      }
+      throw new Error(turn.streamThenFail.error);
     }
     if (turn.fail) throw new Error(turn.fail);
     if (turn.tokensPerSec != null) {
@@ -327,6 +336,67 @@ describe('runFitnessProbe', () => {
     expect(record.status).toBe('probed');
     expect(record.checks.toolRoundTrip.ok).toBe(false);
     expect(record.checks.toolRoundTrip.detail).toContain('unable to create files');
+  });
+
+  it('a ramble abort on the tool turn is a verdict about the model, not a failed probe', async () => {
+    // Wild-caught on an imported Qwen2.5-0.5B (2026-11-11): every other axis
+    // passed, the model wrote its call as text, and the ramble guard ended
+    // the turn. Filed as machinery, the badge read "fitness check failed /
+    // Could not complete basic tasks" over a model that just cannot call.
+    const rambleAbort =
+      '[llama-cpp] aborting — the gezel emitted 2400 characters of prose this turn without calling any action tool. Stop planning. Your next message must START with a single tool call.';
+    const session = new FakeSession([
+      { text: STORY, tokensPerSec: 236.8 },
+      {
+        streamThenFail: {
+          chunks: ['write_file(proeve.txt, "PROEVE OK")', ' The turn is complete.'.repeat(80)],
+          error: rambleAbort,
+        },
+      },
+    ]);
+    const record = await runFitnessProbe(
+      deps({ getProviderForModel: async () => fakeProvider(session) }),
+      { provider: 'llama-cpp', modelId: 'hf-qwen2.5-0.5b', trigger: 'install' },
+    );
+
+    expect(record.status).toBe('probed');
+    expect(record.admitted).toBe(false);
+    expect(record.checks.spawn.ok).toBe(true);
+    expect(record.checks.toolRoundTrip.ok).toBe(false);
+    expect(record.checks.toolRoundTrip.detail).toContain('instead of calling write_file');
+    expect(record.checks.toolRoundTrip.detail).toContain('write_file(proeve.txt, "PROEVE OK")');
+    expect(record.checks.toolRoundTrip.detail).not.toContain('Stop planning');
+    expect(session.disconnected).toBe(true);
+
+    const badge = composeFitnessBadge({
+      fitness: { record, stale: false, hardwareChanged: false },
+    });
+    expect(badge.label).toBe('tool calls failed');
+    expect(badge.reason).toContain('instead of calling write_file');
+  });
+
+  it('no call through every corrective nudge is the same verdict', async () => {
+    // What the same model does once forced tool choice no longer traps it:
+    // it writes the call as text, stops, and repeats that past both nudges.
+    const session = new FakeSession([
+      { text: STORY, tokensPerSec: 236.8 },
+      {
+        streamThenFail: {
+          chunks: ["write_file(proeve.txt, 'PROEVE OK')", 'write_file(proeve.txt)'],
+          error:
+            'File turn ended without a successful workspace mutation after 2 corrective nudge(s).',
+        },
+      },
+    ]);
+    const record = await runFitnessProbe(
+      deps({ getProviderForModel: async () => fakeProvider(session) }),
+      { provider: 'llama-cpp', modelId: 'hf-qwen2.5-0.5b', trigger: 'install' },
+    );
+
+    expect(record.status).toBe('probed');
+    expect(record.admitted).toBe(false);
+    expect(record.checks.toolRoundTrip.detail).toContain("write_file(proeve.txt, 'PROEVE OK')");
+    expect(record.checks.toolRoundTrip.detail).not.toContain('corrective nudge');
   });
 
   it('generation-turn failure → status failed, disconnect still runs', async () => {

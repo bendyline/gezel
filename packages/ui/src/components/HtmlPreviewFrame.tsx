@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { useEffectiveTheme } from '../theme.js';
 import { PageChatSlots } from './PageChatSlots.js';
+import { useLiveContentShown } from './live-render-gate.js';
 
 export type HtmlPreviewSource = 'artifacts' | 'workspace' | 'type';
 
@@ -152,7 +153,19 @@ type PreviewLoadState =
  * iframe noise can't leak in. Use the ref/source identity check even
  * though the sentinel is already distinctive; belt-and-suspenders.
  */
-export function HtmlPreviewFrame({
+/**
+ * A page or HTML file, live. While its view is hidden (kept alive behind
+ * another destination, or in a closed panel) it renders nothing: a hidden
+ * page would keep its scripts running with its bridge to the app shut, so
+ * it opens fresh when shown, as it did before views were kept.
+ */
+export function HtmlPreviewFrame(props: HtmlPreviewFrameProps) {
+  const shown = useLiveContentShown();
+  if (!shown) return <div className={props.className} aria-hidden="true" />;
+  return <ShownHtmlPreviewFrame {...props} />;
+}
+
+function ShownHtmlPreviewFrame({
   fullscreen = false,
   projectId,
   path,

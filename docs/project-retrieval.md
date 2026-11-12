@@ -181,7 +181,10 @@ create and inherited by fanout children:
 
 - at most five entries, each a citation (`knowledge://` URI or library path),
   a title, and a snippet — never a document body;
-- only entries whose title, path, or snippet names a subject term, so a
+- only entries whose title, path, or snippet names a subject term (two of
+  them when the subject has more than one, unless the title is made of
+  subject terms alone, since a catalog always shares one word with a
+  request: "for the board" cited "Digital Board Game"), so a
   vector-only neighbour cannot ride every step of the run; words from the
   book's own name are not subject terms. An entry a calibrated relevance
   model scored is kept or dropped on that score instead;

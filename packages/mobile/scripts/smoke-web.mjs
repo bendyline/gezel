@@ -278,8 +278,13 @@ try {
   await page.getByRole('textbox', { name: 'Path', exact: true }).fill('field-guide');
   await page.getByRole('dialog').getByRole('button', { name: 'Create', exact: true }).click();
   await page.getByRole('dialog').waitFor({ state: 'detached' });
-  await page.locator('[contenteditable="true"]').fill('Keep careful notes about local wildlife.');
-  await page.getByText('Saved', { exact: true }).waitFor();
+  // The project stays mounted, hidden, behind the document, and its artifact
+  // editor keeps an editor and a "Saved" of its own.
+  const documentDetail = page.getByTestId('document-detail');
+  await documentDetail
+    .locator('[contenteditable="true"]')
+    .fill('Keep careful notes about local wildlife.');
+  await documentDetail.getByText('Saved', { exact: true }).waitFor();
   await checkpoint('phone-document');
 
   await (await navigation()).getByRole('button', { name: 'New crew member', exact: true }).click();

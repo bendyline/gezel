@@ -58,6 +58,14 @@ describe('BootstrapGate interactions', () => {
     expect(client.ensureNativeEngine.mock.calls.at(-1)?.[2]).toBe('cuda');
   });
 
+  it('names Gezel, not a workshop, while it checks this computer', async () => {
+    const client = createClient({ getConfig: vi.fn(() => new Promise(() => {})) });
+    const harness = mountGate(client);
+
+    await vi.waitFor(() => expect(harness.text()).toContain('Getting Gezel ready'));
+    expect(harness.text().toLowerCase()).not.toContain('workshop');
+  });
+
   it('re-probes hardware after native setup so a newly-visible Vulkan dGPU replaces the CPU fallback', async () => {
     const missing = nativeStatus(false);
     const installed = { ...nativeStatus(true), llamaBackend: 'vulkan' as const };
@@ -173,7 +181,7 @@ describe('BootstrapGate interactions', () => {
     await vi.waitFor(() => {
       const text = harness.text();
       expect(text.indexOf('Recommended — Download Chat Model')).toBeLessThan(
-        text.indexOf('Complete workshop set'),
+        text.indexOf('Complete set'),
       );
     });
     await chooseFirst(harness, 'Recommended — Download Chat Model');
@@ -188,7 +196,7 @@ describe('BootstrapGate interactions', () => {
     expect(client.pullRecognitionModel).not.toHaveBeenCalled();
   });
 
-  it('installs workshop helpers explicitly and visibly instead of as chat companions', async () => {
+  it('installs the complete set helpers explicitly and visibly instead of as chat companions', async () => {
     let finishReader: (() => void) | undefined;
     const client = createClient({
       listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
@@ -209,8 +217,8 @@ describe('BootstrapGate interactions', () => {
     });
     const harness = mountGate(client);
 
-    await vi.waitFor(() => expect(harness.text()).toContain('Complete workshop set'));
-    await chooseOption(harness, 'Complete workshop set', '2');
+    await vi.waitFor(() => expect(harness.text()).toContain('Complete set'));
+    await chooseOption(harness, 'Complete set', '2');
     await vi.waitFor(() => {
       expect(harness.text()).toContain('2/2 Reader');
       expect(harness.text()).toContain('25%');

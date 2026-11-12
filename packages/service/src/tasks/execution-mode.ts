@@ -1,6 +1,8 @@
 import {
+  type OutcomeReviewMode,
   type TaskCraftbook,
   type TaskExecutionMode,
+  type TaskReviewSetting,
   type TaskStrategy,
   type TaskStrategyOptions,
   type TaskStrategySetting,
@@ -8,6 +10,7 @@ import {
   executionModeForStrategy,
   outcomeRenderGap,
   renderCraftbookAsOutcome,
+  resolveOutcomeReview,
   withTerminalContractGate,
 } from '@bendyline/gezel';
 import { pinCraftbookOwner } from './craftbook-instantiation.js';
@@ -35,6 +38,10 @@ export interface ExecutionModeResolution {
   /** `auto`'s source: the model's measured strategy, or the tier rule. */
   source?: 'model' | 'tier';
   ownerGezelId?: string;
+  /** `config.taskReview`, for the review decision. */
+  reviewSetting?: TaskReviewSetting;
+  /** The review the owner's model was measured to gain from (`tuning.taskStrategy.review`). */
+  measuredReview?: OutcomeReviewMode;
   setting?: string;
   providerName?: string;
   tier?: string;
@@ -149,9 +156,21 @@ export async function applyExecutionMode(
     craftbook = withTerminalContractGate(craftbook);
     if (spawnsCraftbook) spawnsCraftbook = withTerminalContractGate(spawnsCraftbook);
   }
+  // A request that names a review keeps it; otherwise the book, the model
+  // and the install setting decide, after any fallback settled the strategy.
+  const review =
+    options?.review ??
+    resolveOutcomeReview({
+      setting: resolution.reviewSetting,
+      strategy,
+      contract: args.craftbook.contract,
+      measured: resolution.measuredReview,
+    });
   const strategyOptions =
     strategy === 'outcome'
-      ? options
+      ? options || review
+        ? { ...options, ...(review ? { review } : {}) }
+        : undefined
       : options?.contract
         ? { contract: options.contract }
         : undefined;
@@ -165,7 +184,7 @@ export async function applyExecutionMode(
   // Stable marker: the eval harness reads `resolved=`/`setting=`/`strategy=`
   // into its continuity facts. Keep the shape if you reword the rest.
   log.info(
-    `[tasks] ${args.ref} generalist-mode resolved=${mode} setting=${resolution.setting ?? 'auto'} provider=${resolution.providerName ?? 'unknown'} tier=${resolution.tier ?? 'unknown'} requested=${args.requested}${owner ? ` owner=${owner}` : ''} strategy=${strategy}${resolution.source ? ` source=${resolution.source}` : ''}${strategyOptions?.procedure ? ` procedure=${strategyOptions.procedure}` : ''}${strategyOptions?.contract ? ` contract=${strategyOptions.contract}` : ''}`,
+    `[tasks] ${args.ref} generalist-mode resolved=${mode} setting=${resolution.setting ?? 'auto'} provider=${resolution.providerName ?? 'unknown'} tier=${resolution.tier ?? 'unknown'} requested=${args.requested}${owner ? ` owner=${owner}` : ''} strategy=${strategy}${resolution.source ? ` source=${resolution.source}` : ''}${strategyOptions?.procedure ? ` procedure=${strategyOptions.procedure}` : ''}${strategyOptions?.contract ? ` contract=${strategyOptions.contract}` : ''}${strategyOptions?.review ? ` review=${strategyOptions.review}` : ''}`,
   );
   return {
     mode,

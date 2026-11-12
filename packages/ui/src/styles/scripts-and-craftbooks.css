@@ -83,7 +83,7 @@
 }
 
 .script-editor-banner--info {
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  background: color-mix(in srgb, var(--wash-tint) 8%, var(--panel));
 }
 
 .script-editor-banner--warn {
@@ -315,7 +315,7 @@
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border);
-  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  background: color-mix(in srgb, var(--wash-tint) 10%, var(--panel));
   /* Pills sit inside buttons, which default to white ink on the accent fill. */
   color: var(--text);
   white-space: nowrap;
@@ -380,7 +380,7 @@
 
 .new-script-template:hover:not(:disabled):not(.active) {
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
-  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  background: color-mix(in srgb, var(--wash-tint) 6%, var(--panel));
 }
 
 .new-script-template strong {
@@ -787,7 +787,7 @@
 
 .script-picker-item:hover:not(:disabled) {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  background: color-mix(in srgb, var(--wash-tint) 6%, var(--panel));
 }
 
 .script-picker-item-name {
@@ -896,7 +896,7 @@
 
 .gate-condition-add:hover:not(:disabled) {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  background: color-mix(in srgb, var(--wash-tint) 6%, var(--panel));
 }
 
 .gate-settings-link {

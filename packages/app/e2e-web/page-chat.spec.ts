@@ -94,7 +94,8 @@ test('fullscreen keeps navigation and each project restores its own page mode', 
   await page.getByRole('button', { name: 'Hide output pane', exact: true }).first().click();
   await expect.poll(async () => (await api.getProject(notes.id)).outputPaneVisible).toBe(false);
   await openProject(page, board.id);
-  const pane = page.locator('.project-output-pane');
+  // The pane on screen: a project left behind stays mounted, hidden (kept alive).
+  const pane = page.locator('.project-output-pane').filter({ visible: true });
   const iframe = pane.locator('iframe');
   const input = page
     .frameLocator('.project-output-pane iframe')

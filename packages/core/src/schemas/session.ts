@@ -340,6 +340,15 @@ export const ChatSessionSchema = z.object({
    */
   subagentFor: z.object({ taskRef: z.string(), ownerSessionId: z.string() }).optional(),
   /**
+   * A fresh-eyes review of an outcome task's deliverables: the session can
+   * read the work and its sources but change nothing. Its built-in tools are
+   * `REVIEW_FOCUS_BUILTIN_TOOLS` whatever the role, installed toolsets, app
+   * tools and project script tools are withheld, and the CLI providers run
+   * read-only. Telling the reviewer not to edit did not hold: in the counted
+   * review test every bug-fix reviewer changed a file.
+   */
+  reviewFocus: z.boolean().optional(),
+  /**
    * Set when this session belongs to an anonymous VISITOR of an app-serve
    * site, not to the signed-in user. Triggers at session build: (a) the
    * tool surface is stripped to nothing — no MCP toolsets, no script
@@ -869,6 +878,8 @@ export const TimelineMessageSchema = z.object({
    * this to render an inter-gezel handoff bubble.
    */
   from: z.object({ gezelId: z.string(), gezelName: z.string() }).optional(),
+  /** Mirrors `ChatMessage.relayedImages` — pictures a relayed reply carries. */
+  relayedImages: ChatMessageSchema.shape.relayedImages,
   /**
    * Mirrors `ChatMessage.nudge` — this user message was delivered from
    * the mid-turn queue as a nudge. The bubble renders a small chip.

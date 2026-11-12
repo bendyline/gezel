@@ -147,6 +147,17 @@ export const test = base.extend<TestFixtures, WorkerFixtures>({
     await use(daemon.baseURL);
   },
 
+  // The app keeps recently visited views mounted but hidden (KeepAliveHost),
+  // so Home's chat timeline is still in the page behind a project's. A test id
+  // names what a person sees: page-level lookups match only visible elements.
+  // A spec that means a hidden kept view says so with `page.locator`.
+  page: async ({ page }, use) => {
+    const getByTestId = page.getByTestId.bind(page);
+    page.getByTestId = ((testId: Parameters<typeof getByTestId>[0]) =>
+      getByTestId(testId).filter({ visible: true })) as typeof page.getByTestId;
+    await use(page);
+  },
+
   // Pre-seed auth + determinism into every context before the first navigation.
   context: async ({ context, daemon }, use) => {
     await context.addInitScript(

@@ -122,7 +122,7 @@
 
 .settings-nav-item-active {
   background: var(--selected-bg);
-  border-color: rgba(176, 114, 76, 0.28);
+  border-color: color-mix(in srgb, var(--wash-tint) 28%, transparent);
   color: var(--fg);
 }
 
@@ -149,7 +149,7 @@
   top: -0.15rem;
   bottom: -0.15rem;
   width: 1px;
-  background: rgba(176, 114, 76, 0.28);
+  background: color-mix(in srgb, var(--wash-tint) 28%, transparent);
 }
 /* Round off the first and last items in the group so the rail
    reads as a grouped bracket rather than an unterminated line. */
@@ -1817,8 +1817,8 @@ label.gz-setting-inline {
 
 .about-generating-banner {
   padding: 0.5rem 0.75rem;
-  background: rgba(176, 114, 76, 0.12);
-  border: 1px solid rgba(176, 114, 76, 0.3);
+  background: color-mix(in srgb, var(--wash-tint) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wash-tint) 30%, transparent);
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
   color: var(--text);
@@ -2599,7 +2599,7 @@ label.gz-setting-inline {
 
 .project-codex-mode-reviewed.gz-select-trigger {
   border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 9%, transparent);
 }
 
 .project-codex-mode-full.gz-select-trigger {

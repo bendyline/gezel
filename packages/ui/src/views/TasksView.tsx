@@ -17,15 +17,18 @@ import {
 import { api } from '../api.js';
 import { EmptyPlace } from '../components/EmptyPlace.js';
 import { TASK_STATUS_KEY_ORDER, TaskStatusKeys } from '../components/TaskStatusKeys.js';
+import { sameJson } from '../components/chat-timeline-helpers.js';
 import { useCompactLayout } from '../components/useCompactLayout.js';
 import {
   ViewLocationScope,
   useRestoredViewPart,
   useViewLocation,
 } from '../components/view-history/ViewHistoryContext.js';
+import { useApiRead } from '../data/use-api-read.js';
 import { DropdownChevron, DropdownMenu, Select } from '../primitives/index.js';
 import { onRadioKeyDown } from '../primitives/radio-keyboard.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
+import { setVisibleInterval } from '../visible-interval.js';
 import { TaskTabContent } from './TaskTabContent.js';
 import { NewTaskDialog, type TaskCreationMode } from './tasks/NewTaskDialog.js';
 
@@ -243,12 +246,16 @@ export interface TasksViewProps {
   projectId?: string;
 }
 
+const NO_PROJECTS: Project[] = [];
+const NO_GEZELS: GezelSummary[] = [];
+
 export function TasksView({ projectId }: TasksViewProps = {}) {
   const layoutRef = useRef<HTMLDivElement>(null);
   const compact = useCompactLayout(layoutRef, 640);
   const [showCompactDetail, setShowCompactDetail] = useState(false);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [gezels, setGezels] = useState<GezelSummary[]>([]);
+  // Shared reads: painted from memory when another view already asked.
+  const projects = useApiRead('listProjects', []).data?.projects ?? NO_PROJECTS;
+  const gezels = useApiRead('listGezels', []).data?.gezels ?? NO_GEZELS;
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projectFilter, setProjectFilter] = useState(projectId ?? '');
   const [statusFilter, setStatusFilter] = useState<'' | TaskStatus>('');
@@ -334,17 +341,6 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
     if (projectId !== undefined) setProjectFilter(projectId);
   }, [projectId]);
 
-  useEffect(() => {
-    api
-      .listProjects()
-      .then((r) => setProjects(r.projects))
-      .catch(() => {});
-    api
-      .listGezels()
-      .then((r) => setGezels(r.gezels))
-      .catch(() => {});
-  }, []);
-
   const refresh = useCallback(async () => {
     const version = ++requestVersion.current;
     try {
@@ -355,7 +351,8 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
         ? await api.listProjectTasks(projectFilter, filter)
         : await api.listTasks(filter);
       if (version !== requestVersion.current) return;
-      setTasks(res.tasks);
+      // A poll that changes nothing keeps the list the rows already show.
+      setTasks((prev) => (sameJson(prev, res.tasks) ? prev : res.tasks));
       setError(null);
     } catch (err) {
       if (version === requestVersion.current) setError((err as Error).message);
@@ -374,10 +371,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
   // Keep the list live without a manual Refresh button — poll on an
   // interval so status/assignee changes (from here, from chat, or from a
   // running agent) surface on their own.
-  useEffect(() => {
-    const id = window.setInterval(() => void refresh(), 4000);
-    return () => window.clearInterval(id);
-  }, [refresh]);
+  useEffect(() => setVisibleInterval(() => void refresh(), 4000), [refresh]);
 
   // Patch a single task in place when the detail panel edits it, so the
   // list reflects the change immediately instead of waiting for the next

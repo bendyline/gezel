@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { AlertDialog } from '../primitives/index.js';
+import { setVisibleInterval } from '../visible-interval.js';
 import { addedAppScopes, describeAppScope } from './app-scopes.js';
 import {
   approvalErrorMessage,
@@ -74,8 +75,8 @@ export function GrantConsentDialog() {
 
   useEffect(() => {
     void poll();
-    const t = window.setInterval(() => void poll(), POLL_INTERVAL_MS);
-    return () => window.clearInterval(t);
+    // Paused while the window is hidden; shown again, it checks at once.
+    return setVisibleInterval(() => void poll(), POLL_INTERVAL_MS);
   }, [poll]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: changing grants must reset transient form state

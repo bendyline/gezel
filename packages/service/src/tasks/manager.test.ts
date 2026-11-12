@@ -6,7 +6,7 @@ import { type CraftbookContract, executionModeForStrategy } from '@bendyline/gez
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
-import { TaskManager, stepOwnerGezelId } from './manager.js';
+import { type OutcomeReviewer, TaskManager, stepOwnerGezelId } from './manager.js';
 
 let home: string;
 let store: Store;
@@ -2867,6 +2867,76 @@ describe('TaskManager — task strategy and the book contract', () => {
     expect(task.craftbook.steps[0]!.assignee).toEqual({ kind: 'gezel', gezelId: 'gen-1' });
     expect(task.craftbook.steps[0]!.attemptCount).toBe(1);
     expect(task.craftbook.sourceSteps?.map((s) => s.id)).toEqual(['read', 'write', 'finish']);
+  });
+
+  describe('outcome review', () => {
+    const reviewTask = async (review?: 'self' | 'fresh') => {
+      contractBook();
+      tasks.setExecutionModeResolver(async ({ requested }) => ({
+        mode: 'generalist',
+        strategy: requested === 'auto' ? 'generalist' : requested,
+        ownerGezelId: 'gen-1',
+      }));
+      return tasks.create('website', {
+        title: 'Summarize',
+        craftbookId: 'summarize',
+        strategy: 'outcome',
+        strategyOptions: { procedure: 'none', ...(review ? { review } : {}) },
+      });
+    };
+
+    it('reviews once after the contract passes, holds for the fixes, then finishes', async () => {
+      const reviewer = vi.fn<OutcomeReviewer>(async () => ({
+        kind: 'hold' as const,
+        message: '1. fix it',
+      }));
+      tasks.setOutcomeReviewer(reviewer);
+      const task = await reviewTask('fresh');
+      await store.writeProjectWorkspaceFile('website', 'out/summary.md', 'x'.repeat(300));
+
+      const first = await tasks.completeStepChecked('website', task.num, 'outcome');
+      expect(first.status).toBe('held');
+      if (first.status !== 'held') throw new Error('expected a hold');
+      expect(first.gate.review).toBe('fresh');
+      expect(first.gate.message).toBe('1. fix it');
+      expect(first.task.status).toBe('active');
+      expect(reviewer).toHaveBeenCalledTimes(1);
+      expect(reviewer.mock.calls[0]![0]).toMatchObject({ round: 1, mode: 'fresh' });
+
+      const second = await tasks.completeStepChecked('website', task.num, 'outcome');
+      expect(second.status).toBe('advanced');
+      expect(second.task.status).toBe('complete');
+      expect(reviewer).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not review work the contract still rejects', async () => {
+      const reviewer = vi.fn(async () => ({ kind: 'hold' as const, message: 'x' }));
+      tasks.setOutcomeReviewer(reviewer);
+      const task = await reviewTask('self');
+      await store.writeProjectWorkspaceFile('website', 'out/summary.md', 'too short');
+      const held = await tasks.completeStepChecked('website', task.num, 'outcome');
+      expect(held.status).toBe('held');
+      if (held.status !== 'held') throw new Error('expected a hold');
+      expect(held.gate.review).toBeUndefined();
+      expect(reviewer).not.toHaveBeenCalled();
+    });
+
+    it('finishes without a review when none was asked for, or when the review fails to run', async () => {
+      const reviewer = vi.fn(async () => {
+        throw new Error('engine gone');
+      });
+      tasks.setOutcomeReviewer(reviewer);
+      const plain = await reviewTask();
+      await store.writeProjectWorkspaceFile('website', 'out/summary.md', 'x'.repeat(300));
+      const done = await tasks.completeStepChecked('website', plain.num, 'outcome');
+      expect(done.status).toBe('advanced');
+      expect(reviewer).not.toHaveBeenCalled();
+
+      const reviewed = await reviewTask('fresh');
+      const passed = await tasks.completeStepChecked('website', reviewed.num, 'outcome');
+      expect(passed.status).toBe('advanced');
+      expect(reviewer).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('refuses an explicit outcome request on a book with no contract', async () => {

@@ -16,11 +16,20 @@
  * `info`/`debug`, matching Node's defaults so log aggregators that split
  * streams keep working. Result-oriented commands can temporarily select the
  * `stderr` destination so their stdout remains a machine-readable data
- * channel.
+ * channel. A host that keeps records out of the terminal altogether (the CLI
+ * running the service in its own process) installs a sink with `setLogSink`.
  */
 
 export type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug';
 export type LogOutput = 'split' | 'stderr';
+
+export interface LogRecord {
+  level: Exclude<LogLevel, 'silent'>;
+  name: string;
+  /** The formatted line, timestamp and level included, with any extra arguments appended. */
+  line: string;
+}
+export type LogSink = (record: LogRecord) => void;
 
 export interface Logger {
   readonly name: string;
@@ -73,11 +82,18 @@ const environment = typeof process === 'undefined' ? undefined : process.env;
 // defaults; the environment is what it copies from its parent. Without this a
 // `gezel run` reply on stdout carried an embedding worker's info line.
 const OUTPUT_ENV = 'GEZEL_LOG_OUTPUT';
+// A sink cannot cross into a worker or a child process. They inherit this
+// instead and keep to errors, so a host that took records off the terminal
+// does not get them back from its workers and MCP children.
+const SINK_ENV = 'GEZEL_LOG_SINK';
 
 interface LogState {
   level: LogLevel;
   debugAllow: Set<string> | '*' | null;
   output: LogOutput;
+  sink?: LogSink | null;
+  /** A parent thread or process holds a sink this one cannot reach. */
+  sinkElsewhere?: boolean;
 }
 
 // Each entry point of this package bundles its own copy of this module, and a
@@ -93,6 +109,8 @@ function sharedLogState(): LogState {
       level: parseLevel(environment?.GEZEL_LOG_LEVEL) ?? 'info',
       debugAllow: parseNamespaceAllowList(environment?.GEZEL_LOG_DEBUG),
       output: environment?.[OUTPUT_ENV] === 'stderr' ? 'stderr' : 'split',
+      sink: null,
+      sinkElsewhere: environment?.[SINK_ENV] === '1',
     };
     holder[STATE_KEY] = existing;
   }
@@ -128,6 +146,26 @@ export function setLogOutput(output: LogOutput): void {
   else delete environment[OUTPUT_ENV];
 }
 
+export function getLogSink(): LogSink | null {
+  return state.sink ?? null;
+}
+
+/**
+ * Send every record that passes the level gate to `sink` instead of the
+ * process streams; `null` restores the streams. Like `setLogOutput`, the
+ * caller restores the previous sink when its scoped operation completes.
+ * Workers and child processes started while a sink is set write only errors,
+ * to stderr. Calling this in such a process (`null` included) gives it back
+ * its own output.
+ */
+export function setLogSink(sink: LogSink | null): void {
+  state.sink = sink;
+  state.sinkElsewhere = false;
+  if (!environment) return;
+  if (sink) environment[SINK_ENV] = '1';
+  else delete environment[SINK_ENV];
+}
+
 /**
  * Override the per-namespace debug allow-list. Pass `null` to clear.
  * Mainly used by tests; production callers set `GEZEL_LOG_DEBUG`.
@@ -145,7 +183,32 @@ function shouldEmit(level: Exclude<LogLevel, 'silent'>, name: string): boolean {
 }
 
 function format(level: Exclude<LogLevel, 'silent'>, name: string, message: string): string {
-  return `${new Date().toISOString()} ${LEVEL_LABEL[level]} [${name}] ${message}`;
+  return `${new Date().toISOString()} ${LEVEL_LABEL[level]} [${name}] ${withoutOwnTag(name, message)}`;
+}
+
+// Many call sites still open the message with their logger's own tag
+// (`log.info('[tasks] …')` on `createLogger('tasks')`), which printed it twice.
+function withoutOwnTag(name: string, message: string): string {
+  const tag = `[${name}] `;
+  return message.startsWith(tag) ? message.slice(tag.length) : message;
+}
+
+function describeLogArgument(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value instanceof Error) return value.stack ?? `${value.name}: ${value.message}`;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function deliverToSink(sink: LogSink, record: LogRecord): void {
+  try {
+    sink(record);
+  } catch {
+    /* a failing sink must not break the caller that logged */
+  }
 }
 
 /**
@@ -201,6 +264,13 @@ function emit(
 ): void {
   if (!shouldEmit(level, name)) return;
   const line = format(level, name, message);
+  const recordSink = state.sink;
+  if (recordSink) {
+    const full = rest.length === 0 ? line : `${line} ${rest.map(describeLogArgument).join(' ')}`;
+    deliverToSink(recordSink, { level, name, line: full });
+    return;
+  }
+  if (state.sinkElsewhere && level !== 'error') return;
   const useStderr = state.output === 'stderr' || level === 'warn' || level === 'error';
   if (typeof process === 'undefined' || !process.stdout || !process.stderr) {
     // Browser and native webview hosts share the same logger and level gate.

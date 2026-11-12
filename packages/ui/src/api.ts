@@ -10,14 +10,11 @@ import type {
 } from '@bendyline/gezel';
 import { GezelClient } from '@bendyline/gezel-client';
 import type { ReactNode } from 'react';
+import { installApiReads } from './data/api-reads.js';
+import { watchProductChangeEvents, withReadInvalidation } from './data/invalidation.js';
 import { readAppSurface, withAppSurface } from './embedded/app-surface.js';
 import type { HostHtmlPreview, HostHtmlPreviewRequest } from './html-preview-host.js';
 import { instrumentFetch, setPerfReportSink } from './nav-timing.js';
-import {
-  installSharedApiReads,
-  invalidateApiReads,
-  withReadInvalidation,
-} from './shared-api-reads.js';
 import { SIGNED_OUT_EVENT, TOKEN_STORAGE_KEY, isSignedOutResponse } from './sign-in/gate.js';
 
 /**
@@ -509,17 +506,8 @@ export const api = new GezelClient({
     instrumentFetch(watchSignedOut(appSurface ? withAppSurface(baseFetch, appSurface) : baseFetch)),
   ),
 });
-installSharedApiReads(api);
-for (const event of [
-  'gezel:config-updated',
-  'gezel:project-created',
-  'gezel:project-updated',
-  'gezel:project-deleted',
-  'gezel:gezel-updated',
-  'gezel:gezel-deleted',
-]) {
-  window.addEventListener(event, invalidateApiReads);
-}
+installApiReads(api);
+watchProductChangeEvents();
 
 if (window.__GEZEL__?.capabilities?.perfReports !== false) {
   setPerfReportSink((report) => {

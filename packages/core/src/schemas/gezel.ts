@@ -322,6 +322,8 @@ export type GezelFrontmatter = z.infer<typeof GezelFrontmatterSchema>;
  */
 export const GezelSectionSchema = z.object({
   heading: z.string(),
+  /** Heading depth (1–6). Absent means `##`, the level serialization writes by default. */
+  level: z.number().int().min(1).max(6).optional(),
   template: z.string().optional(),
   params: z.record(z.string(), z.string()).optional(),
   body: z.string(),
@@ -808,6 +810,20 @@ const ChatMessageObject = z.object({
    * the task made on the way. Always also present in `referencedFiles`.
    */
   deliverable: TaskDeliverableSchema.optional(),
+  /**
+   * Pictures another gezel made in the turn this message relays (a
+   * delegation's reply). The reply's words reach the sender's chat, but the
+   * pictures belong to the recipient's tool calls, so without this the person
+   * saw them only in the recipient's thread while the sender's model, given
+   * no path, invented a link. `projectId` names the project whose artifacts
+   * hold them: the recipient's, which a cross-project delegation does not share.
+   */
+  relayedImages: z
+    .object({
+      projectId: z.string(),
+      images: z.array(ToolCallImageSchema).min(1),
+    })
+    .optional(),
   /**
    * The artifact-only projection of {@link referencedFiles}, still
    * written so an older `@bendyline/gezel-cli` (or any out-of-tree

@@ -27,4 +27,4 @@ When Gezel produces something that is an "accessory" to your files — a report,
 
 ## The default project
 
-Not everything needs ceremony. Chats that don't belong anywhere in particular live in the built-in **default project** — a catch-all workbench that's always there.
+Not everything needs ceremony. Chats that don't belong anywhere in particular live in the built-in **default project** — a catch-all that's always there.

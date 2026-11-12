@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -343,8 +344,27 @@ describe('content pack parity — fixture catalog', () => {
   });
 });
 
-describe('content pack parity — the pinned gilde community tier', () => {
-  const community = join(gildeDataDir(), 'community');
+const pinnedCommunity = join(gildeDataDir(), 'community');
+// Gilde publishes the tier packed from the release after 0.3.8; an earlier pin
+// ships it loose, and then this suite packs it here and compares.
+const pinnedPacked = existsSync(join(pinnedCommunity, CONTENT_PACK_FILENAME));
+
+describe.runIf(pinnedPacked)('the pinned gilde community tier ships packed', () => {
+  it('holds only its pack, and lists and resolves toolsets through it', async () => {
+    expect(await readdir(pinnedCommunity)).toEqual([CONTENT_PACK_FILENAME]);
+    const source = new CommunitySource(pinnedCommunity);
+    const listed = await source.list('toolset');
+    expect(listed.length).toBeGreaterThan(1_000);
+    const step = Math.max(1, Math.floor(listed.length / 300));
+    for (let i = 0; i < listed.length; i += step) {
+      const id = listed[i]!.manifest.id;
+      expect((await source.get('toolset', id))?.manifest.id).toBe(id);
+    }
+  }, 300_000);
+});
+
+describe.skipIf(pinnedPacked)('content pack parity — the pinned gilde community tier', () => {
+  const community = pinnedCommunity;
   let work: string;
   let packedRoot: string;
 

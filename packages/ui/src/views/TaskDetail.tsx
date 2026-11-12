@@ -34,6 +34,7 @@ import { TaskOutputsList } from '../components/TaskOutputsList.js';
 import { TaskStatusKeys } from '../components/TaskStatusKeys.js';
 import { TaskStepPanel } from '../components/TaskStepPanel.js';
 import { TaskStepTracker } from '../components/TaskStepTracker.js';
+import { RenderedMarkdown } from '../components/chat-bubbles.js';
 import { markdownEquivalent } from '../components/markdown-baseline.js';
 import { navigateToTab, openProjectFileActions, runNavActions } from '../components/nav-actions.js';
 import { TransformToolbarButton } from '../components/transform/TransformToolbarButton.js';
@@ -987,25 +988,27 @@ export function TaskDetail({
                       )}
                     </header>
                     <div className="task-note-body">
-                      <EditorShell
-                        {...GEZEL_WRITE_CANVAS}
-                        ariaLabel="Task note"
-                        key={editing ? `edit-${n.id}` : n.id}
-                        initialMarkdown={n.text}
-                        readOnly={!editing}
-                        onChange={
-                          editing
-                            ? (source) => {
-                                editDraftRef.current = source;
-                              }
-                            : undefined
-                        }
-                        colorScheme={editorTheme}
-                        showPlayTab={false}
-                        showStatusBar={editing}
-                        height="auto"
-                        fullWidth
-                      />
+                      {/* Only the note being edited gets an editor. A rich
+                          editor per note made a long task's notes slow to
+                          open; the rest read as rendered documents. */}
+                      {editing ? (
+                        <EditorShell
+                          {...GEZEL_WRITE_CANVAS}
+                          ariaLabel="Task note"
+                          key={`edit-${n.id}`}
+                          initialMarkdown={n.text}
+                          onChange={(source) => {
+                            editDraftRef.current = source;
+                          }}
+                          colorScheme={editorTheme}
+                          showPlayTab={false}
+                          showStatusBar
+                          height="auto"
+                          fullWidth
+                        />
+                      ) : (
+                        <RenderedMarkdown markdown={n.text} register="report" />
+                      )}
                     </div>
                     {editing && (
                       <div className="task-note-edit-actions">

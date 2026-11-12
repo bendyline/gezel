@@ -4,6 +4,7 @@ import type {
   ProjectTypeUpgradePlan,
 } from '@bendyline/gezel';
 import { useState } from 'react';
+import { apiErrorMessage } from '../../api-error.js';
 import { api } from '../../api.js';
 import { SettingField } from '../../components/SettingsSection.js';
 import { useBuilderView } from '../../components/useBuilderView.js';
@@ -139,7 +140,7 @@ export function ProjectTypeUpdateDialog({
       onUpdated(applied);
       onOpenChange(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(apiErrorMessage(err));
     } finally {
       setBusy(false);
     }

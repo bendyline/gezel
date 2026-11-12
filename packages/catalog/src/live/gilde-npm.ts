@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs';
 import { mkdir, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { HttpStatusError, retryTransient } from '@bendyline/gezel';
-import { collapseToContentPack } from '../content-pack.js';
+import { CONTENT_PACK_FILENAME, collapseToContentPack } from '../content-pack.js';
 import {
   DEFAULT_NPM_REGISTRY,
   downloadTarball,
@@ -192,12 +192,13 @@ export async function stageGildeVersion(opts: {
       expectedVersion: release.version,
     });
     const community = join(packageDir, 'data', 'community');
-    if (
-      await stat(community).then(
-        (st) => st.isDirectory(),
+    const exists = (path: string) =>
+      stat(path).then(
+        () => true,
         () => false,
-      )
-    ) {
+      );
+    // Gilde publishes the tier already packed; older releases ship it loose.
+    if ((await exists(community)) && !(await exists(join(community, CONTENT_PACK_FILENAME)))) {
       await collapseToContentPack(community);
     }
     return { packageDir };

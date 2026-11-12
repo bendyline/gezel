@@ -4,6 +4,7 @@ import {
   SCORECARD,
   type ScorecardDataset,
   catalogGroundFor,
+  docbenchRowsFor,
   measuredClaim,
   measuredResultFor,
   measuredRowsFor,
@@ -320,14 +321,15 @@ function modelCatalogMarkdown(
     '',
     `## Chat models (${chat.length})`,
     '',
-    'The models Gezel thinks and writes with, recommended first. **Measured** is the share of tasks the model (or another build of it) passed in its most recent full [scorecard](model-scorecard) round, preferring the general set, with the machine that round ran on. Follow it to every round on the model’s page. Rounds are not comparable with each other, and a number from a workstation is not a promise about a laptop.',
+    'The models Gezel thinks and writes with, recommended first. **Measured** is the share of tasks the model (or another build of it) passed in its most recent full [scorecard](model-scorecard) round, preferring the general set, with the machine that round ran on. Follow it to every round on the model’s page. Rounds are not comparable with each other, and a number from a workstation is not a promise about a laptop. **Docbench** is the build’s score from 0 to 100 on DocBlocks’ document work (review, writing, diagrams, slides, study aids) in its newest [docbench](docbench) round.',
     '',
-    '| Model | Measured | Size | Context | Tools | Best for | Runs on | License |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| Model | Measured | Docbench | Size | Context | Tools | Best for | Runs on | License |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...chat.map((m) =>
       row([
         `[${cell(m.name)}](model/${m.id})`,
         measuredCell(scorecard, m.id),
+        docbenchCell(scorecard, m.id),
         formatGB(m.approxSizeBytes),
         formatContext(m.contextWindow),
         m.supportsTools === false ? 'No' : 'Yes',
@@ -384,6 +386,84 @@ function measuredCell(scorecard: ScorecardDataset, modelId: string): string {
   const measured = measuredResultFor(scorecard, modelId);
   if (!measured) return 'Not yet';
   return `[${cell(measuredClaim(measured))}](model/${modelId}#measured-results)`;
+}
+
+/**
+ * The catalog table's Docbench cell: this exact build's newest score, linked
+ * to the page section with its range and family scores. A quant's score is
+ * its own, so sibling builds never stand in.
+ */
+function docbenchCell(scorecard: ScorecardDataset, modelId: string): string {
+  const latest = docbenchRowsFor(scorecard, modelId)[0];
+  if (!latest) return 'Not yet';
+  return `[${Math.round(latest.docbench.score)}](model/${modelId}#docbench)`;
+}
+
+/** docbench families in the pack's order, in reader terms. */
+const DOCBENCH_FAMILY_LABELS: ReadonlyArray<readonly [string, string]> = [
+  ['review', 'Review and feedback'],
+  ['writing', 'Writing new content'],
+  ['visuals', 'Diagrams and illustrations'],
+  ['presentations', 'Presentations'],
+  ['study', 'Study aids'],
+  ['narration', 'Narration cleanup'],
+];
+
+/**
+ * A model page's "Docbench" section: the newest round's score for this
+ * build with its range, band and family scores, and earlier rounds as one
+ * line each. Empty when the build has never been measured, so untested
+ * pages do not grow a placeholder heading.
+ */
+export function docbenchResultsMarkdown(scorecard: ScorecardDataset, modelId: string): string[] {
+  const rows = docbenchRowsFor(scorecard, modelId);
+  const latest = rows[0];
+  if (!latest) return [];
+  const { docbench, result, run } = latest;
+  const whole = (value: number) => String(Math.round(value));
+  const range = (ci: readonly [number, number]) => `${whole(ci[0])}–${whole(ci[1])}`;
+  const engine = SCORECARD_ENGINE_LABELS[result.engine] ?? result.engine;
+  const lines = [
+    '## Docbench',
+    '',
+    `How well this build does DocBlocks’ document work, judged from 0 to 100 in the [docbench](docbench) ${run.scope === 'subset' ? 'focused re-run' : 'round'} of ${run.provenance.startedAt.slice(0, 10)} on ${engine}: **${whole(docbench.score)}** (95% range ${range(docbench.ci)}, band ${docbench.band}). DocBlocks could use ${Math.round(docbench.usableRate * 100)}% of its answers.`,
+    '',
+    '| Group | Score | 95% range |',
+    '| --- | --- | --- |',
+  ];
+  const known = new Set(DOCBENCH_FAMILY_LABELS.map(([id]) => id));
+  const families = [
+    ...DOCBENCH_FAMILY_LABELS,
+    ...Object.keys(docbench.families)
+      .filter((id) => !known.has(id))
+      .map((id) => [id, id] as const),
+  ];
+  for (const [id, label] of families) {
+    const family = docbench.families[id];
+    if (family) lines.push(row([label, whole(family.score), range(family.ci)]));
+  }
+  const findings = docbench.tasks['review-general']?.findings;
+  if (findings) {
+    const one = (value: number) => value.toFixed(1);
+    lines.push(
+      '',
+      `In general review it found, per document, ${one(findings.low)} small fixes, ${one(findings.medium)} moderate changes and ${one(findings.high)} substantial ones, and added ${one(findings.trivial)} trivial and ${one(findings.wrong)} wrong suggestions.`,
+    );
+  }
+  if (rows.length > 1) {
+    lines.push(
+      '',
+      'Earlier results for this build, measured before the one above under their own round’s tests, reviewer and Gezel version:',
+      '',
+      ...rows
+        .slice(1)
+        .map(
+          (earlier) =>
+            `- ${earlier.run.provenance.startedAt.slice(0, 10)}, pack ${earlier.docbench.packVersion}: ${whole(earlier.docbench.score)}`,
+        ),
+    );
+  }
+  return lines;
 }
 
 /** Engine ids as the scorecard records them, in reader terms. */
@@ -492,6 +572,8 @@ function chatModelMarkdown(m: ChatModelManifest, scorecard: ScorecardDataset): s
     '',
     ...measuredResultsMarkdown(scorecard, m.id),
   ];
+  const docbench = docbenchResultsMarkdown(scorecard, m.id);
+  if (docbench.length > 0) lines.push('', ...docbench);
   const more = [
     m.upstream ? `[The model’s own page](${m.upstream})` : '',
     '[Every model](model-catalog)',

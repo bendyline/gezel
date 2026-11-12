@@ -1,5 +1,10 @@
 import { hardwareSummary, scoreModel, scorecardMemoryCoverage } from './report.js';
-import type { ScorecardDataset, ScorecardModelResult, ScorecardRun } from './schema.js';
+import {
+  DOCBENCH_SUITE_ID,
+  type ScorecardDataset,
+  type ScorecardModelResult,
+  type ScorecardRun,
+} from './schema.js';
 
 /**
  * Every recorded result as one flat CSV: a row per run × suite × model ×
@@ -242,11 +247,17 @@ function scorecardCsvFields(run: ScorecardRun, result: ScorecardModelResult): Sc
   };
 }
 
-/** Every result, newest sweep first, then by suite, model, and engine. */
+/**
+ * Every pass-rate result, newest sweep first, then by suite, model, and
+ * engine. docbench rows are judged quality scores whose cells count usable
+ * replies, not passes, so they stay out of a file whose columns read as pass
+ * rates; the handboek renders them in their own table.
+ */
 export function scorecardCsvRows(dataset: ScorecardDataset): ScorecardCsvRow[] {
   const runs = new Map(dataset.runs.map((run) => [run.id, run]));
   return dataset.results
     .flatMap((result) => {
+      if (result.suiteId === DOCBENCH_SUITE_ID) return [];
       const run = runs.get(result.runId);
       return run ? [{ run, result }] : [];
     })

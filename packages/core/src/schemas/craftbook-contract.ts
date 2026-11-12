@@ -106,6 +106,12 @@ const CraftbookContractObject = z
     deliverables: z.array(ContractDeliverableSchema).min(1),
     criteria: z.array(ContractCriterionSchema).min(1),
     grounding: ContractGroundingSchema.optional(),
+    /**
+     * Whether a review after the contract checks pass suits this book's work.
+     * Absent: decided by the primary deliverables' kind
+     * ({@link contractSuitsReview}). Set it only where that answer is wrong.
+     */
+    reviewable: z.boolean().optional(),
   })
   .superRefine((contract, ctx) => {
     const seen = new Set<string>();
@@ -173,4 +179,38 @@ export function contractAsksForGrounding(contract: CraftbookContract | undefined
   if (!contract) return false;
   if (contract.grounding) return true;
   return contract.criteria.some((c) => c.checks?.some((check) => check.kind === 'claimsGrounded'));
+}
+
+/**
+ * Deliverable kinds a review improves: work made of claims a reader has to
+ * trust. In the counted review test (evals/runs/review-counted-2026-11-11)
+ * reviews changed 65 of about 130 reviewed trials of books whose primary
+ * deliverable was a report, document or spec, 52 for the better and 9 for
+ * the worse, audits included. On code, data files and the deck they changed
+ * 5 of about 60, 2 better and 3 worse: a contract check already verifies
+ * that work, and a reviewer there mostly re-edits code. Notes and security
+ * reports were not measured; they are listed as the same kind of work.
+ */
+export const REVIEW_SUITED_DELIVERABLE_KINDS: ReadonlySet<string> = new Set([
+  'markdown-report',
+  'markdown-doc',
+  'markdown-notes',
+  'yaml-spec',
+  'security-report',
+]);
+
+/**
+ * True when a review after the contract checks pass suits a book's work: the
+ * book says so (`reviewable`), else one of its primary deliverables is a
+ * kind in {@link REVIEW_SUITED_DELIVERABLE_KINDS}. A book without a contract
+ * has nothing to review against.
+ */
+export function contractSuitsReview(
+  contract: Pick<CraftbookContract, 'deliverables' | 'reviewable'> | undefined,
+): boolean {
+  if (!contract) return false;
+  if (contract.reviewable !== undefined) return contract.reviewable;
+  return contract.deliverables.some(
+    (d) => deliverableRole(d) === 'primary' && REVIEW_SUITED_DELIVERABLE_KINDS.has(d.kind),
+  );
 }

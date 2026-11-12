@@ -38,6 +38,7 @@
     "test:e2e:page-components": "playwright test --config playwright.page-components.config.ts --reporter=line",
     "test:e2e:catalog-apps": "playwright test --config playwright.catalog-apps.config.ts --reporter=line",
     "test:e2e:visual": "playwright test --config playwright.visual.config.ts",
+    "test:perf": "playwright test --config playwright.perf.config.ts",
     "package": "pnpm run build:packaged && electron-builder --publish never",
     "package:mac": "pnpm run build:packaged && electron-builder --mac --publish never",
     "package:win": "pnpm run build:packaged && node scripts/package-win.mjs",

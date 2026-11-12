@@ -96,4 +96,67 @@ describe('LocalVideoProvider', () => {
       /'nope' is not available locally/,
     );
   });
+
+  it('never stops an engine while its render is running', async () => {
+    const { local, diffusers, sdCpp } = setup();
+    let finishDiffusers!: () => void;
+    const diffusersRender = diffusers.provider.generate;
+    diffusers.provider.generate = async (input) => {
+      await new Promise<void>((resolve) => {
+        finishDiffusers = resolve;
+      });
+      return diffusersRender(input);
+    };
+    const long = local.generate({ prompt: 'long', model: 'ltx-2.3-22b' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const statuses: string[] = [];
+    const animate = local.generate({
+      prompt: 'animate',
+      model: 'wan2.2-ti2v-5b-q4',
+      onStatus: (message) => statuses.push(message),
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(diffusers.stops()).toBe(0);
+    expect(sdCpp.calls).toHaveLength(0);
+    expect(statuses).toEqual(['Waiting for another video to finish…']);
+
+    finishDiffusers();
+    await long;
+    await animate;
+    expect(diffusers.stops()).toBe(1);
+    expect(sdCpp.calls[0]?.prompt).toBe('animate');
+  });
+
+  it('leaves the queue when canceled and keeps later renders in order', async () => {
+    const { local, diffusers, sdCpp } = setup();
+    let finishFirst!: () => void;
+    const diffusersRender = diffusers.provider.generate;
+    diffusers.provider.generate = async (input) => {
+      if (input.prompt === 'first') {
+        await new Promise<void>((resolve) => {
+          finishFirst = resolve;
+        });
+      }
+      return diffusersRender(input);
+    };
+    const first = local.generate({ prompt: 'first', model: 'ltx-2.3-22b' });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const controller = new AbortController();
+    const canceled = local.generate({
+      prompt: 'canceled',
+      model: 'wan2.2-ti2v-5b-q4',
+      signal: controller.signal,
+    });
+    const third = local.generate({ prompt: 'third', model: 'wan2.2-ti2v-5b-q4' });
+    controller.abort();
+    await expect(canceled).rejects.toMatchObject({ code: 'video_generation_cancelled' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(sdCpp.calls).toHaveLength(0);
+    expect(diffusers.stops()).toBe(0);
+
+    finishFirst();
+    await first;
+    await third;
+    expect(sdCpp.calls.map((c) => c.prompt)).toEqual(['third']);
+  });
 });

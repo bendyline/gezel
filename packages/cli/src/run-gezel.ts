@@ -35,6 +35,30 @@ export async function resolveRunGezel(
   throw new CliError(`No crew member matches "${ref}". Run \`gezel agent list\` to see your crew.`);
 }
 
+/**
+ * Resolve the crew member an `agent` subcommand names: the exact id first,
+ * then a name, ignoring case. Stricter than {@link resolveRunGezel} (no roles
+ * or prefixes), because these commands show or change one crew member's own
+ * settings. WHY: `gezel agent show "Rosa Writer"` sent the name to the daemon
+ * as an id and answered "invalid entity id" (2026-11-11 npm ship audit).
+ */
+export async function resolveCrewMember(
+  client: Pick<GezelClient, 'listGezels'>,
+  ref: string,
+): Promise<string> {
+  const wanted = ref.trim();
+  const { gezels } = await client.listGezels();
+  const byId = gezels.find((gezel) => gezel.id === wanted);
+  if (byId) return byId.id;
+  const query = wanted.toLowerCase();
+  const sameName = gezels.filter((gezel) => gezel.name.trim().toLowerCase() === query);
+  if (sameName.length === 1) return sameName[0]!.id;
+  if (sameName.length > 1) throw ambiguous(ref, sameName);
+  throw new CliError(
+    `No crew member with the id or name "${ref}". Run \`gezel agent list\` to see your crew.`,
+  );
+}
+
 function ambiguous(ref: string, candidates: ReadonlyArray<{ id: string; name: string }>): CliError {
   const listed = candidates.map((gezel) => `${gezel.name} (${gezel.id})`).join(', ');
   return new CliError(

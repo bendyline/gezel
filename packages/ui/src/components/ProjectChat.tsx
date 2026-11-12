@@ -2,8 +2,9 @@ import type { GezelSummary, ProjectDetail, Task } from '@bendyline/gezel';
 import { displayName, isCodingProject, isTaskOrCraftbookSession } from '@bendyline/gezel';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { refreshRead } from '../data/api-reads.js';
+import { useApiRead } from '../data/use-api-read.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
-import { peekApiRead } from '../shared-api-reads.js';
 import { ChatComposer } from './ChatComposer.js';
 import { ChatPillRow } from './ChatPillRow.js';
 import { ChatReferences } from './ChatReferences.js';
@@ -53,6 +54,8 @@ interface LastThread {
   lastHumanActivityAt?: string;
 }
 
+const NO_GEZELS: GezelSummary[] = [];
+
 /**
  * Per-project chat with the people doing the work. The selected gezel scopes
  * the composer; the timeline shows ALL chats in the project interleaved.
@@ -71,34 +74,31 @@ export function ProjectChat({
   project: ProjectDetail;
   compact?: boolean;
 }) {
-  const [gezels, setGezels] = useState<GezelSummary[]>(
-    () => peekApiRead('listGezels')?.gezels ?? [],
-  );
+  // The shared roster read paints the first frame from memory when it can.
+  const roster = useApiRead('listGezels', []);
+  const gezels = roster.data?.gezels ?? NO_GEZELS;
   // Has the roster ever come back? Distinguishes "this project has nobody"
   // from "we haven't asked yet" — without it the empty state renders on the
-  // first frame of every project switch. Monotonic on purpose: the refetch
-  // below also fires on roster/voorman changes, and blanking the pane for
-  // those would trade one flash for another.
-  const [gezelsLoaded, setGezelsLoaded] = useState(() => peekApiRead('listGezels') !== undefined);
+  // first frame of every project switch. A kept answer stays while the
+  // roster is read again, so a refresh never blanks the pane.
+  const gezelsLoaded = roster.data !== undefined || roster.error != null;
   const [selectedId, setSelectedId] = useState<string>('');
+  // The gezel whose initial thread selection must stay blank, because
+  // nothing fresh was there to resume. Cleared the moment the user picks a
+  // recipient themselves — an explicit choice gets the ordinary
+  // newest-thread behavior.
+  const [startFreshFor, setStartFreshFor] = useState<string | null>(null);
 
-  // Refetch the global gezel list whenever the project — or its
-  // lead/roster — changes. `ProjectChat` stays MOUNTED across project
-  // switches (only the `project` prop changes), so a mount-only (`[]`)
-  // fetch goes stale: a game you just created mints a fresh opponent that
-  // never appears here, and `soloLead` can't find the project's real
-  // voorman (it falls back to `gezels[0]` — the wrong character in the
-  // chip). Keying on the voorman/roster also catches a gezel created for
-  // THIS project moments ago.
+  // Read the roster again whenever the project — or its lead/roster —
+  // changes. `ProjectChat` stays MOUNTED across project switches (only the
+  // `project` prop changes), so a mount-only read goes stale: a game you
+  // just created mints a fresh opponent that never appears here, and
+  // `soloLead` can't find the project's real voorman (it falls back to
+  // `gezels[0]` — the wrong character in the chip). Keying on the
+  // voorman/roster also catches a gezel created for THIS project moments ago.
   // biome-ignore lint/correctness/useExhaustiveDependencies: project identity and roster fields are deliberate refetch triggers.
   useEffect(() => {
-    api
-      .listGezels()
-      .then((r) => {
-        setGezels(r.gezels);
-        setGezelsLoaded(true);
-      })
-      .catch(() => setGezelsLoaded(true));
+    refreshRead('listGezels', []);
   }, [project.id, project.voormanGezelId, (project.gezelIds ?? []).join(',')]);
 
   // Reset the composer selection when the project changes. Without this,
@@ -107,8 +107,13 @@ export function ProjectChat({
   // shows checkers while the chat is still addressed to Owen, with his
   // project's placeholder. Clearing lets the default-selection effect
   // below pick THIS project's lead.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: project.id is the deliberate reset trigger.
+  // Only a real change of project resets: a project kept alive while hidden
+  // runs this effect again when shown, and clearing the pick then remounted
+  // the whole chat (docs/ui-architecture.md, "Kept alive").
+  const resetForProject = useRef(project.id);
   useEffect(() => {
+    if (resetForProject.current === project.id) return;
+    resetForProject.current = project.id;
     setSelectedId('');
     setStartFreshFor(null);
   }, [project.id]);
@@ -152,11 +157,6 @@ export function ProjectChat({
     };
   }, [project.id]);
 
-  // The gezel whose initial thread selection must stay blank, because
-  // nothing fresh was there to resume. Cleared the moment the user picks a
-  // recipient themselves — an explicit choice gets the ordinary
-  // newest-thread behavior.
-  const [startFreshFor, setStartFreshFor] = useState<string | null>(null);
   const selectGezel = useCallback((gezelId: string) => {
     setStartFreshFor(null);
     setSelectedId(gezelId);

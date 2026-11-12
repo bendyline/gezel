@@ -19,6 +19,7 @@ import type { Store } from '../fs/store.js';
 import { resolveDefaultProviderName } from '../providers/default-provider.js';
 import { ensureCommandApprovalQuestions } from '../workspace/scripts.js';
 import { loadTaskOutputs } from './completion-wrapup.js';
+import type { ExecutionModeResolver } from './execution-mode.js';
 import { reviewTaskFigures } from './figure-review.js';
 import { type TaskManager, stepOwnerGezelId } from './manager.js';
 import { ownerStepQuestion } from './owner-step.js';
@@ -148,7 +149,12 @@ export async function wireTaskCreation({
       }),
     };
   };
-  tasks.setExecutionModeResolver(async ({ projectId, assigneeGezelId, nightShift, requested }) => {
+  const resolveStrategy: ExecutionModeResolver = async ({
+    projectId,
+    assigneeGezelId,
+    nightShift,
+    requested,
+  }) => {
     const config = await store.readConfig();
     const setting = effectiveGeneralistModeSetting(config);
     const strategySetting =
@@ -221,6 +227,30 @@ export async function wireTaskCreation({
       }
     }
     return { mode: 'generalist', ownerGezelId: generalist.gezelId, ...base };
+  };
+  // An outcome task's review is read for the model its owner will run on,
+  // whichever way the strategy was chosen. TaskManager applies it only when
+  // the task really runs as an outcome and its book suits a review.
+  tasks.setExecutionModeResolver(async (args) => {
+    const resolution = await resolveStrategy(args);
+    if ((resolution.strategy ?? resolution.mode) !== 'outcome') return resolution;
+    try {
+      const config = await store.readConfig();
+      const reviewSetting = config.taskReview ?? 'auto';
+      if (reviewSetting === 'off') return { ...resolution, reviewSetting };
+      const owner = args.assigneeGezelId ?? resolution.ownerGezelId;
+      const provider = owner
+        ? await chat.providerForGezel(owner, { nightShift: Boolean(args.nightShift) })
+        : resolveDefaultProviderName(config);
+      const measured = (await chat.executionModelProfile(provider, owner)).affinity?.review;
+      return { ...resolution, reviewSetting, ...(measured ? { measuredReview: measured } : {}) };
+    } catch (err) {
+      log.warn(
+        `[tasks] could not read the owner's measured review; no review:`,
+        err instanceof Error ? err.message : err,
+      );
+      return resolution;
+    }
   });
 
   // Install a craftbook's bundled scripts into the project's scripts/

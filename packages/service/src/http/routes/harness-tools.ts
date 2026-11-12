@@ -121,10 +121,18 @@ async function parseBody<T extends z.ZodType>(
   return { data: parsed.data };
 }
 
+/**
+ * A refusal keeps its status and message; 424 is the app's own command
+ * failing, and a 4xx is what carries its words past the 5xx sanitizer.
+ * Anything else is a fault inside Gezel and stays opaque.
+ */
 function setupError(c: Context, error: unknown) {
   const candidate = error as { status?: unknown; code?: unknown; message?: unknown };
   const status =
-    candidate.status === 400 || candidate.status === 404 || candidate.status === 409
+    candidate.status === 400 ||
+    candidate.status === 404 ||
+    candidate.status === 409 ||
+    candidate.status === 424
       ? candidate.status
       : 500;
   const code = typeof candidate.code === 'string' ? candidate.code : 'harness_tools_failed';

@@ -207,7 +207,7 @@ export async function runAppNew(
   console.log('  1. Edit items/ — start with the two about.md files and the version manifest.');
   console.log(`  2. gezel app validate ${id}`);
   console.log(`  3. gezel app pack ${id}`);
-  console.log(`  4. gezel app add ${id}-1.0.0.gezapp --yes && gezel app apply ${id}`);
+  console.log(`  4. gezel app add ${id}-1.0.0.gezapp --yes && gezel app apply ${id} --yes`);
 }
 
 export async function runAppSchemas(opts: { out?: string; json?: boolean } = {}): Promise<void> {

@@ -81,6 +81,7 @@ A macro is a leaf directive on its own line. The engine expands it into plain ma
 | `::handboek-project-type-composition{id=…}` | What a project type sets up: crew, craftbooks, toolsets, schedules. |
 | `::handboek-model-scorecard{suites=core,productivity}` | Measured model results from the checked-in scorecard, grouped by test round (`suite=core` renders a single set). The site gets a filterable HTML version. |
 | `::handboek-community-scorecard{suites=core,productivity}` | Community rounds submitted with `gezel bench submit`, from `packages/core/src/scorecard/data/community/`, rendered apart from Bendyline's rounds in every mode. |
+| `::handboek-docbench-scorecard` | The newest docbench round (DocBlocks document work, judged 0–100) with ranges, bands, family scores and review depth, plus the last two rounds. Kept out of the pass-rate tables, round pages and CSV. |
 | `::handboek-whats-new-list{limit=12}` | Every release in `whats-new/`, newest first, each with its one-line summary. Identical in all three modes. |
 
 ## Conventions

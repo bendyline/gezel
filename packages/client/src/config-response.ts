@@ -20,6 +20,11 @@ export interface ConfigResponse {
   provider: ProviderName;
   /** Generalist mode setting (`auto` when unset). See docs/generalist-mode.md. */
   generalistMode?: 'auto' | 'on' | 'off';
+  /**
+   * Whether an outcome task's work is reviewed once its checks pass
+   * (`auto` when unset): Settings → "Check work before handing it in".
+   */
+  taskReview?: 'auto' | 'off';
   githubToken?: string;
   hasGithubToken: boolean;
   openaiApiKey?: string;

@@ -195,7 +195,11 @@ Catalog **content** is not in this repo. It lives across three repos:
   every chat-model recipe and `tools/build-chat-model.mjs`. A model can be
   introduced and released entirely in Gilde without a Gezel source change.
   Repo root **is** the npm package root of `@bendyline/gilde`, so the
-  published package and the checkout are interchangeable. Gilde owns the
+  published package and the checkout are interchangeable to the loader,
+  with one difference in form: the published tarball carries the community
+  tier as a single `data/community/content.pack` (written by gilde's
+  `prepack`, removed by `postpack`), which `BundledSource` reads in place,
+  because its ~45k loose files were nearly half of an npm install. Gilde owns the
   canonical `tools/build-index.mjs` plus dependency-light PR validation
   (ajv against `schemas/*.schema.json`, which are **generated from
   core's Zod schemas** — see Gotchas). `build-index` writes two indexes
@@ -511,6 +515,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
 - [`packages/service/src/meester/prompt.ts`](packages/service/src/meester/prompt.ts) — the curated Meester about.md and name list.
 - [`packages/mcp/src/server.ts`](packages/mcp/src/server.ts) — every MCP tool. Add new capabilities here.
 - [`packages/ui/src/views/`](packages/ui/src/views/) — one file per top-level tab; the entire user-facing surface.
+- [`packages/ui/src/data/`](packages/ui/src/data/) and [`packages/ui/src/navigation/`](packages/ui/src/navigation/) — the UI's one way to read server state (a TanStack Query cache behind `useApiRead`) and to move between views (the destination registry and the keep-alive host). Rules and the guards that hold them: [docs/ui-architecture.md](docs/ui-architecture.md).
 
 ## Conventions
 
@@ -540,7 +545,7 @@ No rotation in MVP; explicit events are small and even a year of heavy use stays
   - `~/.gezel/ambient/` — ambient-dashboard PNGs plus the Electron wallpaper applier's slots. Regenerable, safe to delete — except `display-state.json`, which holds the restore record for the user's pre-gezel wallpaper
   - `~/.gezel/git-clones/` and per-project checkouts (`workingDir`, `<workingDir>/gh/`, or the project workspace) — git working copies, owned by [git/manager.ts](packages/service/src/git/manager.ts)
   - `~/.gezel/sandbox/` — sandboxed script runs, owned by [sandbox/runner.ts](packages/service/src/sandbox/runner.ts)
-  - `~/.gezel/python/` — uv runtime, owned by [python/uv-runtime.ts](packages/inference/src/python/uv-runtime.ts)
+  - `~/.gezel/engines/uv/` — uv's `venvs/` and its download cache `cache/` (`UV_CACHE_DIR`, unless the person set one), owned by [python/uv-runtime.ts](packages/inference/src/python/uv-runtime.ts); counted as re-downloadable by `gezel cleanup`
   - Native binary trees (`~/.gezel/bin/llama-cpp/`, `sd-cpp/`, `uv/`) — owned by the matching provider; see [native/README.md](native/README.md) for the upstream fetch + bundle pipeline.
 
   If you're writing code that touches state outside this list, it goes through `Store`.

@@ -67,8 +67,8 @@ export interface InferenceServiceOptions {
   imageProvider?: ImageProvider;
   onUnexpectedHttpError?: (event: InferenceHttpErrorEvent) => void;
   /**
-   * Where log records go while this host runs; restored on `stop()`. An app
-   * embedding the host passes `'stderr'` so its own stdout stays its own.
+   * Where log records go while this host runs; restored on `stop()`. Unset
+   * is `'stderr'`, so the embedding app's stdout stays its own.
    */
   logOutput?: LogOutput;
 }
@@ -87,7 +87,7 @@ export async function startService(
   disableOnnxRuntimeTelemetry();
   const previousLogOutput = getLogOutput();
   const restoreLogOutput = () => setLogOutput(previousLogOutput);
-  if (options.logOutput) setLogOutput(options.logOutput);
+  setLogOutput(options.logOutput ?? 'stderr');
   const home = options.home ?? gezelHome();
   const runtimeDir = join(home, 'runtime');
   let lock: Awaited<ReturnType<typeof acquireSingleInstanceLock>>;

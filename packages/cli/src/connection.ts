@@ -481,7 +481,17 @@ export async function connectForRun(globals: CliGlobals): Promise<RunConnection>
     process.env.GEZEL_SKIP_SYSTEM_BOOTSTRAP = '1';
   }
   const { startService } = await import('@bendyline/gezel-service');
-  const svc = await startService({ port: 0, role: 'user' });
+  // The terminal belongs to the person: the service's records go to its log
+  // file, as a daemon's do, and only errors are printed. The file gets the
+  // info records too unless GEZEL_LOG_LEVEL says otherwise.
+  const levelBeforeService = getLogLevel();
+  if (!process.env.GEZEL_LOG_LEVEL) setLogLevel('info');
+  const svc = await startService({ port: 0, role: 'user', logOutput: 'file' }).catch(
+    (error: unknown) => {
+      setLogLevel(levelBeforeService);
+      throw error;
+    },
+  );
   const scheme = svc.cert ? 'https' : 'http';
   const baseUrl = `${scheme}://127.0.0.1:${svc.port}`;
   const client = new GezelClient({
@@ -495,7 +505,11 @@ export async function connectForRun(globals: CliGlobals): Promise<RunConnection>
   let stopPromise: Promise<void> | undefined;
   const stop = (): Promise<void> => {
     stopPromise ??= (async () => {
-      await svc.stop();
+      try {
+        await svc.stop();
+      } finally {
+        setLogLevel(levelBeforeService);
+      }
       // Remove the runtime files this one-shot wrote — but only if they're
       // still ours (pid === this process), so we never clobber a real daemon
       // that happened to start during the run. (We only reach in-proc because
@@ -532,8 +546,9 @@ export function spawnedDaemonNotice(pid: number | undefined): string {
  * someone runs before anything is set up, and they used to spawn a resident
  * daemon that outlived the command by 20+ minutes (2026-09-30 npm ship audit).
  *
- * Service log records go to stderr at warn level for the command's lifetime,
- * so stdout carries only the command's result.
+ * Log records go to stderr at warn level for the command's lifetime (an
+ * in-process service keeps its own in the service log file), so stdout
+ * carries only the command's result.
  */
 export async function withTransientConnection<T>(
   globals: CliGlobals,

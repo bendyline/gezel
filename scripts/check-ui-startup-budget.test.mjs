@@ -68,3 +68,30 @@ test('fails byte, resource, and export-only regressions', () => {
   );
   assert.equal(failures.length, 4);
 });
+
+test('caps what a destination loads beyond the shell and the chunk count', async () => {
+  const { evaluateRouteBudget } = await import('./check-ui-startup-budget.mjs');
+  const budget = {
+    destinations: { HomeView: { chunks: 10, gzipBytes: 1_000 } },
+    totalChunks: 50,
+  };
+  assert.deepEqual(
+    evaluateRouteBudget({ destinations: { HomeView: { files: 8, gzipBytes: 900 } } }, 40, budget),
+    [],
+  );
+  assert.deepEqual(
+    evaluateRouteBudget(
+      { destinations: { HomeView: { files: 12, gzipBytes: 1_200 } } },
+      60,
+      budget,
+    ),
+    [
+      'HomeView loads 12 chunks > 10',
+      'HomeView loads 1200 gzip bytes > 1000',
+      '60 JS chunks in the build > 50',
+    ],
+  );
+  assert.deepEqual(evaluateRouteBudget({ destinations: {} }, 1, budget), [
+    'route graph has no HomeView',
+  ]);
+});

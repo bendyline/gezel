@@ -27,7 +27,7 @@ A job looks like this: here is a meeting transcript, an out-of-date agenda,
 and a list of who works here. Produce a written brief and a table of action
 items with the right owner, the right date, and the right dependencies. Then
 we open the files and check them. Did the September 14th decision survive?
-Did the cancelled proposal stay cancelled? Is the action assigned to someone
+Did the canceled proposal stay canceled? Is the action assigned to someone
 who actually works here?
 
 Every task is checked the same way for every model, by a program rather than

@@ -148,6 +148,15 @@ describe('resolveRequestTracks on the bakery', () => {
     expect(work?.stop).toBe('checking');
   });
 
+  it('reads a review round under way as checking the work', () => {
+    const reviewing = structuredClone(invoices) as Task;
+    const draft = reviewing.craftbook.steps.find((s) => s.id === reviewing.activeStepId)!;
+    draft.outcomeReviewRounds = 1;
+    const work = resolveRequestTracks(base({ tasks: [reviewing], inflight: [draftTurn] }))[0];
+    expect(work?.stop).toBe('checking');
+    expect(work?.line?.doing).toMatch(/^is checking (your|the work)/);
+  });
+
   it('shows Got it while a reply is still being written with no work yet', () => {
     const thread: RequestThread = {
       id: 'shop-thread',

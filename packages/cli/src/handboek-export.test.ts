@@ -3,7 +3,12 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { SCORECARD, SCORECARD_DATA_ATTRS, SCORECARD_QUERY_PARAMS } from '@bendyline/gezel';
+import {
+  DOCBENCH_SUITE_ID,
+  SCORECARD,
+  SCORECARD_DATA_ATTRS,
+  SCORECARD_QUERY_PARAMS,
+} from '@bendyline/gezel';
 import { findHandboekContent, loadScorecardRoundNotes } from '@bendyline/gezel-service/handboek';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -22,6 +27,15 @@ import {
 } from './handboek-export.js';
 import { SCORECARD_FILTER_JS } from './handboek-site-scorecard.js';
 import { OPEN_IN_GEZEL_JS } from './site-open-in-gezel.js';
+
+/**
+ * The rounds the pass-rate filter and round pages carry. A docbench round is
+ * a judged score with its own article and table, never a pass-rate round.
+ */
+const PASS_RATE_RUNS = SCORECARD.runs.filter((run) =>
+  run.suites.some((suite) => suite !== DOCBENCH_SUITE_ID),
+);
+const DOCBENCH_RUNS = SCORECARD.runs.filter((run) => !PASS_RATE_RUNS.includes(run));
 
 describe('rewriteSiteLinks', () => {
   const ids = new Set(['welcome', 'the-crew', 'role/meester', 'craftbook/status-report']);
@@ -185,12 +199,15 @@ describe('runHandboekExport', () => {
     // Every round is a stamped entry the pickers can hide — the markdown
     // pipeline must keep the list items and their stamps — and a link to the
     // page that now holds its tables.
-    for (const run of SCORECARD.runs) {
+    for (const run of PASS_RATE_RUNS) {
       expect(page).toContain(`${SCORECARD_DATA_ATTRS.round}="${run.id}"`);
       expect(page).toContain(`href="../model-scorecard/${run.id}/"`);
     }
+    for (const run of DOCBENCH_RUNS) {
+      expect(page).not.toContain(`${SCORECARD_DATA_ATTRS.round}="${run.id}"`);
+    }
     expect(page).not.toMatch(new RegExp(`${SCORECARD_DATA_ATTRS.model}="[^"]+"`));
-    const headline = SCORECARD.runs.find((run) => run.scope !== 'subset') ?? SCORECARD.runs[0]!;
+    const headline = PASS_RATE_RUNS.find((run) => run.scope !== 'subset') ?? PASS_RATE_RUNS[0]!;
     const defaultRound = page.match(
       new RegExp(
         `<li class="hb-scorecard-round[^"]*"[^>]*${SCORECARD_DATA_ATTRS.latest}="1"[^>]*>`,
@@ -200,7 +217,10 @@ describe('runHandboekExport', () => {
   });
 
   it('gives every round a page with its tables, and its notes', async () => {
-    for (const run of SCORECARD.runs) {
+    for (const run of DOCBENCH_RUNS) {
+      expect(existsSync(join(out, 'model-scorecard', run.id, 'index.html')), run.id).toBe(false);
+    }
+    for (const run of PASS_RATE_RUNS) {
       const page = await readFile(join(out, 'model-scorecard', run.id, 'index.html'), 'utf8');
       expect(page, run.id).toContain('class="hb-scorecard-stamp"');
       expect(page, run.id).toContain('href="../../model-scorecard/"');
@@ -241,6 +261,13 @@ describe('runHandboekExport', () => {
     }
   });
 
+  it('renders published docbench rounds in their own article', async () => {
+    const page = await readFile(join(out, 'docbench', 'index.html'), 'utf8');
+    expect(page).not.toContain('::handboek-docbench-scorecard');
+    if (DOCBENCH_RUNS.length > 0) expect(page).toContain('95% range');
+    else expect(page).toContain('No docbench round has been published yet.');
+  });
+
   it('leaves the scorecard filter off pages that have no scorecard', async () => {
     const page = await readFile(join(out, 'the-crew', 'index.html'), 'utf8');
     expect(page).not.toContain('scorecard.js');
@@ -255,7 +282,7 @@ describe('runHandboekExport', () => {
     const roundTitles = [
       ...page.matchAll(/<a class="hb-scorecard-run-link"[^>]*>([^<]+)<\/a>/g),
     ].map((match) => match[1]!);
-    expect(roundTitles.length).toBe(SCORECARD.runs.length);
+    expect(roundTitles.length).toBe(PASS_RATE_RUNS.length);
     for (const title of roundTitles) expect(nav).not.toContain(title);
   });
 

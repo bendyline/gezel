@@ -33,7 +33,17 @@ import type {
   MouseEvent as ReactMouseEvent,
   ReactNode,
 } from 'react';
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Suspense,
+  lazy,
+  startTransition,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -53,6 +63,7 @@ import type { ProjectTemplateGezelOptions } from '../components/ProjectAddGezelD
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
 import { PROJECT_STATUS_OPTIONS, ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
+import { ProjectIconField } from '../components/ProjectIconField.js';
 import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPanePlaceholder } from '../components/ProjectPanePlaceholder.js';
@@ -146,12 +157,12 @@ import {
   useViewLocation,
 } from '../components/view-history/ViewHistoryContext.js';
 import type { ViewPart } from '../components/view-history/view-history.js';
+import { peekRead } from '../data/api-reads.js';
 import { useSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { crewLeadLabel, crewLeadLabelLower } from '../labels.js';
 import { Select, Tabs } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
-import { peekApiRead } from '../shared-api-reads.js';
 import { useEffectiveTheme } from '../theme.js';
 import { OFFERED_PROJECT_VIEWS, preloadProjectView } from './project-views/registry.js';
 import { useProjectViews } from './project-views/useProjectViews.js';
@@ -348,8 +359,18 @@ function preloadProjectTab(tab: ProjectTab): void {
   void loading?.catch(() => {});
 }
 
+/**
+ * A tab whose code is still loading holds the body's place, wordless (see
+ * "Loading states" in docs/ux.md), so the status bar and composer below do
+ * not jump up and back. Tab switches run in a transition, so this shows only
+ * when nothing was on screen before (opening a project straight onto a tab).
+ */
 function ProjectPaneBoundary({ children }: { children: ReactNode }) {
-  return <Suspense fallback={null}>{children}</Suspense>;
+  return (
+    <Suspense fallback={<div className="project-pane-placeholder-body" aria-busy="true" />}>
+      {children}
+    </Suspense>
+  );
 }
 
 type ConfigurableProjectTab = keyof ProjectTabVisibility;
@@ -543,10 +564,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const effectiveCompact = compact || autoCompact;
   const editorTheme = useEffectiveTheme();
   const [projects, setProjects] = useState<Project[]>(
-    () => peekApiRead('listProjects')?.projects ?? [],
+    () => peekRead('listProjects')?.projects ?? [],
   );
   const [selected, setSelected] = useState<ProjectDetail | null>(() =>
-    forceProjectId ? (peekApiRead('getProject', forceProjectId) ?? null) : null,
+    forceProjectId ? (peekRead('getProject', forceProjectId) ?? null) : null,
   );
   const [browsingProjects, setBrowsingProjects] = useState(false);
   const showProjectList = effectiveCompact && !detailOnly && (browsingProjects || !selected);
@@ -562,6 +583,10 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // The project whose openProject has settled: until then `tab` is still the
   // previous project's (or the default), so the view stack is not told.
   const [openedProjectId, setOpenedProjectId] = useState<string | null>(null);
+  const openedProjectIdRef = useRef(openedProjectId);
+  useLayoutEffect(() => {
+    openedProjectIdRef.current = openedProjectId;
+  });
   const debugMode = useDebugMode();
   const showViewsTab = useCallback(() => setTab('map'), []);
   const projectViews = useProjectViews({
@@ -687,9 +712,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   const [typeName, setTypeName] = useState<string | null>(null);
   const [typeUpdateOpen, setTypeUpdateOpen] = useState(false);
   const selectedIdRef = useRef<string | null>(null);
-  const [gezels, setGezels] = useState<GezelSummary[]>(
-    () => peekApiRead('listGezels')?.gezels ?? [],
-  );
+  const [gezels, setGezels] = useState<GezelSummary[]>(() => peekRead('listGezels')?.gezels ?? []);
   const [projectLocalGezelRoster, setProjectLocalGezelRoster] = useState<{
     projectId: string;
     gezels: GezelSummary[];
@@ -1476,6 +1499,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // any queued "open this file" intent the search left for this project.
   useEffect(() => {
     if (!forceProjectId) return;
+    // A project kept alive while hidden runs this again when shown. It is
+    // still open on the tab, file and fold the person left: refresh what it
+    // shows and keep the rest.
+    if (openedProjectIdRef.current === forceProjectId) {
+      void api
+        .getProject(forceProjectId)
+        .then((project) => setSelected(project))
+        .catch(() => {});
+      return;
+    }
     void openProject(forceProjectId).then(() => {
       const intent = consumeOpenFile(forceProjectId);
       if (intent) {
@@ -2606,7 +2639,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
               )}
               <ProjectSectionTabs
                 value={tab}
-                onValueChange={(value) => setTab(value as ProjectTab)}
+                // A transition keeps the tab on screen until the next one's
+                // code has loaded, instead of blanking the pane for it.
+                onValueChange={(value) => startTransition(() => setTab(value as ProjectTab))}
                 onPreload={(value) => {
                   preloadProjectTab(value as ProjectTab);
                   if (value === 'map' && projectViews.view) preloadProjectView(projectViews.view);
@@ -3195,6 +3230,30 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               onReview={() => setTypeUpdateOpen(true)}
                             />
                           )}
+
+                          <SettingField
+                            label="Icon"
+                            hint="What stands beside this project’s name. Automatic follows the project’s type; a drawn mark or a picture of your own replaces it."
+                          >
+                            <ProjectIconField
+                              project={selected}
+                              typeLabel={
+                                typeName ??
+                                getProjectType(
+                                  selected.projectTypeId ?? selected.detectedProjectType?.id,
+                                )?.label
+                              }
+                              onChanged={(updated) => {
+                                setSelected(updated);
+                                // The rail draws the icon too.
+                                window.dispatchEvent(
+                                  new CustomEvent('gezel:project-updated', {
+                                    detail: { projectId: selected.id, project: updated },
+                                  }),
+                                );
+                              }}
+                            />
+                          </SettingField>
 
                           {runtimeCapabilities().catalog && (
                             <ProjectPropertiesEditor

@@ -165,20 +165,49 @@ describe('GET /v1/models catalog metadata', () => {
     });
 
     function catalogOf(
-      ...models: Array<{ id: string; gib: number; recoScore?: number; ds4Only?: boolean }>
+      ...models: Array<{
+        id: string;
+        gib: number;
+        recoScore?: number;
+        ds4Only?: boolean;
+        /** A published llama.cpp docbench score, measured on `measuredOn` (default: this version). */
+        docbench?: number;
+        measuredOn?: string;
+      }>
     ) {
       const ctx = modelContext();
       ctx.chat.listModelsForProvider = vi.fn(async () => []);
       ctx.catalog.list = vi.fn(async () =>
-        models.map(({ id, gib, recoScore, ds4Only }) => ({
+        models.map(({ id, gib, recoScore, ds4Only, docbench, measuredOn }) => ({
           manifest: {
             schemaVersion: 1,
             kind: 'chat-model',
             id,
             name: id,
+            version: '1.0.0',
             tags: [],
             licenseClass: 'open',
             ...(recoScore === undefined ? {} : { recoScore }),
+            ...(docbench === undefined
+              ? {}
+              : {
+                  benchmarks: {
+                    docbench: {
+                      'llama-cpp': {
+                        version: '0.2.1',
+                        score: docbench,
+                        ci: [docbench - 2, docbench + 2],
+                        band: 1,
+                        families: { review: docbench - 5 },
+                        usableRate: 1,
+                        catalogVersion: measuredOn ?? '1.0.0',
+                        runId: 'docbench-round',
+                        measuredAt: '2026-11-11T00:00:00Z',
+                        judge: 'claude-opus-5-5',
+                      },
+                    },
+                  },
+                }),
             approxSizeBytes: gib * GiB,
             supportsTools: true,
             ...(ds4Only
@@ -219,6 +248,41 @@ describe('GET /v1/models catalog metadata', () => {
         fit: { tier: 'too-big' },
         recommendation: { score: 0, recommended: false },
       });
+    });
+
+    it('ranks a second time by measured docbench quality, for document apps', async () => {
+      const data = await list(
+        catalogOf(
+          { id: 'agentic', gib: 6, recoScore: 30, docbench: 55 },
+          { id: 'writer', gib: 5, recoScore: 10, docbench: 80 },
+          // Measured on weights the catalog has since replaced: no score.
+          { id: 'requant', gib: 4, recoScore: 5, docbench: 95, measuredOn: '0.9.0' },
+          { id: 'huge', gib: 60, docbench: 99 },
+        ),
+      );
+      const byId = new Map(data.map((entry) => [entry.id, entry]));
+      expect(byId.get('llama-cpp:agentic')).toMatchObject({
+        recommendation: { recommended: true },
+        docbench: { score: 55, band: 1, version: '0.2.1', families: { review: 50 } },
+        docbench_recommendation: { recommended: false },
+      });
+      expect(byId.get('llama-cpp:writer')).toMatchObject({
+        docbench: { score: 80 },
+        docbench_recommendation: { score: 100, recommended: true },
+      });
+      expect(byId.get('llama-cpp:requant')).not.toHaveProperty('docbench');
+      // Too big for this machine is never recommended, however well it scores.
+      expect(byId.get('llama-cpp:huge')).toMatchObject({
+        docbench_recommendation: { score: 0, recommended: false },
+      });
+    });
+
+    it('sends no docbench ranking when nothing is measured', async () => {
+      const data = await list(catalogOf({ id: 'plain', gib: 4 }, { id: 'other', gib: 5 }));
+      for (const entry of data) {
+        expect(entry).not.toHaveProperty('docbench');
+        expect(entry).not.toHaveProperty('docbench_recommendation');
+      }
     });
 
     it('falls back to curated order, unrated, when this machine cannot be read', async () => {

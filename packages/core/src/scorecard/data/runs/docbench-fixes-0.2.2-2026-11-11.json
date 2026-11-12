@@ -1,0 +1,938 @@
+{
+  "schemaVersion": 1,
+  "runs": [
+    {
+      "id": "docbench-fixes-0.2.2-2026-11-11",
+      "scope": "subset",
+      "provenance": {
+        "startedAt": "2026-11-12T00:49:23.696Z",
+        "device": {
+          "label": "win32 · NVIDIA RTX Spark N1X (6144-core GPU, 20-core CPU)",
+          "platform": "win32",
+          "arch": "arm64",
+          "memoryGb": 23,
+          "osRelease": "win32 10.0.28000",
+          "cpuModel": "NVIDIA RTX Spark N1X (6144-core GPU, 20-core CPU)",
+          "gpuModel": "NVIDIA RTX Spark N1X (6144-core Blackwell RTX GPU)"
+        },
+        "harnessCommit": "1dd7d751",
+        "gildeVersion": "unknown",
+        "count": 3,
+        "judgeModelId": "claude-opus-5-5"
+      },
+      "suites": [
+        "docbench"
+      ],
+      "scenariosBySuite": {
+        "docbench": [
+          "review-general",
+          "review-resume",
+          "review-facts",
+          "review-concise",
+          "review-plain",
+          "review-strunk",
+          "review-un",
+          "review-creative",
+          "write-compose",
+          "write-append",
+          "write-insert",
+          "write-rewrite",
+          "diagram-plan",
+          "diagram-draw",
+          "illustration-svg",
+          "design-brief",
+          "presentation-slides",
+          "study-summary",
+          "study-quiz",
+          "study-flashcards",
+          "narration-cleanup"
+        ]
+      },
+      "note": "Focused re-run of nanbeige4.2-3b-q4, gpt-oss-20b-q4 beside docbench-sweep-0.2.1-2026-11-10, after fixes to how Gezel serves them; bands place them in that round's field · docbench 0.2.2 · public fixtures 27f9a7ba3ea4 · 32768-token launch context · judge claude-opus-5-5 (prompt v2) · prompts dated 2026-11-10"
+    }
+  ],
+  "results": [
+    {
+      "modelId": "nanbeige4.2-3b-q4",
+      "label": "Nanbeige 4.2 (3B, Q4)",
+      "engine": "llama-cpp",
+      "tier": "tiny",
+      "parameterSize": "3B",
+      "quantization": "Q4_K_M",
+      "runId": "docbench-fixes-0.2.2-2026-11-11",
+      "suiteId": "docbench",
+      "docbench": {
+        "packVersion": "0.2.2",
+        "fixtures": {
+          "id": "public",
+          "sha256": "27f9a7ba3ea4bb22641b8eb5d9874c9c6b02b8ae6af335a52b5414b8947e536a"
+        },
+        "score": 70.7,
+        "ci": [
+          68.5,
+          72.9
+        ],
+        "band": 3,
+        "usableRate": 0.971830985915493,
+        "families": {
+          "review": {
+            "score": 52.5,
+            "ci": [
+              46.2,
+              58.7
+            ]
+          },
+          "writing": {
+            "score": 82.9,
+            "ci": [
+              79.8,
+              86.1
+            ]
+          },
+          "visuals": {
+            "score": 71.1,
+            "ci": [
+              65,
+              76.6
+            ]
+          },
+          "presentations": {
+            "score": 83.1,
+            "ci": [
+              79.6,
+              86.6
+            ]
+          },
+          "study": {
+            "score": 69.3,
+            "ci": [
+              66.7,
+              72.1
+            ]
+          },
+          "narration": {
+            "score": 78.9,
+            "ci": [
+              73.8,
+              82.8
+            ]
+          }
+        },
+        "tasks": {
+          "review-general": {
+            "score": 43.5,
+            "ci": [
+              32.1,
+              52.3
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 460,
+            "findings": {
+              "low": 1.75,
+              "medium": 0.5,
+              "high": 0.25,
+              "trivial": 1.5,
+              "wrong": 0.25
+            }
+          },
+          "review-resume": {
+            "score": 75.9,
+            "ci": [
+              69.4,
+              82.4
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 582,
+            "findings": {
+              "low": 0.75,
+              "medium": 3.75,
+              "high": 0.25,
+              "trivial": 0.5,
+              "wrong": 1.25
+            }
+          },
+          "review-facts": {
+            "score": 44.1,
+            "ci": [
+              10.5,
+              67.2
+            ],
+            "usableRate": 0.75,
+            "medianOutputTokens": 663,
+            "findings": {
+              "low": 0.6666666666666666,
+              "medium": 2,
+              "high": 1,
+              "trivial": 0,
+              "wrong": 1.3333333333333333
+            }
+          },
+          "review-concise": {
+            "score": 45.9,
+            "ci": [
+              8.2,
+              83.7
+            ],
+            "usableRate": 0.75,
+            "medianOutputTokens": 838,
+            "findings": {
+              "low": 0.3333333333333333,
+              "medium": 4,
+              "high": 0,
+              "trivial": 2,
+              "wrong": 1.6666666666666667
+            }
+          },
+          "review-plain": {
+            "score": 60.5,
+            "ci": [
+              52.7,
+              73
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 625,
+            "findings": {
+              "low": 1.3333333333333333,
+              "medium": 2,
+              "high": 0,
+              "trivial": 0.6666666666666666,
+              "wrong": 1.3333333333333333
+            }
+          },
+          "review-strunk": {
+            "score": 53.6,
+            "ci": [
+              30.5,
+              66.3
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 544,
+            "findings": {
+              "low": 1,
+              "medium": 2.3333333333333335,
+              "high": 0,
+              "trivial": 1.6666666666666667,
+              "wrong": 0.6666666666666666
+            }
+          },
+          "review-un": {
+            "score": 63.7,
+            "ci": [
+              47.6,
+              75.8
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 993,
+            "findings": {
+              "low": 4,
+              "medium": 1.3333333333333333,
+              "high": 0,
+              "trivial": 2,
+              "wrong": 1
+            }
+          },
+          "review-creative": {
+            "score": 50.9,
+            "ci": [
+              48.8,
+              53
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 1059
+          },
+          "write-compose": {
+            "score": 83.8,
+            "ci": [
+              80.7,
+              87.3
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 2977
+          },
+          "write-append": {
+            "score": 76.2,
+            "ci": [
+              71.4,
+              81.8
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 2485.5
+          },
+          "write-insert": {
+            "score": 86,
+            "ci": [
+              77.2,
+              94.8
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 2150
+          },
+          "write-rewrite": {
+            "score": 85.5,
+            "ci": [
+              78.5,
+              92.7
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 2848.5
+          },
+          "diagram-plan": {
+            "score": 74.3,
+            "ci": [
+              57.9,
+              90.6
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 2
+          },
+          "diagram-draw": {
+            "score": 86.6,
+            "ci": [
+              81.8,
+              91.6
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 76
+          },
+          "illustration-svg": {
+            "score": 48.8,
+            "ci": [
+              32.1,
+              60.3
+            ],
+            "usableRate": 0.8333333333333334,
+            "medianOutputTokens": 1512.5
+          },
+          "design-brief": {
+            "score": 74.7,
+            "ci": [
+              70.8,
+              77.6
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 64
+          },
+          "presentation-slides": {
+            "score": 83.1,
+            "ci": [
+              79.6,
+              86.6
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 181
+          },
+          "study-summary": {
+            "score": 75.4,
+            "ci": [
+              68.7,
+              82.5
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 486.5
+          },
+          "study-quiz": {
+            "score": 65,
+            "ci": [
+              63.1,
+              66.9
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 849
+          },
+          "study-flashcards": {
+            "score": 67.5,
+            "ci": [
+              62.5,
+              72.5
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 704.5
+          },
+          "narration-cleanup": {
+            "score": 78.9,
+            "ci": [
+              73.8,
+              82.8
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 313
+          }
+        },
+        "judge": {
+          "model": "claude-opus-5-5",
+          "promptVersion": 2,
+          "validityPassed": true
+        }
+      },
+      "cells": [
+        {
+          "scenarioId": "review-general",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-resume",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-facts",
+          "trials": 4,
+          "successes": 3,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-concise",
+          "trials": 4,
+          "successes": 3,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-plain",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-strunk",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-un",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-creative",
+          "trials": 9,
+          "successes": 9,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "write-compose",
+          "trials": 15,
+          "successes": 15,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "write-append",
+          "trials": 12,
+          "successes": 12,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "write-insert",
+          "trials": 12,
+          "successes": 12,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "write-rewrite",
+          "trials": 6,
+          "successes": 6,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "diagram-plan",
+          "trials": 11,
+          "successes": 11,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "diagram-draw",
+          "trials": 10,
+          "successes": 10,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "illustration-svg",
+          "trials": 12,
+          "successes": 10,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "design-brief",
+          "trials": 5,
+          "successes": 5,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "presentation-slides",
+          "trials": 8,
+          "successes": 8,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "study-summary",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "study-quiz",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "study-flashcards",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "narration-cleanup",
+          "trials": 5,
+          "successes": 5,
+          "nonModelFailures": 0
+        }
+      ]
+    },
+    {
+      "modelId": "gpt-oss-20b-q4",
+      "label": "GPT-OSS (20B, MoE, Q4)",
+      "engine": "llama-cpp",
+      "tier": "medium",
+      "parameterSize": "20B",
+      "quantization": "Q4_K_M",
+      "runId": "docbench-fixes-0.2.2-2026-11-11",
+      "suiteId": "docbench",
+      "docbench": {
+        "packVersion": "0.2.2",
+        "fixtures": {
+          "id": "public",
+          "sha256": "27f9a7ba3ea4bb22641b8eb5d9874c9c6b02b8ae6af335a52b5414b8947e536a"
+        },
+        "score": 67,
+        "ci": [
+          64.4,
+          69.4
+        ],
+        "band": 3,
+        "usableRate": 0.971830985915493,
+        "families": {
+          "review": {
+            "score": 40.3,
+            "ci": [
+              34.7,
+              45.8
+            ]
+          },
+          "writing": {
+            "score": 82.6,
+            "ci": [
+              79.4,
+              85.7
+            ]
+          },
+          "visuals": {
+            "score": 72.8,
+            "ci": [
+              63.1,
+              81.1
+            ]
+          },
+          "presentations": {
+            "score": 78.5,
+            "ci": [
+              71.9,
+              83.7
+            ]
+          },
+          "study": {
+            "score": 67.3,
+            "ci": [
+              63.9,
+              70.8
+            ]
+          },
+          "narration": {
+            "score": 74.9,
+            "ci": [
+              72.8,
+              77
+            ]
+          }
+        },
+        "tasks": {
+          "review-general": {
+            "score": 39.7,
+            "ci": [
+              31.9,
+              47.4
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 1846,
+            "findings": {
+              "low": 2.75,
+              "medium": 0.5,
+              "high": 0.25,
+              "trivial": 3.25,
+              "wrong": 1.25
+            }
+          },
+          "review-resume": {
+            "score": 36.1,
+            "ci": [
+              10.9,
+              53.8
+            ],
+            "usableRate": 0.75,
+            "medianOutputTokens": 1446.5,
+            "findings": {
+              "low": 1,
+              "medium": 1,
+              "high": 0.3333333333333333,
+              "trivial": 1.3333333333333333,
+              "wrong": 4
+            }
+          },
+          "review-facts": {
+            "score": 51.1,
+            "ci": [
+              27.7,
+              66.8
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 1349.5,
+            "findings": {
+              "low": 0.5,
+              "medium": 3.5,
+              "high": 0.25,
+              "trivial": 2.25,
+              "wrong": 2.75
+            }
+          },
+          "review-concise": {
+            "score": 66.5,
+            "ci": [
+              44.5,
+              84.1
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 1975.5,
+            "findings": {
+              "low": 1.75,
+              "medium": 3,
+              "high": 0,
+              "trivial": 1.75,
+              "wrong": 0.5
+            }
+          },
+          "review-plain": {
+            "score": 35,
+            "ci": [
+              12.5,
+              50.9
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 3655,
+            "findings": {
+              "low": 0.3333333333333333,
+              "medium": 1.3333333333333333,
+              "high": 0.6666666666666666,
+              "trivial": 2.3333333333333335,
+              "wrong": 1
+            }
+          },
+          "review-strunk": {
+            "score": 25.4,
+            "ci": [
+              0,
+              51.5
+            ],
+            "usableRate": 0.6666666666666666,
+            "medianOutputTokens": 2473,
+            "findings": {
+              "low": 1,
+              "medium": 0.5,
+              "high": 0,
+              "trivial": 1,
+              "wrong": 1.5
+            }
+          },
+          "review-un": {
+            "score": 25.7,
+            "ci": [
+              12.5,
+              52
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 2817,
+            "findings": {
+              "low": 1,
+              "medium": 0.3333333333333333,
+              "high": 0,
+              "trivial": 0.3333333333333333,
+              "wrong": 0.3333333333333333
+            }
+          },
+          "review-creative": {
+            "score": 44.2,
+            "ci": [
+              40.5,
+              47.7
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 904
+          },
+          "write-compose": {
+            "score": 76.2,
+            "ci": [
+              68.5,
+              84.1
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 492
+          },
+          "write-append": {
+            "score": 82.8,
+            "ci": [
+              79,
+              87.1
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 219.5
+          },
+          "write-insert": {
+            "score": 82.6,
+            "ci": [
+              74.7,
+              89.9
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 286.5
+          },
+          "write-rewrite": {
+            "score": 88.6,
+            "ci": [
+              83.6,
+              92.1
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 482.5
+          },
+          "diagram-plan": {
+            "score": 83.6,
+            "ci": [
+              67.3,
+              100
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 106
+          },
+          "diagram-draw": {
+            "score": 90.7,
+            "ci": [
+              87.2,
+              93.9
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 98
+          },
+          "illustration-svg": {
+            "score": 61.8,
+            "ci": [
+              40.2,
+              80.3
+            ],
+            "usableRate": 0.9166666666666666,
+            "medianOutputTokens": 541.5
+          },
+          "design-brief": {
+            "score": 55.3,
+            "ci": [
+              27.4,
+              70.1
+            ],
+            "usableRate": 0.8,
+            "medianOutputTokens": 187
+          },
+          "presentation-slides": {
+            "score": 78.5,
+            "ci": [
+              71.9,
+              83.7
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 669.5
+          },
+          "study-summary": {
+            "score": 68.8,
+            "ci": [
+              60.4,
+              76.3
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 490
+          },
+          "study-quiz": {
+            "score": 65,
+            "ci": [
+              61.3,
+              68.8
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 772.5
+          },
+          "study-flashcards": {
+            "score": 68.1,
+            "ci": [
+              61.2,
+              72.5
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 659.5
+          },
+          "narration-cleanup": {
+            "score": 74.9,
+            "ci": [
+              72.8,
+              77
+            ],
+            "usableRate": 1,
+            "medianOutputTokens": 351
+          }
+        },
+        "judge": {
+          "model": "claude-opus-5-5",
+          "promptVersion": 2,
+          "validityPassed": true
+        }
+      },
+      "cells": [
+        {
+          "scenarioId": "review-general",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-resume",
+          "trials": 4,
+          "successes": 3,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-facts",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-concise",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-plain",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-strunk",
+          "trials": 3,
+          "successes": 2,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-un",
+          "trials": 3,
+          "successes": 3,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "review-creative",
+          "trials": 9,
+          "successes": 9,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "write-compose",
+          "trials": 15,
+          "successes": 15,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "write-append",
+          "trials": 12,
+          "successes": 12,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "write-insert",
+          "trials": 12,
+          "successes": 12,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "write-rewrite",
+          "trials": 6,
+          "successes": 6,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "diagram-plan",
+          "trials": 11,
+          "successes": 11,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "diagram-draw",
+          "trials": 10,
+          "successes": 10,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "illustration-svg",
+          "trials": 12,
+          "successes": 11,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "design-brief",
+          "trials": 5,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "presentation-slides",
+          "trials": 8,
+          "successes": 8,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "study-summary",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "study-quiz",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "study-flashcards",
+          "trials": 4,
+          "successes": 4,
+          "nonModelFailures": 0
+        },
+        {
+          "scenarioId": "narration-cleanup",
+          "trials": 5,
+          "successes": 5,
+          "nonModelFailures": 0
+        }
+      ]
+    }
+  ]
+}

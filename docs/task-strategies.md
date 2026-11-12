@@ -290,6 +290,61 @@ task's ref, so what it reads counts toward the contract's task-wide evidence.
 `staleStepSessionRefusal` refuses it any status change or step advance on that
 task.
 
+### Review once the checks pass
+
+An outcome task can get one review after its contract checks first pass
+([core tasks/outcome-review.ts](../packages/core/src/tasks/outcome-review.ts),
+[service tasks/outcome-review.ts](../packages/service/src/tasks/outcome-review.ts)).
+`self` hands the owner a focused review prompt in its own conversation; `fresh`
+has the owner review its deliverables again in a new session with no
+transcript (`ChatManager.askFreshEyes`), and its findings go back to the
+owner's own conversation. Both use one focus list, a five-finding cap, and the rule that a
+fix removes or corrects and adds only what the sources state. The contract
+checks run again after the fixes; there is one round.
+
+`resolveOutcomeReview` decides it once at create and stamps it as
+`strategyOptions.review`. All four must hold:
+
+- **The person** has not set `config.taskReview` to `off` (Settings →
+  Artificial intelligence → "Check work before handing it in"; `auto` when
+  unset).
+- **The strategy** is outcome. Stepwise and generalist books carry their own
+  review steps, and only outcome was measured.
+- **The book's work suits a review** (`contractSuitsReview`): the contract's
+  `reviewable`, else a primary deliverable that is a report, document, notes,
+  spec or security report (`REVIEW_SUITED_DELIVERABLE_KINDS`). Code, data
+  files, decks and games are verified by their checks, and reviews of them
+  changed little and mostly re-edited code.
+- **The model that will run the task** was measured to gain from one:
+  `tuning.taskStrategy.review` in its catalog entry, or the gezel's own
+  `tuning.taskStrategy`. Unmeasured models, hosted ones included, get none.
+
+A fresh review session is read-only (`ChatSession.reviewFocus`): its built-in
+tools are `REVIEW_FOCUS_BUILTIN_TOOLS` whatever the role, installed toolsets,
+app tools and project script tools are withheld, and the Claude and Codex CLI
+providers run in `plan`. Telling the reviewer not to edit did not hold: in the
+counted test the fresh reviewer (then a recruited Reviewer gezel) changed the
+project in all six bug-fix trials and twice undid a correct fix. With no write
+tool on its roster, a local engine also cannot switch the review into its
+write-the-file mode, which the quoted request once triggered. The reviewer is
+the owner itself, so the review runs on the model it was measured on and
+recruits nobody.
+
+While the round runs, the request tracker reads the step as checking the work.
+Each round's record and a copy of the deliverables from before it go to
+`artifacts/outcome-review/<num>/round-<n>/`, hidden from default listings and
+from bare-filename lookups.
+
+Evidence, from the counted test (2026-11-11/12, 216 trials,
+`evals/runs/review-counted-2026-11-11/PREREG.md`): on Qwen 3.8 27B, self-review
+improved the work, scoring +0.34 [+0.17, +0.52] in a blind comparison of the
+copy from before the review against the final work. It made no regressions, two
+rescues, and added a median 1.3 minutes. On Gemma 4 E4B, self-review had no
+effect (+0.01), and fresh eyes (+0.23 [+0.05, +0.44]) were excluded because
+that reviewer edited the project; the read-only design is re-measured in
+`evals/runs/review-fresh-confirm-2026-11-12/`. Eval homes set `taskReview: 'off'` so earlier rounds
+stay comparable.
+
 ## 5. Keeping the strategies comparable
 
 Things that used to differ by strategy without anyone choosing it:

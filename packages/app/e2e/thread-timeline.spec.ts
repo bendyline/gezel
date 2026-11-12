@@ -22,6 +22,7 @@ import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { expectNear } from './helpers/layout.js';
 import { captureScreenshot } from './helpers/screenshot.js';
+import { SHOWN_VIEW_SELECTOR, shownView } from './helpers/shown-view.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -166,9 +167,12 @@ test('replies thread under their trigger, not under the next check-in', async ()
   test.setTimeout(60_000);
   // Open the seeded project's chat surface from the sidebar.
   await page.getByTestId('app-sidebar').getByText('Spanish Lang').first().click();
-  await expect(page.locator('.chat-timeline').first()).toBeVisible({ timeout: 20_000 });
+  // Home stays mounted behind the project, and its chat opens the meester's
+  // newest thread: this one. Every query below reads the shown copy.
+  const view = shownView(page);
+  await expect(view.locator('.chat-timeline').first()).toBeVisible({ timeout: 20_000 });
   await expect(
-    page.getByText('Waiting for the user to respond to my Spanish greeting.'),
+    view.getByText('Waiting for the user to respond to my Spanish greeting.'),
   ).toBeVisible({ timeout: 20_000 });
 
   await captureScreenshot(page, {
@@ -178,10 +182,10 @@ test('replies thread under their trigger, not under the next check-in', async ()
   // Second shot from the top of the scrollback — the first thread with
   // the greeting run and the late straggler is what the containment
   // assertions below are about.
-  await page.evaluate(() => {
-    const el = document.querySelector('.chat-timeline');
+  await page.evaluate((root) => {
+    const el = document.querySelector(`${root} .chat-timeline`);
     if (el) el.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
-  });
+  }, SHOWN_VIEW_SELECTOR);
   await page.waitForTimeout(400);
   await captureScreenshot(page, {
     path: join(screenshotDir, 'thread-timeline-02-top.png'),
@@ -197,8 +201,10 @@ test('replies thread under their trigger, not under the next check-in', async ()
   });
   await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
 
-  const structure = await page.evaluate(() => {
-    const threads = Array.from(document.querySelectorAll('.chat-timeline .timeline-thread'));
+  const structure = await page.evaluate((root) => {
+    const shown = document.querySelector(root);
+    if (!shown) throw new Error(`no shown view (${root})`);
+    const threads = Array.from(shown.querySelectorAll('.chat-timeline .timeline-thread'));
     const threadOf = (text: string) =>
       threads.findIndex((t) => (t.textContent ?? '').includes(text));
     const straggler = 'Waiting for the user to respond to my Spanish greeting.';
@@ -211,14 +217,14 @@ test('replies thread under their trigger, not under the next check-in', async ()
     const nameThread = threadOf('My name is Mike');
     // The check-in bubble must be a thread ROOT (direct thread child),
     // not railed inside a reply column.
-    const checkinBubble = Array.from(document.querySelectorAll('.msg-from-gezel')).find((el) =>
+    const checkinBubble = Array.from(shown.querySelectorAll('.msg-from-gezel')).find((el) =>
       (el.textContent ?? '').includes(checkin),
     );
     const checkinInsideReplies = checkinBubble
       ? checkinBubble.closest('.timeline-thread-replies') !== null
       : null;
     // Straggler containment: inside a reply column, railed.
-    const stragglerBubble = Array.from(document.querySelectorAll('.msg-assistant')).find((el) =>
+    const stragglerBubble = Array.from(shown.querySelectorAll('.msg-assistant')).find((el) =>
       (el.textContent ?? '').includes(straggler),
     );
     const stragglerReplies = stragglerBubble?.closest('.timeline-thread-replies') ?? null;
@@ -244,7 +250,7 @@ test('replies thread under their trigger, not under the next check-in', async ()
       stragglerHeaderText,
       rootHeaderText,
     };
-  });
+  }, SHOWN_VIEW_SELECTOR);
 
   console.log('thread structure:', JSON.stringify(structure, null, 2));
 

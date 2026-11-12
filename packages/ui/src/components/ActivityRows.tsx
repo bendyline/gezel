@@ -7,6 +7,7 @@ import type {
 } from '@bendyline/gezel';
 import type { QueueStatusResponse } from '@bendyline/gezel-client';
 import type { ReactNode } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { FileTypeIcon } from './FileTypeIcon.js';
@@ -223,7 +224,7 @@ export function ActivityResultRow({
     try {
       onAnswered(await api.answerQuestion(question.id, { selectedChoices: [0] }));
     } catch (err) {
-      setError((err as Error).message ?? 'Could not put this away.');
+      setError(apiErrorMessage(err));
       setSubmitting(false);
     }
   };

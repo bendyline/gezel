@@ -144,4 +144,64 @@ describe('applyExecutionMode', () => {
     expect(shown.craftbook.steps.at(-1)!.gate).toBeUndefined();
     expect(shown.strategyOptions).toEqual({ contract: 'shown' });
   });
+
+  describe('the review once the checks pass', () => {
+    const outcome: ExecutionModeResolution = {
+      mode: 'generalist',
+      strategy: 'outcome',
+      options: { procedure: 'none' },
+      fallback: 'generalist',
+      ownerGezelId: 'g-generalist',
+      reviewSetting: 'auto',
+      measuredReview: 'self',
+    };
+    const args = { projectId: 'p', ref: 'p/1', requested: 'auto' as const, now: NOW };
+
+    it("stamps the model's measured review on an outcome task whose book suits one", async () => {
+      const applied = await applyExecutionMode(resolveTo(outcome), { ...args, craftbook: book() });
+      expect(applied.strategyOptions).toEqual({ procedure: 'none', review: 'self' });
+    });
+
+    it('stamps none for a book whose work a check already verifies', async () => {
+      const code = book({
+        contract: {
+          ...CONTRACT,
+          deliverables: [
+            { id: 'fix', path: 'src', kind: 'code-with-tests', description: 'The fix' },
+          ],
+        },
+      });
+      const applied = await applyExecutionMode(resolveTo(outcome), { ...args, craftbook: code });
+      expect(applied.strategyOptions).toEqual({ procedure: 'none' });
+    });
+
+    it('stamps none when the person turned reviews off', async () => {
+      const applied = await applyExecutionMode(resolveTo({ ...outcome, reviewSetting: 'off' }), {
+        ...args,
+        craftbook: book(),
+      });
+      expect(applied.strategyOptions?.review).toBeUndefined();
+    });
+
+    it('stamps none when the task falls back from an outcome', async () => {
+      const applied = await applyExecutionMode(resolveTo(outcome), {
+        ...args,
+        craftbook: book({
+          steps: book().steps.map((s) =>
+            s.id === 'draft' ? { ...s, onExit: { script: 'tidy' } as never } : s,
+          ),
+        }),
+      });
+      expect(applied.strategy).toBe('generalist');
+      expect(applied.strategyOptions).toBeUndefined();
+    });
+
+    it("keeps a request's own review, even with reviews off", async () => {
+      const applied = await applyExecutionMode(
+        resolveTo({ ...outcome, reviewSetting: 'off', measuredReview: undefined }),
+        { ...args, craftbook: book(), strategyOptions: { review: 'fresh' } },
+      );
+      expect(applied.strategyOptions).toEqual({ procedure: 'none', review: 'fresh' });
+    });
+  });
 });

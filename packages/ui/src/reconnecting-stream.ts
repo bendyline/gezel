@@ -59,3 +59,19 @@ export async function* reconnectingStream<T>(
     delayMs = Math.min(delayMs * 2, maxDelayMs);
   }
 }
+
+/**
+ * Hand each event of a stream to a callback until it ends or fails. Components
+ * consume streams through this rather than `for await`: React Compiler leaves
+ * alone any component that contains a `for await` loop.
+ */
+export async function forEachEvent<T>(
+  stream: AsyncIterable<T>,
+  onEvent: (event: T) => void,
+): Promise<void> {
+  try {
+    for await (const event of stream) onEvent(event);
+  } catch {
+    /* aborted, or the stream failed; callers reconcile by polling */
+  }
+}

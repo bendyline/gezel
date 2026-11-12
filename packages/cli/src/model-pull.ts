@@ -1,3 +1,4 @@
+import { dirname } from 'node:path';
 import type { GezmodelEngine } from '@bendyline/gezel';
 import type { LlamaCppInstallEvent, MlxInstallEvent } from '@bendyline/gezel-client';
 import type { GezelClient } from '@bendyline/gezel-client/node';
@@ -49,6 +50,47 @@ export async function pullChatModel(
   else await client.installLlamaCppModel(id, onEvent);
 
   if (pullError) throw new CliError(`download failed: ${pullError}`);
+}
+
+export type SharedModelClient = Pick<
+  GezelClient,
+  'listDs4Models' | 'listLlamaCppModels' | 'listMlxModels'
+>;
+
+export interface SharedModelCopy {
+  /** The folder the model is read from. */
+  location: string;
+  /** The catalog has a newer build than the shared copy. */
+  updateAvailable: boolean;
+}
+
+/**
+ * A copy of `id` this daemon reads from a shared model store (the desktop
+ * app's machine store, or a home named in GEZEL_READONLY_MODEL_HOMES), or
+ * null when there is none. The daemon lists a shared model only after its
+ * files verified against their recorded hashes, so a listed copy is usable.
+ * WHY: `model pull` downloaded 1.33 GB beside a shared copy `model list` and
+ * `model use` already used (2026-11-11 npm ship audit), against the README's
+ * promise that a model you already have is never downloaded again.
+ */
+export async function findSharedModel(
+  client: SharedModelClient,
+  engine: GezmodelEngine,
+  id: string,
+): Promise<SharedModelCopy | null> {
+  if (engine === 'mlx') {
+    const { models } = await client.listMlxModels();
+    const found = models.find((model) => model.id === id && model.readOnly === true);
+    return found
+      ? { location: found.modelDir, updateAvailable: found.updateAvailable === true }
+      : null;
+  }
+  const { models } =
+    engine === 'ds4' ? await client.listDs4Models() : await client.listLlamaCppModels();
+  const found = models.find((model) => model.id === id && model.readOnly === true);
+  return found
+    ? { location: dirname(found.weightsPath), updateAvailable: found.updateAvailable === true }
+    : null;
 }
 
 /**

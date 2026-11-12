@@ -28,46 +28,27 @@
  * `EngineStatusPill`). The endpoint is in-memory — basically free.
  */
 
-import type { ClaudeCliPoolView } from '@bendyline/gezel-client';
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../api.js';
+import type { ClaudeCliPoolView, QueueStatusResponse } from '@bendyline/gezel-client';
+import { useEffect, useRef, useState } from 'react';
+import { useApiRead } from '../data/use-api-read.js';
 import { formatRelativeTime } from '../relative-time.js';
 
 /** Polling cadence; matches QueueMeter / EngineStatusPill. */
 const POLL_MS = 3_000;
 
+const selectPool = (status: QueueStatusResponse): ClaudeCliPoolView | null =>
+  status.anthropicCliPool ?? null;
+
 export function ClaudeCliPoolPill() {
-  const [pool, setPool] = useState<ClaudeCliPoolView | null>(null);
+  // The shared queue read, polled while shown; a hidden window stops asking.
+  const pool =
+    useApiRead('getQueueStatus', [], { pollMs: POLL_MS, select: selectPool }).data ?? null;
   // Bumps every 1s while the popover is open so per-row "5s ago"
   // timestamps tick. Outside the popover the 3s `pool` poll handles
   // freshness.
   const [, setNow] = useState(Date.now());
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const mountedRef = useRef(true);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  const refresh = useCallback(async () => {
-    try {
-      const status = await api.getQueueStatus();
-      if (!mountedRef.current) return;
-      setPool(status.anthropicCliPool ?? null);
-    } catch {
-      /* non-fatal — pill will retry on next tick */
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    const t = setInterval(() => void refresh(), POLL_MS);
-    return () => clearInterval(t);
-  }, [refresh]);
 
   // Per-row "Ns ago" needs a ticker while the dropdown is open.
   useEffect(() => {

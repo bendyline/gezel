@@ -11,6 +11,7 @@ import {
 } from '@bendyline/gezel';
 import { relevanceSummary } from '@bendyline/gezel-inference/internal/search/relevance-stage';
 import {
+  baseForm,
   proactiveRetrievalTerms,
   textMatchesAnyTerm,
   tokenizeText,
@@ -39,6 +40,13 @@ const REFERENCE_QUERY_CHARS = 400;
  * from the whole request ("Can you create a PowerPoint about quiche") would
  * otherwise ground any library document that mentions PowerPoint.
  *
+ * A subject of two or more terms needs two of them in an entry, unless the
+ * entry's title is made of subject terms alone ("Chess" for "the rules of
+ * chess"). One shared word is what any large catalog offers: "Summarize
+ * notes.txt for the board" cited the Help pages "Digital Board Game" and
+ * "Board Meeting Deck" on `board` alone, and two notes-taking books on
+ * `notes` (2026-11-11).
+ *
  * With a relevance model on, a candidate a calibrated model scored is kept
  * or dropped on that score alone; the lexical rule judges the rest. The
  * model is asked about the subject's terms, not the whole request, for the
@@ -61,6 +69,8 @@ export async function gatherTaskReferences(args: {
   const bookTokens = new Set(tokenizeText(args.craftbookName));
   const terms = proactiveRetrievalTerms(args.subject).filter((term) => !bookTokens.has(term));
   if (terms.length === 0) return null;
+  const termGroups = groupByBaseForm(terms);
+  const requiredMatches = Math.min(2, termGroups.length);
   const trace = new RetrievalTraceBuilder('references', subjectHash(args.subject));
   let timer: ReturnType<typeof setTimeout> | undefined;
   const started = performance.now();
@@ -120,7 +130,10 @@ export async function gatherTaskReferences(args: {
         continue;
       }
       const grounding = `${item.title} ${item.path ?? ''} ${result.snippet ?? ''}`;
-      if (!judged(result) && !textMatchesAnyTerm(grounding, terms)) {
+      const grounded =
+        matchedGroups(grounding, termGroups) >= requiredMatches ||
+        titleIsSubject(item.title, terms);
+      if (!judged(result) && !grounded) {
         trace.reject(result, 'lexical');
         continue;
       }
@@ -170,6 +183,32 @@ export async function gatherTaskReferences(args: {
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/** Subject terms keyed by base form, so "note" and "notes" count as one term. */
+function groupByBaseForm(terms: readonly string[]): string[][] {
+  const groups = new Map<string, string[]>();
+  for (const term of terms) {
+    const key = baseForm(term);
+    const group = groups.get(key);
+    if (group) group.push(term);
+    else groups.set(key, [term]);
+  }
+  return [...groups.values()];
+}
+
+function matchedGroups(text: string, groups: readonly string[][]): number {
+  return groups.filter((group) => textMatchesAnyTerm(text, group)).length;
+}
+
+/** Every meaningful word of the title is a subject term, so the entry is about the subject. */
+function titleIsSubject(title: string, terms: readonly string[]): boolean {
+  const words = proactiveRetrievalTerms(title);
+  const bases = new Set(terms.map(baseForm));
+  return (
+    words.length > 0 &&
+    words.every((word) => bases.has(baseForm(word)) || textMatchesAnyTerm(word, terms))
+  );
 }
 
 function toReference(result: UnifiedSearchResult): TaskReference | null {

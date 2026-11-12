@@ -15,6 +15,8 @@ import { ReportErrorLink } from './ReportErrorLink.js';
 interface Props {
   resetKey: string | null;
   children: ReactNode;
+  /** Told once when the tab crashes, so a kept view can be dropped when left. */
+  onError?: () => void;
 }
 
 interface State {
@@ -44,6 +46,7 @@ export class TabErrorBoundary extends Component<Props, State> {
     // Also keep it: this is the one place in the UI holding a real Error,
     // and the component stack is what makes a crash report actionable.
     this.setState({ componentStack: info.componentStack ?? null });
+    this.props.onError?.();
   }
 
   override render() {

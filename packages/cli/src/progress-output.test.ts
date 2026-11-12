@@ -16,23 +16,56 @@ describe('progressWriter', () => {
     expect(stream.written).toEqual(['\rdownloading:   1%', '\rdownloading:   2%']);
   });
 
-  it('prints at most one update per interval in a log, plus every finished line', () => {
+  it('prints a download as one line per step and a few percentages in a log', () => {
+    const stream = capture(false);
+    const write = progressWriter(stream);
+
+    // What `gezel --download run` sent through it, one update per chunk.
+    for (let kib = 0; kib <= 230 * 1024; kib += 128) {
+      const pct = Math.floor((kib / (230 * 1024)) * 100);
+      write(`\rllama-server: ${String(pct).padStart(3)}%  ${kib} KiB/230.4 MiB`);
+    }
+    write('\n');
+    write('llama-server: verifying archive\n');
+    write('llama-server: ready — C:\\gezel\\bin\\llama-server.exe\n');
+    for (let pct = 0; pct <= 100; pct++) {
+      write(`\rdownloading qwen3.5-2b-q4 (llama-cpp): ${String(pct).padStart(3)}%  1.33 GB`);
+    }
+    write(`\rdownloaded qwen3.5-2b-q4 (llama-cpp)${' '.repeat(48)}\n`);
+
+    expect(stream.written).toEqual([
+      'llama-server:   0%  0 KiB/230.4 MiB\n',
+      'llama-server:  25%  58880 KiB/230.4 MiB\n',
+      'llama-server:  50%  117760 KiB/230.4 MiB\n',
+      'llama-server:  75%  176640 KiB/230.4 MiB\n',
+      'llama-server: verifying archive\n',
+      'llama-server: ready — C:\\gezel\\bin\\llama-server.exe\n',
+      'downloading qwen3.5-2b-q4 (llama-cpp):   0%  1.33 GB\n',
+      'downloading qwen3.5-2b-q4 (llama-cpp):  25%  1.33 GB\n',
+      'downloading qwen3.5-2b-q4 (llama-cpp):  50%  1.33 GB\n',
+      'downloading qwen3.5-2b-q4 (llama-cpp):  75%  1.33 GB\n',
+      'downloaded qwen3.5-2b-q4 (llama-cpp)\n',
+    ]);
+    expect(stream.written.join('')).not.toContain('\r');
+  });
+
+  it('prints an update without a percentage at most once per interval', () => {
     let clock = 0;
     const stream = capture(false);
     const write = progressWriter(stream, { intervalMs: 1000, now: () => clock });
 
-    write('\rdownloading:   1%');
+    write('\rpreparing the runtime: 0m 00s');
     clock = 500;
-    write('\rdownloading:  40%');
+    write('\rpreparing the runtime: 0m 01s');
     clock = 1200;
-    write('\rdownloading:  80%');
+    write('\rpreparing the runtime: 0m 02s');
     clock = 1300;
-    write(`\rdownloaded model${' '.repeat(48)}\n`);
+    write(`\rruntime ready${' '.repeat(48)}\n`);
 
     expect(stream.written).toEqual([
-      'downloading:   1%\n',
-      'downloading:  80%\n',
-      'downloaded model\n',
+      'preparing the runtime: 0m 00s\n',
+      'preparing the runtime: 0m 02s\n',
+      'runtime ready\n',
     ]);
   });
 

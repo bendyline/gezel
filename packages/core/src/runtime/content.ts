@@ -1,3 +1,4 @@
+import type { AppModelDocbench } from '../schemas/app-models.js';
 import type { CatalogItemDetail, CatalogItemSummary, Craftbook } from '../schemas/index.js';
 import type { MobileModelSourceIdentity } from '../schemas/mobile-provider.js';
 import type { BehaviorEntry, ModelStyle } from '../schemas/model-profile.js';
@@ -19,6 +20,13 @@ export interface PortableCatalogModel {
   behaviors?: BehaviorEntry[];
   /** The manifest's parameter size ("8B"), which sets the capability tier. */
   parameterSize?: string;
+  /** The manifest's license class (`open`, …); recommendations require `open`. */
+  licenseClass?: string;
+  /**
+   * The build's llama.cpp docbench result, only while it is fresh — measured
+   * on the catalog version the snapshot carries (see `docbenchScoreFor`).
+   */
+  docbench?: AppModelDocbench;
 }
 export interface PortableContent {
   models?: PortableCatalogModel[];

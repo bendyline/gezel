@@ -65,10 +65,14 @@ import {
   type ProjectActivity,
   ProjectActivitySchema,
   type ProjectCraftbookProvenance,
+  type ProjectCustomIcon,
+  type ProjectCustomIconFormat,
+  ProjectCustomIconFormatSchema,
   type ProjectDetail,
   type ProjectFileEntry,
   type ProjectGitHub,
   type ProjectIconId,
+  type ProjectIconImageFormat,
   type ProjectLocalConfig,
   ProjectLocalConfigSchema,
   type ProjectManagedWorkspaceWritePolicy,
@@ -160,6 +164,7 @@ import {
   projectDocsDir,
   projectFindingLifecycleFile,
   projectHistoryFile,
+  projectIconArtFile,
   projectInternalGithubDir,
   projectLocalConfigFile,
   projectLocalGezelDir,
@@ -3308,6 +3313,55 @@ export class Store {
    * links/relinks (the link is a user-supplied claim — actual cloning is
    * driven separately by the GitManager).
    */
+  /**
+   * The project's own icon art: a mark a model drew (SVG text, sanitized by
+   * the caller) or a picture the person uploaded (bytes whose format the
+   * caller sniffed). One file beside `project.json`; a new one replaces the
+   * old, whatever its format.
+   */
+  async writeProjectIconArt(
+    id: string,
+    art:
+      | { kind: 'drawn'; svg: string }
+      | { kind: 'image'; format: ProjectIconImageFormat; bytes: Uint8Array },
+  ): Promise<ProjectDetail> {
+    if (!(await this.getProject(id))) throw new Error(`project ${id} not found`);
+    const format = art.kind === 'drawn' ? 'svg' : art.format;
+    const file = projectIconArtFile(this.home, id, format);
+    await this.removeProjectIconArtFiles(id);
+    await writeFileAtomic(file, art.kind === 'drawn' ? art.svg : Buffer.from(art.bytes));
+    return this.updateProject(id, {
+      customIcon: { kind: art.kind, format, updatedAt: nowIso() },
+    });
+  }
+
+  /** The stored art and its format, or null when the project has none. */
+  async readProjectIconArt(
+    id: string,
+  ): Promise<{ format: ProjectCustomIconFormat; bytes: Buffer } | null> {
+    const project = await this.getProject(id);
+    const format = project?.customIcon?.format;
+    if (!format) return null;
+    try {
+      return { format, bytes: await readFile(projectIconArtFile(this.home, id, format)) };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Drop the project's own art; its mark shows again. */
+  async clearProjectIconArt(id: string): Promise<ProjectDetail> {
+    return this.updateProject(id, { customIcon: null });
+  }
+
+  private async removeProjectIconArtFiles(id: string): Promise<void> {
+    await Promise.all(
+      ProjectCustomIconFormatSchema.options.map((format) =>
+        rm(projectIconArtFile(this.home, id, format), { force: true }),
+      ),
+    );
+  }
+
   async updateProject(
     id: string,
     patch: {
@@ -3315,6 +3369,12 @@ export class Store {
       description?: string;
       /** Explicit maker's-mark override; null resumes type inheritance. */
       icon?: ProjectIconId | null;
+      /**
+       * The record of the project's own icon art; null drops it. Internal:
+       * only the icon-art methods below pass it, after the file is in place.
+       * Choosing a mark (`icon`, including null) drops the art as well.
+       */
+      customIcon?: ProjectCustomIcon | null;
       workingDir?: string | null;
       voormanGezelId?: string | null;
       /** Replaces this project's one-way linked-project set. */
@@ -3469,6 +3529,12 @@ export class Store {
         : patch.icon !== undefined
           ? { icon: patch.icon }
           : {}),
+      // A mark chosen again (or Automatic) replaces the project's own art.
+      ...(patch.customIcon === null || (patch.customIcon === undefined && patch.icon !== undefined)
+        ? { customIcon: undefined }
+        : patch.customIcon !== undefined
+          ? { customIcon: patch.customIcon }
+          : {}),
       ...(patch.workingDir === null
         ? { workingDir: undefined }
         : patch.workingDir !== undefined
@@ -3562,6 +3628,7 @@ export class Store {
       delete (updated as Partial<Project>).properties;
     }
     await this.writeProjectMeta(updated);
+    if (meta.customIcon && !updated.customIcon) await this.removeProjectIconArtFiles(id);
     if (patch.properties !== undefined) {
       await this.history?.log({
         kind: 'project.properties.updated',
@@ -3584,6 +3651,7 @@ export class Store {
     if (patch.description !== undefined && patch.description !== meta.description)
       metaChanged.push('description');
     if (patch.icon !== undefined && patch.icon !== meta.icon) metaChanged.push('icon');
+    if (patch.customIcon !== undefined) metaChanged.push('customIcon');
     if (patch.workingDir !== undefined) metaChanged.push('workingDir');
     if (
       patch.linkedProjectIds !== undefined &&
@@ -6290,6 +6358,7 @@ export class Store {
           content: m.content,
           at: m.at,
           ...(m.from ? { from: m.from } : {}),
+          ...(m.relayedImages ? { relayedImages: m.relayedImages } : {}),
           ...(m.nudge ? { nudge: true } : {}),
           ...(m.draftId ? { draftId: m.draftId } : {}),
           ...(m.hidden ? { hidden: true } : {}),

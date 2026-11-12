@@ -119,6 +119,61 @@ export interface RecoModelInput extends RecoGateInput {
    * {@link RecoDevice.launchCapBytes}. Absent = `residentBytes`.
    */
   launchBytes?: number;
+  /**
+   * Measured docbench score, 0–100, for this build on the engine it would run
+   * on, and only when fresh ({@link docbenchScoreFor}). Read when ranking with
+   * `quality: 'docbench'`.
+   */
+  docbench?: number;
+}
+
+/**
+ * What a recommendation ranks quality by.
+ *
+ * - `reco`: the hand-curated `recoScore`, for Gezel's own work (agents that
+ *   act through tools). The default, and what first run uses.
+ * - `docbench`: the measured docbench score, for DocBlocks' single-request
+ *   document work (review, writing, diagrams, slides, study aids). It needs
+ *   no tool support and no curated score; a model without a measured score
+ *   is never the recommended pick and ranks after every measured one.
+ */
+export type RecommendationQuality = 'reco' | 'docbench';
+
+export interface RecommendationOptions {
+  readonly quality?: RecommendationQuality;
+}
+
+/** The docbench gate: an open, unretired model with a measured score. */
+export function isDocbenchCandidate(m: RecoGateInput & { docbench?: number }): boolean {
+  return (
+    typeof m.docbench === 'number' &&
+    Number.isFinite(m.docbench) &&
+    m.licenseClass === 'open' &&
+    !isRetiredModel(m)
+  );
+}
+
+/**
+ * A manifest's docbench score for one engine, or undefined when there is
+ * none or it is stale: measured on another catalog version of the weights.
+ */
+export function docbenchScoreFor(
+  manifest: {
+    readonly version?: string;
+    readonly benchmarks?: {
+      readonly docbench?: Readonly<
+        Record<string, { readonly score: number; readonly catalogVersion: string }>
+      >;
+    };
+  },
+  engine: string,
+): number | undefined {
+  const measured = manifest.benchmarks?.docbench?.[engine];
+  if (!measured) return undefined;
+  if (manifest.version !== undefined && measured.catalogVersion !== manifest.version) {
+    return undefined;
+  }
+  return measured.score;
 }
 
 export interface RecoDevice {
@@ -242,6 +297,22 @@ function scoreLabel(s: Scored): string {
   const curated = s.m.recoScore as number;
   if (s.score === curated) return `recoScore ${curated}`;
   return `recoScore ${curated} → ${Math.round(s.score * 10) / 10} (${s.m.quantization})`;
+}
+
+/** The gate, quality and label a ranking mode uses. */
+function qualityMode(quality: RecommendationQuality = 'reco') {
+  return quality === 'docbench'
+    ? {
+        eligible: isDocbenchCandidate,
+        // Measured per quant, so no low-bit discount: a 2-bit build's score already says what it costs.
+        value: (m: RecoModelInput) => m.docbench as number,
+        label: (s: Scored) => `docbench ${Math.round(s.score)}`,
+      }
+    : {
+        eligible: isRecommendedModel,
+        value: (m: RecoModelInput) => (m.recoScore as number) * lowBitScoreFactor(m.quantization),
+        label: scoreLabel,
+      };
 }
 
 /** MoE offload is a Mac / small-GPU win; a big discrete GPU prefers dense. */
@@ -386,11 +457,14 @@ function comparator(preferMoE: boolean) {
 export function pickRecommendedModel(
   models: readonly RecoModelInput[],
   device: RecoDevice,
+  options: RecommendationOptions = {},
 ): RecoPick | null {
   const preferMoE = prefersMoE(device);
   const excludeMoE = excludesMoE(device);
+  const mode = qualityMode(options.quality);
+  const scoreLabel = mode.label;
 
-  const scored: Scored[] = models.filter(isRecommendedModel).map((m) => {
+  const scored: Scored[] = models.filter(mode.eligible).map((m) => {
     const isMoE = isMoEFromTags(m.tags);
     const fit = computeModelFit({
       residentBytes: m.residentBytes,
@@ -404,7 +478,7 @@ export function pickRecommendedModel(
     const launchable = launchFitsNow(m, device);
     return {
       m,
-      score: (m.recoScore as number) * lowBitScoreFactor(m.quantization),
+      score: mode.value(m),
       isMoE,
       tier: fit.tier,
       launchable,
@@ -507,10 +581,12 @@ const DENSE_PREFERRED_SCORE_FACTOR = 0.9;
 export function rateModelsForDevice(
   models: readonly RecoModelInput[],
   device: RecoDevice,
+  options: RecommendationOptions = {},
 ): ModelRating[] {
   const smallModelHost = needsSmallModelRecommendation(device);
   const excludeMoE = excludesMoE(device);
   const preferMoE = prefersMoE(device);
+  const mode = qualityMode(options.quality);
   const rated = models.map((m) => {
     const isMoE = isMoEFromTags(m.tags);
     const fit = computeModelFit({
@@ -522,9 +598,7 @@ export function rateModelsForDevice(
       ...(device.budgetBytes !== undefined ? { admissibleBytes: device.budgetBytes } : {}),
       ...(m.nonExpertBytes !== undefined ? { nonExpertBytes: m.nonExpertBytes } : {}),
     });
-    const quality = isRecommendedModel(m)
-      ? (m.recoScore as number) * lowBitScoreFactor(m.quantization)
-      : 0;
+    const quality = mode.eligible(m) ? mode.value(m) : 0;
     const fitFactor = !fit.runnable
       ? 0
       : fit.tier === 'tight' || (smallModelHost && m.residentBytes > SMALL_MODEL_VRAM_THRESHOLD)
@@ -536,7 +610,7 @@ export function rateModelsForDevice(
   });
 
   const bestQuality = Math.max(0, ...rated.filter((r) => r.fit.runnable).map((r) => r.quality));
-  const pick = pickRecommendedModel(models, device);
+  const pick = pickRecommendedModel(models, device, options);
   const pickId = rated.find((r) => r.m.id === pick?.id)?.fit.runnable ? pick?.id : undefined;
 
   const ratings = rated.map((r) => {

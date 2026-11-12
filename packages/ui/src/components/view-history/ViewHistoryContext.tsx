@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { beginNavigation } from '../../nav-timing.js';
 import {
   VIEW_HISTORY_STORAGE_KEY,
   type ViewHistory,
@@ -283,6 +284,7 @@ export function useViewLocation(name: string, options: ViewLocationOptions): Vie
   // view arrives, so Back never records the view's last frame as a new step.
   const pending = useRef<{ from: string | undefined; to: string } | null>(null);
   const correctionTo = useRef<string | null>(null);
+  const reportedKey = useRef<string | undefined>(undefined);
 
   useEffect(() => {
     if (revision === seenRevision.current) return;
@@ -313,6 +315,13 @@ export function useViewLocation(name: string, options: ViewLocationOptions): Vie
       // The view landed somewhere other than where Back asked: it corrected
       // itself (a closed section), which is not a step of its own.
       if (part.key !== waiting.to) annotate = true;
+    }
+    const previousKey = reportedKey.current;
+    reportedKey.current = part.key;
+    // A person's move to another place inside the view is timed like a move
+    // between views; the first report and self-corrections are not moves.
+    if (previousKey !== undefined && previousKey !== part.key && !annotate) {
+      beginNavigation(`${parentKey}/${scope}:${part.key}`, { scope: 'part' });
     }
     setPartAction(scope, part, { selectionKey: parentKey, annotate });
   }, [setPartAction, scope, parentKey, partKey, partLabel, live]);

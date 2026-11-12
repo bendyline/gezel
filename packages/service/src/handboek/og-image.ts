@@ -1,6 +1,5 @@
-import { markdownToDoc } from '@bendyline/squisq/doc';
+import { type Theme, markdownToDoc } from '@bendyline/squisq/doc';
 import { parseMarkdown } from '@bendyline/squisq/markdown';
-import type { Theme } from '@bendyline/squisq/schemas';
 import type { ContentContainer } from '@bendyline/squisq/storage';
 import { runWithManagedBrowser } from '../rendering/managed-browser.js';
 
@@ -25,6 +24,11 @@ export const OG_CARD_HEIGHT = 630;
  * packages/cli/src/handboek-site-css.ts so a card sits in the same world as
  * the page it previews. Keep the two in step by hand — the stylesheet is a
  * string constant in another package and there is nothing to import.
+ *
+ * `Theme` comes from squisq's `doc` entry, not `schemas`: this constant is
+ * public through `@bendyline/gezel-service/handboek`, and the `schemas`
+ * declarations need the DOM lib, which a Node consumer does not load
+ * (2026-11-11 npm ship audit).
  *
  * No `persistentLayers`: every built-in theme layers a `noise`
  * patternBackground, and noise is random pixel data across the whole canvas.

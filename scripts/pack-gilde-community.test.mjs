@@ -95,6 +95,21 @@ describe('gilde community packing for bundles', () => {
     assert.equal(detail?.manifest.version, '1.0.0');
   });
 
+  it('leaves a tier that gilde already published packed as it is', async () => {
+    const community = await seedDeployedTree(root);
+    await catalog.collapseToContentPack(community);
+    // What a gilde tarball shipped beside its pack once: the loader ignores it.
+    await put(join(community, '.gitkeep'), '');
+    const before = await readFile(join(community, catalog.CONTENT_PACK_FILENAME));
+    const result = await packDeployedGildeCommunity(root, { label: 'test', catalog });
+    assert.equal(result.alreadyPacked, true);
+    assert.deepEqual(await readdir(community), [catalog.CONTENT_PACK_FILENAME]);
+    assert.deepEqual(await readFile(join(community, catalog.CONTENT_PACK_FILENAME)), before);
+
+    process.env.GEZEL_GILDE_DATA_DIR = dirname(community);
+    assert.deepEqual(await probePackedGildeCommunity(catalog, root), { listed: TOOL_IDS.length });
+  });
+
   it('refuses a tree without a community tier', async () => {
     await assert.rejects(
       packDeployedGildeCommunity(root, { label: 'test', catalog }),

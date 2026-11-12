@@ -225,6 +225,7 @@ export * from './tasks/gate-accounting.js';
 export * from './tasks/gate-scripts.js';
 export * from './tasks/gate-workspace-files.js';
 export * from './tasks/prompt-context.js';
+export * from './tasks/outcome-review.js';
 export * from './tasks/inferred-step-inputs.js';
 export * from './tasks/paused-card.js';
 export * from './tasks/step-activation.js';

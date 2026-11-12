@@ -277,6 +277,12 @@ export function stepPersonLabel(
     if (phrase.length <= 60) return phrase;
   }
   if (step.terminal && stage === 'check') return 'wrapping up';
+  return stagePersonLabel(stage, opts);
+}
+
+/** A stage's own phrase for "Dejan is …", for when no step name says more. */
+export function stagePersonLabel(stage: CraftbookStepStage, opts: { noun?: string } = {}): string {
+  const yours = opts.noun ? `your ${opts.noun}` : undefined;
   if (stage === 'intake') return 'getting clear on what you need';
   if (stage === 'check') return yours ? `checking ${yours}` : 'checking the work';
   return yours ? `making ${yours}` : 'working on it';

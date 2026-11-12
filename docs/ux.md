@@ -184,10 +184,24 @@ pacing of a transition. If a first-time user can't quite put a finger on
   color: they are most of the secondary text, and at full warmth read tan on
   gray. Home's dusk tokens derive from the same primitives, so Home and the
   rail share one temperature; the cool gray ramp before walnut put a warm
-  Home beside a slate sidebar. What stays warm at night is the accent at
-  work: a selected row's wash, the person's own chat bubble, the composer's
-  edge, a latched key. A new dark surface is a lightness step on the ramp,
-  never a hand-written brown (`night-ground.test.ts` pins the range).
+  Home beside a slate sidebar. A new dark surface is a lightness step on the
+  ramp, never a hand-written brown (`night-ground.test.ts` pins the range).
+
+  **At night the accent is for marks, never for surfaces or structure.** By
+  day a quiet zone is a faint wash of the terracotta and a structural line is
+  a hairline of it: warm on parchment. Over charcoal the same wash is a brown
+  surface and the same hairline a brown frame, and a chat made of them read
+  brown after the ground itself had gone gray. Both go through `--wash-tint`:
+  the terracotta by day, a gray of about the same lightness at night
+  (`color-mix(in srgb, var(--wash-tint) 8%, transparent)`). That covers the
+  person's own chat bubble, hand-off and queued notes, the composer's frame
+  and toolbar band, a thread's line, Home's rules and corner glow, and hover
+  washes. A mix of `--accent` under 16% is a wash and takes the tint; the
+  test fails on a new one written with the accent. What keeps the terracotta
+  at night: the primary key, a selected or latched item (`--selected-bg`,
+  the rail's selected outline, a latched key), a status that is working,
+  links, icons and labels. A warning inside a conversation keeps its ochre
+  words and edge at night and drops most of its fill, for the same reason.
 
   **Emphasis points the same way in both themes.** Filled actions
   (`--action-bg`) and latched keys (`--key-pressed-bg`) are the day's deep
@@ -1073,6 +1087,36 @@ default (see the next rule and "Interests order; they never hide"). On the
 icon rail the group is one icon. An open group, or one holding the current
 area, lists its areas' icons beneath it; pressing the icon of a closed group
 expands the rail and opens it.
+
+**In the rail the accent marks a category; ink marks the things in it.**
+The group headers (Projects, Documents, Crew, More) and the areas below them
+wear the terracotta. A project's mark is drawn in ink, like a document's
+file icon, and a crew member is a face. Project marks were the accent too,
+so a project row read as one more category. A project's mark comes from its
+type (core `resolveProjectIcon`), which makes two projects of one type look
+alike: two code folders are both braces. A person tells them apart in the
+project's Settings → Preferences → Icon, which offers every maker's mark as
+an icon key (`ProjectIconPicker`) and saves the choice as `project.icon`;
+Automatic clears it and follows the type again. The marks stay bare
+single-color glyphs: a tinted tile behind one is this app's key treatment,
+and made every row's mark read as a control.
+
+A project may wear art of its own in place of a mark, from two keys under
+the picker (`ProjectIconField`, shown where the host keeps such art:
+`projectIconArt`). **Draw one** opens a dialog with a description filled in
+from the project's name and type, which the person edits. Generate asks a
+model for one drawing; pressing it again draws another, every drawing made
+stays in a row to choose between, and the one in hand is shown large and at
+list size beside the project's name. Nothing is saved until **Set this as
+the icon**; Cancel leaves the icon as it was. **Upload a picture** takes a
+PNG, JPEG or WebP, which the app scales to a small square before sending.
+A drawn mark is painted as a silhouette in the theme's ink (the SVG is only
+a mask), so it sits with the built-in marks and follows light and dark. A
+picture is shown as it is, with the small radius of a thumbnail. Either
+shows in the picker as one more key, latched, and choosing any mark or
+Automatic puts it away. The built-in mark stands in while art loads or
+cannot be read. Drawing is never automatic: it costs a model call, and a
+small on-device model draws poorly.
 
 **The rail sits on the left.** It is under the brand and the back and
 forward keys, so navigation reads in one direction: the rail, then an area's
@@ -3100,6 +3144,13 @@ the bubble: the sticky scroll header renders the same verdict, and a new
 one must too. Cross-gezel messages are a separate case already answered by
 `from` — they keep the "Aldric → Maya" handoff bubble.
 
+**What a delegate made travels with its reply.** A delegation's reply reaches
+the sender's chat as words, but a picture the delegate made belongs to its own
+tool call. The relay carries it as `relayedImages`, and the handoff bubble
+shows it in the same media strip a tool call uses, with the same menu, so the
+person sees it in the chat they are in rather than only in the delegate's
+thread.
+
 **Hand-offs are a card, not a paragraph.** The dispatch seed that opens a
 task thread is addressed to the model: it names the sender, the step and the
 task ref in its first sentence and then spends four more on tool-calling
@@ -3316,9 +3367,12 @@ local turns used to stream all of it into the conversation for minutes,
 which made the machine room the progress signal. What remains is the
 status line, the thinking dots, and one plain line for a call being
 written ("Writing file…"; a tool with no curated label reads "Working…",
-never its slug). Cards, media and an unrecovered failure sit above the
-body, where the finished reply keeps them, so nothing moves when the turn
-commits. A failure whose reason is a machine payload (a JSON envelope, a
+never its slug). The prompt's token count beside the progress bar ("33.7K")
+is machinery too: outside debug mode it appears only while the pointer is
+over the bubble's header row. The hammer's count stays, with its meaning in
+the tooltip ("The model has reported progress 104 times"). Cards, media and
+an unrecovered failure sit above the body, where the finished reply keeps
+them, so nothing moves when the turn commits. A failure whose reason is a machine payload (a JSON envelope, a
 stack trace) reads "didn't finish. The steps have the full response." The
 raw text stays behind Details. Audio a folded reply produced joins its media
 strip, so hiding the steps never hides a recording.
@@ -3488,7 +3542,16 @@ link that lands on the same article.
 **Loading states.** Routine view transitions, local reads, and lazy-loaded
 editors stay wordless while pending. Use an empty surface or retain the pane's
 frame; don't flash "Loading…" prose or show an empty-state claim before the
-request has answered. Keep refresh and pagination button labels stable while
+request has answered. A lazily loaded pane's fallback holds the pane's size
+rather than rendering nothing (`PaneFrame`), and a switch between tabs runs in
+a transition so the old tab stays up while the next one loads. A move to
+another destination highlights its rail row at once and, when its data is not
+in memory yet, keeps the current view up for a moment (at most 120 ms) so the
+next one paints complete. Recently visited destinations stay alive behind the
+one shown: coming back to a project returns to the tab, open file and scroll
+position the person left, not to Chat. Settings and the editors start fresh
+on every visit. How to measure pop-in, and the rules that keep views from
+filling in stages, are in [ui-architecture.md](ui-architecture.md). Keep refresh and pagination button labels stable while
 their controls are disabled. Use `aria-busy` on retained surfaces and keep
 screen-reader-only status text where it helps. Longer operations such as
 downloads, model preparation, and generation still need meaningful progress;

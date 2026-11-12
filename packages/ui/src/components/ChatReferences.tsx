@@ -34,6 +34,7 @@ import type { ToolActivity } from './chat-bubbles.js';
 import type { OpenChatReference, OpenChatReferenceKind } from './chat-open-command.js';
 import { gezelReportThemeForMode } from './chat-theme.js';
 import { fileRefFromHref, linkifyFileRefs } from './file-linkify.js';
+import { LiveRenderGate } from './live-render-gate.js';
 import { isPlainTextFile } from './plain-text-file.js';
 import { makeReportActionFenceRenderers } from './report-actions/ReportActionFence.js';
 import { type ResultStage, ResultStageContext } from './result-stage.js';
@@ -826,7 +827,10 @@ export function ChatReferences({
     ];
     const onlyChat = compactPanes.length === 1;
     return provideStage(
-      <div ref={containerRef} className="chat-rail-body chat-rail-body-compact">
+      <div
+        ref={containerRef}
+        className={`chat-rail-body chat-rail-body-compact${banner ? ' chat-rail-body-banner' : ''}`}
+      >
         {banner && <div className="chat-rail-banner">{banner(referenceApi)}</div>}
 
         <Tabs.Root
@@ -850,7 +854,11 @@ export function ChatReferences({
             className="chat-rail-compact-panel chat-rail-compact-chat"
             value="chat"
           >
-            <div className="chat-rail-main">{children(referenceApi)}</div>
+            {/* Kept mounted so the draft and scroll survive a tab change; a
+                reply streaming behind another tab waits to redraw until shown. */}
+            <LiveRenderGate shown={onlyChat || compactPane === 'chat'}>
+              <div className="chat-rail-main">{children(referenceApi)}</div>
+            </LiveRenderGate>
           </Tabs.Content>
 
           {hasTasks && effectiveTaskRef && (
@@ -931,7 +939,7 @@ export function ChatReferences({
       ref={containerRef}
       className={`chat-rail-body${hasSide ? ' chat-rail-body-split' : ''}${
         splitWide ? ' chat-rail-body-wide' : ''
-      }`}
+      }${banner ? ' chat-rail-body-banner' : ''}`}
       style={{
         ['--chat-rail-side-fraction' as string]: (splitWide
           ? WIDE_SIDE_FRACTION
@@ -1979,6 +1987,33 @@ function ReferenceAudioPreview({ path, src }: { path: string; src: string }) {
   );
 }
 
+/** What a file is, in a person's words, when the pane cannot show it. */
+function unshownFileKind(path: string): string | null {
+  const ext = /\.([a-z0-9]+)$/i.exec(path)?.[1]?.toLowerCase();
+  switch (ext) {
+    case 'pptx':
+    case 'ppt':
+    case 'odp':
+    case 'key':
+      return 'presentation';
+    case 'docx':
+    case 'doc':
+    case 'odt':
+    case 'rtf':
+    case 'pages':
+      return 'document';
+    case 'xlsx':
+    case 'xls':
+    case 'ods':
+    case 'numbers':
+      return 'spreadsheet';
+    case 'pdf':
+      return 'PDF';
+    default:
+      return null;
+  }
+}
+
 function ReferenceMachineFile({
   path,
   onSaveCopy,
@@ -1988,6 +2023,8 @@ function ReferenceMachineFile({
   onSaveCopy: () => void;
   onOpenContainingFolder: () => void;
 }) {
+  const kind = unshownFileKind(path);
+  const title = kind ? kind.charAt(0).toUpperCase() + kind.slice(1) : 'File';
   return (
     <div className="chat-rail-machine-file">
       <svg
@@ -2001,7 +2038,12 @@ function ReferenceMachineFile({
         <path d="M10 4h13l7 7v25H10z" stroke="currentColor" strokeWidth="1.5" />
         <path d="M23 4v8h7M15 21h10M15 26h10" stroke="currentColor" strokeWidth="1.5" />
       </svg>
-      <p className="chat-rail-machine-file-label">{'<Machine File>'}</p>
+      <p className="chat-rail-machine-file-label">{title}</p>
+      <p className="chat-rail-machine-file-note">
+        {kind
+          ? `Gezel can't show a preview of this ${kind} here.`
+          : "Gezel can't show this kind of file here."}
+      </p>
       <code className="chat-rail-machine-file-path">{path}</code>
       <div className="chat-rail-machine-file-actions">
         <button type="button" onClick={onSaveCopy}>

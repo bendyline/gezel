@@ -31,6 +31,14 @@ describe('gezel app new / validate / pack', () => {
     await runAppNew('field-notes', { dir, withPage });
     const appDir = join(dir, 'field-notes');
     expect(output()).toContain('Scaffolded field-notes');
+    // `app apply` refuses without --yes outside a terminal, so the printed
+    // next step must carry it for both commands.
+    expect(output()).toContain(
+      'gezel app add field-notes-1.0.0.gezapp --yes && gezel app apply field-notes --yes',
+    );
+    expect(await readFile(join(appDir, 'README.md'), 'utf8')).toContain(
+      '`gezel app apply field-notes --yes`',
+    );
 
     logged = [];
     await runAppValidate(appDir, { json: true });

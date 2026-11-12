@@ -12,9 +12,11 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from 'react';
 import { api } from '../api.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
@@ -31,7 +33,7 @@ import {
   withoutIndexingBackground,
 } from './indexing-activity.js';
 
-interface ActivityState {
+export interface ActivityState {
   snapshot: ActivityStatusResponse | null;
   stale: boolean;
   refreshing: boolean;
@@ -42,8 +44,62 @@ interface ActivityState {
   gezels: Map<string, GezelSummary>;
   projects: Map<string, Project>;
 }
-const ActivityContext = createContext<ActivityState | null>(null);
-export const useActivity = () => useContext(ActivityContext);
+
+/**
+ * Activity changes every few seconds (each poll hands out a new snapshot with
+ * new timestamps), so it is a store, not a context value: a context value
+ * re-renders every consumer and, read by the shell, the whole tree. A
+ * component reads the slice it shows with `useActivitySelector`.
+ */
+class ActivityStore {
+  private listeners = new Set<() => void>();
+  constructor(public state: ActivityState) {}
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+  publish(state: ActivityState): void {
+    if (state === this.state) return;
+    this.state = state;
+    for (const listener of this.listeners) listener();
+  }
+}
+
+const ActivityContext = createContext<ActivityStore | null>(null);
+const noStore = () => () => {};
+
+/**
+ * Read one slice of activity. The component re-renders only when the slice
+ * changes by `isEqual` (identity by default; pass a structural comparison for
+ * a derived object or array). Outside the provider the selector gets `null`.
+ */
+export function useActivitySelector<T>(
+  select: (state: ActivityState | null) => T,
+  isEqual: (a: T, b: T) => boolean = Object.is,
+): T {
+  const store = useContext(ActivityContext);
+  const memo = useRef<{ state: ActivityState | null; select: unknown; value: T } | null>(null);
+  const read = () => {
+    const state = store?.state ?? null;
+    const last = memo.current;
+    if (last && last.state === state && last.select === select) return last.value;
+    const next = select(state);
+    const value = last && isEqual(last.value, next) ? last.value : next;
+    memo.current = { state, select, value };
+    return value;
+  };
+  return useSyncExternalStore(store?.subscribe ?? noStore, read, read);
+}
+
+const whole = (state: ActivityState | null) => state;
+
+/**
+ * All of activity. Re-renders on every poll, so only the Activity panel and
+ * leaves that show most of it use this; everything else selects.
+ */
+export function useActivity(): ActivityState | null {
+  return useActivitySelector(whole);
+}
 
 async function loadSnapshot(): Promise<ActivityStatusResponse> {
   if (runtimeCapabilities().daemonSettings) {
@@ -287,5 +343,8 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
       projects,
     ],
   );
-  return <ActivityContext.Provider value={value}>{children}</ActivityContext.Provider>;
+  const [store] = useState(() => new ActivityStore(value));
+  // Published in the layout phase, so subscribers redraw in the same frame.
+  useLayoutEffect(() => store.publish(value), [store, value]);
+  return <ActivityContext.Provider value={store}>{children}</ActivityContext.Provider>;
 }

@@ -49,6 +49,46 @@ describe('parseGezelMarkdown', () => {
     expect(reparsed.sections[0]?.body).toContain('Body here.');
   });
 
+  it('keeps an opening H1 stable from the first round trip', () => {
+    const md = [
+      '---',
+      'name: Ada',
+      '---',
+      '',
+      '# Ada',
+      '',
+      'A careful engineer.',
+      '',
+      '## Working style',
+      '',
+      'Small steps.',
+      '',
+    ].join('\n');
+    const parsed = parseGezelMarkdown(md);
+    expect(parsed.sections).toHaveLength(1);
+    expect(parsed.sections[0]).toMatchObject({ heading: 'Ada', level: 1 });
+
+    const once = serializeGezelMarkdown(parsed);
+    expect(once).toContain('# Ada\n');
+    expect(once).not.toContain('## Ada');
+    const reparsed = parseGezelMarkdown(once);
+    expect(reparsed.sections).toEqual(parsed.sections);
+    expect(serializeGezelMarkdown(reparsed)).toBe(once);
+  });
+
+  it('keeps a body that is only an H1 at level 1', () => {
+    const parsed = parseGezelMarkdown('---\nname: Ada\n---\n\n# Ada\n');
+    const once = serializeGezelMarkdown(parsed);
+    expect(once).toContain('# Ada\n');
+    expect(once).not.toContain('## Ada');
+    expect(serializeGezelMarkdown(parseGezelMarkdown(once))).toBe(once);
+  });
+
+  it('leaves the default level off ## sections', () => {
+    const parsed = parseGezelMarkdown('---\nname: Ada\n---\n\n## About\n\nBody.\n');
+    expect(parsed.sections[0]).toEqual({ heading: 'About', body: 'Body.' });
+  });
+
   it('handles markdown with no headings', () => {
     const parsed = parseGezelMarkdown('---\nname: Simple\n---\n\njust a body');
     expect(parsed.sections).toHaveLength(1);

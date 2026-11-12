@@ -363,12 +363,17 @@ export function imageGenRoutes(ctx: ServiceContext): Hono {
         b64Png?: string;
         promptGuide?: string;
         styles?: Array<{ id: string; name: string }>;
+        replyTo?: { gezelName: string };
       } = {
         artifactPath: writtenPath,
         workspacePath,
         meta: notes.length > 0 ? { ...out.meta, settingsNotes: notes } : out.meta,
         ...(loraChoice.styles.length > 0 ? { styles: loraChoice.styles } : {}),
       };
+      // A turn another gezel started answers that gezel, whose chat is where
+      // the person reads the result: the tool must ask for the path there.
+      const replyTo = req.sessionId ? ctx.chat.turnAnswersGezel(req.sessionId) : null;
+      if (replyTo) respBody.replyTo = replyTo;
       if (req.inline) respBody.b64Png = out.png.toString('base64');
       const promptGuide = renderedModelPromptGuide(
         providerKind(provider.name),

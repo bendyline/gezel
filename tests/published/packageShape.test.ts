@@ -448,6 +448,7 @@ describe('published package payloads', () => {
     for (const file of [
       'dist/index.js',
       'dist/catalog/LICENSE',
+      'dist/catalog/NOTICE.md',
       'dist/catalog/provenance.json',
       'dist/catalog/image-models/raw-index.json',
       'dist/kokoro-lexicon/LICENSE',

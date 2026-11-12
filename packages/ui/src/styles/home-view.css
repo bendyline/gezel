@@ -56,8 +56,11 @@
      off the paper so the open tab and the sheet below read as one cloth. */
   --home-rail: var(--home-surf2);
   --home-sheet-rail-h: 20px;
-  --home-amber: color-mix(in srgb, var(--gezel-terra-bright) 7%, transparent);
-  --home-amber-bd: color-mix(in srgb, var(--gezel-terra-bright) 30%, transparent);
+  /* Home's own wash tint: the bright terracotta by day, foundation's gray
+     `--wash-tint` at dusk (below), for the amber zones and the corner glow. */
+  --home-wash-tint: var(--gezel-terra-bright);
+  --home-amber: color-mix(in srgb, var(--home-wash-tint) 7%, transparent);
+  --home-amber-bd: color-mix(in srgb, var(--home-wash-tint) 30%, transparent);
   /* Provenance mono — JetBrains isn't bundled; system mono is fine at 11px. */
   --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
@@ -75,7 +78,7 @@
     ),
     radial-gradient(
       900px 500px at -10% 110%,
-      color-mix(in srgb, var(--gezel-terra-bright) 6%, transparent),
+      color-mix(in srgb, var(--home-wash-tint) 6%, transparent),
       transparent 60%
     ), var(--paper);
   overflow: hidden;
@@ -84,20 +87,23 @@
 /* Dusk is the global night ramp: the paper and ink formulas above resolve
    against foundation's dark primitives, so Home and the rail share one
    temperature. Only what cannot follow the day's formulas changes here:
-   lines lift with cream and terracotta, cards take the inset step instead of
+   lines lift with cream over the night's gray wash tint (terracotta lines
+   on charcoal read as brown structure), cards take the inset step instead of
    white, the rails sink below the paper, and the deep terracotta text (under
    3:1 at night) takes the accent text. Keep both blocks identical. */
 [data-theme="dark"] .home-workshop {
+  --home-wash-tint: var(--wash-tint);
   --paper-3: color-mix(in srgb, var(--gezel-ink) 8%, var(--gezel-paper-inset));
-  --rule: color-mix(in srgb, var(--gezel-terra) 30%, var(--gezel-paper-inset));
+  --rule: color-mix(in srgb, var(--wash-tint) 30%, var(--gezel-paper-inset));
   --terra-deep: var(--accent-text);
   --home-card: var(--gezel-paper-inset);
   --home-rail: color-mix(in srgb, var(--home-workshop-paper) 70%, black);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .home-workshop {
+    --home-wash-tint: var(--wash-tint);
     --paper-3: color-mix(in srgb, var(--gezel-ink) 8%, var(--gezel-paper-inset));
-    --rule: color-mix(in srgb, var(--gezel-terra) 30%, var(--gezel-paper-inset));
+    --rule: color-mix(in srgb, var(--wash-tint) 30%, var(--gezel-paper-inset));
     --terra-deep: var(--accent-text);
     --home-card: var(--gezel-paper-inset);
     --home-rail: color-mix(in srgb, var(--home-workshop-paper) 70%, black);
@@ -973,7 +979,7 @@
 }
 .home-media-plan-item:has(input:checked) {
   border-color: color-mix(in srgb, var(--accent) 65%, var(--border));
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  background: color-mix(in srgb, var(--wash-tint) 8%, var(--surface));
 }
 .home-media-plan-item input {
   flex: 0 0 auto;

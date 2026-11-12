@@ -374,8 +374,16 @@ test('keeps keyboard focus while switching between terminal and blank chat', asy
 
   await page.keyboard.type('keep typing');
   await expect(chatEditor).toHaveText('keep typing');
+  // The `> ` escape fires only on the composer's first edit out of an empty
+  // draft, and Squisq reports edits from a render effect. On a loaded CI
+  // renderer the clear and the keystrokes reached the composer as one edit
+  // from "keep typing", so the escape never fired (2026-11-12). A person
+  // pauses there; the improve button follows the composer's own empty state.
+  const improve = chatComposer.getByTestId('chat-sparkle');
+  await expect(improve).toBeEnabled();
 
   await chatEditor.fill('');
+  await expect(improve).toBeDisabled();
   await page.keyboard.type('> ');
   await expect(page.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(
     'aria-selected',

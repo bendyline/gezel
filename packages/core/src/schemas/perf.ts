@@ -68,21 +68,35 @@ export const ClientLongTasksSchema = z.object({
 export type ClientLongTasks = z.infer<typeof ClientLongTasksSchema>;
 
 /**
- * What the renderer measured. `navigation`: one move between views, from the
- * click to the moment the new view stopped fetching. `long-task`: a renderer
- * main-thread block outside any navigation.
+ * What the renderer measured. `navigation`: one move between views (or, with
+ * `scope: 'part'`, inside one, such as a project's tab), from the click to the
+ * moment the new view stopped fetching. `long-task`: a renderer main-thread
+ * block outside any navigation.
  */
 export const ClientPerfReportSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('navigation'),
     view: z.string().max(200),
+    /** `part`: a move inside one view. Absent for a move between views. */
+    scope: z.enum(['view', 'part']).optional(),
     /** Click to first frame of the new view (chunk load + first render). */
     firstFrameMs: z.number().nonnegative(),
     /** Click to the last API response the new view waited on. */
     settledMs: z.number().nonnegative(),
+    /** Click to the frame after the view drew the last response it read. */
+    paintedMs: z.number().nonnegative().optional(),
+    /** Click to the first frame showing the view's main content (a chat's messages). */
+    contentMs: z.number().nonnegative().optional(),
+    /**
+     * How far content moved while the view filled in, in Chromium layout-shift
+     * units (0.1 is noticeable, 0.25 is poor). The direct measure of pop-in.
+     */
+    layoutShift: z.number().nonnegative().optional(),
     /** True when the view was still fetching when measurement gave up. */
     unsettled: z.boolean().optional(),
     requests: z.number().int().nonnegative(),
+    /** Polling requests that ran meanwhile; not counted in `requests`. */
+    backgroundRequests: z.number().int().nonnegative().optional(),
     slowest: z.array(ClientPerfRequestSchema).max(5),
     longTasks: ClientLongTasksSchema,
   }),

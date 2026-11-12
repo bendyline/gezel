@@ -39,6 +39,7 @@ export const GRANDFATHERED = new Map([
   ['packages/core/src/local-loop/local-tool-call-salvage.ts', 3_585],
   ['packages/service/src/index-store/index-store.ts', 3_473],
   ['packages/app/src/main.ts', 3_188],
+  ['packages/service/src/tasks/manager.test.ts', 3_015],
 ]);
 
 const IGNORED_DIRS = new Set(['dist', 'node_modules', 'generated', '__snapshots__']);

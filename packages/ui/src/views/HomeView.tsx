@@ -9,10 +9,10 @@ import { useFirstRun } from '../components/first-run-context.js';
 import { llamaEngineNeed } from '../components/first-run-engine.js';
 import { useFirstRunModel } from '../components/useFirstRunModel.js';
 import { useRoleBasedNameOnlyMode } from '../components/useRoleBasedNameOnlyMode.js';
+import { peekRead } from '../data/api-reads.js';
 import { releaseUrl } from '../github-urls.js';
 import { UI_FALLBACK_PROVIDER } from '../provider-default.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
-import { peekApiRead } from '../shared-api-reads.js';
 import { useUpdateState } from '../update-state.js';
 import '../styles/home-view.css';
 import { HomeWorkshop } from './home/HomeWorkshop.js';
@@ -63,11 +63,9 @@ export function HomeView({
       | 'settings',
   ) => void;
 }) {
-  const [config, setConfig] = useState<ConfigResponse | null>(
-    () => peekApiRead('getConfig') ?? null,
-  );
+  const [config, setConfig] = useState<ConfigResponse | null>(() => peekRead('getConfig') ?? null);
   const [projects, setProjects] = useState<Project[]>(
-    () => peekApiRead('listProjects')?.projects ?? [],
+    () => peekRead('listProjects')?.projects ?? [],
   );
   const [meesterName, setMeesterName] = useState<string | undefined>(undefined);
   const [meesterRoleBasedName, setMeesterRoleBasedName] = useState<string | undefined>(undefined);
@@ -93,7 +91,7 @@ export function HomeView({
   const [configured, setConfigured] = useState<boolean | null>(null);
   const needsFirstSetup = useFirstRun();
   const [established, setEstablished] = useState(
-    () => peekApiRead('getSystemHomeInfo')?.usage.everUsed ?? false,
+    () => peekRead('getSystemHomeInfo')?.usage.everUsed ?? false,
   );
   useEffect(() => {
     // A portable host has no daemon home to report on and answers 501.

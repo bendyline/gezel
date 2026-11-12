@@ -5,6 +5,24 @@ export * from './app-images.js';
 import { z } from 'zod';
 
 const id = z.string().min(1).max(512);
+
+/**
+ * A model's docbench result as clients see it: how well this build does
+ * DocBlocks-style document work (review, writing, diagrams, slides, study
+ * aids), measured on one engine. Shared by `/v1/models` entries and the
+ * phone catalog snapshot, so both hosts describe a score the same way.
+ */
+export const AppModelDocbenchSchema = z.object({
+  /** 0–100. */
+  score: z.number().min(0).max(100),
+  /** Rank band in its round; one band's models are indistinguishable. */
+  band: z.number().int().positive(),
+  /** The docbench version that measured it. */
+  version: z.string().max(64),
+  /** Family scores, 0–100, by family id. */
+  families: z.record(z.string().max(64), z.number().min(0).max(100)).optional(),
+});
+export type AppModelDocbench = z.infer<typeof AppModelDocbenchSchema>;
 const bytes = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 export const AppModelCapabilitiesSchema = z.object({
   text: z.boolean(),
@@ -56,6 +74,26 @@ export const AppModelSchema = z
      * `recommended` marks the single model first run would install.
      */
     recommendation: z
+      .object({
+        score: z.number().int().min(0).max(100),
+        recommended: z.boolean(),
+      })
+      .optional(),
+    /**
+     * How well this build does DocBlocks-style document work (review,
+     * writing, diagrams, slides, study aids), measured by docbench on the
+     * engine this entry runs on. Absent when unmeasured or stale. Top-level
+     * so clients that predate it still receive it: the schema passes unknown
+     * top-level fields through, but not unknown fields of `recommendation`.
+     */
+    docbench: AppModelDocbenchSchema.optional(),
+    /**
+     * Like `recommendation`, ranked for document work by docbench instead of
+     * Gezel's curated score: 0–100 for this machine, `recommended` on the one
+     * measured model to install for it. Present on downloadable entries when
+     * the catalog carries any docbench score.
+     */
+    docbench_recommendation: z
       .object({
         score: z.number().int().min(0).max(100),
         recommended: z.boolean(),

@@ -9,9 +9,7 @@ const source = (path: string) => readFileSync(resolve(import.meta.dirname, path)
 describe('surface stylesheets', () => {
   it('arrive with every destination the shell can open', () => {
     const loaders = [
-      ...source('components/tab-content-loaders.ts').matchAll(
-        /export const (load\w+) =\s*([^;]+);/g,
-      ),
+      ...source('navigation/destinations.ts').matchAll(/export const (load\w+) =\s*([^;]+);/g),
     ];
     expect(loaders.length).toBeGreaterThan(10);
     for (const [, name, body] of loaders) expect(body, name).toMatch(/^destination\(/);

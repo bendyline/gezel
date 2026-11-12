@@ -13,6 +13,8 @@ import {
   MAX_RESTART_RESUMES,
   type NewCraftbookStep,
   type NormalizedStepGate,
+  OUTCOME_REVIEW_MAX_ROUNDS,
+  OUTCOME_STEP_ID,
   type ScriptRef,
   type ScriptRun,
   type StepPosition,
@@ -44,6 +46,7 @@ import {
   explicitStepJump,
   gateHandoffNoteText,
   isEngagementAllowed,
+  isOutcomeTask,
   isScheduleHost,
   nightShiftDayKey,
   normalizeScriptRefs,
@@ -374,7 +377,23 @@ export interface GateHoldInfo {
    * When ≥1 the `message` IS the stage directive — deliver it raw.
    */
   escalationStage?: EscalationStage;
+  /** An outcome review, rather than a failed check, held completion. */
+  review?: 'self' | 'fresh';
 }
+
+/**
+ * Runs an outcome task's review once its contract checks pass
+ * (`strategyOptions.review`, decided at create by `resolveOutcomeReview`). `hold` keeps the step open with a message for
+ * the owner; `pass` lets it finish. Wired by product-service, which owns the
+ * chat handle a fresh reviewer needs.
+ */
+export type OutcomeReviewer = (args: {
+  projectId: string;
+  task: Task;
+  step: TaskCraftbookStep;
+  round: number;
+  mode: 'self' | 'fresh';
+}) => Promise<{ kind: 'hold'; message: string } | { kind: 'pass' }>;
 
 export type CompleteStepOutcome =
   | { status: 'advanced'; task: Task }
@@ -413,6 +432,7 @@ export class TaskManager {
   private craftbookResolver?: CraftbookResolver;
   private roleResolver?: RoleResolver;
   private executionModeResolver?: ExecutionModeResolver;
+  private outcomeReviewer?: OutcomeReviewer;
   private requestRefResolver?: RequestRefResolver;
   /**
    * Join concurrent replays of the same step transition. Local models can
@@ -780,6 +800,11 @@ export class TaskManager {
   /** Wire the execution-mode resolver (generalist vs stepwise). See {@link ExecutionModeResolver}. */
   setExecutionModeResolver(fn: ExecutionModeResolver): void {
     this.executionModeResolver = fn;
+  }
+
+  /** Wire the outcome review. See {@link OutcomeReviewer}. */
+  setOutcomeReviewer(fn: OutcomeReviewer): void {
+    this.outcomeReviewer = fn;
   }
 
   /** Wire the request resolver that stamps `Task.requestRef`. See {@link RequestRefResolver}. */
@@ -2535,6 +2560,11 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       }
     }
 
+    if (!opts.force && opts.cause !== 'gate' && opts.cause !== 'user') {
+      const review = await this.holdForOutcomeReview(projectId, task, completedStep);
+      if (review) return review;
+    }
+
     // ── onExit: the step's `finally` ──────────────────────────────────
     // Runs on every approved completion — jumps and terminal steps
     // included — in declared order. Every ref must succeed before the
@@ -2885,6 +2915,66 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
    * and the pause it might trigger would undo a resume. Nothing is stamped,
    * the same 409 the transition gives a completion that lost its pass.
    */
+  /**
+   * The outcome review, once the contract checks have passed and while the
+   * task has review rounds left. The round is charged before the review runs,
+   * so a turn that resubmits while a reviewer is still reading cannot start a
+   * second one. A review that fails to run lets the step finish: the
+   * instrument must never be what stops the task.
+   */
+  private async holdForOutcomeReview(
+    projectId: string,
+    task: Task,
+    step: TaskCraftbookStep,
+  ): Promise<CompleteStepOutcome | null> {
+    const mode = task.strategyOptions?.review;
+    if (!mode || !this.outcomeReviewer || !isOutcomeTask(task) || step.id !== OUTCOME_STEP_ID) {
+      return null;
+    }
+    const round = (step.outcomeReviewRounds ?? 0) + 1;
+    if (round > OUTCOME_REVIEW_MAX_ROUNDS) return null;
+    let charged: Task;
+    try {
+      charged = await this.stampGatePass(projectId, task, step, nowIso(), (s) => ({
+        ...s,
+        outcomeReviewRounds: round,
+      }));
+    } catch (err) {
+      if (err instanceof TaskWriteConflictError) return null;
+      throw err;
+    }
+    const chargedStep = charged.craftbook.steps.find((s) => s.id === step.id) ?? step;
+    const verdict = await this.outcomeReviewer({
+      projectId,
+      task: charged,
+      step: chargedStep,
+      round,
+      mode,
+    }).catch((err: unknown) => {
+      log.warn(
+        `[tasks] ${task.ref} outcome review round ${round} failed to run: ${err instanceof Error ? err.message : err}`,
+      );
+      return { kind: 'pass' as const };
+    });
+    log.info(
+      `[tasks] ${task.ref} outcome review round ${round} (${mode}): ${verdict.kind === 'hold' ? 'held for fixes' : 'pass'}`,
+    );
+    if (verdict.kind !== 'hold') return null;
+    return {
+      status: 'held',
+      task: charged,
+      gate: {
+        message: verdict.message,
+        messageFingerprint: gateMessageFingerprint(verdict.message),
+        attempt: round,
+        maxAttempts: OUTCOME_REVIEW_MAX_ROUNDS,
+        paused: false,
+        cached: false,
+        review: mode,
+      },
+    };
+  }
+
   private async stampGatePass(
     projectId: string,
     task: Task,

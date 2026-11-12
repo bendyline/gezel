@@ -220,7 +220,9 @@ describe('Responsive navigation in the desktop app', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Navigation' }));
         fireEvent.click(screen.getByRole('button', { name: 'Open mobile project' }));
-        expect(await screen.findByText('project:mobile-project')).toBeVisible();
+        // The restored project stayed mounted, hidden, behind setup (kept
+        // alive); opening it shows that same view again.
+        await waitFor(() => expect(screen.getByText('project:mobile-project')).toBeVisible());
         fireEvent.change(screen.getByRole('textbox', { name: 'Project draft' }), {
           target: { value: 'Keep my offline work' },
         });

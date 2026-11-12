@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type RecoDevice,
   type RecoModelInput,
+  docbenchScoreFor,
   excludesMoE,
   hardwareHint,
   isBandwidthBoundHost,
@@ -672,5 +673,98 @@ describe('mediaModelFits', () => {
 
   it('no floors (audio) → always fits', () => {
     expect(mediaModelFits(cpuOnly, {})).toBe(true);
+  });
+});
+
+describe('docbench quality', () => {
+  /** DocBlocks' view of the same catalog: measured scores, some without a recoScore or tools. */
+  const DOCBENCH: RecoModelInput[] = [
+    { id: 'small', docbench: 55, licenseClass: 'open', tags: [], residentBytes: 3 * GB },
+    {
+      id: 'mid-no-reco',
+      docbench: 77,
+      licenseClass: 'open',
+      supportsTools: false,
+      tags: [],
+      residentBytes: 9 * GB,
+    },
+    {
+      id: 'big',
+      docbench: 81,
+      recoScore: 20,
+      licenseClass: 'open',
+      tags: [],
+      residentBytes: 20 * GB,
+    },
+    {
+      id: 'restricted',
+      docbench: 90,
+      licenseClass: 'custom-restricted',
+      tags: [],
+      residentBytes: 2 * GB,
+    },
+    { id: 'unmeasured', recoScore: 23, licenseClass: 'open', tags: [], residentBytes: 8 * GB },
+  ];
+  const laptop12: RecoDevice = {
+    platform: 'win32',
+    gpuVramBytes: 12 * GB,
+    totalRamBytes: 32 * GB,
+    usableBytes: 11 * GB,
+  };
+  const workstation: RecoDevice = {
+    platform: 'win32',
+    gpuVramBytes: 34 * GB,
+    totalRamBytes: 64 * GB,
+    usableBytes: 32 * GB,
+  };
+
+  it('picks the best measured model that fits, needing no tools and no curated score', () => {
+    expect(pickRecommendedModel(DOCBENCH, laptop12, { quality: 'docbench' })?.id).toBe(
+      'mid-no-reco',
+    );
+    expect(pickRecommendedModel(DOCBENCH, workstation, { quality: 'docbench' })?.id).toBe('big');
+  });
+
+  it('never picks a restricted license or an unmeasured model, whatever their scores', () => {
+    const pick = pickRecommendedModel(DOCBENCH, workstation, { quality: 'docbench' });
+    expect(pick?.id).not.toBe('restricted');
+    const ratings = rateModelsForDevice(DOCBENCH, laptop12, { quality: 'docbench' });
+    const unmeasured = ratings.find((r) => r.id === 'unmeasured');
+    const small = ratings.find((r) => r.id === 'small');
+    // Runnable but unscored keeps half; every measured runnable model outranks it.
+    expect(unmeasured?.score).toBeLessThan(small?.score ?? 0);
+  });
+
+  it('agrees with its own pick, and leaves the curated ranking unchanged by default', () => {
+    const ratings = rateModelsForDevice(DOCBENCH, laptop12, { quality: 'docbench' });
+    expect(ratings[0]).toMatchObject({ id: 'mid-no-reco', recommended: true, score: 100 });
+    const curated = rateModelsForDevice(DOCBENCH, workstation);
+    expect(curated.find((r) => r.recommended)?.id).toBe('unmeasured');
+  });
+
+  it('keeps the small-machine rule: a CPU-only host still gets the smallest measured model', () => {
+    const cpuOnly: RecoDevice = {
+      platform: 'linux',
+      gpuVramBytes: null,
+      totalRamBytes: 16 * GB,
+      usableBytes: 12 * GB,
+    };
+    expect(pickRecommendedModel(DOCBENCH, cpuOnly, { quality: 'docbench' })?.id).toBe('small');
+  });
+
+  it('reads a fresh score for the right engine, and ignores a stale one', () => {
+    const manifest = {
+      version: '1.2.0',
+      benchmarks: {
+        docbench: {
+          'llama-cpp': { score: 72, catalogVersion: '1.2.0' },
+          mlx: { score: 70, catalogVersion: '1.1.0' },
+        },
+      },
+    };
+    expect(docbenchScoreFor(manifest, 'llama-cpp')).toBe(72);
+    expect(docbenchScoreFor(manifest, 'mlx')).toBeUndefined();
+    expect(docbenchScoreFor(manifest, 'ds4')).toBeUndefined();
+    expect(docbenchScoreFor({ version: '1.2.0' }, 'llama-cpp')).toBeUndefined();
   });
 });

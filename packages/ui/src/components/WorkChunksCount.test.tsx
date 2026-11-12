@@ -10,14 +10,15 @@ describe('WorkChunksCount', () => {
     expect(container.textContent).toBe('4');
   });
 
-  it('names the count in words for screen readers and on hover', () => {
-    render(<WorkChunksCount count={4} />);
-    const badge = screen.getByRole('img', { name: /sent 4 chunks of work/ });
-    expect(badge.getAttribute('title')).toBe(badge.getAttribute('aria-label'));
+  it('names the count in words for screen readers', () => {
+    render(<WorkChunksCount count={104} />);
+    expect(
+      screen.getByRole('img', { name: 'The model has reported progress 104 times' }),
+    ).toBeTruthy();
   });
 
-  it('uses the singular for one chunk', () => {
+  it('says once for a single report', () => {
     render(<WorkChunksCount count={1} />);
-    expect(screen.getByRole('img', { name: /sent 1 chunk of work/ })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'The model has reported progress once' })).toBeTruthy();
   });
 });

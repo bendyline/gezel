@@ -18,6 +18,7 @@ import type {
 } from '@bendyline/gezel';
 import {
   COMMUNITY_SCORECARD,
+  DOCBENCH_SUITE_ID,
   MODEL_TIER_ORDER,
   ROLES,
   SCORECARD,
@@ -41,6 +42,7 @@ import { BUILTIN_TOOLSETS } from '@bendyline/gezel-catalog';
 import { computeToolAllowlist, expandToolsetGroups } from '../chat/role-tool-filter.js';
 import type { ReleaseNoteEntry, ScorecardRoundNote } from './content.js';
 import type { HandboekDeviceInfo, HandboekGezelInfo, HandboekModelInfo } from './device.js';
+import { renderDocbenchScorecardMarkdown } from './docbench.js';
 import { taskMeasurementsHtml, taskMeasurementsMarkdown } from './scorecard-measurements.js';
 import { unwrapSoftBreaks } from './unwrap.js';
 
@@ -115,6 +117,7 @@ export const MACROS: Record<string, MacroFn> = {
   'model-scorecard': modelScorecard,
   'scorecard-notes': scorecardNotes,
   'community-scorecard': communityScorecard,
+  'docbench-scorecard': docbenchScorecard,
   'project-type-composition': projectTypeComposition,
   'suggested-work': suggestedWork,
   'whats-new-list': whatsNewList,
@@ -691,12 +694,23 @@ async function modelScorecard(attrs: Record<string, string>, ctx: MacroContext):
   }
   const suiteId = attrs.suite?.trim();
   if (!suiteId) return '';
+  if (suiteId === DOCBENCH_SUITE_ID) return renderDocbenchScorecardMarkdown(SCORECARD);
   return renderScorecardMarkdown(SCORECARD, suiteId, {
     includeTaskCount: ctx.mode !== 'site',
     // Agent mode hands this text to a model, where a `<br>` inside an id is
     // noise the model can quote back as part of the model name.
     breakLabels: ctx.mode !== 'agent',
   });
+}
+
+/**
+ * `::handboek-docbench-scorecard` — the newest docbench round (DocBlocks
+ * document work, judged 0–100) with its interval and family scores, and the
+ * last few rounds beneath it. The same markdown in every mode: it is a
+ * plain table, with nothing for the site's filter to act on.
+ */
+async function docbenchScorecard(): Promise<string> {
+  return renderDocbenchScorecardMarkdown(SCORECARD);
 }
 
 /**
@@ -917,7 +931,7 @@ export function renderScorecardRunsMarkdown(
   suiteIds: readonly string[],
   opts: { includeTaskCount: boolean; breakLabels?: boolean },
 ): string {
-  const wanted = [...new Set(suiteIds.filter(Boolean))];
+  const wanted = [...new Set(suiteIds.filter((id) => id && id !== DOCBENCH_SUITE_ID))];
   const runs = collectScorecardRounds(dataset, wanted).slice(0, PRIOR_ROUNDS_SHOWN + 1);
 
   if (runs.length === 0) {
@@ -1017,7 +1031,7 @@ export function renderScorecardFilterHtml(
     roundLinks?: boolean;
   },
 ): string {
-  const wanted = [...new Set(suiteIds.filter(Boolean))];
+  const wanted = [...new Set(suiteIds.filter((id) => id && id !== DOCBENCH_SUITE_ID))];
   const rounds = collectScorecardRounds(dataset, wanted);
   if (rounds.length === 0) {
     return [
@@ -1232,9 +1246,13 @@ export interface ScorecardRoundPage {
  */
 export function renderScorecardRoundPages(dataset: ScorecardDataset): ScorecardRoundPage[] {
   const known = Object.keys(SCORECARD_SUITE_HEADINGS);
+  // docbench rounds are judged scores, rendered by ::handboek-docbench-scorecard;
+  // as a round page here they would print usable replies as passes.
   const suiteIds = [
     ...known,
-    ...[...new Set(dataset.runs.flatMap((run) => run.suites))].filter((id) => !known.includes(id)),
+    ...[...new Set(dataset.runs.flatMap((run) => run.suites))].filter(
+      (id) => !known.includes(id) && id !== DOCBENCH_SUITE_ID,
+    ),
   ];
   const titles = scorecardRoundTitles(dataset.runs);
   return collectScorecardRounds(dataset, suiteIds).map((entry) => {

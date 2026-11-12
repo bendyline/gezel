@@ -537,6 +537,11 @@ import { providerUsesManagedMcpBridge } from './provider-capabilities.js';
 import { isReadOnlyToolName } from './read-only-tools.js';
 import { spliceIntoText } from './recognition-splice.js';
 import {
+  collectMadePictures,
+  picturesOnlyReplyText,
+  relayedPicturesNote,
+} from './relayed-images.js';
+import {
   isRemoteOnlyModel,
   remoteFallbackNotice,
   remoteIdForRoute,
@@ -833,6 +838,7 @@ function buildUserTurnMessage(
     | (Parameters<typeof resolveTurnMessageOrigin>[0] & {
         hidden?: boolean;
         draftId?: string;
+        relayedImages?: NonNullable<ChatMessage['relayedImages']>;
       })
     | undefined,
 ): ChatMessage {
@@ -842,6 +848,7 @@ function buildUserTurnMessage(
     content: userText,
     at: nowIso(),
     ...(opts?.from ? { from: opts.from } : {}),
+    ...(opts?.relayedImages ? { relayedImages: opts.relayedImages } : {}),
     ...(opts?.hidden ? { hidden: true } : {}),
     ...(opts?.nudge ? { nudge: true } : {}),
     ...(opts?.draftId ? { draftId: opts.draftId } : {}),
@@ -1474,6 +1481,15 @@ export class ChatManager extends LocalEngineRuntime {
    * silently wedged. Cleared in the `finally` at the end of `send()`.
    */
   private readonly inflight = new Map<string, InflightTurn>();
+  /**
+   * Sessions whose next reply goes to another gezel rather than being read
+   * where it is written: a delegation's reply listener or a consultation
+   * waiting on its answer. Keyed by the answering session, one entry per
+   * waiter, each naming the gezel the reply goes to. A relayed reply also
+   * arrives with `from.kind: 'delegation'`, so the message's own `from`
+   * cannot tell the two apart.
+   */
+  private readonly replyAudiences = new Map<string, string[]>();
   /**
    * When each in-flight turn last reported that it is still WAITING for a
    * provider slot rather than generating.
@@ -2773,6 +2789,35 @@ export class ChatManager extends LocalEngineRuntime {
     return origin === 'direct-user' || origin === 'question-answer';
   }
 
+  /**
+   * The gezel the session's running turn answers, when another gezel started
+   * it and the reply is relayed back to that gezel's chat. The person reads
+   * that chat, not this one, so a tool result must not tell the model the
+   * person already sees what this turn made.
+   */
+  turnAnswersGezel(sessionId: string): { gezelName: string } | null {
+    if (this.inflight.get(sessionId)?.origin !== 'cross-gezel') return null;
+    const gezelName = this.replyAudiences.get(sessionId)?.at(-1);
+    return gezelName ? { gezelName } : null;
+  }
+
+  /** Record that the session's next reply goes to `gezelName`; returns the release. */
+  private watchReplyAudience(sessionId: string, gezelName: string): () => void {
+    const list = this.replyAudiences.get(sessionId) ?? [];
+    list.push(gezelName);
+    this.replyAudiences.set(sessionId, list);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const current = this.replyAudiences.get(sessionId);
+      if (!current) return;
+      const idx = current.lastIndexOf(gezelName);
+      if (idx >= 0) current.splice(idx, 1);
+      if (current.length === 0) this.replyAudiences.delete(sessionId);
+    };
+  }
+
   /** True while the session's turn answers a scheduled check-in. */
   isCheckInTurn(sessionId: string): boolean {
     return this.inflight.get(sessionId)?.checkIn === true;
@@ -3656,6 +3701,8 @@ export class ChatManager extends LocalEngineRuntime {
     consultationMode?: boolean;
     /** The outcome task this consultation works for. See ChatSession.subagentFor. */
     subagentFor?: { taskRef: string; ownerSessionId: string };
+    /** A read-only fresh-eyes review. See ChatSession.reviewFocus. */
+    reviewFocus?: boolean;
     /**
      * Mark the session as belonging to an anonymous app-serve visitor:
      * zero tools at session build, a visitor-context prompt addendum, and
@@ -3758,6 +3805,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(args.subject ? { subject: args.subject } : {}),
       ...(args.consultationMode ? { consultationMode: true } : {}),
       ...(args.subagentFor ? { subagentFor: args.subagentFor } : {}),
+      ...(args.reviewFocus ? { reviewFocus: true } : {}),
       ...(args.visitorAccess ? { visitorAccess: true as const } : {}),
       ...(args.roleBasedNameOnlyMode !== undefined
         ? { roleBasedNameOnlyMode: args.roleBasedNameOnlyMode }
@@ -5491,6 +5539,7 @@ export class ChatManager extends LocalEngineRuntime {
       state: 'started',
       targetGezelName: targetDisplayName,
     });
+    const releaseAudience = this.watchReplyAudience(session.id, fromName);
 
     try {
       // Pre-warm the target's worker (no-op for non-anthropic-cli providers).
@@ -5574,6 +5623,7 @@ export class ChatManager extends LocalEngineRuntime {
         }
       }
     } finally {
+      releaseAudience();
       this.inflightAsks.delete(args.fromSessionId);
       // Un-park the asker's bubble: the wait is over (reply, timeout, or
       // error). The asker's continuation turn will re-establish its own
@@ -5583,6 +5633,102 @@ export class ChatManager extends LocalEngineRuntime {
         state: 'ended',
         targetGezelName: targetDisplayName,
       });
+    }
+  }
+
+  /**
+   * A fresh-eyes review: a new read-only session (`reviewFocus`) of
+   * `gezelId`, sent `text` and waited on like a consultation. The task owner
+   * reviews its own work this way, so the review runs on the model it was
+   * measured on, with nothing of the work's making in its transcript. Unlike
+   * `askGezelAndWait` a gezel may ask itself here: the two sessions share
+   * only the gezel's character and model, and the review session can reach
+   * no one, so no ask cycle can form through it.
+   */
+  async askFreshEyes(args: {
+    gezelId: string;
+    projectId: string;
+    fromSessionId: string;
+    text: string;
+    timeoutMs?: number;
+    subagentFor: { taskRef: string; ownerSessionId: string };
+  }): Promise<AskGezelOutcome> {
+    if (!isEngagementAllowed(await this.store.readConfig())) {
+      return {
+        outcome: 'error',
+        reason: 'engagement-off',
+        message: 'Cross-gezel work is disabled at the current AI engagement level.',
+      };
+    }
+    const gezel = await this.store.getGezel(args.gezelId).catch(() => null);
+    if (!gezel) {
+      return {
+        outcome: 'error',
+        reason: 'not-found',
+        message: `Gezel "${args.gezelId}" not found.`,
+      };
+    }
+    const fromRec = await this.getSessionRecord(args.fromSessionId).catch(() => null);
+    const session = await this.createSession({
+      gezelId: gezel.id,
+      projectId: args.projectId,
+      parentSession: { sessionId: args.fromSessionId, gezelId: gezel.id, kind: 'consultation' },
+      ...(fromRec?.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: fromRec.roleBasedNameOnlyMode }
+        : {}),
+      consultationMode: true,
+      reviewFocus: true,
+      subagentFor: args.subagentFor,
+    });
+    const boring =
+      fromRec?.roleBasedNameOnlyMode ?? (await this.store.readConfig()).roleBasedNameOnlyMode;
+    const name = displayName(
+      { name: gezel.name, roleBasedName: gezel.roleBasedName },
+      boring ?? false,
+    );
+    const timeoutMs = await this.resolveConsultationIdleTimeoutMs(session, args.timeoutMs);
+    void this.prewarmSession(session.id);
+    const replyPromise = this.waitForNextTurnComplete(session.id, timeoutMs);
+    try {
+      await this.sendWithBusyRetry(session.id, args.text, {
+        from: {
+          gezelId: gezel.id,
+          gezelName: name,
+          sessionId: args.fromSessionId,
+          kind: 'consultation',
+        },
+      });
+    } catch (err) {
+      return {
+        outcome: 'error',
+        reason: 'delivery-failed',
+        message: `The review could not start: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    const result = await replyPromise;
+    switch (result.kind) {
+      case 'complete':
+        return {
+          outcome: 'reply',
+          text: result.text,
+          toGezelId: gezel.id,
+          toGezelName: name,
+          sessionId: session.id,
+        };
+      case 'error':
+        return { outcome: 'error', reason: 'target-error', message: result.error };
+      case 'timeout':
+        return {
+          outcome: 'error',
+          reason: 'timeout',
+          message: `The review went quiet for ${Math.round(timeoutMs / 1000)} s with no progress.`,
+        };
+      case 'session-gone':
+        return {
+          outcome: 'error',
+          reason: 'target-deleted',
+          message: 'The review session was deleted before it replied.',
+        };
     }
   }
 
@@ -5909,7 +6055,8 @@ export class ChatManager extends LocalEngineRuntime {
     };
     armIdleTimeout();
 
-    unsubscribe = this.events.subscribe(args.targetSessionId, (event) => {
+    const releaseAudience = this.watchReplyAudience(args.targetSessionId, args.fromGezelName);
+    const unsubscribeEvents = this.events.subscribe(args.targetSessionId, (event) => {
       if (fired) return;
       // Catch turn-level errors on B's side too — if B's turn fails
       // (provider crash, context overflow, engagement-mode-flipped),
@@ -5973,6 +6120,10 @@ export class ChatManager extends LocalEngineRuntime {
       fired = true;
       clearTimeout(idleTimeout);
       unsubscribe?.();
+      // The reply's words travel as text; the pictures it made live on the
+      // recipient's tool calls and travel beside them, so the person sees
+      // them in the chat they are in and the sender's model has their paths.
+      const pictures = collectMadePictures(event.message);
       // A tool-only recipient turn can legitimately complete with an empty
       // assistant message after its workspace mutation lands. Forwarding
       // that as `[Message from X]: ` creates a content-free model turn for
@@ -5980,7 +6131,14 @@ export class ChatManager extends LocalEngineRuntime {
       // load the sender's much larger orchestration tool roster and exhaust
       // a small local model's context window. The validator/task machinery
       // observes the mutation independently, so end the reply leg here.
-      if (!event.message.content.trim()) {
+      // A picture is not a workspace mutation anyone else reports, so a
+      // turn that made one is relayed even with no words.
+      const replyText = event.message.content.trim()
+        ? event.message.content
+        : pictures.length > 0
+          ? picturesOnlyReplyText(pictures.length)
+          : '';
+      if (!replyText) {
         log.info(
           `[chat] suppressed empty reply from ${args.toName} to ${args.fromGezelName} after recipient turn completed`,
         );
@@ -5993,7 +6151,7 @@ export class ChatManager extends LocalEngineRuntime {
       // "[While you were away...]" onto whatever the user types next,
       // and Florian's model processes the reply immediately instead of
       // waiting for the user to send something unrelated.
-      const seed = `[Message from ${args.toName}]: ${event.message.content}`;
+      const seed = `[Message from ${args.toName}]: ${replyText}`;
       this.trackBackground(
         this.deliverReply({
           targetSessionId: args.fromSessionId,
@@ -6008,11 +6166,18 @@ export class ChatManager extends LocalEngineRuntime {
             projectId: args.projectId,
           },
           seed,
+          ...(pictures.length > 0
+            ? { relayedImages: { projectId: args.projectId, images: pictures } }
+            : {}),
         }).catch((err) => {
           log.error('reply delivery failed:', err);
         }),
       );
     });
+    unsubscribe = () => {
+      unsubscribeEvents();
+      releaseAudience();
+    };
   }
 
   /**
@@ -6037,6 +6202,7 @@ export class ChatManager extends LocalEngineRuntime {
     fromSessionId?: string;
     fromSessionScope?: PublishScope;
     seed: string;
+    relayedImages?: NonNullable<ChatMessage['relayedImages']>;
   }): Promise<void> {
     const deadlineMs = Date.now() + 10 * 60 * 1000;
     let lastError: unknown;
@@ -6048,6 +6214,7 @@ export class ChatManager extends LocalEngineRuntime {
             gezelName: args.fromName,
             ...(args.fromSessionId ? { sessionId: args.fromSessionId, kind: 'delegation' } : {}),
           },
+          ...(args.relayedImages ? { relayedImages: args.relayedImages } : {}),
         });
         return;
       } catch (err) {
@@ -6340,6 +6507,7 @@ export class ChatManager extends LocalEngineRuntime {
       checkIn?: boolean;
       messageOrigin?: TurnMessageOrigin;
       fileTurnIntent?: FileTurnIntent;
+      relayedImages?: NonNullable<ChatMessage['relayedImages']>;
     },
   ): Promise<ChatMessage> {
     return this.send(sessionId, userText, opts);
@@ -7340,6 +7508,8 @@ export class ChatManager extends LocalEngineRuntime {
       /** Settings for a direct image gezel's render; other gezels ignore them. */
       imageSettings?: ImageSettings;
       imageCues?: 'auto' | 'off';
+      /** Pictures a relayed reply carries; see `ChatMessage.relayedImages`. */
+      relayedImages?: NonNullable<ChatMessage['relayedImages']>;
     },
   ): Promise<ChatMessage> {
     if (this.shuttingDown) {
@@ -7400,6 +7570,7 @@ export class ChatManager extends LocalEngineRuntime {
       /** Settings for a direct image gezel's render; other gezels ignore them. */
       imageSettings?: ImageSettings;
       imageCues?: 'auto' | 'off';
+      relayedImages?: NonNullable<ChatMessage['relayedImages']>;
     },
   ): Promise<ChatMessage> {
     const inflightTurn: InflightTurn = {
@@ -7523,6 +7694,7 @@ export class ChatManager extends LocalEngineRuntime {
       /** Settings for a direct image gezel's render; other gezels ignore them. */
       imageSettings?: ImageSettings;
       imageCues?: 'auto' | 'off';
+      relayedImages?: NonNullable<ChatMessage['relayedImages']>;
     },
   ): Promise<ChatMessage> {
     // Fixed-function gezels skip the LLM entirely — dispatch BEFORE
@@ -8138,6 +8310,12 @@ export class ChatManager extends LocalEngineRuntime {
       // depend on. Spliced identically here and in the history rebuild so a
       // restart doesn't invalidate the cached prefix.
       let promptForTurn = spliceIntoText(userText, pendingDigests);
+      // A relayed reply that carries pictures: name their paths nearest the
+      // words. Without it a small model answering the reply wrote its own
+      // link, an `example.com` URL around a retrieved, unrelated image.
+      if (opts?.relayedImages) {
+        promptForTurn = `${relayedPicturesNote(opts.from?.gezelName ?? 'Another gezel', opts.relayedImages.images)}\n\n${promptForTurn}`;
+      }
       const correctivePromptForLiveRoster = (prompt: string, source: string): string => {
         const safe = capabilitySafeCorrectivePrompt({
           prompt,
@@ -9531,7 +9709,7 @@ export class ChatManager extends LocalEngineRuntime {
               advanceOutcome.gateRejected.stepId,
             );
             promptForTurn = correctivePromptForLiveRoster(
-              stage >= 1
+              stage >= 1 || advanceOutcome.gateRejected.review
                 ? advanceOutcome.gateRejected.message
                 : buildGateRejectionNudge(advanceOutcome.gateRejected.message),
               'task-gate',
@@ -15494,14 +15672,17 @@ export class ChatManager extends LocalEngineRuntime {
     // built-in-only step drops them. A thread pinned to a craftbook keeps
     // only its editing kit, so neither apps' tools nor toolsets join it.
     const craftbookFocus = Boolean(record.craftbookRef);
+    // A fresh-eyes review changes nothing, and toolsets, app tools and
+    // project scripts all reach past the read-only core.
+    const reviewFocus = record.reviewFocus === true;
     const appToolBindings =
-      builtinOnlyStep || craftbookFocus ? [] : this.appToolBindingsFor(record);
+      builtinOnlyStep || craftbookFocus || reviewFocus ? [] : this.appToolBindingsFor(record);
     const appSubject = promptAppSubjectFor(record, appToolBindings);
     const appItemFocus = isItemFocus(appSubject);
     const activeToolsets = (entries: readonly InstalledToolset[]): InstalledToolset[] =>
       entries.filter(
         (entry) =>
-          (!(builtinOnlyStep || appItemFocus || craftbookFocus) ||
+          (!(builtinOnlyStep || appItemFocus || craftbookFocus || reviewFocus) ||
             entry.runtime.kind === 'builtin') &&
           !stepDisabledToolsetIds.has(entry.toolsetId),
       );
@@ -16061,7 +16242,7 @@ export class ChatManager extends LocalEngineRuntime {
     // through our MCP bridge.
     const sandboxCopilotEffective =
       record.providerName === 'copilot'
-        ? resolveSandboxCopilot(config.sandboxCopilot, gezelFm?.sandboxCopilot)
+        ? reviewFocus || resolveSandboxCopilot(config.sandboxCopilot, gezelFm?.sandboxCopilot)
         : false;
 
     const opts: BuiltSessionOpts = {
@@ -16716,7 +16897,9 @@ export class ChatManager extends LocalEngineRuntime {
       // rebuild must never silently strip tools a live session already had.
       // `project == null` means getProject hit a read/parse failure; treat
       // the type as still applied (fail safe) so a blip doesn't clear tools.
-      const resolvedScriptTools = await resolveProjectScriptTools(this.catalog, project);
+      const resolvedScriptTools = reviewFocus
+        ? []
+        : await resolveProjectScriptTools(this.catalog, project);
       const typeStillApplied = project == null || project.projectType != null;
       const scriptToolPlan = reconcileScriptTools(
         resolvedScriptTools,
@@ -17296,11 +17479,13 @@ export class ChatManager extends LocalEngineRuntime {
 
     if (record.providerName === 'anthropic-cli') {
       const cwd = await this.store.projectWorkspaceDir(record.projectId);
-      const permissionModeOverride =
-        project?.claudePermissionMode ??
-        gezelFm?.claudePermissionMode ??
-        config.anthropicCli?.defaultPermissionMode ??
-        'acceptEdits';
+      // `plan` keeps Claude's own edit and shell tools out of a review.
+      const permissionModeOverride = reviewFocus
+        ? 'plan'
+        : (project?.claudePermissionMode ??
+          gezelFm?.claudePermissionMode ??
+          config.anthropicCli?.defaultPermissionMode ??
+          'acceptEdits');
       // Compute the Claude CLI built-ins to disallow AND to auto-allow
       // from the same role+toolsets data the gezel-mcp filter uses. The
       // disallowed list is what the model literally can't reach
@@ -17345,12 +17530,15 @@ export class ChatManager extends LocalEngineRuntime {
       // The project status-bar control is authoritative, followed by the
       // Codex-specific gezel override. Fall back to the historical shared
       // Claude field so existing gezel files retain their prior behavior.
-      const permissionModeOverride = normalizeCodexPermissionMode(
-        project?.codexPermissionMode ??
-          gezelFm?.codexPermissionMode ??
-          gezelFm?.claudePermissionMode ??
-          config.codexCli?.defaultPermissionMode,
-      );
+      // `plan` runs Codex in its read-only sandbox for a review.
+      const permissionModeOverride = reviewFocus
+        ? 'plan'
+        : normalizeCodexPermissionMode(
+            project?.codexPermissionMode ??
+              gezelFm?.codexPermissionMode ??
+              gezelFm?.claudePermissionMode ??
+              config.codexCli?.defaultPermissionMode,
+          );
       // If the gezel's effort belongs to another provider's vocabulary,
       // drop it and let Codex fall back to the install/model default.
       const reasoningEffortOverride = isCodexReasoningEffort(gezelFm?.reasoningEffort)

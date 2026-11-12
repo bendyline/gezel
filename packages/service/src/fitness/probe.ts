@@ -29,6 +29,7 @@ import type {
   ExternalToolSpec,
   LLMProvider,
 } from '@bendyline/gezel-inference/internal/providers/types';
+import { isNoProgressTurnMessage, isRambleAbortMessage } from '@bendyline/gezel/local-loop';
 import {
   FITNESS_MIN_CONTEXT_TOKENS,
   type FitnessEvidence,
@@ -106,6 +107,22 @@ function scaledTurnBudgetMs(
  */
 function isTurnDeadlineError(err: unknown): boolean {
   return /timed out/i.test(err instanceof Error ? err.message : String(err));
+}
+
+/** Characters of the tool turn's reply kept for its verdict. */
+const TOOL_TURN_HEAD_CHARS = 200;
+
+/**
+ * Did the runtime end this turn because the model kept answering in prose
+ * instead of calling the tool? Either the ramble guard stopped a long reply,
+ * or the model ignored every corrective nudge. A healthy engine raises both,
+ * so neither is mistaken for contention or a launch failure, which keep
+ * their own handling.
+ */
+function isProseInsteadOfCall(err: unknown): boolean {
+  if (isEngineBusy(err) || isEngineLaunchError(err)) return false;
+  const message = err instanceof Error ? err.message : String(err);
+  return isRambleAbortMessage(message) || isNoProgressTurnMessage(message);
 }
 
 /** Provider-default launch context when nothing narrower is known. */
@@ -384,6 +401,9 @@ export async function runFitnessProbe(
         representative: { chars: 0 },
         tool: { chars: 0 },
       };
+      // The opening of the tool turn's visible reply, for the verdict when the
+      // runtime stops it mid-prose and no reply text comes back.
+      let toolTurnHead = '';
       const observeDelta = (chunk: string): void => {
         if (!activeTurn) return;
         const stream = streams[activeTurn];
@@ -392,9 +412,15 @@ export async function runFitnessProbe(
         stream.lastAt = at;
         stream.chars += chunk.length;
       };
+      const observeVisibleDelta = (chunk: string): void => {
+        observeDelta(chunk);
+        if (activeTurn === 'tool' && toolTurnHead.length < TOOL_TURN_HEAD_CHARS) {
+          toolTurnHead += chunk.slice(0, TOOL_TURN_HEAD_CHARS - toolTurnHead.length);
+        }
+      };
       // Optional-called: a provider (or a test double) without a delta channel
       // must lose the rate estimate, never the whole probe.
-      const offDelta = session.onDelta?.(observeDelta);
+      const offDelta = session.onDelta?.(observeVisibleDelta);
       if (offDelta) unsubscribes.push(offDelta);
       // Reasoning deltas are decoded tokens too, and on a thinking model they
       // are most of them — counting only visible text would price a 4096-token
@@ -403,8 +429,8 @@ export async function runFitnessProbe(
       if (offReasoning) unsubscribes.push(offReasoning);
 
       // Core's `estimateTokens` ratio applied to a running character count:
-      // the probe keeps the SIZE of what streamed, never the text itself, so
-      // there is nothing to hand the estimator directly.
+      // the probe keeps the SIZE of what streamed (plus at most the tool
+      // turn's opening line), so there is no text to hand the estimator.
       const streamedTokens = (turn: ProbeTurn): number =>
         Math.ceil(streams[turn].chars / CHARS_PER_TOKEN_ESTIMATE);
       const streamedRate = (turn: ProbeTurn): number | null => {
@@ -510,6 +536,13 @@ export async function runFitnessProbe(
         turnStartedAt = now();
         toolTurnText = await session.sendAndWait(TOOL_PROMPT, { timeoutMs: toolMs, queue });
       } catch (err) {
+        if (isProseInsteadOfCall(err)) {
+          // The runtime ended the turn: the engine was serving fine and the
+          // model wrote prose where the call belonged. That is the tool
+          // round-trip result, not a broken probe.
+          evidence.toolTurnProse = { observedTokens: streamedTokens('tool'), head: toolTurnHead };
+          return;
+        }
         const unfinished = unfinishedTurn(err, 'tool', turnStartedAt);
         if (!unfinished) {
           failTurn(err, 'toolTurnError');

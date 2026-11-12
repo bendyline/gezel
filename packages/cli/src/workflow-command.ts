@@ -20,6 +20,7 @@ import type { GezelClient } from '@bendyline/gezel-client';
 import { CliError } from './connection.js';
 import { parseCraftbookArguments, waitForTask } from './craftbook-command.js';
 import { ensureCraftbookSetup, terminalPrompter } from './craftbook-setup.js';
+import { stderrProgress } from './progress-output.js';
 
 /** Validate generated documents with the same contracts as the daemon, before installing them. */
 export function validateWorkflowCraftbook(document: unknown): Craftbook {
@@ -67,7 +68,7 @@ export async function runWorkflow(
       ...(params ? { params } : {}),
       ...(book?.paramSchema ? { paramSchema: book.paramSchema } : {}),
       prompter: terminalPrompter(),
-      write: (text) => process.stderr.write(text),
+      write: stderrProgress(),
     });
   return module.run({
     client,

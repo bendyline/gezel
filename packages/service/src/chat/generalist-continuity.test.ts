@@ -64,6 +64,22 @@ describe('resolveExecutionModelFor', () => {
     expect(overridden.affinity).toEqual({ strategy: 'stepwise' });
   });
 
+  it("carries the review the model's outcome work was measured to gain from", async () => {
+    const profile = await resolveExecutionModelFor({
+      ...stubs({
+        defaultModel: { 'llama-cpp': 'qwen3.8-27b-q4' },
+        manifests: {
+          'qwen3.8-27b-q4': {
+            parameterSize: '27B',
+            tuning: { taskStrategy: { strategy: 'outcome', procedure: 'none', review: 'self' } },
+          },
+        },
+      }),
+      providerName: 'llama-cpp',
+    });
+    expect(profile.affinity?.review).toBe('self');
+  });
+
   it('treats a cloud provider as the cloud tier and finds no catalog pick', async () => {
     const profile = await resolveExecutionModelFor({
       ...stubs({ defaultModel: { anthropic: 'claude-opus-5-5' }, manifests }),

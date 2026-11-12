@@ -51,6 +51,20 @@ export const STRATEGY_ARMS: Readonly<Record<string, TrialTaskStrategy>> = {
   'outcome-bare': { arm: 'outcome-bare', strategy: 'outcome', options: { procedure: 'none' } },
   // The daemon picks: the model's catalog `tuning.taskStrategy`, else the tier rule.
   auto: { arm: 'auto', strategy: 'auto' },
+  // The review test: goal only, then once the contract checks pass, a review
+  // by the owner in its own conversation (`review-self`) or by a new session
+  // of the same model that never saw the work being made (`review-fresh`).
+  // Both get the same focus and the same cap on findings.
+  'review-self': {
+    arm: 'review-self',
+    strategy: 'outcome',
+    options: { procedure: 'none', review: 'self' },
+  },
+  'review-fresh': {
+    arm: 'review-fresh',
+    strategy: 'outcome',
+    options: { procedure: 'none', review: 'fresh' },
+  },
   // The contract ablation (round 2, test 1): outcome-bare with the contract
   // shown but never checked, and with it hidden so the request is the only
   // brief, as a general-purpose agent harness would run it. Both are graded

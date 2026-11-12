@@ -1,14 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { builtinModules } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import react from '@vitejs/plugin-react';
 import { defineConfig, normalizePath } from 'vite';
 import { projectPageTypographyPlugin } from '../../scripts/project-page-typography.mjs';
 import { harperWasmPlugin } from '../ui/scripts/vite-harper-wasm.js';
+import { reactWithCompiler } from '../ui/scripts/vite-react.js';
 import { browserTypeScriptPlugin } from './scripts/browser-typescript.js';
 import { kokoroLexiconPlugin } from './scripts/kokoro-lexicon.js';
 import { portableContentPlugin } from './scripts/portable-content.js';
 import { portableScriptsPlugin } from './scripts/portable-scripts.js';
+import { preloadUiGraphPlugin } from './scripts/preload-ui-graph.js';
 
 const builtins = new Set(builtinModules.map((name) => name.replace(/^node:/, '')));
 
@@ -48,8 +49,10 @@ export default defineConfig({
     kokoroLexiconPlugin(),
     portableScriptsPlugin(),
     portableContentPlugin(),
-    react(),
+    // The same React Compiler setup as the desktop UI, for the shared components.
+    ...reactWithCompiler(fileURLToPath(new URL('.', import.meta.url))),
     harperWasmPlugin(fileURLToPath(new URL('../ui', import.meta.url))),
+    preloadUiGraphPlugin(),
   ],
   base: './',
   resolve: { dedupe: ['react', 'react-dom'] },

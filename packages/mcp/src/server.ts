@@ -10659,7 +10659,14 @@ server.tool(
         // Playwright `browser_screenshot` tools use.
         inline: true,
       });
-      const { meta, artifactPath, workspacePath, b64Png, promptGuide, styles } = res;
+      const { meta, artifactPath, workspacePath, b64Png, promptGuide, styles, replyTo } = res;
+      // A turn another gezel started is answered in that gezel's chat, where
+      // the person sees the picture beside the relayed reply but the gezel
+      // sees only words. Told "the user already sees this", the delegate left
+      // the path out, and the gezel it answered invented a link.
+      const audienceLine = replyTo
+        ? `Your reply goes to ${replyTo.gezelName}, and the person sees this picture beside it. Name it in your reply by its exact path, \`artifacts/${artifactPath}\`, as plain text, not a Markdown image, so ${replyTo.gezelName} can refer to it.`
+        : `The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed.`;
       // Surface the path + remind the model that the user already sees
       // the image inline (the bridge attaches a thumbnail to this same
       // tool result). Without the explicit "do not embed" line, models
@@ -10718,7 +10725,7 @@ server.tool(
           ? ` Styles this model has: ${styles.map((s) => s.name).join(', ')}.`
           : '';
       if (styles?.length) imageStylesShown.add(meta.model);
-      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${styleLine}${settingsLine}${skippedLine}${guideLine}${stylesLine} The user already sees this image inline below the tool call — DO NOT embed it again as Markdown (e.g. \`![alt](artifacts/${artifactPath})\`); just refer to it by name in your reply when needed. To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call.${(await installedVideoAnimates()) ? ` To animate it, pass \`{ inputImage: { artifactPath: "${artifactPath}" } }\` to generate_video.` : ''} To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
+      const summary = `Generated ${meta.widthPx}×${meta.heightPx} image with ${meta.model} (seed ${meta.seed}, ${meta.steps} steps, ${meta.durationMs}ms).${styleLine}${settingsLine}${skippedLine}${guideLine}${stylesLine} ${audienceLine} To iterate on it, pass \`{ inputImages: [{ artifactPath: "${artifactPath}" }] }\` to a follow-up generate_image call.${(await installedVideoAnimates()) ? ` To animate it, pass \`{ inputImage: { artifactPath: "${artifactPath}" } }\` to generate_video.` : ''} To read its bytes, call \`read_artifact\` with path \`${artifactPath}\`.${workspaceLine}`;
       const content: Array<
         { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }
       > = [{ type: 'text' as const, text: summary }];

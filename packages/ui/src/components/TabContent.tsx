@@ -1,6 +1,5 @@
 import type { RecentTab } from '@bendyline/gezel';
 import { lazy } from 'react';
-import { CapabilityUnavailable, supportsTab } from '../runtime-capabilities.js';
 import {
   loadBenchmarksViewModule,
   loadCraftbookScriptEditorViewModule,
@@ -18,7 +17,8 @@ import {
   loadSettingsViewModule,
   loadTaskTabContentModule,
   loadTasksViewModule,
-} from './tab-content-loaders.js';
+} from '../navigation/destinations.js';
+import { CapabilityUnavailable, supportsTab } from '../runtime-capabilities.js';
 import { useDebugMode } from './useDebugMode.js';
 
 const BenchmarksView = lazy(() =>

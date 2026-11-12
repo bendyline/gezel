@@ -4,9 +4,45 @@ import type {
   MarkdownListItem,
   MarkdownTableCell,
 } from '@bendyline/squisq/markdown';
-import { parseMarkdown } from '@bendyline/squisq/markdown';
-import { Fragment, type ReactNode, useMemo } from 'react';
+import { Fragment, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { highlightTokens } from './highlight-tokens.js';
+
+type ParseMarkdown = typeof import('@bendyline/squisq/markdown').parseMarkdown;
+
+/**
+ * The parser loads on first use. It carries Squisq's markdown stack and icon
+ * catalog (about 226 KB gzip), which used to sit in the startup bundle for the
+ * sake of search snippets. Until it arrives a snippet reads as plain text.
+ */
+let parser: ParseMarkdown | null = null;
+let parserLoad: Promise<ParseMarkdown> | null = null;
+
+/** Load the snippet parser; the search box calls this when it takes focus. */
+export function loadSearchSnippetMarkdown(): Promise<ParseMarkdown> {
+  parserLoad ??= import('@bendyline/squisq/markdown').then((module) => {
+    parser = module.parseMarkdown;
+    return parser;
+  });
+  return parserLoad;
+}
+
+function useSnippetParser(enabled: boolean): ParseMarkdown | null {
+  const [parse, setParse] = useState<ParseMarkdown | null>(() => parser);
+  useEffect(() => {
+    if (!enabled || parse) return;
+    let live = true;
+    loadSearchSnippetMarkdown().then(
+      (loaded) => {
+        if (live) setParse(() => loaded);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [enabled, parse]);
+  return parse;
+}
 
 interface SearchMarkdownSnippetProps {
   /** A short excerpt returned by the search index. */
@@ -37,14 +73,15 @@ export function SearchMarkdownSnippet({
   query,
   formatMarkdown = true,
 }: SearchMarkdownSnippetProps) {
+  const parse = useSnippetParser(formatMarkdown);
   const blocks = useMemo(() => {
-    if (!formatMarkdown) return null;
+    if (!formatMarkdown || !parse) return null;
     try {
-      return parseMarkdown(markdown, { parseHtml: false }).children;
+      return parse(markdown, { parseHtml: false }).children;
     } catch {
       return null;
     }
-  }, [formatMarkdown, markdown]);
+  }, [formatMarkdown, markdown, parse]);
 
   if (!blocks) return <>{highlightTokens(markdown, query)}</>;
   return <>{renderBlocks(blocks, query)}</>;

@@ -177,6 +177,7 @@ import { type ToolFailureLoop, ToolFailureTracker } from './tool-failure-tracker
 import {
   isLlamaCppForcedToolChoiceError,
   isLlamaCppGrammarParseError,
+  isLlamaCppStructuredOutputSamplerError,
   normalizeJsonSchemaForLlamaCpp,
   simplifyJsonSchemaForLlamaCpp,
   stripJsonSchemaPatternsForLlamaCpp,
@@ -379,6 +380,22 @@ const DIRECT_FILE_WORK_SCRIPT_HELPER_PATH = 'scripts/clean_data.mjs';
 const CONSTRAINED_TOOL_NO_SIGNAL_CHUNK_LIMIT = 32;
 const CONSTRAINED_TOOL_REASONING_CHAR_LIMIT = 1_024;
 const CONSTRAINED_TOOL_NO_SIGNAL_MS = 45_000;
+/**
+ * Visible prose a rescue-forced request may stream before its tool call.
+ *
+ * Forcing does not make a model call first. llama.cpp v0.9.0 builds the
+ * `tool_choice: "required"` grammar as `optional(prose until the call
+ * marker) + tool_call + end` (common/chat-auto-parser-generator.cpp): the
+ * model may open in prose and is then forbidden to stop until it emits a
+ * call. A model that writes its call as text never does. Imported
+ * Qwen2.5-0.5B, 20K tokens into the fitness probe, wrote
+ * `write_file(proeve.txt, "PROEVE OK")` and then looped `</tools></tool_call>`
+ * junk for 2,400 chars until the ramble guard ended the turn. Unforced, it
+ * wrote the same line and stopped. A forced reply that is working puts a
+ * sentence at most before its call, so past this limit the request is
+ * abandoned and re-issued unforced.
+ */
+const FORCED_TOOL_CHOICE_PROSE_LIMIT_CHARS = 512;
 // DeepSeek R1 keeps emitting private reasoning even when constrained turns
 // request thinking=false. GPT-OSS has a separate native reasoning-effort
 // control, but even its low setting benefits from the same bounded allowance.
@@ -1632,13 +1649,35 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
    * instead of 400ing the very rescue meant to save the turn.
    */
   private forceToolChoice(body: Record<string, unknown>): void {
-    if (this.deps.provider.supportsForcedToolChoice) {
+    if (this.deps.provider.supportsForcedToolChoice && !this.forcedToolChoiceTrapsProse) {
       body.tool_choice = 'required';
+      this.rescueForcedBodies.add(body);
       return;
     }
     delete body.tool_choice;
   }
+  /**
+   * Request bodies whose `tool_choice: "required"` came from a rescue here,
+   * not from a caller or the model's tuning. Only these are watched for the
+   * forced-prose trap ({@link FORCED_TOOL_CHOICE_PROSE_LIMIT_CHARS}); a
+   * caller that asked for `required` keeps what it asked for.
+   */
+  private readonly rescueForcedBodies = new WeakSet<object>();
+  /**
+   * Set once a rescue-forced request trapped the model in prose. Later
+   * rescues in this session go out unforced. Session-scoped, unlike the
+   * provider's `forcedToolChoiceUnsupported`, because the trap depends on
+   * the conversation: the same 0.5B model called cleanly at short context.
+   */
+  private forcedToolChoiceTrapsProse = false;
   private flattenToolMessagesForStrictAlternation = false;
+  /**
+   * Set when the engine could not build a grammar for this request's
+   * `json_schema` / JSON mode (see {@link isLlamaCppStructuredOutputSamplerError}).
+   * Later requests in this session go out unconstrained instead of replaying
+   * the rejection; the caller already validates what comes back.
+   */
+  private structuredOutputUnsupported = false;
   private compactWriteTranscript = false;
   /**
    * Collapse every `role:'system'` turn into one leading system message
@@ -2505,6 +2544,12 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         // identity; gezel frontmatter `tuning` overrides apply on top.
         if (this.deps.tuning) {
           applyTuning(body, this.deps.tuning, LLAMA_CPP_TUNING_MAP);
+        }
+        if (this.structuredOutputUnsupported) {
+          // A raw GBNF `grammar` still works on these models; only the
+          // template-built grammars behind these two fields fail.
+          delete body.json_schema;
+          delete body.response_format;
         }
         applySessionReasoningEffort(
           body,
@@ -3851,6 +3896,21 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             );
             continue;
           }
+          // Structured output the engine cannot build a grammar for on this
+          // model. Answering unconstrained is better than not answering: the
+          // caller asked for JSON in its prompt and validates the reply, and
+          // without this every schema request on the model failed outright.
+          if (
+            (body.json_schema !== undefined || body.response_format !== undefined) &&
+            !this.structuredOutputUnsupported &&
+            isLlamaCppStructuredOutputSamplerError(txt)
+          ) {
+            this.structuredOutputUnsupported = true;
+            log.warn(
+              '[llama-cpp] engine could not build a grammar for this JSON schema on this model; retrying without the output constraint',
+            );
+            continue;
+          }
           if (
             tryParseStrictAlternationTemplateError(txt) &&
             !this.flattenToolMessagesForStrictAlternation
@@ -4064,6 +4124,18 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         let scenarioRepairTextAborted = false;
         let existingSourceEditTextAborted = false;
         let immediateWriteStructuredAborted = false;
+        // Forced-prose trap (FORCED_TOOL_CHOICE_PROSE_LIMIT_CHARS). Prose on
+        // a rescue-forced request is held back from the chat until a call
+        // starts, so a trapped request can be discarded without a trace.
+        const watchForcedProse =
+          body.tool_choice === 'required' && this.rescueForcedBodies.has(body);
+        const forcedProseLimit =
+          profileHasBehavior(this.deps.profile, 'turn.preamble-folding') ||
+          leaksUntaggedReasoning(this.deps.model)
+            ? FORCED_TOOL_CHOICE_PROSE_LIMIT_CHARS * 2
+            : FORCED_TOOL_CHOICE_PROSE_LIMIT_CHARS;
+        let heldForcedProse = '';
+        let forcedProseTrapped = false;
         const streamedFileWriteDebug = (): string => {
           const rawWriteArgs = toolCallAccumulator.rawArgumentsForTool('write_file');
           const argSuffix = rawWriteArgs === null ? '' : ` argChars=${rawWriteArgs.length}`;
@@ -4226,7 +4298,11 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             }
             if (hasContent) {
               turnContent += delta!.content!;
-              this.emitDelta(delta!.content!);
+              if (watchForcedProse && !sawStructuredToolSignal) {
+                heldForcedProse += delta!.content!;
+              } else {
+                this.emitDelta(delta!.content!);
+              }
               const contentRun = contentRunDetector.observe(delta!.content!);
               if (contentRun) {
                 degenerateRun = contentRun;
@@ -4291,8 +4367,27 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
                 );
                 ctrl.abort();
               }
+              // After the salvage-oriented aborts above, which recover a
+              // file body written as text and must keep first claim on it.
+              if (
+                watchForcedProse &&
+                !sawStructuredToolSignal &&
+                !rambleAborted &&
+                turnContent.trim().length >= forcedProseLimit
+              ) {
+                forcedProseTrapped = true;
+                log.warn(
+                  `[llama-cpp] ABORT-FIRED reason=forced-tool-choice-prose (${turnContent.length} chars with no call under a rescue's tool_choice=required, limit ${forcedProseLimit}) afterMs=${Date.now() - start}`,
+                );
+                ctrl.abort();
+                break;
+              }
             }
             if (hasToolCalls) {
+              if (heldForcedProse) {
+                this.emitDelta(heldForcedProse);
+                heldForcedProse = '';
+              }
               sawStructuredToolSignal = true;
               if (constrainedToolSignalTimer) {
                 clearTimeout(constrainedToolSignalTimer);
@@ -4677,6 +4772,10 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
         }
 
         thinkingOffRetryPending = false;
+        if (!forcedProseTrapped && heldForcedProse) {
+          this.emitDelta(heldForcedProse);
+          heldForcedProse = '';
+        }
         if (degenerateRun !== null) {
           throw await this.degenerateEngineOutputError({
             kind: 'repeated-output',
@@ -4716,6 +4815,18 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           // `continuationMaxTokens`, and a wrap-up cap can truncate the very
           // tool call this retry exists to get. Bounded — a thinking-off
           // request has no client budget, so it cannot land here again.
+          turn -= 1;
+          continue;
+        }
+        if (forcedProseTrapped) {
+          // Same transcript, no corrective: the model never saw the discarded
+          // prose, and unforced it can end its turn, after which the ordinary
+          // salvage and no-call correctives apply. Bounded: with the flag set,
+          // forceToolChoice no longer forces, so this cannot fire again.
+          this.forcedToolChoiceTrapsProse = true;
+          log.warn(
+            `[llama-cpp] tool_choice=required trapped model=${this.deps.model ?? 'unknown'} in prose (${turnContent.length} chars, no call) → re-issuing iteration ${turn} unforced; later rescues in this session stay unforced`,
+          );
           turn -= 1;
           continue;
         }

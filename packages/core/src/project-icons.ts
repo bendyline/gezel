@@ -176,3 +176,61 @@ export function resolveProjectIcon(project: ProjectIconSource): ProjectIconId {
   if (project.workingDir) return 'folder';
   return 'sheet';
 }
+
+/**
+ * A project's own icon art, kept beside its `project.json`: a mark a model
+ * drew for it, or a picture the person uploaded. It stands in for the maker's
+ * mark wherever the project's icon shows. Choosing a mark again removes it.
+ */
+export const ProjectCustomIconFormatSchema = z.enum(['svg', 'png', 'jpeg', 'webp']);
+export type ProjectCustomIconFormat = z.infer<typeof ProjectCustomIconFormatSchema>;
+
+export const ProjectCustomIconSchema = z.object({
+  /**
+   * `drawn` is a one-color mark, shown in the theme's ink like the built-in
+   * marks. `image` is a picture, shown as it is.
+   */
+  kind: z.enum(['drawn', 'image']),
+  format: ProjectCustomIconFormatSchema,
+  /** Changes whenever the art does, so a client knows to fetch it again. */
+  updatedAt: z.string(),
+});
+export type ProjectCustomIcon = z.infer<typeof ProjectCustomIconSchema>;
+
+export type ProjectIconImageFormat = Exclude<ProjectCustomIconFormat, 'svg'>;
+
+/** An uploaded picture is small: the app scales it down before sending it. */
+export const PROJECT_ICON_IMAGE_MAX_BYTES = 512 * 1024;
+/** A drawn mark is a handful of shapes; a long one is not a mark. */
+export const PROJECT_ICON_SVG_MAX_CHARS = 24_000;
+/** The description a person gives the model of what to draw. */
+export const PROJECT_ICON_BRIEF_MAX_CHARS = 600;
+
+export const PROJECT_ICON_MEDIA_TYPES = {
+  svg: 'image/svg+xml',
+  png: 'image/png',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+} as const satisfies Readonly<Record<ProjectCustomIconFormat, string>>;
+
+/**
+ * What a picture's own first bytes say it is, or null when it is not a PNG,
+ * JPEG or WebP. A declared type or a file name is never taken for it.
+ */
+export function sniffProjectIconImage(bytes: Uint8Array): ProjectIconImageFormat | null {
+  const starts = (...signature: number[]) =>
+    bytes.length >= signature.length && signature.every((byte, index) => bytes[index] === byte);
+  if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'png';
+  if (starts(0xff, 0xd8, 0xff)) return 'jpeg';
+  if (
+    starts(0x52, 0x49, 0x46, 0x46) &&
+    bytes.length >= 12 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50
+  ) {
+    return 'webp';
+  }
+  return null;
+}

@@ -403,7 +403,8 @@ final class MobileBridgeTests: XCTestCase {
             await openNavigation();
             await clickButton('Native workshop', document.querySelector('[data-testid="app-sidebar"]'));
             await until(() => visible(document.querySelector('[data-testid="project-tab-chat"]')), 'ordinary project Chat tab');
-            const composer = await until(() => document.querySelector('[data-testid="chat-composer"]'), 'shared chat composer');
+            // Home stays mounted but hidden (KeepAliveHost) with its own composer, whose editor is torn down while hidden.
+            const composer = await until(() => document.querySelector('.keep-alive-view[data-shown] [data-testid="chat-composer"]'), 'shared chat composer');
             const editor = await until(() => composer.querySelector('[contenteditable="true"]'), 'shared rich text input');
             editor.focus(); document.execCommand('insertText', false, 'Say hello.');
             // Send reads the composer's draft, which Squisq reports a task after the edit.

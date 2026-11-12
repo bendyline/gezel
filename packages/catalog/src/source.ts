@@ -1415,6 +1415,9 @@ function mergeIdentityAndVersion(
       ...(identity.style ? { style: identity.style } : {}),
       ...(identity.behaviors ? { behaviors: identity.behaviors } : {}),
       ...(identity.tuning ? { tuning: identity.tuning } : {}),
+      // Measured results ride on identity; like every field here, an
+      // unlisted one would be silently dropped from the resolved manifest.
+      ...(identity.benchmarks ? { benchmarks: identity.benchmarks } : {}),
       ...(version.ollama ? { ollama: version.ollama } : {}),
       ...(version.llamaCpp ? { llamaCpp: version.llamaCpp } : {}),
       ...(version.mlx ? { mlx: version.mlx } : {}),

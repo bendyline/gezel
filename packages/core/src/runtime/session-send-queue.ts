@@ -52,6 +52,8 @@ export interface QueuedSendOptions {
   /** The image strip's picks for a direct image gezel. */
   imageSettings?: NonNullable<SendToSessionRequest['imageSettings']>;
   imageCues?: NonNullable<SendToSessionRequest['imageCues']>;
+  /** Pictures a relayed reply carries; stamped on the persisted message. */
+  relayedImages?: NonNullable<ChatMessage['relayedImages']>;
 }
 
 export type QueuedRunOptions<O extends QueuedSendOptions> = Omit<O, 'coalescable'>;
@@ -129,6 +131,7 @@ function runOptionsOf<O extends QueuedSendOptions>(opts: O): QueuedRunOptions<O>
     'fileTurnIntent',
     'draftId',
     'requiredTool',
+    'relayedImages',
   ] as const) {
     if (!out[key]) delete out[key];
   }

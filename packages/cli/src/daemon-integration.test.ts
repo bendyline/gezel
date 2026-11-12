@@ -8,7 +8,7 @@
  * in a way the in-process tests miss, it'll surface here first.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -778,8 +778,16 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
         const result = await command;
 
         expect(result.stdout).toBe(`Mock reply: ${source === 'stdin' ? prompt : prompt.trim()}\n`);
-        expect(result.stderr).toContain('INFO ');
-        expect(result.stderr).toContain('[service]');
+        // The terminal is the person's: the service's records go to its log
+        // file, as a daemon's do.
+        expect(result.stderr).not.toContain('INFO ');
+        expect(result.stderr).not.toContain('[service]');
+        const logs = await readdir(join(runHome, 'logs'));
+        const serviceLog = logs.find((name) => name.startsWith('service-'));
+        expect(serviceLog).toBeDefined();
+        const logged = await readFile(join(runHome, 'logs', serviceLog ?? ''), 'utf8');
+        expect(logged).toContain('INFO  [service]');
+        expect(logged).not.toContain('[service] [service]');
         expect(await readRuntime(runHome)).toBeNull();
       } finally {
         const runtime = await readRuntime(runHome).catch(() => null);

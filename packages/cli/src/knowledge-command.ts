@@ -563,9 +563,25 @@ async function manifestFor(abs: string): Promise<KnowledgeCatalogManifest> {
   const info = await stat(abs).catch(() => null);
   if (!info) throw new CliError(`no such file or directory: ${abs}`);
   if (info.isDirectory()) {
-    return JSON.parse(await readFile(join(abs, 'manifest.json'), 'utf8'));
+    let raw: string;
+    try {
+      raw = await readFile(join(abs, 'manifest.json'), 'utf8');
+    } catch {
+      throw new CliError(`${abs} has no manifest.json — not an extracted catalog`);
+    }
+    try {
+      return JSON.parse(raw) as KnowledgeCatalogManifest;
+    } catch {
+      throw new CliError(`${join(abs, 'manifest.json')} is not valid JSON`);
+    }
   }
-  return readGezkManifest(abs);
+  try {
+    return await readGezkManifest(abs);
+  } catch (err) {
+    throw new CliError(
+      `${abs} is not a readable .gezk archive: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 }
 
 function excerpt(text: string): string {
@@ -585,15 +601,30 @@ export function contentSha256(bytes: Buffer): string {
 }
 
 /**
+ * What to do when `export-parquet` finds no DuckDB. Every way out is a
+ * command: the hint used to send a terminal-only person to "open a data
+ * feature in gezel", which only the desktop app has (2026-11-11 npm audit).
+ */
+export function duckdbMissingMessage(version: string): string {
+  return [
+    'No DuckDB CLI found. To get one:',
+    `  gezel native install --engine duckdb   (downloads DuckDB ${version}; or run this command again with --download)`,
+    '  or install DuckDB yourself (https://duckdb.org), on your PATH or named with --duckdb <binary>',
+  ].join('\n');
+}
+
+/**
  * Write the Parquet companion of a catalog — the same documents, chunks and
  * embeddings as columnar tables for DuckDB, pandas, Polars or `datasets`.
  * Uses the DuckDB CLI gezel installs for its data features (or
  * `GEZEL_DUCKDB_BIN` / `--duckdb`), pinned to the release Parquet bytes are
- * reproducible against.
+ * reproducible against. With `fetchDuckdb` (`--download`), a missing DuckDB
+ * is downloaded through the Gezel service first.
  */
 export async function runKnowledgeExportParquet(
   path: string,
   opts: { out?: string; duckdb?: string },
+  deps: { fetchDuckdb?: () => Promise<string | undefined> } = {},
 ): Promise<void> {
   const { DUCKDB_VERSION, duckdbInstalledBinary } = await import('@bendyline/gezel/native');
   const { exportCatalogParquet, findDuckdbBinary } = await import('@bendyline/gezel-knowledge');
@@ -607,14 +638,11 @@ export async function runKnowledgeExportParquet(
 
   const installed = duckdbInstalledBinary(process.env.GEZEL_HOME ?? join(homedir(), '.gezel'));
   const binaryPath =
-    opts.duckdb ??
-    process.env.GEZEL_DUCKDB_BIN?.trim() ??
-    ((await stat(installed).catch(() => null)) ? installed : await findDuckdbBinary());
-  if (!binaryPath) {
-    throw new CliError(
-      `no DuckDB CLI found — open a data feature in gezel once (it installs DuckDB ${DUCKDB_VERSION}), install DuckDB yourself, or pass --duckdb <binary>`,
-    );
-  }
+    opts.duckdb ||
+    process.env.GEZEL_DUCKDB_BIN?.trim() ||
+    ((await stat(installed).catch(() => null)) ? installed : await findDuckdbBinary()) ||
+    (await deps.fetchDuckdb?.());
+  if (!binaryPath) throw new CliError(duckdbMissingMessage(DUCKDB_VERSION));
 
   const report = await exportCatalogParquet({
     source,

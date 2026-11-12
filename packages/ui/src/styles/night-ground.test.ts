@@ -1,6 +1,6 @@
 /// <reference types="node" />
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { gezelReadingSurfaceForMode } from '../components/chat-theme.js';
@@ -81,5 +81,50 @@ describe('the night ground', () => {
   it('gives every reader a surface in both modes', () => {
     expect(gezelReadingSurfaceForMode('dark')).toBe(GEZEL_DARK_SURFACE);
     expect(gezelReadingSurfaceForMode('light').background).toBe('#eeeae1');
+  });
+});
+
+// By day a quiet wash or a structural hairline is the terracotta on
+// parchment. Over charcoal the same wash is a brown surface, so at night the
+// tint is a gray and the accent is kept for marks.
+describe('the wash tint', () => {
+  const lightRoot = foundation.match(/^:root \{([\s\S]*?)^\}/m)?.[1] ?? '';
+  const washTint = (source: string) => source.match(/--wash-tint:\s*([^;]+);/)?.[1]?.trim();
+
+  it('is the terracotta by day, so a wash through it is the color it always was', () => {
+    expect(washTint(lightRoot)).toBe('var(--gezel-terra)');
+    expect(lightRoot).toMatch(/--accent:\s*var\(--gezel-terra\);/);
+  });
+
+  it('is the same gray in both dark blocks', () => {
+    const night = washTint(pinnedDark) ?? '';
+    expect(washTint(systemDark)).toBe(night);
+    expect(night).toMatch(/^#[0-9a-f]{6}$/);
+    const [red, green, blue] = channels(night);
+    expect(red).toBeGreaterThanOrEqual(green);
+    expect(green).toBeGreaterThanOrEqual(blue);
+    expect(red - blue).toBeLessThanOrEqual(8);
+  });
+
+  // A new wash written with the terracotta itself would be brown at night.
+  it('carries every quiet wash: none is written with the accent directly', () => {
+    const sheets = readdirSync(import.meta.dirname).filter((name) => name.endsWith('.css'));
+    const strays: string[] = [];
+    for (const sheet of sheets) {
+      read(sheet)
+        .split('\n')
+        .forEach((line, index) => {
+          if (line.includes('--selected-bg')) return;
+          for (const match of line.matchAll(/rgba\(176,\s*114,\s*76,\s*(0?\.\d+)\)/g)) {
+            if (Number(match[1]) <= 0.45) strays.push(`${sheet}:${index + 1} ${match[0]}`);
+          }
+          for (const match of line.matchAll(
+            /color-mix\(in srgb, var\(--accent\) (\d+(?:\.\d+)?)%/g,
+          )) {
+            if (Number(match[1]) <= 14) strays.push(`${sheet}:${index + 1} ${match[0]}`);
+          }
+        });
+    }
+    expect(strays).toEqual([]);
   });
 });

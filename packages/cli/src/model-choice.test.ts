@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   type ModelChoiceClient,
   availableChatModels,
+  chatModelInUse,
   formatAvailableChatModels,
+  formatInstalledChatModels,
   pinPulledModel,
   useChatModel,
 } from './model-choice.js';
@@ -54,7 +56,7 @@ describe('formatAvailableChatModels', () => {
       platformDefault: 'mlx',
       ranked: [model('qwen3.8-27b-q4', 16.1), model('qwen3.5-0.8b-q4', 0.65)],
       installed: new Set(['qwen3.8-27b-q4']),
-      pinned: 'qwen3.8-27b-q4',
+      inUse: 'qwen3.8-27b-q4',
     });
     expect(text).toContain('qwen3.8-27b-q4   16.1 GB');
     expect(text).toContain('(recommended, installed, in use)');
@@ -99,6 +101,58 @@ describe('formatAvailableChatModels', () => {
     expect(text).not.toContain('(recommended');
     expect(text).toContain('its graphics card is not measured yet');
     expect(text).toContain('Run `gezel native install`, then list again');
+  });
+});
+
+describe('chatModelInUse', () => {
+  const ids = ['gemma-4b-q4', 'qwen3.5-2b-q4'];
+
+  it('is the pinned model when chats use this engine', () => {
+    const config = { provider: 'llama-cpp', defaultModel: { 'llama-cpp': 'qwen3.5-2b-q4' } };
+    expect(chatModelInUse(config, 'llama-cpp', ids)).toBe('qwen3.5-2b-q4');
+  });
+
+  it('is the first listed model when nothing is pinned, as the daemon picks it', () => {
+    expect(chatModelInUse({ provider: 'llama-cpp' }, 'llama-cpp', ids)).toBe('gemma-4b-q4');
+    // llama.cpp falls back from a pin that is gone; MLX refuses it.
+    const gone = { 'llama-cpp': 'deleted-q4', mlx: 'deleted-q4' };
+    expect(chatModelInUse({ provider: 'llama-cpp', defaultModel: gone }, 'llama-cpp', ids)).toBe(
+      'gemma-4b-q4',
+    );
+    expect(chatModelInUse({ provider: 'mlx', defaultModel: gone }, 'mlx', ids)).toBeUndefined();
+  });
+
+  it('is none when chats use another provider or an engine Gezel does not run', () => {
+    const defaultModel = { 'llama-cpp': 'qwen3.5-2b-q4' };
+    expect(chatModelInUse({ provider: 'openai', defaultModel }, 'llama-cpp', ids)).toBeUndefined();
+    expect(
+      chatModelInUse(
+        { provider: 'llama-cpp', defaultModel, llamaCppBaseUrl: 'http://127.0.0.1:8080' },
+        'llama-cpp',
+        ids,
+      ),
+    ).toBeUndefined();
+    expect(chatModelInUse({ provider: 'llama-cpp' }, 'llama-cpp', [])).toBeUndefined();
+  });
+});
+
+describe('formatInstalledChatModels', () => {
+  it('marks the model chats use and the ones another Gezel shares', () => {
+    const text = formatInstalledChatModels(
+      'llama-cpp',
+      [
+        { id: 'gemma-4b-q4', name: 'Gemma 4B', approxSizeBytes: 3.1e9 },
+        { id: 'qwen3.5-2b-q4', name: 'Qwen 3.5 2B', approxSizeBytes: 1.33e9, readOnly: true },
+      ],
+      { provider: 'llama-cpp', defaultModel: { 'llama-cpp': 'qwen3.5-2b-q4' } },
+    );
+    const [gemma, qwen] = text.split('\n');
+    expect(gemma).toMatch(/^gemma-4b-q4\s+3\.10 GB {2}Gemma 4B$/);
+    expect(qwen).toMatch(/^qwen3\.5-2b-q4\s+1\.33 GB {2}Qwen 3\.5 2B {2}\(shared, in use\)$/);
+  });
+
+  it('says how to find a model when none is downloaded', () => {
+    expect(formatInstalledChatModels('mlx', [], {})).toContain('gezel model list --available');
   });
 });
 

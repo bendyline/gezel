@@ -10,6 +10,7 @@ export interface UtilityServiceStartOptions {
   preferCanonicalPort?: boolean;
   role?: 'user' | 'machine-engine' | 'legacy-full';
   machineEngineDiscovery?: boolean;
+  logOutput?: 'split' | 'stderr';
 }
 
 export type UtilityParentMessage =

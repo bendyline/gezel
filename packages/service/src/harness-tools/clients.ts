@@ -479,7 +479,15 @@ function commandAdapter(opts: {
         );
       }
       if (existing !== undefined) await input.ctx.run(binary, opts.removeArgs).catch(() => '');
-      await input.ctx.run(binary, opts.addArgs(input.expected));
+      try {
+        await input.ctx.run(binary, opts.addArgs(input.expected));
+      } catch (error) {
+        throw appCommandFailure(
+          `${label} did not take Gezel's tools.`,
+          `${opts.displayName} mcp add`,
+          error,
+        );
+      }
     },
 
     async remove(input) {
@@ -497,9 +505,56 @@ function commandAdapter(opts: {
           `The gezel server in ${label} was not set up by Gezel, so Gezel left it in place.`,
         );
       }
-      await input.ctx.run(binary, opts.removeArgs);
+      try {
+        await input.ctx.run(binary, opts.removeArgs);
+      } catch (error) {
+        throw appCommandFailure(
+          `${label} did not remove Gezel's tools.`,
+          `${opts.displayName} mcp remove`,
+          error,
+        );
+      }
     },
   };
+}
+
+/**
+ * An app's own command failing, as a person reads it: which command, and in
+ * a line what that command said. WHY: `claude mcp add` exiting 1 reached the
+ * CLI as `internal_error` and Settings as "Gezel could not change this app"
+ * (2026-11-11 npm ship audit), with the app's own explanation only in the
+ * service log. The text is the app's, about its own config, and is shortened
+ * with anything shaped like a credential taken out.
+ */
+export function appCommandFailure(
+  lead: string,
+  command: string,
+  error: unknown,
+): HarnessSetupError {
+  const raw = error instanceof Error ? error.message : String(error);
+  const exited = /^exited (-?\d+|null): ?([\s\S]*)$/.exec(raw);
+  let what: string;
+  if (exited) {
+    const said = appText(exited[2] ?? '');
+    what = `\`${command}\` stopped with exit code ${exited[1]}${said ? `: ${said}` : '.'}`;
+  } else if (/ timed out after \d+ms$/.test(raw)) {
+    what = `\`${command}\` did not finish in time.`;
+  } else {
+    what = `\`${command}\` could not start: ${appText(raw)}`;
+  }
+  return new HarnessSetupError('app_command_failed', `${lead} ${what}`, 424);
+}
+
+const APP_TEXT_LIMIT = 300;
+
+function appText(text: string): string {
+  const flat = text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\bbearer\s+\S+/gi, 'Bearer …')
+    .replace(/\b(api[_-]?key|token|password|secret|authorization)(\s*[:=]\s*)\S+/gi, '$1$2…')
+    .replace(/[A-Za-z0-9_+-]{32,}/g, '…');
+  return flat.length > APP_TEXT_LIMIT ? `${flat.slice(0, APP_TEXT_LIMIT - 1)}…` : flat;
 }
 
 export function claudeCodeAdapter(
