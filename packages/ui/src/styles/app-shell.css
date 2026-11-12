@@ -3117,6 +3117,110 @@ button.machine-memory-unload-button {
   box-sizing: border-box;
 }
 
+/* In the rail the accent marks a category (Projects, Documents, Crew) and
+   ink marks the things inside it: a project's mark is drawn like a document's
+   file icon. In the accent, a project row read as one more category. */
+.app-sidebar-proj-row .app-sidebar-item-icon {
+  color: var(--text);
+}
+
+/* A project's own art. A drawn mark is painted as a silhouette in the current
+   text color: the SVG is the mask, so it takes the theme's ink like the
+   built-in marks whatever colors it was written with. A picture is shown as
+   it is, with the small radius of a thumbnail. */
+.project-icon-drawn {
+  display: inline-block;
+  flex: 0 0 auto;
+  background-color: currentColor;
+  mask-repeat: no-repeat;
+  mask-position: center;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+}
+.project-icon-image {
+  display: block;
+  border-radius: var(--radius-sm);
+  object-fit: cover;
+}
+
+/* The icon picker in a project's Settings: every mark as an icon key, then
+   the two ways to give the project art of its own. */
+.project-icon-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  max-width: 34rem;
+}
+.project-icon-own-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+/* Draw an icon: the description, one large look at the current drawing with
+   the same mark at list size beside the project's name, then every drawing
+   made so far. */
+.project-icon-draw-dialog {
+  width: min(34rem, calc(100vw - 2rem));
+}
+.project-icon-draw-label {
+  display: block;
+  margin: 0.9rem 0 0.3rem;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.project-icon-draw-brief {
+  width: 100%;
+  resize: vertical;
+}
+.project-icon-draw-stage {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.9rem;
+}
+.project-icon-draw-preview {
+  flex: 0 0 auto;
+  width: 7rem;
+  height: 7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  text-align: center;
+  color: var(--text);
+  background: var(--tray-bg);
+  border: 1px solid var(--tray-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--tray-shadow);
+}
+.project-icon-draw-side {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+.project-icon-draw-side p {
+  margin: 0;
+}
+.project-icon-draw-in-list {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  color: var(--text);
+}
+.project-icon-draw-attempts {
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 0.9rem;
+}
+
 /* Project row: the name button flexes all the way to the right-aligned signal.
    The hover action overlays the tail of the name instead of permanently
    reserving space for an invisible button. */
@@ -3372,7 +3476,8 @@ button.machine-memory-unload-button {
 .project-rail-mark {
   width: 1.5rem;
   height: 1.5rem;
-  color: var(--accent-text);
+  /* Ink, as in the navigation rail: a project's mark is a thing, not a link. */
+  color: var(--text);
   /* The 18px glyph is centered inside this 24px alignment box. Offset that
      built-in 3px inset so the visible mark sits on the row's leading edge,
      then lower it by the same amount for optical alignment with the label. */

@@ -116,6 +116,7 @@ import { previewLogRoutes } from './routes/preview-log.js';
 import { previewRoutes } from './routes/preview.js';
 import { projectContinuationRoutes } from './routes/project-continuation.js';
 import { projectGezelRoutes } from './routes/project-gezels.js';
+import { projectIconRoutes } from './routes/project-icon.js';
 import { projectIndexViewRoutes } from './routes/project-index-views.js';
 import { projectReportRoutes } from './routes/project-reports.js';
 import { globalTaskRoutes, projectTaskRoutes } from './routes/project-tasks.js';
@@ -614,6 +615,8 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
   app.route('/api/projects', diffpackRoutes(ctx));
   // The Reports view's list and write-now at /api/projects/:id/reports*
   app.route('/api/projects', projectReportRoutes(ctx));
+  // A project's own icon art at /api/projects/:id/icon*
+  app.route('/api/projects', projectIconRoutes(ctx));
   app.route('/api/projects', projectIndexViewRoutes(ctx));
   app.route('/api/projects', promptDraftRoutes(ctx));
   // Per-project GitHub operations live at /api/projects/:id/github/*

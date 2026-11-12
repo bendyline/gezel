@@ -41,6 +41,12 @@ export interface RuntimeCapabilities {
    * it follows `catalog`.
    */
   projectTypes?: boolean;
+  /**
+   * The host keeps a project's own icon art (`/api/projects/:id/icon*`): a mark
+   * a model draws, or a picture the person uploads. Omitted means it does not,
+   * and a project's Settings offers the built-in marks only.
+   */
+  projectIconArt?: boolean;
   htmlPreview: boolean;
   daemonSettings: boolean;
   /**
@@ -109,6 +115,7 @@ export const DESKTOP_RUNTIME_CAPABILITIES: Readonly<RuntimeCapabilities> = Objec
   growth: true,
   catalog: true,
   projectTypes: true,
+  projectIconArt: true,
   htmlPreview: true,
   daemonSettings: true,
   engineStatus: true,

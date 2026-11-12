@@ -63,6 +63,7 @@ import type { ProjectTemplateGezelOptions } from '../components/ProjectAddGezelD
 import { ProjectCrewRoster } from '../components/ProjectCrewRoster.js';
 import { PROJECT_STATUS_OPTIONS, ProjectGitStatusBar } from '../components/ProjectGitStatusBar.js';
 import { ProjectIcon } from '../components/ProjectIcon.js';
+import { ProjectIconField } from '../components/ProjectIconField.js';
 import { ProjectKnowledgeRow } from '../components/ProjectKnowledgeRow.js';
 import { ProjectOutputPane } from '../components/ProjectOutputPane.js';
 import { ProjectPanePlaceholder } from '../components/ProjectPanePlaceholder.js';
@@ -3229,6 +3230,30 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                               onReview={() => setTypeUpdateOpen(true)}
                             />
                           )}
+
+                          <SettingField
+                            label="Icon"
+                            hint="What stands beside this project’s name. Automatic follows the project’s type; a drawn mark or a picture of your own replaces it."
+                          >
+                            <ProjectIconField
+                              project={selected}
+                              typeLabel={
+                                typeName ??
+                                getProjectType(
+                                  selected.projectTypeId ?? selected.detectedProjectType?.id,
+                                )?.label
+                              }
+                              onChanged={(updated) => {
+                                setSelected(updated);
+                                // The rail draws the icon too.
+                                window.dispatchEvent(
+                                  new CustomEvent('gezel:project-updated', {
+                                    detail: { projectId: selected.id, project: updated },
+                                  }),
+                                );
+                              }}
+                            />
+                          </SettingField>
 
                           {runtimeCapabilities().catalog && (
                             <ProjectPropertiesEditor

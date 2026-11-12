@@ -1088,6 +1088,36 @@ icon rail the group is one icon. An open group, or one holding the current
 area, lists its areas' icons beneath it; pressing the icon of a closed group
 expands the rail and opens it.
 
+**In the rail the accent marks a category; ink marks the things in it.**
+The group headers (Projects, Documents, Crew, More) and the areas below them
+wear the terracotta. A project's mark is drawn in ink, like a document's
+file icon, and a crew member is a face. Project marks were the accent too,
+so a project row read as one more category. A project's mark comes from its
+type (core `resolveProjectIcon`), which makes two projects of one type look
+alike: two code folders are both braces. A person tells them apart in the
+project's Settings → Preferences → Icon, which offers every maker's mark as
+an icon key (`ProjectIconPicker`) and saves the choice as `project.icon`;
+Automatic clears it and follows the type again. The marks stay bare
+single-color glyphs: a tinted tile behind one is this app's key treatment,
+and made every row's mark read as a control.
+
+A project may wear art of its own in place of a mark, from two keys under
+the picker (`ProjectIconField`, shown where the host keeps such art:
+`projectIconArt`). **Draw one** opens a dialog with a description filled in
+from the project's name and type, which the person edits. Generate asks a
+model for one drawing; pressing it again draws another, every drawing made
+stays in a row to choose between, and the one in hand is shown large and at
+list size beside the project's name. Nothing is saved until **Set this as
+the icon**; Cancel leaves the icon as it was. **Upload a picture** takes a
+PNG, JPEG or WebP, which the app scales to a small square before sending.
+A drawn mark is painted as a silhouette in the theme's ink (the SVG is only
+a mask), so it sits with the built-in marks and follows light and dark. A
+picture is shown as it is, with the small radius of a thumbnail. Either
+shows in the picker as one more key, latched, and choosing any mark or
+Automatic puts it away. The built-in mark stands in while art loads or
+cannot be read. Drawing is never automatic: it costs a model call, and a
+small on-device model draws poorly.
+
 **The rail sits on the left.** It is under the brand and the back and
 forward keys, so navigation reads in one direction: the rail, then an area's
 own list (Settings' pages, Help's sections, a project's tabs), then the

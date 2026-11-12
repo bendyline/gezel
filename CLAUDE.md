@@ -133,6 +133,8 @@ Do not bake "the service is in-process" assumptions into new code — go through
 ├── projects/
 │   └── {id}/
 │       ├── project.json     name, description, workingDir?, packages
+│       ├── icon.svg|png|jpg|webp  the project's own icon, when it has one: a mark a model
+│       │                    drew, or a picture the person uploaded (`customIcon` in project.json)
 │       ├── finding-lifecycle.json  durable open/in-progress/resolved scanner findings
 │       ├── report-actions.json  fired/dismissed lifecycle of report-embedded action requests
 │       ├── artifacts/       read-write user/agent outputs
@@ -418,6 +420,7 @@ Each project also carries:
 - **`about`** — `documents/about.md` inside the project. Free-form prose describing what the project is, who it's for, what's in scope. Read lazily by `Store.getProject` and **injected into the system prompt** for any chat session scoped here, under the heading `### About this project`.
 - **`missionObjectives`** — `documents/missionObjectives.md`. Concrete success criteria. Same lifecycle as `about` and same prompt injection (under `### Mission objectives`). Use this for the kind of bullet list you'd put in a team brief.
 - **`voormanGezelId`** — the project's **main gezel**. Every project is assigned one (Default and the shared library have none), and `mode` says what they do there: in a `crew` project (the default) they are a crew lead, who recruits specialists and hands the work out; in a `solo` project they do the work themselves, start to finish, in their own role (usually a Builder), with team-management tools stripped. Working alone is the common shape, so the field's name describes only the first. Stored in `project.json`; the system prompt for any session here names them, and the model knows whom to defer to. What a person reads follows the shape, never the gezel's role: the star marks the main gezel in both (`isProjectMainGezel`), and the words come from [packages/ui/src/labels.ts](packages/ui/src/labels.ts). See [docs/ux.md](docs/ux.md) ("Every project has a main crew member").
+- **`icon` / `customIcon`** — what stands beside the project's name. By default a maker's mark from its type (core [project-icons.ts](packages/core/src/project-icons.ts) `resolveProjectIcon`); `icon` is a mark the person chose. `customIcon` records art of the project's own, kept beside `project.json`: a one-color SVG mark a model drew from the person's description (`POST /:id/icon/draw` returns a drawing and saves nothing; the person keeps one with `PUT /:id/icon`), or an uploaded PNG, JPEG or WebP whose format is read from its bytes. Only [routes/project-icon.ts](packages/service/src/http/routes/project-icon.ts) writes it, through `Store.writeProjectIconArt`; choosing a mark again drops the art. None of those routes is on the session allowlist, so a gezel cannot draw or set one. A drawn mark is sanitized by `sanitizePresentationSvg` on the way in and again in the UI, where it is only ever used as a CSS mask.
 
 The per-project `documents/` folder is **distinct from the global `~/.gezel/documents/` library** and holds only `about.md` + `missionObjectives.md`. Project docs are injected into chats scoped to that project; the shared library is a project in its own right (below).
 

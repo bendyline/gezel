@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
 vi.mock('../api.js', () => ({ api: createMockApi() }));
-const { nextKeptViews } = await import('./KeepAliveHost.js');
+const { arrangeFor, nextKeptViews, withShownView } = await import('./KeepAliveHost.js');
 const { destinationFor } = await import('./destinations.js');
 
 const tab = (fields: Record<string, unknown>) => ({ at: 0, order: 0, ...fields }) as RecentTab;
@@ -62,6 +62,35 @@ describe('kept views', () => {
     views = visit(views, tab({ kind: 'project', id: 'a' }), 2);
     views = visit(views, tab({ kind: 'project', id: 'b' }), 11 * 60_000);
     expect(views.map((view) => view.key)).toEqual(['home', 'project:a', 'project:b']);
+  });
+
+  it('arranges the shown key and the views together, and drops a crashed view once left', () => {
+    const options = { hiddenLimit: 3, now: 1 };
+    const project = (id: string) => {
+      const next = tab({ kind: 'project', id });
+      return { key: destinationFor(next).key, tab: next, keepAlive: true };
+    };
+    let state = arrangeFor({ shownKey: '', views: [], crashed: new Set() }, project('a'), options);
+    state = arrangeFor(state, project('b'), options);
+    expect(state.shownKey).toBe('project:b');
+    expect(state.views.find((view) => view.hiddenAt === null)?.key).toBe('project:b');
+
+    // b crashed while shown: it stays until left, then unmounts.
+    state = { ...state, crashed: new Set(['project:b']) };
+    state = arrangeFor(state, project('c'), options);
+    expect(state.views.map((view) => view.key)).toEqual(['project:a', 'project:c']);
+    expect(state.crashed.size).toBe(0);
+  });
+
+  it('always renders the shown destination, even when the kept set lacks it', () => {
+    const shown = { key: 'project:b', tab: tab({ kind: 'project', id: 'b' }) };
+    const views = visit([], tab({ kind: 'project', id: 'a' }), 0);
+    expect(withShownView(views, shown).map((view) => [view.key, view.hiddenAt])).toEqual([
+      ['project:a', null],
+      ['project:b', null],
+    ]);
+    const complete = visit(views, shown.tab, 1);
+    expect(withShownView(complete, shown)).toBe(complete);
   });
 
   it('brings a kept view back without moving it', () => {

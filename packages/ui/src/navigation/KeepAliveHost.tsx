@@ -72,6 +72,46 @@ export function nextKeptViews(
   return kept.filter((view) => !evicted.has(view.key));
 }
 
+export interface KeptState {
+  /** The destination the views were arranged for. */
+  shownKey: string;
+  views: readonly KeptView[];
+  /** Views that crashed while shown; they unmount once left. */
+  crashed: ReadonlySet<string>;
+}
+
+const NO_CRASHES: ReadonlySet<string> = new Set();
+const EMPTY_KEPT: KeptState = { shownKey: '', views: [], crashed: NO_CRASHES };
+
+/** The kept state once `shown` is the destination on screen. */
+export function arrangeFor(
+  state: KeptState,
+  shown: { key: string; tab: RecentTab | null; keepAlive: boolean },
+  options: { hiddenLimit: number; now: number },
+): KeptState {
+  const survivors = state.views.filter(
+    (view) => !state.crashed.has(view.key) || view.key === shown.key,
+  );
+  return {
+    shownKey: shown.key,
+    views: nextKeptViews(survivors, shown, options),
+    crashed: NO_CRASHES,
+  };
+}
+
+/**
+ * The views to render: the kept set, and the shown destination even if the
+ * set somehow lacks it. Whatever else goes wrong, the destination someone
+ * picked is on screen.
+ */
+export function withShownView(
+  views: readonly KeptView[],
+  shown: { key: string; tab: RecentTab | null },
+): readonly KeptView[] {
+  if (views.some((view) => view.key === shown.key)) return views;
+  return [...views, { key: shown.key, tab: shown.tab, hiddenAt: null }];
+}
+
 /** Drop hidden views that have been hidden too long. */
 function withoutExpired(views: readonly KeptView[], now: number): readonly KeptView[] {
   const next = views.filter(
@@ -115,43 +155,43 @@ export function KeepAliveHost({
   render: (tab: RecentTab | null, onCrash: () => void) => ReactNode;
 }) {
   const shown = destinationFor(selection);
-  const [views, setViews] = useState<readonly KeptView[]>(() =>
-    nextKeptViews(
-      [],
-      { key: shown.key, tab: selection, keepAlive: shown.keepAlive },
-      {
-        hiddenLimit,
-        now: Date.now(),
-      },
-    ),
+  const showing = { key: shown.key, tab: selection, keepAlive: shown.keepAlive };
+  const [kept, setKept] = useState<KeptState>(() =>
+    arrangeFor(EMPTY_KEPT, showing, { hiddenLimit, now: Date.now() }),
   );
-  const [crashed, setCrashed] = useState<ReadonlySet<string>>(new Set());
-  // Adjust the kept set in render when the shown destination changes, so the
-  // new view mounts in the same commit instead of one frame later.
-  const [shownKey, setShownKey] = useState(shown.key);
-  if (shownKey !== shown.key) {
-    setShownKey(shown.key);
-    setViews((previous) =>
-      nextKeptViews(
-        previous.filter((view) => !crashed.has(view.key) || view.key === shown.key),
-        { key: shown.key, tab: selection, keepAlive: shown.keepAlive },
-        { hiddenLimit, now: Date.now() },
-      ),
-    );
-    if (crashed.size > 0) setCrashed(new Set());
+  // Arrange the kept set in render when the shown destination changes, so the
+  // new view mounts in the same commit instead of one frame later. React does
+  // not keep an update made during render when another update to the same
+  // state is still waiting (the expiry tick, landing mid-transition): it
+  // replays from the older state. Everything this decision rests on is one
+  // state for that reason, so a replay takes the shown key back with the views
+  // and this check arranges them again. As two states, the views lost the new
+  // destination while its key stayed, and the pane was blank until the next
+  // pick (2026-11-12).
+  if (kept.shownKey !== shown.key) {
+    setKept(arrangeFor(kept, showing, { hiddenLimit, now: Date.now() }));
   }
 
   useEffect(
     () =>
-      setVisibleInterval(() => setViews((current) => withoutExpired(current, Date.now())), 60_000),
+      setVisibleInterval(
+        () =>
+          setKept((current) => {
+            const views = withoutExpired(current.views, Date.now());
+            return views === current.views ? current : { ...current, views };
+          }),
+        60_000,
+      ),
     [],
   );
 
   useEffect(() => {
     const onDeleted = (event: Event) =>
-      setViews((current) => {
-        const next = current.filter((view) => view.hiddenAt === null || !deletedBy(view, event));
-        return next.length === current.length ? current : next;
+      setKept((current) => {
+        const views = current.views.filter(
+          (view) => view.hiddenAt === null || !deletedBy(view, event),
+        );
+        return views.length === current.views.length ? current : { ...current, views };
       });
     for (const type of DELETION_EVENTS) window.addEventListener(type, onDeleted);
     return () => {
@@ -161,7 +201,7 @@ export function KeepAliveHost({
 
   return (
     <>
-      {views.map((view) => {
+      {withShownView(kept.views, showing).map((view) => {
         const visible = view.key === shown.key;
         return (
           <Activity key={view.key} mode={visible ? 'visible' : 'hidden'}>
@@ -171,7 +211,10 @@ export function KeepAliveHost({
                 <Suspense fallback={<PaneFrame kind={destinationFor(view.tab).frame} />}>
                   <ViewLocationRoot selection={view.tab}>
                     {render(view.tab, () =>
-                      setCrashed((current) => new Set(current).add(view.key)),
+                      setKept((current) => ({
+                        ...current,
+                        crashed: new Set(current.crashed).add(view.key),
+                      })),
                     )}
                   </ViewLocationRoot>
                 </Suspense>

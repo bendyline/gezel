@@ -163,6 +163,15 @@ hide and runs them again on show. So:
   to its newest message).
 - Tests find a hidden view's text with `getByText`; wait for visibility
   (`toBeVisible`) after a navigation, not for presence.
+- The host arranges its kept set during render, and keeps that decision in
+  one state (shown key, views, crashed views together). React drops an update
+  made during render when another update to the same state is still waiting,
+  and replays from the older state. With the shown key and the views as two
+  states, the expiry tick landing mid-transition took the views back without
+  the key, and the picked destination had no view: a blank pane until the next
+  pick. The host also renders the shown destination even if the set lacks it
+  (`withShownView`). Anything else that adjusts state during render follows
+  the same rule.
 
 ## Rendering rules
 

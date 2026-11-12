@@ -1,7 +1,11 @@
 import { KnowledgeLocationSchema } from '@bendyline/gezk';
 import { z } from 'zod';
 import { PoppetjeSchema } from '../poppetje/schema.js';
-import { ProjectIconIdSchema } from '../project-icons.js';
+import {
+  PROJECT_ICON_BRIEF_MAX_CHARS,
+  PROJECT_ICON_SVG_MAX_CHARS,
+  ProjectIconIdSchema,
+} from '../project-icons.js';
 import { MEMORY_KINDS } from '../runtime/memory-markdown.js';
 import { OUTCOME_TEAMMATE_SLUGS } from '../task-strategy.js';
 import {
@@ -4498,6 +4502,25 @@ export const CreateProjectRequestSchema = z.object({
     })
     .optional(),
 });
+
+/** Ask a model to draw a project's mark. Nothing is saved. */
+export const DrawProjectIconRequestSchema = z.object({
+  /** What to draw, in the person's words. */
+  description: z.string().trim().min(1).max(PROJECT_ICON_BRIEF_MAX_CHARS),
+});
+export type DrawProjectIconRequest = z.infer<typeof DrawProjectIconRequestSchema>;
+
+export const DrawProjectIconResponseSchema = z.object({
+  /** A sanitized, one-color SVG mark. */
+  svg: z.string(),
+});
+export type DrawProjectIconResponse = z.infer<typeof DrawProjectIconResponseSchema>;
+
+/** Keep a drawn mark as the project's icon. */
+export const SetProjectIconSvgRequestSchema = z.object({
+  svg: z.string().min(1).max(PROJECT_ICON_SVG_MAX_CHARS),
+});
+export type SetProjectIconSvgRequest = z.infer<typeof SetProjectIconSvgRequestSchema>;
 
 export const UpdateProjectRequestSchema = z.object({
   name: z.string().min(1).optional(),

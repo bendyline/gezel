@@ -145,6 +145,8 @@ import type {
   DocumentMediaExportRequest,
   DraftScriptRequest,
   DraftScriptResponse,
+  DrawProjectIconRequest,
+  DrawProjectIconResponse,
   DriveIndexEnrichmentRequest,
   DriveIndexEnrichmentResponse,
   DuplicatePromptDraftRequest,
@@ -436,6 +438,7 @@ import type {
   SessionDebugSnapshot,
   SessionTelemetry,
   SessionTelemetryListResponse,
+  SetProjectIconSvgRequest,
   SharedModelMigrationCandidatesResponse,
   SharedModelMigrationRequest,
   SharedModelMigrationResult,
@@ -4844,6 +4847,67 @@ export class GezelClient {
 
   updateProject(id: string, body: UpdateProjectRequest): Promise<ProjectResponse> {
     return this.request('PUT', `/api/projects/${encodeURIComponent(id)}`, body);
+  }
+
+  /**
+   * Ask a model to draw a mark for the project from a description. Returns a
+   * sanitized one-color SVG and saves nothing; keep one with
+   * `setProjectIconSvg`. A model call, so it can take a minute.
+   */
+  drawProjectIcon(
+    id: string,
+    body: DrawProjectIconRequest,
+    signal?: AbortSignal,
+  ): Promise<DrawProjectIconResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/icon/draw`,
+      body,
+      undefined,
+      signal,
+    );
+  }
+
+  /** Keep a drawn mark as the project's icon. */
+  setProjectIconSvg(id: string, body: SetProjectIconSvgRequest): Promise<ProjectResponse> {
+    return this.request('PUT', `/api/projects/${encodeURIComponent(id)}/icon`, body);
+  }
+
+  /** Use a picture (PNG, JPEG or WebP, at most 512 KB) as the project's icon. */
+  async uploadProjectIcon(id: string, image: Blob): Promise<ProjectResponse> {
+    const res = await this.fetchImpl(
+      `${this.baseUrl}/api/projects/${encodeURIComponent(id)}/icon`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${this.token}`,
+          'content-type': image.type || 'application/octet-stream',
+        },
+        body: image,
+      },
+    );
+    const result = (await res.json().catch(() => ({}))) as ProjectResponse & { error?: string };
+    // The daemon's sentence rides on `details`, where `apiErrorMessage` reads it.
+    if (!res.ok) throw new GezelApiError(`icon upload failed: ${res.status}`, res.status, result);
+    return result;
+  }
+
+  /** The project's own icon art, as stored. Rejects when it has none. */
+  async getProjectIcon(id: string, signal?: AbortSignal): Promise<Blob> {
+    const res = await this.fetchImpl(
+      `${this.baseUrl}/api/projects/${encodeURIComponent(id)}/icon`,
+      {
+        headers: { Authorization: `Bearer ${this.token}` },
+        ...(signal ? { signal } : {}),
+      },
+    );
+    if (!res.ok) throw new GezelApiError(`project icon: ${res.status}`, res.status);
+    return res.blob();
+  }
+
+  /** Drop the project's own icon art; its mark shows again. */
+  deleteProjectIcon(id: string): Promise<ProjectResponse> {
+    return this.request('DELETE', `/api/projects/${encodeURIComponent(id)}/icon`);
   }
 
   /**

@@ -47,6 +47,10 @@ type TriState = 'auto' | 'on' | 'off';
 type LoadMode = NonNullable<ConfigResponse['llamaCppLoadMode']>;
 type LazyMode = NonNullable<ConfigResponse['llamaCppLazyMode']>;
 
+// `.new-row` adds a 0.25rem gap after the label, so a 9.75rem column puts each
+// control on the same 10rem line as the help text indented beneath it.
+const ADVANCED_LABEL_STYLE = { fontSize: 'var(--text-md)', flex: '0 0 9.75rem' } as const;
+
 /** Map a nullable boolean config override to the tri-state select value. */
 function triStateValue(v: boolean | null | undefined): TriState {
   if (v === true) return 'on';
@@ -788,11 +792,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label
-            htmlFor="llama-cpp-context-sizing"
-            className="muted"
-            style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}
-          >
+          <label htmlFor="llama-cpp-context-sizing" className="muted" style={ADVANCED_LABEL_STYLE}>
             Context sizing
           </label>
           <select
@@ -819,11 +819,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label
-            htmlFor="llama-cpp-engine-backend"
-            className="muted"
-            style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}
-          >
+          <label htmlFor="llama-cpp-engine-backend" className="muted" style={ADVANCED_LABEL_STYLE}>
             Engine backend
           </label>
           <select
@@ -864,7 +860,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         ) : null}
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
+          <label className="muted" style={ADVANCED_LABEL_STYLE}>
             KV cache quantization
           </label>
           <select
@@ -886,7 +882,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
+          <label className="muted" style={ADVANCED_LABEL_STYLE}>
             Flash attention
           </label>
           <select
@@ -912,7 +908,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
+          <label className="muted" style={ADVANCED_LABEL_STYLE}>
             Speculative decoding
           </label>
           <select
@@ -938,7 +934,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           <label
             htmlFor="llama-cpp-spec-draft-sampling"
             className="muted"
-            style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}
+            style={ADVANCED_LABEL_STYLE}
           >
             Draft sampling
           </label>
@@ -965,7 +961,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
+          <label className="muted" style={ADVANCED_LABEL_STYLE}>
             Reasoning history
           </label>
           <select
@@ -985,11 +981,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label
-            htmlFor="llama-cpp-n-cpu-ffn"
-            className="muted"
-            style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}
-          >
+          <label htmlFor="llama-cpp-n-cpu-ffn" className="muted" style={ADVANCED_LABEL_STYLE}>
             Dense FFN offload
           </label>
           <input
@@ -1024,7 +1016,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
+          <label className="muted" style={ADVANCED_LABEL_STYLE}>
             MoE expert offload
           </label>
           <select
@@ -1045,7 +1037,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
           the next time the engine starts.
         </p>
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
+          <label className="muted" style={ADVANCED_LABEL_STYLE}>
             Full SWA cache
           </label>
           <select
@@ -1068,7 +1060,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
+          <label className="muted" style={ADVANCED_LABEL_STYLE}>
             Model loading
           </label>
           <select
@@ -1092,7 +1084,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
+          <label className="muted" style={ADVANCED_LABEL_STYLE}>
             Lazy tensor loading
           </label>
           <select
@@ -1120,7 +1112,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
+          <label className="muted" style={ADVANCED_LABEL_STYLE}>
             External engine URL
           </label>
           <input
@@ -1141,7 +1133,7 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </div>
 
         <div className="new-row" style={{ marginTop: '0.5rem', alignItems: 'center' }}>
-          <label className="muted" style={{ fontSize: 'var(--text-md)', minWidth: '10rem' }}>
+          <label className="muted" style={ADVANCED_LABEL_STYLE}>
             Override model path
           </label>
           <input

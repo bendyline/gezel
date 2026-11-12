@@ -51,8 +51,10 @@ export function evaluateCompilerCoverage(report, mustCompile = MUST_COMPILE, flo
     failures.push(`only ${report.compiled} functions compiled (floor ${floor})`);
   }
   for (const [target, rule] of Object.entries(mustCompile)) {
-    const files = Object.entries(report.files).filter(([file]) =>
-      target.endsWith('/') ? file.startsWith(target) : file === target,
+    // Report keys are POSIX-relative strings, not filesystem paths, and a folder
+    // target ends in '/', so the prefix match already stops at a separator.
+    const files = Object.entries(report.files).filter(([key]) =>
+      target.endsWith('/') ? key.startsWith(target) : key === target,
     );
     if (files.length === 0) {
       failures.push(`${target}: not in the compiler report`);

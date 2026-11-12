@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ProjectIconIdSchema } from '../project-icons.js';
+import { ProjectCustomIconSchema, ProjectIconIdSchema } from '../project-icons.js';
 import { ClaudePermissionModeSchema } from './claude.js';
 import { CodexPermissionModeSchema } from './codex.js';
 import { EntityIdSchema } from './entity-id.js';
@@ -268,6 +268,13 @@ const ProjectObject = z.object({
   description: z.string().optional(),
   /** Explicit maker's-mark override. Missing inherits from the project type. */
   icon: ProjectIconIdSchema.optional(),
+  /**
+   * The project's own icon art (a drawn mark or an uploaded picture), shown
+   * in place of the mark. The file sits beside `project.json`; this record is
+   * written only by the icon routes. Lenient, so a bad hand edit drops the
+   * art instead of hiding the project.
+   */
+  customIcon: ProjectCustomIconSchema.optional().catch(undefined),
   workingDir: z.string().optional(),
   /** Optional gezel that acts as the project's voorman (foreman). Surfaces in
    *  the project detail pane, flows into the system prompt when a session is
