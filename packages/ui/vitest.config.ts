@@ -56,6 +56,11 @@ export default defineConfig({
     },
     environment: 'jsdom',
     setupFiles: ['./src/test-utils/setup.ts'],
+    // setup.ts lets each waitFor/findBy take 5 s under a contended CI host.
+    // A view test chains several of them, so the default 5 s test budget let
+    // one slow wait time out the whole test with no message: ScriptsView's
+    // project switch took 5009 ms in CI on 2026-11-12, its other tests <150 ms.
+    testTimeout: 15_000,
     globals: false,
     css: false,
     // `clearMocks` resets call history between tests so each one starts
