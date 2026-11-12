@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { CraftbookContract } from '../schemas/craftbook-contract.js';
+import { type CraftbookContract, contractSuitsReview } from '../schemas/craftbook-contract.js';
 import {
   OUTCOME_REVIEW_MAX_FINDINGS,
   outcomeReviewFindingKind,
@@ -7,6 +7,7 @@ import {
   renderFreshReviewBrief,
   renderOutcomeReviewFindings,
   renderSelfReviewMessage,
+  resolveOutcomeReview,
 } from './outcome-review.js';
 
 const contract: CraftbookContract = {
@@ -119,5 +120,64 @@ describe('parseOutcomeReviewVerdict', () => {
     expect(outcomeReviewFindingKind('FIX `a.md` — "x" — wrong')).toBe('fix');
     expect(outcomeReviewFindingKind('**CHECK** `a.md` — doubt')).toBe('check');
     expect(outcomeReviewFindingKind('`a.md` — no mark')).toBe('unmarked');
+  });
+});
+
+describe('resolveOutcomeReview', () => {
+  const report = {
+    deliverables: [
+      { id: 'r', path: 'r.md', kind: 'markdown-report', description: 'The report' },
+      { id: 'd', path: 'd.json', kind: 'json', role: 'supporting', description: 'The data' },
+    ],
+  } as unknown as CraftbookContract;
+  const code = {
+    deliverables: [{ id: 'c', path: 'src', kind: 'code-with-tests', description: 'The fix' }],
+  } as unknown as CraftbookContract;
+  const base = { strategy: 'outcome' as const, contract: report, measured: 'self' as const };
+
+  it('reviews when the setting, strategy, book and model all agree', () => {
+    expect(resolveOutcomeReview(base)).toBe('self');
+    expect(resolveOutcomeReview({ ...base, setting: 'auto' })).toBe('self');
+  });
+
+  it('stands down when any one of them says no', () => {
+    expect(resolveOutcomeReview({ ...base, setting: 'off' })).toBeUndefined();
+    expect(resolveOutcomeReview({ ...base, strategy: 'generalist' })).toBeUndefined();
+    expect(resolveOutcomeReview({ ...base, strategy: 'stepwise' })).toBeUndefined();
+    expect(resolveOutcomeReview({ ...base, contract: code })).toBeUndefined();
+    expect(resolveOutcomeReview({ ...base, contract: undefined })).toBeUndefined();
+    expect(resolveOutcomeReview({ ...base, measured: undefined })).toBeUndefined();
+  });
+
+  it('never takes a fresh reviewer from a measurement', () => {
+    expect(resolveOutcomeReview({ ...base, measured: 'fresh' })).toBeUndefined();
+  });
+});
+
+describe('contractSuitsReview', () => {
+  const book = (kind: string, extra: Record<string, unknown> = {}) =>
+    ({
+      deliverables: [{ id: 'x', path: 'x', kind, description: 'x', ...extra }],
+    }) as unknown as CraftbookContract;
+
+  it('suits work made of claims a reader trusts', () => {
+    for (const kind of ['markdown-report', 'markdown-doc', 'yaml-spec', 'security-report']) {
+      expect(contractSuitsReview(book(kind))).toBe(true);
+    }
+  });
+
+  it('does not suit work a check already verifies', () => {
+    for (const kind of ['code-with-tests', 'code-module', 'data-file', 'slide-deck', 'html-game']) {
+      expect(contractSuitsReview(book(kind))).toBe(false);
+    }
+  });
+
+  it('reads only primary deliverables', () => {
+    expect(contractSuitsReview(book('markdown-report', { role: 'supporting' }))).toBe(false);
+  });
+
+  it('lets the book override the kind', () => {
+    expect(contractSuitsReview({ ...book('code-module'), reviewable: true })).toBe(true);
+    expect(contractSuitsReview({ ...book('markdown-report'), reviewable: false })).toBe(false);
   });
 });

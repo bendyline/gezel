@@ -1005,6 +1005,27 @@ describe('project artifacts', () => {
     ).toContain('Make the invoice');
   });
 
+  it('hides outcome-review copies from listings and fuzzy resolve but serves explicit reads', async () => {
+    await store.createProject({ name: 'ReviewList' });
+    const artifactsDir = store.projectArtifactsDir('reviewlist');
+    const before = join(artifactsDir, 'outcome-review', '3', 'round-1', 'before', 'artifacts');
+    await mkdir(before, { recursive: true });
+    await writeFile(join(before, 'brief.md'), '# Before the review');
+    await store.writeProjectArtifact('reviewlist', 'report.md', '# Report');
+
+    const rootListing = await store.listProjectArtifacts('reviewlist');
+    expect(rootListing.some((e) => e.name === 'outcome-review')).toBe(false);
+    const recursive = await store.listProjectArtifactsRecursive('reviewlist');
+    expect(recursive.some((e) => e.path.startsWith('outcome-review'))).toBe(false);
+    expect((await store.resolveProjectArtifact('reviewlist', 'brief.md')).kind).toBe('missing');
+    expect(
+      await store.readProjectArtifact(
+        'reviewlist',
+        'outcome-review/3/round-1/before/artifacts/brief.md',
+      ),
+    ).toContain('Before the review');
+  });
+
   it('strips redundant artifacts/ prefix on write so files do not nest', async () => {
     await store.createProject({ name: 'Prefix' });
     await store.writeProjectArtifact('prefix', 'artifacts/report.md', 'x');

@@ -24,6 +24,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     provider: resolveDefaultProviderName(config),
     generalistMode: config.generalistMode,
     taskStrategy: config.taskStrategy,
+    taskReview: config.taskReview,
     ollamaBaseUrl: config.ollamaBaseUrl,
     autoStartOllama: config.autoStartOllama ?? true,
     ollamaNumCtx: config.ollamaNumCtx,

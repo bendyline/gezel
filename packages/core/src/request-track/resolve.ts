@@ -1,4 +1,5 @@
 import { type ActivityTurn, isReadyQuestion } from '../activity.js';
+import type { CraftbookStepStage } from '../schemas/craftbook.js';
 import { type ChatMessage, isLocalProvider } from '../schemas/gezel.js';
 import { projectLeadGezelId } from '../schemas/project.js';
 import type { Question } from '../schemas/question.js';
@@ -16,7 +17,7 @@ import {
   latestPersonMessage,
   requestKey,
 } from './identity.js';
-import { craftbookStepStages, stepPersonLabel } from './stage.js';
+import { craftbookStepStages, stagePersonLabel, stepPersonLabel } from './stage.js';
 
 /** The parts of a thread a tracker reads. A `ChatSession` fits. */
 export interface RequestThread {
@@ -69,13 +70,32 @@ function furthest(a: RequestStop, b: RequestStop): RequestStop {
 }
 
 /** The furthest stop a task's steps have reached: done steps, and the one under way. */
+type TaskStep = Task['craftbook']['steps'][number];
+
+/**
+ * An outcome task's one step is checking the work once its review round has
+ * started: the review and the fixes it asks for run inside the step that
+ * made the work.
+ */
+function underReview(step: TaskStep): boolean {
+  return (step.outcomeReviewRounds ?? 0) > 0 && !step.completedAt;
+}
+
+/** A step's stage as the person should read it now. */
+function liveStepStage(
+  step: TaskStep,
+  stages: ReadonlyMap<string, CraftbookStepStage>,
+): CraftbookStepStage {
+  return underReview(step) ? 'check' : (stages.get(step.id) ?? 'make');
+}
+
 function taskStop(task: Task): RequestStop {
   if (taskEffectiveStatus(task) === 'complete') return 'ready';
   const stages = craftbookStepStages(task.craftbook.steps);
   let stop: RequestStop = 'got-it';
   for (const step of task.craftbook.steps) {
     if (step.completedAt || step.id === task.activeStepId) {
-      stop = furthest(stop, STAGE_STOP[stages.get(step.id) ?? 'make']);
+      stop = furthest(stop, STAGE_STOP[liveStepStage(step, stages)]);
     }
   }
   return stop;
@@ -233,7 +253,9 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
       pausedTask && pauseCard?.intent?.kind === 'task-paused' ? pauseCard.intent : undefined;
 
     const active = activeStepOf(current);
-    const stage = active ? craftbookStepStages(current.craftbook.steps).get(active.id) : undefined;
+    const stage = active
+      ? liveStepStage(active, craftbookStepStages(current.craftbook.steps))
+      : undefined;
     const promised = taskDeliverableCandidates(current)[0];
     const noun = promised ? deliverableFormatNoun(promised.path) : undefined;
     let doing: string | undefined;
@@ -251,9 +273,14 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
     else if (state === 'waiting') {
       const wait = waits[0];
       doing = wait ? WAIT_LINES[wait.reason] : 'is about to start';
-    } else if (active)
-      doing = `is ${stepPersonLabel(active, stage ?? 'make', noun ? { noun } : {})}`;
-    else doing = 'is working on it';
+    } else if (active) {
+      const label = noun ? { noun } : {};
+      doing = `is ${
+        underReview(active)
+          ? stagePersonLabel('check', label)
+          : stepPersonLabel(active, stage ?? 'make', label)
+      }`;
+    } else doing = 'is working on it';
 
     // Where it is running decides which medians fit: a live turn says.
     const runningOn = turns.find((turn) => turn.providerName)?.providerName;

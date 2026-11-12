@@ -6,7 +6,7 @@ import { type CraftbookContract, executionModeForStrategy } from '@bendyline/gez
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
-import { TaskManager, stepOwnerGezelId } from './manager.js';
+import { type OutcomeReviewer, TaskManager, stepOwnerGezelId } from './manager.js';
 
 let home: string;
 let store: Store;
@@ -2886,7 +2886,10 @@ describe('TaskManager — task strategy and the book contract', () => {
     };
 
     it('reviews once after the contract passes, holds for the fixes, then finishes', async () => {
-      const reviewer = vi.fn(async () => ({ kind: 'hold' as const, message: '1. fix it' }));
+      const reviewer = vi.fn<OutcomeReviewer>(async () => ({
+        kind: 'hold' as const,
+        message: '1. fix it',
+      }));
       tasks.setOutcomeReviewer(reviewer);
       const task = await reviewTask('fresh');
       await store.writeProjectWorkspaceFile('website', 'out/summary.md', 'x'.repeat(300));

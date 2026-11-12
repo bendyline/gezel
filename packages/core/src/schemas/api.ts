@@ -3020,6 +3020,14 @@ const GezelConfigObject = z.object({
    */
   taskStrategy: z.enum(['auto', 'stepwise', 'generalist', 'outcome']).optional(),
   /**
+   * Settings → Artificial intelligence → "Check work before handing it in".
+   * `auto` (the default, including when unset) reviews an outcome task's
+   * work once its contract checks pass, where the book's work suits a review
+   * and the model running it was measured to gain from one; `off` never
+   * does. See `resolveOutcomeReview` (core tasks/outcome-review.ts).
+   */
+  taskReview: z.enum(['auto', 'off']).optional(),
+  /**
    * @deprecated Pre-v2 name for `generalistMode` (`flat` ≙ `on`, `scaffold`
    * ≙ `off`). Still declared so `Store.ensureLayout` can read and migrate a
    * config written by an older daemon — this schema is non-strict and would

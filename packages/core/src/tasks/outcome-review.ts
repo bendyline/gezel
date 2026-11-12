@@ -8,8 +8,34 @@
  * conversation, or a new session of the same model with no transcript), not
  * what they were told to look for.
  */
-import type { CraftbookContract } from '../schemas/craftbook-contract.js';
+import { type CraftbookContract, contractSuitsReview } from '../schemas/craftbook-contract.js';
+import type { OutcomeReviewMode, TaskReviewSetting, TaskStrategy } from '../task-strategy.js';
 import { renderTaskContractBlock } from './prompt-context.js';
+
+/**
+ * The review a task gets when its request names none. All of these must hold:
+ * the person has not turned reviews off (`config.taskReview`), the task runs
+ * as an outcome (the only strategy measured; stepwise and generalist books
+ * carry their own review steps), the book's work suits a review
+ * ({@link contractSuitsReview}), and the model that will run the task was
+ * measured to gain from one (`tuning.taskStrategy.review`). Decided once at
+ * create and stamped on the task.
+ *
+ * Only `self` is honored from a measurement. A fresh reviewer is told not to
+ * edit and still has the workspace write tools: in the counted test it
+ * edited the project in all six bug-fix trials, twice undoing a correct fix.
+ * It stays available to a request (evals) until its tool surface is read-only.
+ */
+export function resolveOutcomeReview(args: {
+  setting?: TaskReviewSetting | undefined;
+  strategy: TaskStrategy;
+  contract: Pick<CraftbookContract, 'deliverables' | 'reviewable'> | undefined;
+  measured: OutcomeReviewMode | undefined;
+}): OutcomeReviewMode | undefined {
+  if (args.setting === 'off' || args.strategy !== 'outcome') return undefined;
+  if (args.measured !== 'self') return undefined;
+  return contractSuitsReview(args.contract) ? 'self' : undefined;
+}
 
 /** Review rounds per task: the review runs once, the fixes are re-checked by the contract. */
 export const OUTCOME_REVIEW_MAX_ROUNDS = 1;

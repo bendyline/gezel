@@ -382,8 +382,8 @@ export interface GateHoldInfo {
 }
 
 /**
- * Runs an outcome task's review once its contract checks pass (eval only,
- * `strategyOptions.review`). `hold` keeps the step open with a message for
+ * Runs an outcome task's review once its contract checks pass
+ * (`strategyOptions.review`, decided at create by `resolveOutcomeReview`). `hold` keeps the step open with a message for
  * the owner; `pass` lets it finish. Wired by product-service, which owns the
  * chat handle a fresh reviewer needs.
  */

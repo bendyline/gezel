@@ -72,6 +72,7 @@ import {
   UpdateStatus,
   formatStartedAt,
 } from './SettingsSystemStatus.js';
+import { TaskReviewSection } from './TaskReviewSection.js';
 import { CLAUDE_PERMISSION_CHOICES, CODEX_PERMISSION_CHOICES } from './cli-permission-choices.js';
 import { detectDs4Availability } from './ds4-availability.js';
 import { localEngineSettingsLabel } from './local-engine-label.js';
@@ -2885,6 +2886,15 @@ function DaemonSettingsView() {
                 onSaved={(res) => {
                   setConfig(res);
 
+                  window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
+                }}
+              />
+
+              <TaskReviewSection
+                value={config?.taskReview}
+                setStatus={setStatus}
+                onSaved={(res) => {
+                  setConfig(res);
                   window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: res }));
                 }}
               />

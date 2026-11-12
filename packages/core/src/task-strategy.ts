@@ -62,15 +62,19 @@ export interface TaskStrategyOptions {
    */
   contract?: TaskContractMode;
   /**
-   * Eval only, to measure what a review adds once the contract checks pass:
-   * `self` hands the owner a focused review prompt in its own conversation;
-   * `fresh` has a new session of the same model review the deliverables and
-   * sends its findings back to the owner. See core tasks/outcome-review.ts.
+   * The review once the contract checks pass: `self` hands the owner a
+   * focused review prompt in its own conversation; `fresh` has a new session
+   * of the same model review the deliverables and sends its findings back to
+   * the owner. Decided at create by `resolveOutcomeReview`; a request may
+   * name one (evals). See core tasks/outcome-review.ts.
    */
   review?: OutcomeReviewMode;
 }
 
 export type OutcomeReviewMode = 'self' | 'fresh';
+
+/** `config.taskReview`: follow the book and the model (`auto`), or never review. */
+export type TaskReviewSetting = 'auto' | 'off';
 
 export type TaskContractMode = 'enforced' | 'shown' | 'hidden';
 
@@ -88,6 +92,8 @@ export function taskContractMode(task: {
 export interface ModelStrategyAffinity {
   strategy: TaskStrategy;
   procedure?: 'advisory' | 'none' | undefined;
+  /** The review this model's outcome work was measured to gain from. */
+  review?: OutcomeReviewMode | undefined;
 }
 
 /**

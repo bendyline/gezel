@@ -393,6 +393,12 @@ export const ModelTaskStrategySchema = z
       .describe(
         'Outcome only: show the recipe as advice (`advisory`, the default) or leave it out (`none`).',
       ),
+    review: z
+      .enum(['self', 'fresh'])
+      .optional()
+      .describe(
+        'Outcome only: the review this model was measured to improve its work with once the contract checks pass. `self` asks the owner to review its own work; `fresh` has a new session of the same model review it. Absent: no review.',
+      ),
     basis: z
       .string()
       .max(400)

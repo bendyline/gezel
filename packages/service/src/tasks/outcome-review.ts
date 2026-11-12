@@ -1,9 +1,10 @@
 /**
- * The outcome review (eval only): once an outcome task's contract checks
- * pass, either the owner is asked to review its own deliverables (`self`) or
- * a new session of the same model reviews them with no transcript (`fresh`)
- * and its findings go back to the owner. The question it measures is whether
- * fresh eyes on the same weights improve the work a local model hands in.
+ * The outcome review: once an outcome task's contract checks pass, either
+ * the owner is asked to review its own deliverables (`self`) or a new
+ * session of the same model reviews them with no transcript (`fresh`) and
+ * its findings go back to the owner. Whether a task gets one is decided at
+ * create (`resolveOutcomeReview`, core tasks/outcome-review.ts); the counted
+ * test behind it is evals/runs/review-counted-2026-11-11/PREREG.md.
  *
  * Every round leaves a record under `artifacts/outcome-review/<num>/round-<n>/`:
  * the deliverables as they stood before the review (`before/`), what the
@@ -23,6 +24,7 @@ import {
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { PROJECT_OUTCOME_REVIEW_DIR_NAME } from '@bendyline/gezel/paths';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import { ensureGezel } from '../gezels/ensure.js';
@@ -53,7 +55,7 @@ export function createOutcomeReviewer(deps: Deps): OutcomeReviewer {
   return async ({ projectId, task, step, round, mode }) => {
     const contract = task.craftbook.contract;
     if (!contract) return { kind: 'pass' };
-    const recordDir = `outcome-review/${task.num}/round-${round}`;
+    const recordDir = `${PROJECT_OUTCOME_REVIEW_DIR_NAME}/${task.num}/round-${round}`;
     const files = await deliverableFiles(deps.store, projectId, task);
     await snapshot(deps.store, projectId, `${recordDir}/before`, files);
 

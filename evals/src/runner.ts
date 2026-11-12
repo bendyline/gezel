@@ -1248,6 +1248,10 @@ export async function runTrial(
       ...(imageModelId ? { imageProvider: 'sd-cpp' as const } : {}),
       ...(opts.generalistMode ? { generalistMode: opts.generalistMode } : {}),
       ...(opts.taskStrategy ? { taskStrategy: opts.taskStrategy.strategy } : {}),
+      // Every scorecard and strategy round was measured without the product's
+      // review after the checks pass. An arm that names one
+      // (`strategyOptions.review`) still gets it: a request outranks this.
+      taskReview: 'off' as const,
       // A retrieval arm's policy outranks the `autoRecall: false` above:
       // config.retrieval is read before the legacy switch.
       ...(opts.retrieval
