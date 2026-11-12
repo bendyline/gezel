@@ -32,10 +32,12 @@ import {
 import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { isBackDismiss } from '../back-dismiss.js';
+import { useConfig } from '../data/use-api-read.js';
 import { SubmitArrow } from '../primitives/index.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
 import { useEffectiveTheme } from '../theme.js';
+import { setVisibleInterval } from '../visible-interval.js';
 import { AreaIcon } from './AreaIcon.js';
 import { AutosaveStatus } from './AutosaveStatus.js';
 import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
@@ -336,6 +338,8 @@ export interface ChatComposerProps {
  * lands; the draft itself is already on disk.
  */
 const SEND_WHEN_READY_KEY = 'gezel:home:send-when-ready';
+/** How long typing pauses before the route preview reads the draft. */
+const TYPING_SETTLE_MS = 120;
 
 function readSendWhenReady(): boolean {
   try {
@@ -589,10 +593,35 @@ export function ChatComposer({
   // draftNonEmpty it retains the text, but remains local-only and is never an
   // alternate persistence path.
   const [intentPreviewText, setIntentPreviewText] = useState(draftRef.current);
+  // Typing settles the preview text after a pause instead of on every key: a
+  // state change per keystroke re-rendered the whole composer. Sending checks
+  // the plan against the live draft (see the send path), so the lag never
+  // decides a launch.
+  const previewTextTimer = useRef<number | null>(null);
+  const setPreviewTextNow = useCallback((text: string) => {
+    if (previewTextTimer.current !== null) window.clearTimeout(previewTextTimer.current);
+    previewTextTimer.current = null;
+    setIntentPreviewText(text);
+  }, []);
+  const setPreviewTextSoon = useCallback((text: string) => {
+    if (previewTextTimer.current !== null) window.clearTimeout(previewTextTimer.current);
+    previewTextTimer.current = window.setTimeout(() => {
+      previewTextTimer.current = null;
+      setIntentPreviewText(text);
+    }, TYPING_SETTLE_MS);
+  }, []);
+  useEffect(
+    () => () => {
+      if (previewTextTimer.current !== null) window.clearTimeout(previewTextTimer.current);
+    },
+    [],
+  );
   const [intentPreview, setIntentPreview] = useState<{
     message: string;
     plan: TurnIntentPlan;
   } | null>(null);
+  const intentPreviewRef = useRef(intentPreview);
+  intentPreviewRef.current = intentPreview;
   const turnIntentPlan =
     intentPreview?.message === intentPreviewText.trim() ? intentPreview.plan : null;
   // A non-null value means the entire single-line draft is a local `/open`
@@ -663,11 +692,11 @@ export function ChatComposer({
     draftEditVersionRef.current += 1;
     prevDraftLenRef.current = merged.length;
     setDraftNonEmpty(merged.trim().length > 0);
-    setIntentPreviewText(merged);
+    setPreviewTextNow(merged);
     setOpenCommandQuery(parseOpenChatQuery(merged));
     setEditorRevision((revision) => revision + 1);
     if (queued.focus) setCaretAtEndRequest((request) => request + 1);
-  }, [projectId, cancelQueuedForReady]);
+  }, [projectId, cancelQueuedForReady, setPreviewTextNow]);
   useEffect(() => {
     consumePrefill();
     const onPrefill = (e: Event) => {
@@ -701,7 +730,7 @@ export function ChatComposer({
       // previous draft must not clear the text that just arrived.
       draftEditVersionRef.current += 1;
       setDraftNonEmpty(markdown.trim().length > 0);
-      setIntentPreviewText(markdown);
+      setPreviewTextNow(markdown);
       setOpenCommandQuery(parseOpenChatQuery(markdown));
       setMentioned(extractMentionTokens(markdown));
       setEditorRevision((revision) => revision + 1);
@@ -795,36 +824,11 @@ export function ChatComposer({
       return gezel ? [gezel] : [];
     });
   }, [additionalRecipientIds, recipientGezels]);
-  const [engagementMode, setEngagementMode] = useState<
-    'proactive' | 'scheduled' | 'reactive' | 'off'
-  >('proactive');
+  const engagementMode =
+    useConfig((config) => config.aiEngagementMode ?? 'proactive') ?? 'proactive';
   // A task queued for tonight never runs while the Night Shift is off, so
   // Tonight is offered only once the config says the shift is on.
-  const [nightShiftOn, setNightShiftOn] = useState(false);
-  useEffect(() => {
-    api
-      .getConfig()
-      .then((cfg) => {
-        setEngagementMode(cfg.aiEngagementMode ?? 'proactive');
-        setNightShiftOn(cfg.nightShift?.enabled !== false);
-      })
-      .catch(() => {});
-    const onConfigUpdated = (e: Event) => {
-      const detail = (e as CustomEvent).detail as
-        | { aiEngagementMode?: string; nightShift?: { enabled?: boolean } }
-        | undefined;
-      if (detail?.aiEngagementMode) {
-        setEngagementMode(
-          detail.aiEngagementMode as 'proactive' | 'scheduled' | 'reactive' | 'off',
-        );
-      }
-      if (detail?.nightShift && typeof detail.nightShift.enabled === 'boolean') {
-        setNightShiftOn(detail.nightShift.enabled);
-      }
-    };
-    window.addEventListener('gezel:config-updated', onConfigUpdated);
-    return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
-  }, []);
+  const nightShiftOn = useConfig((config) => config.nightShift?.enabled !== false) ?? false;
   const engagementOff = engagementMode === 'off';
   // The draft can still be written; it just can't go anywhere yet.
   const waitingForModel = useWaitingForModel(gezelId, recipientGezels);
@@ -910,7 +914,7 @@ export function ChatComposer({
         // A failed preview leaves ordinary chat available; the daemon will
         // compute the route for the text that actually gets sent.
         .catch(() => {});
-    }, 350);
+    }, 350 - TYPING_SETTLE_MS);
     return () => window.clearTimeout(timer);
   }, [gezelId, intentPreviewText, liveSessionId, projectId, taskLaunchEnabled]);
 
@@ -929,32 +933,57 @@ export function ChatComposer({
     return created.id;
   }, [gezelId, projectId, taskRef, stepId, craftbookRef, subject, onSessionCreated]);
 
-  const ensureSessionId = useCallback(async (): Promise<string> => {
-    if (liveSessionIdRef.current) return liveSessionIdRef.current;
-    // A draft the user opened as "new thread" means it: skip the reuse probe
-    // below, which exists for the opposite case (typing before the picker's
-    // auto-pick landed) and would otherwise silently drop the message into
-    // whatever thread happened to be newest.
-    // The draft only learns it is a fresh thread once the server has filed
-    // it, so the parent's explicit choice has to count on its own: a short
-    // message sent right after New thread on a phone went into the newest
-    // old thread, pinned to the model that thread started with (2026-09-30).
-    if (draftFreshThreadRef.current || freshThreadRef.current) return createFreshSession();
-    // Look for an existing unarchived session before creating a fresh
-    // one. The user-facing bug this protects: if the user navigates
-    // (Home → back to Chat) and types fast enough that the
-    // SessionSwitcher's auto-pick effect hasn't populated `sessionId`
-    // yet, this path used to unconditionally create a NEW session —
-    // splitting one user-perceived conversation across two records.
-    //
-    // When task-scoped, scope the reuse probe to this task's sessions
-    // so we don't grab an unrelated (gezel, project) session.
-    try {
-      if (taskRef) {
-        const parsed = parseTaskRef(taskRef);
-        if (parsed) {
-          const res = await api.listTaskSessions(parsed.projectId, parsed.num);
-          const existing = res.sessions.find((s) => !s.archived && s.gezelId === gezelId);
+  const ensureSessionId = useCallback(
+    async (startedFresh: boolean): Promise<string> => {
+      if (liveSessionIdRef.current) return liveSessionIdRef.current;
+      // A draft the user opened as "new thread" means it: skip the reuse probe
+      // below, which exists for the opposite case (typing before the picker's
+      // auto-pick landed) and would otherwise silently drop the message into
+      // whatever thread happened to be newest.
+      // The draft only learns it is a fresh thread once the server has filed
+      // it, so the parent's explicit choice has to count on its own: a short
+      // message sent right after New thread on a phone went into the newest
+      // old thread, pinned to the model that thread started with (2026-09-30).
+      if (startedFresh) return createFreshSession();
+      // Look for an existing unarchived session before creating a fresh
+      // one. The user-facing bug this protects: if the user navigates
+      // (Home → back to Chat) and types fast enough that the
+      // SessionSwitcher's auto-pick effect hasn't populated `sessionId`
+      // yet, this path used to unconditionally create a NEW session —
+      // splitting one user-perceived conversation across two records.
+      //
+      // When task-scoped, scope the reuse probe to this task's sessions
+      // so we don't grab an unrelated (gezel, project) session.
+      try {
+        if (taskRef) {
+          const parsed = parseTaskRef(taskRef);
+          if (parsed) {
+            const res = await api.listTaskSessions(parsed.projectId, parsed.num);
+            const existing = res.sessions.find((s) => !s.archived && s.gezelId === gezelId);
+            if (existing) {
+              liveSessionIdRef.current = existing.id;
+              setLiveSessionId(existing.id);
+              onSessionCreated?.(existing.id);
+              return existing.id;
+            }
+          }
+        } else {
+          // A document's composer reuses only a thread about that document,
+          // and a craftbook's only a thread about that craftbook.
+          const res = await api.listChatSessions({
+            gezelId,
+            projectId,
+            ...(subjectKeys?.length ? { subjectKeys } : {}),
+            ...(craftbookRef ? { craftbookRef } : {}),
+          });
+          // Ordinary chat must never reuse a task/craftbook handoff session.
+          // The SessionSwitcher applies the same boundary, but this fallback
+          // also has to enforce it for the fast-type race before auto-pick.
+          const existing = res.sessions.find(
+            (s) =>
+              !s.archived &&
+              (craftbookRef ? s.craftbookRef === craftbookRef : !isTaskOrCraftbookSession(s)),
+          );
           if (existing) {
             liveSessionIdRef.current = existing.id;
             setLiveSessionId(existing.id);
@@ -962,43 +991,13 @@ export function ChatComposer({
             return existing.id;
           }
         }
-      } else {
-        // A document's composer reuses only a thread about that document,
-        // and a craftbook's only a thread about that craftbook.
-        const res = await api.listChatSessions({
-          gezelId,
-          projectId,
-          ...(subjectKeys?.length ? { subjectKeys } : {}),
-          ...(craftbookRef ? { craftbookRef } : {}),
-        });
-        // Ordinary chat must never reuse a task/craftbook handoff session.
-        // The SessionSwitcher applies the same boundary, but this fallback
-        // also has to enforce it for the fast-type race before auto-pick.
-        const existing = res.sessions.find(
-          (s) =>
-            !s.archived &&
-            (craftbookRef ? s.craftbookRef === craftbookRef : !isTaskOrCraftbookSession(s)),
-        );
-        if (existing) {
-          liveSessionIdRef.current = existing.id;
-          setLiveSessionId(existing.id);
-          onSessionCreated?.(existing.id);
-          return existing.id;
-        }
+      } catch {
+        /* fall through to create */
       }
-    } catch {
-      /* fall through to create */
-    }
-    return createFreshSession();
-  }, [
-    gezelId,
-    projectId,
-    taskRef,
-    subjectKeys,
-    craftbookRef,
-    createFreshSession,
-    onSessionCreated,
-  ]);
+      return createFreshSession();
+    },
+    [gezelId, projectId, taskRef, subjectKeys, craftbookRef, createFreshSession, onSessionCreated],
+  );
 
   // Media belongs to the draft, in the `message_files/` companion beside its
   // `message.md` — the same shape every other squisq document here uses. A
@@ -1094,10 +1093,11 @@ export function ChatComposer({
       }
     };
     void sync();
-    const timer = window.setInterval(() => void sync(), 2_000);
+    // Paused while the window is hidden; it reconciles at once when shown.
+    const stop = setVisibleInterval(() => void sync(), 2_000);
     return () => {
       disposed = true;
-      window.clearInterval(timer);
+      stop();
     };
   }, [liveSessionId, syncInflight]);
 
@@ -1163,6 +1163,7 @@ export function ChatComposer({
       const prevLen = prevDraftLenRef.current;
       prevDraftLenRef.current = source.length;
       const sourceChanged = draftRef.current !== source;
+      const wasEmpty = !draftRef.current.trim();
       draftRef.current = source;
       draftUpdateRef.current(source);
       if (sourceChanged) draftEditVersionRef.current += 1;
@@ -1170,7 +1171,14 @@ export function ChatComposer({
       // A queued request can be edited; one the person erased is withdrawn.
       if (sourceChanged && !source.trim()) cancelQueuedForReady();
       setDraftNonEmpty(source.trim().length > 0);
-      setIntentPreviewText(source);
+      // Starting or emptying the draft shows at once, and so does the first
+      // edit under a shown suggestion (it belongs to the text it was computed
+      // for, so it goes now). Other edits settle.
+      const shown = intentPreviewRef.current;
+      const suggestionOutdated = shown !== null && shown.message !== source.trim();
+      if (suggestionOutdated) setIntentPreview(null);
+      if (wasEmpty !== !source.trim() || suggestionOutdated) setPreviewTextNow(source);
+      else setPreviewTextSoon(source);
       setOpenCommandQuery(parseOpenChatQuery(source));
       // Terminal escape: user typed `> ` (markdown blockquote / shell
       // sigil) as the very start of a fresh draft. Hand the rest off
@@ -1192,7 +1200,7 @@ export function ChatComposer({
       const next = extractMentionTokens(source);
       setMentioned((prev) => (sameMentionTokens(prev, next) ? prev : next));
     },
-    [onTerminalEscape, cancelQueuedForReady],
+    [onTerminalEscape, cancelQueuedForReady, setPreviewTextNow, setPreviewTextSoon],
   );
 
   // The task dialog's brief is this draft under another name. Its edits land
@@ -1201,33 +1209,39 @@ export function ChatComposer({
   // editor behind the modal is reseeded once, when the dialog closes, rather
   // than remounted on every keystroke.
   const briefEditedRef = useRef(false);
-  const applyBriefEdit = useCallback((text: string) => {
-    if (draftRef.current === text) return;
-    draftRef.current = text;
-    draftUpdateRef.current(text);
-    draftEditVersionRef.current += 1;
-    prevDraftLenRef.current = text.length;
-    setDraftNonEmpty(text.trim().length > 0);
-    setIntentPreviewText(text);
-    setOpenCommandQuery(parseOpenChatQuery(text));
-    const next = extractMentionTokens(text);
-    setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
-    briefEditedRef.current = true;
-  }, []);
+  const applyBriefEdit = useCallback(
+    (text: string) => {
+      if (draftRef.current === text) return;
+      draftRef.current = text;
+      draftUpdateRef.current(text);
+      draftEditVersionRef.current += 1;
+      prevDraftLenRef.current = text.length;
+      setDraftNonEmpty(text.trim().length > 0);
+      setPreviewTextNow(text);
+      setOpenCommandQuery(parseOpenChatQuery(text));
+      const next = extractMentionTokens(text);
+      setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
+      briefEditedRef.current = true;
+    },
+    [setPreviewTextNow],
+  );
   // A rewrite from the sparkle menu, or its undo: the text the person will
   // send, as if typed, with the editor reseeded to show it.
-  const replaceDraftText = useCallback((text: string) => {
-    draftRef.current = text;
-    draftUpdateRef.current(text);
-    draftEditVersionRef.current += 1;
-    prevDraftLenRef.current = text.length;
-    setDraftNonEmpty(text.trim().length > 0);
-    setIntentPreviewText(text);
-    setOpenCommandQuery(parseOpenChatQuery(text));
-    const next = extractMentionTokens(text);
-    setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
-    setEditorRevision((revision) => revision + 1);
-  }, []);
+  const replaceDraftText = useCallback(
+    (text: string) => {
+      draftRef.current = text;
+      draftUpdateRef.current(text);
+      draftEditVersionRef.current += 1;
+      prevDraftLenRef.current = text.length;
+      setDraftNonEmpty(text.trim().length > 0);
+      setPreviewTextNow(text);
+      setOpenCommandQuery(parseOpenChatQuery(text));
+      const next = extractMentionTokens(text);
+      setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
+      setEditorRevision((revision) => revision + 1);
+    },
+    [setPreviewTextNow],
+  );
   const promptAssist = useComposerPromptAssist({
     projectId,
     gezelId,
@@ -1250,22 +1264,25 @@ export function ChatComposer({
   // happened while the microphone was live. Return the merged source so the
   // toolbar bridge can update Squisq without remounting the editor (and the
   // still-recording microphone button along with it).
-  const appendNarratedText = useCallback((text: string): string | null => {
-    const spoken = text.trim();
-    if (!spoken) return null;
-    const current = draftRef.current;
-    const merged = `${current}${current && !/\s$/.test(current) ? ' ' : ''}${spoken}`;
-    draftRef.current = merged;
-    draftUpdateRef.current(merged);
-    draftEditVersionRef.current += 1;
-    prevDraftLenRef.current = merged.length;
-    setDraftNonEmpty(true);
-    setIntentPreviewText(merged);
-    setOpenCommandQuery(parseOpenChatQuery(merged));
-    const next = extractMentionTokens(merged);
-    setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
-    return merged;
-  }, []);
+  const appendNarratedText = useCallback(
+    (text: string): string | null => {
+      const spoken = text.trim();
+      if (!spoken) return null;
+      const current = draftRef.current;
+      const merged = `${current}${current && !/\s$/.test(current) ? ' ' : ''}${spoken}`;
+      draftRef.current = merged;
+      draftUpdateRef.current(merged);
+      draftEditVersionRef.current += 1;
+      prevDraftLenRef.current = merged.length;
+      setDraftNonEmpty(true);
+      setPreviewTextNow(merged);
+      setOpenCommandQuery(parseOpenChatQuery(merged));
+      const next = extractMentionTokens(merged);
+      setMentioned((previous) => (sameMentionTokens(previous, next) ? previous : next));
+      return merged;
+    },
+    [setPreviewTextNow],
+  );
 
   const beginDraftSubmission = useCallback(
     (opts: { allowEmpty?: boolean } = {}): ComposerDraftSnapshot | null => {
@@ -1292,26 +1309,29 @@ export function ChatComposer({
    * attachment nodes, selection, and undo history without a lossy rebuild.
    * If the user edits while the request is pending, that newer draft wins.
    */
-  const clearAcceptedDraft = useCallback((snapshot: ComposerDraftSnapshot) => {
-    if (
-      draftEditVersionRef.current !== snapshot.editVersion ||
-      draftRef.current !== snapshot.source
-    ) {
-      return;
-    }
-    draftRef.current = '';
-    prevDraftLenRef.current = 0;
-    setDraftNonEmpty(false);
-    setIntentPreviewText('');
-    // Cleared in the same batch as the text, not by the debounced preview
-    // effect a render later: an attached task was just cleared too, and a
-    // render that still held the old plan would re-attach it — and create a
-    // ghost draft for the message that just went out.
-    setIntentPreview(null);
-    setOpenCommandQuery(null);
-    setEditorRevision((revision) => revision + 1);
-    setMentioned([]);
-  }, []);
+  const clearAcceptedDraft = useCallback(
+    (snapshot: ComposerDraftSnapshot) => {
+      if (
+        draftEditVersionRef.current !== snapshot.editVersion ||
+        draftRef.current !== snapshot.source
+      ) {
+        return;
+      }
+      draftRef.current = '';
+      prevDraftLenRef.current = 0;
+      setDraftNonEmpty(false);
+      setPreviewTextNow('');
+      // Cleared in the same batch as the text, not by the debounced preview
+      // effect a render later: an attached task was just cleared too, and a
+      // render that still held the old plan would re-attach it — and create a
+      // ghost draft for the message that just went out.
+      setIntentPreview(null);
+      setOpenCommandQuery(null);
+      setEditorRevision((revision) => revision + 1);
+      setMentioned([]);
+    },
+    [setPreviewTextNow],
+  );
 
   const openSuggestions = useMemo(
     () =>
@@ -1432,6 +1452,11 @@ export function ChatComposer({
     const userText = draftSnapshot.source.trim();
     setError(null);
     setQueuedAhead(null);
+    // Whether the person asked for a new thread, read before this send files
+    // its draft. A draft filed with no session yet also reads as a fresh
+    // thread, so reading it after `ensureDraft` sent a message meant for the
+    // open conversation into a new one whenever a render landed in between.
+    const startedFresh = draftFreshThreadRef.current || freshThreadRef.current;
 
     // Settle the draft before it becomes a message: the service reads its
     // files to resolve the refs, and it stamps the sent record from what is
@@ -1448,7 +1473,7 @@ export function ChatComposer({
 
     let activeSessionId: string;
     try {
-      activeSessionId = await ensureSessionId();
+      activeSessionId = await ensureSessionId(startedFresh);
     } catch (err) {
       setError(humanizeTransportError(apiErrorMessage(err)));
       finishDraftSubmission();

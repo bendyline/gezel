@@ -49,7 +49,7 @@ Sign in with your GitHub account from Settings; your Copilot plan's quota applie
 
 ## Local engines
 
-Gezel bundles and manages native engines that run models directly on your machine — llama.cpp and friends, with Ollama supported too if you already use it. Local means private and free per use; the trade is that model quality depends on what your hardware can lift. The [Models and tiers](../conceptual/local-models-and-tiers.md) article explains how gezel matches local models to roles, and the built-in fitness check ("de proeve") verifies a model actually behaves before any work relies on it.
+Gezel bundles and manages native engines that run models directly on your machine — llama.cpp and friends, with Ollama supported too if you already use it. Local means private and free per use; the trade is that model quality depends on what your hardware can lift. The [Models and tiers](../conceptual/local-models-and-tiers.md) article explains how gezel matches local models to roles, and a built-in fitness check verifies that a model actually behaves before any work relies on it.
 
 ## Mixing
 

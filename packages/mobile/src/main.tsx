@@ -1,4 +1,3 @@
-import content from 'virtual:gezel-portable-content';
 import { PortableProductService, PortableStore } from '@bendyline/gezel/runtime';
 import { Capacitor, SystemBarType, SystemBars, SystemBarsStyle } from '@capacitor/core';
 import { version } from '../../core/package.json';
@@ -14,6 +13,11 @@ import { createMobileScripts } from './scripts.js';
 // paint rather than arriving a moment later over the desktop layout.
 import '../../ui/src/components/ResponsiveAppShell.mobile.css';
 import './product-host.css';
+
+// The bundled catalog is the largest part of the entry. Loaded beside the
+// host and store setup instead of inside the entry, it no longer holds up the
+// first script from parsing.
+const contentLoad = import('virtual:gezel-portable-content').then((module) => module.default);
 
 async function boot() {
   const host = isNativeHost() ? createNativeHost() : createBrowserHost();
@@ -36,6 +40,7 @@ async function boot() {
       : {}),
   });
   service.setScripts(createMobileScripts(store));
+  const content = await contentLoad;
   service.setContent(content);
   service.setNetworkCancellation(async () => {
     await host.cancelModelSourceResolution();

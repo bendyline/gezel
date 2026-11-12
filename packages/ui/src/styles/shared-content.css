@@ -396,7 +396,7 @@
 /* Details stays tinted while the steps show, like the composer's expand key:
    a full latched fill would be the loudest thing in this quiet column. */
 .msg-action-button[aria-expanded="true"] {
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  background: color-mix(in srgb, var(--wash-tint) 14%, var(--surface));
   border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   color: var(--accent-text);
 }
@@ -731,8 +731,8 @@
 }
 
 .msg-user .msg-body {
-  background: rgba(176, 114, 76, 0.18);
-  border-color: rgba(176, 114, 76, 0.35);
+  background: color-mix(in srgb, var(--wash-tint) 18%, transparent);
+  border-color: color-mix(in srgb, var(--wash-tint) 35%, transparent);
 }
 
 /* User bubbles hold a squisq LinearDocView so prompts get the same complete
@@ -782,8 +782,9 @@
 }
 
 .msg-from-gezel .msg-body {
-  background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
-  border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
+  background: var(--chat-handoff-bg, color-mix(in srgb, var(--wash-tint) 8%, transparent));
+  border: 1px dashed
+    var(--chat-handoff-border, color-mix(in srgb, var(--wash-tint) 45%, transparent));
 }
 
 /* A narrow conversation (a page's companion chat, the Office pane, about
@@ -936,7 +937,7 @@
 }
 
 .msg-retrieval-source-summary:hover {
-  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 7%, transparent);
 }
 
 .msg-retrieval-source-label {
@@ -1105,7 +1106,7 @@
   font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 0.92em;
   color: var(--accent-text);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
   border-radius: var(--radius-sm);
   padding: 0 4px;
   text-decoration: none;
@@ -1141,7 +1142,7 @@
   padding: 0.75rem 0.85rem;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
   border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+  background: color-mix(in srgb, var(--wash-tint) 6%, var(--panel));
   font-family: var(--font-ui);
 }
 
@@ -1327,7 +1328,7 @@
   padding: 0.15rem 0.55rem;
   border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  background: color-mix(in srgb, var(--wash-tint) 6%, var(--surface));
   color: var(--text);
   font-family: var(--font-ui);
   font-size: var(--text-xs);
@@ -1464,7 +1465,7 @@
 :is(.home-workshop-conversation, .gezel-chat-tab, .task-detail-chat:not(.document-chat-body))
   .chat-composer {
   --compose-frame-bg: var(--chat-compose-header-bg);
-  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
+  --compose-frame-border: color-mix(in srgb, var(--wash-tint) 62%, var(--border));
   --compose-toolbar-bg: var(--chat-compose-header-bg);
   margin: 0 0.75rem 0.25rem;
   border: 1px solid var(--compose-frame-border);
@@ -1549,7 +1550,7 @@
   margin: 0 0 0.25rem;
   padding: 0.3rem 0.4rem 0.3rem 0.5rem;
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 7%, var(--surface-1));
+  background: color-mix(in srgb, var(--wash-tint) 7%, var(--surface-1));
   border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
   border-radius: var(--radius-md);
 }
@@ -1576,7 +1577,7 @@
 }
 
 .chat-composer-task-bar-main:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
 }
 
 .chat-composer-task-bar-art {
@@ -1641,7 +1642,7 @@
   margin: 0 0 0.25rem;
   padding: 0.3rem 0.4rem 0.3rem 0.5rem;
   color: var(--text);
-  background: color-mix(in srgb, var(--accent) 5%, var(--surface-1));
+  background: color-mix(in srgb, var(--wash-tint) 5%, var(--surface-1));
   border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
   border-radius: var(--radius-md);
 }
@@ -1740,7 +1741,7 @@
 .chat-composer-recipient-trigger[data-state="open"],
 .chat-composer-expand-btn:hover,
 .chat-composer-expand-btn[aria-pressed="true"] {
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 14%, transparent);
 }
 
 .chat-composer-recipient-trigger {
@@ -1773,9 +1774,9 @@
   font-weight: 500;
   padding: 0.1rem 0.5rem;
   border-radius: var(--radius-sm);
-  background: rgba(176, 114, 76, 0.14);
+  background: color-mix(in srgb, var(--wash-tint) 14%, transparent);
   color: #b0724c;
-  border: 1px solid rgba(176, 114, 76, 0.35);
+  border: 1px solid color-mix(in srgb, var(--wash-tint) 35%, transparent);
 }
 
 .gz-popover.chat-recipient-popover {
@@ -1833,7 +1834,7 @@
 
 .chat-recipient-select:hover,
 .chat-recipient-option-primary .chat-recipient-select {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 12%, transparent);
   border-color: var(--accent);
 }
 
@@ -1913,7 +1914,7 @@
      more content when the project-scoped roster overflows the cap. */
   overflow-y: scroll !important;
   background: #f9f1e3;
-  border-color: rgba(176, 114, 76, 0.32);
+  border-color: color-mix(in srgb, var(--wash-tint) 32%, transparent);
   color: #2b2420;
   box-shadow: 0 8px 24px rgba(110, 64, 36, 0.18);
 }
@@ -1927,7 +1928,7 @@
 }
 [data-theme="dark"] .squisq-mention-popover {
   background: var(--gezel-paper-inset);
-  border-color: rgba(224, 184, 151, 0.28);
+  border-color: color-mix(in srgb, var(--wash-tint) 40%, transparent);
   color: #f3ede0;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
 }
@@ -1942,7 +1943,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .squisq-mention-popover {
     background: var(--gezel-paper-inset);
-    border-color: rgba(224, 184, 151, 0.28);
+    border-color: color-mix(in srgb, var(--wash-tint) 40%, transparent);
     color: #f3ede0;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
   }
@@ -2032,7 +2033,7 @@
 .chat-open-command-menu {
   margin: 0.25rem 1px 0.35rem;
   padding: 0.35rem;
-  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 12%);
+  background: color-mix(in srgb, var(--surface) 88%, var(--wash-tint) 12%);
   border: 1px solid color-mix(in srgb, var(--border) 76%, var(--accent) 24%);
   border-radius: var(--radius-lg);
   box-shadow: 0 5px 16px color-mix(in srgb, var(--text) 10%, transparent);
@@ -2249,14 +2250,14 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-editor-header {
   background: var(--gezel-paper-inset);
-  border-bottom-color: rgba(176, 114, 76, 0.28);
+  border-bottom-color: color-mix(in srgb, var(--wash-tint) 28%, transparent);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar {
-  background: rgba(176, 114, 76, 0.08);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tabs {
   background: var(--gezel-paper-workshop);
-  border-right-color: rgba(176, 114, 76, 0.28);
+  border-right-color: color-mix(in srgb, var(--wash-tint) 28%, transparent);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab,
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button {
@@ -2278,7 +2279,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab:hover,
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button:hover {
   color: #f3ede0;
-  background: rgba(176, 114, 76, 0.14);
+  background: color-mix(in srgb, var(--wash-tint) 14%, transparent);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab--active {
   color: #e0b897;
@@ -2293,7 +2294,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   background: var(--selected-bg-hover);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-separator {
-  background: rgba(176, 114, 76, 0.28);
+  background: color-mix(in srgb, var(--wash-tint) 28%, transparent);
 }
 
 /* The WYSIWYG typing surface is the inset paper, the same `--surface` that
@@ -2343,7 +2344,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
    composer chrome. */
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-menu {
   background: var(--gezel-paper-inset);
-  border-color: rgba(176, 114, 76, 0.35);
+  border-color: color-mix(in srgb, var(--wash-tint) 35%, transparent);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-menu--up {
@@ -2354,7 +2355,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-item:hover {
   color: #f3ede0;
-  background: rgba(176, 114, 76, 0.18);
+  background: color-mix(in srgb, var(--wash-tint) 18%, transparent);
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-overflow-item--active {
   color: #e0b897;
@@ -2993,7 +2994,7 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .document-narration-cancel:hover:not(:disabled),
 .document-narration-close:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--accent) 60%, var(--border));
-  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  background: color-mix(in srgb, var(--wash-tint) 12%, var(--surface));
 }
 
 .document-narration-control {

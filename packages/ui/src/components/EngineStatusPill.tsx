@@ -46,6 +46,10 @@ import type {
 } from '@bendyline/gezel-client';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api.js';
+import { setRead } from '../data/api-reads.js';
+import { dataChanged } from '../data/invalidation.js';
+import { useApiRead } from '../data/use-api-read.js';
+import { forEachEvent } from '../reconnecting-stream.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { streamSharedAllChatEvents } from '../shared-chat-events.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
@@ -114,11 +118,21 @@ const ENGINE_RETENTION_PRESETS: ReadonlyArray<{
   { value: 1_800_000, label: 'Keep warm' },
 ];
 
+const NO_GEZELS = new Map<string, GezelSummary>();
+const NO_TURNS: InflightTurn[] = [];
+const gezelsById = (res: { gezels: GezelSummary[] }) =>
+  new Map(res.gezels.map((gezel) => [gezel.id, gezel]));
+const inflightOf = (res: { inflight?: unknown[] }) => (res.inflight ?? []) as InflightTurn[];
+
 export function EngineStatusPill() {
   const [config, setConfig] = useState<ConfigResponse | null>(null);
-  const [gezels, setGezels] = useState<Map<string, GezelSummary>>(new Map());
-  const [queueStatus, setQueueStatus] = useState<QueueStatusResponse | null>(null);
-  const [inflightTurns, setInflightTurns] = useState<InflightTurn[]>([]);
+  // Shared, polled reads: an answer that did not change keeps its identity,
+  // so the pill does not redraw on every tick.
+  const gezels =
+    useApiRead('listGezels', [], { pollMs: 10_000, select: gezelsById }).data ?? NO_GEZELS;
+  const queueStatus = useApiRead('getQueueStatus', [], { pollMs: 3_000 }).data ?? null;
+  const inflightTurns =
+    useApiRead('listInflightTurns', [], { pollMs: 3_000, select: inflightOf }).data ?? NO_TURNS;
   const [deviceSafetySaving, setDeviceSafetySaving] = useState(false);
   const [deviceSafetyError, setDeviceSafetyError] = useState<string | null>(null);
   const [retentionSaving, setRetentionSaving] = useState(false);
@@ -160,40 +174,9 @@ export function EngineStatusPill() {
     return () => timer();
   }, [refreshConfig]);
 
-  const refreshGezels = useCallback(() => {
-    void api
-      .listGezels()
-      .then(({ gezels: nextGezels }) => {
-        if (!mountedRef.current) return;
-        setGezels(new Map(nextGezels.map((gezel) => [gezel.id, gezel])));
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    refreshGezels();
-    const timer = setVisibleInterval(refreshGezels, 10_000);
-    return () => timer();
-  }, [refreshGezels]);
-
-  const refreshActivity = useCallback(() => {
-    // Settled separately: a host without a queue snapshot still reports the
-    // turns it is running, and the pill should keep showing them.
-    void Promise.allSettled([api.getQueueStatus(), api.listInflightTurns()]).then(
-      ([status, inflight]) => {
-        if (!mountedRef.current) return;
-        if (status.status === 'fulfilled') setQueueStatus(status.value);
-        if (inflight.status === 'fulfilled')
-          setInflightTurns((inflight.value.inflight ?? []) as InflightTurn[]);
-      },
-    );
-  }, []);
-
-  useEffect(() => {
-    refreshActivity();
-    const timer = setVisibleInterval(refreshActivity, 3_000);
-    return () => timer();
-  }, [refreshActivity]);
+  // The queue and the turns in flight are read separately: a host without a
+  // queue snapshot still reports the turns it is running.
+  const refreshActivity = useCallback(() => dataChanged('live'), []);
 
   const updateDeviceSafetyMode = useCallback(
     async (mode: UserDeviceSafetyMode) => {
@@ -259,7 +242,9 @@ export function EngineStatusPill() {
       const result = await api.emergencyStopChats();
       if (!mountedRef.current) return;
       setConfig((current) => (current ? { ...current, aiEngagementMode: 'reactive' } : current));
-      setInflightTurns([]);
+      setRead('listInflightTurns', [], (current) =>
+        current ? { ...current, inflight: [] } : current,
+      );
       setEmergencyStopNotice(
         `Stopped ${result.cancelledTurns} ${result.cancelledTurns === 1 ? 'chat' : 'chats'}${
           result.clearedQueuedMessages > 0
@@ -701,46 +686,41 @@ function EngineStatusPillForProvider({
     setLastTurn(undefined);
     setRamAllocBytes(undefined);
     const ctrl = new AbortController();
-    void (async () => {
-      try {
-        for await (const env of streamSharedAllChatEvents({
-          url: api.allEventsUrl(),
-          headers: api.authHeader(),
-          signal: ctrl.signal,
-          fetch: api.getFetch(),
-        })) {
-          const { event } = env as ChatEventEnvelope;
-          if (event.type === 'turn_stats') {
-            if (event.provider !== onDeviceProvider) continue;
-            const entry: TurnStats = {
-              at: Date.now(),
-              ...(event.model ? { model: event.model } : {}),
-              promptTokens: event.promptTokens,
-              completionTokens: event.completionTokens,
-              durationMs: event.durationMs,
-              ...(typeof event.tokensPerSec === 'number'
-                ? { tokensPerSec: event.tokensPerSec }
-                : {}),
-            };
-            setRecentTurns((prev) => {
-              const cutoff = Date.now() - STATS_WINDOW_MS;
-              const filtered = prev.filter((t) => t.at >= cutoff);
-              const next = [...filtered, entry];
-              return next.length > STATS_MAX_ENTRIES
-                ? next.slice(next.length - STATS_MAX_ENTRIES)
-                : next;
-            });
-            setLastTurn(entry);
-            refreshModelSpeeds();
-          } else if (event.type === 'engine_stats') {
-            if (event.provider !== onDeviceProvider) continue;
-            setRamAllocBytes(event.ramAllocBytes);
-          }
+    void forEachEvent(
+      streamSharedAllChatEvents({
+        url: api.allEventsUrl(),
+        headers: api.authHeader(),
+        signal: ctrl.signal,
+        fetch: api.getFetch(),
+      }),
+      (env) => {
+        const { event } = env as ChatEventEnvelope;
+        if (event.type === 'turn_stats') {
+          if (event.provider !== onDeviceProvider) return;
+          const entry: TurnStats = {
+            at: Date.now(),
+            ...(event.model ? { model: event.model } : {}),
+            promptTokens: event.promptTokens,
+            completionTokens: event.completionTokens,
+            durationMs: event.durationMs,
+            ...(typeof event.tokensPerSec === 'number' ? { tokensPerSec: event.tokensPerSec } : {}),
+          };
+          setRecentTurns((prev) => {
+            const cutoff = Date.now() - STATS_WINDOW_MS;
+            const filtered = prev.filter((t) => t.at >= cutoff);
+            const next = [...filtered, entry];
+            return next.length > STATS_MAX_ENTRIES
+              ? next.slice(next.length - STATS_MAX_ENTRIES)
+              : next;
+          });
+          setLastTurn(entry);
+          refreshModelSpeeds();
+        } else if (event.type === 'engine_stats') {
+          if (event.provider !== onDeviceProvider) return;
+          setRamAllocBytes(event.ramAllocBytes);
         }
-      } catch {
-        /* aborted / stream closed */
-      }
-    })();
+      },
+    );
     return () => ctrl.abort();
   }, [onDeviceProvider, refreshModelSpeeds]);
 
@@ -753,37 +733,34 @@ function EngineStatusPillForProvider({
       return;
     }
     const ctrl = new AbortController();
-    void (async () => {
-      try {
-        for await (const env of streamSharedAllChatEvents({
-          url: api.allEventsUrl(),
-          headers: api.authHeader(),
-          signal: ctrl.signal,
-          fetch: api.getFetch(),
-        })) {
-          const { event, sessionId, gezelId } = env as ChatEventEnvelope;
-          if (event.type !== 'gpu_swap') continue;
-          setMediaActivity((prev) => {
-            const next = new Map(prev);
-            if (event.state === 'ended') {
-              next.delete(sessionId);
-            } else {
-              const existing = next.get(sessionId);
-              next.set(sessionId, {
-                kind: event.task === 'video_generation' ? 'video' : 'image',
-                label: mediaLabel(event),
-                gezelId,
-                ...(typeof event.progress === 'number' ? { progress: event.progress } : {}),
-                startedAt: existing?.startedAt ?? Date.now(),
-              });
-            }
-            return next;
-          });
-        }
-      } catch {
-        /* aborted / stream closed */
-      }
-    })();
+    void forEachEvent(
+      streamSharedAllChatEvents({
+        url: api.allEventsUrl(),
+        headers: api.authHeader(),
+        signal: ctrl.signal,
+        fetch: api.getFetch(),
+      }),
+      (env) => {
+        const { event, sessionId, gezelId } = env as ChatEventEnvelope;
+        if (event.type !== 'gpu_swap') return;
+        setMediaActivity((prev) => {
+          const next = new Map(prev);
+          if (event.state === 'ended') {
+            next.delete(sessionId);
+          } else {
+            const existing = next.get(sessionId);
+            next.set(sessionId, {
+              kind: event.task === 'video_generation' ? 'video' : 'image',
+              label: mediaLabel(event),
+              gezelId,
+              ...(typeof event.progress === 'number' ? { progress: event.progress } : {}),
+              startedAt: existing?.startedAt ?? Date.now(),
+            });
+          }
+          return next;
+        });
+      },
+    );
     return () => ctrl.abort();
   }, [includeMedia]);
 

@@ -29,14 +29,18 @@ test.describe('tasks', () => {
 
     await shot(page, 'step-tracker', {
       area: 'tasks',
-      clip: page.locator('.step-tracker').first(),
+      clip: page.locator('.step-tracker').filter({ visible: true }).first(),
       selector: '.step-tracker',
       description: 'Task step tracker — the craftbook phases (Plan → Build → Review)',
     });
 
     // A task now opens on the Task overview; select a step on the bench to
     // reveal its panel before capturing it.
-    await page.locator('.step-tracker .bench-step-marker').first().click();
+    await page
+      .locator('.step-tracker .bench-step-marker')
+      .filter({ visible: true })
+      .first()
+      .click();
     await expect(page.getByTestId('task-step-panel')).toBeVisible();
     await shot(page, 'step-panel', {
       area: 'tasks',

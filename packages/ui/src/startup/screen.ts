@@ -78,6 +78,7 @@ export function mountStartup(bridge: StartupHomeBridge): (() => void) | undefine
   const welcome = snapshot?.welcome === true;
   root.dataset.shape = welcome ? 'welcome' : 'workshop';
   const layout = element('div', 'app-body');
+  layout.dataset.view = 'home';
   const pane = element('main', 'app-main');
   const main = element('div', 'home-workshop');
   const stage = element('div', 'home-workshop-stage');

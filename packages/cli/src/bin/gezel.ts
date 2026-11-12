@@ -92,12 +92,13 @@ import { registerMcpCommands } from '../mcp-command.js';
 import {
   availableChatModels,
   formatAvailableChatModels,
+  formatInstalledChatModels,
   measuredClaimsFor,
   pinPulledModel,
   useChatModel,
 } from '../model-choice.js';
 import { exportModelToFile } from '../model-export.js';
-import { pullChatModel, waitForMlxRuntime } from '../model-pull.js';
+import { findSharedModel, pullChatModel, waitForMlxRuntime } from '../model-pull.js';
 import {
   formatNativeList,
   formatNativeStatus,
@@ -106,7 +107,7 @@ import {
   parseNativeVariant,
 } from '../native-command.js';
 import { stderrProgress } from '../progress-output.js';
-import { resolveRunGezel } from '../run-gezel.js';
+import { resolveCrewMember, resolveRunGezel } from '../run-gezel.js';
 import { RunProgress } from '../run-progress.js';
 import { resolveRunPrompt } from '../run-prompt.js';
 import { canOfferRunSetup, checkRunReadiness } from '../run-readiness.js';
@@ -167,7 +168,7 @@ program
   )
   .option(
     '--download',
-    'Download what a command needs (the on-device engine and the recommended model) without asking, printing each step. Also GEZEL_AUTO_DOWNLOAD=1.',
+    'Download what a command needs (the on-device engine and the recommended model, or DuckDB for knowledge export-parquet) without asking, printing each step. Also GEZEL_AUTO_DOWNLOAD=1.',
   );
 
 /** Global flags, read off the root program. */
@@ -838,7 +839,7 @@ program
   .option('-g, --gezel <ref>', "crew member id or name (default: this project's crew lead)")
   .addHelpText(
     'after',
-    '\nExamples:\n  gezel run "Summarize this project"\n  printf \'Summarize these notes:\\nThe launch is Friday.\\n\' | gezel run -\n  gezel run - < prompt.txt\n\nA sole - reads UTF-8 stdin to EOF. Empty input is rejected.\nReplies go to stdout; diagnostics go to stderr.\nWith no model set up yet, a run in a terminal first offers to download one,\nthen runs the prompt.',
+    '\nExamples:\n  gezel run "Summarize this project"\n  gezel run "Summarize these notes" < notes.txt\n  printf \'Summarize these notes:\\nThe launch is Friday.\\n\' | gezel run -\n  gezel run - < prompt.txt\n\nA sole - reads UTF-8 stdin to EOF. Empty input is rejected.\nWith a prompt, text piped or redirected to stdin is sent after it,\nseparated by a blank line. A pipe that sends nothing within a moment is\nleft unread; use - to wait for a slow one.\nReplies go to stdout; diagnostics go to stderr.\nWith no model set up yet, a run in a terminal first offers to download one,\nthen runs the prompt.',
   )
   .action(async (promptParts: string[], opts: { gezel?: string }) => {
     const prompt = await resolveRunPrompt(promptParts);
@@ -872,7 +873,7 @@ program
       if (!readiness.ready && autoDownloadRequested(cliGlobals())) {
         // Nobody needs to be at the keyboard: an agent or a script asked for
         // the downloads up front. Progress goes to stderr; stdout stays the reply.
-        await downloadForRun(client, { gezelId, write: (text) => process.stderr.write(text) });
+        await downloadForRun(client, { gezelId, write: stderrProgress() });
         readiness = await checkRunReadiness(client, gezelId);
       } else if (!readiness.ready && canOfferRunSetup()) {
         // A first `npx gezel-cli run …` in a terminal sets up a model and then
@@ -1296,12 +1297,12 @@ craftbook
 const agent = program.command('agent').description('Manage your crew (your AI companions)');
 
 agent
-  .command('output-limit <id> [tokens]')
+  .command('output-limit <crew-member> [tokens]')
   .description(
-    "Show or set one crew member's output-token limit, including reasoning; auto clears its override",
+    "Show or set one crew member's output-token limit (by id or name), including reasoning; auto clears its override",
   )
   .option('--json', 'Output the override as JSON')
-  .action(async (id: string, tokens: string | undefined, opts: { json?: boolean }) => {
+  .action(async (ref: string, tokens: string | undefined, opts: { json?: boolean }) => {
     if (
       tokens !== undefined &&
       tokens !== 'auto' &&
@@ -1310,6 +1311,7 @@ agent
       throw new CliError('Output limit must be a positive integer, or auto.');
     }
     const client = await connectOwned(cliGlobals());
+    const id = await resolveCrewMember(client, ref);
     const { parsed } = await client.getGezel(id);
     const tuning = { ...parsed.frontmatter.tuning };
     const sampling = { ...tuning.sampling };
@@ -1351,10 +1353,11 @@ agent
   });
 
 agent
-  .command('show <id>')
-  .description('Show one crew member')
-  .action(async (id: string) => {
+  .command('show <crew-member>')
+  .description('Show one crew member, by id or name')
+  .action(async (ref: string) => {
     const client = await connectOwned(cliGlobals());
+    const id = await resolveCrewMember(client, ref);
     const a = await client.getGezel(id).catch((err: unknown) => {
       throw isNotFound(err)
         ? new CliError(`No crew member with id "${id}". Run \`gezel agent list\` to see your crew.`)
@@ -1653,8 +1656,23 @@ knowledge
   )
   .action(async (path: string, opts: { out?: string; duckdb?: string }) => {
     const { runKnowledgeExportParquet } = await loadKnowledgeCommand();
-    await runKnowledgeExportParquet(path, opts);
+    await runKnowledgeExportParquet(
+      path,
+      opts,
+      autoDownloadRequested(cliGlobals()) ? { fetchDuckdb: fetchDuckdbForCli } : {},
+    );
   });
+
+/** `--download` for `export-parquet`: the service installs the pinned DuckDB and says where. */
+async function fetchDuckdbForCli(): Promise<string | undefined> {
+  process.stderr.write('No DuckDB CLI found; downloading it (--download)…\n');
+  const client = await connectOwned(cliGlobals());
+  const status = await installNativeToolkit(client, {
+    engines: ['duckdb'],
+    output: { writeProgress: stderrProgress() },
+  });
+  return status.engines.find((engine) => engine.name === 'duckdb' && engine.installed)?.path;
+}
 
 knowledge
   .command('search <path> <query>')
@@ -2484,23 +2502,15 @@ model
       );
       return;
     }
-    const { models } =
+    const [{ models }, config] = await Promise.all([
       provider === 'mlx'
-        ? await client.listMlxModels()
+        ? client.listMlxModels()
         : provider === 'ds4'
-          ? await client.listDs4Models()
-          : await client.listLlamaCppModels();
-    if (models.length === 0) {
-      console.log(
-        `(no local ${provider} models — \`gezel model list --available\` shows ones to download)`,
-      );
-      return;
-    }
-    for (const m of models) {
-      console.log(
-        `${m.id.padEnd(28)}  ${(m.approxSizeBytes / 1e9).toFixed(2).padStart(6)} GB  ${m.name}`,
-      );
-    }
+          ? client.listDs4Models()
+          : client.listLlamaCppModels(),
+      client.getConfig(),
+    ]);
+    console.log(formatInstalledChatModels(provider, models, config));
   });
 
 model
@@ -2517,7 +2527,19 @@ model
     // as `--download` does. On a Mac that engine is the toolkit's uv, and a
     // pull without it left a model no chat could load.
     await ensureModelEngines(client, [provider], progress);
-    await pullChatModel(client, provider, id, progress);
+    const shared = await findSharedModel(client, provider, id);
+    if (shared) {
+      progress(
+        `${id} is already on this computer in a shared model store, so nothing was downloaded: ${shared.location}\n`,
+      );
+      if (shared.updateAvailable) {
+        progress(
+          'The catalog has a newer version. The Gezel that shares this copy updates it when it updates its models.\n',
+        );
+      }
+    } else {
+      await pullChatModel(client, provider, id, progress);
+    }
     if (provider === 'mlx') await waitForMlxRuntime(client, progress);
     if ((await pinPulledModel(client, provider, id)) === 'pinned') {
       process.stderr.write(`${id} is now the default ${provider} model.\n`);

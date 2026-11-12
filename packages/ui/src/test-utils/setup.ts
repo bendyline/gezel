@@ -3,6 +3,7 @@ import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
 import { resetChatThreadMemory } from '../components/chat-thread-memory.js';
 import { resetComposerDrafts } from '../components/composer-drafts.js';
+import { resetReads } from '../data/api-reads.js';
 
 // View tests routinely wait on a chain of effects (load projects -> pick a
 // default -> load that project's scripts), each of which needs its own render
@@ -23,6 +24,9 @@ afterEach(() => {
   // half-typed draft from one test would seed the next test's composer.
   resetComposerDrafts();
   resetChatThreadMemory();
+  // Server answers are module-level too: one test's mocked config would
+  // otherwise paint the next test's first frame.
+  resetReads();
 });
 
 // jsdom implements getClientRects/getBoundingClientRect on Element but not on

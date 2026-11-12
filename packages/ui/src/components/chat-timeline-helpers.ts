@@ -33,11 +33,31 @@ export function mergeTerminalEntries(
   return [...byId.values()].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 }
 
+/** Structural equality for JSON-shaped values, such as rows as they arrive from the API. */
+export function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) || Array.isArray(b)) {
+    if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+    return a.every((item, index) => sameJson(item, b[index]));
+  }
+  const aRecord = a as Record<string, unknown>;
+  const bRecord = b as Record<string, unknown>;
+  const keys = Object.keys(aRecord);
+  if (keys.length !== Object.keys(bRecord).length) return false;
+  return keys.every((key) => Object.hasOwn(bRecord, key) && sameJson(aRecord[key], bRecord[key]));
+}
+
 /**
  * Merge a newest-page snapshot into the rows already on screen. Older pages
  * remain intact, while a matching durable user row retires its optimistic
  * counterpart. Shared by completion refreshes and the initial
  * snapshot/subscription handoff reconciliation.
+ *
+ * A row the snapshot repeats unchanged keeps its existing object, and when
+ * nothing changed at all the existing array comes back: a refresh after each
+ * tool-loop iteration otherwise gave every visible row a new identity and
+ * re-rendered every bubble.
  */
 export function mergeTimelineMessages(
   existing: TimelineMessage[],
@@ -55,6 +75,8 @@ export function mergeTimelineMessages(
         : true;
     });
   });
+  const keyOf = (message: TimelineMessage) => `${message.sessionId}:${message.at}:${message.role}`;
+  const onScreen = new Map(withoutReconciledOptimistic.map((message) => [keyOf(message), message]));
   const seen = new Set<string>();
   const merged: TimelineMessage[] = [];
   // The snapshot is canonical for rows it contains. Put it first so a
@@ -62,13 +84,17 @@ export function mergeTimelineMessages(
   // `sessionLastTurnError`) instead of the older in-memory copy winning the
   // duplicate check forever. Existing rows outside the newest page remain.
   for (const message of [...snapshot, ...withoutReconciledOptimistic]) {
-    const key = `${message.sessionId}:${message.at}:${message.role}`;
+    const key = keyOf(message);
     if (seen.has(key)) continue;
     seen.add(key);
-    merged.push(message);
+    const prior = onScreen.get(key);
+    merged.push(prior && prior !== message && sameJson(prior, message) ? prior : message);
   }
   merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
-  return merged;
+  const unchanged =
+    merged.length === existing.length &&
+    merged.every((message, index) => message === existing[index]);
+  return unchanged ? existing : merged;
 }
 
 export function findLastForSession(

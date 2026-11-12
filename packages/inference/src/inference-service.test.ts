@@ -134,6 +134,15 @@ describe('in-process inference host', () => {
     running = undefined;
     expect(getLogOutput()).toBe(before);
   });
+  it("keeps the embedding app's stdout its own when it names no log output", async () => {
+    home = await mkdtemp(join(tmpdir(), 'gezel-inference-'));
+    const before = getLogOutput();
+    running = await startService({ home, providers: new Map() });
+    expect(getLogOutput()).toBe('stderr');
+    await running.stop();
+    running = undefined;
+    expect(getLogOutput()).toBe(before);
+  });
 
   it('answers the bare id ensureModel pins, and names the qualified form otherwise', async () => {
     home = await mkdtemp(join(tmpdir(), 'gezel-inference-'));

@@ -8,7 +8,7 @@ const streams = vi.hoisted(() => ({
   invalidate: vi.fn(),
 }));
 
-vi.mock('./shared-api-reads.js', () => ({ invalidateLiveApiReads: streams.invalidate }));
+vi.mock('./data/api-reads.js', () => ({ markReadsStale: streams.invalidate, setRead: vi.fn() }));
 
 vi.mock('@bendyline/gezel-client', () => ({
   streamAllChatEvents: streams.all,
@@ -62,6 +62,7 @@ describe('shared chat events', () => {
     gate.resolve();
     expect((await subscriber.next()).value?.event.type).toBe('done');
     expect(streams.invalidate).toHaveBeenCalledOnce();
+    expect(streams.invalidate).toHaveBeenCalledWith(['live'], { refetch: true });
     controller.abort();
     finish.resolve();
     streams.all.mockReset();

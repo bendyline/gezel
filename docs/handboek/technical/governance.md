@@ -17,7 +17,7 @@ Gezel is open source under the MIT license. Anyone can read it, audit it, fork i
 
 Gezel runs scripts that models write, on people's own machines, with access to their files. For software like that, we think the safer arrangement is one accountable author for every line, one set of conventions throughout, and no path by which a change reaches you without that team having written and reviewed it. SQLite has worked this way for more than twenty years, for much the same reasons.
 
-So pull requests that change source code, tests, build configuration or dependencies are closed, however good they are. That is not a judgement on the change. It keeps the answer to "who wrote this?" simple.
+So pull requests that change source code, tests, build configuration or dependencies are closed, however good they are. That is not a judgment on the change. It keeps the answer to "who wrote this?" simple.
 
 ## How proposals work
 

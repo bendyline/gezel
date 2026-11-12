@@ -484,7 +484,7 @@ button.danger {
 }
 
 .project-about-toc a:hover {
-  background: rgba(176, 114, 76, 0.1);
+  background: color-mix(in srgb, var(--wash-tint) 10%, transparent);
   color: var(--text);
 }
 
@@ -1447,7 +1447,7 @@ button.danger {
 }
 
 .writes-op-mkdir {
-  background: rgba(176, 114, 76, 0.12);
+  background: color-mix(in srgb, var(--wash-tint) 12%, transparent);
   color: var(--accent-text, #b0724c);
 }
 
@@ -2054,7 +2054,7 @@ button.tree-row-trailing-select {
   flex: 0 0 auto;
   padding: 0.75rem 0.75rem 0.65rem;
   border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--panel) 88%, var(--accent) 12%);
+  background: color-mix(in srgb, var(--panel) 88%, var(--wash-tint) 12%);
 }
 
 .workspace-index-pane-title {
@@ -2709,7 +2709,7 @@ button.tree-row-trailing-select {
 }
 
 .file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-item:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 12%, transparent);
 }
 
 .file-viewer-panel .squisq-folder-view[data-theme] .squisq-folder-view-item-icon,

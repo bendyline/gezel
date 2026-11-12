@@ -24,7 +24,6 @@ import {
   useState,
 } from 'react';
 import { api } from '../api.js';
-import { flushSerializedAutosave } from '../hooks/useSerializedAutosave.js';
 import { ContextMenu, Tooltip } from '../primitives/index.js';
 import { runtimeCapabilities, supportsArea } from '../runtime-capabilities.js';
 import { requestSettingsSection } from '../settings-nav.js';
@@ -48,13 +47,6 @@ import {
 } from './PrimaryNavigation.js';
 import { ProjectActionsMenu } from './ProjectActionsMenu.js';
 import { ProjectIcon } from './ProjectIcon.js';
-import {
-  isMarkdownDocumentPath,
-  markdownCompanionDirectory,
-  moveFileWithCompanion,
-  rewriteDocumentCompanionRefs,
-} from './SquisqIntegration/document-companion.js';
-import type { OutsideInLayout } from './SquisqIntegration/outside-in.js';
 import { documentLabel } from './document-label.js';
 import { documentQuickListEntries, useDocumentQuickList } from './document-quick-list.js';
 import { fileManagerLabel } from './file-manager-label.js';
@@ -63,6 +55,13 @@ import { openUpdates } from './nav-actions.js';
 import { type CreateKind, requestCreate } from './nav-intents.js';
 import { queueFocusSessionError } from './pending-focus-session-error.js';
 import { tabKey, toRecentTab } from './recent-tabs.js';
+import {
+  createDocument,
+  deleteDocument,
+  importDroppedDocuments,
+  renameDocument,
+  writeStoredSetting,
+} from './sidebar-documents.js';
 import { useBuilderView } from './useBuilderView.js';
 import { useDebugMode } from './useDebugMode.js';
 import { useHasKnowledgeCatalogs } from './useHasKnowledgeCatalogs.js';
@@ -103,12 +102,6 @@ function roleDescription(role?: string, roleBasedName?: string): string {
     }
   }
   return '';
-}
-
-async function outsideInLayout(path: string): Promise<OutsideInLayout | null> {
-  if (!/\.(?:html?|docx|pdf|pptx|xlsx)$/i.test(path)) return null;
-  const { resolveOutsideInLayout } = await import('./SquisqIntegration/outside-in.js');
-  return resolveOutsideInLayout(path);
 }
 
 function documentsFolderContextLabel(platform?: string): string {
@@ -297,10 +290,16 @@ export function Sidebar({
   const [deleteDocError, setDeleteDocError] = useState<string | null>(null);
   const [documentDropActive, setDocumentDropActive] = useState(false);
   const [documentDropStatus, setDocumentDropStatus] = useState('');
-  const documentQuickList = useDocumentQuickList();
+  const {
+    state: quickListState,
+    noteUsed: noteDocumentUsed,
+    pinnedPaths: pinnedDocumentPaths,
+    pin: pinDocument,
+    unpin: unpinDocument,
+  } = useDocumentQuickList();
   const quickDocs = useMemo(
-    () => documentQuickListEntries(docs, documentQuickList.state),
-    [docs, documentQuickList.state],
+    () => documentQuickListEntries(docs, quickListState),
+    [docs, quickListState],
   );
   const [groups, setGroups] = useState<StoredGroups>(() => readStoredGroups());
   const [width, setWidth] = useState<number>(() => readStoredWidth());
@@ -474,54 +473,9 @@ export function Sidebar({
         `Adding ${files.length === 1 ? files[0]?.name : `${files.length} files`}…`,
       );
 
-      try {
-        // Read a fresh, unfiltered listing for collision detection. Managed
-        // outside-in companion folders stay hidden in the rail, but still
-        // reserve their names when an OS drop chooses a destination.
-        const current = await api.listDocuments('', true, { stats: true, hidden: false });
-        // Keep the document conversion stack out of the always-mounted
-        // sidebar bundle; it is only needed once a user actually drops files.
-        const { importDroppedFiles } = await import('./SquisqIntegration/document-import.js');
-        const result = await importDroppedFiles({
-          target: {
-            writeText: async (path, content) => {
-              await api.writeDocument(path, content);
-            },
-            writeBinary: async (path, data, mimeType) => {
-              await api.writeDocumentBinary(path, data, mimeType);
-            },
-          },
-          files,
-          destination: '',
-          existingPaths: current.files.map((entry) => entry.path),
-        });
-
-        if (result.importedPaths.length > 0) {
-          const lastPath = result.importedPaths.at(-1)!;
-          documentQuickList.noteUsed(lastPath);
-          window.dispatchEvent(
-            new CustomEvent('gezel:document-created', {
-              detail: { path: lastPath, paths: result.importedPaths },
-            }),
-          );
-        }
-
-        const added = result.importedPaths.length;
-        if (result.rejected.length > 0) {
-          const first = result.rejected[0]!;
-          setDocumentDropStatus(
-            `${added > 0 ? `Added ${added}; ` : ''}couldn't add ${first.name}: ${first.reason}${result.rejected.length > 1 ? ` (+${result.rejected.length - 1} more)` : ''}`,
-          );
-        } else {
-          setDocumentDropStatus(`Added ${added} ${added === 1 ? 'file' : 'files'}.`);
-        }
-      } catch (error) {
-        setDocumentDropStatus(
-          `Couldn't add files: ${(error as Error).message || 'Unknown error.'}`,
-        );
-      }
+      setDocumentDropStatus(await importDroppedDocuments(files, noteDocumentUsed));
     },
-    [documentQuickList.noteUsed],
+    [noteDocumentUsed],
   );
 
   const documentDropTarget = useMemo<GroupDropTarget>(
@@ -564,8 +518,8 @@ export function Sidebar({
   // A direct document tab can be restored or opened from outside either
   // documents pane. Count that as use so it joins the five-item quick list.
   useEffect(() => {
-    if (selection?.kind === 'document') documentQuickList.noteUsed(selection.path);
-  }, [selection, documentQuickList.noteUsed]);
+    if (selection?.kind === 'document') noteDocumentUsed(selection.path);
+  }, [selection, noteDocumentUsed]);
 
   // Renames / creates / deletes elsewhere flow back in via the same
   // window events the detail views already broadcast.
@@ -633,27 +587,15 @@ export function Sidebar({
   const commitWidth = useCallback((px: number) => {
     const clamped = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, Math.round(px)));
     setWidth(clamped);
-    try {
-      window.localStorage.setItem(WIDTH_KEY, String(clamped));
-    } catch {
-      /* private mode / quota */
-    }
+    writeStoredSetting(WIDTH_KEY, String(clamped));
   }, []);
   const commitCollapsed = useCallback((v: boolean) => {
     setCollapsed(v);
-    try {
-      window.localStorage.setItem(COLLAPSED_KEY, v ? '1' : '0');
-    } catch {
-      /* private mode / quota */
-    }
+    writeStoredSetting(COLLAPSED_KEY, v ? '1' : '0');
   }, []);
   const commitStayOpen = useCallback((v: boolean) => {
     setStayOpen(v);
-    try {
-      window.localStorage.setItem(STAY_OPEN_KEY, v ? '1' : '0');
-    } catch {
-      /* private mode / quota */
-    }
+    writeStoredSetting(STAY_OPEN_KEY, v ? '1' : '0');
   }, []);
   // Every way of folding or opening the rail goes through here. In a list
   // area the person's choice is the stay-open pin, so leaving the area
@@ -676,11 +618,7 @@ export function Sidebar({
   );
   const commitGroups = useCallback((next: StoredGroups) => {
     setGroups(next);
-    try {
-      window.localStorage.setItem(GROUPS_KEY, JSON.stringify(next));
-    } catch {
-      /* private mode / quota */
-    }
+    writeStoredSetting(GROUPS_KEY, JSON.stringify(next));
   }, []);
 
   const toggleGroup = useCallback(
@@ -816,17 +754,10 @@ export function Sidebar({
     async (path: string) => {
       const clean = path.trim();
       if (!clean) return;
-      try {
-        await api.writeDocument(clean, '');
-        setShowNewDoc(false);
-        window.dispatchEvent(
-          new CustomEvent('gezel:document-created', { detail: { path: clean } }),
-        );
-        onSelect(toRecentTab({ kind: 'document', path: clean }));
-      } catch {
-        // Surface nothing inline here — the dialog stays open so the user
-        // can retry or cancel.
-      }
+      // A failure leaves the dialog open so the person can retry or cancel.
+      if (!(await createDocument(clean))) return;
+      setShowNewDoc(false);
+      onSelect(toRecentTab({ kind: 'document', path: clean }));
     },
     [onSelect],
   );
@@ -840,123 +771,14 @@ export function Sidebar({
     async (newName: string) => {
       const entry = renameDocTarget;
       if (!entry) return;
-      const cleanName = newName.trim();
-      if (!cleanName || /[\\/]/.test(cleanName)) {
-        setRenameDocError('Enter a name without slashes.');
+      const selectedPath = selection?.kind === 'document' ? selection.path : null;
+      const error = await renameDocument(entry, newName, selectedPath);
+      if (error) {
+        setRenameDocError(error);
         return;
       }
-
-      const slash = entry.path.lastIndexOf('/');
-      const parent = slash >= 0 ? entry.path.slice(0, slash + 1) : '';
-      const toPath = `${parent}${cleanName}`;
-      if (toPath === entry.path) {
-        setRenameDocTarget(null);
-        setRenameDocError(null);
-        return;
-      }
-
-      try {
-        const oldLayout = entry.isDirectory ? null : await outsideInLayout(entry.path);
-        const nextLayout = entry.isDirectory ? null : await outsideInLayout(toPath);
-        if (oldLayout && nextLayout?.format !== oldLayout.format) {
-          setRenameDocError(`Keep the .${oldLayout.format} extension when renaming this document.`);
-          return;
-        }
-        const oldCompanionDirectory =
-          oldLayout?.companionDirectory ??
-          (entry.isDirectory ? null : markdownCompanionDirectory(entry.path));
-        const nextCompanionDirectory =
-          nextLayout?.companionDirectory ??
-          (entry.isDirectory ? null : markdownCompanionDirectory(toPath));
-        if (
-          !entry.isDirectory &&
-          isMarkdownDocumentPath(entry.path) &&
-          !isMarkdownDocumentPath(toPath)
-        ) {
-          setRenameDocError('Keep the Markdown extension when renaming this document.');
-          return;
-        }
-        const companionListing = oldCompanionDirectory ? await api.listDocuments('', true) : null;
-        if (
-          nextCompanionDirectory &&
-          companionListing?.files.some(
-            (candidate) =>
-              candidate.path === toPath ||
-              ((candidate.path === nextCompanionDirectory ||
-                candidate.path.startsWith(`${nextCompanionDirectory}/`)) &&
-                !(
-                  oldCompanionDirectory &&
-                  (candidate.path === oldCompanionDirectory ||
-                    candidate.path.startsWith(`${oldCompanionDirectory}/`))
-                )),
-          )
-        ) {
-          setRenameDocError('A document or companion folder with that name already exists.');
-          return;
-        }
-        const selectedPath = selection?.kind === 'document' ? selection.path : null;
-        if (
-          selectedPath &&
-          (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
-        ) {
-          await flushSerializedAutosave(`document:${selectedPath}`);
-          if (oldLayout) {
-            await flushSerializedAutosave(`outside-in:documents:${oldLayout.markdownPath}`);
-          }
-        }
-        const hasCompanion = Boolean(
-          oldCompanionDirectory &&
-            companionListing?.files.some(
-              (candidate) =>
-                candidate.path === oldCompanionDirectory ||
-                candidate.path.startsWith(`${oldCompanionDirectory}/`),
-            ),
-        );
-        await moveFileWithCompanion(
-          (fromPath, nextPath) => api.renameDocument(fromPath, nextPath).then(() => undefined),
-          entry.path,
-          toPath,
-          hasCompanion && oldCompanionDirectory && nextCompanionDirectory
-            ? { from: oldCompanionDirectory, to: nextCompanionDirectory }
-            : null,
-        );
-        if (oldLayout && nextLayout && hasCompanion && companionListing) {
-          const { relinkMovedOutsideInCompanion } = await import(
-            './SquisqIntegration/outside-in.js'
-          );
-          await relinkMovedOutsideInCompanion({
-            from: oldLayout,
-            to: nextLayout,
-            filePaths: companionListing.files
-              .filter((candidate) => !candidate.isDirectory)
-              .map((candidate) => candidate.path),
-            rename: (fromPath, nextPath) =>
-              api.renameDocument(fromPath, nextPath).then(() => undefined),
-            read: async (path) => (await api.readDocument(path)).content,
-            write: async (path, content) => {
-              await api.writeDocument(path, content);
-            },
-          });
-        } else if (
-          hasCompanion &&
-          !entry.isDirectory &&
-          isMarkdownDocumentPath(entry.path) &&
-          isMarkdownDocumentPath(toPath)
-        ) {
-          const response = await api.readDocument(toPath);
-          const relinked = rewriteDocumentCompanionRefs(response.content, entry.path, toPath);
-          if (relinked !== response.content) await api.writeDocument(toPath, relinked);
-        }
-        window.dispatchEvent(
-          new CustomEvent('gezel:document-renamed', {
-            detail: { fromPath: entry.path, toPath, isDirectory: entry.isDirectory },
-          }),
-        );
-        setRenameDocTarget(null);
-        setRenameDocError(null);
-      } catch (err) {
-        setRenameDocError((err as Error).message || 'Rename failed.');
-      }
+      setRenameDocTarget(null);
+      setRenameDocError(null);
     },
     [renameDocTarget, selection],
   );
@@ -969,38 +791,14 @@ export function Sidebar({
   const confirmDeleteDocument = useCallback(async () => {
     const entry = deleteDocTarget;
     if (!entry) return;
-    try {
-      const selectedPath = selection?.kind === 'document' ? selection.path : null;
-      const layout = entry.isDirectory ? null : await outsideInLayout(entry.path);
-      const companionDirectory =
-        layout?.companionDirectory ??
-        (entry.isDirectory ? null : markdownCompanionDirectory(entry.path));
-      if (
-        selectedPath &&
-        (selectedPath === entry.path || selectedPath.startsWith(`${entry.path}/`))
-      ) {
-        await flushSerializedAutosave(`document:${selectedPath}`);
-        if (layout) {
-          await flushSerializedAutosave(`outside-in:documents:${layout.markdownPath}`);
-        }
-      }
-      const hasCompanion = companionDirectory
-        ? (await api.listDocuments('', true)).files.some(
-            (candidate) =>
-              candidate.path === companionDirectory ||
-              candidate.path.startsWith(`${companionDirectory}/`),
-          )
-        : false;
-      await api.deleteDocument(entry.path);
-      if (companionDirectory && hasCompanion) await api.deleteDocument(companionDirectory);
-      window.dispatchEvent(
-        new CustomEvent('gezel:document-deleted', { detail: { path: entry.path } }),
-      );
-      setDeleteDocTarget(null);
-      setDeleteDocError(null);
-    } catch (err) {
-      setDeleteDocError((err as Error).message || 'Delete failed.');
+    const selectedPath = selection?.kind === 'document' ? selection.path : null;
+    const error = await deleteDocument(entry, selectedPath);
+    if (error) {
+      setDeleteDocError(error);
+      return;
     }
+    setDeleteDocTarget(null);
+    setDeleteDocError(null);
   }, [deleteDocTarget, selection]);
 
   const activeKey = selection ? tabKey(selection) : null;
@@ -1033,16 +831,15 @@ export function Sidebar({
   const documentActionsForEntry = useCallback(
     (entry: FileEntry) => {
       if (entry.isDirectory) return [];
-      const pinned = documentQuickList.pinnedPaths.has(entry.path);
+      const pinned = pinnedDocumentPaths.has(entry.path);
       return [
         {
           label: pinned ? 'Unpin from Documents list' : 'Pin to Documents list',
-          onSelect: () =>
-            pinned ? documentQuickList.unpin(entry.path) : documentQuickList.pin(entry.path),
+          onSelect: () => (pinned ? unpinDocument(entry.path) : pinDocument(entry.path)),
         },
       ];
     },
-    [documentQuickList.pin, documentQuickList.pinnedPaths, documentQuickList.unpin],
+    [pinDocument, pinnedDocumentPaths, unpinDocument],
   );
 
   return (
@@ -1264,7 +1061,7 @@ export function Sidebar({
                 selectedPath={selection?.kind === 'document' ? selection.path : undefined}
                 onSelect={(entry) => {
                   if (entry.isDirectory) return;
-                  documentQuickList.noteUsed(entry.path);
+                  noteDocumentUsed(entry.path);
                   onSelect(toRecentTab({ kind: 'document', path: entry.path }));
                 }}
                 onIntent={(entry) => {
@@ -1276,7 +1073,7 @@ export function Sidebar({
                 onDelete={openDeleteDocument}
                 actionsForEntry={documentActionsForEntry}
                 trailingForEntry={(entry) =>
-                  documentQuickList.pinnedPaths.has(entry.path) ? (
+                  pinnedDocumentPaths.has(entry.path) ? (
                     <span className="document-pin-marker" title="Pinned" aria-label="Pinned">
                       <i className="fa-solid fa-thumbtack" />
                     </span>

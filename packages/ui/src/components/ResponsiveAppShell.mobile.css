@@ -123,6 +123,7 @@
 }
 
 .app.app-compact .app-main:has(> .gezel-detail-chat),
+.app.app-compact .app-main:has(> .keep-alive-view[data-shown] > .gezel-detail-chat),
 .app.app-compact .two-col > section:has(> .gezel-detail-chat),
 .app.app-compact .task-detail-panel:has(.task-detail-chat-mode) {
   padding: 0;
@@ -130,7 +131,8 @@
 
 /* A task opened in its own tab has no back key above its header, so it keeps
    the top gutter; its chat still runs edge to edge and down to the frame. */
-.app.app-compact .app-main:has(> .task-detail-chat-mode) {
+.app.app-compact .app-main:has(> .task-detail-chat-mode),
+.app.app-compact .app-main:has(> .keep-alive-view[data-shown] > .task-detail-chat-mode) {
   padding: var(--app-main-pad-block) 0 0;
 }
 

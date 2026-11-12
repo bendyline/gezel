@@ -34,10 +34,14 @@ export const LOCAL_HARNESS_PROVIDERS = [
 export const LOCAL_HARNESS_PROVIDER_SET = new Set<ProviderName>(LOCAL_HARNESS_PROVIDERS);
 
 export class HarnessSetupError extends Error {
+  /**
+   * 424 is an outside app's own command failing (`claude mcp add` exiting
+   * non-zero): a 4xx, so the message survives the 5xx body sanitizer.
+   */
   constructor(
     readonly code: string,
     message: string,
-    readonly status: 400 | 404 | 409 | 500 = 409,
+    readonly status: 400 | 404 | 409 | 424 | 500 = 409,
   ) {
     super(message);
     this.name = 'HarnessSetupError';

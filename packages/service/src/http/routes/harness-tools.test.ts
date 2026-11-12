@@ -94,4 +94,23 @@ describe('/api/harness-tools', () => {
       message: 'Cursor already has a server called gezel.',
     });
   });
+
+  it("answers an app command's failure with its words, not a bare 500", async () => {
+    const { app, harnessTools } = build(['ui']);
+    const message =
+      "Claude Code did not take Gezel's tools. `claude mcp add` stopped with exit code 1: Error: Invalid configuration";
+    harnessTools.configure.mockRejectedValueOnce(
+      Object.assign(new Error(message), { code: 'app_command_failed', status: 424 }),
+    );
+    const res = await app.request('/api/harness-tools/clients/claude-code', json('PUT', {}));
+    expect(res.status).toBe(424);
+    expect(await res.json()).toEqual({ error: 'app_command_failed', message });
+
+    harnessTools.remove.mockRejectedValueOnce(new Error('EACCES: C:\\Users\\alice\\.claude.json'));
+    const opaque = await app.request('/api/harness-tools/clients/claude-code', {
+      method: 'DELETE',
+    });
+    expect(opaque.status).toBe(500);
+    expect(JSON.stringify(await opaque.json())).not.toContain('alice');
+  });
 });

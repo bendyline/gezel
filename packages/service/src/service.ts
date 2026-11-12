@@ -1,9 +1,9 @@
-import { type LogOutput, getLogOutput, setLogOutput } from '@bendyline/gezel';
 import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { gezelHome } from '@bendyline/gezel/paths';
 import { daemonHost } from './daemon-host.js';
 import type { EngineContext } from './http/engine-context.js';
 import type { RunningInferenceOnlyService } from './inference-host.js';
+import { routeServiceLogs } from './log-routing.js';
 import { resolveEffectiveServiceRole } from './runtime-discovery.js';
 import type { RunningService, StartServiceOptions } from './service-options.js';
 export type { RunningInferenceOnlyService } from './inference-host.js';
@@ -36,25 +36,28 @@ export async function startService(
   daemonHost();
   // Before any worker or child loads ONNX Runtime: see core native/onnx-telemetry.ts.
   disableOnnxRuntimeTelemetry();
-  const previousLogOutput = getLogOutput();
-  if (opts.logOutput) setLogOutput(opts.logOutput);
+  const home = opts.home ?? gezelHome();
+  // A library's stdout belongs to its caller: unset means stderr, and only a
+  // process that is nothing but the daemon asks for 'split'.
+  const logOutput = opts.logOutput ?? 'stderr';
+  const restoreLogs = routeServiceLogs(logOutput, home);
   try {
-    const running = await startForRole(opts);
-    if (opts.logOutput) restoreLogOutputOnStop(running, previousLogOutput);
+    const running = await startForRole({ ...opts, home, logOutput });
+    restoreLogsOnStop(running, restoreLogs);
     return running;
   } catch (error) {
-    setLogOutput(previousLogOutput);
+    await restoreLogs();
     throw error;
   }
 }
 
-function restoreLogOutputOnStop(running: { stop(): Promise<void> }, previous: LogOutput): void {
+function restoreLogsOnStop(running: { stop(): Promise<void> }, restore: () => Promise<void>): void {
   const stop = running.stop.bind(running);
   running.stop = async () => {
     try {
       await stop();
     } finally {
-      setLogOutput(previous);
+      await restore();
     }
   };
 }

@@ -581,11 +581,23 @@ class MockSession extends StreamingSessionBase implements LLMSession {
     const text = this.provider.nextScriptedResponse(prompt);
     const engineTelemetry = this.provider.nextScriptedEngineTelemetry();
     for (const phase of engineTelemetry?.phases ?? []) this.emitEnginePhase(phase);
-    // Emit 2-3 deltas so streaming tests see activity.
-    const mid = Math.floor(text.length / 2);
-    const parts = text.length > 1 ? [text.slice(0, mid), text.slice(mid)] : [text];
-    for (const part of parts) {
-      this.emitDelta(part);
+    const pacing = mockStreamPacing();
+    if (pacing) {
+      // The UI perf harness streams a long reply the way an engine does: small
+      // chunks on a clock, so per-frame rendering cost is what gets measured.
+      const signal = sendOpts?.queue?.signal;
+      for (let at = 0; at < text.length; at += pacing.chars) {
+        if (signal?.aborted) throw new Error(turnCancelledMessage());
+        this.emitDelta(text.slice(at, at + pacing.chars));
+        await new Promise<void>((resolve) => setTimeout(resolve, pacing.intervalMs));
+      }
+    } else {
+      // Emit 2-3 deltas so streaming tests see activity.
+      const mid = Math.floor(text.length / 2);
+      const parts = text.length > 1 ? [text.slice(0, mid), text.slice(mid)] : [text];
+      for (const part of parts) {
+        this.emitDelta(part);
+      }
     }
     this.emitUsage(
       buildTurnUsage({
@@ -654,6 +666,18 @@ class MockSession extends StreamingSessionBase implements LLMSession {
 /** Convenience: returns a random id so tests can assert unique values. */
 export function randomMockSessionId(): string {
   return `mock-${randomUUID().slice(0, 8)}`;
+}
+
+/**
+ * `GEZEL_MOCK_STREAM_CHUNK_CHARS` (and optionally `GEZEL_MOCK_STREAM_INTERVAL_MS`,
+ * default 16) make the mock stream its reply in chunks of that many characters
+ * on a timer, read per turn. Unset, replies stream in two parts.
+ */
+function mockStreamPacing(): { chars: number; intervalMs: number } | null {
+  const chars = Number(process.env.GEZEL_MOCK_STREAM_CHUNK_CHARS ?? '');
+  if (!Number.isFinite(chars) || chars <= 0) return null;
+  const interval = Number(process.env.GEZEL_MOCK_STREAM_INTERVAL_MS ?? '');
+  return { chars, intervalMs: Number.isFinite(interval) && interval >= 0 ? interval : 16 };
 }
 
 /**

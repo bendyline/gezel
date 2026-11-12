@@ -1,6 +1,6 @@
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { resolveRunPrompt } from './run-prompt.js';
+import { detectStdinKind, resolveRunPrompt } from './run-prompt.js';
 
 function unreadInput(isTTY = false) {
   return {
@@ -51,6 +51,51 @@ describe('resolveRunPrompt', () => {
     expect(input[Symbol.asyncIterator]).not.toHaveBeenCalled();
   });
 
+  it('adds a redirected file after the prompt, separated by a blank line', async () => {
+    await expect(
+      resolveRunPrompt(['Use', 'the text I piped in'], Readable.from(['The launch is Friday.\n']), {
+        stdinKind: 'file',
+      }),
+    ).resolves.toBe('Use the text I piped in\n\nThe launch is Friday.\n');
+  });
+
+  it('adds what a pipe delivers, read to its end', async () => {
+    const chunks = ['first ', 'and ', 'last'].map((text) => Buffer.from(text));
+    await expect(
+      resolveRunPrompt(['Summarize'], Readable.from(chunks), { stdinKind: 'pipe' }),
+    ).resolves.toBe('Summarize\n\nfirst and last');
+  });
+
+  it.each(['', ' \r\n\t '])(
+    'sends the prompt alone when the pipe ends empty (%j)',
+    async (text) => {
+      await expect(
+        resolveRunPrompt(['Summarize'], Readable.from([text]), { stdinKind: 'pipe' }),
+      ).resolves.toBe('Summarize');
+    },
+  );
+
+  it('goes on without a pipe that stays silent, and lets go of it', async () => {
+    const silent = new PassThrough();
+    const started = Date.now();
+    await expect(
+      resolveRunPrompt(['Summarize'], silent, { stdinKind: 'pipe', firstDataMs: 20 }),
+    ).resolves.toBe('Summarize');
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(silent.isPaused()).toBe(true);
+  });
+
+  it.each(['tty', 'none'] as const)(
+    'never reads stdin of kind %s beside a prompt',
+    async (kind) => {
+      const input = unreadInput(kind === 'tty');
+      await expect(resolveRunPrompt(['Summarize'], input, { stdinKind: kind })).resolves.toBe(
+        'Summarize',
+      );
+      expect(input[Symbol.asyncIterator]).not.toHaveBeenCalled();
+    },
+  );
+
   it('reports an unreadable stream as a CLI error', async () => {
     const input = Readable.from(
       (async function* () {
@@ -62,5 +107,25 @@ describe('resolveRunPrompt', () => {
       name: 'CliError',
       message: 'Could not read prompt from stdin: stream failed',
     });
+  });
+});
+
+describe('detectStdinKind', () => {
+  const mode = (bits: number) => () => ({ mode: bits });
+
+  it('reads the mode bits, which also mark a pipe on Windows', () => {
+    expect(detectStdinKind(mode(0o100644), undefined)).toBe('file');
+    expect(detectStdinKind(mode(0o010000), undefined)).toBe('pipe');
+    expect(detectStdinKind(mode(0o140777), undefined)).toBe('pipe');
+  });
+
+  it('leaves a terminal, a null device and a missing stdin unread', () => {
+    expect(detectStdinKind(mode(0o020620), true)).toBe('tty');
+    expect(detectStdinKind(mode(0o020666), undefined)).toBe('none');
+    expect(
+      detectStdinKind(() => {
+        throw new Error('EBADF');
+      }, undefined),
+    ).toBe('none');
   });
 });

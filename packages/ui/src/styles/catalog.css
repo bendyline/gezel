@@ -701,7 +701,7 @@
    reads as a collection of objects instead of ruled-off page sections.
    Keep the lift quiet: these cards are informational, not clickable. */
 .catalog-browser--models .catalog-item {
-  border-color: color-mix(in srgb, var(--border) 88%, var(--accent));
+  border-color: color-mix(in srgb, var(--border) 88%, var(--wash-tint));
   background: color-mix(in srgb, var(--panel) 72%, var(--surface));
   box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 7%, transparent);
 }
@@ -833,7 +833,7 @@
      Light mode: the same peach `#e0b897` text used in dark mode washed out
      against the parchment-tinted background — flip to a dark brown ink so
      the pill content is legible. */
-  background: rgba(176, 114, 76, 0.22);
+  background: color-mix(in srgb, var(--wash-tint) 22%, transparent);
   color: #5a3825;
 }
 
@@ -844,13 +844,13 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) .catalog-item-tag {
-    background: rgba(176, 114, 76, 0.14);
+    background: color-mix(in srgb, var(--wash-tint) 14%, transparent);
     color: #e0b897;
   }
 }
 
 [data-theme="dark"] .catalog-item-tag {
-  background: rgba(176, 114, 76, 0.14);
+  background: color-mix(in srgb, var(--wash-tint) 14%, transparent);
   color: #e0b897;
 }
 
@@ -885,7 +885,7 @@
 
 .catalog-ollama-list > .catalog-ollama-action {
   padding: 0.6rem 0.75rem;
-  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--accent));
+  border: 1px solid color-mix(in srgb, var(--border) 88%, var(--wash-tint));
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--panel) 72%, var(--surface));
   box-shadow: 0 1px 2px color-mix(in srgb, var(--text) 7%, transparent);
@@ -1307,8 +1307,8 @@
   padding: 0.2rem 0.55rem;
   border-radius: var(--radius-lg);
   color: var(--accent-text);
-  background: rgba(176, 114, 76, 0.12);
-  border: 1px solid rgba(176, 114, 76, 0.3);
+  background: color-mix(in srgb, var(--wash-tint) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wash-tint) 30%, transparent);
   white-space: nowrap;
 }
 
@@ -1422,8 +1422,8 @@ a.license-button:hover {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.4rem 0.55rem;
-  background: rgba(176, 114, 76, 0.06);
-  border: 1px dashed rgba(176, 114, 76, 0.35);
+  background: color-mix(in srgb, var(--wash-tint) 6%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--wash-tint) 35%, transparent);
   border-radius: var(--radius-md);
   margin-top: 0.25rem;
 }
@@ -1836,7 +1836,7 @@ a.license-button:hover {
 }
 .gezel-template-list li.suggested {
   border-color: var(--accent);
-  background: rgba(176, 114, 76, 0.06);
+  background: color-mix(in srgb, var(--wash-tint) 6%, transparent);
 }
 .gezel-template-head {
   display: flex;
@@ -1957,7 +1957,7 @@ a.license-button:hover {
 
 .ambient-theme-select-menu .gz-select-item[data-highlighted] {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, var(--surface));
+  background: color-mix(in srgb, var(--wash-tint) 10%, var(--surface));
   color: var(--text);
 }
 

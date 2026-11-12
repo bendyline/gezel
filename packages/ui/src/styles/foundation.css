@@ -149,6 +149,18 @@
   --titlebar-pane-shadow: rgba(0, 0, 0, 0.18);
   --accent: var(--gezel-terra);
   --accent-hover: var(--gezel-terra-hover);
+  /* The tint of a quiet wash or a structural hairline: a zone set apart
+     inside a conversation or a panel (your own bubble, a hand-off note, a
+     toolbar band, the composer's frame, a thread's line, a hover). By day it
+     is the terracotta, warm on parchment. At night it is a gray of about the
+     same lightness, because a terracotta wash over charcoal is a brown
+     surface, and at night the accent is kept for marks: the primary key, a
+     selected or latched item, links, icons and labels. Use it through
+     color-mix at the strength the wash wants, e.g.
+     `color-mix(in srgb, var(--wash-tint) 8%, transparent)`. A mix of
+     `--accent` under 16% is a wash and belongs here; selection (16% and up),
+     focus and emphasis keep `--accent`. */
+  --wash-tint: var(--gezel-terra);
   /* Text variants are deliberately darker than their fill/border peers in
      light mode. The semantic colors are attractive structural accents but do
      not reach 4.5:1 as normal-size text on every paper surface. */
@@ -376,8 +388,9 @@
        the day's cream ink, so the primary key stays the densest object rather
        than turning into the palest one. */
     --action-bg: #8c4428;
-    --chat-handoff-bg: rgba(176, 114, 76, 0.08);
-    --chat-handoff-border: rgba(176, 114, 76, 0.45);
+    --wash-tint: #8c8a87;
+    --chat-handoff-bg: color-mix(in srgb, var(--wash-tint) 8%, transparent);
+    --chat-handoff-border: color-mix(in srgb, var(--wash-tint) 45%, transparent);
     --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
     --shadow-popover: 0 10px 28px rgb(0 0 0 / 0.45);
     --shadow-dialog: 0 20px 50px rgb(0 0 0 / 0.5);
@@ -484,8 +497,9 @@
   --accent-text: #d5a07a;
   --accent-text-hover: #e0b897;
   --action-bg: #8c4428;
-  --chat-handoff-bg: rgba(176, 114, 76, 0.08);
-  --chat-handoff-border: rgba(176, 114, 76, 0.45);
+  --wash-tint: #8c8a87;
+  --chat-handoff-bg: color-mix(in srgb, var(--wash-tint) 8%, transparent);
+  --chat-handoff-border: color-mix(in srgb, var(--wash-tint) 45%, transparent);
   --surface-shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
   --shadow-popover: 0 10px 28px rgb(0 0 0 / 0.45);
   --shadow-dialog: 0 20px 50px rgb(0 0 0 / 0.5);

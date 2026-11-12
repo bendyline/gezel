@@ -247,6 +247,6 @@ Applications can use `@bendyline/gezel-client` against the authenticated user da
 | `GET /api/knowledge/catalogs/:catalogId/passage?id=<documentId>&chunk=<uid>` | Read a cited passage |
 | `POST /api/memory/save`, `POST /api/memory/search` | Save and retrieve mutable memories |
 
-URL-encode document ids in query parameters; they can contain slashes and Unicode. Install and catalog-management routes require the first-party management boundary, rather than a model session token. A progress subscriber can disconnect without cancelling an install; use the explicit cancel endpoint when that is the intended action.
+URL-encode document ids in query parameters; they can contain slashes and Unicode. Install and catalog-management routes require the first-party management boundary, rather than a model session token. A progress subscriber can disconnect without canceling an install; use the explicit cancel endpoint when that is the intended action.
 
 For an independent compiler or reader, use [`@bendyline/gezel-knowledge`](https://github.com/bendyline/gezel/tree/main/packages/knowledge). For the schemas, citation grammar, quantization, and signature helpers, use [`@bendyline/gezk`](https://github.com/bendyline/gezel/tree/main/packages/gezk). The [specification repository](https://github.com/bendyline/gezk), [Python reader](https://github.com/bendyline/gezk/tree/main/reference/python), and [conformance kit](https://github.com/bendyline/gezk/tree/main/conformance) support implementations outside Gezel.

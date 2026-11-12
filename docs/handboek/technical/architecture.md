@@ -12,7 +12,7 @@ subcategory:
 
 Gezel is two cooperating pieces:
 
-- **The app** — the window you see. It draws the workshop and talks to the service over a private, authenticated local connection.
+- **The app** — the window you see. It shows your crew, projects and threads, and talks to the service over a private, authenticated local connection.
 - **The service (**`gezeld`**)** — a background process on your machine that owns everything real: your files, your threads, the connections to AI providers. It keeps working when the window is closed, which is what makes scheduled jobs and long-running tasks possible.
 
 The app finds or starts the service automatically. On a standard install the service runs machine-wide; there is also a per-user mode, and Settings lets you enable start-at-login so Gezel is always on duty.

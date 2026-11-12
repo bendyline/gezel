@@ -1,6 +1,6 @@
 import { fileURLToPath } from 'node:url';
-import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { reactWithCompiler } from './scripts/vite-react.js';
 
 /**
  * Third Vite build target: the Office task pane, served by gezeld at
@@ -24,7 +24,7 @@ export default defineConfig({
   root,
   base: '/office/',
   publicDir: fileURLToPath(new URL('./office-pages/public', import.meta.url)),
-  plugins: [react()],
+  plugins: reactWithCompiler(fileURLToPath(new URL('.', import.meta.url))),
   resolve: {
     dedupe: ['react', 'react-dom'],
   },

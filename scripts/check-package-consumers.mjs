@@ -121,6 +121,16 @@ const IMPORTABLE = [
   '@bendyline/gezel-capacitor',
 ];
 
+/** Declarations a Node program imports, checked without the DOM lib. */
+const NODE_ONLY_TYPE_SPECIFIERS = [
+  '@bendyline/gezel-service',
+  '@bendyline/gezel-service/gezapp',
+  '@bendyline/gezel-service/handboek',
+  '@bendyline/gezel-service/media',
+  '@bendyline/gezel-service/native-release',
+  '@bendyline/gezel-service/native-verification',
+];
+
 const failures = [];
 const reportPath = consumerCheckReportPath(repoRoot);
 const step = (name) => console.log(`\n── ${name}`);
@@ -303,14 +313,15 @@ function mkdtempHomeWithoutRetrieval(prefix) {
   return home;
 }
 
-function findOnPath(fileName) {
+function findAllOnPath(fileName) {
+  const found = [];
   for (const rawDir of (process.env.PATH ?? '').split(delimiter)) {
     const pathDir = rawDir.replace(/^"(.*)"$/, '$1');
     if (!pathDir) continue;
     const candidate = join(pathDir, fileName);
-    if (existsSync(candidate)) return candidate;
+    if (existsSync(candidate)) found.push(candidate);
   }
-  return null;
+  return found;
 }
 
 /**
@@ -332,8 +343,10 @@ function windowsPackageManagerCli(manager) {
     }
   }
 
-  const shim = findOnPath(`${manager}.cmd`);
-  if (shim) {
+  // Every shim on PATH, not only the first: under `pnpm run`, node_modules/.bin
+  // leads PATH, and a dependency's own `npm` bin shim there has no npm-cli.js
+  // beside it.
+  for (const shim of findAllOnPath(`${manager}.cmd`)) {
     const shimDir = dirname(shim);
     if (manager === 'pnpm') {
       candidates.push(
@@ -594,6 +607,51 @@ try {
     fail(`installed declaration typecheck failed\n${typecheck.stdout}\n${typecheck.stderr}`);
   } else {
     ok('installed declarations typecheck without skipping library errors');
+  }
+
+  // The check above leaves `lib` to its target's default, which includes the
+  // DOM. A Node program usually does not, and the service's declarations once
+  // pulled in squisq's schema types and `hono/ws`, which only compile with it
+  // (2026-11-11 npm ship audit).
+  step('typechecking the service declarations as a Node program, without the DOM lib');
+  const nodeTypeProbe = join(consumer, 'probe-node-types.mts');
+  writeFileSync(
+    nodeTypeProbe,
+    `${NODE_ONLY_TYPE_SPECIFIERS.map((specifier) => `import ${JSON.stringify(specifier)};`).join('\n')}\n`,
+  );
+  writeFileSync(
+    join(consumer, 'tsconfig.node-consumer.json'),
+    `${JSON.stringify(
+      {
+        compilerOptions: {
+          target: 'ES2023',
+          lib: ['ES2023'],
+          module: 'NodeNext',
+          moduleResolution: 'NodeNext',
+          strict: true,
+          skipLibCheck: false,
+          noEmit: true,
+          types: ['node'],
+        },
+        files: ['./probe-node-types.mts'],
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  const nodeTypecheck = run(
+    process.execPath,
+    [
+      join(consumer, 'node_modules', 'typescript', 'bin', 'tsc'),
+      '-p',
+      'tsconfig.node-consumer.json',
+    ],
+    { cwd: consumer },
+  );
+  if (nodeTypecheck.status !== 0) {
+    fail(`service declarations need the DOM lib\n${nodeTypecheck.stdout}\n${nodeTypecheck.stderr}`);
+  } else {
+    ok('service declarations typecheck for a Node program without the DOM lib');
   }
 
   // The doctor re-hashes every file against the manifest `prepack` wrote, so it
@@ -986,9 +1044,10 @@ try {
         );
       } else if (downloadedBytes > 1024 * 1024) {
         fail(`fresh-home gezel run downloaded ${downloadedBytes} bytes into ${enginesDir}`);
-      } else if (result.stderr.split('\n').filter((line) => / INFO /.test(line)).length > 0) {
+      } else if (/ (?:INFO|WARN) {2}\[/.test(result.stderr)) {
+        // An in-process service keeps its records in the service log file.
         fail(
-          `fresh-home gezel run printed info-level service logs by default\nstderr: ${result.stderr}`,
+          `fresh-home gezel run printed service log records by default\nstderr: ${result.stderr}`,
         );
       } else {
         ok('fresh-home gezel run stops before any download with CLI setup guidance');

@@ -6,6 +6,7 @@ import {
   isRetryableFailedTurn,
   mergeTimelineMessages,
   newestMessageAt,
+  sameJson,
   turnFailureShownElsewhere,
 } from './chat-timeline-helpers.js';
 
@@ -77,6 +78,40 @@ describe('mergeTimelineMessages', () => {
     const newest = message();
 
     expect(mergeTimelineMessages([older], [newest])).toEqual([older, newest]);
+  });
+
+  it('keeps the rows on screen, and the array itself, when a refresh repeats them', () => {
+    const first = message();
+    const reply = message({ role: 'assistant', content: 'Hi', at: '2026-09-01T10:00:05.000Z' });
+    const onScreen = [first, reply];
+    const refreshed = [structuredClone(first), structuredClone(reply)];
+
+    expect(mergeTimelineMessages(onScreen, refreshed)).toBe(onScreen);
+  });
+
+  it('replaces only the rows that changed', () => {
+    const first = message();
+    const reply = message({ role: 'assistant', content: 'Hi', at: '2026-09-01T10:00:05.000Z' });
+    const next = message({ content: 'And then', at: '2026-09-01T10:01:00.000Z' });
+    const merged = mergeTimelineMessages(
+      [first, reply],
+      [structuredClone(first), { ...reply, content: 'Hi there' }, next],
+    );
+
+    expect(merged[0]).toBe(first);
+    expect(merged[1]).not.toBe(reply);
+    expect(merged[1]?.content).toBe('Hi there');
+    expect(merged[2]).toBe(next);
+  });
+});
+
+describe('sameJson', () => {
+  it('compares JSON-shaped values by content', () => {
+    expect(sameJson({ a: [1, { b: 'x' }] }, { a: [1, { b: 'x' }] })).toBe(true);
+    expect(sameJson({ a: [1, 2] }, { a: [1, 2, 3] })).toBe(false);
+    expect(sameJson({ a: 1 }, { a: 1, b: undefined })).toBe(false);
+    expect(sameJson([1], { 0: 1 })).toBe(false);
+    expect(sameJson(null, {})).toBe(false);
   });
 });
 

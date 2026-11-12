@@ -28,6 +28,9 @@ You choose the level in **Settings → Security & compliance**, or with `gezel s
 | Package scripts Gezel runs (`npm run`, `npx`) | Whatever the script sends; package scripts run with network access | **Blocked** | **Blocked** | Allowed |
 | Automatic update checks (the app, and live catalog updates if you turn them on) | Version checks to Gezel's GitHub releases and to npm | **Blocked** | Allowed | Allowed |
 | Downloads you start: models, on-device engines, knowledge catalogs | Requests for those files, from Hugging Face and Gezel's GitHub releases | Allowed | Allowed | Allowed |
+| Models Gezel downloads on its own when it first needs them: the text search model, and an image reader for an on-device chat model that cannot read images | Requests for those model files, from Hugging Face | Allowed | Allowed | Allowed |
+| Search models Gezel downloads on its own: the relevance model and the media-search model | Requests for those model files, from Hugging Face | **Blocked** | Allowed | Allowed |
+| Catalog updates you turn on: installed knowledge catalogs, and live catalog content | Requests for the new versions, from Hugging Face and npm | **Blocked** | Allowed | Allowed |
 | First-start tool setup | Downloads of the browser-automation tools from npm and Playwright | Allowed | Allowed | Allowed |
 
 The levels are presets. **Settings → Security & compliance** can turn individual switches on or off; a combination that matches no preset is shown as **Custom**.
@@ -48,9 +51,13 @@ The levels are presets. **Settings → Security & compliance** can turn individu
 
 **Downloads you start** fetch files; they do not upload your work. Model files are checked against their published hashes, and the on-device engines against fingerprints built into the release you installed.
 
+**Downloads Gezel starts on its own** also fetch files and upload nothing. The text search model comes the first time Gezel needs it to search your files or memories by meaning. An image reader comes with an on-device chat model that cannot read images, unless **Settings → Image recognition** is set to **Never**. The relevance model is on for new installs, and the media-search model is on unless you turn media search off in **Settings → Image recognition**; a new install waits for its first project to finish, or for background work to begin, before fetching it. Those two follow the security level, so `super-lockdown` stops them.
+
+**Catalog updates you turn on** download new versions of your installed knowledge catalogs, and new catalog content when live catalog updates are on (**Settings → About**). Both are off until you turn them on.
+
 ## What the levels do not change
 
-- **Nothing goes to Bendyline.** No level sends your chats, files or usage to us. The Bendyline-published places Gezel contacts are its GitHub releases and its npm packages, for updates, engines and tools.
+- **Nothing goes to Bendyline.** No level sends your chats, files or usage to us. The Bendyline-published places Gezel contacts are its GitHub releases and its npm packages, for updates, engines and tools, and Bendyline's Hugging Face datasets, for knowledge catalogs.
 - **Keys go only to their own service.** A provider key is sent to that provider and nowhere else. Gezel keeps keys in your operating system's keychain, or in an encrypted file in its own folder where no keychain exists.
 - **The service answers only on this machine.** It listens on this computer alone unless you pair another device to it for remote inference.
 

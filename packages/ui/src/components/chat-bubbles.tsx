@@ -28,6 +28,7 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { formatDebugBundle } from './chat-debug-bundle.js';
 import { humanizeChatError } from './chat-error-copy.js';
 import { queueNoticeIsFresh } from './chat-live-slot.js';
+import { sameJson } from './chat-timeline-helpers.js';
 import { formatContextWindow } from './model-context.js';
 
 export { formatDebugBundle } from './chat-debug-bundle.js';
@@ -41,6 +42,7 @@ import {
   type MouseEvent,
   type ReactNode,
   type RefObject,
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -690,7 +692,7 @@ function HandoffNoteCard({
   );
 }
 
-export function MessageBubble({
+function MessageBubbleView({
   role,
   content,
   authorLabel,
@@ -1440,6 +1442,35 @@ export function MessageBubble({
   );
 }
 
+/** Props compared by value: built per render, but equal while the gezel is unchanged. */
+const BUBBLE_VALUE_PROPS = new Set<string>(['makerGezel']);
+
+function sameSet(a: unknown, b: unknown): boolean {
+  if (!(a instanceof Set) || !(b instanceof Set) || a.size !== b.size) return false;
+  for (const value of a) if (!b.has(value)) return false;
+  return true;
+}
+
+function sameBubbleProps(prev: MessageBubbleProps, next: MessageBubbleProps): boolean {
+  const prevKeys = Object.keys(prev) as (keyof MessageBubbleProps)[];
+  if (prevKeys.length !== Object.keys(next).length) return false;
+  for (const key of prevKeys) {
+    if (Object.is(prev[key], next[key])) continue;
+    if (BUBBLE_VALUE_PROPS.has(key) && sameJson(prev[key], next[key])) continue;
+    // The timeline derives which cards to hide on every render.
+    if (key === 'hiddenCards' && sameSet(prev[key], next[key])) continue;
+    return false;
+  }
+  return true;
+}
+
+/**
+ * One persisted message. Memoized: a timeline re-render leaves a bubble alone
+ * while its message and props keep their identity, which the timeline keeps
+ * for unchanged rows (`mergeTimelineMessages`) and stable handlers.
+ */
+export const MessageBubble = memo(MessageBubbleView, sameBubbleProps);
+
 /**
  * Hover-reveal toolbar that floats in the gutter alongside a chat
  * bubble. Hidden by default; appears when the bubble (or the toolbar
@@ -1948,6 +1979,7 @@ export function StreamingStatusLine({
   thinkingLabel,
   thinkingProgress,
   thinkingDetail,
+  debugMode = false,
 }: {
   failed: boolean;
   queued: boolean;
@@ -1964,6 +1996,11 @@ export function StreamingStatusLine({
   thinkingLabel?: string | undefined;
   thinkingProgress?: number | undefined;
   thinkingDetail?: string | undefined;
+  /**
+   * The prompt's token count is machinery: outside debug mode it shows only
+   * while the pointer is over the header row (`msg-live-tokens-on-hover`).
+   */
+  debugMode?: boolean;
 }) {
   // Name both the queue and its contents: a bare "queued" can read like
   // the user's message has not been sent yet, while this state specifically
@@ -2071,7 +2108,10 @@ export function StreamingStatusLine({
         </Tooltip.Hint>
       )}
       {showProgress && totalTokens !== null && (
-        <span className="msg-live-tokens" aria-label={`${totalTokens} prompt tokens total`}>
+        <span
+          className={`msg-live-tokens${debugMode ? '' : ' msg-live-tokens-on-hover'}`}
+          aria-label={`${totalTokens} prompt tokens total`}
+        >
           {COMPACT_TOKEN_FMT.format(totalTokens)}
         </span>
       )}
@@ -2458,6 +2498,7 @@ export function StreamingBubble({
           toolCount={showMachinery ? toolCount : 0}
           wirePulseCount={awaiting ? 0 : wirePulseCount}
           awaiting={awaiting}
+          debugMode={debugMode === true}
           thinkingLabel={
             awaiting
               ? `Waiting on ${awaitingGezelName}`
@@ -2618,6 +2659,7 @@ export function StreamingBubble({
                         }),
                       )}
                       fontFamily={fontFamily}
+                      live
                     />
                   )}
                 </div>
@@ -3053,10 +3095,7 @@ export function GhostQueuedBubble({
  */
 function useWaitedSeconds(enqueuedAtIso: string): number | null {
   const [, tick] = useState(0);
-  useEffect(() => {
-    const interval = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(interval);
-  }, []);
+  useEffect(() => onSecondTick(() => tick((n) => n + 1)), []);
   const parsed = Date.parse(enqueuedAtIso);
   if (Number.isNaN(parsed)) return null;
   return Math.max(0, Math.floor((Date.now() - parsed) / 1000));
@@ -3843,11 +3882,34 @@ export function useElapsedSeconds(
     // ago — the reader's first question becomes "is it still going?"
     // rather than "what went wrong?".
     if (startedAt === null || stopped) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
+    return onSecondTick(() => setNow(Date.now()));
   }, [startedAt, stopped]);
   if (startedAt === null) return null;
   return Math.max(0, Math.floor((now - startedAt) / 1000));
+}
+
+/**
+ * One clock for every running counter (the elapsed and waited counters in
+ * this file). Each counter used to own an interval,
+ * and a streaming bubble's "silent for" counter is keyed on the last activity,
+ * so its interval was torn down and rebuilt on every streamed frame. Now a
+ * counter joins a set, and every counter on screen ticks in the same frame.
+ */
+const secondTickListeners = new Set<() => void>();
+let secondTickTimer: ReturnType<typeof setInterval> | null = null;
+
+function onSecondTick(listener: () => void): () => void {
+  secondTickListeners.add(listener);
+  secondTickTimer ??= setInterval(() => {
+    for (const tick of secondTickListeners) tick();
+  }, 1000);
+  return () => {
+    secondTickListeners.delete(listener);
+    if (secondTickListeners.size === 0 && secondTickTimer !== null) {
+      clearInterval(secondTickTimer);
+      secondTickTimer = null;
+    }
+  };
 }
 
 /**
@@ -3962,16 +4024,58 @@ function formatVramSize(bytes: number): string {
   return `${Math.round(mb)} MB VRAM`;
 }
 
-export function RenderedMarkdown({
+function parseChatDoc(markdown: string): ReturnType<typeof markdownToChatDoc> | null {
+  try {
+    const mdDoc = parseMarkdown(prepareChatMarkdown(markdown));
+    // Mostly-raw-HTML messages render as source rather than a hollow
+    // sanitized page — see raw-html-dump.ts.
+    const source = isRawHtmlDump((mdDoc.children ?? []) as unknown as MarkdownWalkNode[], markdown)
+      ? parseMarkdown(toHtmlCodeFence(markdown))
+      : mdDoc;
+    return markdownToChatDoc(source, { articleId: 'gezel-chat' });
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parsed documents for settled text, least recently used last out. A chat
+ * that opens again (a project switch and back, a remount) reuses its parses
+ * instead of parsing every message on the way in. Streaming text is never
+ * kept: each frame's text is new and would only push settled entries out.
+ */
+const PARSED_DOC_LIMIT = 400;
+const parsedDocs = new Map<string, ReturnType<typeof parseChatDoc>>();
+
+function cachedChatDoc(markdown: string): ReturnType<typeof parseChatDoc> {
+  const hit = parsedDocs.get(markdown);
+  if (hit !== undefined || parsedDocs.has(markdown)) {
+    parsedDocs.delete(markdown);
+    parsedDocs.set(markdown, hit ?? null);
+    return hit ?? null;
+  }
+  const doc = parseChatDoc(markdown);
+  parsedDocs.set(markdown, doc);
+  if (parsedDocs.size > PARSED_DOC_LIMIT) parsedDocs.delete(parsedDocs.keys().next().value!);
+  return doc;
+}
+
+/** Rendered chat markdown. Memoized: the same text and options draw once. */
+export const RenderedMarkdown = memo(RenderedMarkdownView);
+
+function RenderedMarkdownView({
   markdown,
   mediaProvider,
   fontFamily,
   register = 'chat',
+  live = false,
 }: {
   markdown: string;
   mediaProvider?: MediaProvider | null;
   /** `report` for a document shown outside a bubble: a report, a plan, step instructions. */
   register?: 'chat' | 'report';
+  /** Text still streaming in: parsed fresh each time and never cached. */
+  live?: boolean;
   /**
    * Per-gezel chat-bubble font (a CSS `font-family` value). Squisq's
    * LinearDocView sets its own `bodyFont` from the theme's typography and
@@ -3981,22 +4085,10 @@ export function RenderedMarkdown({
    */
   fontFamily?: string;
 }) {
-  const doc = useMemo(() => {
-    try {
-      const mdDoc = parseMarkdown(prepareChatMarkdown(markdown));
-      // Mostly-raw-HTML messages render as source rather than a hollow
-      // sanitized page — see raw-html-dump.ts.
-      const source = isRawHtmlDump(
-        (mdDoc.children ?? []) as unknown as MarkdownWalkNode[],
-        markdown,
-      )
-        ? parseMarkdown(toHtmlCodeFence(markdown))
-        : mdDoc;
-      return markdownToChatDoc(source, { articleId: 'gezel-chat' });
-    } catch {
-      return null;
-    }
-  }, [markdown]);
+  const doc = useMemo(
+    () => (live ? parseChatDoc(markdown) : cachedChatDoc(markdown)),
+    [markdown, live],
+  );
   // Override the squisq theme's body + title fonts with the gezel's font
   // when one is set. `resolveFontFamily` passes a string family through
   // verbatim, so the GEZEL_CHAT_FONTS family value drops straight in.

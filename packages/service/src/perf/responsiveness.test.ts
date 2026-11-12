@@ -112,6 +112,27 @@ describe('stall classification', () => {
       'opened project:gezel in 2.4s, first frame 180ms, 23 requests, slowest GET /api/projects/gezel/timeline 1.1s (daemon 210ms), renderer busy 3× (max 640ms)',
     );
   });
+
+  it('describes a move inside a view with when it drew and how far it shifted', () => {
+    expect(
+      describeClientReport({
+        kind: 'navigation',
+        view: 'project:gezel/tab:chat',
+        scope: 'part',
+        firstFrameMs: 60,
+        settledMs: 900,
+        paintedMs: 1_200,
+        contentMs: 1_140,
+        layoutShift: 0.31,
+        requests: 4,
+        backgroundRequests: 2,
+        slowest: [],
+        longTasks: { count: 0, totalMs: 0, maxMs: 0 },
+      }),
+    ).toBe(
+      'moved to project:gezel/tab:chat in 900ms, first frame 60ms, drawn 1.2s, content 1.1s, 4 requests (+2 background), layout shift 0.31',
+    );
+  });
 });
 
 describe('responsiveness monitor', () => {

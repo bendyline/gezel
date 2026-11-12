@@ -1,8 +1,13 @@
 import { render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
-import { SearchMarkdownSnippet } from './SearchMarkdownSnippet.js';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { SearchMarkdownSnippet, loadSearchSnippetMarkdown } from './SearchMarkdownSnippet.js';
 
 describe('SearchMarkdownSnippet', () => {
+  // The parser loads on first use; once loaded, snippets format on first render.
+  beforeAll(async () => {
+    await loadSearchSnippetMarkdown();
+  });
+
   it('renders Markdown formatting without exposing its source markers', () => {
     const { container } = render(
       <button type="button">

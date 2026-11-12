@@ -29,7 +29,7 @@
 }
 
 .app-sidebar-item:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
 }
 
 .app-sidebar-item-icon {
@@ -135,7 +135,7 @@
 }
 
 .app-sidebar-group-toggle:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
 }
 
 .app-sidebar-group-label {
@@ -165,7 +165,7 @@
 }
 
 .app-sidebar-caret-btn:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
   color: var(--text);
 }
 
@@ -205,7 +205,7 @@
 }
 
 .app-sidebar-add:hover {
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 12%, transparent);
   color: var(--accent-text);
 }
 

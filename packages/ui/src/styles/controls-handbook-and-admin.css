@@ -290,7 +290,7 @@
 
 .gz-check-card:where(:has(input:checked)) {
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  background: color-mix(in srgb, var(--wash-tint) 8%, var(--surface));
 }
 
 .gz-check-card:where(:has(input:disabled)) {

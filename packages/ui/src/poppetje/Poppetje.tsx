@@ -4,7 +4,7 @@ import {
   type Poppetje as PoppetjeStruct,
   seedFromKey,
 } from '@bendyline/gezel/poppetje';
-import { type JSX, useId } from 'react';
+import { type JSX, memo, useId } from 'react';
 import { feltForSkin, mixHex } from './color.js';
 import { CarvedHair } from './flowing-hair.js';
 import {
@@ -108,8 +108,25 @@ function grainCharacterFor(seed: number): GrainCharacter {
  * drives the per-individual micro-variation (eye spacing, mouth width,
  * hat felt color), so two gezels with identical catalog slots still
  * don't share a face.
+ *
+ * Memoized: a figure is a large SVG tree with its own gradients and filters,
+ * and lists re-render their rows far more often than a figure changes.
  */
-export function Poppetje({
+export const Poppetje = memo(PoppetjeFigure, samePoppetjeProps);
+
+/**
+ * Other props compare shallowly; the struct compares by value, since every
+ * roster read hands out a fresh copy of the same figure.
+ */
+function samePoppetjeProps(a: PoppetjeProps, b: PoppetjeProps): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof PoppetjeProps>;
+  for (const key of keys) {
+    if (key !== 'poppetje' && a[key] !== b[key]) return false;
+  }
+  return a.poppetje === b.poppetje || JSON.stringify(a.poppetje) === JSON.stringify(b.poppetje);
+}
+
+function PoppetjeFigure({
   poppetje: g,
   variant = 'full',
   size = 120,

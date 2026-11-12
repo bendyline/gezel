@@ -1,5 +1,5 @@
 import type { HarnessToolsClientStatus, HarnessToolsStatusResponse } from '@bendyline/gezel';
-import type { GezelClient } from '@bendyline/gezel-client';
+import { GezelApiError, type GezelClient } from '@bendyline/gezel-client';
 import { Command } from 'commander';
 import { describe, expect, it, vi } from 'vitest';
 import { registerMcpCommands } from './mcp-command.js';
@@ -96,6 +96,23 @@ describe('gezel mcp', () => {
     expect(out).toContain('the `search` tool from the `gezel` MCP server');
     // Cursor has no prompt command Gezel can name, so none is printed.
     expect(out).not.toContain('triage_issues');
+  });
+
+  it("prints the app's own reason when its command refuses the setup", async () => {
+    const { run, client } = fixture();
+    const message =
+      "Claude Code did not take Gezel's tools. `claude mcp add` stopped with exit code 1: Error: Invalid configuration";
+    client.configureHarnessTools.mockRejectedValueOnce(
+      new GezelApiError(
+        'Gezel service answered 424 on PUT /api/harness-tools/clients/claude-code',
+        424,
+        { error: 'app_command_failed', message },
+      ),
+    );
+    await expect(run('mcp', 'install', 'claude-code')).rejects.toMatchObject({
+      name: 'CliError',
+      message,
+    });
   });
 
   it('names the apps it knows when given another', async () => {

@@ -156,6 +156,7 @@ export function ChatStickyHeader({
             elapsedSeconds={liveElapsed}
             toolCount={debugMode ? countSegmentTools(slotForLive.segments) : 0}
             wirePulseCount={slotForLive.wirePulseCount}
+            debugMode={debugMode}
             {...(liveStatusLabel(slotForLive)
               ? { thinkingLabel: liveStatusLabel(slotForLive) }
               : {})}

@@ -194,11 +194,13 @@ test('07 - tasks area and the new-task gallery', async () => {
   const newTask = page.getByRole('button', { name: '+ New task' });
   if (await newTask.isEnabled()) {
     await newTask.click();
-    await expect(page.locator('[role="dialog"]')).toBeVisible({ timeout: 10_000 });
+    // By name: views visited earlier stay mounted, hidden, with dialogs of their own.
+    const gallery = page.getByRole('dialog', { name: 'New task' });
+    await expect(gallery).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(800);
     await shot('12-new-task-gallery.png');
     await page.keyboard.press('Escape');
-    await expect(page.locator('[role="dialog"]')).toBeHidden();
+    await expect(gallery).toBeHidden();
   }
 });
 

@@ -4,8 +4,11 @@ import {
   resolveInterestAreas,
   shouldAskInterests,
 } from '@bendyline/gezel';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ConfigResponse } from '@bendyline/gezel-client';
+import { useCallback, useRef } from 'react';
 import { api } from '../api.js';
+import { setRead } from '../data/api-reads.js';
+import { useApiRead } from '../data/use-api-read.js';
 
 /** The slice of config interests read. */
 interface InterestConfig {
@@ -27,43 +30,35 @@ export interface InterestsState {
   save(next: readonly InterestAreaId[]): Promise<void>;
 }
 
+function interestSlice(config: ConfigResponse): InterestConfig {
+  const source = config as InterestConfig;
+  return {
+    interests: source.interests,
+    firstUseAt: source.firstUseAt,
+    securityPolicy: source.securityPolicy,
+  };
+}
+
 /**
- * The person's interest areas, from config. Every surface that orders work
- * reads them here, and a save from any one of them reaches the others
- * through `gezel:config-updated`.
+ * The person's interest areas, from the shared config read. Every surface
+ * that orders work reads them here, and a save from any one of them reaches
+ * the others through the same cache.
  */
 export function useInterests(): InterestsState {
-  const [config, setConfig] = useState<InterestConfig | null>(null);
-  const latest = useRef<InterestConfig | null>(null);
+  const config = useApiRead('getConfig', [], { select: interestSlice }).data;
+  const latest = useRef<InterestConfig | undefined>(config);
   latest.current = config;
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getConfig()
-      .then((cfg) => {
-        if (!cancelled) setConfig(cfg as InterestConfig);
-      })
-      .catch(() => {});
-    const onUpdated = (e: Event) => {
-      const detail = (e as CustomEvent).detail as InterestConfig | undefined;
-      if (detail && 'interests' in detail) {
-        setConfig((prev) => ({ ...(prev ?? {}), interests: detail.interests }));
-      }
-    };
-    window.addEventListener('gezel:config-updated', onUpdated);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('gezel:config-updated', onUpdated);
-    };
-  }, []);
 
   const save = useCallback(async (next: readonly InterestAreaId[]) => {
     const interests = {
       areas: interestAreasToSave(latest.current, next),
       askedAt: new Date().toISOString(),
     };
-    setConfig((prev) => ({ ...(prev ?? {}), interests }));
+    setRead(
+      'getConfig',
+      [],
+      (previous) => ({ ...(previous ?? {}), interests }) as unknown as ConfigResponse,
+    );
     try {
       await api.updateConfig({ interests });
       window.dispatchEvent(new CustomEvent('gezel:config-updated', { detail: { interests } }));
@@ -73,7 +68,7 @@ export function useInterests(): InterestsState {
   }, []);
 
   return {
-    loaded: config !== null,
+    loaded: config !== undefined,
     areas: resolveInterestAreas(config),
     ask: shouldAskInterests(config, Date.now()),
     appNetwork: config?.securityPolicy?.allowAppNetwork !== false,

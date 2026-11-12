@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import {
   type FatalProcessErrorSource,
   installProcessErrorHandlers,
+  setLogSink,
   writeProcessOutput,
 } from '@bendyline/gezel';
 // Self-reference, kept external in tsup.config.ts: the daemon runs from the
@@ -57,6 +58,9 @@ async function exitAfterFatalError(error: Error, source: FatalProcessErrorSource
 installProcessErrorHandlers(process, exitAfterFatalError);
 
 async function main() {
+  // A daemon started while its spawner sent records to a sink inherits
+  // GEZEL_LOG_SINK, which would keep it to errors; its output is its own.
+  setLogSink(null);
   applyAutostartRuntimeArguments(process.argv.slice(2));
   // After the autostart home is applied, so the log lands in the home
   // startService() resolves.
@@ -77,6 +81,9 @@ async function main() {
     port: explicitPort,
     preferCanonicalPort: explicitPort === undefined,
     uiDir,
+    // This process is only the daemon, so its stdout is free for info records.
+    // The supervisor reads stdout as info and stderr as warnings.
+    logOutput: 'split',
     // Set by an app SDK host that asked for inference only: the narrow
     // embedded profile, with no secrets, device identity, or remote surface.
     ...(process.env.GEZEL_EMBEDDED_INFERENCE_ONLY === '1' ? { embeddedInferenceOnly: true } : {}),

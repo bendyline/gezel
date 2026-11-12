@@ -92,6 +92,59 @@ describe('gatherTaskReferences', () => {
     expect(references?.items.map((item) => item.title)).toEqual(['Quiche']);
   });
 
+  it('does not cite a page on one generic word of a multi-word subject', async () => {
+    const help = (id: string, title: string, snippet: string): UnifiedSearchResult => ({
+      ...knowledge(id, title, snippet),
+      id: `knowledge:handboek:${id}:a`,
+      catalogId: 'gezel-handboek',
+      uri: `knowledge://bendyline/gezel-handboek/${id}#chunk=a`,
+    });
+    const { search } = searchReturning([
+      help(
+        'board-game-web',
+        'Digital Board Game',
+        'Build a single-file web version of a turn-based board game such as checkers.',
+      ),
+      help(
+        'board-deck',
+        'Board Meeting Deck',
+        'Build a board-meeting deck that briefs directors efficiently.',
+      ),
+      help(
+        'podcast-chaptering',
+        'Podcast Chapters & Show Notes',
+        'Turn a podcast episode into chapter markers plus publish-ready show notes.',
+      ),
+      help(
+        'crm-update-batch',
+        'Bulk CRM Update from Notes',
+        'Turn unstructured notes (call logs, meeting recaps) into structured CRM updates.',
+      ),
+      shared('board/notes-for-directors.md', 'How we keep notes for the board.'),
+    ]);
+    const references = await gatherTaskReferences({
+      search,
+      projectId: 'default',
+      subject: 'Summarize notes.txt for the board',
+      craftbookName: 'Summarize a Long Document',
+    });
+    expect(references?.items.map((item) => item.title)).toEqual(['board/notes-for-directors.md']);
+  });
+
+  it('still cites a page whose title is the subject', async () => {
+    const { search } = searchReturning([
+      knowledge('4234', 'Chess', 'Chess is a strategy game for two players.'),
+      knowledge('51', 'Digital Board Game', 'A turn-based board game such as checkers.'),
+    ]);
+    const references = await gatherTaskReferences({
+      search,
+      projectId: 'default',
+      subject: 'Summarize the rules of chess for the board',
+      craftbookName: 'Summarize a Long Document',
+    });
+    expect(references?.items.map((item) => item.title)).toEqual(['Chess']);
+  });
+
   it('is null when the subject is only the deliverable, or nothing matched', async () => {
     const { search, calls } = searchReturning([shared('PowerPoint tips.md', 'Slides.')]);
     expect(

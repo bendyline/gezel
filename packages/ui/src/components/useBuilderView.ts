@@ -1,5 +1,3 @@
-import { resolveInterestAreas } from '@bendyline/gezel';
-import { peekApiRead } from '../shared-api-reads.js';
 import { useInterests } from './useInterests.js';
 import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
 
@@ -15,7 +13,6 @@ import { useShowAdvancedFeatures } from './useShowAdvancedFeatures.js';
  */
 export function useBuilderView(): boolean {
   const showAdvancedFeatures = useShowAdvancedFeatures();
-  const interests = useInterests();
-  const areas = interests.loaded ? interests.areas : resolveInterestAreas(peekApiRead('getConfig'));
+  const { areas } = useInterests();
   return showAdvancedFeatures || areas.includes('software');
 }

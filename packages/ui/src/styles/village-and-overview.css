@@ -524,7 +524,7 @@ button.filemap-review-issue {
   cursor: pointer;
 }
 button.filemap-review-issue:hover {
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
 }
 .filemap-review-advice,
 .filemap-review-pending {

@@ -6,6 +6,7 @@ import { GezelApiError, streamChatEvents } from '@bendyline/gezel-client';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { api } from '../api.js';
+import { resetReads } from '../data/api-reads.js';
 import { takePendingSettingsSection } from '../settings-nav.js';
 import { ChatComposer } from './ChatComposer.js';
 import { queueComposerPrefill } from './composer-prefill.js';
@@ -465,6 +466,8 @@ describe('ChatComposer attached task', () => {
     expect(await within(strip).findByRole('button', { name: /tonight/i })).toBeVisible();
     unmount();
 
+    // A later visit reads config afresh (the first mount's answer is cached).
+    resetReads();
     vi.mocked(api.getConfig).mockResolvedValueOnce({
       provider: 'mock',
       nightShift: { enabled: false },

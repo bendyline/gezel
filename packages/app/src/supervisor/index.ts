@@ -2843,6 +2843,7 @@ async function startEmbeddedRaw(
       preferCanonicalPort?: boolean;
       role?: 'user' | 'machine-engine' | 'legacy-full';
       machineEngineDiscovery?: boolean;
+      logOutput?: 'split' | 'stderr';
       onRestartRequested?: (reason: string) => void;
     }) => Promise<{
       port: number;
@@ -2869,6 +2870,8 @@ async function startEmbeddedRaw(
     // fallback) so it has a stable base URL.
     preferCanonicalPort: true,
     role: 'user',
+    // The app owns this process's streams, and the log tee persists both.
+    logOutput: 'split',
     // Dev must exercise the provider code that `pnpm app` just built. The
     // installed release broker is deliberately opt-in for compatibility and
     // machine-boundary testing, not an implicit shadow runtime.

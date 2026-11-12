@@ -1264,7 +1264,7 @@
   border-radius: var(--radius-lg);
   font-family: var(--font-ui);
   font-size: var(--text-sm);
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
 }
 .visit-card-text {
@@ -1287,5 +1287,5 @@
 }
 .visit-card-dismiss:hover {
   color: inherit;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 12%, transparent);
 }

@@ -54,7 +54,9 @@ export default defineConfig({
       input: resolve('src/startup/screen.ts'),
       output: {
         entryFileNames: 'startup.js',
-        chunkFileNames: '[name]-[hash].js',
+        // Hashed chunks sit under assets/ with everything else hashed, where
+        // the daemon serves them as immutable (static-ui.ts).
+        chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: (asset) =>
           asset.names.some((name) => name.endsWith('.css'))
             ? '[name][extname]'

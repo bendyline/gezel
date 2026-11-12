@@ -106,6 +106,19 @@ describe('storage summary', () => {
     expect(summary.redownloadableBytes).toBeGreaterThanOrEqual(4128);
   });
 
+  it("counts uv's download cache as a deletable engine cache", async () => {
+    // UvRuntime points UV_CACHE_DIR here (uvCacheDir in inference's uv-runtime.ts).
+    const store = new Store({ home });
+    await store.ensureLayout();
+    await seedFile(join(home, 'engines', 'uv', 'cache', 'wheels-v5', 'mlx.whl'), 2048);
+
+    const summary = await summarize(store);
+    const caches = category(summary, 'engine-caches');
+    expect(caches.class).toBe('redownloadable');
+    expect(caches.deletable).toBe(true);
+    expect(caches.bytes).toBe(2048);
+  });
+
   it('counts a project once even though several helpers name its directory', async () => {
     const store = new Store({ home });
     await store.ensureLayout();

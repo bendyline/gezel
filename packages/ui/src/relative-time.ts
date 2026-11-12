@@ -96,8 +96,15 @@ export function formatClockTime(at: TimeInput, fallback = ''): string {
 export function formatAbsoluteTime(at: TimeInput, fallback = ''): string {
   const then = toEpochMs(at);
   if (then === null) return fallback;
-  return new Intl.DateTimeFormat(undefined, {
+  absoluteFormat ??= new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
-  }).format(new Date(then));
+  });
+  return absoluteFormat.format(new Date(then));
 }
+
+/**
+ * Built once: constructing an Intl formatter costs far more than formatting,
+ * and History, session dividers and the switcher format one per row per render.
+ */
+let absoluteFormat: Intl.DateTimeFormat | undefined;

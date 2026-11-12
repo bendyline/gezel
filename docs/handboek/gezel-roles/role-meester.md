@@ -7,7 +7,7 @@ summary: The guildmaster — your front door to the whole crew.
 
 # The Meester
 
-Every workshop needs someone who knows the whole guild. The **Meester** (Dutch for master craftsman) is that figure: the first one you meet, and the one whose job is *you* — understanding what you're trying to do and getting the right help onto it.
+Every crew needs someone who knows everyone on it. The **Meester** (Dutch for master craftsman) is that figure: the first one you meet, and the one whose job is *you* — understanding what you're trying to do and getting the right help onto it.
 
 ::handboek-gezel-roster{role=meester}
 

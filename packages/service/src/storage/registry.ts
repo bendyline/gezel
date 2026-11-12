@@ -223,7 +223,8 @@ export const STORAGE_CATEGORIES: StorageCategoryDef[] = [
     id: 'engine-caches',
     class: 'redownloadable',
     label: 'Engine caches',
-    description: 'Python environments, model conversion caches, and scratch state.',
+    description:
+      'Python environments and their package downloads, model conversion caches, and scratch state.',
     deletable: true,
     inBackup: false,
     async resolve({ home }) {

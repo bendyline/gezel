@@ -3,6 +3,7 @@ import { parseYamlFrontmatter, stringifyYamlFrontmatter } from './frontmatter.js
 
 const HEADING_RE = /^(#{1,6})\s+(.+?)\s*$/;
 const TEMPLATE_RE = /\{\[\s*([a-zA-Z_][\w-]*)\s*([^\]]*)\]\}\s*$/;
+const DEFAULT_SECTION_LEVEL = 2;
 
 /**
  * Parse an `agent.md` source string into frontmatter + sections.
@@ -50,6 +51,7 @@ export function parseGezelMarkdown(source: string): ParsedGezel {
     const { heading, template, params } = parseHeadingAnnotation(start.text);
     sections.push({
       heading,
+      ...(topLevel === DEFAULT_SECTION_LEVEL ? {} : { level: topLevel }),
       body,
       ...(template ? { template } : {}),
       ...(params && Object.keys(params).length > 0 ? { params } : {}),
@@ -109,7 +111,10 @@ export function serializeGezelMarkdown(parsed: ParsedGezel): string {
       const annotation = section.template
         ? ` {[${section.template}${formatParams(section.params)}]}`
         : '';
-      const heading = section.heading ? `## ${section.heading}${annotation}\n\n` : '';
+      // The parsed level is kept so a body that opens with `# Name` above `##`
+      // subsections stays one section instead of splitting on the next parse.
+      const marks = '#'.repeat(section.level ?? DEFAULT_SECTION_LEVEL);
+      const heading = section.heading ? `${marks} ${section.heading}${annotation}\n\n` : '';
       return `${heading}${section.body}`.trimEnd();
     })
     .join('\n\n');

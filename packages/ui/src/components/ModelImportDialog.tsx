@@ -7,6 +7,7 @@ import {
 } from '@bendyline/gezel';
 import type { ModelFitnessEntry } from '@bendyline/gezel-client';
 import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { announceModelInventoryChanged } from '../model-inventory.js';
 import { Dialog, Select } from '../primitives/index.js';
@@ -79,10 +80,6 @@ function describeProgress(bytesWritten: number, totalBytes: number): string {
   return bytesWritten > 0 ? `Downloading ${formatBytes(bytesWritten)}…` : 'Preparing download…';
 }
 
-function errorText(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
-}
-
 function settingsLine(review: ModelImportReview): string {
   const { tuning } = review;
   if (tuning.from === 'catalog') {
@@ -108,7 +105,7 @@ export function ModelImportDialog({ open, initial, onClose, onInstalled }: Model
       const review = await api.reviewModelImport(request);
       if (!closed.current) setPhase({ kind: 'review', review });
     } catch (err) {
-      if (!closed.current) setPhase({ kind: 'enter', error: errorText(err) });
+      if (!closed.current) setPhase({ kind: 'enter', error: apiErrorMessage(err) });
     }
   }, []);
 
@@ -240,7 +237,7 @@ export function ModelImportDialog({ open, initial, onClose, onInstalled }: Model
     } catch (err) {
       if (closed.current) return;
       dropLocal();
-      setPhase({ kind: 'enter', error: errorText(err) });
+      setPhase({ kind: 'enter', error: apiErrorMessage(err) });
     }
   };
 
@@ -308,7 +305,7 @@ export function ModelImportDialog({ open, initial, onClose, onInstalled }: Model
         );
       }
     } catch (err) {
-      if (!controller.signal.aborted) failed = errorText(err);
+      if (!controller.signal.aborted) failed = apiErrorMessage(err);
     }
     if (closed.current || controller.signal.aborted) return;
     installAbort.current = null;
@@ -339,7 +336,7 @@ export function ModelImportDialog({ open, initial, onClose, onInstalled }: Model
       });
       await install(result.engine, result.id, result.name);
     } catch (err) {
-      if (!closed.current) setPhase({ kind: 'review', review, error: errorText(err) });
+      if (!closed.current) setPhase({ kind: 'review', review, error: apiErrorMessage(err) });
     }
   };
 

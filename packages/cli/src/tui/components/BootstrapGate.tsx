@@ -423,7 +423,7 @@ export function BootstrapGate(props: {
   if (screen.kind === 'ready') return <>{children}</>;
   if (screen.kind === 'loading') {
     return (
-      <BootstrapFrame title="Preparing the workshop">
+      <BootstrapFrame title="Getting Gezel ready">
         <Text color="yellow">● {screen.message}</Text>
       </BootstrapFrame>
     );
@@ -500,7 +500,7 @@ export function BootstrapGate(props: {
             ...(screen.plan.accessories.length > 0
               ? [
                   {
-                    label: `Complete workshop set — ${bootstrapChatModelLabel(best)} + ${screen.plan.accessories.length} ${screen.plan.accessories.length === 1 ? 'helper' : 'helpers'}`,
+                    label: `Complete set — ${bootstrapChatModelLabel(best)} + ${screen.plan.accessories.length} ${screen.plan.accessories.length === 1 ? 'helper' : 'helpers'}`,
                     hint: `optional · ${bestInstalled ? 'chat model already available · ' : ''}${
                       workshopDownloadBytes > 0
                         ? formatDownloadSize(workshopDownloadBytes)

@@ -145,6 +145,15 @@ describe('service bundled assets', () => {
   it('does not ship the browser ffmpeg runtime', () => {
     expect(existsSync(resolve(service.dist, 'ui/ffmpeg-core/ffmpeg-core.js'))).toBe(false);
     expect(existsSync(resolve(service.dist, 'ui/ffmpeg-core/ffmpeg-core.wasm'))).toBe(false);
+    // Nor ffmpeg.wasm's worker, which Vite emitted for a code path it then
+    // tree-shook (packages/ui/scripts/vite-no-browser-ffmpeg.ts).
+    const assets = resolve(service.dist, 'ui/assets');
+    const naming = existsSync(assets)
+      ? readdirSync(assets)
+          .filter((file) => file.endsWith('.js'))
+          .filter((file) => readFileSync(resolve(assets, file), 'utf8').includes('@ffmpeg/core'))
+      : [];
+    expect(naming).toEqual([]);
   });
 
   it('does not ship the LAME MP3 encoder hidden in a renderer payload', () => {

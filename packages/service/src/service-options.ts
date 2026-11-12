@@ -1,5 +1,6 @@
+import type { Server } from 'node:http';
+import type { Http2SecureServer, Http2Server } from 'node:http2';
 import type { LogOutput, ServiceRole } from '@bendyline/gezel';
-import type { ServerType } from '@hono/node-server';
 import type { LoopbackCert } from './http/cert.js';
 import type { ServiceContext } from './http/context.js';
 import type { EngineContext } from './http/engine-context.js';
@@ -107,11 +108,15 @@ export interface StartServiceOptions {
    */
   onUnexpectedHttpError?: UnexpectedHttpErrorHandler;
   /**
-   * Where log records go while this service runs; restored on `stop()`. An
-   * app hosting the service in its own process passes `'stderr'` so its
-   * stdout stays its own. Unset keeps the process setting.
+   * Where log records go while this service runs; restored on `stop()`.
+   * Unset is `'stderr'`, so a program hosting the service in its own process
+   * keeps its stdout. `'split'` (info on stdout, warnings and errors on
+   * stderr) is for a process that is only the daemon, such as `gezeld`.
+   * `'file'` keeps them in `<home>/logs/service-YYYY-MM-DD.log` and prints
+   * only errors, to stderr: for a command line whose terminal is the
+   * person's, not the service's.
    */
-  logOutput?: LogOutput;
+  logOutput?: LogOutput | 'file';
   /**
    * Test seam: bind the opt-in Ollama emulation listener to this port
    * instead of the well-known 11434 (`0` = ephemeral). Production
@@ -141,9 +146,17 @@ export interface StartServiceOptions {
   nightShiftNow?: () => Date;
 }
 
+/**
+ * The listener a running service holds: `@hono/node-server`'s `ServerType`,
+ * spelled in Node's own types. That package's declarations import `hono/ws`,
+ * which needs the DOM lib, so naming it in a public type broke typechecking
+ * for Node consumers without DOM (2026-11-11 npm ship audit).
+ */
+export type ServiceServer = Server | Http2Server | Http2SecureServer;
+
 export interface RunningService<C extends EngineContext = ServiceContext> {
   context: C;
-  server: ServerType;
+  server: ServiceServer;
   port: number;
   /**
    * First-party client credential written to `runtime/auth-token`. A user

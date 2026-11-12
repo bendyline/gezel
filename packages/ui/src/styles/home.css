@@ -670,7 +670,7 @@
   flex-shrink: 0;
   border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  background: color-mix(in srgb, var(--wash-tint) 5%, var(--surface));
   overflow: hidden;
 }
 

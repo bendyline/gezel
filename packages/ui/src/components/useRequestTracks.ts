@@ -1,8 +1,11 @@
 import type { RequestTrack } from '@bendyline/gezel';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
-import { useActivity } from './activity-context.js';
+import { type ActivityState, useActivitySelector } from './activity-context.js';
+import { sameJson } from './chat-timeline-helpers.js';
 import { trackedSessions, trackedTaskRefs } from './request-track-placement.js';
+
+const selectLiveRequests = (state: ActivityState | null) => state?.snapshot?.requests;
 
 /**
  * The requests written in `sessionIds`, by key (`RequestTrack.key`). Fetched
@@ -14,9 +17,10 @@ export function useRequestTracks(sessionIds: readonly string[]): {
   /** The first answer (or a refusal from a daemon without requests) has arrived. */
   loaded: boolean;
 } {
-  const activity = useActivity();
   const sessions = useMemo(() => [...new Set(sessionIds)].sort().join(','), [sessionIds]);
-  const live = activity?.snapshot?.requests;
+  // A poll hands out new request objects every few seconds; a timeline
+  // re-renders only when one of them actually changed.
+  const live = useActivitySelector(selectLiveRequests, sameJson);
   // A request joining or leaving the live set is the moment a fetch has
   // something new to say (it started, or it is Ready now).
   const liveKeys = (live ?? [])

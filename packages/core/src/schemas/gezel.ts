@@ -322,6 +322,8 @@ export type GezelFrontmatter = z.infer<typeof GezelFrontmatterSchema>;
  */
 export const GezelSectionSchema = z.object({
   heading: z.string(),
+  /** Heading depth (1–6). Absent means `##`, the level serialization writes by default. */
+  level: z.number().int().min(1).max(6).optional(),
   template: z.string().optional(),
   params: z.record(z.string(), z.string()).optional(),
   body: z.string(),

@@ -210,7 +210,7 @@
 
 .ai-btn:hover:not(:disabled) {
   border-color: var(--accent);
-  background: rgba(176, 114, 76, 0.1);
+  background: color-mix(in srgb, var(--wash-tint) 10%, transparent);
 }
 
 .ai-btn:disabled {

@@ -27,7 +27,11 @@
 /* Make the workspace the fixed-position boundary only while a page is
    expanded. The sidebar keeps its own side, width and collapse state, and
    the iframe stays in place rather than being remounted in a portal. */
-.responsive-app-shell > .app-main:has(.project-output-pane-maximized) {
+/* Only the shown view counts: a project kept alive behind another destination
+   keeps its maximized pane in the DOM, hidden (KeepAliveHost). */
+.responsive-app-shell
+  > .app-main:has(> .keep-alive-view[data-shown] .project-output-pane-maximized),
+.responsive-app-shell > .app-main:has(> :not(.keep-alive-view) .project-output-pane-maximized) {
   contain: layout;
   overflow: hidden;
 }

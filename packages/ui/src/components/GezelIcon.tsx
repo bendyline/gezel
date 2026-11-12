@@ -1,5 +1,5 @@
 import type { Poppetje as PoppetjeStruct } from '@bendyline/gezel';
-import { type MouseEventHandler, useMemo } from 'react';
+import { type MouseEventHandler, memo, useMemo } from 'react';
 import { Poppetje, type PoppetjeVariant } from '../poppetje/index.js';
 import { safeSvgImageUrl } from '../safe-svg-image.js';
 import { useShowPoppetjes } from './useShowPoppetjes.js';
@@ -56,7 +56,20 @@ function variantForSize(size: number): PoppetjeVariant {
   return 'full';
 }
 
-export function GezelIcon({
+/**
+ * Memoized like the figure it wraps: rows that re-render on every poll leave
+ * their avatars alone. A clickable icon given a fresh handler each render
+ * still re-renders, which costs a wrapper, not the figure.
+ */
+export const GezelIcon = memo(GezelIconView, (a, b) => {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof GezelIconProps>;
+  for (const key of keys) {
+    if (key !== 'poppetje' && a[key] !== b[key]) return false;
+  }
+  return a.poppetje === b.poppetje || JSON.stringify(a.poppetje) === JSON.stringify(b.poppetje);
+});
+
+function GezelIconView({
   svg,
   poppetje,
   iconOverride,

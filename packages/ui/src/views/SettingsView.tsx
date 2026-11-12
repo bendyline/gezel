@@ -11,6 +11,7 @@ import {
 } from '@bendyline/gezel';
 import type { ConfigResponse, UsageResponse } from '@bendyline/gezel-client';
 import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { AppleFoundationModelsStatus } from '../components/AppleFoundationModelsStatus.js';
 import { CopilotInstallCard } from '../components/CopilotInstallCard.js';
@@ -4058,7 +4059,7 @@ function RoleAssignmentField({
           }
           setFailure(null);
           onAssign(next).catch((err: unknown) =>
-            setFailure(`Couldn't change the ${label}: ${(err as Error).message}`),
+            setFailure(`Couldn't change the ${label}: ${apiErrorMessage(err)}`),
           );
         }}
       >
@@ -4085,7 +4086,7 @@ function RoleAssignmentField({
               await onCreate(name);
               close();
             } catch (err) {
-              setFailure(`Couldn't create the ${label}: ${(err as Error).message}`);
+              setFailure(`Couldn't create the ${label}: ${apiErrorMessage(err)}`);
             } finally {
               setBusy(false);
             }

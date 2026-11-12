@@ -349,7 +349,7 @@
   flex: 0 0 1.75rem;
   min-width: 1.75rem;
   padding: 0;
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
   border: none;
   border-right: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
   border-bottom: 1px solid var(--border);
@@ -529,7 +529,7 @@
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--surface) 90%, var(--accent));
+  background: color-mix(in srgb, var(--surface) 90%, var(--wash-tint));
 }
 
 .task-bulk-item .task-status-dot {
@@ -585,6 +585,7 @@
    panel. Both must pass their available height to chat instead of scrolling
    the entire task and carrying the composer below the window. */
 .responsive-app-shell > .app-main:has(> .task-detail-chat-mode),
+.responsive-app-shell > .app-main:has(> .keep-alive-view[data-shown] > .task-detail-chat-mode),
 .task-detail-panel:has(> .task-detail-chat-mode) {
   display: flex;
   flex-direction: column;

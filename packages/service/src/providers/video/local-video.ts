@@ -1,8 +1,9 @@
 /**
  * LocalVideoProvider is the video provider for this computer: one model
  * store, two engines. Each render goes to the engine its model was installed
- * for, and the other engine is stopped first, so only one video engine holds
- * memory at a time. Routes, the machine broker and paired servers call it as
+ * for. Renders take turns across both engines, and the other engine is
+ * stopped when a render's turn comes, so only one video engine holds memory
+ * at a time and none is stopped mid-render. Routes, the machine broker and paired servers call it as
  * they called the diffusers provider before it.
  */
 
@@ -20,8 +21,32 @@ import type {
   VideoModelPullEvent,
   VideoProvider,
 } from './types.js';
+import { VideoGenerationCancelledError } from './types.js';
 
 const log = createLogger('video');
+
+function notifyStatus(input: VideoGenerationInput, message: string): void {
+  try {
+    input.onStatus?.(message);
+  } catch {
+    /* a listener's error never stops a render */
+  }
+}
+
+/** Resolves when `turn` settles; rejects as cancelled the moment `signal` aborts. */
+function untilSettledOrAborted(turn: Promise<void>, signal?: AbortSignal): Promise<void> {
+  const cancelled = () => new VideoGenerationCancelledError('The video render was stopped.');
+  if (!signal) return turn;
+  if (signal.aborted) return Promise.reject(cancelled());
+  return new Promise<void>((resolve, reject) => {
+    const onAbort = () => reject(cancelled());
+    signal.addEventListener('abort', onAbort, { once: true });
+    void turn.then(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    });
+  });
+}
 
 export interface LocalVideoProviderOptions {
   models: VideoModelManager;
@@ -35,6 +60,14 @@ export class LocalVideoProvider implements VideoProvider {
   private readonly models: VideoModelManager;
   private readonly engines: Readonly<Record<VideoEngine, VideoProvider>>;
   private readonly defaultModelId: () => string | undefined;
+  /**
+   * Renders run one at a time across both engines. Stopping the other engine
+   * is only safe once its render has finished: stop() does not wait for work
+   * in flight, so a picture-to-video request on sd.cpp used to end an
+   * hour-long diffusers render that was still running.
+   */
+  private renderTail: Promise<void> = Promise.resolve();
+  private rendersInFlight = 0;
 
   constructor(opts: LocalVideoProviderOptions) {
     this.models = opts.models;
@@ -61,16 +94,33 @@ export class LocalVideoProvider implements VideoProvider {
           : 'No video model is available locally. Download one from Settings → Video generation before generating.',
       );
     }
-    const engine = this.engines[model.engine];
-    for (const [name, other] of Object.entries(this.engines)) {
-      if (name === model.engine) continue;
-      await other.shutdown?.().catch((err: unknown) => {
-        log.warn(
-          `[video] could not stop the ${name} engine before a ${model.engine} render: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      });
+    const previous = this.renderTail;
+    let finished!: () => void;
+    const mine = new Promise<void>((resolve) => {
+      finished = resolve;
+    });
+    // The next render waits for this one AND everything before it, so a
+    // render cancelled while queued never lets a later one start early.
+    this.renderTail = previous.then(() => mine);
+    const waits = this.rendersInFlight > 0;
+    this.rendersInFlight += 1;
+    try {
+      if (waits) notifyStatus(input, 'Waiting for another video to finish…');
+      await untilSettledOrAborted(previous, input.signal);
+      const engine = this.engines[model.engine];
+      for (const [name, other] of Object.entries(this.engines)) {
+        if (name === model.engine) continue;
+        await other.shutdown?.().catch((err: unknown) => {
+          log.warn(
+            `[video] could not stop the ${name} engine before a ${model.engine} render: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        });
+      }
+      return await engine.generate({ ...input, model: model.id });
+    } finally {
+      this.rendersInFlight -= 1;
+      finished();
     }
-    return engine.generate({ ...input, model: model.id });
   }
 
   async listInstalledModels(): Promise<InstalledVideoModelInfo[]> {

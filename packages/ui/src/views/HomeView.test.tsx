@@ -102,12 +102,29 @@ vi.mock('../components/GezelIcon.js', () => ({
 }));
 // Most tests want a conversation that is not empty, so the meester's
 // introduction stays out of them unless a test asks for it.
-const timeline = vi.hoisted(() => ({
-  empty: false,
-  attention: null as { failedTurn: boolean; latestReplyAt: string | null } | null,
-}));
+// A small store, so the mocked timeline redraws when a test flips it: Home is
+// memoized (React Compiler), and a mock that read a plain variable during
+// render only saw the change while every parent render re-rendered it.
+const timeline = vi.hoisted(() => {
+  const listeners = new Set<() => void>();
+  let empty = false;
+  return {
+    get empty() {
+      return empty;
+    },
+    set empty(next: boolean) {
+      empty = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    attention: null as { failedTurn: boolean; latestReplyAt: string | null } | null,
+  };
+});
 vi.mock('../components/GlobalTimeline.js', async () => {
-  const { useEffect } = await import('react');
+  const { useEffect, useSyncExternalStore } = await import('react');
   return {
     GlobalTimeline: ({
       emptyContent,
@@ -119,7 +136,8 @@ vi.mock('../components/GlobalTimeline.js', async () => {
       useEffect(() => {
         if (timeline.attention) onAttentionChange?.(timeline.attention);
       }, [onAttentionChange]);
-      return <div data-testid="timeline">{timeline.empty ? emptyContent : null}</div>;
+      const empty = useSyncExternalStore(timeline.subscribe, () => timeline.empty);
+      return <div data-testid="timeline">{empty ? emptyContent : null}</div>;
     },
   };
 });

@@ -105,6 +105,60 @@ Conventional Commits are not checked anywhere — no local git hook and no CI
 job — but the messages are load-bearing, because every published version bump
 derives from them: a commit whose subject has no type releases nothing.
 
+### Which packages a release publishes
+
+multi-semantic-release decides each package in two passes.
+
+1. **Its own commits.** It lists the commits since the package's last tag that
+   touched its directory (`git log <tag>..HEAD -- packages/<dir>`), and the
+   commit analyzer reads their types: `feat` is a minor release, `fix` and
+   `perf` a patch, a breaking change a major. Every file in the directory
+   counts, shipped or not, and a squash merge gives the pull request's type to
+   every package it touched.
+2. **Its local dependencies.** A package then gets at least a patch whenever a
+   local dependency releases, transitively, whether the edge is in
+   `dependencies`, `devDependencies` or `peerDependencies` (`--deps.release`,
+   default `patch`). Every local edge is `workspace:*`, which
+   multi-semantic-release 3.1.0 always treats as needing a manifest update, so
+   no edge is exempt. Its prepare step then writes every local dependency of a
+   releasing package as an exact version.
+
+The second pass is why a release carries packages whose only change is a
+dependency pin, and they must ship. Published pins are exact, so a dependent
+that stayed behind would keep pointing at the old sibling: `gezel-cli` would go
+on installing the previous CLI, `script-stdlib` would bring a second copy of
+`@bendyline/gezel-sdk` in beside the service's, and `app-sdk`'s exact peer
+pin on the service would conflict with the new service. Some packages also
+bundle a sibling (`sdk` bundles core), so a dependency release changes their
+code as well.
+
+The first pass is where a release can publish nothing new. A `fix:` commit
+that touches only tests under `packages/gezk` releases `gezk` with identical
+content, and through the pins every published package except `plugin-sdk` and
+`connectors-spectral`, since everything else depends on `gezk` through core or
+directly. Give a change that ships nothing a `test:`, `docs:` or `chore:`
+type. A package `README.md` does ship, so a `fix:` that edits one is a real
+release.
+
+To preview the decision, run `pnpm exec multi-semantic-release --dry-run` on
+`main`. To see what a candidate set would actually change on npm, pack it and
+compare it with the registry:
+
+```bash
+node scripts/rehearse-npm-release.mjs --output <candidates>
+npm pack @bendyline/gezk@latest --pack-destination <published>   # one per package
+node scripts/compare-npm-release-content.mjs --candidates <candidates> --published <published>
+```
+
+[`compare-npm-release-content.mjs`](../scripts/compare-npm-release-content.mjs)
+reports each package as `identical`, `pins-only` or `changed`, ignoring the
+version. It compares manifests parsed, not as bytes: the rehearsal's plain
+`pnpm pack` rewrites `workspace:*` through an async map that moves the
+rewritten sibling pins to the end of their dependency map. The release does
+not show that order, because multi-semantic-release has already replaced every
+local range in place before pnpm packs, so a published manifest keeps the
+source order.
+
 ### `GEZEL_VERSION` is stamped during `prepare`
 
 The version a running install *reports* — `gezel --version`, `/api/health`

@@ -1,5 +1,6 @@
-import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { noBrowserFfmpegPlugin } from './scripts/vite-no-browser-ffmpeg.js';
+import { reactWithCompiler } from './scripts/vite-react.js';
 
 /**
  * Second Vite build target — produces the chat-only IIFE bundle the
@@ -36,7 +37,7 @@ export default defineConfig({
   // font, icon-font, and worker URL relative to chat.css/chat.global.js so
   // it resolves through the extension's localResourceRoots.
   base: './',
-  plugins: [react()],
+  plugins: [...reactWithCompiler(import.meta.dirname), noBrowserFfmpegPlugin()],
   build: {
     outDir: 'dist-embedded',
     emptyOutDir: true,

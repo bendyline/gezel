@@ -12,7 +12,7 @@ subcategory:
 # Gezel in Docker
 
 The Gezel image is the whole of Gezel in one container: the service, the web
-version of the workshop, the command line, and every engine that runs models
+version of the app, the command line, and every engine that runs models
 on your own hardware. Nothing else needs installing. What it downloads is
 models: the one you choose, and smaller ones it uses to search your files and
 to read pictures, along with a web browser for tasks that visit websites.
@@ -58,7 +58,7 @@ docker exec gezel gezel integrations token create my-notebook
 
 Then point the program at `http://localhost:6230/v1` with that key. The key
 appears in Settings → Integrations, where you can see when it was last used
-and revoke it. To have a model ready without opening the workshop, name it
+and revoke it. To have a model ready without opening the app, name it
 when you start the container:
 
 ```sh

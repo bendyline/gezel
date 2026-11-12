@@ -16,7 +16,7 @@
 
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { readdir, realpath } from 'node:fs/promises';
+import { readdir, realpath, rm } from 'node:fs/promises';
 import { isAbsolute, join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
@@ -52,6 +52,20 @@ export async function packDeployedGildeCommunity(root, { label, catalog } = {}) 
   }
   if (typeof module.collapseToContentPack !== 'function') {
     throw new Error(`[${label}] the deployed catalog loader cannot write content packs`);
+  }
+  // Gilde publishes the tier packed (tools/pack-community.mjs in bendyline/gilde).
+  // The loader reads a packed directory only through its pack, so anything
+  // beside it (a stray .gitkeep) is dead weight; the bundle keeps the pack
+  // alone. `verifyPackedGildeCommunity` still proves the loader reads it.
+  const packPath = join(dir, module.CONTENT_PACK_FILENAME);
+  if (existsSync(packPath)) {
+    for (const name of await readdir(dir)) {
+      if (name !== module.CONTENT_PACK_FILENAME) await rm(join(dir, name), { recursive: true });
+    }
+    console.log(
+      `[${label}] the gilde community tier already ships as ${module.CONTENT_PACK_FILENAME}`,
+    );
+    return { files: 0, bytes: 0, packPath, alreadyPacked: true };
   }
   const started = Date.now();
   const result = await module.collapseToContentPack(dir);

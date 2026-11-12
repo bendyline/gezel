@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  type LogRecord,
   createLogger,
   getLogLevel,
   getLogOutput,
@@ -7,6 +8,7 @@ import {
   setDebugNamespaces,
   setLogLevel,
   setLogOutput,
+  setLogSink,
 } from './log.js';
 
 describe('logger', () => {
@@ -16,6 +18,7 @@ describe('logger', () => {
   afterEach(() => {
     setLogLevel(initialLevel);
     setLogOutput(initialOutput);
+    setLogSink(null);
     setDebugNamespaces(null);
     vi.restoreAllMocks();
   });
@@ -160,6 +163,73 @@ describe('logger', () => {
 
     setLogOutput('split');
     expect(process.env.GEZEL_LOG_OUTPUT).toBeUndefined();
+  });
+
+  it("prints a message's own logger tag once", () => {
+    setLogLevel('info');
+    const out = captureStdout();
+    createLogger('tasks').info('[tasks] default/1 runs stepwise');
+    createLogger('tasks').info('[chat] handed over');
+    out.restore();
+    expect(out.lines.some((l) => l.includes('INFO  [tasks] default/1 runs stepwise'))).toBe(true);
+    expect(out.lines.some((l) => l.includes('[tasks] [tasks]'))).toBe(false);
+    expect(out.lines.some((l) => l.includes('INFO  [tasks] [chat] handed over'))).toBe(true);
+  });
+
+  it('sends records to a sink instead of the process streams', () => {
+    setLogLevel('info');
+    const records: LogRecord[] = [];
+    setLogSink((record) => records.push(record));
+    expect(process.env.GEZEL_LOG_SINK).toBe('1');
+    const out = captureStdout();
+    const err = captureStderr();
+    const log = createLogger('service');
+    log.info('listening');
+    log.warn('slow step', { ms: 5000 });
+    log.error('failed', new Error('disk full'));
+    log.debug('dropped by the level gate');
+    out.restore();
+    err.restore();
+    expect(out.lines).toEqual([]);
+    expect(err.lines).toEqual([]);
+    expect(records.map((r) => [r.level, r.name])).toEqual([
+      ['info', 'service'],
+      ['warn', 'service'],
+      ['error', 'service'],
+    ]);
+    expect(records[1]?.line).toMatch(/WARN {2}\[service\] slow step \{"ms":5000\}$/);
+    expect(records[2]?.line).toContain('Error: disk full');
+
+    setLogSink(null);
+    expect(process.env.GEZEL_LOG_SINK).toBeUndefined();
+  });
+
+  it('keeps a worker started under a sink to errors on stderr', async () => {
+    setLogSink(() => {});
+    const key = Symbol.for('bendyline.gezel.log-state');
+    const holder = globalThis as Record<symbol, unknown>;
+    const shared = holder[key];
+    try {
+      // A fresh realm (what a worker is) reads the sink marker on load.
+      delete holder[key];
+      vi.resetModules();
+      const fresh = await import('./log.js');
+      fresh.setLogLevel('info');
+      const out = captureStdout();
+      const err = captureStderr();
+      const log = fresh.createLogger('embeddings');
+      log.info('model loaded');
+      log.warn('slow load');
+      log.error('load failed');
+      out.restore();
+      err.restore();
+      expect(out.lines).toEqual([]);
+      expect(err.lines).toHaveLength(1);
+      expect(err.lines[0]).toContain('ERROR [embeddings] load failed');
+    } finally {
+      holder[key] = shared;
+      vi.resetModules();
+    }
   });
 
   it('per-namespace debug works at info level', () => {

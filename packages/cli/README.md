@@ -65,7 +65,7 @@ Run `gezel --help`, or `--help` on any command, for every option.
 | Command | What it does |
 |---|---|
 | `gezel` | Open the interactive terminal app for this folder's project |
-| `gezel run [prompt…]` | One prompt, one reply, using this project's crew lead unless you pass `--gezel <id>`. A sole `-` reads the prompt from stdin |
+| `gezel run [prompt…]` | One prompt, one reply, using this project's crew lead unless you pass `--gezel <id>`. A sole `-` reads the prompt from stdin; with a prompt, piped or redirected text is sent after it |
 | `gezel do <craftbook…>` | Start a craftbook as a task in this folder's project: its name, then required values, `key=value` parameters, and your request. `--wait` follows it to the end |
 | `gezel <craftbook> …` | Shorthand for `gezel do <craftbook> …`, matched exactly on the craftbook's command name; built-in commands always win |
 | `gezel craftbook list [words…]` | List the craftbooks `gezel do` can start in this folder's project (command name, title, category); words filter by command, title, and tags. `--json` for scripts |
@@ -74,14 +74,14 @@ Run `gezel --help`, or `--help` on any command, for every option.
 | `gezel task list\|show\|create` | Tasks across every project |
 | `gezel task wait\|resume\|pause <ref>` | Follow a task to the end, retry a paused task and follow it, or pause one task. Waiting prints where the result is; `--out <dir>` copies it |
 | `gezel task notes <ref>` | A task's notes, including pause reasons and failed checks (`--warnings` adds runtime warnings) |
-| `gezel agent list\|create\|show\|output-limit` | Manage your crew (the command name is historical) |
+| `gezel agent list\|create\|show\|output-limit` | Manage your crew (the command name is historical); `show` and `output-limit` take a crew member's id or name |
 | `gezel project list\|create\|install\|indexing\|edits` | Manage projects, their npm packages, background indexing, and whether Gezel may change files in the folder (`gezel env` is the same command) |
 | `gezel integrations list\|approve\|deny\|token` | The apps connected to this Gezel: answer one that asked to connect, or make and revoke app keys |
 | `gezel integrations address` | Where other programs reach this Gezel's models |
 | `gezel integrations ollama [on\|off]` | A plain-HTTP port on this computer that needs no key (`http://127.0.0.1:11434/v1`, and Ollama's own paths); off until you turn it on |
 | `gezel skills list\|import\|convert` | Find SKILL.md skills and turn them into craftbooks |
 | `gezel app …` | Build, install, apply, and serve AI Apps (`.gezapp`): `new`, `validate`, `pack`, `add`, `update`, `list`, `show`, `apply`, `status`, `serve`, `enable`, `disable`, `remove`, `schemas` |
-| `gezel model list\|pull\|use\|export` | On-device chat models. `list --available` shows the catalog models that fit this machine, with sizes; `pull <id>` downloads one, plus the engine it runs on if that is missing; `use <id>` makes chats use a downloaded model (a pull does this itself when no working default is set); `export <id> [file]` writes a portable, checksum-verified `.gezmodel` |
+| `gezel model list\|pull\|use\|export` | On-device chat models. `list` marks the one chats use and the ones another Gezel on this computer shares; `list --available` shows the catalog models that fit this machine, with sizes; `pull <id>` downloads one, plus the engine it runs on if that is missing, and downloads nothing when a shared copy is already here; `use <id>` makes chats use a downloaded model (a pull does this itself when no working default is set); `export <id> [file]` writes a portable, checksum-verified `.gezmodel` |
 | `gezel model context\|concurrency` | A local model's context window, and how many requests a local engine serves at once |
 | `gezel native install\|list\|status` | The native engines that run models on this computer |
 | `gezel image status\|models\|pull\|rm` | Image-generation models |
@@ -139,6 +139,18 @@ stderr. Empty input exits with status 1 before anything starts. Without a sole
 `-`, `gezel run "your prompt"` uses its arguments, and bare `gezel run` shows
 usage. Until a model is set up, `run` downloads nothing: it names the setup
 commands and exits.
+
+With a prompt in its arguments, `run` also sends text piped or redirected to
+it, after the prompt and a blank line:
+
+```bash
+gezel run "Summarize these notes for the board" < notes.txt
+git diff | gezel run "Write a commit message for this change"
+```
+
+A terminal is never read, and a pipe that sends nothing within a moment is
+left unread so a script that keeps stdin open never waits on it. For a slow
+producer, put the whole prompt in the input and use `gezel run -`.
 
 ## Provider keys
 

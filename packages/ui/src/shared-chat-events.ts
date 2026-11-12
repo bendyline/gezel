@@ -4,7 +4,7 @@ import {
   streamAllChatEvents,
   streamProjectChatEvents,
 } from '@bendyline/gezel-client';
-import { invalidateLiveApiReads } from './shared-api-reads.js';
+import { streamEventChangedData } from './data/invalidation.js';
 
 type ChatEventSource = (opts: SseStreamOptions) => AsyncGenerator<ChatEventEnvelope>;
 
@@ -37,19 +37,6 @@ interface SharedStream {
 
 /** Mirror of the service bus's per-session history cap. */
 const REPLAY_CAP = 500;
-const READ_INVALIDATING_EVENTS = new Set<ChatEventEnvelope['event']['type']>([
-  'user_message_pending',
-  'user_message',
-  'complete',
-  'done',
-  'error',
-  'cancelled',
-  'queue_enqueued',
-  'queue_removed',
-  'task_event',
-  'question_asked',
-  'question_answered',
-]);
 
 function recordForReplay(shared: SharedStream, envelope: ChatEventEnvelope): void {
   if (!envelope.sessionId) return;
@@ -180,9 +167,7 @@ function startSharedStream(
         ...upstreamOpts,
         signal: shared.controller.signal,
       })) {
-        if (READ_INVALIDATING_EVENTS.has(envelope.event.type)) {
-          invalidateLiveApiReads();
-        }
+        streamEventChangedData(envelope.event.type);
         recordForReplay(shared, envelope);
         for (const subscriber of shared.subscribers) {
           subscriber.queue.push(envelope);

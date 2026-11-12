@@ -3,9 +3,9 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { api } from '../api.js';
 import { Popover } from '../primitives/index.js';
 import { SearchPalette } from './SearchPalette.js';
-import { openSearchResults } from './SearchResultsOverlay.js';
 import { runNavActions } from './nav-actions.js';
 import { type SearchGroup, flattenGroups, groupResults, resultToActions } from './search-nav.js';
+import { openSearchResults, preloadSearchResults } from './search-results-open.js';
 
 type SearchMode = 'search' | 'quick-open';
 
@@ -259,6 +259,7 @@ export function TitlebarSearch({ compact = false }: { compact?: boolean }) {
               onKeyDown={onInputKeyDown}
               onFocus={() => {
                 window.dispatchEvent(new CustomEvent('gezel:close-header-popovers'));
+                preloadSearchResults();
                 if (query.trim() && results.length > 0) setOpen(true);
               }}
             />

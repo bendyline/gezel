@@ -4,7 +4,7 @@ import {
   measuredClaim,
   measuredResultFor,
 } from '@bendyline/gezel';
-import type { GezelClient } from '@bendyline/gezel-client/node';
+import type { ConfigResponse, GezelClient } from '@bendyline/gezel-client/node';
 import { CliError } from './connection.js';
 import {
   type BootstrapChatModel,
@@ -48,6 +48,74 @@ export async function installedChatModels(
   return models.map((model) => model.id);
 }
 
+/** The config fields that decide which downloaded model chats run on. */
+export interface ChatModelConfig
+  extends Partial<
+    Pick<
+      ConfigResponse,
+      | 'llamaCppBaseUrl'
+      | 'llamaCppModelPath'
+      | 'mlxBaseUrl'
+      | 'mlxModelPath'
+      | 'ds4BaseUrl'
+      | 'ds4ModelPath'
+    >
+  > {
+  provider?: string;
+  defaultModel?: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * The downloaded model chats run on for `engine`, the way the daemon picks
+ * it: none when chats use another provider or an external engine or model
+ * file; else the pinned model; else, with no pin (or, outside MLX, a pin
+ * that is no longer downloaded), the first one listed.
+ */
+export function chatModelInUse(
+  config: ChatModelConfig,
+  engine: ChatEngine,
+  listedIds: readonly string[],
+): string | undefined {
+  if (config.provider !== engine) return undefined;
+  const external =
+    engine === 'mlx'
+      ? config.mlxBaseUrl || config.mlxModelPath
+      : engine === 'ds4'
+        ? config.ds4BaseUrl || config.ds4ModelPath
+        : config.llamaCppBaseUrl || config.llamaCppModelPath;
+  if (external) return undefined;
+  const pinned = config.defaultModel?.[engine];
+  if (pinned && listedIds.includes(pinned)) return pinned;
+  // MLX refuses a pinned model that is gone; the other engines fall back.
+  if (pinned && engine === 'mlx') return undefined;
+  return listedIds[0];
+}
+
+/** `gezel model list`: downloaded models, the one chats use marked. */
+export function formatInstalledChatModels(
+  engine: ChatEngine,
+  models: ReadonlyArray<{ id: string; name: string; approxSizeBytes: number; readOnly?: boolean }>,
+  config: ChatModelConfig,
+): string {
+  if (models.length === 0) {
+    return `(no local ${engine} models — \`gezel model list --available\` shows ones to download)`;
+  }
+  const inUse = chatModelInUse(
+    config,
+    engine,
+    models.map((model) => model.id),
+  );
+  const width = Math.max(28, ...models.map((model) => model.id.length));
+  return models
+    .map((model) => {
+      const notes = [model.readOnly ? 'shared' : '', model.id === inUse ? 'in use' : ''].filter(
+        Boolean,
+      );
+      return `${model.id.padEnd(width)}  ${(model.approxSizeBytes / 1e9).toFixed(2).padStart(6)} GB  ${model.name}${notes.length > 0 ? `  (${notes.join(', ')})` : ''}`;
+    })
+    .join('\n');
+}
+
 /** `--provider` for a command line, left off when it is the platform default. */
 export function providerFlag(engine: ChatEngine, platformDefault: ChatEngine): string {
   return engine === platformDefault ? '' : ` --provider ${engine}`;
@@ -67,7 +135,7 @@ export async function availableChatModels(
 ): Promise<{
   ranked: BootstrapChatModel[];
   installed: Set<string>;
-  pinned?: string;
+  inUse?: string;
   gpuUnmeasured?: boolean;
 }> {
   if (engine === 'ds4') {
@@ -80,7 +148,7 @@ export async function availableChatModels(
     client.getConfig(),
     client.getNativeEngineStatus?.().catch(() => undefined),
   ]);
-  const pinned = config.defaultModel?.[engine];
+  const inUse = chatModelInUse(config, engine, installed);
   // An AMD or Intel graphics card is read through llama-server. Before the
   // engine is installed the profile falls back to main memory, and the first
   // row was the model for a computer with no graphics card at all: Gemma 4 E2B
@@ -93,7 +161,7 @@ export async function availableChatModels(
   return {
     ranked: rankChatModels(catalog.items, recoDevice(memory), engine as BootstrapChatProvider),
     installed: new Set(installed),
-    ...(pinned ? { pinned } : {}),
+    ...(inUse ? { inUse } : {}),
     ...(gpuUnmeasured ? { gpuUnmeasured } : {}),
   };
 }
@@ -103,7 +171,8 @@ export function formatAvailableChatModels(input: {
   platformDefault: ChatEngine;
   ranked: readonly BootstrapChatModel[];
   installed: ReadonlySet<string>;
-  pinned?: string;
+  /** The model chats run on ({@link chatModelInUse}). */
+  inUse?: string;
   /**
    * What the published scorecard says about each model (`measuredClaim`),
    * keyed by id. "Fits" is about memory; this column is about whether the
@@ -117,7 +186,7 @@ export function formatAvailableChatModels(input: {
    */
   gpuUnmeasured?: boolean;
 }): string {
-  const { engine, ranked, installed, pinned, measured, gpuUnmeasured } = input;
+  const { engine, ranked, installed, inUse, measured, gpuUnmeasured } = input;
   if (ranked.length === 0) return `(no ${engine} chat models in the catalog for this machine)`;
   const width = Math.max(...ranked.map((model) => model.id.length));
   const measuredWidth = measured
@@ -134,7 +203,7 @@ export function formatAvailableChatModels(input: {
     const notes = [
       index === 0 && !gpuUnmeasured ? 'recommended' : '',
       installed.has(model.id) ? 'installed' : '',
-      model.id === pinned ? 'in use' : '',
+      model.id === inUse ? 'in use' : '',
     ].filter(Boolean);
     const claim = measured
       ? `  ${(measured.get(model.id) ?? 'not measured').padEnd(measuredWidth)}`

@@ -281,6 +281,45 @@ describe('apps with their own MCP command', () => {
     expect(commands.at(-1)?.args).toEqual(['mcp', 'remove', '--scope', 'user', 'gezel']);
   });
 
+  it("passes on what the app's own command said when it fails", async () => {
+    const m = manager({
+      claudeBinary: async () => '/bin/claude',
+      run: async () => {
+        throw new Error(
+          'exited 1: Error: Invalid configuration in ~/.claude.json\n  token=sk-ant-0123456789abcdefghijklmnop',
+        );
+      },
+    });
+    const failure = m.configure('claude-code', {});
+    await expect(failure).rejects.toMatchObject({ code: 'app_command_failed', status: 424 });
+    const error = (await failure.catch((err: unknown) => err)) as Error;
+    expect(error.message).toBe(
+      "Claude Code did not take Gezel's tools. `claude mcp add` stopped with exit code 1: Error: Invalid configuration in ~/.claude.json token=…",
+    );
+  });
+
+  it('says plainly when the app command hangs or will not start', async () => {
+    const hung = manager({
+      claudeBinary: async () => '/bin/claude',
+      run: async () => {
+        throw new Error('mcp add --scope user gezel -- /node launch.mjs timed out after 30000ms');
+      },
+    });
+    await expect(hung.configure('claude-code', {})).rejects.toThrow(
+      "Claude Code did not take Gezel's tools. `claude mcp add` did not finish in time.",
+    );
+    const missing = manager({
+      codexBinary: async () => '/bin/codex',
+      run: async () => {
+        throw new Error('spawn /bin/codex ENOENT');
+      },
+    });
+    await expect(missing.configure('codex', {})).rejects.toMatchObject({
+      status: 424,
+      message: expect.stringContaining('`codex mcp add` could not start: spawn /bin/codex ENOENT'),
+    });
+  });
+
   it('reads the gezel server out of a Codex config.toml', () => {
     const toml = [
       'model = "gpt-5"',

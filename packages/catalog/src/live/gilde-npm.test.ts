@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import * as tar from 'tar';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CommunitySource } from '../community-source.js';
-import { CONTENT_PACK_FILENAME } from '../content-pack.js';
+import { CONTENT_PACK_FILENAME, collapseToContentPack } from '../content-pack.js';
 import {
   GILDE_PACKAGE_NAME,
   type GildeReleaseInfo,
@@ -28,10 +28,14 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-async function gildeTarball(version: string, name = GILDE_PACKAGE_NAME): Promise<Buffer> {
+async function gildeTarball(
+  version: string,
+  name = GILDE_PACKAGE_NAME,
+  { communityPacked = false }: { communityPacked?: boolean } = {},
+): Promise<Buffer> {
   const fixture = join(
     home,
-    `fixture-${version.replace(/[^0-9a-z.]/gi, '_')}-${name.replace(/[^a-z]/gi, '_')}`,
+    `fixture-${version.replace(/[^0-9a-z.]/gi, '_')}-${name.replace(/[^a-z]/gi, '_')}${communityPacked ? '-packed' : ''}`,
   );
   await mkdir(join(fixture, 'package', 'data', 'toolsets'), { recursive: true });
   await writeFile(join(fixture, 'package', 'package.json'), JSON.stringify({ name, version }));
@@ -73,6 +77,8 @@ async function gildeTarball(version: string, name = GILDE_PACKAGE_NAME): Promise
       config: [],
     }),
   );
+  // Gilde publishes the tier as one pack (tools/pack-community.mjs in bendyline/gilde).
+  if (communityPacked) await collapseToContentPack(join(fixture, 'package', 'data', 'community'));
   const archive = join(fixture, 'package.tgz');
   await tar.create({ cwd: fixture, file: archive, gzip: true }, ['package']);
   return readFile(archive);
@@ -252,6 +258,28 @@ describe('stageGildeVersion', () => {
       expect(await readdir(staging)).toEqual(['package']);
       // The community tier is staged packed, the way the packaged bundle
       // ships it, and still resolves.
+      const community = join(packageDir, 'data', 'community');
+      expect(await readdir(community)).toEqual([CONTENT_PACK_FILENAME]);
+      const resolved = await new CommunitySource(community).get('toolset', COMMUNITY_ID);
+      expect(resolved?.manifest.version).toBe('1.0.0');
+    } finally {
+      await registry.close();
+    }
+  });
+
+  it('stages a release that already ships its community tier packed', async () => {
+    const tarball = await gildeTarball('0.1.17', GILDE_PACKAGE_NAME, { communityPacked: true });
+    const registry = await serveGildeRegistry({
+      '0.1.17': { tarball, integrity: sha512Integrity(tarball) },
+    });
+    try {
+      const [release] = await fetchGildeReleases({ registry: registry.registry });
+      if (!release) throw new Error('expected a release');
+      const { packageDir } = await stageGildeVersion({
+        release,
+        stagingDir: join(home, 'staging-packed'),
+        registry: registry.registry,
+      });
       const community = join(packageDir, 'data', 'community');
       expect(await readdir(community)).toEqual([CONTENT_PACK_FILENAME]);
       const resolved = await new CommunitySource(community).get('toolset', COMMUNITY_ID);

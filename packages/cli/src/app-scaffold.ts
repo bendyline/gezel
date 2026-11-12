@@ -114,7 +114,7 @@ The loop:
 1. Edit the files under \`items/\` (schemas: \`gezel app schemas --out schemas\`).
 2. \`gezel app validate .\`
 3. \`gezel app pack .\`
-4. \`gezel app add ${id}-1.0.0.gezapp --yes\` then \`gezel app apply ${id}\` in a project folder.
+4. \`gezel app add ${id}-1.0.0.gezapp --yes\` then \`gezel app apply ${id} --yes\` in a project folder.
 
 The keeper uses \`add_record\` to update the seeded \`data.json\` through
 \`records-store\`. Read failures are errors; they never reset existing data.

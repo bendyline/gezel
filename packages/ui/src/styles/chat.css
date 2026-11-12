@@ -81,8 +81,8 @@
   border-radius: var(--radius-sm);
   font-family: var(--font-ui);
   color: var(--accent-text-hover, #996142);
-  background: rgba(176, 114, 76, 0.1);
-  border: 1px solid rgba(176, 114, 76, 0.28);
+  background: color-mix(in srgb, var(--wash-tint) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wash-tint) 28%, transparent);
   font-size: var(--text-xs);
   display: flex;
   flex-direction: column;
@@ -100,6 +100,17 @@
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
+}
+/* At night the banner keeps its ochre words and edge and loses most of its
+   fill. An ochre wash over charcoal is a brown bar, and a long task repeats
+   this banner after every turn. Keep both blocks identical. */
+[data-theme="dark"] .msg-warning-banner {
+  background: color-mix(in srgb, var(--warning) 5%, transparent);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .msg-warning-banner {
+    background: color-mix(in srgb, var(--warning) 5%, transparent);
+  }
 }
 .msg-warning-link {
   appearance: none;
@@ -121,8 +132,8 @@
   margin-top: 0.4rem;
   padding: 0.35rem 0.6rem;
   border-radius: var(--radius-sm);
-  background: rgba(176, 114, 76, 0.06);
-  border: 1px solid rgba(176, 114, 76, 0.18);
+  background: color-mix(in srgb, var(--wash-tint) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wash-tint) 18%, transparent);
   font-size: var(--text-sm);
   font-style: italic;
   color: var(--text-muted, #b3b3b3);
@@ -153,14 +164,14 @@
   padding: 0.2rem 0.55rem;
   font-size: var(--text-xs);
   border-radius: var(--radius-sm);
-  border: 1px solid rgba(176, 114, 76, 0.4);
-  background: rgba(176, 114, 76, 0.15);
+  border: 1px solid color-mix(in srgb, var(--wash-tint) 40%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 15%, transparent);
   color: inherit;
   cursor: pointer;
   flex-shrink: 0;
 }
 .msg-slow-banner-probe-btn:hover:not(:disabled) {
-  background: rgba(176, 114, 76, 0.25);
+  background: color-mix(in srgb, var(--wash-tint) 25%, transparent);
 }
 .msg-slow-banner-probe-btn:disabled {
   opacity: 0.55;
@@ -192,8 +203,8 @@
   margin-left: auto;
   padding: 0;
   border-radius: 50%;
-  border: 1px solid rgba(176, 114, 76, 0.22);
-  background: rgba(176, 114, 76, 0.08);
+  border: 1px solid color-mix(in srgb, var(--wash-tint) 22%, transparent);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
   color: var(--text-muted, #a0a0a0);
   font-size: 0.95rem;
   line-height: 1;
@@ -201,7 +212,7 @@
   transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
 }
 .msg-role-cancel:hover:not(:disabled) {
-  background: rgba(176, 114, 76, 0.28);
+  background: color-mix(in srgb, var(--wash-tint) 28%, transparent);
   color: #f3ede0;
   border-color: rgba(176, 114, 76, 0.55);
 }
@@ -219,7 +230,7 @@
   padding: 0.5rem 0.7rem;
   /* Warm tint so the pill reads on both the Gezellig orange bubbles and
      the neutral light-mode surface. */
-  background: rgba(176, 114, 76, 0.12);
+  background: color-mix(in srgb, var(--wash-tint) 12%, transparent);
   border-radius: 12px;
 }
 
@@ -569,6 +580,17 @@
   font-size: var(--text-xs);
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* Outside debug mode the token count is machinery, shown only while the
+   pointer is over the bubble's header row (or the sticky header's copy). */
+.msg-live-tokens-on-hover {
+  display: none;
+}
+.msg-role:hover .msg-live-tokens-on-hover,
+.msg-role:focus-within .msg-live-tokens-on-hover,
+.chat-sticky-header-assistant:hover .msg-live-tokens-on-hover {
+  display: inline;
 }
 
 @keyframes msg-live-pulse {
@@ -1165,12 +1187,16 @@
 }
 
 /* The crew's hammer with the count as its exponent. Tabular numerals
-   so a climbing count does not jitter what follows it. */
+   so a climbing count does not jitter what follows it. The count stays
+   inside the badge's box: the status line clips its overflow, and a
+   count lifted above the box lost the tops of its digits there. */
 .msg-work-chunks {
   display: inline-flex;
+  flex: none;
   align-items: flex-start;
   vertical-align: -0.2em;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 .msg-work-chunks-hammer {
   flex: none;
@@ -1178,11 +1204,11 @@
   height: 1.2em;
 }
 .msg-work-chunks-count {
+  flex: none;
   font-size: 0.72em;
   line-height: 1;
   vertical-align: baseline;
   margin-left: 0.05em;
-  margin-top: -0.2em;
 }
 .queued-pill {
   display: inline-flex;
@@ -1191,7 +1217,7 @@
   padding: 0.5rem 0.7rem;
   /* Same warm tint as `.thinking-dots` — visual continuity between
      queued/thinking states. */
-  background: rgba(176, 114, 76, 0.12);
+  background: color-mix(in srgb, var(--wash-tint) 12%, transparent);
   border-radius: 12px;
   color: var(--text-muted);
   font-size: var(--text-sm);
@@ -1212,7 +1238,7 @@
   padding-inline: 0.2rem;
   border: 1px solid color-mix(in srgb, var(--accent) 72%, var(--border));
   border-radius: var(--radius-sm);
-  background: color-mix(in srgb, var(--accent) 14%, var(--surface));
+  background: color-mix(in srgb, var(--wash-tint) 14%, var(--surface));
   color: var(--accent-text-hover);
   font-size: var(--text-2xs);
   font-weight: 700;
@@ -1258,8 +1284,8 @@
   opacity: 0.75;
 }
 .msg-ghost-queued .msg-body {
-  background: rgba(176, 114, 76, 0.08);
-  border-color: rgba(176, 114, 76, 0.35);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
+  border-color: color-mix(in srgb, var(--wash-tint) 35%, transparent);
   border-style: dashed;
   color: var(--text-muted);
   font-style: italic;
@@ -1288,7 +1314,7 @@
 .msg-ghost-queued-btn:hover {
   border-color: rgba(176, 114, 76, 0.55);
   color: #e0b897;
-  background: rgba(176, 114, 76, 0.1);
+  background: color-mix(in srgb, var(--wash-tint) 10%, transparent);
 }
 .msg-ghost-queued-btn:disabled {
   opacity: 0.5;
@@ -1326,7 +1352,7 @@
   margin-left: 0.35rem;
   font-size: var(--text-2xs);
   padding: 0 0.3rem;
-  border: 1px solid rgba(176, 114, 76, 0.35);
+  border: 1px solid color-mix(in srgb, var(--wash-tint) 35%, transparent);
   border-radius: var(--radius-sm);
   color: var(--text-muted);
 }
@@ -1373,9 +1399,10 @@
   flex-direction: column;
   gap: 0.3rem;
   padding: 0.55rem 0.75rem;
-  border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
+  border: 1px dashed
+    var(--chat-handoff-border, color-mix(in srgb, var(--wash-tint) 45%, transparent));
   border-radius: var(--radius-md);
-  background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
+  background: var(--chat-handoff-bg, color-mix(in srgb, var(--wash-tint) 8%, transparent));
 }
 
 .msg-handoff-note-head {
@@ -1467,9 +1494,10 @@
   flex-direction: column;
   gap: 0.3rem;
   padding: 0.55rem 0.75rem;
-  border: 1px dashed var(--chat-handoff-border, rgba(176, 114, 76, 0.45));
+  border: 1px dashed
+    var(--chat-handoff-border, color-mix(in srgb, var(--wash-tint) 45%, transparent));
   border-radius: var(--radius-md);
-  background: var(--chat-handoff-bg, rgba(176, 114, 76, 0.08));
+  background: var(--chat-handoff-bg, color-mix(in srgb, var(--wash-tint) 8%, transparent));
 }
 
 .msg-queued-task-head {
@@ -1842,7 +1870,7 @@
    above the panes. The transparent grip track still spans both rows so its
    painted handle stays aligned with the neighbouring output-pane handle;
    the banner sits above the track so its controls keep the full hit area. */
-.chat-rail-body:has(> .chat-rail-banner) {
+.chat-rail-body.chat-rail-body-banner {
   grid-template-rows: auto minmax(0, 1fr);
   row-gap: 0;
 }
@@ -1853,15 +1881,15 @@
   grid-row: 1;
   min-width: 0;
 }
-.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-main {
+.chat-rail-body.chat-rail-body-banner > .chat-rail-main {
   grid-column: 1;
   grid-row: 2;
 }
-.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-grip {
+.chat-rail-body.chat-rail-body-banner > .chat-rail-grip {
   grid-column: 2;
   grid-row: 1 / -1;
 }
-.chat-rail-body:has(> .chat-rail-banner) > .chat-rail-side {
+.chat-rail-body.chat-rail-body-banner > .chat-rail-side {
   grid-column: 3;
   grid-row: 2;
 }
@@ -2574,8 +2602,8 @@ body.chat-rail-resizing webview {
   margin: 0.65rem auto;
   padding: 0.6rem 0.72rem;
   color: var(--text-muted);
-  background: color-mix(in srgb, var(--surface) 88%, var(--accent) 4%);
-  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--accent));
+  background: color-mix(in srgb, var(--surface) 88%, var(--wash-tint) 4%);
+  border: 1px solid color-mix(in srgb, var(--border) 72%, var(--wash-tint));
   border-radius: var(--radius-md, 6px);
 }
 .msg-context-compaction-summary {
@@ -2659,7 +2687,7 @@ body.chat-rail-resizing webview {
   --chat-scrollbar-thumb-color: transparent;
   --chat-scrollbar-track-color: transparent;
   --timeline-session-step: 1.6rem;
-  --timeline-tree-line: color-mix(in srgb, var(--accent) 42%, transparent);
+  --timeline-tree-line: color-mix(in srgb, var(--wash-tint) 42%, transparent);
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
@@ -2807,20 +2835,20 @@ body.chat-rail-resizing webview {
   z-index: 2;
 }
 .chat-timeline-pin-toggle:hover {
-  background: rgba(176, 114, 76, 0.14);
+  background: color-mix(in srgb, var(--wash-tint) 14%, transparent);
   color: #e0b897;
-  border-color: rgba(176, 114, 76, 0.4);
+  border-color: color-mix(in srgb, var(--wash-tint) 40%, transparent);
 }
 .chat-timeline-pin-toggle:active {
   transform: scale(0.94);
 }
 .chat-timeline-pin-toggle-on {
-  background: rgba(176, 114, 76, 0.2);
+  background: color-mix(in srgb, var(--wash-tint) 20%, transparent);
   color: #e0b897;
   border-color: rgba(176, 114, 76, 0.5);
 }
 .chat-timeline-pin-toggle-on:hover {
-  background: rgba(176, 114, 76, 0.3);
+  background: color-mix(in srgb, var(--wash-tint) 30%, transparent);
 }
 .chat-timeline-pin-glyph {
   display: block;
@@ -2842,6 +2870,26 @@ body.chat-rail-resizing webview {
   position: relative;
 }
 
+/* Off-screen conversations skip layout and paint, so a reply streaming into
+   a long transcript lays out what is on screen rather than every thread (a
+   2,000-message timeline spent ~66 ms of layout per streamed frame). Code
+   that reads geometry must not measure inside these rows wholesale: reading
+   a skipped row forces it back into layout (see recomputeStickyHeader).
+   Containment clips at the box edge, so threads that draw guides into their
+   neighbours (sub-sessions and the sessions they hang from) stay out, and the
+   clip margin keeps the rail that climbs through the gap above a thread.
+   The newest rows stay out too: a chat opens on them, and a skipped row on
+   screen first lays out at its estimated size and then at its real one,
+   which reads as the conversation jumping as it appears. */
+.chat-timeline
+  > .timeline-thread:not(.timeline-session-subthread):not(.timeline-session-parent):not(
+    :nth-last-child(-n + 12)
+  ) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 16rem;
+  overflow-clip-margin: 1.5rem;
+}
+
 /* The reply column. The warm left rail + indent are the "these hang
    off the message above" cue — same visual family as the handoff
    bubble's dashed warm border. Total left inset (margin + rail +
@@ -2855,7 +2903,8 @@ body.chat-rail-resizing webview {
   gap: 0.4rem;
   min-width: 0;
   margin-left: 7px;
-  border-left: 2px solid var(--timeline-tree-line, rgba(176, 114, 76, 0.28));
+  border-left: 2px solid
+    var(--timeline-tree-line, color-mix(in srgb, var(--wash-tint) 28%, transparent));
   padding-left: calc(var(--thread-indent, 1.05rem) - 7px - 2px);
 }
 
@@ -2873,7 +2922,7 @@ body.chat-rail-resizing webview {
   top: 0;
   bottom: 0;
   width: 2px;
-  background: var(--timeline-tree-line, rgba(176, 114, 76, 0.28));
+  background: var(--timeline-tree-line, color-mix(in srgb, var(--wash-tint) 28%, transparent));
   pointer-events: none;
 }
 
@@ -3042,7 +3091,7 @@ button.timeline-session-divider::before {
   margin: 0.25rem 0 0.35rem 1.45rem;
   padding: 0.35rem 0.5rem 0.35rem 1.25rem;
   overflow: auto;
-  border-left: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-left: 1px solid color-mix(in srgb, var(--wash-tint) 32%, var(--border));
 }
 
 .timeline-indexing-file-list li {
@@ -3349,8 +3398,8 @@ button.timeline-session-divider-child::before {
 }
 
 .memories-tree-scope-header:hover {
-  background: rgba(176, 114, 76, 0.08);
-  border-color: rgba(176, 114, 76, 0.18);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
+  border-color: color-mix(in srgb, var(--wash-tint) 18%, transparent);
 }
 
 .memories-tree-caret {
@@ -3396,12 +3445,12 @@ button.timeline-session-divider-child::before {
 }
 
 .memories-tree-leaf:hover {
-  background: rgba(176, 114, 76, 0.08);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
 }
 
 .memories-tree-leaf-active {
   background: var(--selected-bg);
-  border-color: rgba(176, 114, 76, 0.3);
+  border-color: color-mix(in srgb, var(--wash-tint) 30%, transparent);
   color: var(--text);
 }
 
@@ -3497,9 +3546,9 @@ button.timeline-session-divider-child::before {
 .chat-composer-wedged {
   margin: 0 0 0.5rem 0;
   padding: 0.5rem 0.6rem;
-  border: 1px solid rgba(176, 114, 76, 0.35);
+  border: 1px solid color-mix(in srgb, var(--wash-tint) 35%, transparent);
   border-radius: var(--radius-md);
-  background: rgba(176, 114, 76, 0.08);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
   font-size: var(--text-xs);
   display: flex;
   flex-direction: column;
@@ -4503,9 +4552,16 @@ button.timeline-session-divider-child::before {
 
 .chat-rail-machine-file-label {
   margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   color: var(--text);
   font-size: var(--text-lg);
   font-weight: 600;
+}
+
+.chat-rail-machine-file-note {
+  margin: 0;
+  font-size: var(--text-sm);
 }
 
 .chat-rail-machine-file-path {

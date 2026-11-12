@@ -266,7 +266,7 @@
  * canvas. ANSI palette overrides below retune the SGR colors for a light
  * bg (dark-bg variants would be near-invisible on cream). */
 [data-theme="light"] .terminal-folder-pill {
-  background: rgba(176, 114, 76, 0.18);
+  background: color-mix(in srgb, var(--wash-tint) 18%, transparent);
   color: #6b3f24;
 }
 [data-theme="light"] .terminal-output-body {
@@ -274,12 +274,12 @@
   color: var(--text, #1c1c1c);
   border: 0;
   padding: 0.25rem 0.1rem 0.25rem 0.6rem;
-  border-left: 2px solid rgba(176, 114, 76, 0.32);
+  border-left: 2px solid color-mix(in srgb, var(--wash-tint) 32%, transparent);
   border-radius: 0;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) .terminal-folder-pill {
-    background: rgba(176, 114, 76, 0.18);
+    background: color-mix(in srgb, var(--wash-tint) 18%, transparent);
     color: #6b3f24;
   }
   :root:not([data-theme="dark"]) .terminal-output-body {
@@ -287,7 +287,7 @@
     color: var(--text, #1c1c1c);
     border: 0;
     padding: 0.25rem 0.1rem 0.25rem 0.6rem;
-    border-left: 2px solid rgba(176, 114, 76, 0.32);
+    border-left: 2px solid color-mix(in srgb, var(--wash-tint) 32%, transparent);
     border-radius: 0;
   }
 }
@@ -561,7 +561,7 @@
    * deeper Home header band — so flipping modes changed the fill behind an
    * unchanged frame, and the same border read as two different borders. */
   --compose-frame-bg: var(--chat-compose-header-bg);
-  --compose-frame-border: color-mix(in srgb, var(--accent) 62%, var(--border));
+  --compose-frame-border: color-mix(in srgb, var(--wash-tint) 62%, var(--border));
   --compose-toolbar-bg: var(--chat-compose-header-bg);
   /* The rule under each band. Quieter than the frame's accent-tinted edge:
    * these are seams inside one surface, not the surface's boundary. */
@@ -962,7 +962,7 @@
   align-items: center;
   gap: 0.3rem;
   padding: 0 0.4rem;
-  background: rgba(176, 114, 76, 0.08);
+  background: color-mix(in srgb, var(--wash-tint) 8%, transparent);
 }
 
 /* Compact toolbar button that warms on hover / when its popover is open. */
@@ -982,8 +982,8 @@
 }
 .terminal-toolbar-btn:hover,
 .terminal-toolbar-btn[data-state="open"] {
-  background: rgba(176, 114, 76, 0.16);
-  border-color: rgba(176, 114, 76, 0.32);
+  background: color-mix(in srgb, var(--wash-tint) 16%, transparent);
+  border-color: color-mix(in srgb, var(--wash-tint) 32%, transparent);
   color: var(--text, #f0f0f0);
 }
 .terminal-toolbar-btn svg {
@@ -1286,7 +1286,7 @@
    * toolbar read as a floating band instead of a flush seam. */
   background: #f6f1e7;
   border: 0;
-  border-bottom: 1px solid rgba(176, 114, 76, 0.28);
+  border-bottom: 1px solid color-mix(in srgb, var(--wash-tint) 28%, transparent);
   border-radius: 0;
   padding: 0.4rem 0 0.4rem 0.1rem;
 }
@@ -1300,7 +1300,7 @@
 [data-theme="light"] .folder-tree-trigger,
 [data-theme="light"] .folder-tree-popup {
   background: #f6f1e7;
-  border-color: rgba(176, 114, 76, 0.3);
+  border-color: color-mix(in srgb, var(--wash-tint) 30%, transparent);
   color: var(--text, #1c1c1c);
 }
 [data-theme="light"] .terminal-composer-input {
@@ -1335,7 +1335,7 @@
     /* Parchment fill — see the `[data-theme="light"]` rule above. */
     background: #f6f1e7;
     border: 0;
-    border-bottom: 1px solid rgba(176, 114, 76, 0.28);
+    border-bottom: 1px solid color-mix(in srgb, var(--wash-tint) 28%, transparent);
     border-radius: 0;
     padding: 0.4rem 0 0.4rem 0.1rem;
   }
@@ -1345,7 +1345,7 @@
   :root:not([data-theme="dark"]) .folder-tree-trigger,
   :root:not([data-theme="dark"]) .folder-tree-popup {
     background: #f6f1e7;
-    border-color: rgba(176, 114, 76, 0.3);
+    border-color: color-mix(in srgb, var(--wash-tint) 30%, transparent);
     color: var(--text, #1c1c1c);
   }
   :root:not([data-theme="dark"]) .terminal-composer-input {

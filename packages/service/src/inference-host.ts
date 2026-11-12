@@ -1,18 +1,17 @@
 import { startService as startInferenceService } from '@bendyline/gezel-inference';
 import { gezelPaths } from '@bendyline/gezel/paths';
-import type { ServerType } from '@hono/node-server';
 import { Hono } from 'hono';
 import { type LoopbackCert, generateLoopbackCert } from './http/cert.js';
 import { closeListener } from './http/close-listener.js';
 import { hostGuard } from './http/host-guard.js';
 import { bindMainListener } from './http/main-listener.js';
 import { writeRuntime } from './runtime-discovery.js';
-import type { StartServiceOptions } from './service-options.js';
+import type { ServiceServer, StartServiceOptions } from './service-options.js';
 
 /** What `startService({ embeddedInferenceOnly: true })` returns. */
 export interface RunningInferenceOnlyService {
   profile: 'embedded-inference';
-  server: ServerType;
+  server: ServiceServer;
   port: number;
   /** The inference host's bearer credential, also written to `runtime/auth-token`. */
   clientToken: string;
@@ -39,9 +38,12 @@ export async function startInferenceOnlyService(
 ): Promise<RunningInferenceOnlyService> {
   const inference = await startInferenceService({
     home: opts.home,
+    // startService has already routed records; a 'file' route writes through
+    // a sink and leaves the streams on stderr.
+    logOutput: opts.logOutput === 'split' ? 'split' : 'stderr',
     ...(opts.onUnexpectedHttpError ? { onUnexpectedHttpError: opts.onUnexpectedHttpError } : {}),
   });
-  let server: ServerType | undefined;
+  let server: ServiceServer | undefined;
   try {
     const cert = process.env.GEZEL_INSECURE_TRANSPORT === '1' ? null : await generateLoopbackCert();
     const app = new Hono();

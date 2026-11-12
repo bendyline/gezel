@@ -1,6 +1,4 @@
-import { useEffect, useState } from 'react';
-import { api } from '../api.js';
-import { peekApiRead } from '../shared-api-reads.js';
+import { useConfig } from '../data/use-api-read.js';
 
 /**
  * Live view of the UI/CLI-only work-in-progress feature bucket. The default
@@ -8,31 +6,5 @@ import { peekApiRead } from '../shared-api-reads.js';
  * discoverability only and deliberately does not change service capability.
  */
 export function useShowWorkInProgressFeatures(): boolean {
-  const [on, setOn] = useState(() => peekApiRead('getConfig')?.showWorkInProgressFeatures ?? false);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getConfig()
-      .then((config) => {
-        if (!cancelled) setOn(config.showWorkInProgressFeatures === true);
-      })
-      .catch(() => {});
-
-    const onConfigUpdated = (event: Event) => {
-      const detail = (event as CustomEvent).detail as
-        | { showWorkInProgressFeatures?: boolean }
-        | undefined;
-      if (typeof detail?.showWorkInProgressFeatures === 'boolean') {
-        setOn(detail.showWorkInProgressFeatures);
-      }
-    };
-    window.addEventListener('gezel:config-updated', onConfigUpdated);
-    return () => {
-      cancelled = true;
-      window.removeEventListener('gezel:config-updated', onConfigUpdated);
-    };
-  }, []);
-
-  return on;
+  return useConfig((config) => config.showWorkInProgressFeatures === true) ?? false;
 }

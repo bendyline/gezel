@@ -645,17 +645,27 @@ export function describeClientReport(report: ClientPerfReport): string {
     }`;
   }
   const slowest = report.slowest[0];
+  const verb = report.scope === 'part' ? 'moved to' : 'opened';
   const parts = [
-    `opened ${report.view} in ${formatPerfMs(report.settledMs)}${report.unsettled ? ' (still loading)' : ''}`,
+    `${verb} ${report.view} in ${formatPerfMs(report.settledMs)}${report.unsettled ? ' (still loading)' : ''}`,
     `first frame ${formatPerfMs(report.firstFrameMs)}`,
-    `${report.requests} request${report.requests === 1 ? '' : 's'}`,
   ];
+  if (report.paintedMs !== undefined) parts.push(`drawn ${formatPerfMs(report.paintedMs)}`);
+  if (report.contentMs !== undefined) parts.push(`content ${formatPerfMs(report.contentMs)}`);
+  parts.push(
+    `${report.requests} request${report.requests === 1 ? '' : 's'}${
+      report.backgroundRequests ? ` (+${report.backgroundRequests} background)` : ''
+    }`,
+  );
   if (slowest) {
     parts.push(
       `slowest ${slowest.method} ${slowest.path} ${formatPerfMs(slowest.ms)}${
         slowest.serverMs !== undefined ? ` (daemon ${formatPerfMs(slowest.serverMs)})` : ''
       }`,
     );
+  }
+  if (report.layoutShift !== undefined && report.layoutShift >= 0.01) {
+    parts.push(`layout shift ${report.layoutShift.toFixed(2)}`);
   }
   if (report.longTasks.count > 0) {
     parts.push(

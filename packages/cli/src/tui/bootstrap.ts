@@ -83,7 +83,7 @@ const CHAT_MEMORY_OVERHEAD: Record<BootstrapChatProvider, number> = {
 };
 
 /**
- * Complete local toolkit used by the recommended workshop set. The three
+ * Complete local toolkit used by the recommended complete set. The three
  * variant-less entries share one release archive; resolving them serially
  * downloads that archive once and activates each executable from its cache.
  */

@@ -23,7 +23,11 @@ npm install @bendyline/gezel-mcp
 web tools what only Gezel has: search over the folder it works in (including
 the text of its Office documents), the person's shared library, memories and
 knowledge catalogs, Office documents read as markdown, image description and
-generation, and memory. Nine tools in all, with absolute paths throughout.
+generation, memory, documents made and checked with the DocBlocks that Gezel
+ships, and the night shift's issues for the app to judge (with the prompts
+`triage_issues` and `fix_issues`). Paths are absolute throughout. The exact
+set is `HARNESS_TOOL_NAMES` and `HARNESS_DOCUMENT_TOOL_NAMES` in
+[harness-profile.ts](https://github.com/bendyline/gezel/blob/main/packages/core/src/tools/harness-profile.ts).
 
 Set it up from Gezel (Settings → Integrations, or `gezel mcp install <app>`),
 which writes the app's entry for you. By hand, run the server under Node 24 or

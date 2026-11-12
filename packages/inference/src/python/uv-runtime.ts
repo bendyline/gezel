@@ -21,6 +21,7 @@
  * Storage layout:
  *
  *   <home>/engines/uv/
+ *   ├── cache/                         (uv's download cache, UV_CACHE_DIR)
  *   └── venvs/
  *       └── <name>/
  *           ├── uv.json                (this module's manifest)
@@ -128,6 +129,24 @@ export interface UvRuntimeOptions {
 
 const DEFAULT_MIN_PY = '3.10';
 const DEFAULT_PREFERRED_PY = '3.11';
+
+/** uv's download cache for this home, beside the venvs it fills. */
+export function uvCacheDir(home: string): string {
+  return join(home, 'engines', 'uv', 'cache');
+}
+
+/**
+ * The environment a uv run gets. Left alone, uv caches downloaded wheels in
+ * `~/.cache/uv` (1.4 GB on one Mac), outside the Gezel home
+ * where storage accounting and `gezel cleanup` never saw it (2026-11-11 npm
+ * ship audit). A UV_CACHE_DIR the person set stays theirs. Inside the home
+ * the cache also shares a volume with the venvs, so uv can link files from
+ * it instead of copying them.
+ */
+export function uvChildEnv(env: NodeJS.ProcessEnv, home: string): NodeJS.ProcessEnv {
+  if (env.UV_CACHE_DIR?.trim()) return env;
+  return { ...env, UV_CACHE_DIR: uvCacheDir(home) };
+}
 
 export class UvRuntime {
   private readonly home: string;
@@ -466,7 +485,7 @@ export class UvRuntime {
   private run(command: string, args: string[]): Promise<void> {
     return new Promise((resolve, reject) => {
       const child = this.spawn(command, args, {
-        env: process.env,
+        env: uvChildEnv(process.env, this.home),
         stdio: ['ignore', 'pipe', 'pipe'],
         ...windowsHeadlessSpawnOptions(),
       });

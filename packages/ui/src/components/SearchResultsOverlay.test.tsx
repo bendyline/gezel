@@ -7,6 +7,7 @@ import { createMockApi } from '../test-utils/mockApi.js';
 vi.mock('../api.js', () => ({ api: createMockApi() }));
 
 import { api } from '../api.js';
+import { loadSearchSnippetMarkdown } from './SearchMarkdownSnippet.js';
 import { SearchResultsOverlay, openSearchResults } from './SearchResultsOverlay.js';
 
 const RESULTS: UnifiedSearchResult[] = [
@@ -30,8 +31,10 @@ const RESULTS: UnifiedSearchResult[] = [
   },
 ];
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.mocked(api.search).mockResolvedValue({ results: RESULTS, truncated: false });
+  // The search box preloads the snippet parser on focus; so does this test.
+  await loadSearchSnippetMarkdown();
 });
 
 afterEach(() => {

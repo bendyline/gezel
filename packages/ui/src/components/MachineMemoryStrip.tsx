@@ -1,5 +1,5 @@
 import type { LocalEngineLifecycle, MachineMemoryUsage } from '@bendyline/gezel';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { api } from '../api.js';
 import { Tooltip } from '../primitives/index.js';
 import { formatBytes } from './engine-pill-stats.js';
@@ -154,6 +154,8 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
   const [unavailable, setUnavailable] = useState(false);
   const [unloadingEngines, setUnloadingEngines] = useState<ReadonlySet<string>>(() => new Set());
   const [unloadError, setUnloadError] = useState<string | null>(null);
+  const [processesOpen, setProcessesOpen] = useState(false);
+  const processListId = useId();
 
   useEffect(() => {
     let cancelled = false;
@@ -406,6 +408,16 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
     allGpuProcesses.reduce((sum, process) => sum + process.dedicatedBytes, 0) - visibleProcessBytes,
   );
   const showProcessRemainder = remainingProcessBytes >= processDetailThresholdBytes;
+  const gezelProcessBytes = allGpuProcesses
+    .filter((process) => process.owner !== 'external')
+    .reduce((sum, process) => sum + process.dedicatedBytes, 0);
+  const otherProcessBytes = allGpuProcesses
+    .filter((process) => process.owner === 'external')
+    .reduce((sum, process) => sum + process.dedicatedBytes, 0);
+  const processApprox = processAttributionEstimated ? '~' : '';
+  const processHeading = processAttributionEstimated
+    ? 'Estimated video memory use'
+    : 'Dedicated video memory owners';
   const engineLifecycles = usage.engineLifecycles ?? [];
   const ariaSummary = [
     `${hasMeasuredUsage ? measuredUsageLabel : label}: ${usedSummary}`,
@@ -507,38 +519,66 @@ export function MachineMemoryStrip({ pollMs = 1_000, modelNames, modelConcurrent
         </div>
       )}
       {(gpuProcesses.length > 0 || showProcessRemainder) && (
-        <div
-          className="machine-memory-detail-list"
-          aria-label={
-            processAttributionEstimated
-              ? 'Estimated video memory use'
-              : 'Dedicated video memory owners'
-          }
-        >
-          <div className="machine-memory-detail-heading">
-            {processAttributionEstimated
-              ? 'Estimated video memory use'
-              : 'Dedicated video memory owners'}
-          </div>
-          {gpuProcesses.map((process) => (
+        <div className="machine-memory-detail-list">
+          <button
+            type="button"
+            className="machine-memory-disclosure"
+            aria-expanded={processesOpen}
+            aria-controls={processListId}
+            onClick={() => setProcessesOpen((open) => !open)}
+          >
+            <span className="machine-memory-disclosure-label">
+              <span className="machine-memory-disclosure-chevron" aria-hidden="true">
+                <svg
+                  width={10}
+                  height={10}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2.4}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                  focusable="false"
+                >
+                  <polyline points="9 6 15 12 9 18" />
+                </svg>
+              </span>
+              {processHeading}
+            </span>
+            <span className="machine-memory-disclosure-summary">
+              Gezel {processApprox}
+              {formatBytes(gezelProcessBytes)} · Other {processApprox}
+              {formatBytes(otherProcessBytes)}
+            </span>
+          </button>
+          {processesOpen && (
             <div
-              className="machine-memory-detail-row"
-              key={`${process.pid}:${process.adapterLuid ?? 'all'}:${process.owner}`}
+              id={processListId}
+              className="machine-memory-detail-list machine-memory-process-list"
+              aria-label={processHeading}
             >
-              <span>{gpuProcessRowLabel(process)}</span>
-              <span>
-                {processAttributionEstimated ? '~' : ''}
-                {formatBytes(process.dedicatedBytes)}
-              </span>
-            </div>
-          ))}
-          {showProcessRemainder && (
-            <div className="machine-memory-detail-row">
-              <span>Other processes</span>
-              <span>
-                {processAttributionEstimated ? '~' : ''}
-                {formatBytes(remainingProcessBytes)}
-              </span>
+              {gpuProcesses.map((process) => (
+                <div
+                  className="machine-memory-detail-row"
+                  key={`${process.pid}:${process.adapterLuid ?? 'all'}:${process.owner}`}
+                >
+                  <span>{gpuProcessRowLabel(process)}</span>
+                  <span>
+                    {processApprox}
+                    {formatBytes(process.dedicatedBytes)}
+                  </span>
+                </div>
+              ))}
+              {showProcessRemainder && (
+                <div className="machine-memory-detail-row">
+                  <span>Other processes</span>
+                  <span>
+                    {processApprox}
+                    {formatBytes(remainingProcessBytes)}
+                  </span>
+                </div>
+              )}
             </div>
           )}
         </div>

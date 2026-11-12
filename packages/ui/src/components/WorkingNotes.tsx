@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
+import { LiveRenderGate } from './live-render-gate.js';
 
 /**
  * The crew's working, folded into one line of the person's conversation.
@@ -41,12 +42,16 @@ export function WorkingNotes({
   const who = joinNames(names);
   const several = names.length > 1;
   const state = needsYou ? 'needs-you' : live ? 'live' : error ? 'stopped' : 'done';
+  // Follows the element, however it opened or closed, so a closed fold's
+  // streaming replies stop redrawing (LiveRenderGate below).
+  const [open, setOpen] = useState(defaultOpen || needsYou);
   return (
     <details
       className={`timeline-working-notes timeline-working-notes-${state}`}
       data-testid="working-notes"
       data-working-notes-state={state}
       {...(defaultOpen || needsYou ? { open: true } : {})}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary className="timeline-working-notes-summary">
         <span className="timeline-working-notes-dot" aria-hidden="true" />
@@ -61,7 +66,9 @@ export function WorkingNotes({
         </span>
         <span className="timeline-working-notes-toggle">Working notes</span>
       </summary>
-      <div className="timeline-working-notes-body">{children}</div>
+      <div className="timeline-working-notes-body">
+        <LiveRenderGate shown={open}>{children}</LiveRenderGate>
+      </div>
     </details>
   );
 }

@@ -1167,7 +1167,9 @@ describe('ChatReferences reference picker', () => {
     );
 
     await user.click(screen.getByRole('button', { name: 'Open binary' }));
-    expect(await screen.findByText('<Machine File>')).toBeInTheDocument();
+    expect(await screen.findByText("Gezel can't show this kind of file here.")).toBeInTheDocument();
+    expect(screen.getByText('File', { selector: '.chat-rail-machine-file-label' })).toBeTruthy();
+    expect(screen.queryByText('<Machine File>')).toBeNull();
 
     await user.click(screen.getByRole('button', { name: 'Save copy as…' }));
     await user.click(screen.getByRole('button', { name: 'Open containing folder' }));
@@ -1181,6 +1183,30 @@ describe('ChatReferences reference picker', () => {
       kind: 'artifact',
       path: 'build/archive.bin',
     });
+  });
+
+  it('names a deck it could not preview instead of a placeholder', async () => {
+    activeWidth = CHAT_RAIL_MIN_SPLIT_PX;
+    const user = userEvent.setup();
+    apiMocks.previewReference.mockResolvedValue({ mode: 'binary' });
+
+    render(
+      <ChatReferences chatKey="project-1" projectId="project-1">
+        {({ onArtifactReference }) => (
+          <button type="button" onClick={() => onArtifactReference('powerpoint/task-2/deck.pptx')}>
+            Open deck
+          </button>
+        )}
+      </ChatReferences>,
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Open deck' }));
+    expect(
+      await screen.findByText("Gezel can't show a preview of this presentation here."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('Presentation', { selector: '.chat-rail-machine-file-label' }),
+    ).toBeTruthy();
   });
 });
 

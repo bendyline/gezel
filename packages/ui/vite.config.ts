@@ -1,13 +1,20 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import { fontPreloadPlugin } from './scripts/vite-font-preload.js';
 import { harperWasmPlugin } from './scripts/vite-harper-wasm.js';
+import { noBrowserFfmpegPlugin } from './scripts/vite-no-browser-ffmpeg.js';
+import { reactWithCompiler } from './scripts/vite-react.js';
+import { routeGraphPlugin } from './scripts/vite-route-graph.js';
 
 export default defineConfig({
   plugins: [
-    react(),
+    ...reactWithCompiler(import.meta.dirname),
     harperWasmPlugin(),
+    noBrowserFfmpegPlugin(),
+    routeGraphPlugin(),
+    // The interface face and the reading face the shell draws first.
+    fontPreloadPlugin(['hanken-grotesk-400', 'pt-serif-400']),
     {
       name: 'local-startup-dev-assets',
       configureServer(server) {
@@ -74,6 +81,28 @@ export default defineConfig({
         // too; matching it put all of squisq's core in the startup chunk.
         codeSplitting: {
           groups: [
+            // Vendor code in named chunks: an app update that leaves React,
+            // the query cache or the editor alone keeps their files, so the
+            // browser keeps their cached bytes and compiled code. Only sets the
+            // shell uses whole (or that load together) are grouped: a group
+            // is one chunk, so grouping a family the shell uses part of would
+            // pull the rest into startup.
+            {
+              name: 'vendor-react',
+              // Not react-dom's server and static renderers: only a lazily
+              // loaded Help article uses them, and grouped they rode startup.
+              test: (id: string) =>
+                /[\\/]node_modules[\\/](?:react|react-dom|scheduler)[\\/]/.test(id) &&
+                !/[\\/]react-dom[\\/](?:cjs[\\/]react-dom-)?(?:server|static)/.test(id),
+            },
+            {
+              name: 'vendor-query',
+              test: /[\\/]node_modules[\\/]@tanstack[\\/](?:react-query|query-core)[\\/]/,
+            },
+            {
+              name: 'vendor-editor',
+              test: /[\\/]node_modules[\\/](?:prosemirror-[^\\/]+|@tiptap[\\/][^\\/]+)[\\/]/,
+            },
             {
               name: 'gezel-core',
               test: /(?<![\\/]squisq)[\\/]packages[\\/]core[\\/]dist[\\/]|[\\/]node_modules[\\/]@bendyline[\\/]gezel[\\/]dist[\\/]/,

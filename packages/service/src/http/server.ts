@@ -10,8 +10,6 @@ export {
   type UnexpectedHttpErrorEvent,
 } from './errors.js';
 import { randomUUID } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
-import { join } from 'node:path';
 import {
   GEZEL_API_GENERATION,
   GEZEL_API_GENERATION_FLOOR,
@@ -19,7 +17,6 @@ import {
   createLogger,
   isSafeEntityId,
 } from '@bendyline/gezel';
-import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { embeddingsHealth } from '@bendyline/gezel-inference/internal/memory/embeddings';
 import { redactPathSecrets } from '@bendyline/gezel-inference/internal/perf/redact-path';
 import { beginPerfRequest } from '@bendyline/gezel-inference/internal/perf/responsiveness';
@@ -49,7 +46,6 @@ import { machineEngineProxy } from '@bendyline/gezel-inference/internal/http/rou
 import { modelBundleRoutes } from '@bendyline/gezel-inference/internal/http/routes/model-bundles';
 import { v1ImagesRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-images';
 import { v1KnowledgeRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-knowledge';
-import { mimeTypeForPath } from './mime.js';
 import { openAiErrorEnvelope } from './openai-compat/error-envelope.js';
 import { requireOpenAiEndpointsEnabled } from './openai-endpoints-gate.js';
 import { PreviewCapabilityStore } from './preview-capability.js';
@@ -187,7 +183,7 @@ import {
   sessionRouteGuard,
   teamRouteGuard,
 } from './scope-guard.js';
-import { shouldServeUiShell, staticUiCacheControl } from './static-ui.js';
+import { staticUiRoutes } from './static-ui.js';
 
 interface BuildAppOptions {
   onUnexpectedHttpError?: UnexpectedHttpErrorHandler;
@@ -890,39 +886,7 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
   // serve it at `/`. Otherwise return a friendly placeholder so browsers
   // hitting the daemon directly see something sensible.
   if (ctx.uiDir) {
-    app.get('/*', async (c) => {
-      const rel = c.req.path === '/' ? 'index.html' : c.req.path.replace(/^\/+/, '');
-      const file = safeJoin(ctx.uiDir!, rel);
-      if (!file) return c.notFound();
-      try {
-        const s = await stat(file);
-        if (!s.isFile()) {
-          if (!shouldServeUiShell(rel)) return c.notFound();
-          // Fall through to index.html for client-side routing.
-          const html = await readFile(join(ctx.uiDir!, 'index.html'));
-          return c.body(html, 200, {
-            'content-type': 'text/html; charset=utf-8',
-            'cache-control': staticUiCacheControl('index.html'),
-          });
-        }
-        const content = await readFile(file);
-        return c.body(content, 200, {
-          'content-type': mimeTypeForPath(file),
-          'cache-control': staticUiCacheControl(rel),
-        });
-      } catch {
-        if (!shouldServeUiShell(rel)) return c.notFound();
-        try {
-          const html = await readFile(join(ctx.uiDir!, 'index.html'));
-          return c.body(html, 200, {
-            'content-type': 'text/html; charset=utf-8',
-            'cache-control': staticUiCacheControl('index.html'),
-          });
-        } catch {
-          return c.notFound();
-        }
-      }
-    });
+    app.route('/', staticUiRoutes(ctx.uiDir));
   } else {
     app.get('/', (c) =>
       c.html(
