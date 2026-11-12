@@ -145,6 +145,29 @@ describe('startCliEndpoint', () => {
     }
   });
 
+  it('refuses a reply the CLI served from a different model than the one asked for', async () => {
+    const claudeBin = await fakeClaude(
+      `echo '{"type":"result","subtype":"success","is_error":false,"result":"ok","modelUsage":{"claude-haiku-5-5":{},"claude-opus-5-5":{}}}'`,
+    );
+    const endpoint = await startCliEndpoint({
+      modelId: 'claude-opus-4-1',
+      reference: { cli: 'claude', model: 'claude-opus-4-1' },
+      contextWindow: 32_768,
+      claudeBin,
+      codexBin: 'codex',
+    });
+    try {
+      const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'Hi' }] }),
+      });
+      expect(response.status).toBe(502);
+    } finally {
+      await endpoint.close();
+    }
+  });
+
   it('returns structured output as the reply text when a schema was asked for', async () => {
     const claudeBin = await fakeClaude(
       `echo '{"type":"result","subtype":"success","is_error":false,"result":"","structured_output":{"slides":[]}}'`,

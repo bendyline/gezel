@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, expect, test } from '@playwright/test';
 import { _electron as electron } from 'playwright';
+import { waitForAppReady } from './helpers/app-ready.js';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 
@@ -27,7 +28,9 @@ test.beforeAll(async () => {
   });
 
   page = await app.firstWindow();
-  await page.waitForLoadState('domcontentloaded');
+  // The start screen draws its own copy of the rail, with the same test ids,
+  // until the live shell takes over; clicking before then hits the copy.
+  await waitForAppReady(page);
 });
 
 test.afterAll(async () => {

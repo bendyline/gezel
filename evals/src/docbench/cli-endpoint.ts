@@ -249,6 +249,16 @@ async function runClaude(options: CliRunOptions, dir: string): Promise<CliReply>
   if ((parsed.is_error === true || run.code !== 0) && !schemaGaveUp) {
     throw new CliFailure(`claude ${String(parsed.subtype)}: ${tail(result || run.stderr)}`);
   }
+  // The CLI answers a retired model id with the current model and says so
+  // only in modelUsage, so a reply from any other model is not this model's.
+  const served = Object.keys((parsed.modelUsage ?? {}) as Record<string, unknown>);
+  const requested = options.reference.model;
+  if (
+    served.length > 0 &&
+    !served.some((id) => id === requested || new RegExp(`^${requested}-\\d{8}$`).test(id))
+  ) {
+    throw new CliFailure(`claude served ${served.join(', ')} instead of ${requested}`);
+  }
   const promptTokens =
     (count(usage.input_tokens) ?? 0) +
     (count(usage.cache_read_input_tokens) ?? 0) +

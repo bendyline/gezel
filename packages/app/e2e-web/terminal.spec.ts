@@ -360,7 +360,16 @@ test('mounts, submits on Enter, newlines on Shift+Enter', async ({ page, world }
 test('keeps keyboard focus while switching between terminal and blank chat', async ({
   page,
   world,
+  daemon,
 }) => {
+  const client = new GezelClient({ baseUrl: daemon.baseURL, token: daemon.token });
+  const keepTypingSaved = async () => {
+    const { drafts } = await client.listPromptDrafts(world!.projectId, {
+      gezelId: world!.gezelIds.ada,
+      status: 'draft',
+    });
+    return drafts.some((draft) => draft.title.startsWith('keep typing'));
+  };
   const terminalEditor = await openTerminal(page, world!.projectId);
   await expect(terminalEditor.locator('textarea.inputarea')).toBeFocused();
   await page.keyboard.type('@');
@@ -375,7 +384,14 @@ test('keeps keyboard focus while switching between terminal and blank chat', asy
   await page.keyboard.type('keep typing');
   await expect(chatEditor).toHaveText('keep typing');
 
+  // The `> ` escape fires only on the composer's first edit out of an empty
+  // draft. Squisq reports edits from a render effect, so on a loaded CI
+  // renderer the clear and both keystrokes arrived as one edit from
+  // "keep typing" and the escape never fired (2026-11-12). A person pauses
+  // there; the autosave shows when the composer has seen each state.
+  await expect.poll(keepTypingSaved).toBe(true);
   await chatEditor.fill('');
+  await expect.poll(keepTypingSaved).toBe(false);
   await page.keyboard.type('> ');
   await expect(page.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(
     'aria-selected',
