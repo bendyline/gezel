@@ -3701,6 +3701,8 @@ export class ChatManager extends LocalEngineRuntime {
     consultationMode?: boolean;
     /** The outcome task this consultation works for. See ChatSession.subagentFor. */
     subagentFor?: { taskRef: string; ownerSessionId: string };
+    /** A read-only fresh-eyes review. See ChatSession.reviewFocus. */
+    reviewFocus?: boolean;
     /**
      * Mark the session as belonging to an anonymous app-serve visitor:
      * zero tools at session build, a visitor-context prompt addendum, and
@@ -3803,6 +3805,7 @@ export class ChatManager extends LocalEngineRuntime {
       ...(args.subject ? { subject: args.subject } : {}),
       ...(args.consultationMode ? { consultationMode: true } : {}),
       ...(args.subagentFor ? { subagentFor: args.subagentFor } : {}),
+      ...(args.reviewFocus ? { reviewFocus: true } : {}),
       ...(args.visitorAccess ? { visitorAccess: true as const } : {}),
       ...(args.roleBasedNameOnlyMode !== undefined
         ? { roleBasedNameOnlyMode: args.roleBasedNameOnlyMode }
@@ -5630,6 +5633,102 @@ export class ChatManager extends LocalEngineRuntime {
         state: 'ended',
         targetGezelName: targetDisplayName,
       });
+    }
+  }
+
+  /**
+   * A fresh-eyes review: a new read-only session (`reviewFocus`) of
+   * `gezelId`, sent `text` and waited on like a consultation. The task owner
+   * reviews its own work this way, so the review runs on the model it was
+   * measured on, with nothing of the work's making in its transcript. Unlike
+   * `askGezelAndWait` a gezel may ask itself here: the two sessions share
+   * only the gezel's character and model, and the review session can reach
+   * no one, so no ask cycle can form through it.
+   */
+  async askFreshEyes(args: {
+    gezelId: string;
+    projectId: string;
+    fromSessionId: string;
+    text: string;
+    timeoutMs?: number;
+    subagentFor: { taskRef: string; ownerSessionId: string };
+  }): Promise<AskGezelOutcome> {
+    if (!isEngagementAllowed(await this.store.readConfig())) {
+      return {
+        outcome: 'error',
+        reason: 'engagement-off',
+        message: 'Cross-gezel work is disabled at the current AI engagement level.',
+      };
+    }
+    const gezel = await this.store.getGezel(args.gezelId).catch(() => null);
+    if (!gezel) {
+      return {
+        outcome: 'error',
+        reason: 'not-found',
+        message: `Gezel "${args.gezelId}" not found.`,
+      };
+    }
+    const fromRec = await this.getSessionRecord(args.fromSessionId).catch(() => null);
+    const session = await this.createSession({
+      gezelId: gezel.id,
+      projectId: args.projectId,
+      parentSession: { sessionId: args.fromSessionId, gezelId: gezel.id, kind: 'consultation' },
+      ...(fromRec?.roleBasedNameOnlyMode !== undefined
+        ? { roleBasedNameOnlyMode: fromRec.roleBasedNameOnlyMode }
+        : {}),
+      consultationMode: true,
+      reviewFocus: true,
+      subagentFor: args.subagentFor,
+    });
+    const boring =
+      fromRec?.roleBasedNameOnlyMode ?? (await this.store.readConfig()).roleBasedNameOnlyMode;
+    const name = displayName(
+      { name: gezel.name, roleBasedName: gezel.roleBasedName },
+      boring ?? false,
+    );
+    const timeoutMs = await this.resolveConsultationIdleTimeoutMs(session, args.timeoutMs);
+    void this.prewarmSession(session.id);
+    const replyPromise = this.waitForNextTurnComplete(session.id, timeoutMs);
+    try {
+      await this.sendWithBusyRetry(session.id, args.text, {
+        from: {
+          gezelId: gezel.id,
+          gezelName: name,
+          sessionId: args.fromSessionId,
+          kind: 'consultation',
+        },
+      });
+    } catch (err) {
+      return {
+        outcome: 'error',
+        reason: 'delivery-failed',
+        message: `The review could not start: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+    const result = await replyPromise;
+    switch (result.kind) {
+      case 'complete':
+        return {
+          outcome: 'reply',
+          text: result.text,
+          toGezelId: gezel.id,
+          toGezelName: name,
+          sessionId: session.id,
+        };
+      case 'error':
+        return { outcome: 'error', reason: 'target-error', message: result.error };
+      case 'timeout':
+        return {
+          outcome: 'error',
+          reason: 'timeout',
+          message: `The review went quiet for ${Math.round(timeoutMs / 1000)} s with no progress.`,
+        };
+      case 'session-gone':
+        return {
+          outcome: 'error',
+          reason: 'target-deleted',
+          message: 'The review session was deleted before it replied.',
+        };
     }
   }
 
@@ -15573,14 +15672,17 @@ export class ChatManager extends LocalEngineRuntime {
     // built-in-only step drops them. A thread pinned to a craftbook keeps
     // only its editing kit, so neither apps' tools nor toolsets join it.
     const craftbookFocus = Boolean(record.craftbookRef);
+    // A fresh-eyes review changes nothing, and toolsets, app tools and
+    // project scripts all reach past the read-only core.
+    const reviewFocus = record.reviewFocus === true;
     const appToolBindings =
-      builtinOnlyStep || craftbookFocus ? [] : this.appToolBindingsFor(record);
+      builtinOnlyStep || craftbookFocus || reviewFocus ? [] : this.appToolBindingsFor(record);
     const appSubject = promptAppSubjectFor(record, appToolBindings);
     const appItemFocus = isItemFocus(appSubject);
     const activeToolsets = (entries: readonly InstalledToolset[]): InstalledToolset[] =>
       entries.filter(
         (entry) =>
-          (!(builtinOnlyStep || appItemFocus || craftbookFocus) ||
+          (!(builtinOnlyStep || appItemFocus || craftbookFocus || reviewFocus) ||
             entry.runtime.kind === 'builtin') &&
           !stepDisabledToolsetIds.has(entry.toolsetId),
       );
@@ -16140,7 +16242,7 @@ export class ChatManager extends LocalEngineRuntime {
     // through our MCP bridge.
     const sandboxCopilotEffective =
       record.providerName === 'copilot'
-        ? resolveSandboxCopilot(config.sandboxCopilot, gezelFm?.sandboxCopilot)
+        ? reviewFocus || resolveSandboxCopilot(config.sandboxCopilot, gezelFm?.sandboxCopilot)
         : false;
 
     const opts: BuiltSessionOpts = {
@@ -16795,7 +16897,9 @@ export class ChatManager extends LocalEngineRuntime {
       // rebuild must never silently strip tools a live session already had.
       // `project == null` means getProject hit a read/parse failure; treat
       // the type as still applied (fail safe) so a blip doesn't clear tools.
-      const resolvedScriptTools = await resolveProjectScriptTools(this.catalog, project);
+      const resolvedScriptTools = reviewFocus
+        ? []
+        : await resolveProjectScriptTools(this.catalog, project);
       const typeStillApplied = project == null || project.projectType != null;
       const scriptToolPlan = reconcileScriptTools(
         resolvedScriptTools,
@@ -17375,11 +17479,13 @@ export class ChatManager extends LocalEngineRuntime {
 
     if (record.providerName === 'anthropic-cli') {
       const cwd = await this.store.projectWorkspaceDir(record.projectId);
-      const permissionModeOverride =
-        project?.claudePermissionMode ??
-        gezelFm?.claudePermissionMode ??
-        config.anthropicCli?.defaultPermissionMode ??
-        'acceptEdits';
+      // `plan` keeps Claude's own edit and shell tools out of a review.
+      const permissionModeOverride = reviewFocus
+        ? 'plan'
+        : (project?.claudePermissionMode ??
+          gezelFm?.claudePermissionMode ??
+          config.anthropicCli?.defaultPermissionMode ??
+          'acceptEdits');
       // Compute the Claude CLI built-ins to disallow AND to auto-allow
       // from the same role+toolsets data the gezel-mcp filter uses. The
       // disallowed list is what the model literally can't reach
@@ -17424,12 +17530,15 @@ export class ChatManager extends LocalEngineRuntime {
       // The project status-bar control is authoritative, followed by the
       // Codex-specific gezel override. Fall back to the historical shared
       // Claude field so existing gezel files retain their prior behavior.
-      const permissionModeOverride = normalizeCodexPermissionMode(
-        project?.codexPermissionMode ??
-          gezelFm?.codexPermissionMode ??
-          gezelFm?.claudePermissionMode ??
-          config.codexCli?.defaultPermissionMode,
-      );
+      // `plan` runs Codex in its read-only sandbox for a review.
+      const permissionModeOverride = reviewFocus
+        ? 'plan'
+        : normalizeCodexPermissionMode(
+            project?.codexPermissionMode ??
+              gezelFm?.codexPermissionMode ??
+              gezelFm?.claudePermissionMode ??
+              config.codexCli?.defaultPermissionMode,
+          );
       // If the gezel's effort belongs to another provider's vocabulary,
       // drop it and let Codex fall back to the install/model default.
       const reasoningEffortOverride = isCodexReasoningEffort(gezelFm?.reasoningEffort)

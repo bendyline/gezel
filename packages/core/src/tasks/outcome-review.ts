@@ -21,10 +21,9 @@ import { renderTaskContractBlock } from './prompt-context.js';
  * measured to gain from one (`tuning.taskStrategy.review`). Decided once at
  * create and stamped on the task.
  *
- * Only `self` is honored from a measurement. A fresh reviewer is told not to
- * edit and still has the workspace write tools: in the counted test it
- * edited the project in all six bug-fix trials, twice undoing a correct fix.
- * It stays available to a request (evals) until its tool surface is read-only.
+ * A fresh review runs in a read-only session ({@link REVIEW_FOCUS_BUILTIN_TOOLS}):
+ * told only not to edit, a fresh reviewer changed the project in all six
+ * bug-fix trials of the counted test, twice undoing a correct fix.
  */
 export function resolveOutcomeReview(args: {
   setting?: TaskReviewSetting | undefined;
@@ -32,10 +31,49 @@ export function resolveOutcomeReview(args: {
   contract: Pick<CraftbookContract, 'deliverables' | 'reviewable'> | undefined;
   measured: OutcomeReviewMode | undefined;
 }): OutcomeReviewMode | undefined {
-  if (args.setting === 'off' || args.strategy !== 'outcome') return undefined;
-  if (args.measured !== 'self') return undefined;
-  return contractSuitsReview(args.contract) ? 'self' : undefined;
+  if (args.setting === 'off' || args.strategy !== 'outcome' || !args.measured) return undefined;
+  return contractSuitsReview(args.contract) ? args.measured : undefined;
 }
+
+/**
+ * The built-in tools of a fresh-eyes review session, whatever the reviewer's
+ * role: reading the work, its sources and the project, and the factual
+ * lookups a CHECK finding rests on. Nothing that writes, runs code, asks the
+ * person or reaches another gezel. With no `write_file` on the roster, a
+ * local engine also cannot put the turn in its write-the-file mode, which the
+ * brief's quoted request ("write alert-rules.yaml …") once triggered.
+ */
+export const REVIEW_FOCUS_BUILTIN_TOOLS: readonly string[] = [
+  'list_dir',
+  'read_file',
+  'read_files',
+  'stat',
+  'grep_files',
+  'find_files',
+  'diff_files',
+  'list_artifacts',
+  'read_artifact',
+  'read_artifacts',
+  'grep_artifact',
+  'read_doc_as_markdown',
+  'search_docs',
+  'list_documents',
+  'read_document',
+  'search_documents',
+  'list_tables',
+  'describe_table',
+  'query_table',
+  'outline_file',
+  'find_symbol',
+  'read_symbol',
+  'find_references',
+  'search_code',
+  'search',
+  'wikipedia_search',
+  'wikipedia_read',
+  'web_search',
+  'fetch_url',
+];
 
 /** Review rounds per task: the review runs once, the fixes are re-checked by the contract. */
 export const OUTCOME_REVIEW_MAX_ROUNDS = 1;
@@ -101,7 +139,7 @@ export function renderFreshReviewBrief(args: {
   contract: CraftbookContract;
 }): string {
   return [
-    `Review the work another gezel produced for task ${args.taskRef}, "${args.title}". You did not write it, and you have not seen it being made. Read it with fresh eyes and report what keeps it from meeting the request and the contract below. Do not change, create or delete any file.`,
+    `Review the work handed in for task ${args.taskRef}, "${args.title}". You have not seen it being made and remember nothing of it. Read it with fresh eyes and report what keeps it from meeting the request and the contract below. You can open files but not change them; your reply is the review.`,
     `The request:\n\n${args.request.trim()}`,
     contractForReview(args.contract),
     `Open each deliverable with your read tools: ${deliverableList(args.contract)}. Open the sources and inputs it relies on wherever you need to check a claim.`,

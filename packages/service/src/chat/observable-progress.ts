@@ -144,6 +144,12 @@ export async function maybeAutoAdvanceOnObservableProgress(
   };
 }> {
   if (!deps.taskAdvancer) return {};
+  // A teammate or a fresh-eyes review works for a task without being a task
+  // session, and may be the owner's own gezel. Keyed on assignment, the
+  // advance below read a review's reply as the owner finishing: the review
+  // advanced the step whose gate was waiting on that very review, and the
+  // task hung (review-fresh-confirm, Gemma 4 E4B, 2026-11-12).
+  if (state.record.subagentFor || state.record.reviewFocus) return {};
   const projectId = state.record.projectId;
   if (!projectId) return {};
   const gezelId = state.record.gezelId;

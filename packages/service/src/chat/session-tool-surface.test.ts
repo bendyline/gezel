@@ -330,6 +330,40 @@ describe('resolveSessionToolSurface — step-scoped sessions', () => {
     }
   });
 
+  it('a fresh-eyes review reads the work and changes nothing, whatever the role', async () => {
+    for (const role of ['Reviewer', 'Generalist', 'Developer']) {
+      const clamps: string[] = [];
+      const { allowlist } = await resolveSessionToolSurface({
+        ...baseOpts,
+        role,
+        session: baseSession({ reviewFocus: true, consultationMode: true }),
+        tier: 'medium',
+        latestUserMessage:
+          'Review the work handed in for task p/3. The request:\n\nWrite alert-rules.yaml with three rules.',
+        onClamp: (kind) => clamps.push(kind),
+      });
+      expect(clamps).toEqual(['review-focus']);
+      expect(allowlist).not.toBeNull();
+      for (const tool of ['read_file', 'read_artifact', 'grep_files', 'read_doc_as_markdown']) {
+        expect(allowlist!.has(tool)).toBe(true);
+      }
+      for (const tool of [
+        'write_file',
+        'replace_in_file',
+        'append_to_file',
+        'write_artifact',
+        'delete_path',
+        'run_nodejs_script',
+        'run_git',
+        'advance_task_step',
+        'ask_user_question',
+        'ask_gezel',
+      ]) {
+        expect(allowlist!.has(tool)).toBe(false);
+      }
+    }
+  });
+
   it('a default Meester fits under the coordinator diet cap — no trim', async () => {
     // The diet exists to shed the uncurated ~127-tool workspace/execution
     // tail, not to hide half a coordinator's own roster. Before the roster

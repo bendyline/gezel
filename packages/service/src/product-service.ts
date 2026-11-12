@@ -1104,7 +1104,7 @@ export async function startProductService(
     }
     return { status: 'advanced' };
   });
-  tasks.setOutcomeReviewer(createOutcomeReviewer({ store, catalog, chat }));
+  tasks.setOutcomeReviewer(createOutcomeReviewer({ store, chat }));
 
   // Fail-fast per-task budget (Theme F, F3.1): when a task exhausts its
   // cumulative unattended-spend budget, ChatManager routes here to the same

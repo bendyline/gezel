@@ -164,7 +164,7 @@ describe('terminal task-note completion', () => {
 // past the seed. A lead that ends its turn short of that is reported, so the
 // manager can re-prompt it once instead of leaving the first project empty.
 describe('growth gate', () => {
-  function kickoff(content: string) {
+  function kickoff(content: string, session: Partial<ChatSession> = {}) {
     const task = {
       projectId: 'jobs',
       num: 2,
@@ -190,6 +190,7 @@ describe('growth gate', () => {
       taskRef: task.ref,
       stepId: 'first-draft',
       stepActivationId: '2026-10-14T23:00:00.000Z',
+      ...session,
     } as ChatSession;
     const advance = vi.fn().mockResolvedValue({ status: 'advanced' });
     const deps: DeliverableGateDeps = {
@@ -222,5 +223,20 @@ describe('growth gate', () => {
   it('advances once the file has grown', async () => {
     const f = kickoff(`{"applications":[${'"x",'.repeat(60)}"x"]}`);
     await expect(f.run()).resolves.toEqual({ autoAdvanced: true });
+  });
+
+  it.each([
+    ['a fresh-eyes review', { reviewFocus: true }],
+    ['a teammate', { subagentFor: { taskRef: 'jobs/2', ownerSessionId: 'owner' } }],
+  ])("never advances the owner's step from %s, even of the owner's own gezel", async (_, extra) => {
+    const unpinned = { taskRef: undefined, stepId: undefined, stepActivationId: undefined };
+    const f = kickoff(`{"applications":[${'"x",'.repeat(60)}"x"]}`, { ...unpinned, ...extra });
+    await expect(f.run()).resolves.toEqual({});
+    expect(f.advance).not.toHaveBeenCalled();
+    await expect(
+      kickoff(`{"applications":[${'"x",'.repeat(60)}"x"]}`, unpinned).run(),
+    ).resolves.toEqual({
+      autoAdvanced: true,
+    });
   });
 });

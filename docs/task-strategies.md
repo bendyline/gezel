@@ -296,8 +296,9 @@ An outcome task can get one review after its contract checks first pass
 ([core tasks/outcome-review.ts](../packages/core/src/tasks/outcome-review.ts),
 [service tasks/outcome-review.ts](../packages/service/src/tasks/outcome-review.ts)).
 `self` hands the owner a focused review prompt in its own conversation; `fresh`
-has a new session of the same model review the deliverables and sends its
-findings back. Both use one focus list, a five-finding cap, and the rule that a
+has the owner review its deliverables again in a new session with no
+transcript (`ChatManager.askFreshEyes`), and its findings go back to the
+owner's own conversation. Both use one focus list, a five-finding cap, and the rule that a
 fix removes or corrects and adds only what the sources state. The contract
 checks run again after the fixes; there is one round.
 
@@ -318,11 +319,16 @@ checks run again after the fixes; there is one round.
   `tuning.taskStrategy.review` in its catalog entry, or the gezel's own
   `tuning.taskStrategy`. Unmeasured models, hosted ones included, get none.
 
-Only `self` is taken from a measurement. A fresh reviewer is told not to edit
-but has the workspace write tools, and in the counted test it edited the
-project in all six bug-fix trials, twice undoing a correct fix. A request can
-still name `fresh` (`CreateTaskRequest.strategyOptions`, evals only) until the
-reviewer's tool surface is read-only.
+A fresh review session is read-only (`ChatSession.reviewFocus`): its built-in
+tools are `REVIEW_FOCUS_BUILTIN_TOOLS` whatever the role, installed toolsets,
+app tools and project script tools are withheld, and the Claude and Codex CLI
+providers run in `plan`. Telling the reviewer not to edit did not hold: in the
+counted test the fresh reviewer (then a recruited Reviewer gezel) changed the
+project in all six bug-fix trials and twice undid a correct fix. With no write
+tool on its roster, a local engine also cannot switch the review into its
+write-the-file mode, which the quoted request once triggered. The reviewer is
+the owner itself, so the review runs on the model it was measured on and
+recruits nobody.
 
 While the round runs, the request tracker reads the step as checking the work.
 Each round's record and a copy of the deliverables from before it go to
@@ -334,8 +340,9 @@ Evidence, from the counted test (2026-11-11/12, 216 trials,
 improved the work, scoring +0.34 [+0.17, +0.52] in a blind comparison of the
 copy from before the review against the final work. It made no regressions, two
 rescues, and added a median 1.3 minutes. On Gemma 4 E4B, self-review had no
-effect (+0.01), and fresh eyes (+0.23 [+0.05, +0.44]) are held back by the
-editing reviewer above. Eval homes set `taskReview: 'off'` so earlier rounds
+effect (+0.01), and fresh eyes (+0.23 [+0.05, +0.44]) were excluded because
+that reviewer edited the project; the read-only design is re-measured in
+`evals/runs/review-fresh-confirm-2026-11-12/`. Eval homes set `taskReview: 'off'` so earlier rounds
 stay comparable.
 
 ## 5. Keeping the strategies comparable

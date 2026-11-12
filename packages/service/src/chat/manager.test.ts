@@ -5382,6 +5382,40 @@ describe('ChatManager — askGezelAndWait (sync consultation)', () => {
     expect(consult?.taskRef).toBe('default/42');
   });
 
+  it('lets a gezel review its own work in a new read-only session', async () => {
+    const ownerSession = await manager.createSession({ gezelId: 'ada', taskRef: 'default/7' });
+    mock.script('VERDICT: PASS');
+    mock.script('NONE');
+
+    const res = await manager.askFreshEyes({
+      gezelId: 'ada',
+      projectId: 'default',
+      fromSessionId: ownerSession.id,
+      text: 'Review the work handed in for task default/7.',
+      subagentFor: { taskRef: 'default/7', ownerSessionId: ownerSession.id },
+    });
+
+    expect(res.outcome).toBe('reply');
+    if (res.outcome !== 'reply') return;
+    expect(res.text).toBe('VERDICT: PASS');
+    expect(res.sessionId).not.toBe(ownerSession.id);
+    const review = await store.getSession('ada', res.sessionId);
+    expect(review).toMatchObject({
+      reviewFocus: true,
+      consultationMode: true,
+      subagentFor: { taskRef: 'default/7', ownerSessionId: ownerSession.id },
+      parentSession: { sessionId: ownerSession.id, gezelId: 'ada', kind: 'consultation' },
+    });
+    expect(review?.taskRef).toBeUndefined();
+    expect(review?.messages[0]?.content).toBe('Review the work handed in for task default/7.');
+    const create = mock.calls.filter((c) => c.kind === 'create').at(-1);
+    const allowlist = create?.opts?.toolAllowlist;
+    expect(allowlist?.has('read_file')).toBe(true);
+    for (const tool of ['write_file', 'write_artifact', 'advance_task_step', 'ask_gezel']) {
+      expect(allowlist?.has(tool)).toBe(false);
+    }
+  });
+
   it('rejects self-asks with reason: self', async () => {
     const adaSession = await manager.createSession({ gezelId: 'ada' });
     const res = await manager.askGezelAndWait({
@@ -6247,6 +6281,43 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     expect(creates).toHaveLength(2);
     expect(creates[1]!.opts!.claudeCliContext?.permissionModeOverride).toBe('acceptEdits');
     expect(mock.calls.some((call) => call.kind === 'disconnect')).toBe(true);
+  });
+
+  it('runs a fresh-eyes review read-only on both CLI providers, whatever the project allows', async () => {
+    for (const provider of ['anthropic-cli', 'codex-cli'] as const) {
+      await manager.shutdown();
+      mock = new MockProvider({ name: 'copilot' });
+      manager = new ChatManager({
+        store,
+        events,
+        memory: noopMemory,
+        getPort: () => 0,
+        getToken: () => 'test-token',
+        home,
+        providers: [[provider, mock]],
+        catalog: new CatalogService(),
+        secrets: new FileSecretStore(home),
+      });
+      await store.writeConfig({ provider, defaultModel: { [provider]: 'm' } });
+      await store.updateProject('default', {
+        claudePermissionMode: 'bypassPermissions',
+        codexPermissionMode: 'full',
+      });
+      const review = await manager.createSession({
+        gezelId: 'ada',
+        projectId: 'default',
+        consultationMode: true,
+        reviewFocus: true,
+      });
+      mock.script('VERDICT: PASS');
+      await manager.send(review.id, 'Review the work.');
+      const create = mock.calls.find((call) => call.kind === 'create');
+      const context =
+        provider === 'anthropic-cli'
+          ? create!.opts!.claudeCliContext
+          : create!.opts!.codexCliContext;
+      expect(context?.permissionModeOverride).toBe('plan');
+    }
   });
 
   it('rebuilds the live session when the catalog content root flips (live gilde update)', async () => {

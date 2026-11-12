@@ -5,10 +5,6 @@ import type { Task, TaskCraftbookStep } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createOutcomeReviewer } from './outcome-review.js';
 
-vi.mock('../gezels/ensure.js', () => ({
-  ensureGezel: vi.fn(async () => ({ gezelId: 'reviewer-1' })),
-}));
-
 let root: string;
 let artifacts: string;
 let workspace: string;
@@ -51,18 +47,18 @@ function fakeDeps(reply: string, edit?: () => Promise<void>) {
     await mkdir(dirname(abs), { recursive: true });
     await writeFile(abs, body);
   };
-  const askGezelAndWait = vi.fn(async () => {
+  const askFreshEyes = vi.fn(async () => {
     await edit?.();
     return {
       outcome: 'reply' as const,
       text: reply,
-      toGezelId: 'reviewer-1',
+      toGezelId: 'owner',
       toGezelName: 'Rae',
       sessionId: 'review-session',
     };
   });
   return {
-    askGezelAndWait,
+    askFreshEyes,
     deps: {
       store: {
         projectArtifactsDir: () => artifacts,
@@ -77,8 +73,7 @@ function fakeDeps(reply: string, edit?: () => Promise<void>) {
         getSession: async (_gezelId: string, id: string) =>
           id === 'side' ? { id, consultationMode: true } : id === 'owner-session' ? { id } : null,
       },
-      catalog: {},
-      chat: { askGezelAndWait },
+      chat: { askFreshEyes },
     } as unknown as Parameters<typeof createOutcomeReviewer>[0],
   };
 }
@@ -89,8 +84,8 @@ const record = async (round = 1) =>
   );
 
 describe('createOutcomeReviewer', () => {
-  it('asks a fresh reviewer for the owner session, records the round, and holds on findings', async () => {
-    const { deps, askGezelAndWait } = fakeDeps(
+  it('has the owner review again in a new session, records the round, and holds on findings', async () => {
+    const { deps, askFreshEyes } = fakeDeps(
       'VERDICT: FAIL\n1. `out/summary.md` — Summary — 12% — the source says 21%',
     );
     const verdict = await createOutcomeReviewer(deps)({
@@ -103,15 +98,15 @@ describe('createOutcomeReviewer', () => {
     expect(verdict.kind).toBe('hold');
     if (verdict.kind !== 'hold') throw new Error('expected a hold');
     expect(verdict.message).toContain('1. `out/summary.md` — Summary — 12% — the source says 21%');
-    expect(askGezelAndWait).toHaveBeenCalledWith(
+    expect(askFreshEyes).toHaveBeenCalledWith(
       expect.objectContaining({
-        fromGezelId: 'owner',
+        gezelId: 'owner',
+        projectId: 'p',
         fromSessionId: 'owner-session',
-        toGezelIdOrName: 'reviewer-1',
         subagentFor: { taskRef: 'p/3', ownerSessionId: 'owner-session' },
       }),
     );
-    const brief = (askGezelAndWait.mock.calls[0] as unknown as [{ text: string }])[0].text;
+    const brief = (askFreshEyes.mock.calls[0] as unknown as [{ text: string }])[0].text;
     expect(brief).toContain('Summarize the brief.');
     expect(brief).toContain('`out/summary.md`');
     expect(
@@ -148,7 +143,7 @@ describe('createOutcomeReviewer', () => {
   });
 
   it('hands the owner the focused prompt for a self-review, without a reviewer', async () => {
-    const { deps, askGezelAndWait } = fakeDeps('unused');
+    const { deps, askFreshEyes } = fakeDeps('unused');
     const verdict = await createOutcomeReviewer(deps)({
       projectId: 'p',
       task,
@@ -159,7 +154,7 @@ describe('createOutcomeReviewer', () => {
     expect(verdict.kind).toBe('hold');
     if (verdict.kind !== 'hold') throw new Error('expected a hold');
     expect(verdict.message).toContain('review your deliverables as an independent reviewer would');
-    expect(askGezelAndWait).not.toHaveBeenCalled();
+    expect(askFreshEyes).not.toHaveBeenCalled();
     expect(await record()).toMatchObject({ mode: 'self' });
   });
 });

@@ -1,8 +1,9 @@
 /**
  * The outcome review: once an outcome task's contract checks pass, either
- * the owner is asked to review its own deliverables (`self`) or a new
- * session of the same model reviews them with no transcript (`fresh`) and
- * its findings go back to the owner. Whether a task gets one is decided at
+ * the owner is asked to review its own deliverables (`self`) or the owner
+ * reviews them again in a new read-only session with no transcript
+ * (`fresh`, `ChatManager.askFreshEyes`) and its findings go back to the
+ * owner's own conversation. Whether a task gets one is decided at
  * create (`resolveOutcomeReview`, core tasks/outcome-review.ts); the counted
  * test behind it is evals/runs/review-counted-2026-11-11/PREREG.md.
  *
@@ -22,12 +23,10 @@ import {
   renderOutcomeReviewFindings,
   renderSelfReviewMessage,
 } from '@bendyline/gezel';
-import type { CatalogService } from '@bendyline/gezel-catalog';
 import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { PROJECT_OUTCOME_REVIEW_DIR_NAME } from '@bendyline/gezel/paths';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
-import { ensureGezel } from '../gezels/ensure.js';
 import { type OutcomeReviewer, stepOwnerGezelId } from './manager.js';
 
 const log = createLogger('tasks');
@@ -40,7 +39,6 @@ const SNAPSHOT_SKIP = new Set(['node_modules', '.git']);
 
 interface Deps {
   store: Store;
-  catalog: CatalogService;
   chat: ChatManager;
 }
 
@@ -78,27 +76,11 @@ export function createOutcomeReviewer(deps: Deps): OutcomeReviewer {
       });
       return { kind: 'pass' };
     }
-    const reviewer = await ensureGezel({
-      opts: { jobTitle: 'Reviewer' },
-      store: deps.store,
-      catalog: deps.catalog,
-      chat: deps.chat,
-      bespokeMode: 'static',
-    });
-    if (reviewer.gezelId === ownerGezelId) {
-      await writeRecord(deps.store, projectId, recordDir, {
-        mode,
-        round,
-        error: 'the owner is the reviewer',
-      });
-      return { kind: 'pass' };
-    }
     const before = await hashFiles(files);
-    const answer = await deps.chat.askGezelAndWait({
-      fromGezelId: ownerGezelId,
-      fromSessionId: ownerSessionId,
-      toGezelIdOrName: reviewer.gezelId,
+    const answer = await deps.chat.askFreshEyes({
+      gezelId: ownerGezelId,
       projectId,
+      fromSessionId: ownerSessionId,
       text: renderFreshReviewBrief({
         taskRef: task.ref,
         title: task.title,
@@ -116,7 +98,6 @@ export function createOutcomeReviewer(deps: Deps): OutcomeReviewer {
       await writeRecord(deps.store, projectId, recordDir, {
         mode,
         round,
-        reviewerGezelId: reviewer.gezelId,
         error: `${answer.reason}: ${answer.message}`,
         durationMs: Date.now() - started,
         changedByReviewer,
@@ -127,7 +108,6 @@ export function createOutcomeReviewer(deps: Deps): OutcomeReviewer {
     await writeRecord(deps.store, projectId, recordDir, {
       mode,
       round,
-      reviewerGezelId: reviewer.gezelId,
       reviewerSessionId: answer.sessionId,
       verdict: verdict.verdict,
       findings: verdict.findings,
@@ -135,6 +115,8 @@ export function createOutcomeReviewer(deps: Deps): OutcomeReviewer {
       changedByReviewer,
       reply: answer.text,
     });
+    // A read-only session cannot change a file; a change here means a tool
+    // reached past it, which the record keeps for the analysis.
     if (changedByReviewer.length > 0) {
       log.warn(
         `[tasks] ${task.ref} outcome reviewer changed ${changedByReviewer.length} deliverable file(s): ${changedByReviewer.slice(0, 5).join(', ')}`,

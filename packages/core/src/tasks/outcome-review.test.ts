@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { type CraftbookContract, contractSuitsReview } from '../schemas/craftbook-contract.js';
+import { BUILTIN_TOOLSETS } from '../tools/builtin-groups.js';
+import { TOOL_REGISTRY } from '../tools/tool-inventory.js';
 import {
   OUTCOME_REVIEW_MAX_FINDINGS,
+  REVIEW_FOCUS_BUILTIN_TOOLS,
   outcomeReviewFindingKind,
   parseOutcomeReviewVerdict,
   renderFreshReviewBrief,
@@ -71,7 +74,8 @@ describe('outcome review text', () => {
     expect(fresh).toContain('Every claim cites its source');
     expect(fresh).not.toContain('Reads well');
     expect(fresh).not.toContain('The runtime checks');
-    expect(fresh).toContain('Do not change, create or delete any file.');
+    expect(fresh).toContain('You can open files but not change them');
+    expect(fresh).not.toContain('another gezel');
   });
 });
 
@@ -149,8 +153,40 @@ describe('resolveOutcomeReview', () => {
     expect(resolveOutcomeReview({ ...base, measured: undefined })).toBeUndefined();
   });
 
-  it('never takes a fresh reviewer from a measurement', () => {
-    expect(resolveOutcomeReview({ ...base, measured: 'fresh' })).toBeUndefined();
+  it('takes whichever review the model was measured to gain from', () => {
+    expect(resolveOutcomeReview({ ...base, measured: 'fresh' })).toBe('fresh');
+    expect(resolveOutcomeReview({ ...base, measured: 'fresh', contract: code })).toBeUndefined();
+  });
+});
+
+describe('REVIEW_FOCUS_BUILTIN_TOOLS', () => {
+  it('names only real built-in tools', () => {
+    for (const name of REVIEW_FOCUS_BUILTIN_TOOLS) expect(TOOL_REGISTRY).toHaveProperty(name);
+  });
+
+  it('can change nothing, run nothing and reach no one', () => {
+    const groups = new Map(BUILTIN_TOOLSETS.map((g) => [g.id, new Set<string>(g.tools)]));
+    const writers = [
+      'workspace-fs-write',
+      'code-execution',
+      'git',
+      'tasks',
+      'team-management',
+      'role-delegation',
+      'interaction',
+      'images',
+      'videos',
+      'browser-automation',
+    ].flatMap((id) => [...(groups.get(id) ?? [])]);
+    expect(writers.length).toBeGreaterThan(20);
+    for (const name of REVIEW_FOCUS_BUILTIN_TOOLS) expect(writers).not.toContain(name);
+    for (const name of [
+      'write_artifact',
+      'save_memory',
+      'ask_user_question',
+      'set_file_issue_status',
+    ])
+      expect(REVIEW_FOCUS_BUILTIN_TOOLS).not.toContain(name);
   });
 });
 

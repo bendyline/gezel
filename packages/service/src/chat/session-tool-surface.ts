@@ -7,6 +7,7 @@ import {
   OUTCOME_TEAMMATE_TOOLS,
   type PromptTaskContext,
   type ProviderName,
+  REVIEW_FOCUS_BUILTIN_TOOLS,
   type ResolvedSecurityPolicy,
   type TaskCraftbookStep,
   type TaskInputRecord,
@@ -113,6 +114,7 @@ export type SessionToolSurface = 'prompt' | 'bridge';
 export type SessionToolClampKind =
   | 'app-item-focus'
   | 'craftbook-focus'
+  | 'review-focus'
   | 'project-orchestration'
   | 'exact-craftbook-invocation'
   | 'project-retrieval-first'
@@ -527,6 +529,37 @@ export async function resolveSessionToolSurface(
     opts.onClamp?.('craftbook-focus');
     return {
       allowlist,
+      projectOrchestrationConstrained: false,
+      exactCraftbookConstrained: false,
+    };
+  }
+  // A fresh-eyes review reads the work and changes nothing, whoever reviews.
+  // The read-only core is granted through the hard ceiling, not the role kit:
+  // a Reviewer's kit writes (its other books file reports), and a kit is
+  // widened by toolset overrides. It returns before the message-shaped
+  // clamps, which read the quoted request ("write alert-rules.yaml") as a
+  // file to create.
+  if (opts.session.reviewFocus) {
+    const ceiling = computeToolAllowlist({
+      role: opts.role,
+      mode: 'never',
+      provider: opts.provider,
+      ...(opts.modelId !== undefined ? { modelId: opts.modelId } : {}),
+      ...(opts.parameterSize !== undefined ? { parameterSize: opts.parameterSize } : {}),
+      ...(opts.webSearchProvider ? { webSearchProvider: opts.webSearchProvider } : {}),
+      factualWriting: true,
+      githubLinked: opts.githubLinked,
+      isGitRepo: opts.isGitRepo,
+      ...(opts.securityPolicy ? { securityPolicy: opts.securityPolicy } : {}),
+      ...(opts.workspaceWritable !== undefined
+        ? { workspaceWritable: opts.workspaceWritable }
+        : {}),
+    });
+    opts.onClamp?.('review-focus');
+    return {
+      allowlist: new Set(
+        REVIEW_FOCUS_BUILTIN_TOOLS.filter((name) => ceiling === null || ceiling.has(name)),
+      ),
       projectOrchestrationConstrained: false,
       exactCraftbookConstrained: false,
     };
