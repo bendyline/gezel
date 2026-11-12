@@ -237,7 +237,9 @@ describe('renderProjectTypeTemplate', () => {
   });
 });
 
-describe('applyProjectType', () => {
+// A real Store and catalog: the file's first apply pays every cold import, and
+// took 6.3 s in a CI stability pass (2026-11-12).
+describe('applyProjectType', { timeout: 30_000 }, () => {
   it('applies a solo type: maps manifest mode + leadLabel onto the project', async () => {
     const project = await store.createProject({ name: 'Game' });
     const applied = await applyProjectType(

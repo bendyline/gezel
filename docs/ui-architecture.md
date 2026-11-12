@@ -35,7 +35,10 @@ repeated. Visual rules live in [ux.md](ux.md).
    starts the code and the reads together, and holds the current view (at most
    120 ms) only when those reads are not in memory. The rail warms a
    destination on hover; after startup, `idle-warmup.ts` loads likely next
-   destinations one idle period at a time, never while a turn is running.
+   destinations one idle period at a time, never while a turn is running. Its
+   first load sets the `gezel:idle-warmup` performance mark, and the browser
+   JavaScript budget for the first usable Home counts only script fetched
+   before it.
 5. **Recent destinations stay alive.**
    [KeepAliveHost.tsx](../packages/ui/src/navigation/KeepAliveHost.tsx) keeps
    Home and the newest three hidden destinations (one on a phone) mounted

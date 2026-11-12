@@ -17,6 +17,12 @@ const START_AFTER_MS = 2_000;
 const IDLE_TIMEOUT_MS = 5_000;
 const BUSY_RETRY_MS = 10_000;
 
+/**
+ * Marked when the first warm-up load starts. Script fetched after it is not
+ * part of the first usable Home, which the browser JavaScript budget measures.
+ */
+const IDLE_WARMUP_MARK = 'gezel:idle-warmup';
+
 const LIKELY_NEXT: RecentTab[] = [
   { kind: 'area', area: 'projects' },
   { kind: 'area', area: 'tasks' },
@@ -57,6 +63,9 @@ export function startIdleWarmup(current: () => RecentTab | null): () => void {
     let next = queue.shift();
     while (next && destinationFor(next).key === shownKey) next = queue.shift();
     if (!next) return;
+    if (performance.getEntriesByName(IDLE_WARMUP_MARK).length === 0) {
+      performance.mark(IDLE_WARMUP_MARK);
+    }
     void destinationFor(next)
       .load()
       .catch(() => {})

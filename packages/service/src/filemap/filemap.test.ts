@@ -351,7 +351,10 @@ describe('buildPrOverlay', () => {
   });
 });
 
-describe('buildFileMap (end-to-end over a real index)', () => {
+// Real index writes and git subprocesses: the .gitignore case took 9 s in a
+// CI stability pass (2026-11-12), and its afterEach then raced the still-running
+// body (ENOTEMPTY).
+describe('buildFileMap (end-to-end over a real index)', { timeout: 30_000 }, () => {
   let dir: string;
   beforeEach(async () => {
     dir = await mkdtemp(join(tmpdir(), 'gezel-filemap-'));
