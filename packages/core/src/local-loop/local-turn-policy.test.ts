@@ -5,6 +5,7 @@ import {
   LocalTurnPolicy,
   compactLocalTurn,
   isMissingRepairTargetOutput,
+  isNoProgressTurnMessage,
   planFileTurn,
   turnCheckpoint,
 } from './local-turn-policy.js';
@@ -82,6 +83,24 @@ describe('shared recovery budgets', () => {
     expect(() => policy.requireProgressRetry()).toThrow('without a successful workspace mutation');
     for (let i = 0; i < 6; i++) expect(policy.retry('writeContinuations')).toBe(true);
     expect(policy.retry('writeContinuations')).toBe(false);
+  });
+  it('recognizes its own no-progress error, and the older per-kind wording', () => {
+    const policy = new LocalTurnPolicy();
+    policy.requireProgressRetry();
+    policy.requireProgressRetry();
+    let message = '';
+    try {
+      policy.requireProgressRetry();
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(isNoProgressTurnMessage(message)).toBe(true);
+    expect(
+      isNoProgressTurnMessage(
+        '[llama-cpp] direct file-work turn ended without a successful workspace mutation after 2 corrective nudge(s).',
+      ),
+    ).toBe(true);
+    expect(isNoProgressTurnMessage('[llama-cpp] timed out after 180s')).toBe(false);
   });
   it('checks cancellation and the awake-time deadline before allowing rescue', () => {
     const ctrl = new AbortController();

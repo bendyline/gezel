@@ -53,6 +53,41 @@ describe('mobile catalog provenance', () => {
     expect(models[0]!.source).not.toHaveProperty('sizeBytes');
   });
 
+  it('carries a fresh llama.cpp docbench score and the license class phones rank by', () => {
+    const measured = (catalogVersion: string) => {
+      const scored = item();
+      Object.assign(scored.manifest, {
+        licenseClass: 'open',
+        benchmarks: {
+          docbench: {
+            'llama-cpp': {
+              version: '0.2.1',
+              score: 70.7,
+              ci: [68, 73],
+              band: 3,
+              families: { review: 53 },
+              usableRate: 0.97,
+              catalogVersion,
+              runId: 'docbench-round',
+              measuredAt: '2026-11-11T00:00:00Z',
+              judge: 'claude-opus-5-5',
+            },
+          },
+        },
+      });
+      return scored;
+    };
+    const [fresh] = portableCatalogModels([measured('1.0.0')]);
+    expect(fresh).toMatchObject({
+      licenseClass: 'open',
+      docbench: { score: 70.7, band: 3, version: '0.2.1', families: { review: 53 } },
+    });
+    // Measured on weights the catalog has since replaced: no score.
+    const [stale] = portableCatalogModels([measured('0.9.0')]);
+    expect(stale).not.toHaveProperty('docbench');
+    expect(stale?.licenseClass).toBe('open');
+  });
+
   it('carries the tuning phones resolve sampling from', () => {
     const tuned = item();
     Object.assign(tuned.manifest, {

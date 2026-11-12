@@ -163,3 +163,22 @@ export function isLlamaCppForcedToolChoiceError(text: string): boolean {
   if (isLlamaCppGrammarParseError(text)) return false;
   return /failed to initialize samplers/i.test(text);
 }
+
+/**
+ * The same sampler-init failure, raised for a structured-output request
+ * (`json_schema`, or `response_format` JSON mode) on a model whose chat
+ * template llama.cpp cannot build the output grammar against.
+ *
+ * Wild-caught on Nanbeige4.2-3B again (docbench, 2026-11-11): every
+ * `json_schema` and JSON-mode request failed with "Unexpected empty grammar
+ * stack after accepting piece:  assistant", with thinking on or off, while
+ * a raw GBNF `grammar` and an unconstrained request both answered. The
+ * template's generation prompt tokenizes as `<|im_start|>` + ` assistant`,
+ * with a leading space the template text does not have, so a grammar that
+ * llama.cpp starts with that prompt cannot accept its own first piece. Not a
+ * parse error, so it stays disjoint from {@link isLlamaCppGrammarParseError}.
+ */
+export function isLlamaCppStructuredOutputSamplerError(text: string): boolean {
+  if (isLlamaCppGrammarParseError(text)) return false;
+  return /failed to initialize samplers/i.test(text);
+}

@@ -555,6 +555,132 @@ analysis:
 }
 ```
 
+## docbench: prompt-pack benchmarks for DocBlocks
+
+Every suite above drives the full agent. docbench measures something
+narrower and more common: how well a model does the single-request AI work in
+DocBlocks — reviewing a resume, drawing an SVG illustration, wording slides —
+so the product can recommend the best model a machine can run.
+
+The work is split by a process boundary. DocBlocks' **task pack**
+(`../docblocks/packages/bench`, `docbench-pack`) knows what to test and runs
+the product's own pipelines; this harness owns models, judging and scoring.
+The contract is `packages/core/src/eval/bench-pack.ts`
+(`@bendyline/gezel/eval`), validated on every line the pack writes.
+
+```bash
+# In DocBlocks: build the pack once (and after pulling)
+npm run build:core && npm run build:react && npm run build:bench
+
+# Here: generate, judge, score
+pnpm eval:docbench --models qwen3.5-2b-q4,gemma4-12b-q4 --run-id my-round --allow-download
+```
+
+Per model it starts a trial gezeld with `GEZEL_LLAMA_NUM_CTX=32768` (the
+constrained-laptop launch context), concurrency 1 and routing off, then runs
+the pack against the daemon's own `/v1/chat/completions` with model
+`llama-cpp:<id>` — the route DocBlocks' hosted mode uses, catalog tuning
+applied. It never talks to llama-server directly and never overrides
+`modelTuning`; either would measure a model the product does not run. The
+pack trusts the daemon's per-launch certificate through `NODE_EXTRA_CA_CERTS`
+and reads its token from the environment.
+
+| Flag | Meaning |
+| --- | --- |
+| `--models a,b` | Catalog ids; default is the 21-model default set (27B and smaller); `slice` runs the Phase 1 four |
+| `--run-id <id>` | `runs/docbench-<id>/`; rerunning the same id resumes (cached verdicts are reused) |
+| `--pack <dir>` | The built pack; default `GEZEL_DOCBENCH_PACK` or the sibling DocBlocks checkout |
+| `--tasks`, `--cases` | Run a subset |
+| `--judge <model>` | Default the official `claude-opus-5-5`; `none`; or `openai:<baseUrl>#<model>` for an unofficial local judge |
+| `--claude-bin <path>` | The Claude CLI; default `GEZEL_CLAUDE_BIN`, PATH, then the VS Code extension's bundled copy |
+| `--now <iso>` | The date every prompt states; kept with the run so a resume matches |
+| `--source-home <dir>` | Borrow installed weights read-only (for example `~/.gezel-dev`) |
+| `--allow-download` | Fetch weights the eval cache lacks |
+| `--skip-generate`, `--skip-judge` | Run only the later phases |
+| `--fixtures <dir>` | Run on another fixture set laid out like the pack's (a private holdout); the round records the set's hash |
+
+Scoring (`src/docbench/score.ts`): a case scores 0 when the product would
+have shown nothing; otherwise the pack's checks and the judge blend by the
+task's weights. Review findings are matched against seeded defects and scored
+by F1, so padding and non-findings earn nothing. Endpoint failures are retried
+once and excluded. Task, family and docbench intervals come from one nested
+bootstrap (cases, then trials within a case), and models whose intervals
+overlap share a rank band. The judge (`src/docbench/judge.ts`) runs the Claude
+CLI from an empty directory with no tools — only Read, for a picture, which
+`src/docbench/render.ts` renders in a JavaScript-off headless browser.
+
+Review tasks label every finding's complexity (low: mechanical; medium: a
+sentence; high: the paragraph or document), and `report.md` has a review-depth
+table: valid suggestions per document at each level, trivial and wrong ones,
+and the share of seeded issues found at each level. Recall weights a high
+issue three times a low one.
+
+Judge validity, once per judge or prompt version, on a finished round:
+
+```bash
+pnpm eval:docbench-validity --run-id my-round --model gemma4-12b-q4
+```
+
+It re-judges a fixed sample (mean spread at most 0.7 on 0–10), has
+`claude-sonnet-5-5` judge it too (Krippendorff's alpha at least 0.6), and
+judges damaged copies of good outputs — findings swapped for "this sentence is
+correct", text cut short, figures changed, a picture's labels removed — which
+must score at least 2 points lower 90% of the time (`src/docbench/validity.ts`).
+It writes `validity.json` and `validity.md` beside the round.
+
+A round is **publishable** only when every family the pack declares has tasks,
+every case that needs a verdict has one, the judge is the official one, and
+that judge passed its validity tests; `report.md` says which of those a round
+is missing.
+
+To see *why* a model scored what it did, write the round's side-by-side case
+pages. Every case gets every model's output, its failed checks, the judge's
+axes and reasons, and the source and answer key. Pictures render in empty
+sandboxed frames, so model output never runs:
+
+```bash
+pnpm eval:docbench-cases --run-id my-round   # runs/docbench-my-round/compare/index.html
+```
+
+Publishing a publishable round:
+
+```bash
+pnpm eval:docbench-publish --run-id my-round --dry-run   # show what would change
+pnpm eval:docbench-publish --run-id my-round             # scorecard shard + Gilde
+```
+
+It refuses anything else, naming each failed condition
+(`src/docbench/publish.ts`). It writes two things. The first is the scorecard
+shard `packages/core/src/scorecard/data/runs/docbench-<run-id>.json` (suite
+`docbench`) and the regenerated barrel, which the handboek's
+`::handboek-docbench-scorecard`, the model catalog's Docbench column and each
+model page's Docbench section render. The pass-rate tables, round pages and
+results CSV leave docbench rows out, because a usable reply is not a pass. The
+second is `benchmarks.docbench.<engine>` in each model's Gilde recipe and
+identity manifest (`--gilde <dir>`, default `../gilde`; `--skip-gilde` to
+leave Gilde alone). Gilde's `MEASURED_FIELDS` lets the recipe win on rebuild,
+so a newer round replaces an older score. Each entry stamps the catalog
+version generation measured. `/v1/models` serves a score only while the
+catalog still ships that version (`docbenchScoreFor`), and ranks downloadable
+models a second time by it (`docbench_recommendation`), which DocBlocks
+prefers over the general ranking. Release Gilde and bump the pin before
+scores reach users. Nothing here touches git.
+
+To re-measure a few models after a fix, run them in a new round with the
+same prompt date (`--now`), fixtures and judge. Add an unchanged anchor model
+to show how far scores move between rounds. Then publish just those models
+beside the published round:
+
+```bash
+pnpm eval:docbench-publish --run-id fixes-round --models a,b --against published-round
+```
+
+The re-run is scoped `subset`, so it never becomes the headline table: the
+handboek lists it under the full round and marks the replaced rows "re-measured
+below". Each model's band is its place in the published field. The command
+refuses a re-run whose judge, fixtures, prompt date, launch context, machine or
+pack line (`major.minor`) differs from the published round's.
+
 ## The in-app runner (Settings → Benchmarks)
 
 The app runs this same harness; it does not have its own copy of any scenario,

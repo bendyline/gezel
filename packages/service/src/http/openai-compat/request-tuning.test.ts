@@ -30,6 +30,41 @@ describe('overlayOpenAiRequestTuning — reasoning_effort', () => {
     expect(base.reasoning.enableThinking).toBe(true);
   });
 
+  it('drops a model’s declared reasoning depth to its floor, since some templates ignore the switch', () => {
+    // GPT-OSS reasons whatever enable_thinking says; its depth dial is what moves it.
+    const gptOss: ResolvedTuning = {
+      ...base,
+      reasoning: {
+        effort: 'medium',
+        thinkingBudget: 6144,
+        templateKwargs: { reasoning_effort: 'medium', other_flag: true },
+      },
+    };
+    const out = overlayOpenAiRequestTuning(gptOss, request({ reasoning_effort: 'none' }));
+    expect(out.reasoning).toEqual({
+      effort: 'medium',
+      thinkingBudget: 6144,
+      enableThinking: false,
+      templateKwargs: { reasoning_effort: 'low', other_flag: true },
+    });
+    expect(gptOss.reasoning.templateKwargs).toEqual({
+      reasoning_effort: 'medium',
+      other_flag: true,
+    });
+    const muse: ResolvedTuning = {
+      ...base,
+      reasoning: { enableThinking: true, templateKwargs: { reasoning_strength: 'high' } },
+    };
+    expect(overlayOllamaRequestTuning(muse, undefined, undefined, false).reasoning).toEqual({
+      enableThinking: false,
+      templateKwargs: { reasoning_strength: 'low' },
+    });
+    // A request that keeps reasoning keeps the model's depth.
+    expect(
+      overlayOpenAiRequestTuning(gptOss, request({ reasoning_effort: 'high' })).reasoning,
+    ).toBe(gptOss.reasoning);
+  });
+
   it('leaves the resolved reasoning alone for other effort values', () => {
     const out = overlayOpenAiRequestTuning(base, request({ reasoning_effort: 'high' }));
     expect(out.reasoning).toBe(base.reasoning);

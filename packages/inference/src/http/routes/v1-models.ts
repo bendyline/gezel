@@ -1,6 +1,7 @@
 import {
   type ChatModelManifest,
   type RecoDevice,
+  docbenchScoreFor,
   estimateManifestKvBytes,
   externalGezelModelId,
   isRecommendedModel,
@@ -10,6 +11,28 @@ import {
   resolveDistributionProfile,
 } from '@bendyline/gezel';
 import type { AppModel } from '@bendyline/gezel/app-models';
+
+/**
+ * A manifest's docbench result for the engine an entry runs on, in the shape
+ * `/v1/models` lists it; undefined when unmeasured or stale.
+ */
+function docbenchEntry(manifest: ChatModelManifest, engine: string): AppModel['docbench'] {
+  if (docbenchScoreFor(manifest, engine) === undefined) return undefined;
+  const measured = manifest.benchmarks?.docbench?.[engine];
+  if (!measured) return undefined;
+  return {
+    score: measured.score,
+    band: measured.band,
+    version: measured.version,
+    families: measured.families,
+  };
+}
+
+/** `{ docbench }` to spread into an entry, or nothing. */
+function withDocbench(manifest: ChatModelManifest, engine: string): Pick<AppModel, 'docbench'> {
+  const docbench = docbenchEntry(manifest, engine);
+  return docbench ? { docbench } : {};
+}
 import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Hono } from 'hono';
 import { currentLlamaCppBackend } from '../../providers/llama-cpp/backend-health.js';
@@ -259,6 +282,7 @@ async function downloadableCatalogEntries(
           download_bytes: manifest.approxSizeBytes,
           ...(manifest.contextWindow ? { context_window: manifest.contextWindow } : {}),
           capabilities: catalogCapabilities(manifest, provider),
+          ...withDocbench(manifest, provider),
         },
       },
     ];
@@ -269,7 +293,8 @@ async function downloadableCatalogEntries(
   if (!memory) return candidates.sort(byCuratedScore).map(({ entry }) => entry);
 
   const rated = candidates.map((candidate) => {
-    const { entry, manifest, source } = candidate;
+    const { entry, manifest, source, provider } = candidate;
+    const docbench = docbenchScoreFor(manifest, provider);
     return {
       id: entry.id,
       residentBytes: footprintBytes(candidate, memory),
@@ -278,17 +303,31 @@ async function downloadableCatalogEntries(
       ...(manifest.recoScore !== undefined ? { recoScore: manifest.recoScore } : {}),
       ...(manifest.licenseClass ? { licenseClass: manifest.licenseClass } : {}),
       ...(source.quantization ? { quantization: source.quantization } : {}),
+      ...(docbench !== undefined ? { docbench } : {}),
     };
   });
   const entries = new Map(candidates.map(({ entry }) => [entry.id, entry]));
-  return rateModelsForDevice(rated, recoDevice(memory)).flatMap((rating) => {
+  const device = recoDevice(memory);
+  // A second ranking, for document work, only when anything is measured:
+  // otherwise every model would tie and the field would say nothing.
+  const forDocuments = rated.some((model) => model.docbench !== undefined)
+    ? new Map(
+        rateModelsForDevice(rated, device, { quality: 'docbench' }).map((rating) => [
+          rating.id,
+          { score: rating.score, recommended: rating.recommended },
+        ]),
+      )
+    : null;
+  return rateModelsForDevice(rated, device).flatMap((rating) => {
     const entry = entries.get(rating.id);
     if (!entry) return [];
+    const docbenchRecommendation = forDocuments?.get(rating.id);
     return [
       {
         ...entry,
         fit: { tier: rating.fit.tier, label: rating.fit.label, detail: rating.fit.detail },
         recommendation: { score: rating.score, recommended: rating.recommended },
+        ...(docbenchRecommendation ? { docbench_recommendation: docbenchRecommendation } : {}),
       },
     ];
   });
@@ -363,6 +402,7 @@ async function buildModelEntries(
           ...(enforcesResponseFormat(provider) && manifests.has(m.id)
             ? { capabilities: catalogCapabilities(manifests.get(m.id)!, provider) }
             : {}),
+          ...(manifests.has(m.id) ? withDocbench(manifests.get(m.id)!, provider) : {}),
         }));
       } catch {
         // Provider not configured / not available on this host —

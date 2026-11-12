@@ -22,6 +22,7 @@ import {
   isImmediateFileWriteTurn,
   isLlamaCppForcedToolChoiceError,
   isLlamaCppGrammarParseError,
+  isLlamaCppStructuredOutputSamplerError,
   isRecoverableImmediateFileWriteError,
   llamaCppReasoningRequestDiagnostic,
   normalizeJsonSchemaForLlamaCpp,
@@ -593,6 +594,70 @@ describe('llama.cpp JSON Schema compatibility', () => {
     expect(isLlamaCppForcedToolChoiceError(parse)).toBe(false);
 
     expect(isLlamaCppForcedToolChoiceError('some other 400')).toBe(false);
+  });
+
+  it('answers unconstrained when the engine cannot build a grammar for a JSON schema', async () => {
+    // Nanbeige4.2-3B: every json_schema request failed at sampler init
+    // ("Unexpected empty grammar stack after accepting piece:  assistant"),
+    // so every structured-output feature failed outright on that model.
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+      bodies.push(body);
+      if (body.json_schema !== undefined) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              code: 400,
+              message:
+                'Failed to initialize samplers: Unexpected empty grammar stack after accepting piece:  assistant (13886)',
+              type: 'invalid_request_error',
+            },
+          }),
+          { status: 400, statusText: 'Bad Request' },
+        );
+      }
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: '{"headline":"Rain"}' } }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+    const session = await provider.createSession({
+      systemMessage: 'Reply with JSON.',
+      model: 'nanbeige4.2-3b-q4',
+      tuning: {
+        sampling: { maxTokens: 512 },
+        reasoning: {},
+        output: { jsonSchema: { type: 'object', properties: { headline: { type: 'string' } } } },
+        promptTags: {},
+        wasThinking: false,
+      },
+    });
+
+    await expect(session.sendAndWait('A headline about rain.')).resolves.toBe(
+      '{"headline":"Rain"}',
+    );
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0]?.json_schema).toBeDefined();
+    expect(bodies[1]?.json_schema).toBeUndefined();
+    // The session remembers: the next request skips the doomed attempt.
+    bodies.length = 0;
+    await expect(session.sendAndWait('Another one.')).resolves.toBe('{"headline":"Rain"}');
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]?.json_schema).toBeUndefined();
+
+    expect(
+      isLlamaCppStructuredOutputSamplerError(
+        'Failed to initialize samplers: Unexpected empty grammar stack after accepting piece',
+      ),
+    ).toBe(true);
+    expect(
+      isLlamaCppStructuredOutputSamplerError(
+        'Failed to initialize samplers: failed to parse grammar',
+      ),
+    ).toBe(false);
   });
 
   it('reduces grammar-hostile unions and validation constraints while preserving argument guidance', () => {
@@ -2193,6 +2258,151 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     // The prompt record sizes the whole roster, not the one-tool narrowing.
     expect(session.getToolSurface?.()).toMatchObject({ count: 3 });
     expect(session.getToolSurface?.()?.tokens).toBeGreaterThan(0);
+  });
+
+  it('re-issues a rescue-forced request unforced when the model is trapped in prose', async () => {
+    // llama.cpp's `required` grammar admits prose before the call and then
+    // forbids the model to stop. Wild-caught on an imported Qwen2.5-0.5B: it
+    // wrote its call as text and looped junk until the ramble guard fired.
+    const trappedProse = [
+      'make_move(from="b6", to="b5") ',
+      'I would like to move the knight forward because it controls the center. ',
+      'The bishop on the long diagonal is still blocked by our own pawn chain. ',
+      'After that the rook can come to the open file and press the backward pawn. ',
+      'Black has few active pieces, so a slow plan is fine here and keeps the edge. ',
+      'Castling first would also be reasonable, but the king is safe for now. ',
+      '</tools></tool_call> INCTeam ',
+      'Sure, here is the move once more for clarity and nothing else follows it. ',
+      'Let me know if you would like a deeper analysis of the resulting position. ',
+    ];
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      if (bodies.length === 1) {
+        return abortableSseResponse(init?.signal, [
+          ...trappedProse.map((content) => ({ choices: [{ index: 0, delta: { content } }] })),
+          { choices: [{ index: 0, finish_reason: 'length' }] },
+          '[DONE]',
+        ]);
+      }
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_move',
+                    type: 'function',
+                    function: { name: 'make_move', arguments: '{"from":"b6","to":"b5"}' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+    Object.defineProperty(provider, 'supportsForcedToolChoice', { value: true });
+    const session = await provider.createSession({
+      systemMessage: 'Play from the current board.',
+      model: 'qwen',
+      terminalToolPolicy: { toolNames: ['make_move'], fallbackText: 'Your turn.' },
+    });
+    const moves: Array<Record<string, unknown>> = [];
+    (session as unknown as { deps: { bridges: unknown } }).deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () =>
+        ['get_board', 'make_move'].map((name) => ({
+          name,
+          description: name,
+          parameters: { type: 'object' },
+        })),
+      hasTool: () => true,
+      callTool: async (_name: string, args: Record<string, unknown>) => {
+        moves.push(args);
+        return 'run move-1 — status: ok';
+      },
+    };
+    const deltas: string[] = [];
+    session.onDelta((chunk) => deltas.push(chunk));
+
+    await session.sendAndWait('Your opponent played c3-d4. Make your move.', {
+      requiredTool: 'make_move',
+    });
+
+    expect(bodies[0]!.tool_choice).toBe('required');
+    // Same iteration again, still narrowed to the one tool, now unforced.
+    expect(bodies[1]!.tool_choice).toBeUndefined();
+    const names = (body: Record<string, unknown>) =>
+      (body.tools as Array<{ function: { name: string } }>).map((t) => t.function.name);
+    expect(names(bodies[1]!)).toEqual(['make_move']);
+    expect(moves).toEqual([{ from: 'b6', to: 'b5' }]);
+    expect(bodies).toHaveLength(2);
+    // The trapped request's prose never reached the chat.
+    expect(deltas.join('')).not.toContain('INCTeam');
+    expect(deltas.join('')).not.toContain('knight forward');
+  });
+
+  it('keeps forcing for a short preamble and shows it once the call starts', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return sseResponse([
+        { choices: [{ index: 0, delta: { content: 'Pushing the b-pawn. ' } }] },
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_move',
+                    type: 'function',
+                    function: { name: 'make_move', arguments: '{"from":"b6","to":"b5"}' },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://llama.test' });
+    Object.defineProperty(provider, 'supportsForcedToolChoice', { value: true });
+    const session = await provider.createSession({
+      systemMessage: 'Play from the current board.',
+      model: 'qwen',
+      terminalToolPolicy: { toolNames: ['make_move'], fallbackText: 'Your turn.' },
+    });
+    (session as unknown as { deps: { bridges: unknown } }).deps.bridges = {
+      isEmpty: () => false,
+      getOpenAITools: () => [
+        { name: 'make_move', description: 'Play a move.', parameters: { type: 'object' } },
+      ],
+      hasTool: (name: string) => name === 'make_move',
+      callTool: async () => 'run move-1 — status: ok',
+    };
+    const deltas: string[] = [];
+    session.onDelta((chunk) => deltas.push(chunk));
+
+    await session.sendAndWait('Your opponent played c3-d4. Make your move.', {
+      requiredTool: 'make_move',
+    });
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]!.tool_choice).toBe('required');
+    expect(deltas.join('')).toContain('Pushing the b-pawn.');
   });
 
   it('ends a task-step turn after advance succeeds and skips later calls in the batch', async () => {

@@ -3100,6 +3100,13 @@ the bubble: the sticky scroll header renders the same verdict, and a new
 one must too. Cross-gezel messages are a separate case already answered by
 `from` — they keep the "Aldric → Maya" handoff bubble.
 
+**What a delegate made travels with its reply.** A delegation's reply reaches
+the sender's chat as words, but a picture the delegate made belongs to its own
+tool call. The relay carries it as `relayedImages`, and the handoff bubble
+shows it in the same media strip a tool call uses, with the same menu, so the
+person sees it in the chat they are in rather than only in the delegate's
+thread.
+
 **Hand-offs are a card, not a paragraph.** The dispatch seed that opens a
 task thread is addressed to the model: it names the sender, the step and the
 task ref in its first sentence and then spends four more on tool-calling

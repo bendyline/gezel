@@ -43,6 +43,10 @@
     "thinking-report": "tsx src/bin/thinking-report.ts",
     "report:engine-context": "tsx src/bin/report-engine-context.ts",
     "scorecard": "tsx src/bin/scorecard.ts",
+    "docbench": "tsx src/bin/docbench.ts",
+    "docbench-validity": "tsx src/bin/docbench-validity.ts",
+    "docbench-publish": "tsx src/bin/docbench-publish.ts",
+    "docbench-cases": "tsx src/bin/docbench-cases.ts",
     "judge-sweep": "tsx src/bin/judge-sweep.ts",
     "video-bench": "tsx src/bin/video-bench.ts",
     "fit-media-memory": "tsx src/bin/fit-media-memory.ts"

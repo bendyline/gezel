@@ -170,6 +170,51 @@ describe('mobile model manager', () => {
     });
     await manager.close();
   });
+  it('carries docbench scores and ranks open-license downloads that fit by them', async () => {
+    const { plugin } = fixture();
+    plugin.listModels = vi.fn(async () => ({
+      models: [],
+      memoryBudgetBytes: 2.5 * GiB,
+      physicalMemoryBytes: 6 * GiB,
+    }));
+    const scored = (catalogId: string, size: number, score: number, licenseClass = 'open') => ({
+      ...catalog[0]!,
+      name: catalogId,
+      approxSizeBytes: size,
+      source: { ...source, catalogId },
+      licenseClass,
+      docbench: { score, band: 1, version: '0.2.1', families: { review: score - 5 } },
+    });
+    const manager = createMobileModelManager(plugin, {
+      catalog: [
+        scored('small', MINICPM5_1B, 37),
+        // Tight on this phone, so its 56 counts as 44.8 — still the best.
+        scored('tight', QWEN35_2B, 56),
+        // Scores higher but its license is not open: shown, never recommended.
+        scored('custom', MINICPM5_1B, 60, 'custom'),
+        // Too big: listed as unavailable, never ranked.
+        scored('huge', GEMMA_4_E2B, 90),
+        // Unmeasured: no score shown, and no invented ranking.
+        { ...catalog[0]!, source: { ...source, catalogId: 'plain' }, licenseClass: 'open' },
+      ],
+    });
+    const listed = new Map((await manager.list()).map((model) => [model.id, model]));
+    expect(listed.get('catalog:tight')).toMatchObject({
+      docbench: { score: 56, band: 1, version: '0.2.1', families: { review: 51 } },
+      docbench_recommendation: { score: 100, recommended: true },
+    });
+    expect(listed.get('catalog:small')?.docbench_recommendation).toEqual({
+      score: 83,
+      recommended: false,
+    });
+    expect(listed.get('catalog:custom')?.docbench?.score).toBe(60);
+    expect(listed.get('catalog:custom')).not.toHaveProperty('docbench_recommendation');
+    expect(listed.get('catalog:huge')).not.toHaveProperty('docbench_recommendation');
+    expect(listed.get('catalog:plain')).not.toHaveProperty('docbench');
+    expect(listed.get('catalog:plain')).not.toHaveProperty('docbench_recommendation');
+    await manager.close();
+  });
+
   it('validates installed identity after completion and emits progress', async () => {
     const { plugin, complete } = fixture();
     const manager = createMobileModelManager(plugin, { catalog, pollIntervalMs: 10 });

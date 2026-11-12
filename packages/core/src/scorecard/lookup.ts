@@ -9,12 +9,55 @@
 
 import { scorecardHardwareKey, scorecardModelFamilyId } from './filter.js';
 import { type ModelScore, hardwareSummary, scoreModel } from './report.js';
-import type {
-  ScorecardDataset,
-  ScorecardDevice,
-  ScorecardModelResult,
-  ScorecardRun,
+import {
+  DOCBENCH_SUITE_ID,
+  type ScorecardDataset,
+  type ScorecardDevice,
+  type ScorecardDocbench,
+  type ScorecardModelResult,
+  type ScorecardRun,
 } from './schema.js';
+
+/**
+ * docbench rows are judged quality scores, not pass rates: they never feed a
+ * "passed N%" claim. Read them with {@link docbenchResultFor}.
+ */
+function isPassRateResult(result: ScorecardModelResult): boolean {
+  return result.suiteId !== DOCBENCH_SUITE_ID;
+}
+
+export interface DocbenchResult {
+  result: ScorecardModelResult;
+  run: ScorecardRun;
+  docbench: ScorecardDocbench;
+}
+
+/**
+ * Every docbench result for exactly this build (a quant's score is its own,
+ * so sibling quantizations never stand in), newest first.
+ */
+export function docbenchRowsFor(dataset: ScorecardDataset, modelId: string): DocbenchResult[] {
+  const runs = new Map(dataset.runs.map((run) => [run.id, run]));
+  return dataset.results
+    .filter((result) => result.modelId === modelId && result.docbench)
+    .map((result): DocbenchResult | null => {
+      const run = runs.get(result.runId);
+      return run && result.docbench ? { result, run, docbench: result.docbench } : null;
+    })
+    .filter((row): row is DocbenchResult => row !== null)
+    .sort((a, b) => b.run.provenance.startedAt.localeCompare(a.run.provenance.startedAt));
+}
+
+/** The newest docbench result for this build, optionally on one engine. */
+export function docbenchResultFor(
+  dataset: ScorecardDataset,
+  modelId: string,
+  engine?: string,
+): DocbenchResult | null {
+  return (
+    docbenchRowsFor(dataset, modelId).find((row) => !engine || row.result.engine === engine) ?? null
+  );
+}
 
 /** The suite a one-line "measured" claim quotes first. */
 export const MEASURED_HEADLINE_SUITE = 'core';
@@ -57,6 +100,7 @@ export function measuredResultFor(
   const runs = new Map(dataset.runs.map((run) => [run.id, run]));
   const key = device ? scorecardHardwareKey(device) : null;
   const candidates = dataset.results
+    .filter(isPassRateResult)
     .map((result): MeasuredResult | null => {
       const run = runs.get(result.runId);
       if (!run || run.scope === 'subset') return null;
@@ -139,7 +183,7 @@ export const MEASURED_SUITE_WORDS: Readonly<Record<string, string>> = {
 export function measuredRowsFor(dataset: ScorecardDataset, modelId: string): MeasuredResult[] {
   const runs = new Map(dataset.runs.map((run) => [run.id, run]));
   return dataset.results
-    .filter((result) => matches(result, modelId, false))
+    .filter((result) => isPassRateResult(result) && matches(result, modelId, false))
     .map((result): MeasuredResult | null => {
       const run = runs.get(result.runId);
       if (!run) return null;

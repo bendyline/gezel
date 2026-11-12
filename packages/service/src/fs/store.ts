@@ -6290,6 +6290,7 @@ export class Store {
           content: m.content,
           at: m.at,
           ...(m.from ? { from: m.from } : {}),
+          ...(m.relayedImages ? { relayedImages: m.relayedImages } : {}),
           ...(m.nudge ? { nudge: true } : {}),
           ...(m.draftId ? { draftId: m.draftId } : {}),
           ...(m.hidden ? { hidden: true } : {}),

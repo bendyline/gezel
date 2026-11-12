@@ -256,6 +256,14 @@ export const ImageGenerationResponseSchema = z.object({
   promptGuide: z.string().optional(),
   /** The styles the rendering model has, for a caller that cannot read the model list. */
   styles: z.array(ImageLoraRefSchema).optional(),
+  /**
+   * The gezel the calling session's running turn answers, when that turn's
+   * reply is relayed to another gezel rather than read where it is written
+   * (a delegation or a consultation). The person is in that gezel's chat, so
+   * the tool asks for the picture's path in the reply instead of saying the
+   * person already sees it.
+   */
+  replyTo: z.object({ gezelName: z.string() }).optional(),
 });
 export type ImageGenerationResponse = z.infer<typeof ImageGenerationResponseSchema>;
 

@@ -81,6 +81,14 @@ export interface FitnessEvidence {
    */
   toolTurnIncomplete?: IncompleteTurn;
   /**
+   * The runtime ended the tool turn because the model kept writing prose
+   * instead of calling the tool: a ramble abort, or no call through every
+   * corrective nudge. Like {@link toolTurnIncomplete}, a verdict about the
+   * model: filed as a probe failure, it read "fitness check failed" over a
+   * model that simply cannot make the call.
+   */
+  toolTurnProse?: { observedTokens: number; head: string };
+  /**
    * A generation turn ran out of budget while the model was still producing
    * tokens. The engine was healthy and decoding — what failed is the model's
    * ability to finish a short answer inside a budget scaled to its own
@@ -147,7 +155,9 @@ export function buildFitnessChecks(ev: FitnessEvidence): {
         ? { ok: false, detail: `tool turn failed: ${ev.toolTurnError}` }
         : ev.toolTurnIncomplete
           ? buildUnfinishedToolCheck(ev.toolTurnIncomplete)
-          : buildToolRoundTripCheck(ev);
+          : ev.toolTurnProse
+            ? buildProseToolTurnCheck(ev.toolTurnProse)
+            : buildToolRoundTripCheck(ev);
 
   const reasoningBudget = buildReasoningBudgetCheck(ev);
 
@@ -346,6 +356,23 @@ function buildUnfinishedGenerationCheck(
     detail:
       `still writing${rate} after ${formatProbeDuration(turn.elapsedMs)} — about ` +
       `${turn.observedTokens.toLocaleString()} tokens into a request for a short reply, ${verdict}`,
+  };
+}
+
+/** The runtime stopped the tool turn for writing prose instead of the call. */
+function buildProseToolTurnCheck(prose: { observedTokens: number; head: string }): {
+  ok: boolean;
+  detail: string;
+} {
+  const head = prose.head.slice(0, 160).replace(/\s+/g, ' ').trim();
+  const amount =
+    prose.observedTokens > 0
+      ? `about ${prose.observedTokens.toLocaleString()} tokens of prose`
+      : 'prose';
+  const began = head ? ` — it began: "${head}"` : '';
+  return {
+    ok: false,
+    detail: `model wrote ${amount} instead of calling ${PROBE_TOOL_NAME}, and the runtime stopped the turn${began}`,
   };
 }
 

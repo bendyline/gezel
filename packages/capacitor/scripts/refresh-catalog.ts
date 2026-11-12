@@ -11,12 +11,15 @@ const items = await new BundledSource({ dataDir: join(dirname(gildePath), 'data'
   'chat-model',
 );
 const models = portableCatalogModels(items).map(
-  ({ name, license, approxSizeBytes, contextWindow, source }) => ({
+  ({ name, license, approxSizeBytes, contextWindow, source, licenseClass, docbench }) => ({
     name,
     license,
     approxSizeBytes,
     contextWindow,
     source,
+    // What a phone ranks its downloads by: docbench among open-license models.
+    ...(licenseClass ? { licenseClass } : {}),
+    ...(docbench ? { docbench } : {}),
   }),
 );
 await writeFile(

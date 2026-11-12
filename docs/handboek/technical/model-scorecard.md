@@ -140,6 +140,8 @@ planning, and analysis work. A high score on the general set matters more if
 you want the model writing or fixing code, and the engineering set, where a round
 has it, is the stricter test of that.
 
+For writing, reviewing, and illustrating documents in DocBlocks, [Docbench](docbench.md) is the more direct guide: it grades the answers themselves, not whether a job finished.
+
 If a model you're considering isn't listed, it hasn't been measured here yet
 — which is not a verdict on it either way. The Models catalog in the app
 will still tell you whether it fits this machine.

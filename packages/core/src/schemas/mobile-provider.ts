@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { AppModelDocbenchSchema } from './app-models.js';
 
 export const MobileProviderIdSchema = z.enum([
   'llama-cpp',
@@ -246,6 +247,10 @@ export const MobileCatalogEntrySchema = z
       .max(4 * 1024 ** 3),
     contextWindow: z.number().int().positive(),
     source: MobileModelSourceIdentitySchema,
+    /** The catalog's license class; only `open` models are recommended. */
+    licenseClass: z.string().max(32).optional(),
+    /** The build's fresh llama.cpp docbench score, when the catalog carries one. */
+    docbench: AppModelDocbenchSchema.optional(),
   })
   .strict();
 export const MobileCatalogSchema = z

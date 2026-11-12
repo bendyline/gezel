@@ -869,6 +869,8 @@ export const TimelineMessageSchema = z.object({
    * this to render an inter-gezel handoff bubble.
    */
   from: z.object({ gezelId: z.string(), gezelName: z.string() }).optional(),
+  /** Mirrors `ChatMessage.relayedImages` — pictures a relayed reply carries. */
+  relayedImages: ChatMessageSchema.shape.relayedImages,
   /**
    * Mirrors `ChatMessage.nudge` — this user message was delivered from
    * the mid-turn queue as a nudge. The bubble renders a small chip.

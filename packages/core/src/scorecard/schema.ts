@@ -298,6 +298,71 @@ export const ScorecardTaskMeasurementSchema = z
   });
 export type ScorecardTaskMeasurement = z.infer<typeof ScorecardTaskMeasurementSchema>;
 
+/** The suite id a docbench round's rows carry. */
+export const DOCBENCH_SUITE_ID = 'docbench';
+
+const Interval = z.tuple([z.number(), z.number()]);
+const Hundred = z.number().min(0).max(100);
+
+/**
+ * A docbench result: how well a model does DocBlocks' single-request
+ * document work (review, writing, diagrams, slides, study aids, narration),
+ * from a task pack's deterministic checks and a validated judge
+ * (`evals/src/docbench/`). Unlike every other suite this is a judged quality
+ * score, not a pass rate: the row's `cells` count usable outputs per task so
+ * the dataset stays consistent, but nothing should read them as passes.
+ * Scores are 0–100 and comparable only within one pack version and fixture
+ * set.
+ */
+export const ScorecardDocbenchSchema = z
+  .object({
+    packVersion: z.string().min(1),
+    fixtures: z
+      .object({ id: z.string().min(1), sha256: z.string().regex(/^[a-f0-9]{64}$/) })
+      .strict()
+      .optional(),
+    score: Hundred,
+    /** 95% interval, from a nested bootstrap over cases and their trials. */
+    ci: Interval,
+    /** Rank band in the round: models whose intervals overlap share one. */
+    band: z.number().int().positive(),
+    /** Share of outputs the product could use at all. */
+    usableRate: z.number().min(0).max(1),
+    families: z.record(z.string(), z.object({ score: Hundred, ci: Interval }).strict()),
+    tasks: z.record(
+      z.string(),
+      z
+        .object({
+          score: Hundred,
+          ci: Interval,
+          usableRate: z.number().min(0).max(1),
+          medianOutputTokens: z.number().nonnegative().nullable(),
+          /** Review tasks: valid suggestions per document by complexity, and the rest. */
+          findings: z
+            .object({
+              low: z.number().nonnegative(),
+              medium: z.number().nonnegative(),
+              high: z.number().nonnegative(),
+              trivial: z.number().nonnegative(),
+              wrong: z.number().nonnegative(),
+            })
+            .strict()
+            .optional(),
+        })
+        .strict(),
+    ),
+    judge: z
+      .object({
+        model: z.string().min(1),
+        promptVersion: z.number().int().positive(),
+        /** The judge passed its validity tests for this round. */
+        validityPassed: z.boolean(),
+      })
+      .strict(),
+  })
+  .strict();
+export type ScorecardDocbench = z.infer<typeof ScorecardDocbenchSchema>;
+
 export const ScorecardModelResultSchema = z
   .object({
     /** Catalog model id, e.g. "gemma4-e4b-q4". */
@@ -325,6 +390,8 @@ export const ScorecardModelResultSchema = z
     judge: ScorecardJudgeSchema.optional(),
     /** Task measurements and rubric-specific reviews, independent of capability eligibility. */
     taskMeasurements: z.array(ScorecardTaskMeasurementSchema).min(1).optional(),
+    /** A docbench round's score; only on `suiteId: 'docbench'` rows. */
+    docbench: ScorecardDocbenchSchema.optional(),
     cells: z.array(ScorecardCellSchema),
   })
   .strict();

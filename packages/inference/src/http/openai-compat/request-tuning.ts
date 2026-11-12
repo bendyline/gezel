@@ -1,3 +1,7 @@
+import {
+  CONSTRAINED_TURN_REASONING_DEPTH,
+  REASONING_DEPTH_TEMPLATE_KWARGS,
+} from '@bendyline/gezel/local-loop';
 import type { ResolvedTuning } from '../../model-profile/tuning.js';
 import type { ChatCompletionRequest } from './translate.js';
 
@@ -39,7 +43,7 @@ export function overlayOpenAiRequestTuning(
   // Only the off direction is mapped: turning thinking ON for a model whose
   // catalog leaves it off could select a mode the model does not have.
   const reasoning = disablesThinking(req.reasoning_effort)
-    ? { ...tuning.reasoning, enableThinking: false }
+    ? withoutReasoning(tuning.reasoning)
     : tuning.reasoning;
 
   return {
@@ -48,6 +52,38 @@ export function overlayOpenAiRequestTuning(
     reasoning,
     output,
     ...(toolChoice !== undefined ? { toolChoice } : {}),
+  };
+}
+
+/**
+ * The reasoning block for a request that asked to skip reasoning.
+ *
+ * The switch alone is not enough. GPT-OSS's template ignores
+ * `enable_thinking` and reasons at whatever depth its `reasoning_effort`
+ * kwarg says — the catalog's `medium` — so a DocBlocks review that asked for
+ * no reasoning spent its output budget thinking and was cut off (docbench,
+ * 2026-11-11: 27 of 142 gpt-oss-20b outputs). Every reasoning-depth dial the
+ * model declares drops to its floor too, as a constrained turn's does
+ * (`downgradeReasoningDepthKwargs`). Only declared dials move: a key the
+ * template does not read can raise inside it.
+ */
+export function withoutReasoning(
+  reasoning: ResolvedTuning['reasoning'],
+): ResolvedTuning['reasoning'] {
+  const kwargs = reasoning.templateKwargs;
+  return {
+    ...reasoning,
+    enableThinking: false,
+    ...(kwargs
+      ? {
+          templateKwargs: Object.fromEntries(
+            Object.entries(kwargs).map(([key, value]) => [
+              key,
+              REASONING_DEPTH_TEMPLATE_KWARGS.has(key) ? CONSTRAINED_TURN_REASONING_DEPTH : value,
+            ]),
+          ),
+        }
+      : {}),
   };
 }
 
@@ -110,8 +146,7 @@ export function overlayOllamaRequestTuning(
     output.jsonSchema = format;
   }
 
-  const reasoning =
-    think === false ? { ...tuning.reasoning, enableThinking: false } : tuning.reasoning;
+  const reasoning = think === false ? withoutReasoning(tuning.reasoning) : tuning.reasoning;
 
   return { ...tuning, sampling, reasoning, output };
 }

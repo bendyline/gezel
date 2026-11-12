@@ -1,4 +1,6 @@
-import type { CatalogItemSummary } from '../schemas/catalog.js';
+import { docbenchScoreFor } from '../recommendation.js';
+import type { AppModelDocbench } from '../schemas/app-models.js';
+import type { CatalogItemSummary, ChatModelManifest } from '../schemas/catalog.js';
 import { MobileModelSourceIdentitySchema } from '../schemas/mobile-provider.js';
 import type { BehaviorEntry } from '../schemas/model-profile.js';
 import type { PortableCatalogModel } from './content.js';
@@ -7,6 +9,20 @@ import type { PortableCatalogModel } from './content.js';
 function isMlxOnlyBehavior(entry: BehaviorEntry): boolean {
   const id = typeof entry === 'string' ? entry : entry.id;
   return id.startsWith('tools.mlx-');
+}
+
+/** The fresh llama.cpp docbench result, as clients see it; undefined when unmeasured or stale. */
+function phoneDocbench(manifest: ChatModelManifest): AppModelDocbench | undefined {
+  if (docbenchScoreFor(manifest, 'llama-cpp') === undefined) return undefined;
+  const measured = manifest.benchmarks?.docbench?.['llama-cpp'];
+  return measured
+    ? {
+        score: measured.score,
+        band: measured.band,
+        version: measured.version,
+        families: measured.families,
+      }
+    : undefined;
 }
 
 /**
@@ -30,6 +46,7 @@ export function portableCatalogModels(items: CatalogItemSummary[]): PortableCata
         sha256: source.sha256,
       });
       if (!identity.success) return [];
+      const docbench = phoneDocbench(manifest);
       return [
         {
           name: manifest.name,
@@ -49,6 +66,8 @@ export function portableCatalogModels(items: CatalogItemSummary[]): PortableCata
             ? { behaviors: manifest.behaviors.filter((entry) => !isMlxOnlyBehavior(entry)) }
             : {}),
           parameterSize: manifest.parameterSize,
+          ...(manifest.licenseClass ? { licenseClass: manifest.licenseClass } : {}),
+          ...(docbench ? { docbench } : {}),
         },
       ];
     })

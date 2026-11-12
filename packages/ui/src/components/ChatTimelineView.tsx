@@ -1589,6 +1589,7 @@ export function ChatTimelineView({
           // Preserve the cross-gezel `from` sentinel so the live bubble
           // renders as a "Yusuf → Leo" handoff instead of "You".
           ...(event.message.from ? { from: event.message.from } : {}),
+          ...(event.message.relayedImages ? { relayedImages: event.message.relayedImages } : {}),
           ...(event.message.nudge ? { nudge: true } : {}),
           ...(event.message.hidden ? { hidden: true } : {}),
           // Preserve provenance so the live seed stays out of ordinary chat.
@@ -3511,6 +3512,7 @@ export function ChatTimelineView({
           ? { authorMainCrewMember: true }
           : {})}
         {...(m.from ? { from: m.from } : {})}
+        {...(m.from && m.relayedImages ? { relayedImages: m.relayedImages } : {})}
         {...(m.nudge ? { nudge: true } : {})}
         {...(m.origin === 'system' ? { origin: 'system' as const } : {})}
         receiverLabel={

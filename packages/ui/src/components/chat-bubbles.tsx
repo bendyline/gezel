@@ -263,6 +263,12 @@ export interface MessageBubbleProps {
    */
   from?: { gezelId: string; gezelName: string };
   /**
+   * Pictures the sender made in the turn this handoff relays, shown with its
+   * words so the person sees them in the chat they are in. See
+   * `ChatMessage.relayedImages`.
+   */
+  relayedImages?: NonNullable<import('@bendyline/gezel').ChatMessage['relayedImages']>;
+  /**
    * This user message was delivered from the mid-turn queue as a nudge
    * (typed while the previous turn was streaming). Renders a small
    * "nudged" chip after the author label. User bubbles only.
@@ -696,6 +702,7 @@ export function MessageBubble({
   authorTooltip,
   driftLabel,
   from,
+  relayedImages,
   nudge,
   origin,
   receiverLabel,
@@ -1186,6 +1193,11 @@ export function MessageBubble({
         <div className="msg-body msg-body-rendered" onClick={handleBodyClick} style={bodyStyle}>
           <RenderedMarkdown markdown={body} mediaProvider={mediaProvider} fontFamily={fontFamily} />
         </div>
+        {relayedImages && (
+          <div className="msg-tool-media msg-relayed-media">
+            <ToolImageRow projectId={relayedImages.projectId} images={relayedImages.images} />
+          </div>
+        )}
         {chips}
         {planCards}
         <MessageActions

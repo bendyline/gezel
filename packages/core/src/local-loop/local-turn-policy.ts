@@ -23,6 +23,17 @@ export const LOCAL_TURN_LIMITS = {
 type RecoveryKind = 'noProgress' | 'malformed' | 'writeContinuations' | 'capTruncation';
 
 /**
+ * True for the error a local file turn ends with when the model made no
+ * workspace change through every corrective nudge
+ * ({@link LocalTurnPolicy.requireProgressRetry}). The engine was serving; the
+ * model did not act. Older wordings name the turn kind ("direct file-work
+ * turn ended …"), so match the shared clause.
+ */
+export function isNoProgressTurnMessage(text: string): boolean {
+  return /turn ended without a successful workspace mutation/i.test(text);
+}
+
+/**
  * One instance per send. Backends report outcomes after decoding their wire
  * format; this owner decides whether another attempt is allowed. Engine
  * deadlines remain awake-time budgets supplied by the adapter.

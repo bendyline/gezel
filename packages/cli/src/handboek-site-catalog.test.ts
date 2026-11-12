@@ -8,6 +8,7 @@ import {
   buildSiteCatalog,
   craftbookArtHtml,
   demoSectionHtml,
+  docbenchResultsMarkdown,
   insertAfterTitle,
   insertDemoSection,
   measuredResultsMarkdown,
@@ -133,7 +134,9 @@ describe('buildSiteCatalog', () => {
     expect(index.markdown.indexOf('[Big](model/big-q4)')).toBeLessThan(
       index.markdown.indexOf('model/small-q4'),
     );
-    expect(index.markdown).toContain('[Small \\| Fast](model/small-q4) | Not yet | 2.5 GB | 33K |');
+    expect(index.markdown).toContain(
+      '[Small \\| Fast](model/small-q4) | Not yet | Not yet | 2.5 GB | 33K |',
+    );
     const page = pages.find((p) => p.entry.id === 'model/big-q4')!;
     expect(page.listed).toBe(false);
     expect(page.markdown).toContain('| Runs on | DwarfStar |');
@@ -316,6 +319,80 @@ describe('measured results', () => {
     expect(md).toContain('Not measured yet.');
     expect(md).toContain('gezel bench --model small-q4');
     expect(md).not.toContain('| Round |');
+  });
+});
+
+/** The scorecard above plus a docbench round for `big-q4` only. */
+function withDocbench(): ScorecardDataset {
+  const data = structuredClone(scorecard);
+  data.runs.unshift({
+    id: 'docbench-sweep',
+    provenance: {
+      startedAt: '2026-11-11T02:59:20.255Z',
+      device: { label: 'Rig', platform: 'win32', arch: 'arm64' },
+      harnessCommit: 'abc',
+      gildeVersion: '1.0.0',
+      count: 3,
+      judgeModelId: 'claude-opus-5-5',
+    },
+    suites: ['docbench'],
+    scenariosBySuite: { docbench: ['review-general'] },
+  });
+  data.results.push({
+    modelId: 'big-q4',
+    label: 'Big',
+    engine: 'llama-cpp',
+    tier: 'large',
+    runId: 'docbench-sweep',
+    suiteId: 'docbench',
+    docbench: {
+      packVersion: '0.2.1',
+      score: 80.7,
+      ci: [79, 82.4],
+      band: 1,
+      usableRate: 1,
+      families: {
+        review: { score: 71.6, ci: [67.2, 75.4] },
+        writing: { score: 90.2, ci: [88, 92] },
+      },
+      tasks: {
+        'review-general': {
+          score: 60,
+          ci: [55, 65],
+          usableRate: 1,
+          medianOutputTokens: 900,
+          findings: { low: 3.5, medium: 1.25, high: 0.5, trivial: 0.25, wrong: 0 },
+        },
+      },
+      judge: { model: 'claude-opus-5-5', promptVersion: 2, validityPassed: true },
+    },
+    cells: [{ scenarioId: 'review-general', trials: 4, successes: 4, nonModelFailures: 0 }],
+  });
+  return data;
+}
+
+describe('docbench on model pages', () => {
+  it('puts the exact build’s score in the catalog table, never a sibling’s', async () => {
+    const { pages } = await buildSiteCatalog(catalog, withDocbench());
+    const index = pages.find((p) => p.entry.id === MODEL_CATALOG_ID)!;
+    expect(index.markdown).toContain('| Model | Measured | Docbench | Size |');
+    expect(index.markdown).toContain(
+      '[Big](model/big-q4) | [83% general (M4 Max)](model/big-q4#measured-results) | [81](model/big-q4#docbench) |',
+    );
+    expect(index.markdown).toContain('[Small \\| Fast](model/small-q4) | Not yet | Not yet |');
+    const page = pages.find((p) => p.entry.id === 'model/big-q4')!;
+    expect(page.markdown).toContain('## Docbench');
+  });
+
+  it('shows the score, range, families and review depth, and stays out of measured results', () => {
+    const data = withDocbench();
+    const md = docbenchResultsMarkdown(data, 'big-q4').join('\n');
+    expect(md).toContain('**81** (95% range 79–82, band 1)');
+    expect(md).toContain('| Review and feedback | 72 | 67–75 |');
+    expect(md).toContain('| Writing new content | 90 | 88–92 |');
+    expect(md).toContain('3.5 small fixes, 1.3 moderate changes and 0.5 substantial ones');
+    expect(measuredResultsMarkdown(data, 'big-q4').join('\n')).not.toContain('docbench');
+    expect(docbenchResultsMarkdown(data, 'big-q8')).toEqual([]);
   });
 });
 

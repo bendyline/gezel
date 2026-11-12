@@ -288,8 +288,8 @@ importers:
         specifier: workspace:*
         version: link:../knowledge
       '@bendyline/gilde':
-        specifier: 0.3.8
-        version: 0.3.8
+        specifier: 0.3.9
+        version: 0.3.9
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -831,8 +831,8 @@ importers:
         specifier: workspace:*
         version: link:../sdk
       '@bendyline/gilde':
-        specifier: 0.3.8
-        version: 0.3.8
+        specifier: 0.3.9
+        version: 0.3.9
       '@bendyline/squisq':
         specifier: 2.13.12
         version: 2.13.12(supports-color@8.1.1)
@@ -1244,8 +1244,8 @@ packages:
     resolution: {integrity: sha512-9lcSuQKHp14o5fHjI7FeUKVEPX1W/MAK8juffciqVhYomBB1tjMr+rZLtQlZYyxngYsXG5hVD4QluWHu81C8Sg==}
     engines: {node: ^24.18.0 || >=26.0.0}
 
-  '@bendyline/gilde@0.3.8':
-    resolution: {integrity: sha512-+MzBmMNdCc5cs41fRaXn5Hy+PmgZ2af/dKZ2xyoH7/Mntv06ew+5cbs0XmMLweHBr+8ZDtf4TcUC9i+6koUHLA==}
+  '@bendyline/gilde@0.3.9':
+    resolution: {integrity: sha512-MEmdl1aNUL5EYc+BoK8QHZnbBrAycV0nVjbvFioIbDyxo7PN49owP0IO1GyDidbSDmW+nlZsMP1UvdMDwSEr4Q==}
 
   '@bendyline/squisq-calc@2.11.2':
     resolution: {integrity: sha512-5F73g6ZyO5/QtOgv4JTw2cycBGr26mVU11ajXf4+Ynz9uGh/mxdBfY3yXLKceUUUqRYiIfDd+X28FqkQXge3Ag==}
@@ -8769,7 +8769,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/gilde@0.3.8': {}
+  '@bendyline/gilde@0.3.9': {}
 
   '@bendyline/squisq-calc@2.11.2(@ironcalc/wasm@0.8.4)':
     optionalDependencies:
