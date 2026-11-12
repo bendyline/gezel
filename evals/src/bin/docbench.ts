@@ -14,7 +14,10 @@
  *    95% intervals and rank bands: `summary.json` and `report.md`.
  *
  * Flags:
- *   --models <a,b>          catalog ids (default: the 21-model default set; `slice` for the Phase 1 four)
+ *   --models <a,b>          catalog ids (default: the 21-model default set; `slice` for the Phase 1 four),
+ *                           `apple-foundation-models` for the model macOS runs, or a frontier reference:
+ *                           `claude-<model>` on the Claude CLI, `codex-<model>` on the Codex CLI
+ *                           (never publishable; see `docbench/cli-endpoint.ts`)
  *   --run-id <id>           output folder under evals/runs/docbench-<id> (default: a timestamp)
  *   --pack <dir>            the built task pack (default: GEZEL_DOCBENCH_PACK or ../docblocks/packages/bench)
  *   --tasks <a,b>           run these tasks only
@@ -22,6 +25,7 @@
  *   --judge <model|none|openai:<baseUrl>#<model>>
  *                           the judge (default: the official claude-opus-5-5, or GEZEL_DOCBENCH_JUDGE_MODEL)
  *   --claude-bin <path>     the Claude CLI (default: GEZEL_CLAUDE_BIN, PATH, or the VS Code extension's)
+ *   --codex-bin <path>      the Codex CLI, for `codex-<model>` references (default: GEZEL_CODEX_BIN or PATH)
  *   --judge-concurrency <n> judge calls at once (default 3)
  *   --now <iso>             the date prompts state (default: kept from the run, else today at noon UTC)
  *   --seed-base <n>         trial n uses seed base+n (default 1000)
@@ -34,6 +38,10 @@
  *   --fixtures <dir>        run on another fixture set laid out like the pack's (a private holdout);
  *                           the round records the set's hash and refuses to resume on another
  *   --regenerate            generate again for models the round already has (default: skip them)
+ *
+ * Two generation processes may share a round (say, local models in one and
+ * frontier references in another): the run record is merged on every write.
+ * Only models that run on this machine take the eval device lock.
  */
 
 import { execFileSync } from 'node:child_process';
@@ -62,7 +70,13 @@ import {
   renderReport,
   withBands,
 } from '../docbench/report.ts';
-import { DOCBENCH_LAUNCH_CONTEXT, type GenerateResult, generateModel } from '../docbench/runner.ts';
+import {
+  DOCBENCH_LAUNCH_CONTEXT,
+  type GenerateResult,
+  contestantFor,
+  generateModel,
+  runsOnDevice,
+} from '../docbench/runner.ts';
 import { type CaseJudgement, outcomeKey, scoreModel } from '../docbench/score.ts';
 import { acquireEvalDeviceLock } from '../eval-device-lock.ts';
 import { resolveLlamaBinary } from '../native-bin.ts';
@@ -114,6 +128,7 @@ const KNOWN_FLAGS = new Set([
   'cases',
   'judge',
   'claude-bin',
+  'codex-bin',
   'judge-concurrency',
   'now',
   'seed-base',
@@ -136,7 +151,7 @@ interface RunRecord {
     readonly version: string;
     readonly fixtures?: { readonly id: string; readonly sha256: string };
   };
-  readonly generation: Record<string, GenerateResult & { readonly error?: string }>;
+  generation: Record<string, GenerateResult & { readonly error?: string }>;
 }
 
 function list(value: string | boolean | undefined): string[] {
@@ -172,6 +187,23 @@ function judgeProvider(
     return openAiJudge(baseUrl, model, process.env.GEZEL_DOCBENCH_JUDGE_TOKEN);
   }
   return claudeCliJudge(choice, resolveClaudeCli(claudeBin));
+}
+
+/**
+ * Write the run record, keeping any model another process sharing the round
+ * wrote since this one started: its entries win only for models this process
+ * did not generate.
+ */
+async function writeRecord(file: string, record: RunRecord, mine: ReadonlySet<string>) {
+  const onDisk = existsSync(file)
+    ? (JSON.parse(await readFile(file, 'utf8')) as Partial<RunRecord>)
+    : null;
+  const generation = { ...(onDisk?.generation ?? {}) };
+  for (const [modelId, result] of Object.entries(record.generation)) {
+    if (mine.has(modelId) || !(modelId in generation)) generation[modelId] = result;
+  }
+  record.generation = generation;
+  await writeFile(file, `${JSON.stringify(record, null, 2)}\n`);
 }
 
 /** Run `work` over `items`, at most `limit` at a time. */
@@ -315,10 +347,20 @@ async function main(): Promise<void> {
     ? null
     : judgeProvider(text(flags.judge), text(flags['claude-bin']));
 
+  const generatedHere = new Set<string>();
   if (!flags['skip-generate']) {
-    const lease = acquireEvalDeviceLock();
+    const lease = selectedModels.some(runsOnDevice) ? acquireEvalDeviceLock() : null;
     try {
-      const llamaBin = resolveLlamaBinary(text(flags['llama-bin'])).path;
+      const contestants = selectedModels.map(contestantFor);
+      const llamaBin = contestants.some((contestant) => contestant.kind === 'llama-cpp')
+        ? resolveLlamaBinary(text(flags['llama-bin'])).path
+        : undefined;
+      const claudeBin = contestants.some(
+        (contestant) => contestant.kind === 'reference' && contestant.reference.cli === 'claude',
+      )
+        ? resolveClaudeCli(text(flags['claude-bin']))
+        : undefined;
+      const codexBin = text(flags['codex-bin']) ?? process.env.GEZEL_CODEX_BIN?.trim() ?? 'codex';
       for (const modelId of selectedModels) {
         const done = record.generation[modelId];
         if (done && !done.error && done.outcomes > 0 && flags.regenerate !== true) {
@@ -333,7 +375,9 @@ async function main(): Promise<void> {
             manifest,
             modelId,
             modelDir: join(runDir, modelId),
-            llamaBin,
+            ...(llamaBin ? { llamaBin } : {}),
+            ...(claudeBin ? { claudeBin } : {}),
+            codexBin,
             tasks,
             cases: list(flags.cases),
             now,
@@ -344,6 +388,7 @@ async function main(): Promise<void> {
             log: (line) => console.log(line),
           });
           record.generation[modelId] = result;
+          generatedHere.add(modelId);
         } catch (error: unknown) {
           const message = error instanceof Error ? error.message : String(error);
           console.error(`[docbench] ${modelId}: generation failed: ${message}`);
@@ -354,14 +399,15 @@ async function main(): Promise<void> {
             seconds: 0,
             error: message,
           };
+          generatedHere.add(modelId);
         }
-        await writeFile(recordFile, `${JSON.stringify(record, null, 2)}\n`);
+        await writeRecord(recordFile, record, generatedHere);
       }
     } finally {
-      lease.release();
+      lease?.release();
     }
   }
-  await writeFile(recordFile, `${JSON.stringify(record, null, 2)}\n`);
+  await writeRecord(recordFile, record, generatedHere);
 
   if (provider) {
     await judgeRun(

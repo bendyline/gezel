@@ -555,7 +555,8 @@ public final class MobileUiSmokeTest {
             check(!document.querySelector('.project-compact-heading'), 'A single-project tab must not spend a row on a name-only heading');
             // Without that row, the rail is what names the open project.
             check(Array.from(document.querySelectorAll('.app-sidebar-proj-row.active')).some(row => row.textContent.includes('Native workshop')), 'Current project is not marked in navigation');
-            const composer = await until(() => document.querySelector('[data-testid="chat-composer"]'), 'shared chat composer');
+            // Home stays mounted but hidden (KeepAliveHost) with its own composer, whose editor is torn down while hidden.
+            const composer = await until(() => document.querySelector('.keep-alive-view[data-shown] [data-testid="chat-composer"]'), 'shared chat composer');
             const editor = await until(() => composer.querySelector('[contenteditable="true"]'), 'shared rich text input');
             editor.focus();
             document.execCommand('insertText', false, 'Say hello.');

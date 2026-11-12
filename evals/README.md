@@ -588,6 +588,7 @@ and reads its token from the environment.
 | Flag | Meaning |
 | --- | --- |
 | `--models a,b` | Catalog ids; default is the 21-model default set (27B and smaller); `slice` runs the Phase 1 four |
+| `--codex-bin <path>` | The Codex CLI for `codex-<model>` references; default `GEZEL_CODEX_BIN`, then PATH |
 | `--run-id <id>` | `runs/docbench-<id>/`; rerunning the same id resumes (cached verdicts are reused) |
 | `--pack <dir>` | The built pack; default `GEZEL_DOCBENCH_PACK` or the sibling DocBlocks checkout |
 | `--tasks`, `--cases` | Run a subset |
@@ -598,6 +599,31 @@ and reads its token from the environment.
 | `--allow-download` | Fetch weights the eval cache lacks |
 | `--skip-generate`, `--skip-judge` | Run only the later phases |
 | `--fixtures <dir>` | Run on another fixture set laid out like the pack's (a private holdout); the round records the set's hash |
+
+Besides catalog models, `--models` takes two other kinds of contestant:
+
+- `apple-foundation-models`: the model macOS runs, through the trial
+  daemon's Apple provider and the `gezel-apple-fm` helper
+  (`native/helpers/apple-fm/build.sh`, or `GEZEL_APPLE_FM_BIN`). It runs at
+  Apple's own context window and reply cap, not the 32K launch context.
+- Frontier references, `claude-<model>` (Claude CLI) and `codex-<model>`
+  (Codex CLI), such as `claude-opus-5-5` or `codex-gpt-6.1-sol`. DocBlocks
+  never routes to them; they show the ceiling. `src/docbench/cli-endpoint.ts`
+  puts an OpenAI-compatible endpoint in front of the CLI and runs it as bare
+  as the CLI allows: the request's system message as the whole system
+  prompt, no tools, no user settings or memory, an empty working directory,
+  structured output through the CLI's own schema flag. The CLIs ignore
+  `temperature`, `seed` and `max_tokens` and cannot switch reasoning off, so
+  requests that ask for none run at `low` effort and writing at `medium`.
+  Codex keeps some agent framing it cannot drop. Every call is logged to
+  `<model>/cli-calls.jsonl`. A Claude model newer than the CLI on PATH needs
+  a newer CLI (`--claude-bin` or `GEZEL_CLAUDE_BIN`), which the judge then
+  uses too. References are never publishable: they are not in the catalog.
+
+Only on-device contestants take the eval device lock, so references can
+generate in a second process on the same `--run-id` while local models run
+(the run record is merged on every write). Judge afterwards in one
+`--skip-generate` pass over every model.
 
 Scoring (`src/docbench/score.ts`): a case scores 0 when the product would
 have shown nothing; otherwise the pack's checks and the judge blend by the
