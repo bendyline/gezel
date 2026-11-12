@@ -1,3 +1,12 @@
+## @bendyline/gezel-capacitor [1.1.0](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-capacitor%401.0.1...%40bendyline%2Fgezel-capacitor%401.1.0) (2026-11-12)
+
+
+### Dependencies
+
+* **@bendyline/gezel:** upgraded to 1.3.0
+* **@bendyline/gezel-app-sdk:** upgraded to 1.2.0
+* **@bendyline/gezel-inference:** upgraded to 1.1.0
+
 ## @bendyline/gezel-capacitor [1.0.1](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-capacitor%401.0.0...%40bendyline%2Fgezel-capacitor%401.0.1) (2026-11-08)
 
 
