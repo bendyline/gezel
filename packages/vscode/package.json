@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-vscode",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "VSCode extension that hosts a gezel chat panel for the active workspace.",
   "license": "MIT",
