@@ -61,6 +61,7 @@ export interface TrialTaskStrategy {
     procedure?: 'advisory' | 'none';
     subagents?: boolean;
     contract?: 'enforced' | 'shown' | 'hidden';
+    review?: 'self' | 'fresh';
   };
   /**
    * An outside agent tool works the request instead of Gezel. The task is

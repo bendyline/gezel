@@ -8,6 +8,7 @@ import type { Task } from '../schemas/task.js';
 import { MessageGezelInputSchema } from './inputs/team.js';
 import {
   REANCHOR_MAX_CHARS,
+  advanceGateFailureText,
   advanceTaskStepText,
   artifactCompletionHint,
   askUserQuestionText,
@@ -44,6 +45,21 @@ describe('toolErrorText', () => {
     expect(toolErrorText('boom', { code: 'E1', retryable: false, hint: 'read it first' })).toBe(
       '[E1] boom\nRetryable: false\nNext: read it first',
     );
+  });
+});
+
+describe('advanceGateFailureText', () => {
+  it('frames an outcome review as findings to fix, not a failed attempt', () => {
+    const text = advanceGateFailureText('p/3', 'outcome', {
+      message: 'A reviewer … found these problems:\n\n1. `a.md` — fix it',
+      attempt: 1,
+      maxAttempts: 1,
+      review: 'fresh',
+    });
+    expect(text).toContain('[outcome_review]');
+    expect(text).toContain('the contract checks passed, and a review found problems to fix first');
+    expect(text).toContain('1. `a.md` — fix it');
+    expect(text).not.toContain('attempt 1/1');
   });
 });
 

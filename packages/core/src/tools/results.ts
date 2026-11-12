@@ -561,6 +561,8 @@ export interface AdvanceGateOutcome {
   hook?: string;
   infrastructureError?: boolean;
   scriptRuns?: readonly { scriptName: string; runId?: string; error?: string }[];
+  /** An outcome review held the step; `message` is the review itself. */
+  review?: 'self' | 'fresh';
 }
 
 /** The error an `advance_task_step` returns when its gate or exit hook refused the step. */
@@ -569,6 +571,19 @@ export function advanceGateFailureText(
   stepId: string,
   gate: AdvanceGateOutcome,
 ): string {
+  // A review is not a failed check: framing it as a rejection with an
+  // attempt count reads as "your work failed", and the message already says
+  // what to do.
+  if (gate.review) {
+    return toolErrorText(
+      `Step "${stepId}" on ${ref} is not finished yet: ${
+        gate.review === 'fresh'
+          ? 'the contract checks passed, and a review found problems to fix first.'
+          : 'the contract checks passed; review your deliverables first.'
+      }\n\n${gate.message}`,
+      { code: 'outcome_review', retryable: true },
+    );
+  }
   // A declarative gate can reject the work, or an onExit lifecycle
   // script can fail after gate approval. Both use the same compatible
   // wire envelope, but a hook failure is infrastructure—not a defect

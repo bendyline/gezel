@@ -167,6 +167,9 @@ export const TOOL_TIMEOUT_MS: Record<string, number> = {
   // layer gets a normal `isError` result to drain its state from.
   ask_gezel: 35 * 60 * 1000,
   ask_specialist: 35 * 60 * 1000,
+  // An outcome task under review runs its reviewer inside this call (an eval
+  // option, `strategyOptions.review`), bounded at 25 minutes on its own.
+  advance_task_step: 35 * 60 * 1000,
 };
 
 /**

@@ -61,7 +61,16 @@ export interface TaskStrategyOptions {
    * it for grading but leaves the request as the only instruction.
    */
   contract?: TaskContractMode;
+  /**
+   * Eval only, to measure what a review adds once the contract checks pass:
+   * `self` hands the owner a focused review prompt in its own conversation;
+   * `fresh` has a new session of the same model review the deliverables and
+   * sends its findings back to the owner. See core tasks/outcome-review.ts.
+   */
+  review?: OutcomeReviewMode;
 }
+
+export type OutcomeReviewMode = 'self' | 'fresh';
 
 export type TaskContractMode = 'enforced' | 'shown' | 'hidden';
 

@@ -405,6 +405,7 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
           ...(outcome.gate.infrastructureError ? { infrastructureError: true } : {}),
           ...(outcome.gate.hook ? { hook: outcome.gate.hook } : {}),
           ...(outcome.gate.scriptRuns ? { scriptRuns: outcome.gate.scriptRuns } : {}),
+          ...(outcome.gate.review ? { review: outcome.gate.review } : {}),
         },
       });
     }

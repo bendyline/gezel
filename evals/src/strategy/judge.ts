@@ -410,7 +410,13 @@ export function parseJudgeOutput(stdout: string): JudgeSample {
   return { scores, reasons: String(raw.reasons ?? '') };
 }
 
-function callJudge(prompt: string, cliPath: string, model: string): JudgeSample {
+/** One pinned-judge call through the Claude CLI with a JSON schema; returns its raw stdout. */
+export function callJudgeCli(
+  prompt: string,
+  schema: object,
+  cliPath: string,
+  model: string,
+): string {
   const result = spawnSync(
     cliPath,
     [
@@ -423,14 +429,18 @@ function callJudge(prompt: string, cliPath: string, model: string): JudgeSample 
       '--output-format',
       'json',
       '--json-schema',
-      JSON.stringify(JUDGE_SCHEMA),
+      JSON.stringify(schema),
       '--tools',
       '',
     ],
     { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: JUDGE_TIMEOUT_MS, cwd: tmpdir() },
   );
   if (result.error) throw new Error(`claude CLI failed to start: ${result.error.message}`);
-  return parseJudgeOutput(result.stdout ?? '');
+  return result.stdout ?? '';
+}
+
+function callJudge(prompt: string, cliPath: string, model: string): JudgeSample {
+  return parseJudgeOutput(callJudgeCli(prompt, JUDGE_SCHEMA, cliPath, model));
 }
 
 export function summarizeSamples(

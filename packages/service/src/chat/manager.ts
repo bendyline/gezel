@@ -9610,7 +9610,7 @@ export class ChatManager extends LocalEngineRuntime {
               advanceOutcome.gateRejected.stepId,
             );
             promptForTurn = correctivePromptForLiveRoster(
-              stage >= 1
+              stage >= 1 || advanceOutcome.gateRejected.review
                 ? advanceOutcome.gateRejected.message
                 : buildGateRejectionNudge(advanceOutcome.gateRejected.message),
               'task-gate',

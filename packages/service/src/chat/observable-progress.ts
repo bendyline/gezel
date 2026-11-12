@@ -72,6 +72,8 @@ export type TaskAdvancerOutcome =
       scriptRuns?: GateScriptDiagnostic[];
       /** Escalation rung of `message` (≥1 = deliver raw, it IS the directive). */
       escalationStage?: number;
+      /** An outcome review held the step; `message` is the review, delivered raw. */
+      review?: 'self' | 'fresh';
       /**
        * The task's active step after the hold. Differs from the held step when
        * the gate's `onReject` looped the task to another step.
@@ -138,6 +140,7 @@ export async function maybeAutoAdvanceOnObservableProgress(
     hook?: 'onExit';
     unsatisfiable?: boolean;
     scriptRuns?: GateScriptDiagnostic[];
+    review?: 'self' | 'fresh';
   };
 }> {
   if (!deps.taskAdvancer) return {};
@@ -321,6 +324,7 @@ export async function maybeAutoAdvanceOnObservableProgress(
             ...(outcome.escalationStage !== undefined
               ? { escalationStage: outcome.escalationStage }
               : {}),
+            ...(outcome.review !== undefined ? { review: outcome.review } : {}),
           },
         };
       }
@@ -425,6 +429,7 @@ export async function maybeAutoAdvanceOnObservableProgress(
           ...(outcome.escalationStage !== undefined
             ? { escalationStage: outcome.escalationStage }
             : {}),
+          ...(outcome.review !== undefined ? { review: outcome.review } : {}),
         },
       };
     }
