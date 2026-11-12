@@ -59,7 +59,7 @@ export function TaskReviewSection(props: {
     <SettingsSection
       id="settings-task-review"
       title="Check work before handing it in"
-      hint="Once a task's work passes its checks, the gezel reads it again against your request and fixes what it can show is wrong. It adds a minute or two."
+      hint="Once a task's work passes its checks, Gezel reads it again against your request and fixes what it can show is wrong. It adds a minute or two."
     >
       <div>
         <div

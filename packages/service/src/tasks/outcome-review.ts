@@ -14,7 +14,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readFile, readdir, stat } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import {
   type Task,
   createLogger,
@@ -43,7 +43,7 @@ interface Deps {
 }
 
 interface DeliverableFile {
-  /** Where the file is, relative to its drawer. */
+  /** Where the file is, relative to its drawer, with `/` on every platform. */
   rel: string;
   drawer: 'artifacts' | 'workspace';
   abs: string;
@@ -162,7 +162,7 @@ async function deliverableFiles(
     if (!abs) continue;
     for (const file of await walk(abs)) {
       if (out.length >= SNAPSHOT_MAX_FILES) return out;
-      out.push({ rel: relative(root, file), drawer, abs: file });
+      out.push({ rel: relative(root, file).split(sep).join('/'), drawer, abs: file });
     }
   }
   return out;

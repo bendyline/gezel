@@ -15,6 +15,7 @@ import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { captureScreenshot } from './helpers/screenshot.js';
+import { shownView } from './helpers/shown-view.js';
 
 const _dirname = dirname(fileURLToPath(import.meta.url));
 const screenshotDir = join(_dirname, '..', 'screenshots');
@@ -240,23 +241,25 @@ test.afterAll(async () => {
 test('each request is one tracker; the work it stands for stays out of the thread', async () => {
   test.setTimeout(60_000);
   await page.getByTestId('app-sidebar').getByText('Bakery').first().click();
-  await expect(page.locator('.chat-timeline').first()).toBeVisible({ timeout: 20_000 });
-  const trackers = page.getByTestId('request-tracker');
+  // Home stays mounted behind the project with a chat of its own.
+  const view = shownView(page);
+  await expect(view.locator('.chat-timeline').first()).toBeVisible({ timeout: 20_000 });
+  const trackers = view.getByTestId('request-tracker');
   await expect(trackers).toHaveCount(2, { timeout: 20_000 });
 
   const invoices = trackers.filter({ hasText: 'Dejan' }).first();
   await expect(invoices).toBeVisible();
-  const prices = page.locator('[data-testid="request-tracker"][data-state="ready"]');
+  const prices = view.locator('[data-testid="request-tracker"][data-state="ready"]');
   await expect(prices).toHaveCount(1);
   await expect(prices.locator('.deliverable-card')).toHaveCount(1);
-  const working = page.locator('[data-testid="request-tracker"]:not([data-state="ready"])');
+  const working = view.locator('[data-testid="request-tracker"]:not([data-state="ready"])');
   await expect(working).toHaveCount(1);
   await expect(working).toContainText('Making it');
 
   // What the trackers stand for is not in the thread or the rail.
-  await expect(page.locator('.chat-timeline .msg-tool-card')).toHaveCount(0);
-  await expect(page.locator('.chat-rail-task')).toHaveCount(0);
-  await expect(page.locator('.chat-timeline .deliverable-card')).toHaveCount(1);
+  await expect(view.locator('.chat-timeline .msg-tool-card')).toHaveCount(0);
+  await expect(view.locator('.chat-rail-task')).toHaveCount(0);
+  await expect(view.locator('.chat-timeline .deliverable-card')).toHaveCount(1);
 
   await captureScreenshot(page, {
     path: join(screenshotDir, 'request-tracker-01.png'),

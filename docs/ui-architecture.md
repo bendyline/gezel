@@ -162,7 +162,11 @@ hide and runs them again on show. So:
   (`display: none` drops them), unless the view places its own (a chat pinned
   to its newest message).
 - Tests find a hidden view's text with `getByText`; wait for visibility
-  (`toBeVisible`) after a navigation, not for presence.
+  (`toBeVisible`) after a navigation, not for presence. A selector that can
+  match in more than one view scopes to the shown one (`shownView` in
+  `packages/app/e2e/helpers/shown-view.ts`, the wrapper carrying `data-shown`):
+  Home's chat opens the meester's newest thread, often the same thread a
+  project shows, so an unscoped `.chat-timeline` finds Home's hidden copy first.
 - The host arranges its kept set during render, and keeps that decision in
   one state (shown key, views, crashed views together). React drops an update
   made during render when another update to the same state is still waiting,
