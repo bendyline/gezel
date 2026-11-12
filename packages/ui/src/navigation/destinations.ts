@@ -2,6 +2,7 @@ import type { RecentTab } from '@bendyline/gezel';
 import { api } from '../api.js';
 import { peekRead } from '../data/api-reads.js';
 import type { ReadName } from '../data/reads.js';
+import { runtimeCapabilities } from '../runtime-capabilities.js';
 
 /**
  * Every place the main pane can show, in one table: the code it renders, the
@@ -70,12 +71,17 @@ export interface Destination {
 
 const BASE_READS: CriticalRead[] = [['getConfig'], ['listGezels']];
 
+/** A portable host has no daemon home to report on and answers 501. */
+function homeUsageReads(): CriticalRead[] {
+  return runtimeCapabilities().daemonSettings ? [['getSystemHomeInfo']] : [];
+}
+
 export function destinationFor(tab: RecentTab | null): Destination {
   if (!tab) {
     return {
       key: 'home',
       load: loadHomeViewModule,
-      reads: [...BASE_READS, ['listProjects'], ['getSystemHomeInfo']],
+      reads: [...BASE_READS, ['listProjects'], ...homeUsageReads()],
       frame: 'home',
       keepAlive: true,
     };

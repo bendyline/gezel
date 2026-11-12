@@ -1,4 +1,4 @@
-import type { RecentTab } from '@bendyline/gezel';
+import { OFFLINE_RUNTIME_CAPABILITIES, type RecentTab } from '@bendyline/gezel';
 import { describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
 
@@ -18,6 +18,19 @@ describe('destination registry', () => {
     expect(project.reads).toContainEqual(['getProject', 'p1']);
     expect(destinationFor(tab({ kind: 'project', id: 'p2' })).key).not.toBe(project.key);
     expect(destinationFor(null).key).toBe('home');
+  });
+
+  it('warms the daemon home read only on a host that has one', () => {
+    const homeRead = ['getSystemHomeInfo'];
+    expect(destinationFor(null).reads).toContainEqual(homeRead);
+    const host = window as { __GEZEL__?: unknown };
+    host.__GEZEL__ = { capabilities: OFFLINE_RUNTIME_CAPABILITIES };
+    try {
+      expect(destinationFor(null).reads).not.toContainEqual(homeRead);
+      expect(destinationFor(null).reads).toContainEqual(['listProjects']);
+    } finally {
+      host.__GEZEL__ = undefined;
+    }
   });
 
   it('never keeps editors or Settings alive', () => {
