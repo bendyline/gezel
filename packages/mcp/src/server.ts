@@ -170,6 +170,7 @@ import {
   stepOwnerGezelId,
   taskOwnedPrefixes,
   taskPersonNoun,
+  taskReadsArtifactAt,
   taskScopedWriteDeniedMessage,
   uniqueStepId,
   unknownTaskStepText,
@@ -3696,6 +3697,17 @@ function classifyArtifactPath(cleanPath: string): { ok: true } | { ok: false; ex
   return { ok: true };
 }
 
+/** Whether this session's task reads `cleanPath` from the artifacts drawer ({@link taskReadsArtifactAt}). */
+async function sessionTaskReadsArtifactAt(cleanPath: string): Promise<boolean> {
+  if (!sessionTaskRef) return false;
+  try {
+    const parsed = await parseRef(sessionTaskRef);
+    return taskReadsArtifactAt(await api.getTask(parsed.projectId, parsed.num), cleanPath);
+  } catch {
+    return false;
+  }
+}
+
 async function workspaceCollisionForArtifactPath(
   cleanPath: string,
 ): Promise<{ kind: 'file' | 'dir'; path: string } | null> {
@@ -4237,9 +4249,12 @@ async function writeArtifactToolCall({
       };
     }
   }
+  let workspaceTwinNote = '';
   if (!force) {
     const workspaceCollision = await workspaceCollisionForArtifactPath(clean);
-    if (workspaceCollision) {
+    if (workspaceCollision && (await sessionTaskReadsArtifactAt(clean))) {
+      workspaceTwinNote = `\nThe task reads ${clean} from the artifacts drawer, so this is the copy it checks. The workspace ${workspaceCollision.kind} at the same path was left as it is.`;
+    } else if (workspaceCollision) {
       return {
         content: [
           {
@@ -4297,7 +4312,11 @@ async function writeArtifactToolCall({
           checkedByStep: sessionStepCheckedArtifacts.includes(clean),
         })
       : '';
-  return { content: [{ type: 'text' as const, text: `Wrote ${clean}${completionHint}` }] };
+  return {
+    content: [
+      { type: 'text' as const, text: `Wrote ${clean}${workspaceTwinNote}${completionHint}` },
+    ],
+  };
 }
 
 server.tool(

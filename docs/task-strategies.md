@@ -369,7 +369,11 @@ that broke what they fixed, often by rewriting the whole file. A second Gemma
 run with the per-tool brief and the restore scored +0.17 [+0.02, +0.35]; two
 revisions there dropped required content to answer a finding (an alert rule a
 finding said to remove, the amounts in an invoice table), and the runtime's
-checks passed both, so the restore had nothing to act on. On Qwen 3.5 9B
+checks passed both, so the restore had nothing to act on. Rules telling the
+reviewer and the owner never to remove required content and to edit in place
+were then measured and removed (`evals/runs/review-fresh-keep-2026-11-12/`):
+content loss went to 0, but E fell to +0.00 [-0.20, +0.18], with owners
+filling gaps by invention or by duplicating text instead. On Qwen 3.5 9B
 (`evals/runs/review-9b-self-2026-11-12/`, 51 trials), self-review scored
 -0.11 [-0.28, +0.08]: its revisions helped when they took out an unsupported
 claim and hurt when they took out or rewired citations, and twice cited the
