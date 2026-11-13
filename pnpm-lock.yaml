@@ -795,8 +795,8 @@ importers:
         specifier: 0.20.38
         version: 0.20.38
       '@bendyline/docblocks-cli':
-        specifier: 2.7.13
-        version: 2.7.13(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+        specifier: 2.7.16
+        version: 2.7.16(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@bendyline/gezel':
         specifier: workspace:*
         version: link:../core
@@ -1309,13 +1309,13 @@ packages:
     resolution: {integrity: sha512-6zABk/ECA/QYSCQ1NGiVwwbQerUCZ+TQbp64Q3AgmfNvurHH0j8TtXa1qbShXA6qqkpAj4V5W8pP6mLe1mcMqA==}
     engines: {node: '>=18'}
 
-  '@bendyline/docblocks-cli@2.7.13':
-    resolution: {integrity: sha512-EqnXaZnWo+u/DWwTctXHeIxnWlqRLq06j/GP9xRNBTEQVVaospiaFPsmT35hEN/jG+VVZ7fJ5oc0lcwM0gBlWg==}
+  '@bendyline/docblocks-cli@2.7.16':
+    resolution: {integrity: sha512-TuAj6Bm2Ims64XFz5Jfn+FBYF8BcQu4+Fx6QmRqYobItu+LNePGFkSClHUMtYSGLbhjVWLOMuhHayf1DMApytQ==}
     engines: {node: ^24.18.0 || >=26.0.0}
     hasBin: true
 
-  '@bendyline/docblocks@2.7.13':
-    resolution: {integrity: sha512-9lcSuQKHp14o5fHjI7FeUKVEPX1W/MAK8juffciqVhYomBB1tjMr+rZLtQlZYyxngYsXG5hVD4QluWHu81C8Sg==}
+  '@bendyline/docblocks@2.7.16':
+    resolution: {integrity: sha512-rzr1yjwWbcFZeeWlBfgVO/2tVeFD4yY82l9c6KmSEt11yEu5mjzFfW4pqW3sZ2qyGyyUJbILuU1jL2t1+DxppQ==}
     engines: {node: ^24.18.0 || >=26.0.0}
 
   '@bendyline/gilde@0.3.10':
@@ -1330,8 +1330,8 @@ packages:
       '@ironcalc/wasm':
         optional: true
 
-  '@bendyline/squisq-cli@2.9.28':
-    resolution: {integrity: sha512-mJF2vi1cN5sHAz0Obx6isSRwc2zfkAFesebgz1GT07p7GJ5S4D1X8DOZf5eYJ9Pd65sr19a/wKmN4HFl2NyEWQ==}
+  '@bendyline/squisq-cli@2.9.31':
+    resolution: {integrity: sha512-OLOBk4vzrkAqIO/CXQVHzu1OaYXQStzwrhGP6UCL4yb3PRxLYg0VnSqZhWCaQ+Kr7rJwSPxF5YfmURIIr3ZcQQ==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     hasBin: true
 
@@ -1352,8 +1352,8 @@ packages:
       harper.js:
         optional: true
 
-  '@bendyline/squisq-formats@2.8.14':
-    resolution: {integrity: sha512-fJkluIbHw6ECkKsfQ4df1wPJqorZqfXj5rml2z3qIZzSpXzGTLdDB8d9WlCoTCfqSTpXnFGwcdE8dYxqaGnWZw==}
+  '@bendyline/squisq-formats@2.8.17':
+    resolution: {integrity: sha512-YkE+GXvK4Gln1ikS5Yhk70jO7CBOuZRoF0ZR7cVDwkLQon3NEHYHuaZkq0PeHXcL0MRxwBRLCvIWlm/ggVJR7A==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       hyparquet: ^1.29.1
@@ -1381,8 +1381,8 @@ packages:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
-  '@bendyline/squisq-react@2.12.24':
-    resolution: {integrity: sha512-CuYkEdseolurIlKDGHAKywynFEwnQ1fyRVoIbsh8DmrBTmOqRsJmISTCuQuSUh37v+w09GSPXEXhp26+12T1Cg==}
+  '@bendyline/squisq-react@2.12.27':
+    resolution: {integrity: sha512-PektGdyMZIz5HBj0b8iSUoKSFDfBneNVSUSa3xP8xvztPhTWYNOUk4Ay5SUt57zydXkIj+9ACZJwAT5TFe3Y/g==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
@@ -1402,16 +1402,16 @@ packages:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
-  '@bendyline/squisq-video@2.4.18':
-    resolution: {integrity: sha512-6g0LkV0cHQdX0tBlXsuYtrVIjusiNYDbAAPj8GOwZSE5cwsdshXD3AHn5VHt8bW3EZqR9geQl2RxkyjNwSOfYg==}
+  '@bendyline/squisq-video@2.4.21':
+    resolution: {integrity: sha512-Y3rYsHb3ofVr0yn8zSGKJng4aGWdyn6Bzz6fiSSqohjsOglCHpLqaKpGd0uU7J2C968TSwA859xFaFxSWQ7ULQ==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   '@bendyline/squisq-video@2.4.22':
     resolution: {integrity: sha512-lVdGrjrrB9mThWG345MpS+bR5bJdaGNSXZp4UM75yX4bYnDMkM8emYzrOpX4zDeCroUKVzMueMRwf7O7M6aq4Q==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
-  '@bendyline/squisq@2.13.12':
-    resolution: {integrity: sha512-see5Pn6LC9DWSicPpAz+SBYUHTFAccYdNtgzbRH3saJkbimA+oFuEGMq/DgFISwGRsp0XdycgRez6gbLVpP5+A==}
+  '@bendyline/squisq@2.13.15':
+    resolution: {integrity: sha512-kBtRUdN53KlcT9J9yF7wXGdZ6JMmx5cCa/v4Qz5oxD1WLADJjXTPm5L95zpPJgsZuARgcKLW2xWMBcpr8UMjqA==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   '@bendyline/squisq@2.13.16':
@@ -9028,14 +9028,14 @@ snapshots:
 
   '@bcoe/v8-coverage@1.0.2': {}
 
-  '@bendyline/docblocks-cli@2.7.13(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/docblocks-cli@2.7.16(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/docblocks': 2.7.13(supports-color@8.1.1)
-      '@bendyline/squisq': 2.13.12(supports-color@8.1.1)
-      '@bendyline/squisq-cli': 2.9.28(supports-color@8.1.1)
-      '@bendyline/squisq-formats': 2.8.14(supports-color@8.1.1)
-      '@bendyline/squisq-react': 2.12.24(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
-      '@bendyline/squisq-video': 2.4.18(supports-color@8.1.1)
+      '@bendyline/docblocks': 2.7.16(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.15(supports-color@8.1.1)
+      '@bendyline/squisq-cli': 2.9.31(supports-color@8.1.1)
+      '@bendyline/squisq-formats': 2.8.17(supports-color@8.1.1)
+      '@bendyline/squisq-react': 2.12.27(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+      '@bendyline/squisq-video': 2.4.21(supports-color@8.1.1)
       '@modelcontextprotocol/sdk': 1.32.2(supports-color@8.1.1)(zod@3.25.76(patch_hash=0c3a9369ea373fbff7a2b5f617047d5acde808a0fd6e5e0cc201bcdff2c3b621))
       commander: 13.1.0
       jszip: 3.10.1
@@ -9049,9 +9049,9 @@ snapshots:
       - react-dom
       - supports-color
 
-  '@bendyline/docblocks@2.7.13(supports-color@8.1.1)':
+  '@bendyline/docblocks@2.7.16(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.12(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.15(supports-color@8.1.1)
       zod: 3.25.76(patch_hash=0c3a9369ea373fbff7a2b5f617047d5acde808a0fd6e5e0cc201bcdff2c3b621)
     transitivePeerDependencies:
       - supports-color
@@ -9062,11 +9062,11 @@ snapshots:
     optionalDependencies:
       '@ironcalc/wasm': 0.8.4
 
-  '@bendyline/squisq-cli@2.9.28(supports-color@8.1.1)':
+  '@bendyline/squisq-cli@2.9.31(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.12(supports-color@8.1.1)
-      '@bendyline/squisq-formats': 2.8.14(supports-color@8.1.1)
-      '@bendyline/squisq-video': 2.4.18(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.15(supports-color@8.1.1)
+      '@bendyline/squisq-formats': 2.8.17(supports-color@8.1.1)
+      '@bendyline/squisq-video': 2.4.21(supports-color@8.1.1)
       commander: 12.1.0
       playwright-core: 1.63.0
     transitivePeerDependencies:
@@ -9123,9 +9123,9 @@ snapshots:
       - hyparquet
       - supports-color
 
-  '@bendyline/squisq-formats@2.8.14(supports-color@8.1.1)':
+  '@bendyline/squisq-formats@2.8.17(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.12(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.15(supports-color@8.1.1)
       '@pdf-lib/fontkit': 1.1.1
       '@pdf-lib/upng': 1.0.1
       '@xmldom/xmldom': 0.9.12
@@ -9158,9 +9158,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-react@2.12.24(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-react@2.12.27(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.12(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.15(supports-color@8.1.1)
       '@bendyline/squisq-graph': 2.13.1
       mermaid: 11.16.1
       react: 19.2.8
@@ -9193,9 +9193,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-video@2.4.18(supports-color@8.1.1)':
+  '@bendyline/squisq-video@2.4.21(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.12(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.15(supports-color@8.1.1)
       '@ffmpeg/ffmpeg': 0.12.15
       '@ffmpeg/util': 0.12.2
     transitivePeerDependencies:
@@ -9209,7 +9209,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq@2.13.12(supports-color@8.1.1)':
+  '@bendyline/squisq@2.13.15(supports-color@8.1.1)':
     dependencies:
       '@bendyline/squisq-graph': 2.13.1
       genson-js: 0.0.8

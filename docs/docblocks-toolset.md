@@ -21,8 +21,8 @@ the server when bumping versions (`docblocks mcp` publishes exactly 19 tools, no
 aliases; verify with a `tools/list` against the new tarball).
 
 Since 2.7.3 the daemon ships DocBlocks itself: `@bendyline/docblocks-cli` is an
-exact-pinned dependency of `packages/service`, currently **2.7.13** (tarball
-SHA-256 `146e4cc06eb2da237153ca74649472deb9336b451d14a74a6a45af47cb611974`).
+exact-pinned dependency of `packages/service`, currently **2.7.16** (tarball
+SHA-256 `fce4ccf78758cd33ab53d32ca089d0a3de9903cd026b36f0f50add6fc09c2210`).
 [bundled-docblocks.ts](../packages/service/src/toolsets/bundled-docblocks.ts)
 resolves it as an immutable system toolset, so it works on first launch and
 offline with no catalog download, and an install request returns it instead of
@@ -155,6 +155,16 @@ to make an intermediary page.
 - Discover vocabulary live (`list_themes`, `list_templates`,
   `list_transform_styles`, `list_formats`) instead of hard-coding IDs in
   prompts.
+- From 2.7.16 a PPTX slide whose whole body is one list of 2–6 short items is
+  drawn as a picture of how the items relate, with no annotation: a numbered
+  list as steps, `Label: detail` items as cards, dated items as a timeline.
+  `recommend_templates` reports the reading as `profile.listShape`. A book that
+  wants plain bullets annotates the heading `{[list]}` or keeps an introduction
+  sentence on the slide. Neither preview shows the picture: a Markdown source
+  previews the list as written, and a saved deck's `reconstructed-import`
+  preview (like `read_doc_as_markdown`) gives each step number its own line and
+  a card's label and detail separate lines. Review prompts must not read either
+  as a defect.
 
 ## Real integration evals
 
