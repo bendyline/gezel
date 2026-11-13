@@ -25,6 +25,8 @@
  *
  * Env:
  *   GEZEL_CONSUMER_SKIP_DAEMON=1   skip the daemon boot (fastest useful run)
+ *   GEZEL_CONSUMER_NPM_CACHE=<dir> npm cache kept between runs
+ *                                  (default .cache/npm-consumer-cache)
  */
 import { spawn, spawnSync } from 'node:child_process';
 import {
@@ -43,6 +45,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as tar from 'tar';
 import { consumerCheckReportPath, writeConsumerCheckReport } from './consumer-check-report.mjs';
 import { blockingAdvisories, readAuditAllowlist } from './npm-consumer-audit.mjs';
+import {
+  npmConsumerCacheDir,
+  prepareNpmConsumerCache,
+  pruneCandidateTarballs,
+} from './npm-consumer-cache.mjs';
 import { runNpmConsumerInstall } from './npm-consumer-install.mjs';
 import { PUBLISHED_PACKAGE_DIRS, publishedPackageNames } from './published-packages.mjs';
 
@@ -372,10 +379,13 @@ function runPackageManager(manager, args, options = {}) {
     manager === 'npm'
       ? {
           ...options,
-          // A consumer check must not depend on (or mutate) the developer's
-          // global npm cache. Besides making the run hermetic, this avoids a
-          // stale root-owned cache entry turning `pnpm all` into an EPERM.
-          env: { ...process.env, ...options.env, npm_config_cache: npmCache },
+          // Never the developer's global npm cache: see npm-consumer-cache.mjs.
+          env: {
+            ...process.env,
+            ...options.env,
+            npm_config_cache: npmCache,
+            npm_config_update_notifier: 'false',
+          },
         }
       : options;
   if (process.platform !== 'win32') return run(manager, args, isolatedOptions);
@@ -383,16 +393,16 @@ function runPackageManager(manager, args, options = {}) {
 }
 
 const root = mkdtempSync(join(tmpdir(), 'gezel-packed-consumer-'));
-const npmCache = join(root, 'npm-cache');
+const npmCache = npmConsumerCacheDir(repoRoot);
 const tarballDir = suppliedTarballDir ?? join(root, 'tarballs');
 const consumer = join(root, 'consumer');
 mkdirSync(tarballDir, { recursive: true });
 mkdirSync(consumer, { recursive: true });
+const tarballs = [];
 
 try {
   // ── 1. Pack ────────────────────────────────────────────────────────────
   step(suppliedTarballDir ? 'loading supplied tarballs' : 'packing');
-  const tarballs = [];
   if (!suppliedTarballDir) {
     for (const dir of PUBLISHED) {
       const packageDir = resolve(repoRoot, 'packages', dir);
@@ -419,6 +429,7 @@ try {
     join(consumer, 'package.json'),
     `${JSON.stringify({ name: 'gezel-packed-consumer', private: true, type: 'module', version: '0.0.0' }, null, 2)}\n`,
   );
+  prepareNpmConsumerCache(npmCache);
   const install = await runNpmConsumerInstall(() =>
     runPackageManager('npm', ['install', '--no-audit', '--no-fund', ...tarballs], {
       cwd: consumer,
@@ -1134,6 +1145,13 @@ try {
   try {
     writeConsumerCheckReport(reportPath, failures);
   } finally {
+    if (existsSync(npmCache)) {
+      pruneCandidateTarballs({
+        runNpm: (args) => runPackageManager('npm', args, { cwd: consumer }),
+        tarballs,
+        consumerDir: consumer,
+      });
+    }
     if (keep) console.log(`\nleft the consumer project at ${root}`);
     else rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
