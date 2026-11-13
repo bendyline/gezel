@@ -7,8 +7,8 @@
       "files": ["LICENSE-ds4-MIT.txt", "LICENSE-ds4-rax-BSD-3-Clause.txt", "LICENSE-yarn-MIT.txt"]
     },
     "llama-cpp": {
-      "tag": "v0.9.0",
-      "commit": "cd959bae99ff4bed22bef2604f45241c09bbb8c8",
+      "tag": "v1.0.0",
+      "commit": "b1b770d90d94cad9e9ea5b993bdbc383a522fb28",
       "files": [
         "LICENSE-ggml-MIT.txt",
         "LICENSE-yarn-MIT.txt",

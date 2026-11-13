@@ -25,6 +25,6 @@
 #
 # License: MIT (https://github.com/ggml-org/llama.cpp)
 upstream=https://github.com/ggml-org/llama.cpp.git
-tag=v0.9.0
-build=12110
-commit=cd959bae99ff4bed22bef2604f45241c09bbb8c8
+tag=v1.0.0
+build=12359
+commit=b1b770d90d94cad9e9ea5b993bdbc383a522fb28

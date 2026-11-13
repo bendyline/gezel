@@ -13,8 +13,11 @@
  *     `200` with `Access-Control-Allow-Origin: https://evil.example` and a
  *     full chat completion. The response body also leaks the absolute model
  *     path, which contains the account name. Passing `--cors-origins
- *     localhost` removes the header entirely for a foreign origin and closes
- *     this;`--no-webui` drops the built-in chat page nobody here uses.
+ *     localhost` closes this; `--no-webui` drops the built-in chat page
+ *     nobody here uses. Since llama.cpp v1.0.0 that value refuses (403) any
+ *     request whose `Origin` is not the server's own, other localhost ports
+ *     included, and any loopback request whose `Host` is not a loopback name
+ *     (DNS rebinding). Our clients send loopback `Host` and no `Origin`.
  *  2. **Any other local process.** CORS is a *browser* policy; it does
  *     nothing about a native process that opens the port directly. Only a
  *     credential does, which is what this module is for.

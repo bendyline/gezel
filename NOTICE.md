@@ -291,7 +291,7 @@ copies and their engine- and helper-aware manifest live in
 
 | Component | Pinned version | License | Source |
 |---|---|---|---|
-| **llama.cpp** (`llama-server`, `libllama*`, `libmtmd*`) | tag `v0.9.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
+| **llama.cpp** (`llama-server`, `libllama*`, `libmtmd*`) | tag `v1.0.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
 | **ggml** (`libggml*` — CPU, Metal and BLAS on macOS, CUDA, Vulkan backends) | bundled with llama.cpp, whisper.cpp, and stable-diffusion.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
 | **AMD ROCm runtime** (`-rocm` variants of `llama-server` only, x64: HIP runtime, Code Object Manager, rocm-kpack, hipBLAS, rocBLAS and its per-GPU kernels, rocSOLVER, hipBLASLt, origami; on Linux also ROCr, rocprofiler-register, roctracer, rocRoller, LLVM, and TheRock's private copies of libdrm, numactl, elfutils' libelf, zlib, zstd, xz's liblzma and bzip2), redistributed unmodified apart from rocBLAS's kernel packs, trimmed to rocBLAS's own kernels | ROCm SDK `10.0.0` (TheRock wheels, pinned in `native/scripts/rocm-sdk-requirements.txt`) | MIT (AMD components); Apache-2.0 WITH LLVM-exception (LLVM, Code Object Manager); libdrm MIT; numactl LGPL-2.1; libelf LGPL-3.0-or-later OR GPL-2.0-or-later; zlib; zstd BSD-3-Clause; liblzma 0BSD; bzip2 — texts ship in each `-rocm` archive's `THIRD_PARTY_LICENSES/AMD-ROCm/` | [ROCm/TheRock](https://github.com/ROCm/TheRock) |
 | **ds4 / DwarfStar** (`ds4-server` + `metal/*.metal` shaders) | commit `b3f50180` (`main-2026-11-03`) | MIT | [antirez/ds4](https://github.com/antirez/ds4) |
