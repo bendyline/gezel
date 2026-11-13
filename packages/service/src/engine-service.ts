@@ -165,7 +165,8 @@ export async function startEngineService(
       runProbe: (args) =>
         runFitnessProbe(
           {
-            getProviderForModel: (name, id) => chat.getProviderForModel(name, id),
+            getProviderForModel: (name, id, opts) =>
+              chat.getProviderForModel(name, id, { engineBackground: opts?.background === true }),
             resolveInstalled,
             resolveReasoningBudget: (id) => resolveCatalogReasoningBudget(catalog, id),
             detectMemory: detectMemoryProfile,

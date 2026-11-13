@@ -14,9 +14,9 @@ import { asksForOfficeFormat, isCoordinatorRole } from '../chat/turn-intent-plan
 
 const require = createRequire(import.meta.url);
 export const BUNDLED_DOCBLOCKS_TOOLSET_ID = 'docblocks';
-const VERSION = '2.7.13';
+const VERSION = '2.7.16';
 // SHA-256 of this exact published package, kept with the service dependency pin.
-const SHA256 = '146e4cc06eb2da237153ca74649472deb9336b451d14a74a6a45af47cb611974';
+const SHA256 = 'fce4ccf78758cd33ab53d32ca089d0a3de9903cd026b36f0f50add6fc09c2210';
 
 export function bundledDocblocksToolset(): InstalledToolset {
   const packageFile = require.resolve('@bendyline/docblocks-cli/package.json');

@@ -83,8 +83,12 @@ host memory (>10% RAM drift, or a GPU appearing/disappearing) flags
 invalidating.
 
 An install-triggered probe that would have to **evict a resident model** to
-spawn defers (retrying for ~20 minutes, then persisting a `deferred` record);
-a manual probe proceeds immediately — you asked for it. Probe turns ride the
+spawn, or that finds another model used in the last three minutes, defers
+(retrying for ~20 minutes, then persisting a `deferred` record). Between a
+task's turns its engine looks idle, and a probe that loaded then evicted a 27B
+holding 55k tokens of context mid-task; a busy machine also skews the measured
+speed. It asks the pool as background work too, so it never takes an engine a
+turn was just handed. A manual probe proceeds immediately — you asked for it. Probe turns ride the
 background queue lane, so a probe never preempts your chat. When a manual
 probe *does* need to evict a resident engine and that engine will not drain in
 time (it is mid-turn), the pool refuses to kill live work and the probe

@@ -175,8 +175,9 @@ prompts and foreign sources never pass through, whatever the file says.
 
 ## Security
 
-- A `gezel://model/...` link and a pasted reference only open the review.
-  Strict grammars (`parseHuggingFaceReference`, `isSafeGgufRepoPath`) refuse
+- A `gezel://model/...` link only fills in the form: any web page can send
+  one, so nothing reaches Hugging Face until the person presses Check model.
+  A pasted reference only opens the review. Strict grammars (`parseHuggingFaceReference`, `isSafeGgufRepoPath`) refuse
   traversal, other hosts, datasets and Spaces.
 - Downloads are pinned to a 40-character commit and verified by SHA-256.
 - Header and config strings are the uploader's. They are shown as text,

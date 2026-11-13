@@ -375,14 +375,20 @@ test('keeps keyboard focus while switching between terminal and blank chat', asy
   await page.keyboard.type('keep typing');
   await expect(chatEditor).toHaveText('keep typing');
   // The `> ` escape fires only on the composer's first edit out of an empty
-  // draft, and Squisq reports edits from a render effect. On a loaded CI
-  // renderer the clear and the keystrokes reached the composer as one edit
-  // from "keep typing", so the escape never fired (2026-11-12). A person
-  // pauses there; the improve button follows the composer's own empty state.
+  // draft, so the clear must land, and reach the composer, before `> ` is
+  // typed. Clear through the editor's own keys, never `fill('')`: fill
+  // selects the text from script and presses Delete at once, and ProseMirror
+  // learns of a DOM selection only from the `selectionchange` event. Chrome
+  // runs input ahead of that event, so on a loaded CI renderer the Delete
+  // met the old caret at the end of the line, deleted nothing, and `> `
+  // replaced "keep typing" in one edit (release run, 2026-11-12). Tiptap's
+  // Mod-a selects in its own state, so the Backspace after it always clears.
   const improve = chatComposer.getByTestId('chat-sparkle');
   await expect(improve).toBeEnabled();
 
-  await chatEditor.fill('');
+  await chatEditor.press('ControlOrMeta+A');
+  await chatEditor.press('Backspace');
+  await expect(chatEditor).toHaveText('');
   await expect(improve).toBeDisabled();
   await page.keyboard.type('> ');
   await expect(page.getByRole('tab', { name: 'Terminal' })).toHaveAttribute(

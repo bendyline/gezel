@@ -30,7 +30,12 @@ def verified(url, path, sha256, name, fetch):
         if not fetch: raise ValueError('Missing ' + name + '; run with --fetch after approving dependencies.')
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(path.suffix + '.partial')
-        subprocess.run(['curl', '-fL', '--retry', '2', url, '-o', str(temporary)], check=True)
+        # Plain --retry skips a dropped connection (curl exit 56): Hugging Face
+        # stalled one Kokoro file and reset it, failing iOS CI on 2026-11-13.
+        # A stall now times out and every failure retries; the digest below
+        # still decides what is kept.
+        subprocess.run(['curl', '-fL', '--retry', '5', '--retry-all-errors', '--connect-timeout', '30',
+                        '--speed-limit', '1024', '--speed-time', '30', url, '-o', str(temporary)], check=True)
         if digest(temporary) != sha256: raise ValueError('Checksum mismatch: ' + name)
         temporary.replace(path)
     if digest(path) != sha256: raise ValueError('Checksum mismatch: ' + name)

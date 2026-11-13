@@ -169,7 +169,7 @@ function binaryMediaExtension(path: string): string | null {
 }
 
 function binaryMediaReadResult(
-  requestedTool: 'read_file' | 'read_artifact',
+  requestedTool: 'read_file' | 'read_files' | 'read_artifact' | 'read_artifacts',
   path: string,
   ext: string,
 ): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
@@ -188,13 +188,20 @@ async function rerouteBinaryDocumentRead(
   dependencies: CrossDrawerReadDependencies,
   path: string,
   surface: 'workspace' | 'artifact',
+  batch = false,
 ): Promise<{
   content: Array<{ type: 'text'; text: string }>;
   structuredContent?: Record<string, unknown>;
 } | null> {
   const { api, projectId, toolIsAuthorized, unwrapApiError } = dependencies;
   const artifact = surface === 'artifact';
-  const requestedTool = artifact ? 'read_artifact' : 'read_file';
+  const requestedTool = artifact
+    ? batch
+      ? 'read_artifacts'
+      : 'read_artifact'
+    : batch
+      ? 'read_files'
+      : 'read_file';
   const media = binaryMediaExtension(path);
   if (media) return binaryMediaReadResult(requestedTool, path, media);
   if (!isBinaryDocumentPath(path)) return null;
@@ -455,13 +462,23 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
           const rangeError = workspaceReadRangeError(request);
           if (rangeError) throw new Error(`${request.path}: ${rangeError}`);
         }
-        const response = await readWorkspaceFiles(requests);
-        const results = await Promise.all(
+        // Office documents convert and media files are named, as `read_file` does. A
+        // batch read used to answer a .pptx with "file contains NUL bytes", and a
+        // reviewer told the owner the deck could not be opened (2026-11-12).
+        const binaryReads = await Promise.all(
+          requests.map((request) =>
+            rerouteBinaryDocumentRead(dependencies, request.path, 'workspace', true),
+          ),
+        );
+        const textRequests = requests.filter((_, index) => !binaryReads[index]);
+        const response =
+          textRequests.length > 0 ? await readWorkspaceFiles(textRequests) : { results: [] };
+        const textResults = await Promise.all(
           response.results.map(async (result, index) => {
             if (result.status !== 'error' || result.code !== 'path-not-found') {
               return { ...result, resolvedSurface: 'workspace' as const, rerouted: false as const };
             }
-            const request = requests[index]!;
+            const request = textRequests[index]!;
             const collision = await artifactCollisionForWorkspacePath(dependencies, request.path);
             if (!collision) {
               return { ...result, resolvedSurface: 'workspace' as const, rerouted: false as const };
@@ -529,64 +546,23 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
             }
           }),
         );
-        const index = results.map((result, index) => {
-          if (result.status === 'error') {
-            return `${index + 1} ERROR ${result.path} [${result.code}] ${result.error}`;
-          }
-          const next = result.nextStartLine ? ` nextStartLine=${result.nextStartLine}` : '';
-          const route = result.rerouted ? ` rerouted=artifact:${result.resolvedPath}` : '';
-          return `${index + 1} OK ${result.path} ${workspaceReadRangeLabel(result)}${result.completeFile ? ' complete' : ''}${next}${route}`;
+        let nextText = 0;
+        const entries = requests.map((request, position) => {
+          const binary = binaryReads[position];
+          if (binary) return binaryBatchEntry('workspace', request.path, binary);
+          return textBatchEntry(textResults[nextText++]!);
         });
-        const sections = results.map((result) => {
-          if (result.status === 'error') {
-            return `--- ${result.path} [ERROR: ${result.code}] ---\n${result.error}`;
-          }
-          const range = workspaceReadRangeLabel(result);
-          const body = withLineNumbers(result.content, result.startLine) || '(no lines returned)';
-          const hint = workspaceReadHint(result);
-          const notice = result.rerouted
-            ? `${reroutedReadNotice('read_files', 'read_artifact', 'artifact', result.resolvedPath)}\n`
-            : '';
-          return `--- ${result.path} (${range}) ---\n${notice}${body}${hint}`;
-        });
-        const allFailed =
-          results.length > 0 && results.every((result) => result.status === 'error');
+        const index = entries.map((entry, position) => `${position + 1} ${entry.line}`);
+        const okCount = entries.filter((entry) => entry.structured.status === 'ok').length;
+        const allFailed = entries.length > 0 && okCount === 0;
         return {
           content: [
             {
               type: 'text' as const,
-              text: `[read_files requested=${results.length} ok=${results.filter((result) => result.status === 'ok').length} errors=${results.filter((result) => result.status === 'error').length}]\n${index.join('\n')}\n\n${sections.join('\n\n')}`,
+              text: `[read_files requested=${entries.length} ok=${okCount} errors=${entries.length - okCount}]\n${index.join('\n')}\n\n${entries.map((entry) => entry.section).join('\n\n')}`,
             },
           ],
-          structuredContent: {
-            results: results.map((result) =>
-              result.status === 'ok'
-                ? {
-                    path: result.path,
-                    status: result.status,
-                    content: result.content,
-                    startLine: result.startLine,
-                    endLine: result.endLine,
-                    completeFile: result.completeFile,
-                    totalLines: result.totalLines,
-                    hasMore: result.hasMore,
-                    nextStartLine: result.nextStartLine,
-                    resolvedSurface: result.resolvedSurface,
-                    rerouted: result.rerouted,
-                    ...('resolvedPath' in result ? { resolvedPath: result.resolvedPath } : {}),
-                  }
-                : {
-                    path: result.path,
-                    status: result.status,
-                    code: result.code,
-                    error: result.error,
-                    ...('requestedPath' in result ? { requestedPath: result.requestedPath } : {}),
-                    ...('resolvedPath' in result ? { resolvedPath: result.resolvedPath } : {}),
-                    resolvedSurface: result.resolvedSurface,
-                    rerouted: result.rerouted,
-                  },
-            ),
-          },
+          structuredContent: { results: entries.map((entry) => entry.structured) },
           ...(allFailed ? { isError: true } : {}),
         };
       } catch (error) {
@@ -597,6 +573,121 @@ export function registerWorkspaceReadTools(dependencies: CrossDrawerReadDependen
       }
     },
   );
+}
+
+type WorkspaceBatchResult =
+  | (Extract<ReadWorkspaceFilesResponse['results'][number], { status: 'ok' }> & {
+      resolvedSurface: 'workspace' | 'artifact';
+      rerouted: boolean;
+      resolvedPath?: string;
+    })
+  | {
+      status: 'error';
+      path: string;
+      code: string;
+      error: string;
+      resolvedSurface: 'workspace' | 'artifact';
+      rerouted: boolean;
+      requestedPath?: string;
+      resolvedPath?: string;
+    };
+
+interface BatchEntry {
+  line: string;
+  section: string;
+  structured: Record<string, unknown> & { status: 'ok' | 'error' };
+}
+
+/**
+ * A converted document keeps the `--- <path> (lines=…) ---` header of a text
+ * read: the evidence ledger numbers each file of a batch by that header.
+ */
+function binaryBatchEntry(
+  surface: 'workspace' | 'artifact',
+  path: string,
+  read: {
+    content: Array<{ type: 'text'; text: string }>;
+    structuredContent?: Record<string, unknown>;
+  },
+): BatchEntry {
+  const text = read.content.map((item) => item.text).join('\n');
+  const converted = read.structuredContent?.rerouted === true;
+  if (!converted) {
+    return {
+      line: `ERROR ${path} [binary-file] not text; not read`,
+      section: `--- ${path} [ERROR: binary-file] ---\n${text}`,
+      structured: {
+        path,
+        status: 'error',
+        code: 'binary-file',
+        error: text,
+        resolvedSurface: surface,
+        rerouted: false,
+      },
+    };
+  }
+  const markdown = String(read.structuredContent?.content ?? '');
+  const lines = markdown.split('\n').length;
+  const truncated = read.structuredContent?.truncated === true;
+  const ext = binaryDocumentExtension(path)?.toUpperCase() ?? 'document';
+  return {
+    line: `OK ${path} lines=1-${lines} converted=read_doc_as_markdown${truncated ? ' truncated' : ' complete'}`,
+    section: `--- ${path} (lines=1-${lines} converted from ${ext}) ---\n${text}`,
+    structured: {
+      path,
+      status: 'ok',
+      content: markdown,
+      startLine: 1,
+      endLine: lines,
+      completeFile: !truncated,
+      resolvedSurface: surface,
+      rerouted: true,
+    },
+  };
+}
+
+function textBatchEntry(result: WorkspaceBatchResult): BatchEntry {
+  if (result.status === 'error') {
+    return {
+      line: `ERROR ${result.path} [${result.code}] ${result.error}`,
+      section: `--- ${result.path} [ERROR: ${result.code}] ---\n${result.error}`,
+      structured: {
+        path: result.path,
+        status: result.status,
+        code: result.code,
+        error: result.error,
+        ...(result.requestedPath !== undefined ? { requestedPath: result.requestedPath } : {}),
+        ...(result.resolvedPath !== undefined ? { resolvedPath: result.resolvedPath } : {}),
+        resolvedSurface: result.resolvedSurface,
+        rerouted: result.rerouted,
+      },
+    };
+  }
+  const range = workspaceReadRangeLabel(result);
+  const next = result.nextStartLine ? ` nextStartLine=${result.nextStartLine}` : '';
+  const route = result.rerouted ? ` rerouted=artifact:${result.resolvedPath}` : '';
+  const body = withLineNumbers(result.content, result.startLine) || '(no lines returned)';
+  const notice = result.rerouted
+    ? `${reroutedReadNotice('read_files', 'read_artifact', 'artifact', result.resolvedPath ?? result.path)}\n`
+    : '';
+  return {
+    line: `OK ${result.path} ${range}${result.completeFile ? ' complete' : ''}${next}${route}`,
+    section: `--- ${result.path} (${range}) ---\n${notice}${body}${workspaceReadHint(result)}`,
+    structured: {
+      path: result.path,
+      status: result.status,
+      content: result.content,
+      startLine: result.startLine,
+      endLine: result.endLine,
+      completeFile: result.completeFile,
+      totalLines: result.totalLines,
+      hasMore: result.hasMore,
+      nextStartLine: result.nextStartLine,
+      resolvedSurface: result.resolvedSurface,
+      rerouted: result.rerouted,
+      ...(result.resolvedPath !== undefined ? { resolvedPath: result.resolvedPath } : {}),
+    },
+  };
 }
 
 export function registerArtifactReadTools(dependencies: CrossDrawerReadDependencies): void {
@@ -859,8 +950,21 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
         if (rangeError) return errorResult(`read_artifacts failed: ${request.path}: ${rangeError}`);
       }
 
+      // Office documents convert and media files are named, as `read_artifact`
+      // does; the slice read would decode a .pptx's container bytes as text.
+      const binaryReads = await Promise.all(
+        requests.map((request) =>
+          rerouteBinaryDocumentRead(
+            dependencies,
+            normalizeArtifactPath(request.path),
+            'artifact',
+            true,
+          ),
+        ),
+      );
+      const textRequests = requests.filter((_, index) => !binaryReads[index]);
       const results = await Promise.all(
-        requests.map(async (request) => {
+        textRequests.map(async (request) => {
           const clean = normalizeArtifactPath(request.path);
           try {
             const artifact = await api.readProjectArtifactSlice(
@@ -974,33 +1078,42 @@ export function registerArtifactReadTools(dependencies: CrossDrawerReadDependenc
         }),
       );
 
-      const index = results.map((result, index) => {
+      const textEntry = (result: (typeof results)[number]): BatchEntry => {
         if (result.status === 'error') {
-          return `${index + 1} ERROR ${result.path} [${result.code}] ${result.error}`;
+          return {
+            line: `ERROR ${result.path} [${result.code}] ${result.error}`,
+            section: `--- ${result.path} [ERROR: ${result.code}] ---\n${result.error}`,
+            structured: result,
+          };
         }
         const route = result.rerouted ? ` rerouted=workspace:${result.resolvedPath}` : '';
         const next = result.nextStartLine ? ` nextStartLine=${result.nextStartLine}` : '';
-        return `${index + 1} OK ${result.path} lines=${result.startLine}-${result.endLine}${result.totalLines !== undefined ? ` totalLines=${result.totalLines}` : ''}${result.completeFile ? ' complete' : ''}${next}${route}`;
-      });
-      const sections = results.map((result) => {
-        if (result.status === 'error') {
-          return `--- ${result.path} [ERROR: ${result.code}] ---\n${result.error}`;
-        }
         const notice = result.rerouted
           ? `${reroutedReadNotice('read_artifacts', 'read_file', 'workspace', result.resolvedPath)}\n`
           : '';
         const fuzzy = result.fuzzy ? `(matched ${result.resolvedPath} by basename)\n` : '';
-        return `--- ${result.path} (lines=${result.startLine}-${result.endLine}) ---\n${notice}${fuzzy}${result.content}`;
+        return {
+          line: `OK ${result.path} lines=${result.startLine}-${result.endLine}${result.totalLines !== undefined ? ` totalLines=${result.totalLines}` : ''}${result.completeFile ? ' complete' : ''}${next}${route}`,
+          section: `--- ${result.path} (lines=${result.startLine}-${result.endLine}) ---\n${notice}${fuzzy}${result.content}`,
+          structured: result,
+        };
+      };
+      let nextText = 0;
+      const entries = requests.map((request, position) => {
+        const binary = binaryReads[position];
+        if (binary) return binaryBatchEntry('artifact', request.path, binary);
+        return textEntry(results[nextText++]!);
       });
-      const allFailed = results.length > 0 && results.every((result) => result.status === 'error');
+      const okCount = entries.filter((entry) => entry.structured.status === 'ok').length;
+      const allFailed = entries.length > 0 && okCount === 0;
       return {
         content: [
           {
             type: 'text' as const,
-            text: `[read_artifacts requested=${results.length} ok=${results.filter((result) => result.status === 'ok').length} errors=${results.filter((result) => result.status === 'error').length}]\n${index.join('\n')}\n\n${sections.join('\n\n')}`,
+            text: `[read_artifacts requested=${entries.length} ok=${okCount} errors=${entries.length - okCount}]\n${entries.map((entry, position) => `${position + 1} ${entry.line}`).join('\n')}\n\n${entries.map((entry) => entry.section).join('\n\n')}`,
           },
         ],
-        structuredContent: { results },
+        structuredContent: { results: entries.map((entry) => entry.structured) },
         ...(allFailed ? { isError: true } : {}),
       };
     },

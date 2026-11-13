@@ -237,8 +237,16 @@ function buildRepresentativeContextPrompt(targetPromptTokens: number): string {
 const TOOL_PROMPT = `Call the ${PROBE_TOOL_NAME} tool now to create the file \`proeve.txt\` with the content \`PROEVE OK\`. Make exactly that one tool call. Do not reply with prose.`;
 
 export interface FitnessProbeDeps {
-  /** Pool-admitted provider resolution — ChatManager.getProviderForModel. */
-  getProviderForModel(name: FitnessEngine, modelId: string): Promise<LLMProvider>;
+  /**
+   * Pool-admitted provider resolution — ChatManager.getProviderForModel.
+   * `background` asks as an ambient chore: it never takes an engine a turn
+   * was just handed, nor makes a running turn step aside.
+   */
+  getProviderForModel(
+    name: FitnessEngine,
+    modelId: string,
+    opts?: { background?: boolean },
+  ): Promise<LLMProvider>;
   /** Installed-model summary for staleness keys + context window. */
   resolveInstalled(
     engine: FitnessEngine,
@@ -352,7 +360,10 @@ export async function runFitnessProbe(
   const runTurns = async (): Promise<void> => {
     let provider: LLMProvider;
     try {
-      provider = await deps.getProviderForModel(args.provider, args.modelId);
+      // The person asked for a manual check; one after an install was not.
+      provider = await deps.getProviderForModel(args.provider, args.modelId, {
+        background: args.trigger !== 'manual',
+      });
     } catch (err) {
       evidence.spawnError = err instanceof Error ? err.message : String(err);
       machineryFailed = true;

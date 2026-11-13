@@ -6,7 +6,13 @@ import { type CraftbookContract, executionModeForStrategy } from '@bendyline/gez
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
-import { type OutcomeReviewer, TaskManager, stepOwnerGezelId } from './manager.js';
+import {
+  type OutcomeReviewRestore,
+  type OutcomeReviewer,
+  TaskManager,
+  stepOwnerGezelId,
+} from './manager.js';
+import { createOutcomeReviewRestore, createOutcomeReviewer } from './outcome-review.js';
 
 let home: string;
 let store: Store;
@@ -2907,6 +2913,76 @@ describe('TaskManager — task strategy and the book contract', () => {
       expect(second.status).toBe('advanced');
       expect(second.task.status).toBe('complete');
       expect(reviewer).toHaveBeenCalledTimes(1);
+    });
+
+    // Spend the gate's attempts on short drafts, pass it once, and get a
+    // self-review hold: the next failing revision is the last attempt.
+    const passThenReview = async () => {
+      tasks.setOutcomeReviewer(createOutcomeReviewer({ store, chat: {} as never }));
+      const task = await reviewTask('self');
+      const write = (text: string) =>
+        store.writeProjectWorkspaceFile('website', 'out/summary.md', text);
+      for (const draft of ['one', 'two', 'three']) {
+        await write(draft);
+        const held = await tasks.completeStepChecked('website', task.num, 'outcome');
+        expect(held.status).toBe('held');
+      }
+      await write('x'.repeat(300));
+      const review = await tasks.completeStepChecked('website', task.num, 'outcome');
+      if (review.status !== 'held') throw new Error('expected the review hold');
+      expect(review.gate.review).toBe('self');
+      await write('too short after the review');
+      return task;
+    };
+
+    it('finishes on the work from before the review when the revision fails its last attempt', async () => {
+      tasks.setOutcomeReviewRestore(createOutcomeReviewRestore({ store }));
+      const task = await passThenReview();
+      const done = await tasks.completeStepChecked('website', task.num, 'outcome');
+      expect(done.status).toBe('advanced');
+      expect(done.task.status).toBe('complete');
+      expect(await store.readProjectWorkspaceFile('website', 'out/summary.md')).toBe(
+        'x'.repeat(300),
+      );
+      expect(
+        await store.readProjectArtifact(
+          'website',
+          `outcome-review/${task.num}/round-1/revision/workspace/out/summary.md`,
+        ),
+      ).toBe('too short after the review');
+      const notes = await tasks.listNotes('website', task.num);
+      expect(notes.map((n) => n.text).join('\n')).toContain(
+        '# Finished on the work from before the review',
+      );
+    });
+
+    it('pauses as before when the work from before the review no longer passes', async () => {
+      const undo = vi.fn(async () => {});
+      const restore = vi.fn<OutcomeReviewRestore>(async () => ({
+        restored: [],
+        removed: [],
+        undo,
+      }));
+      tasks.setOutcomeReviewRestore(restore);
+      const task = await passThenReview();
+      const held = await tasks.completeStepChecked('website', task.num, 'outcome');
+      expect(held.status).toBe('held');
+      if (held.status !== 'held') throw new Error('expected a hold');
+      expect(held.gate.paused).toBe(true);
+      expect(restore).toHaveBeenCalledWith(expect.objectContaining({ round: 1 }));
+      expect(undo).toHaveBeenCalledTimes(1);
+    });
+
+    it('never restores a task that had no review', async () => {
+      const restore = vi.fn<OutcomeReviewRestore>(async () => ({ refused: 'unused' }));
+      tasks.setOutcomeReviewRestore(restore);
+      const task = await reviewTask();
+      for (const draft of ['one', 'two', 'three', 'four']) {
+        await store.writeProjectWorkspaceFile('website', 'out/summary.md', draft);
+        await tasks.completeStepChecked('website', task.num, 'outcome');
+      }
+      expect((await tasks.get('website', task.num))?.status).toBe('paused');
+      expect(restore).not.toHaveBeenCalled();
     });
 
     it('does not review work the contract still rejects', async () => {

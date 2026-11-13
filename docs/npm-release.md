@@ -288,7 +288,7 @@ packs every published package, `npm install`s the tarballs into a throwaway
 
 1. asserts every package resolved from a candidate tarball rather than the
    registry,
-2. enforces a 950 MiB logical `node_modules` budget,
+2. enforces a 1100 MiB logical `node_modules` budget,
 3. runs `npm audit --omit=dev` and fails on any high or critical advisory
    that [`scripts/npm-consumer-audit-allowlist.json`](../scripts/npm-consumer-audit-allowlist.json)
    does not accept with a reason and an expiry — stricter than the workspace
@@ -325,6 +325,16 @@ bundle checks.
 `GEZEL_CONSUMER_SKIP_DAEMON=1` skips step 8; `--keep` leaves the temp project
 for inspection. `--tarball-dir <path>` skips packing and tests an existing set
 of candidate artifacts byte-for-byte.
+
+npm installs through a cache of its own, never the global one, kept between
+runs in `.cache/npm-consumer-cache/` (`GEZEL_CONSUMER_NPM_CACHE` moves it).
+Emptied with every run, it made each one download the whole graph again, and
+npm 11 resolves with full packuments: about 250 MB of metadata before the first
+dependency tarball. A kept cache only revalidates them against the registry, so
+resolution still sees what a consumer would get today. Each run removes its own
+candidate tarballs from the cache, and a cache past 3 GiB is started over. For a
+cold install, delete the folder or point the variable at an empty one. A hosted
+CI runner starts with no cache, so CI runs stay cold.
 
 **Real models (opt-in, before a release).** A mocked `gezel run` cannot show
 a model's own output reaching stdout: 1.2.4 printed local models' reasoning

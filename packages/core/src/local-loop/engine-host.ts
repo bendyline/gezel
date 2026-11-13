@@ -8,6 +8,7 @@
 import type { ProviderQueue } from '../runtime/provider-queue.js';
 import type {
   DegenerateEngineReport,
+  DegenerateRecovery,
   DraftAcceptanceSample,
   DraftAcceptanceVerdict,
 } from './degenerate-output.js';
@@ -89,13 +90,16 @@ export interface LocalEngineHost {
   noteForcedToolChoiceUnsupported(): void;
   /**
    * The turn loop gave up on the engine's output (see degenerate-output.ts).
-   * Restart the engine without saving anything it holds, and drop the saved
-   * prompt state this session would restore, since a corrupted snapshot
-   * restored into a fresh engine fails the same way. Resolves true when the
-   * engine was restarted. Optional: a host that cannot restart its engine
-   * leaves it out and the turn simply ends.
+   * Drop the saved prompt state this session would restore, since a
+   * corrupted snapshot restored into a fresh engine fails the same way, and
+   * restart the engine without saving anything it holds when the report
+   * condemns it (`DegenerateStrikes`). A boolean answer is read as
+   * restarted or not. Optional: a host that cannot restart its engine leaves
+   * it out and the turn simply ends.
    */
-  recoverFromDegenerateOutput?(report: DegenerateEngineReport): Promise<boolean>;
+  recoverFromDegenerateOutput?(
+    report: DegenerateEngineReport,
+  ): Promise<DegenerateRecovery | boolean>;
   /**
    * Judge one reply's draft acceptance against this engine process's own
    * record. Optional; only hosts that can restart their engine supply it.

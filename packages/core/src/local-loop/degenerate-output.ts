@@ -18,8 +18,9 @@
  *   signal the turn loop received in every reply's timings and ignored.
  *
  * {@link DegenerateRunDetector} catches the first; {@link DraftAcceptanceMonitor}
- * catches the second. Either one ends the turn and asks the engine host to
- * restart the engine without saving what it holds.
+ * catches the second. Either one ends the turn. A draft collapse restarts the
+ * engine without saving what it holds; repeated output does so on its second
+ * run ({@link DegenerateStrikes}), since a model can loop on its own.
  */
 
 /** One character, or a cycle of up to this many, repeated. */
@@ -170,6 +171,55 @@ export class DraftAcceptanceMonitor {
   }
 }
 
+/** What the engine host did about degenerate output. */
+export type DegenerateRecovery =
+  /** The engine was stopped without saving; the next request starts a fresh process. */
+  | 'restarted'
+  /** One run of repeated output: the turn ended, the engine stays for its other turns. */
+  | 'kept'
+  /** The host cannot restart this engine (an external server). */
+  | 'unavailable';
+
+/** A host from before {@link DegenerateRecovery} answered whether it restarted. */
+export function normalizeDegenerateRecovery(
+  value: DegenerateRecovery | boolean | undefined,
+): DegenerateRecovery {
+  if (value === true) return 'restarted';
+  if (value === false || value === undefined) return 'unavailable';
+  return value;
+}
+
+/** A second run of repeated output on the same engine within this window condemns it. */
+export const DEGENERATE_STRIKE_WINDOW_MS = 30 * 60_000;
+
+/**
+ * Whether repeated output condemns the engine. A model can loop on its own
+ * ("wait, wait, …"), and a restart ends every other turn the engine is
+ * serving, so one run only ends its turn. A second run on the same engine
+ * process within {@link DEGENERATE_STRIKE_WINDOW_MS} is the engine: the
+ * incident's process repeated "/" in every reply, from every gezel.
+ */
+export class DegenerateStrikes {
+  private engineKey: unknown;
+  private lastAt: number | null = null;
+
+  /** Record one run; true when it condemns the engine. `engineKey` names the process. */
+  strike(engineKey: unknown, now: number = Date.now()): boolean {
+    if (engineKey !== this.engineKey) {
+      this.engineKey = engineKey;
+      this.lastAt = null;
+    }
+    const condemned = this.lastAt !== null && now - this.lastAt <= DEGENERATE_STRIKE_WINDOW_MS;
+    this.lastAt = condemned ? null : now;
+    return condemned;
+  }
+
+  reset(): void {
+    this.engineKey = undefined;
+    this.lastAt = null;
+  }
+}
+
 /** What the turn loop hands the engine host when it gives up on the engine's output. */
 export type DegenerateEngineReport =
   | ({ kind: 'repeated-output'; sessionId?: string } & DegenerateRun)
@@ -201,14 +251,18 @@ export function describeDegenerateReport(report: DegenerateEngineReport): string
 export function buildDegenerateModelMessage(
   providerLabel: string,
   report: DegenerateEngineReport,
-  restarted: boolean,
+  recovery: DegenerateRecovery | boolean,
 ): string {
+  const outcome = normalizeDegenerateRecovery(recovery);
+  if (outcome === 'kept' && report.kind === 'repeated-output') {
+    return `${providerLabel} stopped this turn: the output repeated ${showUnit(report.unit)} for ${report.length} characters of ${report.channel === 'reasoning' ? 'thinking' : 'reply'}. Continue the work from where it stood, without repeating yourself.`;
+  }
   const what =
     report.kind === 'repeated-output'
       ? `the engine repeated ${showUnit(report.unit)} for ${report.length} characters of ${report.channel === 'reasoning' ? 'thinking' : 'reply'}`
       : `the engine's output stopped matching its own draft model (${describeDegenerateReport(report)})`;
   return `${providerLabel} stopped this turn: ${what}. That is a fault in the engine, not in your work. ${
-    restarted
+    outcome === 'restarted'
       ? 'The engine was restarted without its saved state; continue the work from where it stood.'
       : 'The engine could not be restarted from here.'
   }`;
@@ -217,13 +271,17 @@ export function buildDegenerateModelMessage(
 /** Plain words for the failure banner. */
 export function buildDegenerateUserMessage(
   report: DegenerateEngineReport,
-  restarted: boolean,
+  recovery: DegenerateRecovery | boolean,
 ): string {
+  const outcome = normalizeDegenerateRecovery(recovery);
+  if (outcome === 'kept' && report.kind === 'repeated-output') {
+    return `The on-device model got stuck repeating ${showUnit(report.unit)}, so Gezel stopped it. Try again.`;
+  }
   const what =
     report.kind === 'repeated-output'
       ? `The on-device model got stuck repeating ${showUnit(report.unit)} and produced nothing usable.`
       : 'The on-device model started producing output that made no sense.';
-  return restarted
+  return outcome === 'restarted'
     ? `${what} Gezel restarted it. Try again.`
     : `${what} Restart the on-device engine, then try again.`;
 }

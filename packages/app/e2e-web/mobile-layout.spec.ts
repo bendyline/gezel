@@ -131,7 +131,12 @@ test('the desktop app becomes the mobile workshop at phone width', async ({
 
   // This worker's daemon is reused by later specs. The draft was only needed
   // to verify resizing, so clear it and wait for its autosave deletion.
-  await editor.fill('');
+  // Through the editor's own keys: `fill('')` can press Delete before
+  // ProseMirror has seen fill's selection, and then deletes nothing (see
+  // terminal.spec.ts).
+  await editor.press('ControlOrMeta+A');
+  await editor.press('Backspace');
+  await expect(editor).toHaveText('');
   await expect
     .poll(async () => {
       const { drafts } = await client.listPromptDrafts(world!.projectId, {

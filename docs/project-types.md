@@ -266,7 +266,7 @@ same-major version is better than a page that 404s.
 | Settings the type declares (`mode`, `leadLabel`, `leanProfile`, `indexingEnabled`, check-ins, tab visibility) | Take the new value only while the project still holds the old version's (core `upgradeProjectTypeSettings`) |
 | Crew | Existing slots untouched; a slot new in this version waits for the person's OK; a removed member is never re-hired |
 | http-mcp toolsets | An installed one is kept; a new one waits for the person's OK |
-| Schedules | Existing hosts refresh; a new `consent: 'auto'` schedule waits for the person's OK; a deleted host stays deleted |
+| Schedules | An existing host takes the new time only while it still runs on the old version's (a time the person chose stays); a new `consent: 'auto'` schedule waits for the person's OK; a deleted host stays deleted |
 | Params | Schema defaults, then the stored values, then any the caller passes |
 
 **When it runs.** An update with nothing to ask (`plan.automatic`) runs on its own,
@@ -274,7 +274,9 @@ two seconds after the daemon starts and whenever catalog content changes (a live
 Gilde update), for projects that are not archived, read-only, machine-shared or
 **pinned**, and only for Gilde (`bundled`) types: an installed AI App can be
 added by a model (`import_ai_app`), so its updates always wait for a click. A
-project with a turn running or a site being served waits until it is idle. Any
+project with a turn running or a site being served waits until it is idle. The
+plan for an archived, read-only or machine-shared project reports
+`automatic: false`, since the sweep never reaches it. Any
 other update waits for the person: the UI shows one line over the Output page and
 a key in Settings, and `POST /api/projects/:id/project-type/upgrade` (owner
 credentials only) applies it. Asking for an exact version at creation or apply

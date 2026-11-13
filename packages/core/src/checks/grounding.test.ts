@@ -440,3 +440,37 @@ describe('citationsResolve — names that are not files (squisq/37, 2026-11-10)'
     expect(r.unresolved).toEqual(['ry/errors.ts']);
   });
 });
+
+describe('citationsResolve — a document is not its own source (2026-11-12)', () => {
+  const ws = (files: Record<string, string>) => ({
+    read: async (f: string) => files[f] ?? null,
+    list: async () => Object.keys(files),
+  });
+
+  it('never counts a citation of the checked document toward the minimum', async () => {
+    const report = [
+      'AtlasOps charges a $40k/year platform fee (source: tasks/eval/analysis.md).',
+      'HarborCRM is CSV-first (source: source/briefs.md).',
+    ].join('\n');
+    const files = { 'tasks/eval/analysis.md': report, 'source/briefs.md': 'x' };
+    const one = await citationsResolve(ws(files), 'tasks/eval/analysis.md', { minCitations: 1 });
+    expect(one.ok).toBe(true);
+    expect(one.resolved).toEqual(['source/briefs.md']);
+    expect(one.selfCited).toEqual(['tasks/eval/analysis.md']);
+
+    const two = await citationsResolve(ws(files), 'tasks/eval/analysis.md', { minCitations: 2 });
+    expect(two.ok).toBe(false);
+    expect(two.detail).toMatch(/has 1 recognizable citation/);
+    expect(two.detail).toMatch(/itself is not a source/);
+  });
+
+  it('matches the document however the citation spells its path', async () => {
+    const report = 'Segments come from interviews (source: ./Tasks/Eval/Scan.md).';
+    const r = await citationsResolve(ws({ 'tasks/eval/scan.md': report }), 'tasks/eval/scan.md', {
+      minCitations: 1,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.unresolved).toEqual([]);
+    expect(r.selfCited).toEqual(['./Tasks/Eval/Scan.md']);
+  });
+});

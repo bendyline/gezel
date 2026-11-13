@@ -50,7 +50,7 @@ describe('markdownToChatDoc', () => {
     expect(doc.startBlock).toBeUndefined();
   });
 
-  it('keeps a year-bearing list as a list instead of promoting it to a centered statistic', () => {
+  it('keeps every row of a year-bearing list instead of promoting it to a centered statistic', () => {
     const doc = markdownToChatDoc(
       parseMarkdown(
         [
@@ -64,9 +64,11 @@ describe('markdownToChatDoc', () => {
       { articleId: 'gezel-chat' },
     );
 
+    // Squisq's list-shape classifier (squisq 2.13.16) reads a heading that names
+    // a phase or steps as a sequence, so the rows are drawn as a process.
     expect(doc.blocks[0]).toMatchObject({
       autoTemplate: true,
-      template: 'list',
+      template: 'process',
       templateData: {
         title: 'Phase 1: Early War (1337–1360)',
         items: [

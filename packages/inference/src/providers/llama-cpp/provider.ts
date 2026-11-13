@@ -28,6 +28,8 @@ import {
   type ChatMessage,
   DEFAULT_NUM_CTX,
   type DegenerateEngineReport,
+  type DegenerateRecovery,
+  DegenerateStrikes,
   type DisableThinkingRequestShape,
   DraftAcceptanceMonitor,
   type DraftAcceptanceSample,
@@ -617,6 +619,9 @@ export class LlamaCppProvider implements LLMProvider {
     return this.draftAcceptance.observe(sample, this.supervisor.currentChildPid());
   }
 
+  /** Runs of repeated output this engine process has produced; see degenerate-output.ts. */
+  private readonly degenerateStrikes = new DegenerateStrikes();
+
   /**
    * The turn loop gave up on this engine's output. On 2026-11-10 one
    * llama-server process emitted nothing but "/" for five hours, and every
@@ -624,9 +629,13 @@ export class LlamaCppProvider implements LLMProvider {
    * whole time. So: drop the slot state the session holds or would restore,
    * then stop the engine as a health restart, which saves nothing. The next
    * request starts a fresh process (`ensureRunning` waits for the stop).
-   * Returns false for an external engine, which this provider cannot restart.
+   *
+   * A restart ends every turn the engine is serving, so a first run of
+   * repeated output keeps it: a model can loop on its own. A second run on
+   * the same process, or a draft collapse, restarts it. An external engine
+   * cannot be restarted from here.
    */
-  async recoverFromDegenerateOutput(report: DegenerateEngineReport): Promise<boolean> {
+  async recoverFromDegenerateOutput(report: DegenerateEngineReport): Promise<DegenerateRecovery> {
     try {
       const removed = await this.cacheAdapter?.discardSessionSnapshots(report.sessionId);
       if (removed && removed.length > 0) {
@@ -639,13 +648,19 @@ export class LlamaCppProvider implements LLMProvider {
         `[llama-cpp] could not discard saved prompt snapshots: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
-    if (!this.supervisor) return false;
+    if (!this.supervisor) return 'unavailable';
+    const pid = this.supervisor.currentChildPid();
+    if (report.kind === 'repeated-output' && !this.degenerateStrikes.strike(pid)) {
+      log.warn(
+        `[llama-cpp] keeping the engine after one run of repeated output (pid=${pid ?? '?'}); another within 30 min restarts it`,
+      );
+      return 'kept';
+    }
     this.draftAcceptance.reset();
-    log.warn(
-      `[llama-cpp] restarting the engine after degenerate output (pid=${this.supervisor.currentChildPid() ?? '?'})`,
-    );
+    this.degenerateStrikes.reset();
+    log.warn(`[llama-cpp] restarting the engine after degenerate output (pid=${pid ?? '?'})`);
     await this.supervisor.stop('health-restart');
-    return true;
+    return 'restarted';
   }
 
   /** Whether a constrained turn may ask the engine to force a tool call. */

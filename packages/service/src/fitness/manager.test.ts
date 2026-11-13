@@ -197,6 +197,34 @@ describe('ModelFitnessManager', () => {
       expect(resolved?.record.status).toBe('deferred');
     });
 
+    it('waits while another model is working, even with room to spare', async () => {
+      let clock = 10 * 60_000;
+      let runs = 0;
+      const roomyButBusy: PoolSnapshot = {
+        ...fullPool,
+        committedBytes: 20 * GB,
+        entries: [{ ...fullPool.entries[0]!, residentBytes: 20 * GB, lastUsedAt: clock }],
+      };
+      const mgr = makeManager({
+        engineStatus: async () => roomyButBusy,
+        runProbe: async () => {
+          runs += 1;
+          return record();
+        },
+        now: () => clock,
+        // Each wait lets a minute pass with the 27B left alone.
+        sleep: async () => {
+          clock += 60_000;
+        },
+        deferRetryMs: 60_000,
+        deferBudgetMs: 10 * 60_000,
+      });
+      mgr.scheduleProbe('llama-cpp', 'gemma4-e4b-q4', { trigger: 'install' });
+      await drained(mgr);
+      expect(runs).toBe(1);
+      expect(clock).toBeGreaterThanOrEqual(roomyButBusy.entries[0]!.lastUsedAt + 3 * 60_000);
+    });
+
     it('manual probes proceed despite no headroom', async () => {
       let runs = 0;
       const mgr = makeManager({

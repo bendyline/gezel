@@ -330,10 +330,30 @@ write-the-file mode, which the quoted request once triggered. The reviewer is
 the owner itself, so the review runs on the model it was measured on and
 recruits nobody.
 
+The fresh brief lists the deliverables and marks the ones in the artifacts
+drawer. A brief that named the tool for each one (`read_file` in the
+workspace, `read_artifact` in the artifacts drawer, a folder listed first)
+was measured on Gemma 4 E4B and reverted
+(`evals/runs/review-fresh-brief-2026-11-12/`): reports of a deliverable
+missing without opening it stayed at 2, and two reviewers read "a folder in
+the workspace" as a path and listed `workspace/`, which does not exist.
+
 While the round runs, the request tracker reads the step as checking the work.
 Each round's record and a copy of the deliverables from before it go to
-`artifacts/outcome-review/<num>/round-<n>/`, hidden from default listings and
-from bare-filename lookups.
+`artifacts/outcome-review/<num>/round-<n>/` (`before/`, listed in
+`before.json` with whether the copy is complete), hidden from default listings
+and from bare-filename lookups.
+
+A review never turns work that passed into a paused task. When the revision
+fails the contract checks and the gate is about to pause (attempts spent, or
+the plateau ladder at its top), `finishOnPreReviewWork` puts the deliverables
+back as they stood before the review, keeps the revision in `revision/`, and
+checks the gate again; the task finishes on the restored work when it passes.
+Files the revision added inside a deliverable folder are removed. When either
+copy is incomplete (a file over 1 MB, more than 200 files), the workspace
+cannot be written, or the restored work no longer passes, the revision goes
+back and the task pauses as it would have. A revision that fails with attempts
+left gets them, as before.
 
 Evidence, from the counted test (2026-11-11/12, 216 trials,
 `evals/runs/review-counted-2026-11-11/PREREG.md`): on Qwen 3.8 27B, self-review
@@ -341,9 +361,24 @@ improved the work, scoring +0.34 [+0.17, +0.52] in a blind comparison of the
 copy from before the review against the final work. It made no regressions, two
 rescues, and added a median 1.3 minutes. On Gemma 4 E4B, self-review had no
 effect (+0.01), and fresh eyes (+0.23 [+0.05, +0.44]) were excluded because
-that reviewer edited the project; the read-only design is re-measured in
-`evals/runs/review-fresh-confirm-2026-11-12/`. Eval homes set `taskReview: 'off'` so earlier rounds
-stay comparable.
+that reviewer edited the project. The read-only design, re-measured on Gemma
+(`evals/runs/review-fresh-confirm-2026-11-12/`, 54 trials), scored +0.19
+[+0.02, +0.36], with one regression, two rescues and no reviewer edits, so
+Gemma 4 E4B gets `fresh`. Its losses split between wrong findings and revisions
+that broke what they fixed, often by rewriting the whole file. A second Gemma
+run with the per-tool brief and the restore scored +0.17 [+0.02, +0.35]; two
+revisions there dropped required content to answer a finding (an alert rule a
+finding said to remove, the amounts in an invoice table), and the runtime's
+checks passed both, so the restore had nothing to act on. Rules telling the
+reviewer and the owner never to remove required content and to edit in place
+were then measured and removed (`evals/runs/review-fresh-keep-2026-11-12/`):
+content loss went to 0, but E fell to +0.00 [-0.20, +0.18], with owners
+filling gaps by invention or by duplicating text instead. On Qwen 3.5 9B
+(`evals/runs/review-9b-self-2026-11-12/`, 51 trials), self-review scored
+-0.11 [-0.28, +0.08]: its revisions helped when they took out an unsupported
+claim and hurt when they took out or rewired citations, and twice cited the
+report itself. The 9B gets no review. Eval homes set `taskReview: 'off'` so
+earlier rounds stay comparable.
 
 ## 5. Keeping the strategies comparable
 

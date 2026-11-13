@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BundledSource, CatalogService } from '@bendyline/gezel-catalog';
@@ -43,6 +43,17 @@ async function writeItem(
     await mkdir(join(dest, '..'), { recursive: true });
     await writeFile(dest, content);
   }
+}
+
+/** Language Trainer 1.1.0: a copy of 1.0.0 whose schedule runs at `cron`. */
+async function publishLanguageTrainer110(cron: string): Promise<void> {
+  const versions = join(dataDir, 'project-types', 'la', 'language-trainer', 'versions');
+  await cp(join(versions, '1.0.0'), join(versions, '1.1.0'), { recursive: true });
+  const manifestPath = join(versions, '1.1.0', 'manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.version = '1.1.0';
+  manifest.schedules = [{ cron, craftbook: 'daily-lesson', consent: 'ask' }];
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 }
 
 /** A minimal, graph-valid embedded craftbook document (JSON encoding). */
@@ -432,13 +443,8 @@ describe('applyProjectType', { timeout: 30_000 }, () => {
     const tasks = new TaskManager(store);
     await tasks.setStatus(project.id, num, 'active');
 
-    // Manifest cron changes on a new version → simulate by re-applying after
-    // bumping the seeded schedule (rewrite the version manifest in place).
-    const typeDir = join(dataDir, 'project-types', 'la', 'language-trainer', 'versions', '1.0.0');
-    const manifestPath = join(typeDir, 'manifest.json');
-    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-    manifest.schedules = [{ cron: '30 7 * * 1', craftbook: 'daily-lesson', consent: 'ask' }];
-    await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+    // A new version changes the cron.
+    await publishLanguageTrainer110('30 7 * * 1');
 
     const second = await applyProjectType(
       { store, catalog, home },
@@ -454,6 +460,27 @@ describe('applyProjectType', { timeout: 30_000 }, () => {
     const host = (await store.listProjectTasks(project.id)).find((t) => t.ref === hostRef);
     expect(host?.status).toBe('active');
     expect(host?.cron?.expression).toBe('30 7 * * 1');
+  });
+
+  it('an update keeps a schedule time the person changed', async () => {
+    const project = await store.createProject({ name: 'Own time' });
+    const first = await applyProjectType(
+      { store, catalog, home },
+      { projectId: project.id, typeId: 'language-trainer', params: { language: 'Italian' } },
+    );
+    const hostRef = first.schedulesCreated[0]!.ref;
+    const num = Number(hostRef.split('/').at(-1));
+    // The person moves the lesson to 9:15.
+    await new TaskManager(store).update(project.id, num, { cron: { expression: '15 9 * * *' } });
+
+    await publishLanguageTrainer110('30 7 * * 1');
+    const second = await applyProjectType(
+      { store, catalog, home },
+      { projectId: project.id, typeId: 'language-trainer', params: { language: 'Italian' } },
+    );
+    expect(second.version).toBe('1.1.0');
+    const host = (await store.listProjectTasks(project.id)).find((t) => t.ref === hostRef);
+    expect(host?.cron?.expression).toBe('15 9 * * *');
   });
 
   it("consent 'auto' arms on adoption; 'disabled' stays paused with no question", async () => {

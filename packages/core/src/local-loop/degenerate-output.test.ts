@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
+  DEGENERATE_STRIKE_WINDOW_MS,
   DegenerateRunDetector,
+  DegenerateStrikes,
   DraftAcceptanceMonitor,
   buildDegenerateModelMessage,
   buildDegenerateUserMessage,
@@ -136,5 +138,32 @@ describe('degenerate output messages', () => {
     expect(msg).toContain('[llama-cpp] stopped this turn');
     expect(msg).toContain('not in your work');
     expect(msg).toContain('restarted');
+  });
+
+  it('blames no engine for a first run the engine kept', () => {
+    const msg = buildDegenerateModelMessage('[llama-cpp]', repeated, 'kept');
+    expect(msg).toContain('without repeating yourself');
+    expect(msg).not.toContain('fault in the engine');
+    expect(buildDegenerateUserMessage(repeated, 'kept')).toBe(
+      'The on-device model got stuck repeating "/", so Gezel stopped it. Try again.',
+    );
+  });
+});
+
+describe('DegenerateStrikes', () => {
+  it('condemns an engine on its second run within the window', () => {
+    const strikes = new DegenerateStrikes();
+    expect(strikes.strike(1, 0)).toBe(false);
+    expect(strikes.strike(1, DEGENERATE_STRIKE_WINDOW_MS)).toBe(true);
+    // A condemned engine starts over.
+    expect(strikes.strike(1, DEGENERATE_STRIKE_WINDOW_MS + 1)).toBe(false);
+  });
+
+  it('forgets a run outside the window, and a run on another process', () => {
+    const strikes = new DegenerateStrikes();
+    expect(strikes.strike(1, 0)).toBe(false);
+    expect(strikes.strike(1, DEGENERATE_STRIKE_WINDOW_MS + 1)).toBe(false);
+    expect(strikes.strike(2, DEGENERATE_STRIKE_WINDOW_MS + 2)).toBe(false);
+    expect(strikes.strike(2, DEGENERATE_STRIKE_WINDOW_MS + 3)).toBe(true);
   });
 });

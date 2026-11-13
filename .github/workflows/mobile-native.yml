@@ -148,6 +148,14 @@ jobs:
             }), { command: 'Resolve pinned Android CI toolchains' });
           JS
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+      # The speech build downloads its checksum-pinned inputs (Kokoro, Whisper,
+      # ONNX Runtime) on every run otherwise; build.py re-hashes each one it
+      # reads from here against pins.json.
+      - name: Cache the pinned speech inputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: native/mobile/.build/speech-deps
+          key: speech-deps-${{ runner.os }}-${{ hashFiles('native/mobile/speech/pins.json') }}
       - name: Resolve the exact pinned upstream source
         run: |
           node --input-type=module <<'JS'
@@ -291,6 +299,11 @@ jobs:
         with:
           name: mobile-contract-fixture
           path: native/mobile/.build
+      - name: Cache the pinned speech inputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: native/mobile/.build/speech-deps
+          key: speech-deps-${{ runner.os }}-${{ hashFiles('native/mobile/speech/pins.json') }}
       - name: Resolve the exact pinned upstream source
         run: |
           node --input-type=module <<'JS'

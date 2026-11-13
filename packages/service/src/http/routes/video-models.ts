@@ -44,6 +44,15 @@ export function videoModelRoutes(ctx: EngineContext): Hono {
     });
   });
 
+  // Whether a picture can be animated here, and nothing else: the one fact a
+  // session needs (generate_image says so), where the listing above stays
+  // first-party.
+  app.get('/animates', async (c) => {
+    const provider = await ctx.videoProvider.current();
+    const models = await provider.listInstalledModels().catch(() => []);
+    return c.json({ animates: models.some(videoModelAnimates) });
+  });
+
   app.get('/engine-status', proxy, async (c) => {
     const provider = await ctx.videoProvider.current();
     const [engine, models, engines] = await Promise.all([

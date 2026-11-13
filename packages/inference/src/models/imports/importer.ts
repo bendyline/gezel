@@ -555,18 +555,20 @@ export class HuggingFaceModelImporter {
     const fetched = new Map<string, Buffer>();
     let configError: string | undefined;
     const files: HubRepoFile[] = [];
+    /** Configs too large to read, so never checked for code. */
+    const unreadConfigs: string[] = [];
     if (readable) {
       let budget = MLX_SMALL_FILES_TOTAL_BYTES;
+      const nameOf = (file: HubRepoFile) => file.path.slice(prefix.length);
+      const isConfig = (name: string) => (MLX_CONFIG_FILES as readonly string[]).includes(name);
       try {
+        // Configs first, so other small files can never use up the budget
+        // that the check for code needs.
         for (const file of build.files) {
-          const name = file.path.slice(prefix.length);
-          const wantedConfig = (MLX_CONFIG_FILES as readonly string[]).includes(name);
-          if (!wantedConfig && file.sha256) {
-            files.push(file);
-            continue;
-          }
+          const name = nameOf(file);
+          if (!isConfig(name)) continue;
           if (file.sizeBytes > MLX_SMALL_FILE_BYTES || file.sizeBytes > budget) {
-            files.push(file);
+            unreadConfigs.push(name);
             continue;
           }
           const bytes = await fetchHubSmallFile(
@@ -578,7 +580,31 @@ export class HuggingFaceModelImporter {
           );
           budget -= bytes.length;
           fetched.set(name, bytes);
-          files.push({ ...file, sizeBytes: bytes.length, sha256: file.sha256 ?? sha256(bytes) });
+        }
+        for (const file of build.files) {
+          const name = nameOf(file);
+          if (isConfig(name)) {
+            const bytes = fetched.get(name);
+            files.push(
+              bytes
+                ? { ...file, sizeBytes: bytes.length, sha256: file.sha256 ?? sha256(bytes) }
+                : file,
+            );
+            continue;
+          }
+          if (file.sha256 || file.sizeBytes > MLX_SMALL_FILE_BYTES || file.sizeBytes > budget) {
+            files.push(file);
+            continue;
+          }
+          const bytes = await fetchHubSmallFile(
+            this.fetchImpl,
+            repo,
+            commit,
+            file.path,
+            MLX_SMALL_FILE_BYTES,
+          );
+          budget -= bytes.length;
+          files.push({ ...file, sizeBytes: bytes.length, sha256: sha256(bytes) });
         }
       } catch (err) {
         if (
@@ -594,6 +620,9 @@ export class HuggingFaceModelImporter {
     }
 
     const config = parseJson(fetched.get('config.json'));
+    if (readable && !configError && unreadConfigs.length > 0) {
+      configError = `${unreadConfigs.join(', ')} ${unreadConfigs.length === 1 ? 'is' : 'are'} too large to check for program code`;
+    }
     if (readable && !configError && (!config || typeof config !== 'object')) {
       configError = 'config.json is missing or is not valid JSON';
     }
@@ -604,7 +633,7 @@ export class HuggingFaceModelImporter {
       );
     }
     const facts: MlxConfigFacts | undefined =
-      config && typeof config === 'object'
+      config && typeof config === 'object' && unreadConfigs.length === 0
         ? mlxConfigFacts({
             config,
             tokenizerConfig: parseJson(fetched.get('tokenizer_config.json')),
@@ -615,6 +644,7 @@ export class HuggingFaceModelImporter {
             processorConfigs: [
               parseJson(fetched.get('processor_config.json')),
               parseJson(fetched.get('preprocessor_config.json')),
+              parseJson(fetched.get('video_preprocessor_config.json')),
             ].filter(Boolean),
           })
         : undefined;

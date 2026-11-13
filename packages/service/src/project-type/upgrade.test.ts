@@ -158,6 +158,17 @@ afterEach(async () => {
 });
 
 describe('app updates', () => {
+  it('says an update waits for the person where the sweep never runs', async () => {
+    const projectId = await rosterProjectAt100();
+    await publish110();
+    await store.updateProject(projectId, { archived: true });
+    // The panel would otherwise say "An update is being applied." forever.
+    expect(await planProjectTypeUpgrade(deps(), projectId)).toMatchObject({
+      automatic: false,
+      needsOk: [],
+    });
+  });
+
   it('moves a page-only update on its own and leaves the data alone', async () => {
     const projectId = await rosterProjectAt100();
     const ws = await store.projectWorkspaceDir(projectId);
