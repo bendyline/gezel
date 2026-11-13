@@ -296,6 +296,8 @@ export interface CitationsResult extends CheckResult {
   urls: string[];
   /** Unresolvable cited paths forgiven as task metadata (see `knownPaths`). */
   forgiven?: string[];
+  /** Citations of the checked document itself; never a source. */
+  selfCited?: string[];
 }
 
 /** Comparison form for `knownPaths` matching — tolerant of the same
@@ -423,8 +425,18 @@ export async function citationsResolve(
   const unresolved: string[] = [];
   const urls: string[] = [];
   const forgiven: string[] = [];
+  const selfCited: string[] = [];
+  const self = cleanCitedPath(file).toLowerCase();
 
   for (const c of cites) {
+    // A document is never its own source. Self-review revisions on Qwen 3.5 9B
+    // moved claims' citations from the brief to the report itself, and the
+    // report "resolved" (market-scan, competitive-analysis, 2026-11-12).
+    // `claimsGrounded` refuses the same citation for the same reason.
+    if (cleanCitedPath(c).toLowerCase() === self) {
+      selfCited.push(c);
+      continue;
+    }
     if (opts.resolveKnowledge && /^knowledge:\/\//i.test(c)) {
       if (await opts.resolveKnowledge(c)) resolved.push(c);
       else unresolved.push(c);
@@ -465,7 +477,12 @@ export async function citationsResolve(
     }
   }
 
-  if (cites.length - forgiven.length < min) {
+  const counted = cites.length - forgiven.length - selfCited.length;
+  const selfNote =
+    selfCited.length > 0
+      ? ` A citation of ${file} itself is not a source; cite what it draws on.`
+      : '';
+  if (counted < min) {
     return {
       ok: false,
       // Name the accepted FORMS, not just the rule: a model that wrote the
@@ -473,11 +490,12 @@ export async function citationsResolve(
       // "cite the source" as already satisfied and rewrites content instead
       // of adding markup, looping to gate exhaustion (wild-caught:
       // deepseek-v4 with a flawless diagnosis, three identical rejections).
-      detail: `${file} has ${cites.length - forgiven.length} recognizable citation(s), need ≥ ${min}. Only these forms count as citations: a backticked path like \`src/file.js\`, a markdown link like [name](src/file.js), or (source: src/file.js). Plain prose paths are not counted — wrap each cited file path in backticks.`,
+      detail: `${file} has ${counted} recognizable citation(s), need ≥ ${min}. Only these forms count as citations: a backticked path like \`src/file.js\`, a markdown link like [name](src/file.js), or (source: src/file.js). Plain prose paths are not counted — wrap each cited file path in backticks.${selfNote}`,
       resolved,
       unresolved,
       urls,
       ...(forgiven.length > 0 ? { forgiven } : {}),
+      ...(selfCited.length > 0 ? { selfCited } : {}),
     };
   }
   if (unresolved.length > 0) {
@@ -492,6 +510,7 @@ export async function citationsResolve(
       unresolved,
       urls,
       ...(forgiven.length > 0 ? { forgiven } : {}),
+      ...(selfCited.length > 0 ? { selfCited } : {}),
     };
   }
   return {
@@ -501,6 +520,7 @@ export async function citationsResolve(
     unresolved,
     urls,
     ...(forgiven.length > 0 ? { forgiven } : {}),
+    ...(selfCited.length > 0 ? { selfCited } : {}),
   };
 }
 

@@ -263,7 +263,7 @@ import { TaskManager, stepOwnerGezelId } from './tasks/manager.js';
 import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { postNightShiftReviewCard } from './tasks/night-review-card.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
-import { createOutcomeReviewer } from './tasks/outcome-review.js';
+import { createOutcomeReviewRestore, createOutcomeReviewer } from './tasks/outcome-review.js';
 import { gatherTaskReferences } from './tasks/references.js';
 import { TaskRunner } from './tasks/runner.js';
 import { runActivationGate, runSpawnFanout } from './tasks/runtime-activation.js';
@@ -1105,6 +1105,7 @@ export async function startProductService(
     return { status: 'advanced' };
   });
   tasks.setOutcomeReviewer(createOutcomeReviewer({ store, chat }));
+  tasks.setOutcomeReviewRestore(createOutcomeReviewRestore({ store }));
 
   // Fail-fast per-task budget (Theme F, F3.1): when a task exhausts its
   // cumulative unattended-spend budget, ChatManager routes here to the same

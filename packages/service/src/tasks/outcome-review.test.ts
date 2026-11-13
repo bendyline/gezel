@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Task, TaskCraftbookStep } from '@bendyline/gezel';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createOutcomeReviewer } from './outcome-review.js';
+import { Store } from '../fs/store.js';
+import { createOutcomeReviewRestore, createOutcomeReviewer } from './outcome-review.js';
 
 let root: string;
 let artifacts: string;
@@ -156,5 +157,103 @@ describe('createOutcomeReviewer', () => {
     expect(verdict.message).toContain('review your deliverables as an independent reviewer would');
     expect(askFreshEyes).not.toHaveBeenCalled();
     expect(await record()).toMatchObject({ mode: 'self' });
+  });
+});
+
+describe('createOutcomeReviewRestore', () => {
+  let home: string;
+  let store: Store;
+
+  const folderTask = {
+    ...task,
+    craftbook: {
+      ...task.craftbook,
+      contract: {
+        goal: 'Invoices.',
+        deliverables: [
+          { id: 'invoices', path: 'invoices', kind: 'html-page', description: 'One per client' },
+          {
+            id: 'summary',
+            path: 'tasks/3/summary.md',
+            artifact: true,
+            kind: 'markdown',
+            description: 'The run summary',
+          },
+        ],
+        criteria: [],
+      },
+    },
+  } as unknown as Task;
+
+  beforeEach(async () => {
+    home = await mkdtemp(join(tmpdir(), 'gezel-outcome-restore-'));
+    store = new Store({ home });
+    await store.ensureLayout();
+    await store.createProject({ name: 'Website' });
+  });
+
+  afterEach(async () => {
+    await rm(home, { recursive: true, force: true });
+  });
+
+  const review = () =>
+    createOutcomeReviewer({ store, chat: {} as never })({
+      projectId: 'website',
+      task: folderTask,
+      step,
+      round: 1,
+      mode: 'self',
+    });
+
+  it('puts back the work from before the review, removes what the revision added, and can undo', async () => {
+    await store.writeProjectWorkspaceFile('website', 'invoices/a.html', '<p>A</p>');
+    await store.writeProjectArtifact('website', 'tasks/3/summary.md', 'Two invoices.');
+    await review();
+    await store.writeProjectWorkspaceFile('website', 'invoices/a.html', '<p>A, revised</p>');
+    await store.writeProjectWorkspaceFile('website', 'invoices/b.html', '<p>B</p>');
+
+    const restore = await createOutcomeReviewRestore({ store })({
+      projectId: 'website',
+      task: folderTask,
+      round: 1,
+    });
+    if ('refused' in restore) throw new Error(restore.refused);
+    expect(restore.restored).toEqual(['workspace/invoices/a.html']);
+    expect(restore.removed).toEqual(['workspace/invoices/b.html']);
+    expect(await store.readProjectWorkspaceFile('website', 'invoices/a.html')).toBe('<p>A</p>');
+    expect(await store.readProjectWorkspaceFile('website', 'invoices/b.html')).toBeNull();
+    expect(await store.readProjectArtifact('website', 'tasks/3/summary.md')).toBe('Two invoices.');
+
+    await restore.undo();
+    expect(await store.readProjectWorkspaceFile('website', 'invoices/a.html')).toBe(
+      '<p>A, revised</p>',
+    );
+    expect(await store.readProjectWorkspaceFile('website', 'invoices/b.html')).toBe('<p>B</p>');
+  });
+
+  it('refuses, changing nothing, without a complete copy from before the review', async () => {
+    await store.writeProjectWorkspaceFile('website', 'invoices/a.html', '<p>A</p>');
+    await review();
+    await store.writeProjectArtifact(
+      'website',
+      'outcome-review/3/round-1/before.json',
+      JSON.stringify({ files: ['workspace/invoices/a.html'], complete: false }),
+    );
+    await store.writeProjectWorkspaceFile('website', 'invoices/a.html', '<p>A, revised</p>');
+    const restore = await createOutcomeReviewRestore({ store })({
+      projectId: 'website',
+      task: folderTask,
+      round: 2,
+    });
+    expect(restore).toEqual({ refused: 'there is no record of the work before the review' });
+    const incomplete = await createOutcomeReviewRestore({ store })({
+      projectId: 'website',
+      task: folderTask,
+      round: 1,
+    });
+    expect(incomplete).toEqual({ refused: 'the copy from before the review is incomplete' });
+    expect(await store.readProjectWorkspaceFile('website', 'invoices/a.html')).toBe(
+      '<p>A, revised</p>',
+    );
   });
 });

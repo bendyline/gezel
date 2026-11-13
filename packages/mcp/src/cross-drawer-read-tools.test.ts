@@ -319,6 +319,103 @@ describe('cross-drawer read tools', () => {
       expect(dependencies.readWorkspaceFile).toHaveBeenCalledWith('source/corrupt.docx');
     });
 
+    // A fresh-eyes reviewer batch-read a .pptx, got "file contains NUL bytes",
+    // and told the owner the deck could not be opened (2026-11-12).
+    it('converts a document inside a batch read, in request order, as evidence', async () => {
+      const tools = captureTools();
+      const dependencies = docxDependencies(tools, {
+        readWorkspaceFiles: vi.fn(async () => ({
+          results: [
+            {
+              status: 'ok' as const,
+              path: 'source/notes.md',
+              content: 'alpha\nbeta',
+              startLine: 1,
+              endLine: 2,
+              linesReturned: 2,
+              bytesReturned: 10,
+              scannedBytes: 10,
+              totalLines: 2,
+              totalBytes: 10,
+              eof: true,
+              completeFile: true,
+              hasMore: false,
+              truncated: false,
+            },
+          ],
+          truncated: false,
+          totalBytesReturned: 10,
+          totalScannedBytes: 10,
+        })),
+      });
+      registerWorkspaceReadTools(dependencies);
+
+      const result = await tools.handler('read_files')({
+        paths: ['deliverables/deck.pptx', 'source/notes.md'],
+      });
+      const text = resultText(result);
+
+      expect(dependencies.readWorkspaceFiles).toHaveBeenCalledWith([{ path: 'source/notes.md' }]);
+      expect(text).toMatch(/^\[read_files requested=2 ok=2 errors=0\]/);
+      expect(text).toContain(
+        '1 OK deliverables/deck.pptx lines=1-3 converted=read_doc_as_markdown',
+      );
+      expect(text).toContain('2 OK source/notes.md');
+      expect(text).toContain('Rerouted read_files → read_doc_as_markdown');
+      expect(text).toContain('Mean boarding time fell from 21.4 to 12.8 minutes.');
+      expect(text).not.toContain('NUL bytes');
+      // The evidence ledger numbers each file of a batch by this header.
+      const headers = [...text.matchAll(/^--- (.+?) \(lines=[^)\n]*\) ---$/gm)].map((m) => m[1]);
+      expect(headers).toEqual(['deliverables/deck.pptx', 'source/notes.md']);
+      expect(result.isError).toBeUndefined();
+      expect(result.structuredContent).toMatchObject({
+        results: [
+          { path: 'deliverables/deck.pptx', status: 'ok', rerouted: true, completeFile: true },
+          { path: 'source/notes.md', status: 'ok', rerouted: false },
+        ],
+      });
+    });
+
+    it('names a media file in a batch read without reading its bytes', async () => {
+      const tools = captureTools();
+      const dependencies = docxDependencies(tools);
+      registerWorkspaceReadTools(dependencies);
+
+      const result = await tools.handler('read_files')({ paths: ['assets/logo.png'] });
+      const text = resultText(result);
+
+      expect(dependencies.readWorkspaceFiles).not.toHaveBeenCalled();
+      expect(text).toContain('1 ERROR assets/logo.png [binary-file]');
+      expect(text).toContain('binary PNG file, not text');
+      expect(result.isError).toBe(true);
+    });
+
+    it('converts a document in a batch artifact read instead of decoding its bytes', async () => {
+      const tools = captureTools();
+      const dependencies = docxDependencies(tools);
+      registerArtifactReadTools(dependencies);
+
+      const result = await tools.handler('read_artifacts')({
+        paths: ['tasks/7/deck.pptx', 'tasks/7/notes.md'],
+      });
+      const text = resultText(result);
+
+      expect(dependencies.api.toolReadDocAsMarkdown).toHaveBeenCalledWith('project-a', {
+        path: 'tasks/7/deck.pptx',
+        artifact: true,
+      });
+      expect(dependencies.api.readProjectArtifactSlice).toHaveBeenCalledTimes(1);
+      expect(dependencies.api.readProjectArtifactSlice).toHaveBeenCalledWith(
+        'project-a',
+        'tasks/7/notes.md',
+        expect.anything(),
+      );
+      expect(text).toMatch(/^\[read_artifacts requested=2 ok=1 errors=1\]/);
+      expect(text).toContain('1 OK tasks/7/deck.pptx lines=1-3 converted=read_doc_as_markdown');
+      expect(text).toContain('Rerouted read_artifacts → read_doc_as_markdown');
+      expect(text).toContain('2 ERROR tasks/7/notes.md [path-not-found]');
+    });
+
     it('reroutes an artifact DOCX — an uploaded craftbook input — the same way', async () => {
       const tools = captureTools();
       const dependencies = docxDependencies(tools);

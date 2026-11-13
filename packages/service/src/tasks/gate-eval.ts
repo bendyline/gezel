@@ -793,6 +793,7 @@ async function evalCheckInner(
           unresolved: capList(r.unresolved),
           urls: capList(r.urls),
           ...(r.forgiven && r.forgiven.length > 0 ? { forgiven: capList(r.forgiven) } : {}),
+          ...(r.selfCited && r.selfCited.length > 0 ? { selfCited: capList(r.selfCited) } : {}),
         },
       };
     }

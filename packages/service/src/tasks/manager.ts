@@ -71,6 +71,7 @@ import {
   withEffectiveTaskStatuses,
 } from '@bendyline/gezel';
 import { collapseCraftbookForTier as collapseCraftbookPass } from '@bendyline/gezel';
+import { PROJECT_OUTCOME_REVIEW_DIR_NAME } from '@bendyline/gezel/paths';
 import { evaluateDeliverableGate } from '../chat/deliverable-gate.js';
 import type { DraftOverlayReader } from '../diffpack/draft-store.js';
 import type { Store } from '../fs/store.js';
@@ -395,6 +396,20 @@ export type OutcomeReviewer = (args: {
   mode: 'self' | 'fresh';
 }) => Promise<{ kind: 'hold'; message: string } | { kind: 'pass' }>;
 
+/**
+ * Sets aside the revision an outcome review led to and puts back the
+ * deliverables as they stood before that review round, which had passed the
+ * contract checks. `undo` puts the revision back. Refuses, changing nothing,
+ * when it cannot restore faithfully. Wired by product-service.
+ */
+export type OutcomeReviewRestore = (args: {
+  projectId: string;
+  task: Task;
+  round: number;
+}) => Promise<
+  { restored: string[]; removed: string[]; undo: () => Promise<void> } | { refused: string }
+>;
+
 export type CompleteStepOutcome =
   | { status: 'advanced'; task: Task }
   | { status: 'held'; task: Task; gate: GateHoldInfo };
@@ -433,6 +448,7 @@ export class TaskManager {
   private roleResolver?: RoleResolver;
   private executionModeResolver?: ExecutionModeResolver;
   private outcomeReviewer?: OutcomeReviewer;
+  private outcomeReviewRestore?: OutcomeReviewRestore;
   private requestRefResolver?: RequestRefResolver;
   /**
    * Join concurrent replays of the same step transition. Local models can
@@ -805,6 +821,11 @@ export class TaskManager {
   /** Wire the outcome review. See {@link OutcomeReviewer}. */
   setOutcomeReviewer(fn: OutcomeReviewer): void {
     this.outcomeReviewer = fn;
+  }
+
+  /** Wire the fallback to the work from before a review. See {@link OutcomeReviewRestore}. */
+  setOutcomeReviewRestore(fn: OutcomeReviewRestore): void {
+    this.outcomeReviewRestore = fn;
   }
 
   /** Wire the request resolver that stamps `Task.requestRef`. See {@link RequestRefResolver}. */
@@ -2975,6 +2996,67 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     };
   }
 
+  /**
+   * The last resort before a gate pause on a reviewed outcome task: the
+   * revision a review led to fails checks the work had passed, and the gate
+   * has no attempts left. Put the deliverables back as they stood before the
+   * review and finish on them, when they still pass. A review must not turn
+   * finished work into a paused task: on Gemma 4 E4B an owner answered one
+   * right and one wrong finding by rewriting a retrospective, lost its
+   * required headings, and the task paused (review confirmation, 2026-11-12).
+   */
+  private async finishOnPreReviewWork(
+    projectId: string,
+    task: Task,
+    step: TaskCraftbookStep,
+    gate: NormalizedStepGate,
+  ): Promise<StepGateOutcome | null> {
+    const round = step.outcomeReviewRounds ?? 0;
+    if (
+      !this.outcomeReviewRestore ||
+      round < 1 ||
+      !isOutcomeTask(task) ||
+      step.id !== OUTCOME_STEP_ID ||
+      task.diffpackId
+    ) {
+      return null;
+    }
+    const restore = await this.outcomeReviewRestore({ projectId, task, round }).catch(
+      (err: unknown) => ({ refused: err instanceof Error ? err.message : String(err) }),
+    );
+    if ('refused' in restore) {
+      log.info(
+        `[gate] ${task.ref} step "${step.id}": not restoring the work from before review round ${round}: ${restore.refused}`,
+      );
+      return null;
+    }
+    const outcome = await this.evaluateCompletionGate(projectId, task, step, gate).catch(
+      () => null,
+    );
+    if (outcome?.decision === 'approve' && !outcome.infrastructureError) {
+      log.info(
+        `[gate] ${task.ref} step "${step.id}": the revision after review round ${round} failed its checks with no attempts left — finishing on the work from before the review (${restore.restored.length} file(s) restored, ${restore.removed.length} removed)`,
+      );
+      await this.appendNote(projectId, task.num, {
+        text: `# Finished on the work from before the review\n\nThe changes made after the review failed checks the work had already passed, and no attempts were left. The deliverables are back as they were before the review. The changed version is kept in \`${PROJECT_OUTCOME_REVIEW_DIR_NAME}/${task.num}/round-${round}/revision/\`.`,
+        author: { kind: 'user' },
+        stepId: step.id,
+      }).catch(() => {});
+      return outcome;
+    }
+    await restore
+      .undo()
+      .catch((err: unknown) =>
+        log.error(
+          `[gate] ${task.ref} step "${step.id}": could not put the revision back: ${err instanceof Error ? err.message : err}`,
+        ),
+      );
+    log.warn(
+      `[gate] ${task.ref} step "${step.id}": the work from before review round ${round} no longer passes either — pausing as usual`,
+    );
+    return null;
+  }
+
   private async stampGatePass(
     projectId: string,
     task: Task,
@@ -3009,6 +3091,68 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       throw new TaskWriteConflictError(task.ref);
     }
     return result.task;
+  }
+
+  /** Run a completion gate's checks and scripts against the task's current work. */
+  private evaluateCompletionGate(
+    projectId: string,
+    task: Task,
+    step: TaskCraftbookStep,
+    gate: NormalizedStepGate,
+  ): ReturnType<typeof evaluateStepGate> {
+    // For a drafting task this is the draft overlay, so the gate judges the
+    // proposed tree rather than the untouched workspace.
+    const ws = this.gateWorkspaceReader(projectId, task);
+    return evaluateStepGate({
+      gate,
+      ws,
+      steps: task.craftbook.steps,
+      taskDir: task.artifactDir ?? `tasks/${task.num}`,
+      runScript: (ref) => this.runGateScript(projectId, task, step, ref),
+      deps: {
+        // Paths the task itself handed the assignee (invocation params,
+        // the step prompt's own path tokens). `citationsResolve` forgives
+        // these when unresolvable — a sources packet transcribing its own
+        // work folder or future output path is not fabricating a citation.
+        knownCitationPaths: taskSuppliedCitationPaths({
+          ...(step.prompt !== undefined ? { stepPrompt: step.prompt } : {}),
+          ...(task.craftbookParams !== undefined ? { params: task.craftbookParams } : {}),
+          artifactDir: task.artifactDir ?? `tasks/${task.num}`,
+          steps: task.craftbook.steps,
+        }),
+        ...(this.knowledgeCitationResolver
+          ? { resolveKnowledge: this.knowledgeCitationResolver }
+          : {}),
+        // The nodeRuns executor — same security fence as user scripts:
+        // when the policy disables script execution, the check rejects
+        // with the policy message (fail-closed) instead of running.
+        sandboxExec: async (file, timeoutMs) => {
+          const config = await this.store.readConfig();
+          if (!resolveSecurityPolicy(config).allowScriptExecution) {
+            return {
+              exitCode: 1,
+              stderrTail:
+                'Security policy: script execution is disabled, so this execution gate cannot run. Raise the security level in Settings → Security & compliance, or replace the nodeRuns check.',
+              timedOut: false,
+              denied: true,
+            };
+          }
+          return execNodeRunsInSandbox({ read: ws.read, file, timeoutMs });
+        },
+        judgeExec: async (prompt, timeoutMs) => {
+          if (!this.keurmeester) return { unavailable: 'keurmeester not armed' };
+          const budgetKey = `${task.ref}:${step.id}`;
+          const used = this.judgeCallCounts.get(budgetKey) ?? 0;
+          if (used >= 3) {
+            return { unavailable: 'per-step judge budget exhausted (3 calls)' };
+          }
+          this.judgeCallCounts.set(budgetKey, used + 1);
+          return this.keurmeester.judgeOneShot(prompt, timeoutMs);
+        },
+        ...gateHistoryEvidence(this.history, projectId, task, step, ws),
+        givenText: taskGivenText(task, new Date()),
+      },
+    });
   }
 
   /**
@@ -3130,6 +3274,11 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
 
       if (stage === 3) {
         const updated = await persistTrail();
+        const restored = await this.finishOnPreReviewWork(projectId, task, step, gate);
+        if (restored) {
+          await logGated('approve', cachedInfo.attempt, false, restored);
+          return { kind: 'approved', outcome: restored };
+        }
         // Keurmeester escalation: the frozen-resubmit ladder is spent —
         // the model keeps handing back the SAME bytes against the same
         // verdict. Consult before pausing; an applied verdict earns a
@@ -3248,59 +3397,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
       };
     }
 
-    // For a drafting task this is the draft overlay, so the gate judges the
-    // proposed tree rather than the untouched workspace.
-    const ws = this.gateWorkspaceReader(projectId, task);
-    const outcome = await evaluateStepGate({
-      gate,
-      ws,
-      steps: task.craftbook.steps,
-      taskDir: task.artifactDir ?? `tasks/${task.num}`,
-      runScript: (ref) => this.runGateScript(projectId, task, step, ref),
-      deps: {
-        // Paths the task itself handed the assignee (invocation params,
-        // the step prompt's own path tokens). `citationsResolve` forgives
-        // these when unresolvable — a sources packet transcribing its own
-        // work folder or future output path is not fabricating a citation.
-        knownCitationPaths: taskSuppliedCitationPaths({
-          ...(step.prompt !== undefined ? { stepPrompt: step.prompt } : {}),
-          ...(task.craftbookParams !== undefined ? { params: task.craftbookParams } : {}),
-          artifactDir: task.artifactDir ?? `tasks/${task.num}`,
-          steps: task.craftbook.steps,
-        }),
-        ...(this.knowledgeCitationResolver
-          ? { resolveKnowledge: this.knowledgeCitationResolver }
-          : {}),
-        // The nodeRuns executor — same security fence as user scripts:
-        // when the policy disables script execution, the check rejects
-        // with the policy message (fail-closed) instead of running.
-        sandboxExec: async (file, timeoutMs) => {
-          const config = await this.store.readConfig();
-          if (!resolveSecurityPolicy(config).allowScriptExecution) {
-            return {
-              exitCode: 1,
-              stderrTail:
-                'Security policy: script execution is disabled, so this execution gate cannot run. Raise the security level in Settings → Security & compliance, or replace the nodeRuns check.',
-              timedOut: false,
-              denied: true,
-            };
-          }
-          return execNodeRunsInSandbox({ read: ws.read, file, timeoutMs });
-        },
-        judgeExec: async (prompt, timeoutMs) => {
-          if (!this.keurmeester) return { unavailable: 'keurmeester not armed' };
-          const budgetKey = `${task.ref}:${step.id}`;
-          const used = this.judgeCallCounts.get(budgetKey) ?? 0;
-          if (used >= 3) {
-            return { unavailable: 'per-step judge budget exhausted (3 calls)' };
-          }
-          this.judgeCallCounts.set(budgetKey, used + 1);
-          return this.keurmeester.judgeOneShot(prompt, timeoutMs);
-        },
-        ...gateHistoryEvidence(this.history, projectId, task, step, ws),
-        givenText: taskGivenText(task, new Date()),
-      },
-    });
+    const outcome = await this.evaluateCompletionGate(projectId, task, step, gate);
 
     if (outcome.infrastructureError) {
       const message = outcome.message ?? 'The completion gate could not run.';
@@ -3525,6 +3622,11 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
     }
 
     if (plan.paused || stage === 3) {
+      const restored = await this.finishOnPreReviewWork(projectId, task, step, gate);
+      if (restored) {
+        await logGated('approve', attempt, false, restored);
+        return { kind: 'approved', outcome: restored };
+      }
       // Keurmeester escalation point: the gate budget is spent and the
       // pause-for-help is imminent. Consult first — an applied verdict
       // (corrective message, step/craftbook rewrite, or takeover) keeps
