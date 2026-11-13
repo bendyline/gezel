@@ -330,11 +330,13 @@ write-the-file mode, which the quoted request once triggered. The reviewer is
 the owner itself, so the review runs on the model it was measured on and
 recruits nobody.
 
-The fresh brief names the tool that opens each deliverable (`read_file` in
-the workspace, `read_artifact` in the artifacts drawer, a folder listed
-first), and says a deliverable not yet opened is not missing: Gemma 4 E4B
-reviewers three times reported an artifacts-drawer deliverable missing
-without opening it, although the brief named its drawer.
+The fresh brief lists the deliverables and marks the ones in the artifacts
+drawer. A brief that named the tool for each one (`read_file` in the
+workspace, `read_artifact` in the artifacts drawer, a folder listed first)
+was measured on Gemma 4 E4B and reverted
+(`evals/runs/review-fresh-brief-2026-11-12/`): reports of a deliverable
+missing without opening it stayed at 2, and two reviewers read "a folder in
+the workspace" as a path and listed `workspace/`, which does not exist.
 
 While the round runs, the request tracker reads the step as checking the work.
 Each round's record and a copy of the deliverables from before it go to
@@ -363,7 +365,11 @@ that reviewer edited the project. The read-only design, re-measured on Gemma
 (`evals/runs/review-fresh-confirm-2026-11-12/`, 54 trials), scored +0.19
 [+0.02, +0.36], with one regression, two rescues and no reviewer edits, so
 Gemma 4 E4B gets `fresh`. Its losses split between wrong findings and revisions
-that broke what they fixed, often by rewriting the whole file. On Qwen 3.5 9B
+that broke what they fixed, often by rewriting the whole file. A second Gemma
+run with the per-tool brief and the restore scored +0.17 [+0.02, +0.35]; two
+revisions there dropped required content to answer a finding (an alert rule a
+finding said to remove, the amounts in an invoice table), and the runtime's
+checks passed both, so the restore had nothing to act on. On Qwen 3.5 9B
 (`evals/runs/review-9b-self-2026-11-12/`, 51 trials), self-review scored
 -0.11 [-0.28, +0.08]: its revisions helped when they took out an unsupported
 claim and hurt when they took out or rewired citations, and twice cited the

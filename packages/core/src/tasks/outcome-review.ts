@@ -121,6 +121,19 @@ const EVIDENCE_RULE =
 const FIX_RULE =
   'Fix by removing or correcting what is wrong, or by adding what is missing from what the sources state. Never add a fact, name, number, date or quote the sources do not state.';
 
+/**
+ * What a fix may never take away, for the fresh mode only (self-review was
+ * measured with its own wording). Revisions that answered a finding by
+ * deleting required content were the fresh mode's one repeated loss on Gemma
+ * 4 E4B: a reviewer said to remove a required alert to meet a page budget and
+ * the owner did, and an owner replaced the rows of an invoice table with bare
+ * dates (review re-measurement, 2026-11-12). The contract checks passed both.
+ */
+const REVIEWER_KEEP_RULE =
+  'A change corrects the part in place. Never ask to remove something the request or the contract asks for; when it breaks a rule, say how to change it.';
+const OWNER_KEEP_RULE =
+  'Change only what a finding names, in place, and keep every row, section and item it does not name. Never remove something the request or the contract asks for; if a finding says to, change that part so it meets the finding instead.';
+
 /** The message that asks the owner to review its own work, in its own conversation. */
 export function renderSelfReviewMessage(contract: CraftbookContract): string {
   return [
@@ -154,6 +167,7 @@ export function renderFreshReviewBrief(args: {
       '1. FIX `<file>` — "<the line you object to>" or <what is missing> — <what is wrong> — evidence: `<source>` "<the line that shows it>" — <what to change>',
       '2. CHECK `<file>` — "<the line you doubt>" — <why, from your own knowledge> — <what to verify>',
       `List at most ${OUTCOME_REVIEW_MAX_FINDINGS} problems, the most important first. Use FIX only with evidence quoted from a source, the request or the contract; anything else is CHECK.`,
+      REVIEWER_KEEP_RULE,
     ].join('\n'),
   ].join('\n\n');
 }
@@ -205,6 +219,6 @@ export function renderOutcomeReviewFindings(findings: readonly string[]): string
   return [
     'A reviewer who did not see your work in progress read your deliverables against the request, the contract and the sources. The reviewer can be wrong, so check each finding before you change anything: open the line it quotes and the evidence it cites.',
     findings.map((finding, i) => `${i + 1}. ${finding}`).join('\n'),
-    `Apply a FIX finding when its quote and its evidence hold up. Change a CHECK finding only where the sources or the request confirm it. ${FIX_RULE} Keep everything else as it is, then call advance_task_step again. If no finding holds up, call advance_task_step again without changes.`,
+    `Apply a FIX finding when its quote and its evidence hold up. Change a CHECK finding only where the sources or the request confirm it. ${FIX_RULE} ${OWNER_KEEP_RULE} Then call advance_task_step again. If no finding holds up, call advance_task_step again without changes.`,
   ].join('\n\n');
 }
