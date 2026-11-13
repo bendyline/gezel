@@ -46,12 +46,14 @@ import {
   DEGENERATE_CONTENT_RUN_CHARS,
   DEGENERATE_REASONING_RUN_CHARS,
   type DegenerateEngineReport,
+  type DegenerateRecovery,
   type DegenerateRun,
   DegenerateRunDetector,
   type DraftAcceptanceSample,
   buildDegenerateModelMessage,
   buildDegenerateUserMessage,
   describeDegenerateReport,
+  normalizeDegenerateRecovery,
 } from './degenerate-output.js';
 import { DeliverableReadPaceTracker } from './deliverable-read-pacing.js';
 import {
@@ -2027,27 +2029,29 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
   }
 
   /**
-   * End the turn on output the engine should never produce, after asking the
-   * host to restart the engine. The restart is awaited so the retry the
+   * End the turn on output no healthy model produces, after the host decides
+   * whether the engine must restart. A restart is awaited so the retry the
    * caller makes cannot land on the process that produced it.
    */
   private async degenerateEngineOutputError(
     report: DegenerateEngineReport,
   ): Promise<TurnAbortError> {
-    let restarted = false;
+    let recovery: DegenerateRecovery = 'unavailable';
     try {
-      restarted = (await this.deps.provider.recoverFromDegenerateOutput?.(report)) ?? false;
+      recovery = normalizeDegenerateRecovery(
+        await this.deps.provider.recoverFromDegenerateOutput?.(report),
+      );
     } catch (err) {
       log.warn(
         `[llama-cpp] engine restart after degenerate output failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
     log.error(
-      `[llama-cpp] degenerate output model=${this.deps.model} (${describeDegenerateReport(report)}) — engine ${restarted ? 'restarted' : 'not restarted'}`,
+      `[llama-cpp] degenerate output model=${this.deps.model} (${describeDegenerateReport(report)}) — engine ${recovery === 'restarted' ? 'restarted' : recovery === 'kept' ? 'kept (first run)' : 'not restarted'}`,
     );
     return new TurnAbortError(
-      buildDegenerateModelMessage('[llama-cpp]', report, restarted),
-      buildDegenerateUserMessage(report, restarted),
+      buildDegenerateModelMessage('[llama-cpp]', report, recovery),
+      buildDegenerateUserMessage(report, recovery),
     );
   }
 

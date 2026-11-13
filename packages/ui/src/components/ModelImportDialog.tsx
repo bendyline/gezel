@@ -119,25 +119,21 @@ export function ModelImportDialog({ open, initial, onClose, onInstalled }: Model
 
   const initialRepo = initial?.repo;
   const initialFile = initial?.file;
+  // A linked model is filled in, not checked: any web page can send the
+  // link, and checking it reaches Hugging Face, so that waits for a click
+  // (docs/deep-links.md).
   useEffect(() => {
     if (!open) return;
     closed.current = false;
     setReference(initialRepo ?? '');
-    if (initialRepo) {
-      void runReview(
-        { repo: initialRepo, ...(initialFile ? { file: initialFile } : {}) },
-        `Checking ${initialRepo} on Hugging Face…`,
-      );
-    } else {
-      setPhase({ kind: 'enter' });
-    }
+    setPhase({ kind: 'enter' });
     return () => {
       closed.current = true;
       installAbort.current?.abort();
       installAbort.current = null;
       dropLocal();
     };
-  }, [open, initialRepo, initialFile, runReview, dropLocal]);
+  }, [open, initialRepo, dropLocal]);
 
   // While the post-install fitness check runs, poll for its record.
   const checkingKey =
@@ -195,10 +191,18 @@ export function ModelImportDialog({ open, initial, onClose, onInstalled }: Model
     onClose();
   };
 
+  const linkedUnchanged = initialRepo !== undefined && reference.trim() === initialRepo;
   const submit = (event?: FormEvent) => {
     event?.preventDefault();
     const text = reference.trim();
     if (!text) return;
+    if (linkedUnchanged && initialRepo) {
+      void runReview(
+        { repo: initialRepo, ...(initialFile ? { file: initialFile } : {}) },
+        `Checking ${initialRepo} on Hugging Face…`,
+      );
+      return;
+    }
     void runReview({ reference: text }, 'Checking the model on Hugging Face…');
   };
 
@@ -375,6 +379,11 @@ export function ModelImportDialog({ open, initial, onClose, onInstalled }: Model
                   spellCheck={false}
                   autoComplete="off"
                 />
+                {linkedUnchanged && initialFile && (
+                  <p className="muted small">
+                    File: <code>{initialFile}</code>
+                  </p>
+                )}
                 <p className="muted small model-import-or">
                   Or add a .gguf file that is already on this computer.{' '}
                   <button

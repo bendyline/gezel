@@ -14,6 +14,7 @@ import {
   paramAsksUser,
   paramInputSpec,
   projectManagedWorkspaceWritable,
+  projectManagedWorkspaceWritePolicy,
   stepWorkspaceDeliverableFiles,
 } from '@bendyline/gezel';
 import type { GezelClient } from '@bendyline/gezel-client';
@@ -191,6 +192,10 @@ export type ProjectEditsClient = Pick<GezelClient, 'getProject' | 'updateProject
  * Never refuses. A book whose files already exist can pass on their contents
  * alone, and only the service can tell, so a "no" starts the task anyway and
  * the pause, if it comes, names the command.
+ *
+ * Returns how to put the folder back when it switched edits on: the person
+ * allowed edits for this run, so a launch that fails must not leave the
+ * folder writable.
  */
 export async function ensureProjectEdits(
   client: ProjectEditsClient,
@@ -202,32 +207,37 @@ export async function ensureProjectEdits(
     prompter: SetupPrompter | null;
     write: (text: string) => void;
   },
-): Promise<void> {
+): Promise<(() => Promise<void>) | null> {
   const files = craftbookFolderFiles(options.craftbook);
-  if (files.length === 0) return;
+  if (files.length === 0) return null;
   const project = await client.getProject(options.projectId);
-  if (projectManagedWorkspaceWritable(project)) return;
+  if (projectManagedWorkspaceWritable(project)) return null;
   const what = nameFolderFiles(files);
   const where = project.workingDir ?? 'this project';
+  const before = projectManagedWorkspaceWritePolicy(project);
   const turnOn = async () => {
     await client.updateProject(options.projectId, { managedWorkspaceWritePolicy: 'allow' });
+    return async () => {
+      await client.updateProject(options.projectId, { managedWorkspaceWritePolicy: before });
+    };
   };
   if (options.allow) {
-    await turnOn();
+    const undo = await turnOn();
     options.write(`Gezel may now change files in ${where} (--allow-edits).\n`);
-    return;
+    return undo;
   }
   const saves = `${options.craftbook.name} saves ${what} into ${where}, and Gezel may not change files there yet.`;
   if (options.prompter) {
     if (await options.prompter.confirm(`${saves} Allow it? [y/N] `)) {
-      await turnOn();
+      const undo = await turnOn();
       options.write('Project edits: on\n');
-      return;
+      return undo;
     }
   }
   options.write(
     `${saves} If it stops for that, run \`${PROJECT_EDITS_CLI_COMMAND}\` here, or start it with --allow-edits.\n`,
   );
+  return null;
 }
 
 /**

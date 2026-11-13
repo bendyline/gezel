@@ -12,7 +12,7 @@ menu links a model page the same way.
 | `gezel://app/<project-type-id>` | New Project on that type's form (`NewProjectDialog` with `initialTypeId`) |
 | `gezel://craftbook/<craftbook-id>` | That craftbook's launch form, in the project new work goes to (`NewTaskDialog` with `initialCraftbookId`) |
 | `gezel://docs/<article-id>` | That Handboek article in Knowledge |
-| `gezel://model/huggingface/<owner>/<name>[?file=<path.gguf>]` | The review of that Hugging Face model (`ModelImportDialog`), which checks it before anything downloads. See [model-imports.md](model-imports.md) |
+| `gezel://model/huggingface/<owner>/<name>[?file=<path.gguf>]` | Add a model (`ModelImportDialog`) with that Hugging Face model filled in. Checking it reaches Hugging Face, so it waits for the person to press Check model, and nothing downloads before its review. See [model-imports.md](model-imports.md) |
 | `gezel://open`, or any gezel URL this build does not understand | Home |
 
 The parser is `parseGezelDeepLink` in [core deep-links.ts](../packages/core/src/deep-links.ts).

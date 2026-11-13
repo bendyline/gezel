@@ -1,7 +1,7 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { dirname, join } from 'node:path';
+import { PassThrough, Readable } from 'node:stream';
 import {
   type CatalogItemDetail,
   type CatalogItemSummary,
@@ -460,6 +460,23 @@ describe('MLX imports', () => {
     expect(review.blocked).toBe(true);
     expect(review.checks.find((item) => item.id === 'customCode')?.status).toBe('fail');
 
+    // A video processor config reaches the same loader.
+    const video = setup(
+      {
+        files: {
+          ...MLX_REPO_FILES(),
+          'video_preprocessor_config.json': Buffer.from(
+            JSON.stringify({ auto_map: { AutoVideoProcessor: 'modeling_custom.Processor' } }),
+          ),
+        },
+        plainGit: [...MLX_PLAIN, 'video_preprocessor_config.json'],
+        tags: ['mlx'],
+      },
+      [],
+    );
+    const videoReview = await video.importer.review({ repo: REPO });
+    expect(videoReview.checks.find((item) => item.id === 'customCode')?.status).toBe('fail');
+
     const pc = setup({ files: MLX_REPO_FILES(), plainGit: MLX_PLAIN, tags: ['mlx'] }, [], {
       appleSilicon: false,
     });
@@ -553,6 +570,31 @@ describe('GGUF files from this computer', () => {
     const events = await drain(models.install(result.id));
     expect(events.at(-1)).toMatchObject({ type: 'error' });
     expect((await models.listIncomplete()).length).toBe(0);
+  });
+
+  it('waits for a file still arriving, and never publishes a leftover partial', async () => {
+    const { local, models } = setup({ files: {} });
+    const { importId } = await local.create();
+    await local.receive(importId, 'My-Qwen-Q4_K_M.gguf', Readable.from([chatGguf()]));
+    const slow = new PassThrough();
+    const arriving = local.receive(importId, 'extra-Q8_0.gguf', slow);
+    for (let i = 0; i < 100; i += 1) {
+      if ((await local.status(importId)).files.some((file) => !file.complete)) break;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    await expect(local.confirm(importId)).rejects.toThrow(/still arriving/);
+    slow.destroy(new Error('stopped'));
+    await expect(arriving).rejects.toThrow();
+
+    // What an upload cut off by a crash leaves behind.
+    const stage = join(home, '.transactions', 'local-model-imports', importId, 'files');
+    writeFileSync(join(stage, 'extra-Q8_0.gguf.partial'), 'half');
+    const result = await local.confirm(importId);
+    const installed = await models.resolveModel(result.id);
+    expect(installed).not.toBeNull();
+    expect(readdirSync(dirname(installed?.weightsPath ?? ''))).not.toContain(
+      'extra-Q8_0.gguf.partial',
+    );
   });
 
   it('refuses names that are not plain .gguf files, and a second model in one import', async () => {

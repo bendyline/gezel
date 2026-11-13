@@ -20,6 +20,7 @@ import type { HistoryManager } from '../history/manager.js';
 import {
   AUTOMATIC_UPDATE_SOURCE,
   applyProjectTypeUpdate,
+  automaticUpdatesHeld,
   planProjectTypeUpgrade,
 } from './upgrade.js';
 
@@ -183,8 +184,7 @@ export class ProjectTypeUpgrader {
       if (only && !only.has(project.id)) continue;
       const type = project.projectType;
       if (!type || type.pinned || type.source !== AUTOMATIC_UPDATE_SOURCE) continue;
-      if (project.archived || project.status === 'readonly') continue;
-      if (project.storageScope === 'machine-shared') continue;
+      if (automaticUpdatesHeld(project)) continue;
       try {
         const plan = await this.plan(project.id);
         if (!plan) {

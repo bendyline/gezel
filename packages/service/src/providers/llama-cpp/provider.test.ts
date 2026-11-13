@@ -75,30 +75,51 @@ describe('LlamaCppProvider after degenerate output (2026-11-10)', () => {
     return { provider: new LlamaCppProvider({ supervisor }), stop };
   }
 
-  it('discards the session snapshots, then stops the engine as a health restart', async () => {
+  const repeated = (sessionId: string) =>
+    ({
+      kind: 'repeated-output',
+      channel: 'reasoning',
+      unit: '/',
+      length: 1024,
+      sessionId,
+    }) as const;
+
+  it('keeps the engine for one run of repeated output, and restarts it on the second', async () => {
     const { provider, stop } = supervised({ current: 48300 });
     const order: string[] = [];
-    const discardSessionSnapshots = vi.fn(async () => {
-      order.push('discard');
-      return ['sess-s1.bin'];
+    const discardSessionSnapshots = vi.fn(async (sessionId: string) => {
+      order.push(`discard ${sessionId}`);
+      return [`sess-${sessionId}.bin`];
     });
     stop.mockImplementation(async () => {
       order.push('stop');
     });
     provider.setCacheAdapter({ discardSessionSnapshots } as never);
 
-    const restarted = await provider.recoverFromDegenerateOutput({
-      kind: 'repeated-output',
-      channel: 'reasoning',
-      unit: '/',
-      length: 1024,
-      sessionId: 's1',
-    });
+    // A model looping on its own must not end the other turns on the engine.
+    expect(await provider.recoverFromDegenerateOutput(repeated('s1'))).toBe('kept');
+    expect(stop).not.toHaveBeenCalled();
 
-    expect(restarted).toBe(true);
-    expect(discardSessionSnapshots).toHaveBeenCalledWith('s1');
+    expect(await provider.recoverFromDegenerateOutput(repeated('s2'))).toBe('restarted');
     expect(stop).toHaveBeenCalledWith('health-restart');
-    expect(order).toEqual(['discard', 'stop']);
+    expect(order).toEqual(['discard s1', 'discard s2', 'stop']);
+  });
+
+  it('restarts at once on a draft collapse, and counts strikes per engine process', async () => {
+    const pid = { current: 1 };
+    const { provider, stop } = supervised(pid);
+    expect(
+      await provider.recoverFromDegenerateOutput({
+        kind: 'draft-collapse',
+        drafted: 5000,
+        accepted: 0,
+        baseline: 0.8,
+      }),
+    ).toBe('restarted');
+    expect(await provider.recoverFromDegenerateOutput(repeated('s1'))).toBe('kept');
+    pid.current = 2;
+    expect(await provider.recoverFromDegenerateOutput(repeated('s1'))).toBe('kept');
+    expect(stop).toHaveBeenCalledTimes(1);
   });
 
   it('cannot restart an external engine', async () => {
@@ -110,7 +131,7 @@ describe('LlamaCppProvider after degenerate output (2026-11-10)', () => {
         accepted: 0,
         baseline: 0.8,
       }),
-    ).toBe(false);
+    ).toBe('unavailable');
     expect(provider.judgeDraftAcceptance({ drafted: 5000, accepted: 0 })).toEqual({ sick: false });
   });
 

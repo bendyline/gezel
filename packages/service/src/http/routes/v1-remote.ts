@@ -336,11 +336,20 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
       } catch (err) {
         if (c.req.raw.signal.aborted) return;
         const expected = expectedVideoFailure(err);
-        await write(
-          expected
-            ? { type: 'error', ...expected }
-            : { type: 'error', error: err instanceof Error ? err.message : String(err) },
-        ).catch(() => {});
+        if (expected) {
+          await write({ type: 'error', ...expected }).catch(() => {});
+          return;
+        }
+        // Like the one-shot route's opaque 500: the provider's own text can
+        // name paths on this computer, so it stays in this log.
+        const requestId = randomUUID();
+        log.error(
+          `[remote-video] render failed id=${requestId}: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`,
+        );
+        await write({
+          type: 'error',
+          error: `The video render failed on the server (request ${requestId}). Its log has the details.`,
+        }).catch(() => {});
       } finally {
         clearInterval(heartbeat);
       }

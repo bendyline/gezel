@@ -80,6 +80,21 @@ const log = createLogger('project-type');
 /** Gilde, Gezel's own catalog: the only source whose updates run on their own. */
 export const AUTOMATIC_UPDATE_SOURCE = 'bundled';
 
+/**
+ * Projects the automatic sweep never touches, whatever the update: an
+ * archived or read-only project, and one shared by every account on the
+ * machine. Their updates wait for the person, so a plan says so.
+ */
+export function automaticUpdatesHeld(
+  project: Pick<ProjectDetail, 'archived' | 'status' | 'storageScope'>,
+): boolean {
+  return (
+    project.archived === true ||
+    project.status === 'readonly' ||
+    project.storageScope === 'machine-shared'
+  );
+}
+
 export interface ProjectTypeUpdateInput {
   projectId: string;
   /** Exact target version. Default: the newest of the same major, else a refresh. */
@@ -594,7 +609,7 @@ async function analyzeUpdate(
     source,
     fromVersion: provenance.version,
     toVersion: next.version,
-    automatic: needsOk.size === 0,
+    automatic: needsOk.size === 0 && !automaticUpdatesHeld(project),
     needsOk: [...needsOk.entries()].map(([kind, items]) => ({ kind, items })),
     changes: {
       page: await pageChanged(catalog, source, previous, next),
@@ -801,6 +816,7 @@ export async function applyProjectTypeUpdateUnlocked(
       manifest: next,
       ...(voormanGezelId ? { voormanGezelId } : {}),
       only: a.scheduleKeys,
+      previous: a.previous,
     },
   );
 

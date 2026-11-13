@@ -20,6 +20,11 @@ vi.stubGlobal(
 
 const GB = 1024 ** 3;
 
+/** A linked model waits for the person to press Check model. */
+function checkLinked() {
+  fireEvent.click(screen.getByRole('button', { name: 'Check model' }));
+}
+
 function review(overrides: Partial<ModelImportReview> = {}): ModelImportReview {
   return {
     source: {
@@ -68,11 +73,33 @@ afterEach(() => {
 });
 
 describe('ModelImportDialog', () => {
-  it('reviews a linked model on open and offers the download', async () => {
+  it('fills in a linked model and reaches Hugging Face only on a click', async () => {
+    vi.mocked(api.reviewModelImport).mockResolvedValue(review());
+    render(
+      <ModelImportDialog
+        open
+        initial={{ repo: 'someone/Tiny-Qwen-GGUF', file: 'Tiny-Qwen-Q8_0.gguf' }}
+        onClose={() => {}}
+      />,
+    );
+    const field = screen.getByLabelText(/Link to a model on Hugging Face/) as HTMLInputElement;
+    expect(field.value).toBe('someone/Tiny-Qwen-GGUF');
+    expect(screen.getByText('Tiny-Qwen-Q8_0.gguf')).toBeTruthy();
+    expect(api.reviewModelImport).not.toHaveBeenCalled();
+    checkLinked();
+    expect(await screen.findByText('Tiny Qwen (Q4_K_M)')).toBeTruthy();
+    expect(api.reviewModelImport).toHaveBeenCalledWith({
+      repo: 'someone/Tiny-Qwen-GGUF',
+      file: 'Tiny-Qwen-Q8_0.gguf',
+    });
+  });
+
+  it('reviews a linked model and offers the download', async () => {
     vi.mocked(api.reviewModelImport).mockResolvedValue(review());
     render(
       <ModelImportDialog open initial={{ repo: 'someone/Tiny-Qwen-GGUF' }} onClose={() => {}} />,
     );
+    checkLinked();
     expect(await screen.findByText('Tiny Qwen (Q4_K_M)')).toBeTruthy();
     expect(api.reviewModelImport).toHaveBeenCalledWith({ repo: 'someone/Tiny-Qwen-GGUF' });
     expect(screen.getByText('Engine support.')).toBeTruthy();
@@ -97,6 +124,7 @@ describe('ModelImportDialog', () => {
     render(
       <ModelImportDialog open initial={{ repo: 'someone/Tiny-Qwen-GGUF' }} onClose={() => {}} />,
     );
+    checkLinked();
     expect(await screen.findByText('Problem')).toBeTruthy();
     const download = screen.getByRole('button', { name: 'Download 5.0 GB' }) as HTMLButtonElement;
     expect(download.disabled).toBe(true);
@@ -109,6 +137,7 @@ describe('ModelImportDialog', () => {
     render(
       <ModelImportDialog open initial={{ repo: 'someone/Tiny-Qwen-GGUF' }} onClose={() => {}} />,
     );
+    checkLinked();
     expect(await screen.findByRole('button', { name: 'Download Tiny Qwen' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Download this upload' })).toBeTruthy();
   });
@@ -133,6 +162,7 @@ describe('ModelImportDialog', () => {
         onInstalled={onInstalled}
       />,
     );
+    checkLinked();
     fireEvent.click(await screen.findByRole('button', { name: 'Download 5.0 GB' }));
     await waitFor(() =>
       expect(onInstalled).toHaveBeenCalledWith('hf-tiny-qwen-q4-k-m-abc123', 'llama-cpp'),
@@ -169,6 +199,7 @@ describe('ModelImportDialog', () => {
     render(
       <ModelImportDialog open initial={{ repo: 'someone/Tiny-Qwen-GGUF' }} onClose={() => {}} />,
     );
+    checkLinked();
     expect(await screen.findByText(/borrowed from Qwen3 8B/)).toBeTruthy();
   });
 

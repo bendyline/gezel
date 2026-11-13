@@ -598,6 +598,36 @@ describe('a craftbook that saves into the project folder', () => {
     expect(lines).toContain('--allow-edits');
   });
 
+  it('hands back how to put the folder back, for a launch that fails', async () => {
+    const denied = client({ ...folder, managedWorkspaceWritePolicy: 'deny' });
+    const undo = await ensureProjectEdits(denied as never, {
+      projectId: 'notes',
+      craftbook: summarize,
+      allow: true,
+      prompter: null,
+      write: () => undefined,
+    });
+    expect(undo).toBeTypeOf('function');
+    await undo?.();
+    expect(denied.updateProject).toHaveBeenLastCalledWith('notes', {
+      managedWorkspaceWritePolicy: 'deny',
+    });
+
+    const unset = client();
+    await (
+      await ensureProjectEdits(unset as never, {
+        projectId: 'notes',
+        craftbook: summarize,
+        allow: true,
+        prompter: null,
+        write: () => undefined,
+      })
+    )?.();
+    expect(unset.updateProject).toHaveBeenLastCalledWith('notes', {
+      managedWorkspaceWritePolicy: 'auto',
+    });
+  });
+
   it('only warns in a script without the flag, and changes nothing', async () => {
     const c = client();
     const { lines } = await run(c);

@@ -810,6 +810,9 @@ async function isSessionRouteAllowed(
       : sessionDeny('image recognition must target the session project');
   }
 
+  // A yes/no that generate_image passes on ("To animate it…"); no model names.
+  if (method === 'GET' && path === '/api/video-gen/animates') return SESSION_ALLOW;
+
   // Media/render tools are model-facing, but their project binding is in the
   // body rather than the URL. Only generation calls are admitted; model/admin
   // listing, pull, deletion, and engine-status routes stay first-party.
