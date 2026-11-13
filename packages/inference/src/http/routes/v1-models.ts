@@ -390,6 +390,11 @@ async function buildModelEntries(
           object: 'model' as const,
           created,
           owned_by: provider,
+          // The name the download list showed. Without it an app can only show
+          // the id, so "Qwen 3.5 (0.8B, Q4)" turned into "qwen3.5-0.8b-q4" the
+          // moment it finished downloading. The catalog's name, not the
+          // provider's: a provider decorates its own with size and context.
+          ...(manifests.has(m.id) ? { name: manifests.get(m.id)!.name } : {}),
           ...(provider === 'llama-cpp' || provider === 'mlx' || provider === 'ds4'
             ? {
                 availability: 'available' as const,

@@ -115,6 +115,10 @@ describe('GET /v1/models catalog metadata', () => {
     });
     // No catalog entry: unflagged rather than a guess about tools or images.
     expect(byId.get('llama-cpp:custom-gguf')).not.toHaveProperty('capabilities');
+    // An installed model keeps the name its download entry had; one from
+    // outside the catalog has only its id, not the provider's decorated label.
+    expect(byId.get('llama-cpp:small-writer')?.name).toBe('Small Writer');
+    expect(byId.get('llama-cpp:custom-gguf')).not.toHaveProperty('name');
 
     const downloadable = modelContext();
     downloadable.chat.listModelsForProvider = vi.fn(async () => []);

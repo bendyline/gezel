@@ -15,6 +15,7 @@ import {
   type ImageModelPullEvent,
   type ImageProvider,
 } from '../../providers/image/types.js';
+import { curatedImageOrder } from './v1-images.js';
 
 vi.mock('../../memory/embeddings.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../memory/embeddings.js')>()),
@@ -346,5 +347,26 @@ describe('/v1/images on hosted inference', () => {
       };
       expect(job.status).toBe('error');
     });
+  });
+});
+
+describe('curatedImageOrder', () => {
+  const model = (id: string, extra: Record<string, unknown> = {}) => ({
+    manifest: { kind: 'image-model', id, tags: [], ...extra },
+  });
+
+  // The catalog is alphabetical by id, so "add an image model" opened on an
+  // anime model while the curated picks sat further down.
+  it('lists curated picks first, best first, and leaves the rest in catalog order', () => {
+    const ordered = curatedImageOrder([
+      model('anime-xl'),
+      model('flux-fast', { recoScore: 20, licenseClass: 'open' }),
+      model('krea', { recoScore: 90, licenseClass: 'open' }),
+      // A score alone is not a recommendation: the license and the tags count.
+      model('restricted', { recoScore: 99, licenseClass: 'non-commercial' }),
+      model('retired', { recoScore: 95, licenseClass: 'open', tags: ['retired'] }),
+      model('sd-base'),
+    ]).map((item) => item.manifest.id);
+    expect(ordered).toEqual(['krea', 'flux-fast', 'anime-xl', 'restricted', 'retired', 'sd-base']);
   });
 });

@@ -6,6 +6,7 @@ import {
   type ImageModelManifest,
   createLogger,
   imageModelDefaultSide,
+  isRecommendedModel,
   resolveImageSize,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
@@ -149,6 +150,23 @@ function generationError(err: unknown): { code: string; message: string } {
  *                                    `error`. Closing the stream cancels the
  *                                    render, which stops the engine.
  */
+/**
+ * Catalog image models with the curated picks first, best first, as the chat
+ * model list orders its downloads. The rest keep the catalog's own order. That
+ * order is alphabetical by id, so an app's "add an image model" list opened on
+ * whichever id sorted first: an anime model (2026-11-12).
+ */
+export function curatedImageOrder<T extends { manifest: { kind: string } }>(
+  items: readonly T[],
+): T[] {
+  const score = ({ manifest }: T): number => {
+    if (manifest.kind !== 'image-model') return 0;
+    const model = manifest as unknown as ImageModelManifest;
+    return isRecommendedModel(model) ? (model.recoScore ?? 0) : 0;
+  };
+  return [...items].sort((a, b) => score(b) - score(a));
+}
+
 export function v1ImagesRoutes(ctx: ImagesRouteContext): Hono {
   const app = new Hono();
   if (ctx.images.loraPulls) app.route('/styles', v1ImageStylesRoutes(ctx, ctx.images.loraPulls));
@@ -175,7 +193,7 @@ export function v1ImagesRoutes(ctx: ImagesRouteContext): Hono {
     );
     const data: AppImageModel[] = [];
     const seen = new Set<string>();
-    for (const item of items) {
+    for (const item of curatedImageOrder(items)) {
       const manifest = item.manifest;
       if (manifest.kind !== 'image-model') continue;
       seen.add(manifest.id);
