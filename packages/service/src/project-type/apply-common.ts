@@ -219,6 +219,21 @@ export function projectTypeScheduleKeys(
 }
 
 /**
+ * A host's cron is the one `schedule` creates. Overlap compares by effect: a
+ * night-shift host is created with `skip`, which is also the scheduler's
+ * default for a schedule that declares none.
+ */
+function hostRunsOn(
+  cron: { expression: string; overlap?: string } | undefined,
+  schedule: ProjectTypeSchedule,
+): boolean {
+  const want = hostRecurrenceFields(schedule).cron;
+  return (
+    cron?.expression === want?.expression && (cron?.overlap ?? 'skip') === (want?.overlap ?? 'skip')
+  );
+}
+
+/**
  * Turn a type's declared `schedules[]` into schedule-host tasks
  * (`{cron, spawnsCraftbook, assignee}`) on the existing task engine.
  * Consent rule from docs/project-types.md — never silently armed:
@@ -237,11 +252,26 @@ export async function materializeProjectTypeSchedules(
     manifest: ProjectTypeManifest;
     voormanGezelId?: string;
     only?: ReadonlySet<string>;
+    /**
+     * An app update's earlier version. A host keeps its time unless it
+     * still runs on what that version declared, since anything else is a
+     * time the person chose; `null` (the earlier version no longer
+     * resolves) keeps every host's time. Unset on a fresh apply.
+     */
+    previous?: ProjectTypeManifest | null;
   },
 ): Promise<{ schedules: ScheduleMaterialization[]; failed: number }> {
   const { store, catalog } = deps;
   const { projectId, typeId, manifest } = args;
   if (manifest.schedules.length === 0) return { schedules: [], failed: 0 };
+  const previousSchedules =
+    args.previous === undefined
+      ? undefined
+      : new Map(
+          (args.previous ? projectTypeScheduleKeys(args.previous) : []).map(
+            ({ key, schedule }) => [key, schedule] as const,
+          ),
+        );
 
   // Apply-owned manager over the SAME store instance: task numbering
   // serializes through the store's per-project locks, and on the atomic
@@ -265,9 +295,14 @@ export async function materializeProjectTypeSchedules(
           t.origin.scheduleKey === scheduleKey,
       );
       if (prior) {
+        const declared = previousSchedules?.get(scheduleKey);
+        const appOwned =
+          previousSchedules === undefined ||
+          (declared !== undefined && hostRunsOn(prior.cron, declared));
         if (
+          appOwned &&
           (prior.status === 'active' || prior.status === 'paused') &&
-          (prior.cron?.expression !== hostCron || prior.cron?.overlap !== schedule.overlap)
+          !hostRunsOn(prior.cron, schedule)
         ) {
           await tasks.update(projectId, prior.num, {
             cron: {

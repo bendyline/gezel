@@ -285,8 +285,11 @@ type ProjectTab =
   // pane to sit beside the content, it becomes its own tab instead.
   | 'output';
 
-/** Tabs whose content needs the width more than a docked board does, in a narrow window. */
-const BOARD_STEPS_ASIDE_ON: ReadonlySet<ProjectTab> = new Set(['tasks', 'settings']);
+/**
+ * Tabs whose content needs the width more than a docked board does, in a
+ * narrow window. The Settings tab's value is 'about'.
+ */
+const BOARD_STEPS_ASIDE_ON: ReadonlySet<ProjectTab> = new Set(['tasks', 'about']);
 
 /** Each tab's name as its key shows it, for the history menu. */
 const PROJECT_TAB_LABELS: Record<ProjectTab, string> = {

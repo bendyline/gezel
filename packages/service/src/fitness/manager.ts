@@ -9,9 +9,10 @@
  *   running joins it instead of double-running.
  * - Eviction politeness: an INSTALL-triggered probe defers while the
  *   pool has no headroom for the model (spawning would evict a
- *   resident engine mid-use); it retries for a bounded window, then
- *   persists a `deferred` record. MANUAL probes proceed immediately —
- *   the user asked.
+ *   resident engine mid-use) or another model worked in the last few
+ *   minutes; it retries for a bounded window, then persists a
+ *   `deferred` record, and asks the pool as background work. MANUAL
+ *   probes proceed immediately — the user asked.
  *
  * Persistence rules:
  * - The whole `modelFitness` map is read-modify-written inside the
@@ -32,6 +33,8 @@ const log = createLogger('fitness');
 
 const DEFER_RETRY_MS = 90_000;
 const DEFER_BUDGET_MS = 20 * 60_000;
+/** An install check waits until no other model has worked for this long. */
+const QUIET_MS = 3 * 60_000;
 /** Host-memory drift beyond this fraction softens the badge. */
 const HARDWARE_DRIFT_FRACTION = 0.1;
 
@@ -58,6 +61,7 @@ export interface ModelFitnessManagerOptions {
   sleep?: (ms: number) => Promise<void>;
   deferRetryMs?: number;
   deferBudgetMs?: number;
+  quietMs?: number;
   now?: () => number;
 }
 
@@ -141,11 +145,21 @@ export class ModelFitnessManager {
   /**
    * True when spawning the model would not force-evict a resident
    * engine (or when there is nothing to be polite about: no pool, an
-   * unenforced budget, or the model already resident).
+   * unenforced budget, or the model already resident), and no other
+   * model has been working lately. Between a task's turns its engine
+   * looks idle, and a check that loaded then would evict it mid-task
+   * (a 27B with 55k tokens of context reloaded during a PowerPoint
+   * task); a busy machine would also skew the speed it measures.
    */
   private async headroomAvailable(provider: FitnessEngine, modelId: string): Promise<boolean> {
     const snapshot = await this.opts.engineStatus().catch(() => null);
-    if (!snapshot || !snapshot.enforced) return true;
+    if (!snapshot) return true;
+    const quietSince = this.now() - (this.opts.quietMs ?? QUIET_MS);
+    const others = snapshot.entries.filter(
+      (e) => !(e.provider === provider && e.modelId === modelId),
+    );
+    if (others.some((e) => e.lastUsedAt > quietSince)) return false;
+    if (!snapshot.enforced) return true;
     const resident = snapshot.entries.some((e) => e.provider === provider && e.modelId === modelId);
     if (resident) return true;
     if (snapshot.entries.length === 0) return true;
@@ -178,7 +192,8 @@ export class ModelFitnessManager {
     const installed = await this.opts.resolveInstalled(provider, modelId).catch(() => null);
     const deferredCheck = {
       ok: false,
-      detail: 'probe deferred — spawning would evict a resident model; run the check manually',
+      detail:
+        'probe deferred — another model was working or there was no room beside it; run the check manually',
     };
     return {
       schemaVersion: 1,

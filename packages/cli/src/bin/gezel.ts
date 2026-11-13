@@ -1088,7 +1088,7 @@ Examples:
         return;
       }
       await setUp();
-      await ensureProjectEdits(client, {
+      const undoEdits = await ensureProjectEdits(client, {
         projectId,
         craftbook,
         allow: opts.allowEdits === true,
@@ -1102,7 +1102,8 @@ Examples:
           trustScripts: !opts.strictSandbox,
           roleBasedNameOnlyMode: true,
         })
-        .catch((err: unknown) => {
+        .catch(async (err: unknown) => {
+          await undoEdits?.().catch(() => undefined);
           throw taskInputFailure(err, book, parsed.params) ?? err;
         });
       if (opts.wait || opts.out) {

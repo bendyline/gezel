@@ -8,7 +8,7 @@ export interface NativeInference extends Pick<LocalEngineRuntime, keyof LocalEng
   getProviderForModel(
     name: ProviderName,
     modelId?: string,
-    opts?: { engineDrainWaitMs?: number },
+    opts?: { engineDrainWaitMs?: number; engineBackground?: boolean },
   ): Promise<LLMProvider>;
   listModelsForProvider(name: ProviderName, signal?: AbortSignal): Promise<ModelInfo[]>;
   resetClient(opts?: { deferBusy?: boolean }): Promise<void>;
@@ -26,7 +26,7 @@ export class EngineInference extends LocalEngineRuntime implements NativeInferen
   getProviderForModel(
     name: ProviderName,
     modelId?: string,
-    opts: { engineDrainWaitMs?: number } = {},
+    opts: { engineDrainWaitMs?: number; engineBackground?: boolean } = {},
   ): Promise<LLMProvider> {
     if (!isLocalProvider(name))
       return Promise.reject(new Error(`The machine engine cannot serve provider ${name}`));

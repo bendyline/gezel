@@ -26,6 +26,7 @@ export const MLX_CONFIG_FILES = [
   'chat_template.json',
   'processor_config.json',
   'preprocessor_config.json',
+  'video_preprocessor_config.json',
 ] as const;
 
 export function isMlxDataFile(name: string): boolean {

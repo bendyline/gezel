@@ -3462,6 +3462,11 @@ export class GezelClient {
     return this.request('GET', '/api/video-gen/models');
   }
 
+  /** Whether an installed video model can animate a picture. Open to sessions. */
+  videoAnimates(): Promise<{ animates: boolean }> {
+    return this.request('GET', '/api/video-gen/animates');
+  }
+
   /**
    * Whether this machine can run each catalog video model, priced from its
    * weight files against the capacity the launch path admits. `wont-run`

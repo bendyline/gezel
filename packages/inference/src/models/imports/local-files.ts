@@ -23,6 +23,7 @@ import {
   type ChatModelManifest,
   type GgufHeaderFacts,
   type HubRepoFile,
+  IMPORTED_CHAT_MODEL_ENTRY_FILE,
   LOCAL_FILE_SOURCE_REPO,
   type LocalModelImportStatus,
   type ModelImportConfirmResponse,
@@ -192,6 +193,8 @@ export class LocalModelImports {
   async confirm(importId: string): Promise<ModelImportConfirmResponse> {
     if (this.busy.has(importId))
       throw new HubRequestError('This model is already being added.', 409);
+    if (this.receiving.has(importId))
+      throw new HubRequestError('A file is still arriving. Add the model once it is here.', 409);
     this.busy.add(importId);
     try {
       const { review, manifest, tuningFrom, header, choiceFiles, projector } =
@@ -207,8 +210,11 @@ export class LocalModelImports {
       await writeImportedModelEntryInto(staged, manifest, tuningFrom);
       const state = await this.readState(importId);
       const keep = new Set([...choiceFiles, ...(projector ? [projector] : [])]);
-      for (const file of state.files) {
-        if (!keep.has(file.name)) await rm(join(staged, file.name), { force: true });
+      // Everything else in the folder goes, not just the files the review
+      // saw: a `.partial` a crashed upload left would otherwise be published.
+      for (const name of await readdir(staged)) {
+        if (keep.has(name) || name === IMPORTED_CHAT_MODEL_ENTRY_FILE) continue;
+        await rm(join(staged, name), { recursive: true, force: true });
       }
       const first = choiceFiles[0] as string;
       const sha = (name: string) => state.files.find((file) => file.name === name)?.sha256 ?? '';

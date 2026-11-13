@@ -10797,8 +10797,8 @@ function installedVideoAnimates(): Promise<boolean> {
     videoAnimatesCache = {
       at: now,
       value: api
-        .listInstalledVideoModels()
-        .then((res) => res.defaultImageToVideoModel !== undefined)
+        .videoAnimates()
+        .then((res) => res.animates === true)
         .catch(() => false),
     };
   }

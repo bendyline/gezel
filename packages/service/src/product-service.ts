@@ -811,7 +811,10 @@ export async function startProductService(
     runProbe: (args) =>
       runFitnessProbe(
         {
-          getProviderForModel: (name, modelId) => chat.getProviderForModel(name, modelId),
+          getProviderForModel: (name, modelId, opts) =>
+            chat.getProviderForModel(name, modelId, {
+              engineBackground: opts?.background === true,
+            }),
           resolveInstalled: resolveInstalledForFitness,
           resolveReasoningBudget: (modelId) => resolveCatalogReasoningBudget(catalog, modelId),
           detectMemory: detectMemoryProfile,
