@@ -21,12 +21,14 @@ forced sequence did not supply (the prompt already closed the block); the patch
 keeps that, but a shorter end matched *inside* the forced header no longer cuts
 the header short. Direct tool responses also activate the grammar without requiring the
 generation prompt, which lazy samplers do not receive. Regression tests cover
-both transitions. It also fixes unconstrained nested
-JSON values (`additionalProperties: {}` and `items: {}`), which were wrongly
-restricted to objects and forced structured reports into extra wrappers. Native
-chat and JSON-schema regressions cover that case; the Python converter stays in
-sync. Revalidate/remove this patch when bumping upstream; a mismatch fails the
-build. It changes inference executables and does not require a desktop installer.
+both transitions. It also carries a regression test for unconstrained nested
+JSON values (`additionalProperties: {}` and `items: {}`), which were once
+restricted to objects and forced structured reports into extra wrappers; upstream
+handles that case itself, so the patch has no grammar hunk. Revalidate/remove
+this patch when bumping upstream; a mismatch fails the build. At v1.0.0 it
+applies unchanged (only test-file offsets moved) and upstream's `test-chat`,
+`test-reasoning-budget` and `test-json-schema-to-grammar` pass with it. It
+changes inference executables and does not require a desktop installer.
 
 ## Upstream versioning
 

@@ -20,6 +20,9 @@ set(GEZEL_COMMON_CHAT_FILES
     chat-auto-parser-helpers.cpp
     chat-diff-analyzer.cpp
     chat-peg-parser.cpp
+    # v1.0.0: chat.cpp registers the TTS text-normalization Jinja helpers
+    # (common_chat_tts_norm_add_builtins) for every template it renders.
+    chat-tts-norm.cpp
     chat.cpp
     common.cpp
     debug.cpp

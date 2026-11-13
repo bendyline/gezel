@@ -1758,9 +1758,10 @@ export async function buildLlamaCppProvider(opts: {
           // `--cors-origins` to `*` with credentials enabled, so it echoes
           // back whatever Origin it is handed — meaning any web page the user
           // has open can drive this engine and read the answer, given the
-          // port. The `localhost` special value emits no
-          // Access-Control-Allow-Origin at all for a foreign origin, which is
-          // what actually closes it. `--no-webui` drops the built-in chat
+          // port. The `localhost` special value closes it: since v1.0.0 the
+          // server answers 403 to any cross-origin request (other localhost
+          // ports included) and to a loopback request whose Host is not a
+          // loopback name (DNS rebinding). `--no-webui` drops the built-in chat
           // page; nothing in Gezel uses it. The matching bearer token goes in
           // through the environment below — CORS is a browser policy and does
           // nothing about a native process opening the port directly.
