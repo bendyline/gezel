@@ -164,7 +164,10 @@ its limit, not the host's.
   when a run released the CLI, or dispatched by hand (push off by
   default). Native runners per architecture, push by digest, smoke by
   digest, then versioned tags with provenance and SBOM attestations, then
-  the floating tags and the Docker Hub mirror.
+  the floating tags and the Docker Hub mirror. It builds from the npm
+  run's last release commit, not the CLI's tag, so the image carries every
+  package's version bump. The build stops if core's version there differs
+  from the one the published CLI pins.
 - Verify a published image: `gh attestation verify
   oci://ghcr.io/bendyline/gezel:X.Y.Z --owner bendyline`.
 

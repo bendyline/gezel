@@ -24,7 +24,11 @@ import type { ToolCallEvent, TurnUsage } from '@bendyline/gezel-inference/intern
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { ProviderRateLimitError } from '@bendyline/gezel/runtime';
 import { winShellSafe } from '../../packages/win-shell.js';
-import { type CodexRateLimitSignal, codexRateLimitSignal } from './rate-limit.js';
+import {
+  type CodexRateLimitSignal,
+  codexRateLimitSignal,
+  codexReconnectSignal,
+} from './rate-limit.js';
 import { salvageAgentMessage } from './salvage.js';
 import { type CodexStreamEvent, parseCodexLine } from './stream-parser.js';
 
@@ -273,12 +277,19 @@ interface InvocationState {
   currentPhase: string;
   lastEventAt: number;
   /**
-   * Set while Codex waits out a 429 (between its `Reconnecting… n/m` report
-   * and the next stream event): the turn budget is held, the idle check is
-   * off. `release` restarts the budget; `capped` once the wait outlasted
+   * Set while Codex retries a request (between its `Reconnecting… n/m`
+   * report and the next stream event), for a 429 (`rateLimited`) or for
+   * transport trouble: the turn budget is held, the idle check is off.
+   * `release` restarts the budget; `capped` once the wait outlasted
    * RATE_LIMIT_HOLD_MAX_MS and the budget runs again.
    */
-  rateLimitWait: { since: number; release: () => void; message: string; capped?: boolean } | null;
+  retryWait: {
+    since: number;
+    release: () => void;
+    message: string;
+    rateLimited: boolean;
+    capped?: boolean;
+  } | null;
   /** Codex reported a 429 at some point this turn. */
   rateLimited: boolean;
 }
@@ -350,7 +361,7 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
       observedSuccess: null,
       currentPhase: 'preparing',
       lastEventAt: startedAt,
-      rateLimitWait: null,
+      retryWait: null,
       rateLimited: false,
     };
 
@@ -403,28 +414,29 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
 
     const turnBudget = new AwakeBudget(timeoutMs);
     let idleBudget = new AwakeBudget(idleTimeoutMs);
-    const endRateLimitWait = (): void => {
-      if (!state.rateLimitWait) return;
-      state.rateLimitWait.release();
-      state.rateLimitWait = null;
+    const endRetryWait = (): void => {
+      if (!state.retryWait) return;
+      state.retryWait.release();
+      state.retryWait = null;
     };
     const turnTimer = setInterval(() => {
       if (settled) return;
-      // Codex waiting out a 429 is the service's doing, not the turn's, so it
-      // does not spend the budget — up to a bound, after which it does.
-      const wait = state.rateLimitWait;
+      // Codex retrying a request (a 429, a dropped connection) is not the
+      // turn's doing, so it does not spend the budget — up to a bound, after
+      // which it does.
+      const wait = state.retryWait;
       if (wait && !wait.capped && now() - wait.since > RATE_LIMIT_HOLD_MAX_MS) {
         wait.release();
         wait.capped = true;
       }
       if (turnBudget.expired()) {
-        const waitingOnRateLimit = state.rateLimitWait !== null;
+        const waitingOnRateLimit = state.retryWait?.rateLimited === true;
         const message = `[codex-cli] turn timed out after ${Math.round(timeoutMs / 1000)}s${turnBudget.describeSuspension()}`;
         killChild();
         settleReject(
           waitingOnRateLimit
             ? new ProviderRateLimitError(
-                `${message} while the model service was rate limiting it: ${state.rateLimitWait?.message}`,
+                `${message} while the model service was rate limiting it: ${state.retryWait?.message}`,
               )
             : new Error(message),
         );
@@ -436,7 +448,7 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
       if (
         idleTimeoutMs > 0 &&
         state.pendingTools.size === 0 &&
-        state.rateLimitWait === null &&
+        state.retryWait === null &&
         idleBudget.expired()
       ) {
         killChild();
@@ -571,11 +583,11 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
         settleReject(err);
         return;
       }
-      if (state.rateLimitWait) {
+      if (state.retryWait?.rateLimited) {
         // Exited while still waiting out a 429, without a final report.
         settleReject(
           new ProviderRateLimitError(
-            `[codex-cli] codex exited with code ${code ?? 'null'} while rate limited: ${state.rateLimitWait.message}`,
+            `[codex-cli] codex exited with code ${code ?? 'null'} while rate limited: ${state.retryWait.message}`,
           ),
         );
         return;
@@ -618,10 +630,36 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
           onRateLimit(event.message, rateLimit);
           return;
         }
+        if (codexReconnectSignal(event.message)) {
+          onReconnect(event.message);
+          return;
+        }
       }
       // Anything else on the stream means the request got through.
-      endRateLimitWait();
+      endRetryWait();
       dispatchEvent(event);
+    }
+
+    /** Hold the turn budget while Codex retries; see InvocationState.retryWait. */
+    function holdForRetry(message: string, rateLimited: boolean): void {
+      if (state.retryWait) {
+        state.retryWait.message = message;
+        state.retryWait.rateLimited ||= rateLimited;
+      } else {
+        state.retryWait = { since: now(), release: turnBudget.hold(), message, rateLimited };
+      }
+    }
+
+    function onReconnect(message: string): void {
+      if (!state.warned) {
+        state.warned = true;
+        opts.hooks.emitWarning(message);
+      }
+      // What an exit with no later report means, as before.
+      state.observedFailure = { message };
+      holdForRetry(message, false);
+      state.currentPhase = 'reconnecting';
+      opts.hooks.emitHeartbeat(state.currentPhase);
     }
 
     function onRateLimit(message: string, signal: CodexRateLimitSignal): void {
@@ -633,13 +671,12 @@ export async function runCodexTurn(opts: CodexInvokerOpts): Promise<string> {
       }
       opts.hooks.onRateLimited?.({ ...signal, message });
       if (signal.retrying) {
-        if (state.rateLimitWait) state.rateLimitWait.message = message;
-        else state.rateLimitWait = { since: now(), release: turnBudget.hold(), message };
+        holdForRetry(message, true);
         state.currentPhase = 'waiting on a rate limit';
         opts.hooks.emitHeartbeat(state.currentPhase);
         return;
       }
-      endRateLimitWait();
+      endRetryWait();
       state.observedFailure = { message, rateLimited: true };
     }
 

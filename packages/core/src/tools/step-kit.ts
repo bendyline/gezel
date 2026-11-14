@@ -191,6 +191,21 @@ function gateDrivenAdditions(step: Pick<CraftbookStep, 'gate'>, path: string | n
   return [...out];
 }
 
+/**
+ * Tools the step's completion gate needs the worker to have: the tool an
+ * evidence check counts (`imageEvidence` → `read_image_as_base64`), and what
+ * a validator demands. A narrowed surface must keep them, or the gate can
+ * never pass: the repair clamp dropped `read_image_as_base64` from a media
+ * review whose gate requires it, and the reviewer refused to finish without
+ * seeing the image until the task paused (2026-11-13).
+ */
+export function gateRequiredTools(
+  step: Pick<CraftbookStep, 'gate'>,
+  path: string | null = null,
+): string[] {
+  return gateDrivenAdditions(step, path);
+}
+
 export interface StepKit {
   kind: DeliverableKind;
   path: string | null;

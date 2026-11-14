@@ -27,7 +27,7 @@ on:
   workflow_call:
     inputs:
       ref:
-        description: 'Commit or tag to build.'
+        description: 'Commit to build: the last release commit of the npm release run.'
         type: string
         required: true
       version:
@@ -43,7 +43,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'Commit or tag to build (empty: the selected branch).'
+        description: 'Commit to build (empty: the selected branch). For a release, the last release commit of its npm run, not the CLI tag.'
         type: string
         default: ''
       version:
@@ -105,10 +105,26 @@ jobs:
 
       # The same stamp the npm release puts into core, so /api/health and
       # `gezel --version` inside the image report the released version.
+      # The image must be the Gezel `npm i -g @bendyline/gezel-cli@VERSION`
+      # installs, so the stamp has to equal the core version that CLI pins on
+      # npm. A CLI version not on npm yet (a hand-run build) skips the check.
       - name: Build
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
           export GEZEL_RELEASE_VERSION="$(node -p "require('./packages/core/package.json').version")"
+          view="$(npm view "@bendyline/gezel-cli@${VERSION}" dependencies --json 2>/dev/null || true)"
+          pinned="$(VIEW="$view" node -e "const j = JSON.parse(process.env.VIEW || '{}'); process.stdout.write(j.error ? (j.error.code === 'E404' ? 'unpublished' : '') : (j['@bendyline/gezel'] ?? ''))")"
+          if [[ "$pinned" == "unpublished" ]]; then
+            echo "::notice::@bendyline/gezel-cli@${VERSION} is not on npm; skipping the version check."
+          elif [[ -z "$pinned" ]]; then
+            echo "::error::Could not read the core version @bendyline/gezel-cli@${VERSION} pins on npm."
+            exit 1
+          elif [[ "$pinned" != "$GEZEL_RELEASE_VERSION" ]]; then
+            echo "::error::This ref has core ${GEZEL_RELEASE_VERSION}, but @bendyline/gezel-cli@${VERSION} pins core ${pinned} on npm. Build from the last release commit of that npm run."
+            exit 1
+          fi
           export GEZEL_RELEASE_CONTENT_COMPAT="$(node --input-type=module -e "import { calVerPrefix } from './scripts/calver.mjs'; console.log(calVerPrefix())")"
           pnpm build
 

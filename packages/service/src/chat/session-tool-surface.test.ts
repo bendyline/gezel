@@ -1900,6 +1900,55 @@ describe('resolveSessionToolSurface — D4 step kit + gate-repair clamp', () => 
     expect(allowlist?.has('advance_task_step')).toBe(true);
   });
 
+  // The media review that paused on 2026-11-13: its gate counts image reads,
+  // and its procedure opens the images "with read_image_as_base64", a form the
+  // mandate grammar does not read. The clamp dropped the tool and the reviewer
+  // refused to finish without seeing the image.
+  it('keeps the tool a gate evidence check counts through gate repair', async () => {
+    const clamps: string[] = [];
+    const { allowlist } = await resolveSessionToolSurface({
+      ...baseOpts,
+      provider: 'codex-cli',
+      role: 'Reviewer',
+      session: baseSession({ taskRef: 'p1/1', stepId: 'review', providerName: 'codex-cli' }),
+      tier: 'medium',
+      // Writes off: the drawer is the one channel a repair can use.
+      workspaceWritable: false,
+      activeStep: {
+        name: 'Inspect and relevance',
+        prompt:
+          'Read the input artifact, then open EVERY input.images path with read_image_as_base64 (artifact:true). Use write_artifact with jsonContent, then advance_task_step.',
+        gate: {
+          at: 'completion',
+          checks: [
+            { kind: 'sniff', file: 'item/output.json', sniff: 'json-valid', artifact: true },
+            { kind: 'imageEvidence', file: 'item/input.json', imagesKey: 'images', artifact: true },
+          ],
+        } as never,
+        toolPolicy: {
+          outputMedium: 'artifact',
+          allowTools: [
+            'read_artifact',
+            'read_image_as_base64',
+            'write_artifact',
+            'advance_task_step',
+          ],
+        },
+        gateAttempts: 1,
+        lastGateReject: { at: '2026-11-13T02:48:27Z', message: 'output.json not found' } as never,
+      },
+      onClamp: (kind) => clamps.push(kind),
+    });
+
+    expect(clamps).toContain('gate-repair');
+    expect([...(allowlist ?? [])].sort()).toEqual([
+      'advance_task_step',
+      'read_artifact',
+      'read_image_as_base64',
+      'write_artifact',
+    ]);
+  });
+
   it('gateAttemptHistory alone (post-bump reset) keeps the clamp — the widen-back fix', async () => {
     const clamps: string[] = [];
     await resolveSessionToolSurface({

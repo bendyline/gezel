@@ -15,7 +15,9 @@ export const LlamaCppLazyModeSchema = z.enum(['on', 'auto', 'off']);
 export const LlamaCppV4ConfigSchema = z.object({
   /**
    * Model file loading policy (`--load-mode`). Unset leaves the server on
-   * Auto; the legacy `llamaCppMlock: true` setting maps to `mlock`.
+   * Auto, except that an offload plan which keeps weights in system RAM
+   * loads them pinned (`none`) when RAM allows (`planPinnedHostWeights`).
+   * The legacy `llamaCppMlock: true` setting maps to `mlock`.
    */
   llamaCppLoadMode: LlamaCppLoadModeSchema.optional(),
   /** On-demand loading for large row-addressable tensors (`--lazy-mode`). */

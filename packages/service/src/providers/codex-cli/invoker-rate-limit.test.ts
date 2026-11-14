@@ -144,4 +144,38 @@ describe('Codex turns throttled by the model service', () => {
     expect(error?.message).toContain('while the model service was rate limiting it');
     expect(run.child.kill).toHaveBeenCalledWith('SIGTERM');
   });
+
+  // 2026-11-13: a network blip killed forty turns mid-reconnect.
+  it('holds the budget while Codex reconnects after a dropped connection', async () => {
+    const run = invocation(180_000);
+    run.start();
+    run.event({
+      type: 'error',
+      message:
+        'Reconnecting... 2/5 (stream disconnected before completion: Connection reset by peer (os error 54))',
+    });
+    await vi.advanceTimersByTimeAsync(170_000);
+    run.event({ type: 'error', message: 'Reconnecting... 3/5 (request timed out)' });
+    await vi.advanceTimersByTimeAsync(170_000);
+    run.answer('ready');
+
+    const { value, error } = await run.outcome;
+    expect(error).toBeUndefined();
+    expect(value).toBe('ready');
+    expect(run.hooks.onRateLimited).not.toHaveBeenCalled();
+  });
+
+  it('times out plainly once a transport reconnect outlasts its bound', async () => {
+    const run = invocation(180_000);
+    run.start();
+    run.event({
+      type: 'error',
+      message: 'Reconnecting... 2/5 (workspace routing discovery timed out)',
+    });
+    await vi.advanceTimersByTimeAsync(10 * 60_000 + 185_000);
+
+    const { error } = await run.outcome;
+    expect(error?.message).toMatch(/^\[codex-cli\] turn timed out after 180s/);
+    expect(isProviderRateLimitError(error)).toBe(false);
+  });
 });

@@ -16,6 +16,7 @@ import {
   createLogger,
   deliverableKindForStep,
   factualLookupTools,
+  gateRequiredTools,
   isLocalProvider,
   normalizeScriptRefs,
   outcomeTaskHasSubagents,
@@ -34,7 +35,11 @@ import {
   sessionHasCoordinatorScope,
   withoutCoordinatorOnlyTools,
 } from './coordinator-only-tools.js';
-import { promptConditionallyReferencedTools, promptMandatedTools } from './prompt-tool-contract.js';
+import {
+  promptConditionallyReferencedTools,
+  promptInstructedTools,
+  promptMandatedTools,
+} from './prompt-tool-contract.js';
 import {
   EXTERNAL_SERVICE_TOOLS,
   WORK_ROUTING_TOOLS,
@@ -985,6 +990,10 @@ export async function resolveSessionToolSurface(
       ...(researchIntent ? RESEARCH_STEP_TOOLS : []),
       ...mandatedStepTools,
       ...conditionallyReferencedStepTools,
+      // What the gate counts and every tool the procedure works "with": a
+      // repair that cannot gather the gate's evidence can never pass it.
+      ...(opts.activeStep ? gateRequiredTools(opts.activeStep) : []),
+      ...promptInstructedTools(opts.activeStep?.prompt ?? ''),
       'ask_user_question',
       ...(opts.activeStep && normalizeScriptRefs(opts.activeStep.onExit).length > 0
         ? ['run_installed_script']

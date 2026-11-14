@@ -318,6 +318,10 @@ jobs:
 
       # The container image follows the CLI's version line (release-docker.yml).
       # Find the CLI tag this run created, if it released the CLI at all.
+      # Build from the run's last release commit, not the CLI tag: release
+      # commits land one package at a time in name order, so the CLI's tag
+      # sits before core's version bump, and the 1.3.0-1.3.2 images built
+      # there reported the previous release's version.
       - name: Find the CLI release
         id: cli
         if: ${{ steps.release.outcome == 'success' && !inputs.dry_run }}
@@ -330,8 +334,13 @@ jobs:
             echo "The CLI was not released in this run; no container image."
             exit 0
           fi
+          head="$(git rev-parse HEAD)"
+          if ! git merge-base --is-ancestor "$tag" "$head"; then
+            echo "::error::The release's last commit ${head} does not contain ${tag}."
+            exit 1
+          fi
           echo "version=${tag##*@}" >> "$GITHUB_OUTPUT"
-          echo "ref=$(git rev-list -n 1 "$tag")" >> "$GITHUB_OUTPUT"
+          echo "ref=${head}" >> "$GITHUB_OUTPUT"
 
   docker:
     name: Container images

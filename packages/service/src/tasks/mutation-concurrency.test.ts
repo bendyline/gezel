@@ -518,3 +518,88 @@ it('does not mistake an older pass completion for a concurrent one', async () =>
   expect(stored.activeStepId).toBe('c');
   expect(stored.craftbook.steps.find((s) => s.id === 'a')?.completedAt).toBe(staleStamp);
 });
+
+// A Codex turn fired `advance_task_step` beside a write that failed, wrote the
+// deliverable again and advanced again; the second call shared the first's
+// "output.json not found" and the step idled until the task paused (2026-11-13).
+it('judges a completion again when it arrived while an earlier one was being rejected', async () => {
+  const firstJudging = deferred();
+  const releaseFirst = deferred();
+  let calls = 0;
+  tasks.setScriptRunner({
+    run: async ({ scriptName }: { scriptName: string }) => {
+      calls += 1;
+      if (calls === 1) {
+        firstJudging.resolve();
+        await releaseFirst.promise;
+        return scriptRun(scriptName, { decision: 'reject', message: 'output.json not found' });
+      }
+      return scriptRun(scriptName, { decision: 'approve' });
+    },
+  } as unknown as ScriptRunner);
+  const task = await tasks.create('fixture', {
+    title: 'Write then advance',
+    assignee: { kind: 'user' },
+    steps: [
+      {
+        id: 'review',
+        name: 'Review',
+        assignee: { kind: 'user' },
+        gate: { at: 'completion', scripts: [{ name: 'verify', scope: 'standard' }] } as never,
+      },
+      { id: 'ship', name: 'Ship', assignee: { kind: 'user' } },
+    ],
+  });
+
+  const first = tasks.completeStepChecked('fixture', task.num, 'review', undefined, {
+    cause: 'model',
+  });
+  await firstJudging.promise;
+  const second = tasks.completeStepChecked('fixture', task.num, 'review', undefined, {
+    cause: 'model',
+  });
+  releaseFirst.resolve();
+
+  expect((await first).status).toBe('held');
+  expect((await second).status).toBe('advanced');
+  expect(calls).toBe(2);
+  expect((await store.readTask('fixture', task.num))?.activeStepId).toBe('ship');
+});
+
+it('still shares an advance with a completion that arrived while it was judged', async () => {
+  const judging = deferred();
+  const release = deferred();
+  let calls = 0;
+  tasks.setScriptRunner({
+    run: async ({ scriptName }: { scriptName: string }) => {
+      calls += 1;
+      judging.resolve();
+      await release.promise;
+      return scriptRun(scriptName, { decision: 'approve' });
+    },
+  } as unknown as ScriptRunner);
+  const task = await tasks.create('fixture', {
+    title: 'Advance once',
+    assignee: { kind: 'user' },
+    steps: [
+      {
+        id: 'review',
+        name: 'Review',
+        assignee: { kind: 'user' },
+        gate: { at: 'completion', scripts: [{ name: 'verify', scope: 'standard' }] } as never,
+      },
+      { id: 'ship', name: 'Ship', assignee: { kind: 'user' } },
+      { id: 'after', name: 'After', assignee: { kind: 'user' } },
+    ],
+  });
+
+  const first = tasks.completeStepChecked('fixture', task.num, 'review');
+  await judging.promise;
+  const second = tasks.completeStepChecked('fixture', task.num, 'review');
+  release.resolve();
+
+  expect((await first).status).toBe('advanced');
+  expect(await second).toBe(await first);
+  expect(calls).toBe(1);
+  expect((await store.readTask('fixture', task.num))?.activeStepId).toBe('ship');
+});

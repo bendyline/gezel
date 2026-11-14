@@ -257,6 +257,20 @@ async function main() {
   );
   if (!updated) return;
 
+  // Phones bundle their own snapshot of the catalog (the capacitor package's
+  // catalog.json). A bump that skipped it left phones on an old Gilde, without
+  // the docbench scores they rank downloads by (2026-11-14).
+  run(
+    process.execPath,
+    [
+      join(catalogDir, 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+      join(repoRoot, 'packages', 'capacitor', 'scripts', 'refresh-catalog.ts'),
+    ],
+    {
+      cwd: catalogDir,
+      label: 'refreshing the mobile catalog snapshot',
+    },
+  );
   run(
     process.execPath,
     [

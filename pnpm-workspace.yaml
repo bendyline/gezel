@@ -52,7 +52,6 @@ minimumReleaseAgeExclude:
   # Exact security fixes for the release audit; no package-wide age exemption.
   - "@modelcontextprotocol/sdk@1.32.2"
   - "body-parser@2.4.0"
-  - "hono@4.13.14"
   - "ip-address@10.7.5"
   - "nodemailer@10.2.1"
   - "qs@6.16.1"
@@ -137,7 +136,7 @@ overrides:
   "dompurify@>=3 <4": "3.4.17"
   "fast-uri": "3.1.9"
   "form-data": "4.0.6"
-  "hono": "4.13.14"
+  "hono": "4.13.16"
   "ip-address": "10.7.5"
   "js-yaml@<4": "3.15.2"
   "js-yaml@>=4 <5": "4.3.2"

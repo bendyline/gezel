@@ -1,6 +1,6 @@
 {
   "package": "@bendyline/gilde",
-  "version": "0.1.80",
+  "version": "0.3.10",
   "models": [
     {
       "name": "Qwen 3.5 (0.8B, Q4)",
@@ -15,6 +15,20 @@
         "revision": "cf8a611f6ed2c2060046219a19f12cd3d5ecd67c",
         "filename": "Qwen3.5-0.8B-Q4_K_M.gguf",
         "sha256": "ac7c9d7a1b3e3695bb3bd50f8ceaa97f9c93e99ccc3d3d1a620301b6dd6d3d86"
+      },
+      "licenseClass": "open",
+      "docbench": {
+        "score": 42.7,
+        "band": 7,
+        "version": "0.2.1",
+        "families": {
+          "review": 20.2,
+          "writing": 56,
+          "visuals": 31.9,
+          "presentations": 70,
+          "study": 46.3,
+          "narration": 66.5
+        }
       }
     },
     {
@@ -30,6 +44,49 @@
         "revision": "3d55fac80935ae6456986ad2384b5cbcc4d6c948",
         "filename": "MiniCPM5-1B-Q4_K_M.gguf",
         "sha256": "81b64d05a23b17b34c475f42b3e72fbde62d4b92cc34541f7a8031d0752deafa"
+      },
+      "licenseClass": "open",
+      "docbench": {
+        "score": 37.3,
+        "band": 8,
+        "version": "0.2.1",
+        "families": {
+          "review": 14.4,
+          "writing": 54,
+          "visuals": 32.3,
+          "presentations": 63,
+          "study": 33.6,
+          "narration": 47.5
+        }
+      }
+    },
+    {
+      "name": "LFM3 (1.7B, Q4)",
+      "license": "LFM Open License v1.0",
+      "approxSizeBytes": 1049615680,
+      "contextWindow": 262144,
+      "source": {
+        "catalogId": "lfm3-1.7b-q4",
+        "catalogVersion": "1.0.1",
+        "sourceId": "bundled",
+        "huggingfaceRepo": "LiquidAI/LFM3-1.7B-GGUF",
+        "revision": "cd0c74c575b5c416f3011b5b4c298077f26ca8c2",
+        "filename": "LFM3-1.7B-QAD-Q4_0.gguf",
+        "sha256": "43a7d09a0e9cba91b63eb7052488b9564569bddfd65754d2e426465e572a7452"
+      },
+      "licenseClass": "custom-restricted",
+      "docbench": {
+        "score": 55.2,
+        "band": 5,
+        "version": "0.2.1",
+        "families": {
+          "review": 30.1,
+          "writing": 67.5,
+          "visuals": 70.1,
+          "presentations": 75.5,
+          "study": 57.2,
+          "narration": 12.6
+        }
       }
     },
     {
@@ -45,6 +102,20 @@
         "revision": "e05864f8066d874d5f85aaff007ae57a2a7d1efe",
         "filename": "Qwen3.5-2B-Q4_K_M.gguf",
         "sha256": "18c92228fc1498a02506f64593f7cc8cc02f406f732a217c6ba99ad1254d4f0b"
+      },
+      "licenseClass": "open",
+      "docbench": {
+        "score": 55.5,
+        "band": 5,
+        "version": "0.2.1",
+        "families": {
+          "review": 30.2,
+          "writing": 74,
+          "visuals": 50.5,
+          "presentations": 74.9,
+          "study": 55.5,
+          "narration": 71.3
+        }
       }
     },
     {
@@ -60,6 +131,20 @@
         "revision": "2079a22f3beaa4e306449978533478fe0522f4b3",
         "filename": "MiniCPM5-2B-Q4_K_M.gguf",
         "sha256": "ec2d5801640099e97d8d7e8003ad4d81f336e757811f03a26173dddf386602fd"
+      },
+      "licenseClass": "open",
+      "docbench": {
+        "score": 59.3,
+        "band": 5,
+        "version": "0.2.1",
+        "families": {
+          "review": 34.6,
+          "writing": 74.2,
+          "visuals": 60.1,
+          "presentations": 75.2,
+          "study": 59,
+          "narration": 74.9
+        }
       }
     },
     {
@@ -75,6 +160,20 @@
         "revision": "b22e29ebf6249a8c9fcdda36914743e9980595c4",
         "filename": "LFM2.5-2.6B-Q4_K_M.gguf",
         "sha256": "79fdf00351b46cf26f020aead28d01889886be87c55fa0eb907e6f9b00bfee14"
+      },
+      "licenseClass": "custom-restricted",
+      "docbench": {
+        "score": 46.6,
+        "band": 7,
+        "version": "0.2.1",
+        "families": {
+          "review": 40.4,
+          "writing": 71.5,
+          "visuals": 50.3,
+          "presentations": 0,
+          "study": 57.2,
+          "narration": 0
+        }
       }
     },
     {
@@ -90,6 +189,20 @@
         "revision": "5ab33fa94d1d04e903623ae72c95d1696f09f9e8",
         "filename": "Llama-3.2-3B-Instruct-Q4_K_M.gguf",
         "sha256": "6c1a2b41161032677be168d354123594c0e6e67d2b9227c84f296ad037c728ff"
+      },
+      "licenseClass": "custom-restricted",
+      "docbench": {
+        "score": 53.6,
+        "band": 6,
+        "version": "0.2.1",
+        "families": {
+          "review": 32.4,
+          "writing": 66.1,
+          "visuals": 56.3,
+          "presentations": 63.8,
+          "study": 52.9,
+          "narration": 67.7
+        }
       }
     },
     {
@@ -105,6 +218,20 @@
         "revision": "47a3d9699d7539606c83943d717fcea7bd9f6a19",
         "filename": "granite-4.2-3b-Q4_K_M.gguf",
         "sha256": "20e436143017578687f7f848225cc6c6038126c84149192229c7dff6e4e0f427"
+      },
+      "licenseClass": "open",
+      "docbench": {
+        "score": 58.7,
+        "band": 5,
+        "version": "0.2.1",
+        "families": {
+          "review": 33.5,
+          "writing": 73.6,
+          "visuals": 59.6,
+          "presentations": 77.8,
+          "study": 59,
+          "narration": 67
+        }
       }
     },
     {
@@ -120,6 +247,20 @@
         "revision": "66a399f68ddd113b06dff02fca9523e55465d11d",
         "filename": "gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf",
         "sha256": "e531007218dfab990486a5de7676a6932d6ea8dea233d1f698d7c21cf8a16889"
+      },
+      "licenseClass": "open",
+      "docbench": {
+        "score": 63.7,
+        "band": 4,
+        "version": "0.2.1",
+        "families": {
+          "review": 40,
+          "writing": 74.3,
+          "visuals": 69,
+          "presentations": 80.3,
+          "study": 64.9,
+          "narration": 71.6
+        }
       }
     },
     {
@@ -135,6 +276,20 @@
         "revision": "17562eefe9752007209148d5f7a6e275fc8d8077",
         "filename": "Nanbeige_Nanbeige4.2-3B-Q4_K_M.gguf",
         "sha256": "b92d2e35c9876b0c4bc671996360204f4149d0546c23d5954d5eb3b106c81f24"
+      },
+      "licenseClass": "open",
+      "docbench": {
+        "score": 70.7,
+        "band": 3,
+        "version": "0.2.2",
+        "families": {
+          "review": 52.5,
+          "writing": 82.9,
+          "visuals": 71.1,
+          "presentations": 83.1,
+          "study": 69.3,
+          "narration": 78.9
+        }
       }
     },
     {
@@ -150,6 +305,20 @@
         "revision": "86835bf9949e4d14d6860f7910b1340ad4f271a9",
         "filename": "Qwen3.5-4B-Q4_K_M.gguf",
         "sha256": "3874209241c9a397e2f62cd3f70f80fd2dfbf0dfccb6838416bdb48a714e8630"
+      },
+      "licenseClass": "open",
+      "docbench": {
+        "score": 70.7,
+        "band": 3,
+        "version": "0.2.1",
+        "families": {
+          "review": 46.5,
+          "writing": 84.8,
+          "visuals": 77,
+          "presentations": 85.5,
+          "study": 66.7,
+          "narration": 78.9
+        }
       }
     },
     {
@@ -165,6 +334,20 @@
         "revision": "8c5a9e4fd5482e2be20fe0bf013b4c262a8f4265",
         "filename": "gemma-4-E4B-it-qat-UD-Q4_K_XL.gguf",
         "sha256": "df0fd4ee07072c607c29a0a1cb4f98918426cca12f45a2776bdd6ee6d09a4de3"
+      },
+      "licenseClass": "open",
+      "docbench": {
+        "score": 72.6,
+        "band": 2,
+        "version": "0.2.1",
+        "families": {
+          "review": 52.3,
+          "writing": 85.8,
+          "visuals": 73.6,
+          "presentations": 85.7,
+          "study": 69.4,
+          "narration": 86.4
+        }
       }
     }
   ]

@@ -78,6 +78,7 @@ import {
   estimateWindowedKvLinearization,
   planDenseFfnOffload,
   planMoeOffload,
+  planWeightLoadMode,
   shedSlotsForGpuResidency,
 } from './offload-planner.js';
 import { LlamaCppProvider } from './provider.js';
@@ -940,6 +941,14 @@ export async function buildLlamaCppProvider(opts: {
   // back to the engine's own `--fit` / `-ngl auto`.
   let offloadDecision: PlannerOffloadDecision | undefined;
   let offloadBlockCount: number | undefined;
+  // Per-block bytes the offload plan can leave in system RAM, kept so each
+  // launch (including an OOM-degraded one) can price pinning them.
+  let offloadExpertBytesByLayer: number[] | undefined;
+  let offloadFfnBytesByLayer: number[] | undefined;
+  // The `--load-mode` the planner chose for the current launch, and whether
+  // a start with one has failed (later launches then keep llama.cpp's mmap).
+  let plannerLoadModeInUse: 'none' | 'dio' | undefined;
+  let plannerLoadModeFailed = false;
   // Broker-ledger reservation for this launch: resident weights + the KV
   // the engine will actually allocate at the granted window and cache
   // mode. Undefined when the GGUF is unreadable — the pool builder then
@@ -1017,6 +1026,8 @@ export async function buildLlamaCppProvider(opts: {
               ffnBytesByLayer: summary.denseFfnBytesByLayer,
             }
           : undefined;
+      offloadExpertBytesByLayer = split?.expertBytesByLayer;
+      offloadFfnBytesByLayer = denseFfnSplit?.ffnBytesByLayer;
       // ── RAM-aware context admission ──
       // The slot ceiling sizes the slot COUNT and the broker admits
       // WEIGHTS; neither asks whether one slot at the requested context
@@ -1642,7 +1653,20 @@ export async function buildLlamaCppProvider(opts: {
         );
         return true;
       }
-      if (panicKind !== 'cuda-out-of-memory' && panicKind !== 'vulkan-out-of-memory') {
+      // The planner's load mode is a speed choice, not something the launch
+      // needs, and the unbuffered reader is new in llama.cpp v1.0.0. A start
+      // that fails with it retries on the engine's mmap. A GPU out-of-memory
+      // is not about how the weights were read, so it keeps the ladder below.
+      const gpuOutOfMemory =
+        panicKind === 'cuda-out-of-memory' || panicKind === 'vulkan-out-of-memory';
+      if (plannerLoadModeInUse && !gpuOutOfMemory) {
+        plannerLoadModeFailed = true;
+        log.warn(
+          `[llama-cpp] ${panicKind ?? 'failed start'} while starting ${modelCatalogInfo?.id ?? 'model'} with --load-mode ${plannerLoadModeInUse} — retrying memory-mapped`,
+        );
+        return true;
+      }
+      if (!gpuOutOfMemory) {
         return false;
       }
       // A full-residency plan has no offload rung below it, so before this a
@@ -1728,10 +1752,44 @@ export async function buildLlamaCppProvider(opts: {
       // exe-dir-search-then-PATH-search resolve them all.
       const binDir = dirname(binary);
       const inheritedPath = process.env.PATH ?? '';
+      // Choose a load mode only for a placement the planner actually makes:
+      // an explicit offload setting shadows its flags, so its byte split
+      // would describe a different launch. A load mode someone set wins too.
+      const plannerPlacesWeights =
+        (config.llamaCppCpuMoe ?? resolvedManifestEngineConfig?.cpuMoe) === undefined &&
+        (config.llamaCppNCpuMoe ?? resolvedManifestEngineConfig?.nCpuMoe) === undefined &&
+        (config.llamaCppNGpuLayers ?? resolvedManifestEngineConfig?.nGpuLayers) === undefined;
+      const loadModeIsOpen =
+        config.llamaCppLoadMode === undefined &&
+        !config.llamaCppMlock &&
+        (resolvedManifestEngineConfig?.loadMode ?? 'auto') === 'auto';
+      const loadModePlan =
+        plannerPlacesWeights && loadModeIsOpen && !plannerLoadModeFailed
+          ? planWeightLoadMode({
+              decision: offloadDecision,
+              backend: llamaBackend,
+              platform: process.platform,
+              expertBytesByLayer: offloadExpertBytesByLayer,
+              ffnBytesByLayer: offloadFfnBytesByLayer,
+              ramBudgetBytes: brokerSnap?.enforced
+                ? brokerSnap.pools.ramShareBytes
+                : hostCapacity.ramShareBytes,
+              freeSystemRamBytes: availableSystemRamBytes(),
+            })
+          : undefined;
+      plannerLoadModeInUse = loadModePlan?.loadMode;
+      if (loadModePlan?.loadMode || loadModePlan?.hostBytes) {
+        log.info(
+          `[llama-cpp] weight loading (${modelCatalogInfo?.id ?? 'model'}): ${loadModePlan.reason}`,
+        );
+      }
       const resolvedAdvancedArgs = buildLlamaCppEngineArgs({
         config,
         perModel: resolvedManifestEngineConfig,
-        planner: offloadDecision,
+        planner:
+          offloadDecision && plannerLoadModeInUse
+            ? { ...offloadDecision, loadMode: plannerLoadModeInUse }
+            : offloadDecision,
         kvCacheType,
         slots,
         ggufHasMtp,
@@ -1741,7 +1799,7 @@ export async function buildLlamaCppProvider(opts: {
         // model output reaches `delta.content` for provider-side salvage.
         reasoningFormat: process.env.GEZEL_LLAMA_REASONING_FORMAT?.trim() || undefined,
         reasoningPreserve,
-        backend: llamaBuildMetadata?.backend ?? process.env.GEZEL_LLAMA_SERVER_BACKEND,
+        backend: llamaBackend,
         hostCpuCount: availableCpuCount(),
         containerCpuLimit: containerCpuLimit() ?? undefined,
       });
@@ -1875,6 +1933,7 @@ export async function buildLlamaCppProvider(opts: {
           ubatchSize: lastArgValue(resolvedAdvancedArgs, '--ubatch-size') ?? 'default',
           flashAttention: lastArgValue(resolvedAdvancedArgs, '--flash-attn') ?? 'default',
           threads: lastArgValue(resolvedAdvancedArgs, '--threads') ?? 'default',
+          loadMode: lastArgValue(resolvedAdvancedArgs, '--load-mode') ?? 'default',
           specType: lastArgValue(resolvedAdvancedArgs, '--spec-type') ?? 'default',
           specDraftModel: basename(
             lastArgValue(resolvedAdvancedArgs, '--spec-draft-model') ?? 'none',

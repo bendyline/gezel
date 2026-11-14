@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import type {
   MobileModel,
   MobileModelDownload,
@@ -6,7 +7,12 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 import type { GezelRuntimePlugin } from './definitions.js';
 import { createRuntimeEmbedding } from './embedding.js';
-import { catalogFit, createMobileModelManager } from './model-manager.js';
+import {
+  catalogFit,
+  createMobileModelManager,
+  mobileCatalog,
+  mobileCatalogVersion,
+} from './model-manager.js';
 import { connectRuntime } from './transport.js';
 
 const source = {
@@ -213,6 +219,18 @@ describe('mobile model manager', () => {
     expect(listed.get('catalog:plain')).not.toHaveProperty('docbench');
     expect(listed.get('catalog:plain')).not.toHaveProperty('docbench_recommendation');
     await manager.close();
+  });
+  it('ships the pinned Gilde snapshot, with the scores phones rank downloads by', () => {
+    // `pnpm gilde:update` refreshes the snapshot. A bump that skipped it left
+    // phones on Gilde 0.1.80, with no docbench score to show or rank (2026-11-14).
+    const catalogPackage = JSON.parse(
+      readFileSync(new URL('../../catalog/package.json', import.meta.url), 'utf8'),
+    ) as { devDependencies: Record<string, string> };
+    expect(mobileCatalogVersion).toBe(catalogPackage.devDependencies['@bendyline/gilde']);
+    // Refreshing against a stale core build drops every score without an error.
+    expect(mobileCatalog.some((entry) => entry.docbench && entry.licenseClass === 'open')).toBe(
+      true,
+    );
   });
 
   it('validates installed identity after completion and emits progress', async () => {

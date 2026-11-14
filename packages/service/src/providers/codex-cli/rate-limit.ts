@@ -19,6 +19,13 @@
  * a rate-limit signal: waiting a minute will not fix it, and the quota path
  * reports it.
  *
+ * Codex reconnects for transport trouble the same way ("Reconnecting... 2/5
+ * (request timed out)", "(stream disconnected before completion: Connection
+ * reset by peer)", "(workspace routing discovery timed out)").
+ * {@link codexReconnectSignal} reads those: the wait is not the turn's doing
+ * either, so it holds the budget too, but it narrows no queue (2026-11-13: a
+ * network blip turned forty reviews into 180 s timeouts mid-reconnect).
+ *
  * Related: invoker.ts, provider.ts, core runtime/provider-rate-limit.ts.
  */
 
@@ -39,4 +46,12 @@ export function codexRateLimitSignal(message: string): CodexRateLimitSignal | nu
   const retry = RECONNECTING.exec(message);
   if (!retry) return { retrying: false };
   return { retrying: true, attempt: Number(retry[1]), maxAttempts: Number(retry[2]) };
+}
+
+/** Codex is retrying a request (`Reconnecting... n/m (…)`), for any reason. */
+export function codexReconnectSignal(
+  message: string,
+): { attempt: number; maxAttempts: number } | null {
+  const retry = RECONNECTING.exec(message);
+  return retry ? { attempt: Number(retry[1]), maxAttempts: Number(retry[2]) } : null;
 }
