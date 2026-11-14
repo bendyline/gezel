@@ -1,6 +1,6 @@
 {
   "name": "gezel-cli",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Gezel on the command line, under its short name so `npx gezel-cli` works. Assemble a team of AI helpers and put them to work from your terminal.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "cli", "terminal", "tui"],
