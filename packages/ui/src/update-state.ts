@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import type { UpdateState } from './api.js';
 
 /**
@@ -58,6 +58,60 @@ function snapshot(): UpdateState | null {
 
 export function useUpdateState(): UpdateState | null {
   return useSyncExternalStore(subscribe, snapshot);
+}
+
+export interface UpdateActions {
+  /** The shell call in flight, if any. */
+  busy: 'install' | 'restart' | null;
+  error: string | null;
+  install(): void;
+  restart(): void;
+}
+
+/**
+ * The install and restart keys shared by Settings → About and the Home
+ * banner. `busy` covers the shell call itself. On macOS the install hands off
+ * to Installer.app and the update state reports what happens next, so the key
+ * comes back once the installer is open. A Windows install and every restart
+ * quit the app, so their "Restarting…" stays until the window goes.
+ */
+export function useUpdateActions(platform?: string): UpdateActions {
+  const [busy, setBusy] = useState<UpdateActions['busy']>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const run = (action: 'install' | 'restart'): void => {
+    const bridge = window.__GEZEL__?.update;
+    const restart = bridge?.restart;
+    const call =
+      action === 'install'
+        ? bridge && (() => bridge.install())
+        : restart && (() => restart());
+    setError(null);
+    if (!call) {
+      setError(
+        action === 'install'
+          ? 'Installing updates needs the Gezel desktop app.'
+          : 'Quit Gezel and open it again to finish updating.',
+      );
+      return;
+    }
+    setBusy(action);
+    void call()
+      .then((result) => {
+        if (!result.ok) {
+          setError(result.error);
+          setBusy(null);
+        } else if (action === 'install' && platform === 'darwin') {
+          setBusy(null);
+        }
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : String(err));
+        setBusy(null);
+      });
+  };
+
+  return { busy, error, install: () => run('install'), restart: () => run('restart') };
 }
 
 /** Test-only: forget the cached state so the next mount re-reads the bridge. */

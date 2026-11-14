@@ -17,6 +17,14 @@ export type UpdateState =
       bytesPerSecond?: number;
     }
   | { kind: 'ready'; version: string }
+  /** macOS: Installer.app has the verified package open; Gezel waits for it to finish. */
+  | { kind: 'installing'; version: string }
+  /**
+   * A newer release is installed on disk and its installer has finished, but
+   * this process still runs the old one. `restarting` is true when Gezel
+   * opened that installer itself and is relaunching into the new release.
+   */
+  | { kind: 'installed'; version: string; restarting: boolean }
   | {
       kind: 'error';
       stage: 'check' | 'download' | 'install';
@@ -139,6 +147,14 @@ export function shouldPublishDownloadState(
 /** Attribute a generic updater error to the lifecycle phase it interrupted. */
 export function updateErrorStage(state: UpdateState | null): 'check' | 'download' | 'install' {
   if (state?.kind === 'downloading') return 'download';
-  if (state?.kind === 'ready') return 'install';
+  if (state?.kind === 'ready' || state?.kind === 'installing') return 'install';
   return 'check';
+}
+
+/**
+ * Once an installer is running or has finished, a fresh check could only
+ * restage the package that is already being installed.
+ */
+export function updateCheckWouldInterrupt(state: UpdateState | null): boolean {
+  return state?.kind === 'installing' || state?.kind === 'installed';
 }
