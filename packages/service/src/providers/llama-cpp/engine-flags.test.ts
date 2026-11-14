@@ -193,6 +193,36 @@ describe('buildLlamaCppEngineArgs — v0.4.0 model loading', () => {
     expect(argValue(args, '--load-mode')).toBe('mlock');
     expect(has(args, '--mlock')).toBe(false);
   });
+
+  it("applies the planner's pinned mode over a manifest that only says auto", () => {
+    const args = buildLlamaCppEngineArgs({
+      config: {},
+      perModel: { loadMode: 'auto' },
+      planner: { nGpuLayers: -1, nCpuMoe: 23, loadMode: 'none' },
+    });
+    expect(argValue(args, '--load-mode')).toBe('none');
+  });
+
+  it('keeps a manifest auto when the planner has no load mode', () => {
+    const args = buildLlamaCppEngineArgs({ config: {}, perModel: { loadMode: 'auto' } });
+    expect(argValue(args, '--load-mode')).toBe('auto');
+  });
+
+  it("lets Settings and a specific manifest mode win over the planner's", () => {
+    const planner = { nGpuLayers: -1, nCpuMoe: 23, loadMode: 'none' as const };
+    expect(
+      argValue(
+        buildLlamaCppEngineArgs({ config: { llamaCppLoadMode: 'mmap' }, planner }),
+        '--load-mode',
+      ),
+    ).toBe('mmap');
+    expect(
+      argValue(
+        buildLlamaCppEngineArgs({ config: {}, perModel: { loadMode: 'mlock' }, planner }),
+        '--load-mode',
+      ),
+    ).toBe('mlock');
+  });
 });
 
 describe('buildLlamaCppEngineArgs — SWA full cache (opt-in)', () => {

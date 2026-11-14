@@ -396,6 +396,112 @@ export function degradeDenseFfnOffloadDecision(
   return null;
 }
 
+/** GPU builds whose backend offers a pinned host buffer type for CPU-placed weights. */
+const PINNED_HOST_BACKENDS = new Set(['cuda', 'rocm', 'vulkan']);
+
+/** System RAM left free beside pinned weights, which the OS can never page out. */
+const PINNED_HOST_MARGIN_BYTES = 4 * 1024 ** 3;
+
+export interface WeightLoadModeInput {
+  /** The placement the launch will use (after any OOM degrade). */
+  decision: MoeOffloadDecision | undefined;
+  /** llama-server build backend (`cuda`, `rocm`, `vulkan`, `metal`, `cpu`). */
+  backend: string | undefined;
+  /** `process.platform` of the host the engine runs on. */
+  platform: NodeJS.Platform;
+  /** Routed-expert bytes per block, from the GGUF split. */
+  expertBytesByLayer?: number[] | undefined;
+  /** Dense FFN bytes per block, from the GGUF split. */
+  ffnBytesByLayer?: number[] | undefined;
+  /** Capacity-policy share of system RAM available to local engines. */
+  ramBudgetBytes?: number | undefined;
+  /** Live reclaimable system RAM. */
+  freeSystemRamBytes?: number | undefined;
+  marginBytes?: number;
+}
+
+export interface WeightLoadModeDecision {
+  /**
+   * `--load-mode` for this launch: `none` reads weights into memory, with
+   * CPU-placed ones in the GPU backend's pinned host buffer; `dio` does the
+   * same through unbuffered reads. Undefined leaves llama.cpp's mmap default.
+   */
+  loadMode?: 'none' | 'dio';
+  /** Bytes the plan keeps in system RAM. */
+  hostBytes?: number;
+  reason: string;
+}
+
+/**
+ * How a GPU launch should read its weights, when the planner placed them.
+ *
+ * Weights an offload plan leaves in system RAM are read into pinned memory
+ * instead of being memory-mapped. Large batches upload CPU-placed weights to
+ * the GPU every microbatch, and the GPU backends copy pinned memory at full
+ * DMA speed but stage mapped, pageable memory through a bounce buffer.
+ * Measured with llama.cpp v1.0.0 on an R9700 (2026-11-14), the planner's own
+ * splits pinned against mmap: prefill 2.5-4.5x on MoE splits (ROCm and
+ * Vulkan), +33% on a dense `--n-cpu-ffn` split, 2.6x on Qwen 3.8 Flash Next
+ * IQ4, and decode unchanged in every case. Pinned memory cannot be paged
+ * out, so this applies only when the exact host bytes are known (`-ngl all`
+ * with a tensor-level split) and they fit both the engines' RAM share and
+ * the RAM free now, with room to spare; otherwise the weights stay mapped
+ * and the OS may evict them under pressure. A pinned allocation that fails
+ * falls back to ordinary memory inside llama.cpp.
+ *
+ * On Windows the read goes through v1.0.0's unbuffered loader (`dio`), which
+ * pins the same way and loaded 17 GB models that fit the GPU in 3.6 s
+ * against 8-11 s memory-mapped (cold or warm page cache), and Flash Next's
+ * offload plan in 16 s against 26 s. A model that fits the card gets it too:
+ * only its token embeddings stay on the CPU. Elsewhere unbuffered reads are
+ * unmeasured, so full residency keeps mmap there.
+ */
+export function planWeightLoadMode(input: WeightLoadModeInput): WeightLoadModeDecision {
+  const { decision, backend, platform } = input;
+  if (!backend || !PINNED_HOST_BACKENDS.has(backend)) {
+    return { reason: `${backend ?? 'unknown'} backend — weights stay memory-mapped` };
+  }
+  const unbuffered = platform === 'win32';
+  if (decision?.fullGpuResidency) {
+    return unbuffered
+      ? { loadMode: 'dio', reason: 'model fits the GPU — --load-mode dio reads it unbuffered' }
+      : { reason: 'model fits the GPU — weights stay memory-mapped' };
+  }
+  if (!decision || decision.nGpuLayers !== -1) {
+    return { reason: 'no exact offload plan — weights stay memory-mapped' };
+  }
+  const prefixBytes = (layers: number[] | undefined, n: number) =>
+    (layers ?? []).slice(0, Math.max(0, n)).reduce((sum, value) => sum + value, 0);
+  let hostBytes = 0;
+  if (decision.cpuMoe) {
+    hostBytes = prefixBytes(input.expertBytesByLayer, input.expertBytesByLayer?.length ?? 0);
+  } else if (typeof decision.nCpuMoe === 'number') {
+    hostBytes = prefixBytes(input.expertBytesByLayer, decision.nCpuMoe);
+  } else if (typeof decision.nCpuFfn === 'number') {
+    hostBytes = prefixBytes(input.ffnBytesByLayer, decision.nCpuFfn);
+  }
+  if (hostBytes <= 0) {
+    return { reason: 'plan keeps no sized weights in system RAM — weights stay memory-mapped' };
+  }
+  const margin = input.marginBytes ?? PINNED_HOST_MARGIN_BYTES;
+  const ramLimit = Math.min(
+    input.ramBudgetBytes ?? Number.POSITIVE_INFINITY,
+    input.freeSystemRamBytes ?? Number.POSITIVE_INFINITY,
+  );
+  if (!Number.isFinite(ramLimit) || hostBytes + margin > ramLimit) {
+    return {
+      hostBytes,
+      reason: `pinning ${gib(hostBytes)} of host weights needs ${gib(hostBytes + margin)} of system RAM, above the safe ${Number.isFinite(ramLimit) ? gib(ramLimit) : 'unknown'} pool — weights stay memory-mapped`,
+    };
+  }
+  const loadMode = unbuffered ? 'dio' : 'none';
+  return {
+    loadMode,
+    hostBytes,
+    reason: `${gib(hostBytes)} of host weights fit the ${gib(ramLimit)} RAM pool — --load-mode ${loadMode} pins them for full-speed uploads`,
+  };
+}
+
 /**
  * Room an extra engine slot must leave on the card. Other programs' graphics
  * memory moves while a model runs (a browser, a video, the desktop), and a

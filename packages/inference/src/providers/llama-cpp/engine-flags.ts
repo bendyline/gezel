@@ -81,6 +81,8 @@ export interface PlannerOffloadDecision {
   nCpuFfn?: number;
   /** Every weight fits the GPU pool (see `MoeOffloadDecision.fullGpuResidency`). */
   fullGpuResidency?: true;
+  /** `--load-mode` the planner chose for this launch (see `planWeightLoadMode`). */
+  loadMode?: 'none' | 'dio';
   /** Human-readable reason, for the decision log (not emitted as a flag). */
   reason?: string;
 }
@@ -294,8 +296,15 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   // ── Model loading (`--load-mode` / `--lazy-mode`) ────────────────
   // v0.4.0 consolidates mmap/mlock/direct-I/O under --load-mode. Preserve
   // the old `llamaCppMlock` setting without emitting its deprecated flag.
+  // A manifest `auto` is the engine's own default, not an opinion, so the
+  // planner's pinned mode for an offload plan still applies over it.
+  const manifestLoadMode = perModel?.loadMode === 'auto' ? undefined : perModel?.loadMode;
   const loadMode =
-    config.llamaCppLoadMode ?? (config.llamaCppMlock ? 'mlock' : undefined) ?? perModel?.loadMode;
+    config.llamaCppLoadMode ??
+    (config.llamaCppMlock ? 'mlock' : undefined) ??
+    manifestLoadMode ??
+    planner?.loadMode ??
+    perModel?.loadMode;
   if (loadMode) args.push('--load-mode', loadMode);
   const lazyMode = config.llamaCppLazyMode ?? perModel?.lazyMode;
   if (lazyMode) args.push('--lazy-mode', lazyMode);
