@@ -561,6 +561,32 @@ describe('readGgufSummary — tensor sizing (includeTensorSizes)', () => {
     expect(s.denseFfnBytesByLayer).toEqual([]);
   });
 
+  it('counts fused gate_up and channel experts the way llama.cpp places them', () => {
+    // Gemma 4 26B's layout: a fused `ffn_gate_up_exps` beside `ffn_down_exps`
+    // and its scale, plus the always-active dense FFN and router. llama.cpp's
+    // LLM_FFN_EXPS_REGEX moves all three expert tensors under --cpu-moe.
+    const blob = new GgufBuilder()
+      .header(3)
+      .metaString('general.architecture', 'gemma4')
+      .metaU32('gemma4.expert_count', 128)
+      .metaU32('gemma4.block_count', 2)
+      .tensor('token_embd.weight', 1024)
+      .tensor('blk.0.ffn_gate.weight', 512)
+      .tensor('blk.0.ffn_gate_inp.weight', 256)
+      .tensor('blk.0.ffn_gate_up_exps.weight', 8192)
+      .tensor('blk.0.ffn_down_exps.weight', 4096)
+      .tensor('blk.0.ffn_down_exps.scale', 32)
+      .tensor('blk.1.ffn_up_chexps.weight', 2048)
+      .finish();
+    const path = join(dir, 'fused-experts.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path, { includeTensorSizes: true });
+    expect(s.expertBytesTotal).toBe(8192 + 4096 + 32 + 2048);
+    expect(s.nonExpertBytes).toBe(1024 + 512 + 256);
+    expect(s.expertBytesByLayer).toEqual([8192 + 4096 + 32, 2048]);
+  });
+
   it('reports zero expert bytes and sizes dense FFN by layer for a dense model', () => {
     const blob = new GgufBuilder()
       .header(3)

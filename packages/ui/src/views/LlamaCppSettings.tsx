@@ -1078,9 +1078,12 @@ export function LlamaCppSettings({ config, onConfigChanged, health, title }: Pro
         </div>
         <p className="muted small" style={{ marginTop: '0.25rem', marginLeft: '10rem' }}>
           Controls how model files enter memory. Auto normally uses memory mapping and is the best
-          general choice. Locked modes resist swapping but hold RAM away from other apps; Direct I/O
-          is for storage and platform troubleshooting. Existing <code>llamaCppMlock</code> settings
-          are translated to the new v0.4.0 load mode without a deprecation warning.
+          general choice. When part of a model has to stay in system RAM because the graphics card
+          is too small, Auto reads that part into memory the card can copy from directly, which
+          reads long prompts several times faster, provided enough RAM is free. Locked modes resist
+          swapping but hold RAM away from other apps; Direct I/O is for storage and platform
+          troubleshooting. Existing <code>llamaCppMlock</code> settings are translated to the new
+          v0.4.0 load mode without a deprecation warning.
         </p>
 
         <div className="new-row" style={{ marginTop: '0.75rem', alignItems: 'center' }}>

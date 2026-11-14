@@ -619,11 +619,15 @@ function readBoolArray(r: Reader, type: GgufValueType): boolean[] | undefined {
 }
 
 /**
- * The tensors `--cpu-moe` / `--n-cpu-moe` keep in system RAM — mirrors
- * llama.cpp's own buffer-type override pattern (`common/arg.cpp`), so the
- * planner's byte math matches what the engine will actually place.
+ * The tensors `--cpu-moe` / `--n-cpu-moe` keep in system RAM. Mirrors
+ * llama.cpp's `LLM_FFN_EXPS_REGEX` (`common/common.h`) exactly, so the
+ * planner's byte math matches what the engine will actually place. The
+ * fused `ffn_gate_up_exps` form matters: Gemma 4 26B ships it, and an
+ * earlier copy without it counted ~8 GiB of that model's experts as
+ * GPU-resident residue, so every offload plan for it on a small card was
+ * wrong. Upstream's own converters merge Qwen 3.5 experts the same way.
  */
-const EXPERT_TENSOR_RE = /\.ffn_(?:up|down|gate)_exps\./;
+const EXPERT_TENSOR_RE = /\.ffn_(?:up|down|gate|gate_up)_(?:ch)?exps/;
 /** Mirrors llama.cpp's `LLM_FFN_DENSE_REGEX`. */
 const DENSE_FFN_TENSOR_RE = /\.ffn_(?:up|down|gate)\./;
 const BLOCK_INDEX_RE = /^blk\.(\d+)\./;

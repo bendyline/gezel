@@ -2265,7 +2265,17 @@ export class TaskManager {
   ): Promise<CompleteStepOutcome> {
     const key = `${projectId}\u0000${num}\u0000${stepId}`;
     const existing = this.inFlightStepCompletions.get(key);
-    if (existing) return existing;
+    if (existing) {
+      // Share an advance, never a rejection. A completion that arrives while
+      // another is still being judged may follow a write the earlier one
+      // never saw: a Codex turn fired `advance_task_step` beside a write
+      // that failed, wrote the deliverable again and advanced again, and both
+      // calls got the first verdict, "output.json not found" (2026-11-13). The
+      // step then idled until the stall sweep paused the task. Judge it anew.
+      const earlier = await existing.catch(() => null);
+      if (earlier && earlier.status !== 'held') return earlier;
+      return this.completeStepChecked(projectId, num, stepId, next, opts);
+    }
 
     const pending = this.completeStepInternal(projectId, num, stepId, next, 0, opts ?? {});
     this.inFlightStepCompletions.set(key, pending);

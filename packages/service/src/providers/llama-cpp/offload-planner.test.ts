@@ -6,11 +6,106 @@ import {
   estimateWindowedKvLinearization,
   planDenseFfnOffload,
   planMoeOffload,
+  planWeightLoadMode,
   shedSlotsForGpuResidency,
 } from '@bendyline/gezel-inference/internal/providers/llama-cpp/offload-planner';
 import { describe, expect, it } from 'vitest';
 
 const GiB = 1024 ** 3;
+
+describe('planWeightLoadMode', () => {
+  const experts = Array.from({ length: 48 }, () => 1 * GiB);
+  const roomy = { ramBudgetBytes: 48 * GiB, freeSystemRamBytes: 40 * GiB };
+
+  it('pins the expert prefix --n-cpu-moe leaves in RAM when it fits', () => {
+    const d = planWeightLoadMode({
+      decision: { nGpuLayers: -1, nCpuMoe: 23 },
+      backend: 'rocm',
+      platform: 'linux',
+      expertBytesByLayer: experts,
+      ...roomy,
+    });
+    expect(d.loadMode).toBe('none');
+    expect(d.hostBytes).toBe(23 * GiB);
+  });
+
+  it('reads pinned weights unbuffered on Windows', () => {
+    const d = planWeightLoadMode({
+      decision: { nGpuLayers: -1, nCpuMoe: 23 },
+      backend: 'vulkan',
+      platform: 'win32',
+      expertBytesByLayer: experts,
+      ...roomy,
+    });
+    expect(d.loadMode).toBe('dio');
+  });
+
+  it('prices --cpu-moe as every expert and the dense prefix as its FFN layers', () => {
+    const all = planWeightLoadMode({
+      decision: { nGpuLayers: -1, cpuMoe: true },
+      backend: 'cuda',
+      platform: 'linux',
+      expertBytesByLayer: experts.slice(0, 30),
+      ...roomy,
+    });
+    expect(all.hostBytes).toBe(30 * GiB);
+    expect(all.loadMode).toBe('none');
+    const dense = planWeightLoadMode({
+      decision: { nGpuLayers: -1, nCpuFfn: 4 },
+      backend: 'vulkan',
+      platform: 'linux',
+      ffnBytesByLayer: [GiB, GiB, GiB, GiB, GiB],
+      ...roomy,
+    });
+    expect(dense.hostBytes).toBe(4 * GiB);
+    expect(dense.loadMode).toBe('none');
+  });
+
+  it('leaves the weights mapped when pinning would crowd system RAM', () => {
+    const d = planWeightLoadMode({
+      decision: { nGpuLayers: -1, nCpuMoe: 30 },
+      backend: 'rocm',
+      platform: 'win32',
+      expertBytesByLayer: experts,
+      ramBudgetBytes: 48 * GiB,
+      freeSystemRamBytes: 32 * GiB,
+    });
+    expect(d.loadMode).toBeUndefined();
+    expect(d.reason).toMatch(/memory-mapped/);
+  });
+
+  it('reads a model that fits the GPU unbuffered on Windows only', () => {
+    const fits = { decision: { fullGpuResidency: true as const }, backend: 'rocm' };
+    expect(planWeightLoadMode({ ...fits, platform: 'win32' }).loadMode).toBe('dio');
+    expect(planWeightLoadMode({ ...fits, platform: 'linux' }).loadMode).toBeUndefined();
+  });
+
+  it('never chooses without a GPU backend, an exact plan, or a RAM reading', () => {
+    const base = { expertBytesByLayer: experts, ...roomy, platform: 'win32' as const };
+    expect(
+      planWeightLoadMode({ ...base, decision: { cpuMoe: true }, backend: 'rocm' }).loadMode,
+    ).toBeUndefined();
+    expect(
+      planWeightLoadMode({ ...base, decision: { fullGpuResidency: true }, backend: 'metal' })
+        .loadMode,
+    ).toBeUndefined();
+    expect(
+      planWeightLoadMode({ ...base, decision: { fullGpuResidency: true }, backend: 'cpu' })
+        .loadMode,
+    ).toBeUndefined();
+    expect(
+      planWeightLoadMode({
+        decision: { nGpuLayers: -1, nCpuMoe: 4 },
+        backend: 'rocm',
+        platform: 'linux',
+        expertBytesByLayer: experts,
+      }).loadMode,
+    ).toBeUndefined();
+    expect(planWeightLoadMode({ ...base, decision: undefined, backend: 'cuda' }).loadMode).toBe(
+      undefined,
+    );
+  });
+});
 
 describe('planMoeOffload', () => {
   it('does nothing when there is no GPU', () => {
