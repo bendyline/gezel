@@ -1,3 +1,10 @@
+## gezeld [1.0.5](https://github.com/bendyline/gezel/compare/gezeld%401.0.4...gezeld%401.0.5) (2026-11-14)
+
+
+### Dependencies
+
+* **@bendyline/gezel-service:** upgraded to 1.3.3
+
 ## gezeld [1.0.4](https://github.com/bendyline/gezel/compare/gezeld%401.0.3...gezeld%401.0.4) (2026-11-14)
 
 
