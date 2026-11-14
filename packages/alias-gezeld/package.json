@@ -1,6 +1,6 @@
 {
   "name": "gezeld",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "The Gezel background service, gezeld, under its short name. Same program as @bendyline/gezel-service.",
   "license": "MIT",
   "keywords": ["gezel", "ai", "agents", "local-first", "daemon", "server"],
