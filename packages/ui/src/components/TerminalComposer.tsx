@@ -311,22 +311,6 @@ export function TerminalComposer({
         {toolbarTrailing}
       </div>
       {contextRow}
-      {/* Fire sits where chat's Send sits — its own row between the context
-       * strip and the typing surface, on the same accent recipe and the same
-       * submit glyph — so the primary action doesn't move when the user flips
-       * compose mode. It used to ride at the right of the toolbar, where it
-       * read as a fourth gallery key. */}
-      <div className="terminal-composer-fire-row">
-        <button
-          type="button"
-          className="terminal-fire-btn"
-          aria-label="Fire"
-          title="Fire — run this command (Enter)"
-          onClick={fire}
-        >
-          <SubmitArrow />
-        </button>
-      </div>
       <div className="terminal-composer-input-wrap">
         <span className="terminal-prompt-sigil">&gt;</span>
         <Suspense fallback={<div className="terminal-composer-input" aria-busy="true" />}>
@@ -341,6 +325,22 @@ export function TerminalComposer({
             onChatEscape={onChatEscape}
           />
         </Suspense>
+      </div>
+      {/* Fire sits where chat's Send sits — its own row under the typing
+       * surface, on the same accent recipe and the same submit glyph — so the
+       * primary action doesn't move when the user flips compose mode. It used
+       * to ride at the right of the toolbar, where it read as a fourth gallery
+       * key. */}
+      <div className="terminal-composer-fire-row">
+        <button
+          type="button"
+          className="terminal-fire-btn"
+          aria-label="Fire"
+          title="Fire — run this command (Enter)"
+          onClick={fire}
+        >
+          <SubmitArrow />
+        </button>
       </div>
       {error && <div className="terminal-error-banner">{error}</div>}
     </div>

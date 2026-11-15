@@ -252,6 +252,36 @@ test('two bundled versions of a carrier each require their exact reviewed record
   );
 });
 
+test('only a linked-workspace carrier version may be listed while nothing bundles it', async (t) => {
+  const dir = await tempDir(t, 'gezel-bundled-license-linked-');
+  const { surfaces } = await fixture(dir);
+  const { packages, embedded } = await bundledPackagesFromSourceMaps(surfaces);
+  const entries = [betaCarrier()['@scope/beta'], betaCarrier('2.1.0')['@scope/beta']];
+
+  const stale = await loadEmbeddedLicenses(
+    await registry(join(dir, 'a'), { '@scope/beta': entries }),
+  );
+  assert.throws(
+    () => embeddedLicenseRecords(packages, embedded, stale),
+    /lists @scope\/beta@2\.1\.0, which the service bundles no longer inline anything from/,
+  );
+
+  entries[1] = { ...entries[1], linkedWorkspace: 'sibling: pins beta 2.1.0' };
+  const linked = await loadEmbeddedLicenses(
+    await registry(join(dir, 'b'), { '@scope/beta': entries }),
+  );
+  assert.deepEqual(
+    embeddedLicenseRecords(packages, embedded, linked).map((record) => record.embeddedIn),
+    ['@scope/beta@2.0.0'],
+  );
+
+  entries[1] = { ...entries[1], linkedWorkspace: '' };
+  await assert.rejects(
+    () => registry(join(dir, 'c'), { '@scope/beta': entries }).then(loadEmbeddedLicenses),
+    /linkedWorkspace must say which checkout/,
+  );
+});
+
 for (const lineEnding of ['\n', '\r\n']) {
   test(`staged license digests match the shipped bytes after checkout conversion to ${JSON.stringify(lineEnding)}`, async (t) => {
     const dir = await tempDir(t, 'gezel-bundled-license-endings-');

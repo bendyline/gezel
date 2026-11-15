@@ -1295,13 +1295,21 @@
 }
 
 .deliverable-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
   padding: 0.3rem 0.8rem;
   border-radius: var(--radius-md);
   font-size: var(--text-sm);
 }
 
+/* Stated outright: FontAwesome's own `.fa-solid` display arrives with a lazily
+   loaded editor chunk, so leaving it to cascade order made the icon appear
+   or vanish depending on what had loaded. */
 .deliverable-card-action-icon {
-  display: none;
+  display: inline-block;
+  line-height: 1;
 }
 
 .deliverable-card-open {
@@ -1455,8 +1463,8 @@
 }
 
 /* The compose frame every desktop chat shares with project chat (which draws
-   its own in terminal.css): a warm header band grouping recipient + thread
-   picker + toolbar above the lighter draft, inside one rounded frame. The
+   its own in terminal.css): a warm band for recipient + thread picker above
+   the lighter draft and the toolbar band below it, inside one rounded frame. The
    inset is the timeline's 0.75rem content gutter on both sides, so the frame
    lines up with the bubbles above it. Home, per-gezel chat, and the task,
    craftbook and page chats all wear it; a task chat without it read as a loose
@@ -1471,6 +1479,31 @@
   border: 1px solid var(--compose-frame-border);
   border-radius: var(--radius-md);
   background: var(--compose-frame-bg);
+  transition: border-color 140ms ease-out;
+}
+
+/* While the person is working in it, the frame's edge turns full copper, the
+   color of Send, so the box being typed into is the one that is lit. Project
+   chat's frame does the same in terminal.css. */
+:is(.home-workshop-conversation, .gezel-chat-tab, .task-detail-chat:not(.document-chat-body))
+  .chat-composer:focus-within {
+  border-color: var(--accent);
+}
+
+/* With the toolbar closing the frame, the composer's bottom padding sat under
+   it alone: 2px over Send and 6px under. Spend those 4px inside the band
+   instead, half above and half below, so Send sits centered between the seam
+   and the frame edge at the same overall height. Project chat carries no such
+   padding, and a build whose toolbar is still on top keeps it. */
+:is(.home-workshop-conversation, .gezel-chat-tab, .task-detail-chat:not(.document-chat-body))
+  .chat-composer:has(.squisq-editor-shell[data-toolbar-position="bottom"]) {
+  padding-bottom: 0;
+}
+
+:is(.home-workshop-conversation, .gezel-chat-tab, .task-detail-chat:not(.document-chat-body))
+  .squisq-editor-shell[data-toolbar-position="bottom"]
+  .squisq-toolbar {
+  padding-block: 2px;
 }
 
 .chat-composer {
@@ -2193,14 +2226,16 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   overscroll-behavior: contain;
 }
 
-/* The composer toolbar is supporting chrome, not the main event. Set it one
-   pixel inside the thematic compose frame and pull its fill almost all the
-   way back to paper while preserving the rail, its Send/Stop slot, and the
-   seam above the draft. */
+/* The composer toolbar is supporting chrome, not the main event. It sits under
+   the draft (`toolbarPosition: 'bottom'`), one pixel inside the thematic
+   compose frame, with its fill pulled almost all the way back to paper while
+   preserving the rail, its Send/Stop slot, and the seam between draft and
+   toolbar. Squisq draws that seam on whichever side faces the draft, so only
+   its color is set here. */
 .chat-editor-wrap .squisq-editor-shell[data-host-mode="chat"] .squisq-editor-header {
   margin-inline: 1px;
   background: transparent;
-  border-bottom-color: color-mix(in srgb, var(--border) 82%, transparent);
+  border-color: color-mix(in srgb, var(--border) 82%, transparent);
 }
 
 .chat-editor-wrap .squisq-editor-shell[data-host-mode="chat"] .squisq-toolbar {

@@ -1417,10 +1417,6 @@ button.bench-step-foot:disabled {
   padding: 0.3rem 0.5rem;
 }
 
-.task-deliverable .deliverable-card-action-icon {
-  display: inline-block;
-}
-
 .task-deliverable .deliverable-card-action-label {
   display: none;
 }

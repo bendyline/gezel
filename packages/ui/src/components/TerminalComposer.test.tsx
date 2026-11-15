@@ -59,7 +59,7 @@ describe('TerminalComposer', () => {
     vi.mocked(api.runTerminalCommand).mockResolvedValue({} as never);
   });
 
-  it('fires the current command from its own row over the entry', async () => {
+  it('fires the current command from its own row under the entry', async () => {
     const { container } = render(
       <TerminalComposer projectId="project-1" workingDir="/work/project" />,
     );
@@ -68,11 +68,16 @@ describe('TerminalComposer', () => {
     // finding it by role here is also what guards that label from going away.
     const fire = screen.getByRole('button', { name: 'Fire' });
 
-    // Fire belongs in the row above the entry (where chat puts Send), not back
+    // Fire belongs in the row under the entry (where chat puts Send), not back
     // in the toolbar beside the galleries.
-    expect(container.querySelector('.terminal-composer-fire-row')).toContainElement(fire);
+    const fireRow = container.querySelector('.terminal-composer-fire-row');
+    expect(fireRow).toContainElement(fire);
     expect(fire).toHaveClass('terminal-fire-btn');
     expect(container.querySelector('.terminal-composer-toolbar')).not.toContainElement(fire);
+    const entry = container.querySelector('.terminal-composer-input-wrap');
+    expect(
+      entry && fireRow && entry.compareDocumentPosition(fireRow) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
 
     fireEvent.change(editor, { target: { value: '  pnpm test  ' } });
     fireEvent.click(fire);

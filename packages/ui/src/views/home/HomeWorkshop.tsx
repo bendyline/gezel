@@ -468,14 +468,11 @@ export function HomeWorkshop({
     [tasks],
   );
 
-  // "Ready" cards (finished work) ask nothing, so they get their own chip
-  // rather than inflating "waiting on you".
+  // "Ready" cards (finished work) ask nothing, so they never inflate "waiting
+  // on you". They get no chip either: the title bar's Activity key already
+  // says "N ready", and a second count beside it only repeated it.
   const pendingQuestions = useMemo(
     () => questions.filter((q) => !q.answer && !isReadyQuestion(q)),
-    [questions],
-  );
-  const readyForYou = useMemo(
-    () => questions.filter((q) => !q.answer && isReadyQuestion(q)).length,
     [questions],
   );
 
@@ -497,14 +494,6 @@ export function HomeWorkshop({
         if (activity || pendingQuestions.length > 0) openUpdates({ section: 'needs-you' });
         else if (firstTask) navigateToTab({ kind: 'task', ref: firstTask.ref });
       },
-    });
-  }
-  if (readyForYou > 0) {
-    chips.push({
-      dot: 'var(--sage)',
-      label: `${readyForYou} ready for you`,
-      actionLabel: 'Open Activity',
-      onClick: () => openUpdates({ section: 'ready' }),
     });
   }
 

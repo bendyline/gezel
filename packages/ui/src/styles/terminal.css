@@ -570,12 +570,9 @@
    * both. They are the same row to the eye, so they are the same row in the
    * geometry, and the mode tabs that sit in them fill it exactly. */
   --compose-top-row-height: 2.1875rem;
-  /* What chat spends below its own second row: squisq's editor toolbar
-   * (~35px, where Send lives) plus the editor itself (~69px, about two
-   * lines: ChatComposer's collapsed `minHeight`). Terminal spends it the
-   * same way — a Fire row of `--compose-top-row-height` over the command
-   * entry — so the two modes settle at the same overall height. Measured
-   * rather than derived, because squisq owns both numbers. */
+  /* What chat spends below its own second row: the editor itself (~69px,
+   * about two lines: ChatComposer's collapsed `minHeight`) plus squisq's
+   * editor toolbar under it (~35px, where Send lives). Terminal spends it the
   --compose-entry-height: 104px;
 }
 
@@ -618,6 +615,7 @@
   border: 1px solid var(--compose-frame-border);
   border-radius: var(--radius-md);
   background: var(--compose-frame-bg);
+  transition: border-color 140ms ease-out;
   position: relative;
   /* The content inset, owned here so both modes get it from the same place.
    * It used to be spelled twice — as terminal's `padding-left` and as the
@@ -639,6 +637,12 @@
    * mode re-adds the floor via `.project-chat-compose-main-terminal`
    * below — its textarea needs the room, and the terminal flex rules
    * stretch it to fill, so no dead space appears there. */
+}
+
+/* Lit while the person is working in either mode, like the other chat frames
+ * (shared-content.css). */
+.project-chat-compose-main:focus-within {
+  border-color: var(--accent);
 }
 
 /* Terminal mode is floorless like chat (sizes to its content) so the two
@@ -692,7 +696,7 @@
   padding: 0;
 }
 
-/* Stack toolbar → folder context → command entry. The command-entry band
+/* Stack toolbar → folder context → command entry → Fire row. The command-entry band
  * absorbs the height terminal formerly spent on an empty recipient offset,
  * preserving mode-switch geometry while putting all available space to use. */
 .project-chat-compose-main .terminal-composer {
@@ -704,20 +708,20 @@
   gap: 0;
 }
 
-/* In the compose frame the row is a band like the ones above it: full height
- * of a top row so the Fire key lands where chat's Send does. The 1px inset is
- * measured, not chosen — it mirrors the `margin-inline` squisq's
- * `.squisq-editor-header` spends on the band that carries Send, down to being
- * a margin rather than padding, so the two rows and the two keys inside them
- * land on the same pixels. */
+/* In the compose frame the row is a band like the other ones: full height of a
+ * top row, under the command entry, so the Fire key lands where chat's Send
+ * does. The 1px inset is measured, not chosen — it mirrors the
+ * `margin-inline` squisq's `.squisq-editor-header` spends on the band that
+ * carries Send, down to being a margin rather than padding, so the two rows
+ * and the two keys inside them land on the same pixels. */
 .project-chat-compose-main .terminal-composer-fire-row {
-  /* A top row plus the seam under it. Chat's equivalent band is squisq's
-   * `.squisq-editor-header`: a 35px toolbar with a 1px rule below it, which is
-   * why chat's typing surface is 84px where an unseamed terminal's was 85 —
-   * the one place the two modes still disagreed by a pixel, and the last
-   * "the terminal box is taller" to survive measurement. */
+  /* A top row plus the seam above it. Chat's equivalent band is squisq's
+   * bottom `.squisq-editor-header`: a 35px toolbar with a 1px rule over it,
+   * which is why chat's typing surface is 84px where an unseamed terminal's
+   * was 85 — the one place the two modes still disagreed by a pixel, and the
+   * last "the terminal box is taller" to survive measurement. */
   height: calc(var(--compose-top-row-height) + 1px);
-  border-bottom: 1px solid var(--compose-band-rule);
+  border-top: 1px solid var(--compose-band-rule);
   margin: 0 1px;
   padding-inline-end: calc(var(--chat-composer-action-inset) - 3px);
 }
@@ -725,7 +729,7 @@
 /* Chat's toolbar is content-sized, so it used to be exactly as tall as the
  * Send key inside it plus its vertical margins — shorter than the
  * terminal's Fire row, which left the key looking wedged against the draft
- * below it and put every row after it at a different y across a mode flip.
+ * beside it and put the rows at a different y across a mode flip.
  * The two modes' totals always matched (the editor body simply absorbed the
  * 5px); what did not match was where the rows sat. Floor it at a top row and
  * both bands, both keys, and both typing surfaces line up. */
@@ -734,7 +738,7 @@
 }
 
 /* The typing surface, matched to the squisq editor chat types into: one
- * full-bleed slab under the seam, no card of its own. The standalone terminal
+ * full-bleed slab over the seam, no card of its own. The standalone terminal
  * wraps its input in a bordered, rounded, generously padded box; the light
  * theme already stripped that here, but dark never did, so after dark the two
  * modes disagreed — chat's flush panel against a black `#111` card floating
@@ -744,8 +748,8 @@
  * `editor.background` in terminal-monaco-setup.ts. */
 .project-chat-compose-main .terminal-composer-input-wrap {
   /* Border-box, so this lands the frame bottom exactly where chat's does.
-   * The Fire row above takes its cut of the budget the way squisq's toolbar
-   * takes chat's — one top row, plus the 1px seam under it. */
+   * The Fire row below takes its cut of the budget the way squisq's toolbar
+   * takes chat's — one top row, plus the 1px seam over it. */
   height: calc(var(--compose-entry-height) - var(--compose-top-row-height) - 1px);
   flex: 1 1 calc(var(--compose-entry-height) - var(--compose-top-row-height) - 1px);
   min-height: 60px;

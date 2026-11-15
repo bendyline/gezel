@@ -56,6 +56,9 @@
      off the paper so the open tab and the sheet below read as one cloth. */
   --home-rail: var(--home-surf2);
   --home-sheet-rail-h: 20px;
+  /* A tab's inline padding. A panel that is only a line of text indents by
+     it (plus the tab's 1px border) to start under the first tab's label. */
+  --home-tab-pad-inline: 14px;
   /* Home's own wash tint: the bright terracotta by day, foundation's gray
      `--wash-tint` at dusk (below), for the amber zones and the corner glow. */
   --home-wash-tint: var(--gezel-terra-bright);
@@ -453,6 +456,11 @@
 .home-workshop-status-report {
   max-width: 640px;
 }
+/* A night with nothing to show is two lines of text, which read as
+   misplaced against the tab labels above; they start under the first one. */
+.home-workshop-status-report-quiet {
+  padding-left: calc(var(--home-tab-pad-inline) + 1px);
+}
 .home-workshop-status-body {
   max-height: 260px;
   overflow-y: auto;
@@ -566,7 +574,7 @@
   /* The list's margin already reaches past the seam. The primitive's own
      -1px trigger margin would lift the sheet a pixel above the startup copy. */
   margin: 0;
-  padding: 4px 14px;
+  padding: 4px var(--home-tab-pad-inline);
   min-height: 40px;
   cursor: pointer;
   white-space: normal;

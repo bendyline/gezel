@@ -39,9 +39,13 @@ export function NightReviewPanel({ review }: { review: NightShiftReviewResponse 
   const rest = review.reports.slice(1);
   const actionTotal = review.reports.reduce((n, r) => n + r.actionCounts.suggested, 0);
   const proposals = review.diffpacks;
+  const quiet = proposals.length === 0 && review.reports.length === 0;
 
   return (
-    <div className="home-workshop-status-report" data-testid="night-review-panel">
+    <div
+      className={`home-workshop-status-report${quiet ? ' home-workshop-status-report-quiet' : ''}`}
+      data-testid="night-review-panel"
+    >
       <NightReviewSummary
         completed={review.tasksCompleted.length}
         reports={review.reports.length}
