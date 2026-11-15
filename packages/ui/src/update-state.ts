@@ -83,9 +83,7 @@ export function useUpdateActions(platform?: string): UpdateActions {
     const bridge = window.__GEZEL__?.update;
     const restart = bridge?.restart;
     const call =
-      action === 'install'
-        ? bridge && (() => bridge.install())
-        : restart && (() => restart());
+      action === 'install' ? bridge && (() => bridge.install()) : restart && (() => restart());
     setError(null);
     if (!call) {
       setError(

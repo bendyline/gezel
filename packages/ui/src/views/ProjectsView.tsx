@@ -76,6 +76,7 @@ import {
   settingHintId,
 } from '../components/SettingsSection.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
+import { useDocumentViewProps } from '../components/SquisqIntegration/document-view.js';
 import {
   createArtifactsContentContainer,
   createDataReferenceContainer,
@@ -164,6 +165,7 @@ import { Select, Tabs } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { runtimeCapabilities } from '../runtime-capabilities.js';
 import { useEffectiveTheme } from '../theme.js';
+import { pathBasename } from './project-activity-line.js';
 import { OFFERED_PROJECT_VIEWS, preloadProjectView } from './project-views/registry.js';
 import { useProjectViews } from './project-views/useProjectViews.js';
 import { NewProjectDialog } from './projects/NewProjectDialog.js';
@@ -178,6 +180,10 @@ import {
   loadProjectFile,
   prepareProjectOutsideInDocument,
 } from './projects/project-file-opening.js';
+import {
+  setProjectListCollapsed,
+  useProjectListCollapsed,
+} from './projects/project-list-collapsed.js';
 import { formatPreviewComplaint, formatPreviewLog } from './projects/project-preview-log.js';
 
 const loadProjectChatModule = () => import('../components/ProjectChat.js');
@@ -599,20 +605,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     onOpenRequested: showViewsTab,
   });
   const queueViewsRequest = projectViews.queueRequest;
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
-    try {
-      return window.localStorage.getItem('gezel.projectsSidebarCollapsed') === '1';
-    } catch {
-      return false;
-    }
-  });
+  // Shared with the navigation rail, which folds while this list is open.
+  const sidebarCollapsed = useProjectListCollapsed();
   const sidebarIsCollapsed = sidebarCollapsed && !effectiveCompact;
-  useEffect(() => {
-    try {
-      window.localStorage.setItem('gezel.projectsSidebarCollapsed', sidebarCollapsed ? '1' : '0');
-    } catch {}
-  }, [sidebarCollapsed]);
   // `fileTab` is the active view inside the Workspace/Artifacts file
   // panel. Derived from the main tab — Workspace and Artifacts are
   // now their own top-level tabs rather than a sub-tabs inside a
@@ -2046,6 +2041,9 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     () =>
       projectFileSource(selected?.id ?? '', fileTab ?? 'artifacts', {
         canWrite: selected !== null && fileTab !== null && canWriteProjectFiles(fileTab),
+        folder: selected?.workingDir
+          ? { name: pathBasename(selected.workingDir), path: selected.workingDir }
+          : undefined,
       }),
     [selected, fileTab, canWriteProjectFiles],
   );
@@ -2533,7 +2531,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
             <button
               type="button"
               className="area-toolbar-toggle"
-              onClick={() => setSidebarCollapsed((v) => !v)}
+              onClick={() => setProjectListCollapsed(!sidebarCollapsed)}
               title={sidebarIsCollapsed ? 'Expand project list' : 'Collapse project list'}
               aria-label={sidebarIsCollapsed ? 'Expand project list' : 'Collapse project list'}
             >
@@ -3870,6 +3868,7 @@ function ProjectFileEditor({
   toolbarIndexToggle?: ReactNode;
 }) {
   const markdown = isMarkdown(file.path) && file.source === 'artifacts';
+  const documentView = useDocumentViewProps();
   const { root, parentDirectory, companionName, primaryDocumentFilename } = useMemo(
     () => deriveContainerScope(file.path),
     [file.path],
@@ -3963,6 +3962,7 @@ function ProjectFileEditor({
     <div className="editor-wrap" style={{ height: '100%' }}>
       <EditorShell
         {...GEZEL_WRITE_CANVAS}
+        {...documentView}
         initialMarkdown={autosave.desiredValue()}
         fileName={file.path}
         readOnly={isReadOnly}
@@ -3982,7 +3982,6 @@ function ProjectFileEditor({
         calcEngineFactory={markdown && !isReadOnly ? ironCalcEngineFactory : undefined}
         allowVersioning={markdown && !isReadOnly}
         versionBasename={versionBasename}
-        outline={markdown}
         toolbarSlotAfterActions={
           markdown ? (
             <>
@@ -4050,6 +4049,7 @@ function HtmlFileViewer({
   const [logsCollapsed, setLogsCollapsed] = useState(false);
   const [complainBusyAt, setComplainBusyAt] = useState<number | undefined>(undefined);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const documentView = useDocumentViewProps();
 
   useEffect(() => {
     if (sourceReveal?.path === file.path) setMode('source');
@@ -4165,6 +4165,7 @@ function HtmlFileViewer({
         <div className="editor-wrap">
           <EditorShell
             {...GEZEL_WRITE_CANVAS}
+            {...documentView}
             key={`${file.source}:${file.path}`}
             initialMarkdown={sourceAutosave.desiredValue()}
             fileName={file.path}

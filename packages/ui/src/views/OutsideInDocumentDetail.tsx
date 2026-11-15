@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
+import { useDocumentViewProps } from '../components/SquisqIntegration/document-view.js';
 import {
   type OutsideInLayout,
   chooseOutsideInSource,
@@ -202,6 +203,7 @@ function OutsideInEditor({
 }) {
   const editorTheme = useEffectiveTheme();
   const proofing = useProofingCapability();
+  const documentView = useDocumentViewProps();
   const container = useMemo(
     () =>
       createDocumentsContentContainer({
@@ -306,6 +308,7 @@ function OutsideInEditor({
       <div className="editor-wrap">
         <EditorShell
           {...GEZEL_WRITE_CANVAS}
+          {...documentView}
           initialMarkdown={autosave.desiredValue()}
           // The visible file is CSV/XLSX/etc., but EditorShell is editing the
           // generated Markdown companion. Passing the visible extension makes

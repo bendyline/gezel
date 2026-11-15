@@ -68,6 +68,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     cliShowThinking: config.cliShowThinking !== false,
     cliShowWrites: config.cliShowWrites === true,
     documentExportOptions: config.documentExportOptions,
+    documentView: config.documentView,
     inlineSpellChecking: config.inlineSpellChecking !== false,
     inlineGrammarChecking: config.inlineGrammarChecking !== false,
     sidebarSide: config.sidebarSide,

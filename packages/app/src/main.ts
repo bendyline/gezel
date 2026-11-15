@@ -1317,7 +1317,10 @@ ipcMain.handle('gezel:update:install', async () => {
     }
   }
   if (updateState?.kind === 'installed') {
-    return { ok: false as const, error: 'This update is already installed. Restart Gezel to use it.' };
+    return {
+      ok: false as const,
+      error: 'This update is already installed. Restart Gezel to use it.',
+    };
   }
   const result = await installStagedMacUpdate();
   if (result.ok) return { ok: true as const };

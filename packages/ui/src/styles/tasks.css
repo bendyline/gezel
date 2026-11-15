@@ -37,63 +37,34 @@
   margin: 0;
 }
 
-.tasks-filters {
+/* The toolbar is two things: one tray of keys that decide which tasks are
+   listed (the kind, then the pickers that narrow it), and New task, the row's
+   one filled key. It was a tray, two outlined selects and a flat split
+   button, at three heights and two type sizes. */
+.tasks-filter-tray {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.tasks-filters select,
-.tasks-filters input {
-  padding: 0.35rem 0.5rem;
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-}
-
-.tasks-filters button.primary {
-  background: var(--action-bg);
-  color: var(--action-ink);
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 0.35rem 0.9rem;
-  cursor: pointer;
-}
-
-.tasks-filters button.primary[disabled] {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.tasks-kind-filter {
-  flex-shrink: 0;
+  min-width: 0;
   max-width: 100%;
-  flex-wrap: wrap;
 }
 
 /* Split creation key: the main action stays one click away while the narrow
-   attached key opens less-common task modes. Both halves share the normal
-   button radius on their outside corners and meet on a single seam. */
+   attached key opens less-common task modes. Both halves are primary keys;
+   they keep the key radius on their outside corners and share one seam. */
 .tasks-create-split {
   display: inline-flex;
   align-items: stretch;
+  flex: none;
 }
 
-.tasks-filters button.tasks-create-main {
+.tasks-create-main:not(:only-child) {
   border-radius: var(--radius-md) 0 0 var(--radius-md);
 }
 
-/* Hosts without background work (the phone) have no scheduled/recurring half. */
-.tasks-filters button.tasks-create-main:only-child {
-  border-radius: var(--radius-md);
-}
-
-.tasks-filters button.tasks-create-more {
-  min-width: 2rem;
-  padding-inline: 0.55rem;
-  border-left: 1px solid color-mix(in srgb, var(--accent) 72%, var(--border));
+/* The seam is the neighbor's own edge, so the two borders do not double. */
+.tasks-create-more {
+  margin-left: -1px;
+  padding-inline: 0.5rem;
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
 }
 
@@ -611,10 +582,18 @@
   flex-wrap: wrap;
 }
 
-/* The top-level detail pane otherwise begins exactly on the list seam.
-   Inset its identity + status controls while leaving the workflow bench
-   below full-width for horizontal scrolling. */
-.tasks-view-overall .task-detail-header {
+/* The top-level Tasks area sets the list beside the detail with no gap, so
+   the detail pane otherwise begins exactly on the list's seam. Inset the whole
+   task (header, latest file, Task/Chat tabs, the panels docked under them, and
+   the chat) so none of it abuts the list. The bench keeps its own horizontal
+   scroller, which starts after the tabs either way. Compact layouts show the
+   list and the detail one at a time; there only the header takes the inset,
+   so the chat still runs edge to edge. */
+.tasks-view-overall:not(.tasks-view-compact) :is(.task-detail, .task-detail-panel > .placeholder) {
+  padding-inline-start: 1rem;
+}
+
+.tasks-view-overall.tasks-view-compact .task-detail-header {
   padding-inline-start: 1rem;
 }
 
@@ -747,6 +726,9 @@
   overflow-wrap: anywhere;
 }
 
+/* The task's own controls, all keys at one size: its status keys and its
+   assignee share one tray, a draft's Discard and assignee stand bare, and
+   the one filled key (Start task, Try again) comes last. */
 .task-detail-actions {
   display: flex;
   gap: 0.5rem;
@@ -754,39 +736,30 @@
   flex-wrap: wrap;
 }
 
-.task-detail-actions select {
-  padding: 0.3rem 0.5rem;
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+.task-state-tray {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
 }
 
-.task-detail-actions .primary {
-  background: var(--action-bg);
-  color: var(--action-ink);
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 0.35rem 0.9rem;
-  cursor: pointer;
-}
-
-.task-system-owner {
+/* Whose task it is, where that cannot be changed here: a service-run job, or
+   a host that cannot reassign. Flat, because it cannot be pressed; drawn with
+   a key's face it invited a click that did nothing. */
+.task-owner-readout {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
-  min-height: 32px;
-  padding: 0.25rem 0.55rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--key-bg);
+  padding-inline: 0.5rem;
   color: var(--text);
   font-size: var(--text-sm);
+  white-space: nowrap;
 }
 
-.task-system-owner small {
-  color: var(--muted);
-  font-size: var(--text-2xs);
+.task-owner-readout small {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
 }
 
 .task-description {
@@ -1999,23 +1972,6 @@ button.bench-step-foot:disabled {
 .task-detail-status-badge::first-letter,
 .pending-question-context-status.status-draft::first-letter {
   text-transform: uppercase;
-}
-.task-draft-activate {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-.task-draft-activate button.primary {
-  background: var(--action-bg);
-  color: var(--action-ink);
-  border: none;
-  border-radius: var(--radius-md);
-  padding: 0.3rem 0.7rem;
-  cursor: pointer;
-}
-.task-draft-activate button.primary:disabled {
-  opacity: 0.6;
-  cursor: default;
 }
 .button.linklike,
 button.linklike {

@@ -514,4 +514,31 @@ describe('TaskDetail', () => {
     const start = screen.getByRole('button', { name: 'Start task' });
     expect(start).toHaveAttribute('title', expect.stringContaining('Before running'));
   });
+
+  // Discard carried a class no stylesheet defined, so it drew as a second
+  // filled primary beside Start task.
+  it('gives a draft one filled key, last in the row, with Discard a plain key', () => {
+    const draft = { ...TASK, status: 'draft' } as unknown as Task;
+    render(<TaskDetail task={draft} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+
+    const start = screen.getByRole('button', { name: 'Start task' });
+    const discard = screen.getByRole('button', { name: 'Discard' });
+    expect(start).toHaveClass('gz-key', 'gz-key--primary');
+    expect(discard).toHaveClass('gz-key');
+    expect(discard).not.toHaveClass('gz-key--primary');
+    expect(discard.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // A draft has no status to set, so no status tray either.
+    expect(screen.queryByRole('radiogroup', { name: 'Task status' })).toBeNull();
+  });
+
+  it("seats a running task's status keys and assignee in one tray", () => {
+    render(<TaskDetail task={TASK} gezels={GEZELS} projectName="Alpha" onChanged={vi.fn()} />);
+
+    const tray = screen.getByRole('group', { name: 'Status and assignee' });
+    expect(tray).toHaveClass('gz-tray');
+    const status = within(tray).getByRole('radiogroup', { name: 'Task status' });
+    // The keys bring no tray of their own into the one that holds them.
+    expect(status).not.toHaveClass('gz-tray');
+    expect(tray.querySelector('.gz-tray-divider')).not.toBeNull();
+  });
 });

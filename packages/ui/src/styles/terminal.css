@@ -573,6 +573,9 @@
   /* What chat spends below its own second row: the editor itself (~69px,
    * about two lines: ChatComposer's collapsed `minHeight`) plus squisq's
    * editor toolbar under it (~35px, where Send lives). Terminal spends it the
+   * same way — the command entry over a Fire row of `--compose-top-row-height`
+   * — so the two modes settle at the same overall height. Measured rather
+   * than derived, because squisq owns both numbers. */
   --compose-entry-height: 104px;
 }
 
@@ -594,7 +597,7 @@
   min-height: 0;
 }
 
-/* Expanded, the command entry takes everything under the Fire row, the way
+/* Expanded, the command entry takes everything above the Fire row, the way
  * chat's editor fills its frame. The fixed height below is what keeps the
  * collapsed terminal level with chat; here it would cap the slab at three
  * lines inside an 80% frame. */

@@ -412,6 +412,12 @@ export interface ConfigResponse {
    */
   documentExportOptions?: import('@bendyline/gezel').DocumentExportOptions;
   /**
+   * The document viewers' View menu choices (outline, previews, status bar,
+   * block tags, theme styling, Document/Block). One set for the whole app;
+   * an absent field is the editor's default, and the outline starts hidden.
+   */
+  documentView?: import('@bendyline/gezel').DocumentViewPreferences;
+  /**
    * Whether the document editors paint red spelling squiggles. Default
    * `true`.
    */

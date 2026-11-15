@@ -964,6 +964,46 @@ describe('document export preferences', () => {
   });
 });
 
+describe('document view preferences', () => {
+  it('keeps the View menu choices', () => {
+    const cfg = GezelConfigSchema.parse({
+      documentView: {
+        outline: true,
+        inlinePreview: false,
+        showStatusBar: false,
+        blockTagVisibility: 'always',
+        themeInheritance: 'fonts-colors',
+        layoutMode: 'block',
+      },
+    });
+
+    expect(cfg.documentView).toEqual({
+      outline: true,
+      inlinePreview: false,
+      showStatusBar: false,
+      blockTagVisibility: 'always',
+      themeInheritance: 'fonts-colors',
+      layoutMode: 'block',
+    });
+  });
+
+  it('drops a value this build does not know instead of failing the whole config', () => {
+    // A config that fails its schema is left unreadable, and a newer squisq
+    // can add a mode an older build never saw.
+    const cfg = GezelConfigSchema.parse({
+      debugMode: true,
+      documentView: { outline: true, layoutMode: 'gallery', themeInheritance: 7, blockTags: true },
+    });
+
+    expect(cfg.debugMode).toBe(true);
+    expect(cfg.documentView?.outline).toBe(true);
+    expect(cfg.documentView?.layoutMode).toBeUndefined();
+    expect(cfg.documentView?.themeInheritance).toBeUndefined();
+    expect(cfg.documentView).not.toHaveProperty('blockTags');
+    expect(GezelConfigSchema.parse({ documentView: 'outline' }).documentView).toBeUndefined();
+  });
+});
+
 describe('Night Shift model defaults', () => {
   it('parses an optional provider/model override without changing the inherited default', () => {
     expect(GezelConfigSchema.parse({}).nightShift).toBeUndefined();

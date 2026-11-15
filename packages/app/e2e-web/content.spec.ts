@@ -74,17 +74,17 @@ test.describe('documents', () => {
     await expect(page.getByTestId('documents-view')).toBeVisible();
 
     const search = page.getByRole('searchbox', { name: 'Search document contents' });
-    const createTray = page.locator('.file-create-tray');
-    const [searchBox, createTrayBox] = await Promise.all([
+    const headerActions = page.locator('.file-tree-header-actions');
+    const [searchBox, headerActionsBox] = await Promise.all([
       search.boundingBox(),
-      createTray.boundingBox(),
+      headerActions.boundingBox(),
     ]);
     expect(searchBox).not.toBeNull();
-    expect(createTrayBox).not.toBeNull();
+    expect(headerActionsBox).not.toBeNull();
     // The input is the header's shrinkable cell. Its right border must remain
-    // visible instead of extending underneath the fixed-width create tray.
+    // visible instead of extending underneath the fixed-width create actions.
     expect(searchBox!.x + searchBox!.width).toBeLessThanOrEqual(
-      createTrayBox!.x + LAYOUT_TOLERANCE_PX,
+      headerActionsBox!.x + LAYOUT_TOLERANCE_PX,
     );
 
     await shot(page, 'tree', {

@@ -403,12 +403,7 @@ export function UpdateStatus() {
             : 'It will install automatically after you quit Gezel completely. Closing the window may leave Gezel running in the system tray.'}
         </span>
         <span>
-          <button
-            type="button"
-            className="primary"
-            disabled={installing}
-            onClick={actions.install}
-          >
+          <button type="button" className="primary" disabled={installing} onClick={actions.install}>
             {installing
               ? platform === 'darwin'
                 ? 'Opening installer…'

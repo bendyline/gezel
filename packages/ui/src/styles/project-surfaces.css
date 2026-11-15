@@ -414,6 +414,8 @@
 }
 
 .pending-question-context-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-weight: 500;
 }
 
@@ -425,7 +427,7 @@
 }
 
 /* Worn by both a real external <a> (View on npm) and the in-app <button>
-   navigators (Open task / Open document), so the button-neutralizing
+   navigators (Open task), so the button-neutralizing
    declarations sit here rather than in a second class. Explicit
    `font-family` over `font: inherit` — the shorthand would drag in a serif
    from any display-font ancestor (see docs/ux.md, "Links stay sans"). */
@@ -440,6 +442,15 @@
   border-bottom: 1px dashed currentColor;
   padding: 0;
   cursor: pointer;
+}
+
+/* An attached document opens from a small key beside its name; the row's
+   far end left "Open artifact" floating away from the file it opened. */
+.pending-question-context-open {
+  flex: none;
+  padding: 0.15rem 0.6rem;
+  font-size: var(--text-xs);
+  font-family: var(--font-ui);
 }
 
 /* Squisq paints its own reading surface, so padding on this frame showed the

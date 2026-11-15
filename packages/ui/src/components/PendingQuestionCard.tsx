@@ -1943,8 +1943,13 @@ function DocumentContext({
       <div className="pending-question-context-row">
         <span className="muted">{kindLabel}</span>
         <span className="pending-question-context-title">{documentPath.split('/').pop()}</span>
-        <button type="button" className="pending-question-context-link" onClick={openResolved}>
-          Open {kindLabel.toLowerCase()}
+        <button
+          type="button"
+          className="secondary pending-question-context-open"
+          aria-label={`Open ${kindLabel.toLowerCase()}`}
+          onClick={openResolved}
+        >
+          Open
         </button>
       </div>
       {error && <p className="muted small">Couldn't load preview: {error}</p>}

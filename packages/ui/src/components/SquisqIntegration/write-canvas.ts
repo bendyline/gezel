@@ -7,7 +7,9 @@ import type { EditorShellProps } from '@bendyline/squisq-editor-react';
  * theme falls back to `standard`, whose headings are a system serif — so the
  * library's own notes were edited in a serif nobody chose. Write is for
  * writing: the theme still governs Play, previews and exports, and View →
- * "Editor styling from theme" brings it back for one editor.
+ * "Editor styling from theme" brings it back. In the document viewers that
+ * choice is remembered app-wide with the rest of the View menu
+ * (`document-view.ts`); a compact editor keeps it for that editor only.
  */
 export const GEZEL_WRITE_CANVAS = {
   themeInheritance: 'none',

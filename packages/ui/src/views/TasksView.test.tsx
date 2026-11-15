@@ -419,6 +419,24 @@ describe('TasksView', () => {
     expect(screen.getByTestId('new-task-dialog')).toBeInTheDocument();
   });
 
+  // The toolbar was a tray, two outlined selects and a flat split button.
+  it('holds what decides the list in one tray and keeps New task outside it', async () => {
+    render(<TasksView />);
+    const tray = screen.getByRole('group', { name: 'Tasks shown' });
+    expect(tray).toHaveClass('gz-tray');
+    const kinds = within(tray).getByRole('radiogroup', { name: 'Task type' });
+    expect(kinds).not.toHaveClass('gz-tray');
+    // The pickers that narrow the kind sit in the same tray, past a divider.
+    expect(within(tray).getByText(/All statuses/)).toBeInTheDocument();
+    expect(within(tray).getByText(/Any assignee/)).toBeInTheDocument();
+    expect(tray.querySelector('.gz-tray-divider')).not.toBeNull();
+
+    const create = screen.getByRole('button', { name: /\+ New task/ });
+    expect(create).toHaveClass('gz-key', 'gz-key--primary');
+    expect(screen.getByRole('button', { name: 'More task types' })).toHaveClass('gz-key--primary');
+    expect(tray).not.toContainElement(create);
+  });
+
   it('opens scheduled and Night Shift creation from the New task split menu', async () => {
     render(<TasksView />);
     const user = userEvent.setup();

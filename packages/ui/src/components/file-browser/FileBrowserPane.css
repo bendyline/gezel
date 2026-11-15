@@ -28,11 +28,13 @@
 .project-files-layout.is-narrow .tree-row,
 .project-files-layout.is-narrow .file-flat-row,
 .project-files-layout.is-narrow .gz-key,
+.project-files-layout.is-narrow .file-tree-action,
 .project-files-layout.is-narrow .tree-actions-trigger {
   min-height: 44px;
 }
 
 .project-files-layout.is-narrow .gz-key--icon,
+.project-files-layout.is-narrow .file-tree-action,
 .project-files-layout.is-narrow .tree-actions-trigger {
   min-width: 44px;
 }

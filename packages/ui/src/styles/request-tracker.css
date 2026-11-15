@@ -1,11 +1,12 @@
 /* A request's tracker in the thread: four stops, one line, the file at Ready.
-   See docs/ux.md "One request, one tracker". */
+   See docs/ux.md "One request, one tracker".
+   Indented like the thread's replies: at 0.5rem its edge sat on the rail. */
 .request-tracker {
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
-  width: min(44rem, calc(100% - 1rem));
-  margin: 0.5rem 0 0.65rem 0.5rem;
+  width: min(44rem, calc(100% - var(--thread-indent, 1.05rem)));
+  margin: 0.5rem 0 0.65rem var(--thread-indent, 1.05rem);
   padding: 0.65rem 0.8rem;
   background: var(--surface);
   border: 1px solid var(--border);

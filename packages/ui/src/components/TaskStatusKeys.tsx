@@ -88,17 +88,20 @@ export function TaskStatusKeys({
   options = TASK_STATUS_KEY_ORDER,
   disabled = false,
   ariaLabel = 'Task status',
+  inTray = false,
   onChange,
 }: {
   value: TaskStatus;
   options?: Array<Exclude<TaskStatus, 'draft'>>;
   disabled?: boolean;
   ariaLabel?: string;
+  /** The host seats these keys in a tray of its own, beside what belongs with them. */
+  inTray?: boolean;
   onChange: (status: TaskStatus) => void;
 }) {
   return (
     <div
-      className="gz-tray task-status-tray"
+      className={`${inTray ? 'gz-key-group' : 'gz-tray'} task-status-tray`}
       role="radiogroup"
       onKeyDown={onRadioKeyDown}
       aria-label={ariaLabel}

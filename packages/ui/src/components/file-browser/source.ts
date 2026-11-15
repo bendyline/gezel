@@ -21,8 +21,15 @@ export type FileBrowserKind = 'documents' | 'workspace' | 'artifacts';
  */
 export interface FileBrowserSource {
   kind: FileBrowserKind;
-  /** Display name in the panel header and the collapsed rail. */
+  /** Short name of the tree, for control labels and messages ("Hide Workspace files"). */
   title: string;
+  /**
+   * What the pane's header and collapsed rail call this place, when that says
+   * more than `title`: "Artifacts drawer", or a folder's own name.
+   */
+  heading?: string;
+  /** Tooltip on the heading: the folder's full path, or what the place is for. */
+  headingHint?: string;
   /** Whether mutations are offered at all (workspace honors the write policy). */
   canWrite: boolean;
   list(opts: { hidden: boolean }): Promise<{ files: FileEntry[]; truncated?: boolean }>;
@@ -82,12 +89,24 @@ export function documentsFileSource(): FileBrowserSource {
 export function projectFileSource(
   projectId: string,
   kind: 'workspace' | 'artifacts',
-  opts: { canWrite: boolean },
+  opts: {
+    canWrite: boolean;
+    /** The folder a workspace points at: its name heads the pane, its path is the tooltip. */
+    folder?: { name: string; path: string };
+  },
 ): FileBrowserSource {
   const workspace = kind === 'workspace';
   return {
     kind,
     title: workspace ? 'Workspace' : 'Artifacts',
+    ...(workspace
+      ? opts.folder
+        ? { heading: opts.folder.name, headingHint: opts.folder.path }
+        : {}
+      : {
+          heading: 'Artifacts drawer',
+          headingHint: 'Where Gezel keeps the reports and outputs made for this project.',
+        }),
     canWrite: opts.canWrite,
     list: ({ hidden }) =>
       workspace

@@ -64,6 +64,23 @@
   background: color-mix(in oklch, var(--accent) 16%, transparent);
 }
 
+/* The editor's AI key: Squisq's flex-centered toolbar box, so the sparkles sit
+   in the middle of the frame like their neighbors' glyphs, plus a frame. */
+.gezel-ai-transform-btn.squisq-toolbar-button {
+  margin: 0 0.15rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.gezel-ai-transform-btn.squisq-toolbar-button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.gezel-ai-transform-btn.squisq-toolbar-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .gezel-export-menu.app-nav-menu {
   min-width: 16rem;
   z-index: 1100;
@@ -2310,6 +2327,12 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 .squisq-editor-shell .squisq-toolbar-view-tab:focus,
 .squisq-editor-shell .squisq-toolbar-view-tab:focus-visible {
   outline: none;
+}
+/* Squisq seats the Write / Slideshow mode chevrons 2px above the underline;
+   beside Gezel's tab labels that reads 1px low. Overrides the touch-screen
+   padding too, which keeps the same 2px. */
+.squisq-editor-shell .squisq-view-mode-trigger {
+  padding-bottom: 3px;
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab:hover,
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button:hover {

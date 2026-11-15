@@ -175,7 +175,7 @@
   gap: 16px;
   /* No bottom padding: the tabs stand on the seam, and the open one erases
      its stretch of it so the sheet hangs from that tab like a pulled shade. */
-  padding: 8px 54px 0;
+  padding: 5px 54px 0;
   background: var(--home-rail);
   border-bottom: 1px solid var(--home-hair);
 }
@@ -763,19 +763,6 @@
   align-items: center;
   gap: 0.6rem;
   margin: 0.35rem 0 0.6rem;
-}
-
-.home-intro-modes {
-  display: inline-flex;
-  gap: 0.3rem;
-}
-
-/* Separates the latched view choice from the action beside it, so Open in
-   Handboek doesn't read as a third view. */
-.home-intro-tray-divider {
-  width: 1px;
-  margin: 0.25rem 0.15rem;
-  background: var(--tray-border);
 }
 
 /* On Home's Handboek tab the article is the whole sheet: the page stretches

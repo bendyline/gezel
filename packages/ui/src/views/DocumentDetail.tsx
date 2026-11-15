@@ -6,6 +6,7 @@ import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { ExportToolbarControls } from '../components/DocumentExport/index.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
+import { useDocumentViewProps } from '../components/SquisqIntegration/document-view.js';
 import {
   createDocumentLinkProvider,
   createDocumentMediaProvider,
@@ -65,6 +66,7 @@ const fetchDocumentBlob = (filePath: string) => api.fetchDocumentBlob(filePath);
 function TextDocumentDetail({ path }: DocumentDetailProps) {
   const editorTheme = useEffectiveTheme();
   const proofing = useProofingCapability();
+  const documentView = useDocumentViewProps();
   const [content, setContent] = useState<string | null>(null);
   const [sizeBytes, setSizeBytes] = useState<number | undefined>(undefined);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -243,6 +245,7 @@ function TextDocumentDetail({ path }: DocumentDetailProps) {
       <div className="editor-wrap">
         <EditorShell
           {...GEZEL_WRITE_CANVAS}
+          {...documentView}
           initialMarkdown={content}
           fileName={path}
           onChange={handleChange}
