@@ -113,9 +113,11 @@ const MODE_KEYS: Record<FileViewMode, { label: string; hint: string; icon: () =>
 };
 
 /**
- * The file panel's view-mode switch: icon-only keys in a tray, one shared
- * component for the Workspace and Artifacts tabs so the two panels can
- * never drift apart — the tabs differ only in which `modes` they pass.
+ * The file panel's view-mode switch: icon-only keys, one shared component
+ * for the Workspace and Artifacts tabs so the two panels can never drift
+ * apart — the tabs differ only in which `modes` they pass. It brings no tray
+ * of its own: the pane seats it on its key strip beside the keys below
+ * (docs/ux.md → "A pane's toolbar is one key strip").
  */
 export function FileViewModeKeys({
   value,
@@ -128,7 +130,7 @@ export function FileViewModeKeys({
 }) {
   return (
     <div
-      className="gz-tray file-view-tray"
+      className="gz-key-group"
       role="radiogroup"
       onKeyDown={onRadioKeyDown}
       aria-label="File list view"
@@ -161,8 +163,8 @@ export function FileViewModeKeys({
 }
 
 /**
- * "Show hidden files" — a latching key in its own tray beside the view-mode
- * switch. Separate tray because it is a toggle, not a member of the mode
+ * "Show hidden files" — a latching key beside the view-mode switch, past the
+ * strip's divider because it is a toggle, not a member of the mode
  * radiogroup. In every file panel it also reveals Office lock files; in the
  * Workspace it reveals dotfiles and vendor folders, and in Artifacts it
  * additionally reveals the reserved `shadow/` cache.
@@ -185,39 +187,35 @@ export function FileHiddenKey({
         ? 'Show hidden files — Office lock files, dot-files, and the generated shadow folder.'
         : 'Show hidden files — Office lock files, dot-files, and companion folders.';
   return (
-    <div className="gz-tray file-hidden-tray">
-      <button
-        type="button"
-        aria-pressed={value}
-        className={`gz-key gz-key--icon${value ? ' gz-key-active' : ''}`}
-        title={hint}
-        aria-label="Show hidden files"
-        onClick={() => onChange(!value)}
-      >
-        <Icon />
-      </button>
-    </div>
+    <button
+      type="button"
+      aria-pressed={value}
+      className={`gz-key gz-key--icon${value ? ' gz-key-active' : ''}`}
+      title={hint}
+      aria-label="Show hidden files"
+      onClick={() => onChange(!value)}
+    >
+      <Icon />
+    </button>
   );
 }
 
 /**
- * "Open in File Explorer / Finder" — an action key in the toolbar row. It is
- * a verb, not a mode, so it sits in its own tray with nothing latched
- * (docs/ux.md → "A tray may also hold actions"). `label` comes from
- * `openInFileManagerLabel`, which names the platform's own file manager.
+ * "Open in File Explorer / Finder" — an action key. It is a verb, not a
+ * mode, so it never latches and sits at the far end of the strip, away from
+ * the choices (docs/ux.md → "A tray may also hold actions"). `label` comes
+ * from `openInFileManagerLabel`, which names the platform's own file manager.
  */
 export function FileRevealKey({ label, onReveal }: { label: string; onReveal: () => void }) {
   return (
-    <div className="gz-tray file-reveal-tray">
-      <button
-        type="button"
-        className="gz-key gz-key--icon"
-        title={label}
-        aria-label={label}
-        onClick={onReveal}
-      >
-        <RevealIcon />
-      </button>
-    </div>
+    <button
+      type="button"
+      className="gz-key gz-key--icon"
+      title={label}
+      aria-label={label}
+      onClick={onReveal}
+    >
+      <RevealIcon />
+    </button>
   );
 }

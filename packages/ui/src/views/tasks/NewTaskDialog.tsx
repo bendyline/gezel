@@ -1471,6 +1471,7 @@ export function NewTaskDialog({
                               placeholder="What should this be about?"
                               minHeight="96px"
                               maxHeight="30vh"
+                              showViewTabs={false}
                               onChange={onComposerTextChange}
                               onCommit={onComposerTextChange}
                             />

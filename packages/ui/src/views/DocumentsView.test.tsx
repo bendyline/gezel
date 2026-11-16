@@ -429,7 +429,9 @@ describe('DocumentsView', () => {
     expect(api.writeDocument).not.toHaveBeenCalled();
   });
 
-  it('renders right-aligned Font Awesome creation actions', async () => {
+  // The create actions ride the title row as quiet buttons, drawn in the
+  // pane's own outline glyphs; a tray and solid icons each read as another kit.
+  it('renders the creation actions as quiet title-row buttons', async () => {
     render(<DocumentsView />);
     await waitFor(() => {
       expect(api.listDocuments).toHaveBeenCalledTimes(1);
@@ -437,9 +439,13 @@ describe('DocumentsView', () => {
 
     const folderButton = screen.getByRole('button', { name: 'New folder' });
     const documentButton = screen.getByRole('button', { name: 'New document' });
-    expect(folderButton.parentElement).toHaveClass('file-create-tray');
-    expect(folderButton.querySelector('i')).toHaveClass('fa-solid', 'fa-folder-plus');
-    expect(documentButton.querySelector('i')).toHaveClass('fa-solid', 'fa-file-circle-plus');
+    for (const button of [folderButton, documentButton]) {
+      expect(button.parentElement).toHaveClass('file-tree-header-actions');
+      expect(button).toHaveClass('file-tree-action');
+      expect(button).not.toHaveClass('gz-key');
+      expect(button.querySelector('svg')).not.toBeNull();
+      expect(button.querySelector('i')).toBeNull();
+    }
   });
 
   it('clicking New document opens a dialog; submitting calls writeDocument and refreshes', async () => {

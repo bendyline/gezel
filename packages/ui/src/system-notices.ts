@@ -32,6 +32,8 @@ export type SystemNoticeId =
   | 'update-available'
   | 'update-downloading'
   | 'update-ready'
+  | 'update-installing'
+  | 'update-installed'
   | 'update-download-failed'
   | 'update-install-failed'
   | 'update-check-failed'
@@ -282,7 +284,29 @@ export function updateNotice(state: UpdateState | null, platform?: string): Syst
       title: `Gezel ${state.version} is ready to install.`,
       body: automatic
         ? 'It will install automatically after you quit Gezel completely. Closing the window may leave Gezel running in the system tray.'
-        : 'Choose Open installer in Settings or on Home to launch the verified macOS installer.',
+        : 'Choose Open installer in Settings or on Home to launch the verified macOS installer. Gezel restarts by itself when the installer finishes.',
+      tone: 'success',
+    };
+  }
+
+  if (state.kind === 'installing') {
+    return {
+      id: 'update-installing',
+      railLabel: 'Installing update…',
+      title: `Installing Gezel ${state.version}.`,
+      body: 'Finish the steps in the macOS installer. Gezel restarts by itself when the installer is done.',
+      tone: 'progress',
+    };
+  }
+
+  if (state.kind === 'installed') {
+    return {
+      id: 'update-installed',
+      railLabel: state.restarting ? 'Restarting to finish updating…' : 'Restart to finish updating',
+      title: `Gezel ${state.version} is installed.`,
+      body: state.restarting
+        ? 'Gezel is restarting to start using it.'
+        : 'Restart Gezel to start using it. Your crew, projects, and chats are not affected.',
       tone: 'success',
     };
   }

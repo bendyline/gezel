@@ -825,6 +825,27 @@ export const DocumentExportOptionsSchema = z.object({
 export type DocumentExportOptions = z.infer<typeof DocumentExportOptionsSchema>;
 
 /**
+ * How the document viewers lay out a file: the editor's View menu (outline,
+ * previews, status bar, block tags, theme styling) and its Document/Block
+ * choice. One choice for the whole app, not per file, and an absent field
+ * is the editor's default (the outline starts hidden). Mirrors squisq's
+ * `ViewPreferences`.
+ *
+ * Every field drops a value this build does not know rather than failing:
+ * a config that fails its schema is left untouched and unreadable, and a
+ * newer squisq can add a layout or theme mode an older build never saw.
+ */
+export const DocumentViewPreferencesSchema = z.object({
+  outline: z.boolean().optional().catch(undefined),
+  inlinePreview: z.boolean().optional().catch(undefined),
+  showStatusBar: z.boolean().optional().catch(undefined),
+  blockTagVisibility: z.enum(['none', 'active', 'always']).optional().catch(undefined),
+  themeInheritance: z.enum(['none', 'fonts', 'fonts-colors']).optional().catch(undefined),
+  layoutMode: z.enum(['document', 'block', 'timeline']).optional().catch(undefined),
+});
+export type DocumentViewPreferences = z.infer<typeof DocumentViewPreferencesSchema>;
+
+/**
  * How the managed llama.cpp engine chooses its per-turn context window.
  *
  * `adaptive` keeps Gezel's practical model/tuning target and may reduce a
@@ -2691,6 +2712,12 @@ const GezelConfigObject = z.object({
    * `DocumentExportOptionsSchema`.
    */
   documentExportOptions: DocumentExportOptionsSchema.optional(),
+  /**
+   * The document viewers' View menu choices, one set for the whole app (see
+   * `DocumentViewPreferencesSchema`). Server-side for the same reason as
+   * `themePref`; the renderer keeps a localStorage cache for first paint.
+   */
+  documentView: DocumentViewPreferencesSchema.optional().catch(undefined),
   /**
    * Whether the document editors paint red spelling squiggles as you
    * write. Defaults to `true`. Turning both this and

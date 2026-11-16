@@ -135,6 +135,11 @@ function taskBadge(task: Task): string | null {
   return null;
 }
 
+/** A filter picker in the toolbar's tray; one that is narrowing the list says so. */
+function filterKeyClass(value: string): string {
+  return `gz-key gz-key--dropdown${value ? ' gz-key--filtering' : ''}`;
+}
+
 const STATUS_OPTIONS: Array<{ value: '' | TaskStatus; label: string }> = [
   { value: '', label: 'All statuses' },
   { value: 'active', label: 'Active' },
@@ -549,38 +554,49 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
       data-testid="tasks-view"
     >
       <header className="tasks-header" hidden={compact && showCompactDetail}>
-        {/* A host without background work has one kind only, and a
-            one-key tray is a choice that isn't one. */}
-        {runtimeCapabilities().background && (
-          <div
-            className="gz-tray tasks-kind-filter"
-            role="radiogroup"
-            onKeyDown={onRadioKeyDown}
-            aria-label="Task type"
-          >
-            {TASK_KIND_OPTIONS.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                // biome-ignore lint/a11y/useSemanticElements: keys use the documented radio-group pattern; a native input would duplicate the pressable key surface.
-                role="radio"
-                aria-checked={kindFilter === option.value}
-                tabIndex={kindFilter === option.value ? 0 : -1}
-                className={`gz-key${kindFilter === option.value ? ' gz-key-active' : ''}`}
-                onClick={() => setKindFilter(option.value)}
+        {/* One tray holds everything that decides which tasks are listed:
+            the kind, then the pickers that narrow it. New task stands
+            outside it, the row's one filled key. */}
+        <div
+          className="gz-tray tasks-filter-tray"
+          // biome-ignore lint/a11y/useSemanticElements: a tray of keys, not a form; <fieldset> would bring a legend and form-group styling.
+          role="group"
+          aria-label="Tasks shown"
+        >
+          {/* A host without background work has one kind only, and a
+              one-key choice is a choice that isn't one. */}
+          {runtimeCapabilities().background && (
+            <>
+              <div
+                className="gz-key-group tasks-kind-filter"
+                role="radiogroup"
+                onKeyDown={onRadioKeyDown}
+                aria-label="Task type"
               >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="tasks-filters">
+                {TASK_KIND_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    // biome-ignore lint/a11y/useSemanticElements: keys use the documented radio-group pattern; a native input would duplicate the pressable key surface.
+                    role="radio"
+                    aria-checked={kindFilter === option.value}
+                    tabIndex={kindFilter === option.value ? 0 : -1}
+                    className={`gz-key${kindFilter === option.value ? ' gz-key-active' : ''}`}
+                    onClick={() => setKindFilter(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <span className="gz-tray-divider" aria-hidden="true" />
+            </>
+          )}
           {projectId === undefined && (
             <Select.Root
               value={projectFilter || '__ALL__'}
               onValueChange={(v) => setProjectFilter(v === '__ALL__' ? '' : v)}
             >
-              <Select.Trigger>
+              <Select.Trigger className={filterKeyClass(projectFilter)}>
                 <Select.Value />
               </Select.Trigger>
               <Select.Content>
@@ -597,7 +613,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
             value={statusFilter || '__ALL__'}
             onValueChange={(v) => setStatusFilter(v === '__ALL__' ? '' : (v as TaskStatus))}
           >
-            <Select.Trigger>
+            <Select.Trigger className={filterKeyClass(statusFilter)}>
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
@@ -612,7 +628,7 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
             value={assigneeFilter || '__ALL__'}
             onValueChange={(v) => setAssigneeFilter(v === '__ALL__' ? '' : v)}
           >
-            <Select.Trigger>
+            <Select.Trigger className={filterKeyClass(assigneeFilter)}>
               <Select.Value />
             </Select.Trigger>
             <Select.Content>
@@ -625,52 +641,52 @@ export function TasksView({ projectId }: TasksViewProps = {}) {
               ))}
             </Select.Content>
           </Select.Root>
-          <div className="tasks-create-split">
-            <button
-              type="button"
-              className="primary tasks-create-main"
-              onClick={() => openCreate('one-time')}
-              disabled={!(projectFilter || projects[0])}
-            >
-              + New task
-            </button>
-            {runtimeCapabilities().background && (
-              <DropdownMenu.Root>
-                <DropdownMenu.Trigger asChild>
-                  <button
-                    type="button"
-                    className="primary tasks-create-more"
-                    aria-label="More task types"
-                    disabled={!(projectFilter || projects[0])}
+        </div>
+        <div className="tasks-create-split">
+          <button
+            type="button"
+            className="gz-key gz-key--primary tasks-create-main"
+            onClick={() => openCreate('one-time')}
+            disabled={!(projectFilter || projects[0])}
+          >
+            + New task
+          </button>
+          {runtimeCapabilities().background && (
+            <DropdownMenu.Root>
+              <DropdownMenu.Trigger asChild>
+                <button
+                  type="button"
+                  className="gz-key gz-key--primary tasks-create-more"
+                  aria-label="More task types"
+                  disabled={!(projectFilter || projects[0])}
+                >
+                  <DropdownChevron />
+                </button>
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content
+                  className="app-nav-menu tasks-create-menu"
+                  sideOffset={4}
+                  align="end"
+                >
+                  <DropdownMenu.Item
+                    className="app-nav-menu-item"
+                    onSelect={() => openCreate('scheduled')}
                   >
-                    <DropdownChevron />
-                  </button>
-                </DropdownMenu.Trigger>
-                <DropdownMenu.Portal>
-                  <DropdownMenu.Content
-                    className="app-nav-menu tasks-create-menu"
-                    sideOffset={4}
-                    align="end"
+                    <span>New scheduled task</span>
+                    <small>Runs a fresh copy on a cadence</small>
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    className="app-nav-menu-item"
+                    onSelect={() => openCreate('night-shift')}
                   >
-                    <DropdownMenu.Item
-                      className="app-nav-menu-item"
-                      onSelect={() => openCreate('scheduled')}
-                    >
-                      <span>New scheduled task</span>
-                      <small>Runs a fresh copy on a cadence</small>
-                    </DropdownMenu.Item>
-                    <DropdownMenu.Item
-                      className="app-nav-menu-item"
-                      onSelect={() => openCreate('night-shift')}
-                    >
-                      <span>New Night Shift task</span>
-                      <small>Waits for the unattended work window</small>
-                    </DropdownMenu.Item>
-                  </DropdownMenu.Content>
-                </DropdownMenu.Portal>
-              </DropdownMenu.Root>
-            )}
-          </div>
+                    <span>New Night Shift task</span>
+                    <small>Waits for the unattended work window</small>
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Portal>
+            </DropdownMenu.Root>
+          )}
         </div>
       </header>
 

@@ -15,6 +15,12 @@ interface MarkdownFieldProps {
   minHeight?: string;
   maxHeight?: string;
   /**
+   * Show Squisq's Write / Source view tabs (default true). Off for a field
+   * inside a form, where the field stays in Write and the formatting keys
+   * remain.
+   */
+  showViewTabs?: boolean;
+  /**
    * Fired when focus leaves the editor and the markdown actually changed —
    * mirrors the save-on-blur pattern the plain `<textarea>` fields use, so a
    * keystroke doesn't fire a PATCH per character.
@@ -48,6 +54,7 @@ export function MarkdownField({
   accessibleName,
   minHeight = '80px',
   maxHeight = '40vh',
+  showViewTabs = true,
   onCommit,
   onChange,
 }: MarkdownFieldProps) {
@@ -105,6 +112,7 @@ export function MarkdownField({
         minHeight={minHeight}
         maxHeight={maxHeight}
         showPlayTab={false}
+        showViewTabs={showViewTabs}
         showStatusBar={false}
         showFilesToggle={false}
         fullWidth

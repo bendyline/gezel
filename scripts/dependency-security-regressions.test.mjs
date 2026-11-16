@@ -1,17 +1,50 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { collectLinks, isEnforcing } from './local-link-guard.mjs';
 import { readProductionLicenseInventory } from './production-dependency-inventory.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const inventory = Object.values(readProductionLicenseInventory()).flat();
+
+/**
+ * The copies a linked sibling checkout (`pnpm link:squisq`) resolves for
+ * itself. Its dependencies never enter Gezel's lockfile, so while it is linked
+ * a package only Squisq brings (Tiptap) is missing from the production graph,
+ * yet a local build still bundles one. Resolving from each linked package the
+ * way Node and Vite do tests that copy, which keeps the gate runnable while
+ * linked (scripts/local-link-guard.mjs). CI and releases judge the lockfile
+ * graph alone.
+ */
+function linkedCopies(name) {
+  if (isEnforcing()) return [];
+  const found = new Map();
+  for (const { spec } of collectLinks('@bendyline/')) {
+    for (let dir = resolve(root, spec.slice('link:'.length)); ; dir = dirname(dir)) {
+      const candidate = join(dir, 'node_modules', name);
+      if (existsSync(join(candidate, 'package.json'))) {
+        const path = realpathSync(candidate);
+        found.set(path, JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')).version);
+        break;
+      }
+      if (dirname(dir) === dir) break;
+    }
+  }
+  return [...found].map(([path, version]) => ({ path, version }));
+}
+
 function copies(name) {
   const paths = new Map();
   for (const pkg of inventory.filter((pkg) => pkg.name === name)) {
     for (const [i, version] of pkg.versions.entries()) paths.set(pkg.paths[i], version);
+  }
+  if (paths.size === 0) {
+    const linked = linkedCopies(name);
+    if (linked.length > 0) return linked;
   }
   assert.ok(paths.size, `${name} must be present in the tested production graph`);
   return [...paths].map(([path, version]) => ({ path, version }));

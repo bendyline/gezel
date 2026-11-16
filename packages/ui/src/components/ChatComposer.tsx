@@ -365,10 +365,14 @@ interface ComposerNarrateButtonProps {
   onError: (message: string | null) => void;
 }
 
-// Squisq's sibling source owns this cross-repo option; the currently published
-// editor type predates it. A spread keeps Gezel buildable against that pin while
-// the local/new Squisq runtime consumes the flag normally.
-const CHAT_ACCESSORY_BIN_PROPS = { showFilesWhenNotEmpty: true } as const;
+// Squisq's sibling source owns these cross-repo options; the currently published
+// editor type predates them. A spread keeps Gezel buildable against that pin while
+// the local/new Squisq runtime consumes them normally. The toolbar sits under the
+// draft: write first, then attach and send from the row below it.
+const CHAT_EDITOR_SHELL_PROPS = {
+  showFilesWhenNotEmpty: true,
+  toolbarPosition: 'bottom',
+} as const;
 
 /**
  * Bridge prompt narration into Squisq's live editor state.
@@ -2249,7 +2253,7 @@ export function ChatComposer({
           // toggle available once populated and open the bin when the first
           // attachment arrives so non-image files have a visible home.
           showFilesToggle={attachmentsEnabled}
-          {...CHAT_ACCESSORY_BIN_PROPS}
+          {...CHAT_EDITOR_SHELL_PROPS}
           fullWidth
           thinMargins
           toolbarSlotAfterActions={

@@ -35,6 +35,13 @@ export type UpdateState =
       bytesPerSecond?: number;
     }
   | { kind: 'ready'; version: string }
+  /** macOS: Installer.app has the verified package open; Gezel waits for it to finish. */
+  | { kind: 'installing'; version: string }
+  /**
+   * A newer release finished installing while this app kept running the old
+   * one. `restarting` is true when the shell is relaunching into it by itself.
+   */
+  | { kind: 'installed'; version: string; restarting: boolean }
   /**
    * `stage` tells a failed version *check* (often just offline), download, and
    * installer handoff apart. Optional because an older Electron shell may
@@ -238,6 +245,11 @@ declare global {
       update?: {
         state(): Promise<UpdateState | null>;
         install(): Promise<{ ok: true } | { ok: false; error: string }>;
+        /**
+         * Relaunch into an `installed` update. Optional: the UI is served by
+         * the daemon, so it can run inside an older shell that lacks it.
+         */
+        restart?(): Promise<{ ok: true } | { ok: false; error: string }>;
         onStateChanged(callback: (state: UpdateState) => void): void;
       };
       /**

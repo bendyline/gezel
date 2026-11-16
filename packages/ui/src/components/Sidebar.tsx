@@ -30,6 +30,7 @@ import { requestSettingsSection } from '../settings-nav.js';
 import { getSidebarSide } from '../sidebar-side.js';
 import { railSystemNotices } from '../system-notices.js';
 import { useUpdateState } from '../update-state.js';
+import { useProjectListCollapsed } from '../views/projects/project-list-collapsed.js';
 import { WorkshopIcon } from './AreaIcon.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { type FileEntry, FileTree } from './FileTree.js';
@@ -168,6 +169,15 @@ const LIST_AREAS: ReadonlySet<RecentTabArea> = new Set([
   'benchmarks',
 ]);
 
+/** Whether the selection is an area that shows its own list. Projects counts
+ *  only while its project list is open: folded to icons, it leaves room for
+ *  the rail, which then keeps whatever state the person gave it. */
+function isListArea(selection: RecentTab | null, projectListCollapsed: boolean): boolean {
+  if (selection?.kind !== 'area') return false;
+  if (selection.area === 'projects') return !projectListCollapsed;
+  return LIST_AREAS.has(selection.area);
+}
+
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 420;
 const DEFAULT_WIDTH = 240;
@@ -305,7 +315,8 @@ export function Sidebar({
   const [width, setWidth] = useState<number>(() => readStoredWidth());
   const [storedCollapsed, setCollapsed] = useState<boolean>(() => readStoredCollapsed());
   const [stayOpen, setStayOpen] = useState<boolean>(() => readStoredStayOpen());
-  const inListArea = selection?.kind === 'area' && LIST_AREAS.has(selection.area);
+  const projectListCollapsed = useProjectListCollapsed();
+  const inListArea = isListArea(selection, projectListCollapsed);
   // A narrow window folds the rail too, until the person opens it for this
   // visit. Nothing is stored, so a wider window brings back the rail they had.
   const narrowWindow = useNarrowWindow();

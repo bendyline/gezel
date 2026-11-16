@@ -26,7 +26,7 @@ export function IntroArticleControls({
         // biome-ignore lint/a11y/useSemanticElements: a tray of keys, not a form; <fieldset> would bring a legend and form-group styling.
         <div className="gz-tray handboek-mode-tray" role="group" aria-label="Help article">
           <div
-            className="home-intro-modes"
+            className="gz-key-group"
             role="radiogroup"
             aria-label="View as"
             onKeyDown={onRadioKeyDown}
@@ -55,7 +55,8 @@ export function IntroArticleControls({
               Watch
             </button>
           </div>
-          <span className="home-intro-tray-divider" aria-hidden="true" />
+          {/* So Open in Help does not read as a third view. */}
+          <span className="gz-tray-divider" aria-hidden="true" />
           <button
             type="button"
             className="gz-key"

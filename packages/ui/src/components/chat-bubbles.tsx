@@ -1999,6 +1999,7 @@ export function StreamingStatusLine({
   /**
    * The prompt's token count is machinery: outside debug mode it shows only
    * while the pointer is over the header row (`msg-live-tokens-on-hover`).
+   * The elapsed clock shows only in debug mode.
    */
   debugMode?: boolean;
 }) {
@@ -2015,6 +2016,7 @@ export function StreamingStatusLine({
         ? thinkingLabel
         : 'thinking';
   const showProgress = !failed && !queued && typeof thinkingProgress === 'number';
+  const showClock = debugMode && elapsedSeconds !== null;
   const progressPct = showProgress
     ? Math.max(0, Math.min(100, Math.round((thinkingProgress as number) * 100)))
     : 0;
@@ -2115,7 +2117,10 @@ export function StreamingStatusLine({
           {COMPACT_TOKEN_FMT.format(totalTokens)}
         </span>
       )}
-      {elapsedSeconds !== null && (
+      {showClock && (
+        // A clock counting up beside every reply reads as a stopwatch on
+        // the person's patience; the stall banner below speaks up when
+        // silence actually matters, so the clock is debug-only.
         // When the progress bar is rendered immediately above, the "·"
         // dot floats next to the bar with nothing on its left to anchor
         // it — drop it in that case and just lean on the bar's right
@@ -2133,9 +2138,12 @@ export function StreamingStatusLine({
         </>
       )}
       {!failed && !queued && wirePulseCount !== undefined && wirePulseCount > 0 && (
+        // The hammer's dot separates it from the clock or tool count; with
+        // neither shown it would float beside the label, so the flex gap
+        // does the separating instead.
         <span className="msg-wire-pulse">
-          {' '}
-          · <WorkChunksCount count={wirePulseCount} />
+          {showClock || toolCount > 0 ? ' · ' : ' '}
+          <WorkChunksCount count={wirePulseCount} />
         </span>
       )}
     </span>

@@ -27,6 +27,7 @@ import { FittedTabsList } from './FittedTabsList.js';
 import { GezelIcon } from './GezelIcon.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
 import { PhotoThumb } from './PhotoThumb.js';
+import { useDocumentViewProps } from './SquisqIntegration/document-view.js';
 import { GEZEL_WRITE_CANVAS } from './SquisqIntegration/write-canvas.js';
 import { StepTracker } from './StepTracker.js';
 import { taskStepStatus } from './TaskStepTracker.js';
@@ -975,7 +976,6 @@ export function ChatReferences({
               orderedTasks.length > 1 ||
               references.length > 1) && (
               <div className="chat-rail-section-tabs" role="tablist" aria-label="Chat panels">
-                <span className="chat-rail-section-label">Chat</span>
                 {hasTasks &&
                   (orderedTasks.length > 1 ? (
                     <TaskTabMenu
@@ -1916,12 +1916,14 @@ function ViewerPath({ path }: { path: string }) {
 
 function ReferenceCodePreview({ path, content }: { path: string; content: string }) {
   const editorTheme = useEffectiveTheme();
+  const documentView = useDocumentViewProps();
   // The pane only reads, so it shows no formatting keys.
   if (isPlainTextFile(path)) return <pre className="plain-text-file">{content}</pre>;
   return (
     <div className="chat-rail-viewer-code">
       <EditorShell
         {...GEZEL_WRITE_CANVAS}
+        {...documentView}
         key={path}
         initialMarkdown={content}
         fileName={path}

@@ -128,7 +128,7 @@ describe('GezellenView', () => {
     const fullWidthSidebarSelector =
       '.side li button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.project-row-thinking):not(.gezel-row)';
     expect(appShellCss.replaceAll(/\s/g, '')).toContain(
-      `${fullWidthSidebarSelector.replaceAll(/\s/g, '')}{display:block;width:100%;`,
+      `${fullWidthSidebarSelector.replaceAll(/\s/g, '')}{width:100%;`,
     );
     expect(working.matches(fullWidthSidebarSelector)).toBe(false);
   });

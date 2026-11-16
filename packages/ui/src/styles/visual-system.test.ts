@@ -165,11 +165,20 @@ describe('the three status colors', () => {
   });
 
   // A zone held bordered cards that held inset strips, three boxes deep, and
-  // the engine's rows had a shape of their own beside the panel's.
-  it('makes the Activity zone the only box, with one row shape inside it', () => {
+  // the engine's rows had a shape of their own beside the panel's. Then the
+  // cards went flat too, and a stack of night reports read as one document.
+  it('sets each Activity question on its own card, flat inside, with one row shape', () => {
     const activity = readFileSync(resolve(import.meta.dirname, 'activity.css'), 'utf8');
-    const card = activity.slice(activity.indexOf('.activity-question .pending-question {'));
-    expect(card.slice(0, card.indexOf('}'))).toMatch(/border: 0;[\s\S]*background: transparent;/);
+    const bodyOf = (selector: string) => {
+      const rest = activity.slice(activity.indexOf(`${selector} {`));
+      return rest.slice(0, rest.indexOf('}'));
+    };
+    expect(bodyOf('.activity-section > .activity-question:not(.activity-question-result)')).toMatch(
+      /border: 1px solid var\(--tone-edge\);[\s\S]*background:/,
+    );
+    expect(bodyOf('.activity-question .pending-question')).toMatch(
+      /border: 0;[\s\S]*background: transparent;/,
+    );
     expect(activity).toMatch(
       /\.activity-row,\s*\.activity-queue \.queue-meter-panel-item \{[^}]*grid-template-columns:/,
     );

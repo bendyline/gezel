@@ -378,11 +378,11 @@ Rules:
 - **Icon-only keys are sanctioned for tight panel headers and toolbars**
   where 2–5 modes must fit beside a title — use `gz-key gz-key--icon`
   (near-square padding, no label gap) inside the usual `role="radiogroup"`
-  tray, and give every key both `title` and `aria-label` since there is no
-  visible text. The file-panel view switch (`FileViewModeKeys`) is the
-  reference implementation. This is still a keys case, not Tabs: the same
-  content is being re-presented (sorted, flattened), not swapped for a
-  different panel.
+  tray (on a key strip, a `gz-key-group`), and give every key both `title`
+  and `aria-label` since there is no visible text. The file-panel view
+  switch (`FileViewModeKeys`) is the reference implementation. This is still
+  a keys case, not Tabs: the same content is being re-presented (sorted,
+  flattened), not swapped for a different panel.
 - **A tray may also hold actions, not just modes** — the same icon keys in a
   `role="toolbar"` (or `role="presentation"` when the group needs no name)
   instead of a radiogroup, with nothing latched. Reach for it when a compact
@@ -404,7 +404,39 @@ Rules:
   subject, the choice keys keep their own inner `role="radiogroup"` (one Tab
   stop, arrows move), and a 1px `--tray-border` divider separates them from
   the action keys so an action never reads as one more choice. The Home
-  Help tab's *Read · Watch | Open in Help* is the reference.
+  Help tab's *Read · Watch | Open in Help* is the reference. The divider is
+  `.gz-tray-divider` and the inner group `.gz-key-group`.
+- **A pane's toolbar is one key strip, never a row of small trays.** A
+  narrow header that gives each group its own tray becomes a line of wells
+  with a control lost in each: the file pane had five above a 240px list,
+  three of them around a single key. Use `.gz-key-strip`: the tray's surface
+  run edge to edge under the pane's title row, with no side walls and no
+  corners, because the pane's own edges are the only edges. Every key on it
+  is the ordinary key. The strip is a `role="group"` named after its
+  subject, a radiogroup's keys sit together in `.gz-key-group`, a
+  `.gz-tray-divider` parts the choice from what is not one more choice, and
+  `.gz-key-strip-end` sends the verbs to the far end. Icon keys on a strip
+  are square, which is what seats seven in 240px. A pane folded to its rail
+  shows the same strip stood on end (`.gz-key-strip--rail`). The file pane
+  is the reference (see "The file pane's header"). A tray holding a single
+  key is the sign that a strip was wanted.
+- **A row of controls is one kit: keys at one size.** When a toolbar mixes a
+  tray, a select and a filled button, each arrives at its own height, corner
+  and type size, and the row reads as parts from three kits. Two variants
+  keep such a row in the key recipe:
+  - **The dropdown key** (`gz-key gz-key--dropdown` on `Select.Trigger` or a
+    menu trigger) is a picker wearing the key's face, with the select's own
+    chevron. It may sit in a tray beside the choice it refines, past a
+    `.gz-tray-divider`. One whose choice is narrowing what is listed adds
+    `gz-key--filtering` and takes the accent ink: a value, never a latch.
+  - **The primary key** (`gz-key gz-key--primary`) is the view's one filled
+    action at a key's size. It is raised, never latched, and never sits in
+    a tray, where it would read as a second chosen key. It comes last in its
+    row. The bare `button` stays the filled primary everywhere else.
+
+  Something in such a row that cannot be pressed (a system job's owner) is a
+  flat readout, never a key's face. The Tasks toolbar and a task's header
+  are the reference (see "The Tasks toolbar").
 - **Native `<input type="radio">` stays native** in dense config forms
   (folder scopes, engine settings) — the round dot is a true circle and
   keeps its shape. Reach for keys when the choice is prominent enough to
@@ -1064,12 +1096,13 @@ testing; it never switches to a second application or a different data store.
 its content (Crew, Documents, Tasks, Plans, Scripts, History, Settings,
 Help, Knowledge, Benchmarks: `LIST_AREAS` in
 [Sidebar.tsx](../packages/ui/src/components/Sidebar.tsx)) folds the wide
-rail to its icons on its own. With both open, the content sat between two
-lists, about 520px of a 1440px window. Leaving the area restores the rail
-the person had. Expanding the rail by hand in such an area pins it open
-there (`gezel:nav:sidebar-stay-open`), and collapsing it there hands it back
-to the automatic fold. The person's own collapse choice for the rest of the
-app is a separate setting that the fold never writes.
+rail to its icons on its own. Projects counts while its project list is open;
+folding that list to its icons gives the rail back. With both open, the
+content sat between two lists, about 520px of a 1440px window. Leaving the
+area restores the rail the person had. Expanding the rail by hand in such an
+area pins it open there (`gezel:nav:sidebar-stay-open`), and collapsing it
+there hands it back to the automatic fold. The person's own collapse choice
+for the rest of the app is a separate setting that the fold never writes.
 
 **The rail leads with places; the builder's tools fold into More.** The
 rail lists Home, Projects, Documents and Crew, then one **More** group
@@ -1317,9 +1350,13 @@ whose folder picker is a row of its own, and flipping modes must not move
 the frame, so the picker keeps its row there. The label reads "To", not
 "TO:", and the recipient is a `PersonLabel`. The To line and the strips above
 it (task, image, review, error) share the editor's left and right edges.
-Every desktop chat wears the same compose frame: an accent-tinted border, a
-warm band for recipient, thread and toolbar above the lighter draft, and the
-timeline's 0.75rem gutter on both sides. That holds for Home, a gezel's chat,
+Every desktop chat wears the same compose frame: an accent-tinted border that
+turns full copper (`--accent`, the color of Send) while focus is anywhere in
+the frame, a warm band for recipient and thread above the lighter draft, the toolbar (attach
+keys at the left, Send at the right) as a band under it, and the timeline's
+0.75rem gutter on both sides. Write first, then send from the row below: the
+toolbar follows the draft in tab order too, and the terminal's Fire row sits
+under its command entry so the primary key holds its place across a mode flip. That holds for Home, a gezel's chat,
 and the task, craftbook and page chats (one rule in `shared-content.css`);
 project chat draws the same frame around its chat and terminal modes. Insets
 are never one-sided. The Office pane's document chat, about 320px wide, runs
@@ -2164,11 +2201,16 @@ work in it, repeating counts the section keys already show. So color on the
 panel always means something to read. Working's light breathes like
 the titlebar dot.
 
-**The zone is the only box.** What a zone holds are flat rows parted by a
-hairline of the zone's own tone. A question card inside it has no border,
-fill, or inset strips of its own: a zone used to hold bordered cards that held
-inset strips, three boxes deep. Keys and text fields inside a lit zone take a
-paler tint of the zone instead of the panel's tan. A zone's wash, edge and
+**Rows are flat; a question is a card.** What a zone holds are flat rows
+parted by a hairline of the zone's own tone, except a question (a decision, a
+night's review), which is a card: a sheet of paler paper on the zone, outlined
+in the zone's edge and parted from the next card by a gap, not a hairline.
+Parted only by rules, a stack of night reports read as one long document. The
+card is flat inside: no inset strips, and an attached document's page runs
+edge to edge across it as a band under the file's name. A zone once held
+bordered cards that held inset strips, three boxes deep; two is the limit.
+Keys and text fields inside a lit zone take a paler tint of the zone instead
+of the panel's tan, and inside a card one step paler again. A zone's wash, edge and
 rule are mixed from its one status color in
 [styles/activity.css](../packages/ui/src/styles/activity.css); the panel has
 no colors of its own.
@@ -2489,10 +2531,27 @@ the same label on one tab.
 **Split buttons.** Use a split button when one creation action is the clear,
 frequent default and two or three closely-related variants should remain
 available without crowding the toolbar. The wide left key performs the default
-immediately; the narrow attached right key opens a `DropdownMenu`. Join the
-halves on one straight seam and keep `--radius-md` only on the outside corners.
-Menu items should name the variant and may carry one short hint line. The Tasks
-screen's New task / scheduled / Night Shift control is the reference.
+immediately; the narrow attached right key opens a `DropdownMenu`. Both halves
+are primary keys (`gz-key gz-key--primary`). Join them on one straight seam and
+keep `--radius-md` only on the outside corners. Menu items should name the
+variant and may carry one short hint line. The Tasks screen's New task /
+scheduled / Night Shift control is the reference.
+
+**The Tasks toolbar: one tray for what is listed, one filled key.** The
+toolbar over the task list is two things. A single tray (`role="group"`,
+"Tasks shown") holds everything that decides which tasks are listed: the kind
+keys (One-time, Scheduled, Night Shift), a divider, then the project, status
+and assignee pickers as dropdown keys. **New task** stands outside it at the
+far end, the row's one filled key. The row used to be a tray, two outlined
+selects and a flat split button at three heights and two type sizes, with the
+filters parked beside New task instead of beside the kind they refine.
+
+A task's header follows the same rule. Its status keys and its assignee share
+one tray, the assignee a dropdown key past the divider. A draft has no status
+to set, so its row is bare keys: the Draft badge, the assignee, **Discard**,
+then **Start task**. The filled key (Start task, or Try again on a paused
+task) always comes last, so it sits under New task. Discard is a plain key:
+unstyled, it once rendered as a second filled primary beside Start task.
 
 **A menu never runs off the window.** Radix flips a panel to the other side
 when it doesn't fit, but a list taller than *either* side — the chat rail's
@@ -2517,12 +2576,16 @@ a **fraction** when the split is about balance (the chat rail, the project
 output pane) and **pixels** when the useful size is set by content rather than
 by window width — a file tree is sized by how long filenames are. Pixel splits
 also get a **collapsed rail**: dragging past the point where the pane stops
-being readable snaps it to a ~2rem strip carrying a chevron and the pane's name
-set in `writing-mode: vertical-rl`, which is also the way back. Collapse is a
-snap, never a sliver — never leave a pane too narrow to read. A collapse
-reached only by dragging is one nobody finds, so the pane's own header also
-carries a collapse key (a left chevron, "Hide … files"). The Workspace /
-Artifacts file tree is the reference. A split may also hold a width for one
+being readable snaps it to a ~2rem rail, the pane's key strip stood on end
+(`.gz-key-strip--rail`). A key with a chevron heads it and the pane's name runs
+down it in `writing-mode: vertical-rl`; the two are one button, the way back.
+The keys that need no tree sit at its foot: New file where the tree can be
+written, and Open in the file manager. New folder is left out, since a folder
+made there lands in a tree nobody can see. Collapse is a snap, never a sliver —
+never leave a pane too narrow to read. A collapse reached only by dragging is
+one nobody finds, so the pane's own title row also carries a fold button (a
+left chevron, "Hide … files"). The Workspace / Artifacts file tree is the
+reference. A split may also hold a width for one
 visit that it never stores: the chat rail's side pane goes wide for a result
 opened from its finished-work card, with a **Wider** / **Narrower** key in
 its header, and a drag of the grip starts from the width on screen and
@@ -2541,9 +2604,35 @@ the project Workspace, the project Artifacts drawer, the shared Documents
 library — renders
 [`FileBrowserPane`](../packages/ui/src/components/file-browser/FileBrowserPane.tsx)
 against a `FileBrowserSource`. That is the whole panel: the resizable +
-collapsible tree, the view-mode keys, the show-hidden key, the create keys,
+collapsible tree, the view-mode keys, the show-hidden key, the create actions,
 per-row rename/delete, OS drag-and-drop import, the truncation notice, and the
 media/binary previews. Do not hand-roll a second file pane; add to this one.
+
+**The file pane's header: a title row, then one key strip.** The title row
+says where you are and holds what you can do to the place. The key strip under
+it holds how you are looking at it.
+
+- **The title names the place, never the tab.** The artifacts tree reads
+  **Artifacts drawer**, beside the two-drawer glyph its tab wears, because
+  "drawer" is the word the rest of the app and every gezel uses for it. A
+  workspace that points at a folder reads that folder's own name, with the
+  full path as its tooltip; a project's internal workspace reads "Workspace".
+  The source supplies this as `heading` / `headingHint`. Control labels keep
+  the tree's short `title` ("Hide Workspace files"), so they read the same in
+  every folder. A long name gives way with an ellipsis before the buttons
+  beside it do.
+- **Verbs are quiet buttons on the title row.** New folder, New file and the
+  fold chevron are `.file-tree-action`: the face a tree row's own actions
+  trigger wears, taking a key's face only under the pointer. A raised key
+  beside a title out-shouts it.
+- **The strip holds what latches, then Open.** View modes, a divider, the
+  show-hidden key, and Open in the file manager at the far end (see "A pane's
+  toolbar is one key strip"). The Workspace's seven keys fit one line at the
+  pane's default 240px; narrower than that the strip wraps.
+- **One glyph family.** Everything in the header is a 16-unit outline at one
+  stroke weight ([glyphs.tsx](../packages/ui/src/components/file-browser/glyphs.tsx)
+  and `FileViewModeKeys`). Font Awesome stays in the tree rows, where it marks
+  file types.
 
 The source adapter is what varies, and capabilities are declared by presence:
 an adapter with no `mkdir` gets no New folder key, one with `canWrite: false`
@@ -2612,6 +2701,18 @@ page's *New document* / *New folder* actions are ordinary keys, not a
 full-width primary slab. Squisq's stylesheet is bundled after ours, so a bridge
 rule wins by out-specifying the vendor rule (matching its `[data-theme]`), not
 by source order.
+
+**The document viewers share one View menu.** A file opens with the outline
+hidden; whoever wants it turns it on from View, and that choice (with the
+rest of the View menu and the Document/Block choice) then holds in every
+viewer of a person's files: a project's files and artifacts, the Documents
+library, a document opened outside-in, and a chat reference. It is kept in
+config (`config.documentView`), not per file and not in localStorage alone,
+and an open viewer takes a change made in another at once. A viewer of a
+person's file spreads `useDocumentViewProps()`
+([document-view.ts](../packages/ui/src/components/SquisqIntegration/document-view.ts))
+onto its `EditorShell`; compact editors (the chat composer, note and about
+fields, settings cards) keep their own layout and never read or write it.
 
 **A working document reads as a document, not a web page.** Squisq's
 `LinearDocView` defaults to its page register: a centered cover hero set at

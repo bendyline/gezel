@@ -7,6 +7,7 @@ import { AutosaveStatus } from '../../components/AutosaveStatus.js';
 import { ExportToolbarControls } from '../../components/DocumentExport/index.js';
 import { DocumentNarration } from '../../components/DocumentNarration.js';
 import { ironCalcEngineFactory } from '../../components/SquisqIntegration/calculation.js';
+import { useDocumentViewProps } from '../../components/SquisqIntegration/document-view.js';
 import {
   type OutsideInLayout,
   createDataReferenceContainer,
@@ -50,6 +51,7 @@ export function ProjectOutsideInEditor({
   toolbarIndexToggle,
 }: ProjectOutsideInEditorProps) {
   const { layout, sourcePath } = outsideIn;
+  const documentView = useDocumentViewProps();
   const autosave = useSerializedAutosave({
     resourceKey: `outside-in:${projectId}:${file.source}:${sourcePath}`,
     initialValue: file.content,
@@ -106,6 +108,7 @@ export function ProjectOutsideInEditor({
     <div className="editor-wrap" style={{ height: '100%' }}>
       <EditorShell
         {...GEZEL_WRITE_CANVAS}
+        {...documentView}
         initialMarkdown={autosave.desiredValue()}
         // Detect the mode from the Markdown companion, not the rendered target.
         fileName={sourcePath}
@@ -121,7 +124,6 @@ export function ProjectOutsideInEditor({
         calcEngineFactory={isReadOnly ? undefined : ironCalcEngineFactory}
         allowVersioning={!isReadOnly}
         versionBasename={versionBasename}
-        outline
         toolbarSlotAfterActions={
           <>
             {!isReadOnly && <TransformToolbarButton context="generic" />}

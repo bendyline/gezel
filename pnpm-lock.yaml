@@ -26,7 +26,7 @@ overrides:
   ip-address: 10.7.5
   js-yaml@<4: 3.15.2
   js-yaml@>=4 <5: 4.3.2
-  mermaid@>=11 <12: 11.16.1
+  mermaid@>=11 <12: 11.17.2
   nodemailer: 10.2.1
   kokoro-js>@huggingface/transformers: ^4.3.1
   onnxruntime-node: 1.30.0
@@ -327,14 +327,14 @@ importers:
         specifier: workspace:*
         version: link:../service
       '@bendyline/squisq':
-        specifier: 2.13.16
-        version: 2.13.16(supports-color@8.1.1)
+        specifier: 2.13.17
+        version: 2.13.17(supports-color@8.1.1)
       '@bendyline/squisq-formats':
-        specifier: 2.8.18
-        version: 2.8.18(supports-color@8.1.1)
+        specifier: 2.8.19
+        version: 2.8.19(supports-color@8.1.1)
       '@bendyline/squisq-react':
-        specifier: 2.12.28
-        version: 2.12.28(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+        specifier: 2.12.29
+        version: 2.12.29(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -834,14 +834,14 @@ importers:
         specifier: 0.3.10
         version: 0.3.10
       '@bendyline/squisq':
-        specifier: 2.13.16
-        version: 2.13.16(supports-color@8.1.1)
+        specifier: 2.13.17
+        version: 2.13.17(supports-color@8.1.1)
       '@bendyline/squisq-cli':
-        specifier: 2.9.32
-        version: 2.9.32(supports-color@8.1.1)
+        specifier: 2.9.33
+        version: 2.9.33(supports-color@8.1.1)
       '@bendyline/squisq-formats':
-        specifier: 2.8.18
-        version: 2.8.18(supports-color@8.1.1)
+        specifier: 2.8.19
+        version: 2.8.19(supports-color@8.1.1)
       '@hono/node-server':
         specifier: 2.1.6
         version: 2.1.6(hono@4.13.16)
@@ -987,23 +987,23 @@ importers:
         specifier: workspace:*
         version: link:../client
       '@bendyline/squisq':
-        specifier: 2.13.16
-        version: 2.13.16(supports-color@8.1.1)
+        specifier: 2.13.17
+        version: 2.13.17(supports-color@8.1.1)
       '@bendyline/squisq-calc':
         specifier: 2.11.2
         version: 2.11.2(@ironcalc/wasm@0.8.4)
       '@bendyline/squisq-editor-react':
-        specifier: 2.13.23
-        version: 2.13.23(@ironcalc/wasm@0.8.4)(@types/react@19.2.17)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+        specifier: 2.13.25
+        version: 2.13.25(@ironcalc/wasm@0.8.4)(@types/react@19.2.17)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@bendyline/squisq-formats':
-        specifier: 2.8.18
-        version: 2.8.18(supports-color@8.1.1)
+        specifier: 2.8.19
+        version: 2.8.19(supports-color@8.1.1)
       '@bendyline/squisq-graph':
         specifier: 2.13.1
         version: 2.13.1
       '@bendyline/squisq-react':
-        specifier: 2.12.28
-        version: 2.12.28(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+        specifier: 2.12.29
+        version: 2.12.29(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@ironcalc/wasm':
         specifier: 0.8.4
         version: 0.8.4
@@ -1038,8 +1038,8 @@ importers:
         specifier: 2.7.0
         version: 2.7.0
       mermaid:
-        specifier: 11.16.1
-        version: 11.16.1
+        specifier: 11.17.2
+        version: 11.17.2
       monaco-editor:
         specifier: ~0.50.0
         version: 0.50.0
@@ -1335,13 +1335,13 @@ packages:
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     hasBin: true
 
-  '@bendyline/squisq-cli@2.9.32':
-    resolution: {integrity: sha512-9R8w0gJJsqzEFeKEaL9fnYlMKAcQSAx/9eO6eZ/9Zi91KJAQxf/FVJ+xSSOmbzZ/UDEv2VR8J6caswyxwiN1lg==}
+  '@bendyline/squisq-cli@2.9.33':
+    resolution: {integrity: sha512-VsZgGWkC/014jAJernO1qVQcrMXDdQ/su3jGAHwgjHYFY+5bcm4rJ24yooKxihWFIHKFWzlkCn8k6BmI+EW7xg==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     hasBin: true
 
-  '@bendyline/squisq-editor-react@2.13.23':
-    resolution: {integrity: sha512-2IKjBihpXAU8vEGvnPk7mLtiC+7m0s/ElMlwIsiKb1akl0n5uTBswSbJ9/pX9SFqZGBgD6+e/bv6gqB606bmqQ==}
+  '@bendyline/squisq-editor-react@2.13.25':
+    resolution: {integrity: sha512-PgMNaD52Km9OWtjdEGb3xkRwYP4wzxNfoAWeaFYFkAuxVP2iUaiG7KAORIRSBoU8Se4i52KYWvz4Gwc2VB2D2Q==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       harper.js: ^2.7.0
@@ -1361,8 +1361,8 @@ packages:
       hyparquet:
         optional: true
 
-  '@bendyline/squisq-formats@2.8.18':
-    resolution: {integrity: sha512-glljR/CbVh/+SBBhH0bg5nWN2s9WUiltzR0lD/ubFGwMacoIuAnN/D+JiadUKqj5/a0A0ps3MD+aNUXggSqaAw==}
+  '@bendyline/squisq-formats@2.8.19':
+    resolution: {integrity: sha512-MWBExaXmTdAP3n8M3QHhqrRAgf3yMW8JtyM7z7LGt/YUzcVFu8V4tluvbRxoYxQN2OzjpRSXFVwd300w7dQdDA==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       hyparquet: ^1.29.1
@@ -1374,8 +1374,8 @@ packages:
     resolution: {integrity: sha512-BltjR7oSAHGWkUrwZgAUapHJNN3Ke5HvQtRvd3DfVCDznmEEuLOqCGWEHU0r/Z+cWxcwSv+yE86o2OetSU0rNQ==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
-  '@bendyline/squisq-grid-react@2.11.45':
-    resolution: {integrity: sha512-/XooPn8LV1UU9wwLTgsc7IIgo1gCmlf4GSiFpuwmkp+fO7yGtInCIA7GEVJS2PkE1oaiB0AZe4n8ZZ0KtbU1Bg==}
+  '@bendyline/squisq-grid-react@2.11.46':
+    resolution: {integrity: sha512-Jj09cDSf0ZqIrPlDR59Ki8/TKJ5ssB0HVvozf/Ml7GCmfo/cl1fo1sMDZNO05tBrenfWkxdjYHma6DRD78bkzg==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
@@ -1388,15 +1388,15 @@ packages:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
-  '@bendyline/squisq-react@2.12.28':
-    resolution: {integrity: sha512-e9R2qqsW5Z8RhobYas6bWMJQVoSyRzFhzkYROschC1HsM8T58xrYMC//HcjyMRCQhMhOfqFbSIrCeX07o9fvBQ==}
+  '@bendyline/squisq-react@2.12.29':
+    resolution: {integrity: sha512-R4W4GUHhwnDagDUw3KKECS81fI1lgn61w/fUq/wi5pBa90sgUPvvDg+21teX3D4p4/KVz3yaZOjAXQU+JaMljA==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
       react-dom: ^18.0.0 || ^19.0.0
 
-  '@bendyline/squisq-video-react@2.5.29':
-    resolution: {integrity: sha512-q2AxZINmQnQCN6jjxhjfAP2LayOO0bLx2ncj+B3iAxqLbxRdHS2XFcMaplbmHDue4Gw4jQzClLHq98Ro2OA2Ng==}
+  '@bendyline/squisq-video-react@2.5.31':
+    resolution: {integrity: sha512-F+FWOVLw61smk7cuFZOUw9Xl6ROw3RR8V4kzadAFFiMYZbS9qpoWrMqu5pnBSY+qaUwRgOg4UgjTczOx2PN0lQ==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
     peerDependencies:
       react: ^18.0.0 || ^19.0.0
@@ -1406,16 +1406,16 @@ packages:
     resolution: {integrity: sha512-Y3rYsHb3ofVr0yn8zSGKJng4aGWdyn6Bzz6fiSSqohjsOglCHpLqaKpGd0uU7J2C968TSwA859xFaFxSWQ7ULQ==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
-  '@bendyline/squisq-video@2.4.22':
-    resolution: {integrity: sha512-lVdGrjrrB9mThWG345MpS+bR5bJdaGNSXZp4UM75yX4bYnDMkM8emYzrOpX4zDeCroUKVzMueMRwf7O7M6aq4Q==}
+  '@bendyline/squisq-video@2.4.23':
+    resolution: {integrity: sha512-1OZR2Bm1KrUnxSovuxnwPp12CTUu4tjVW0Ugs2lMU8THkaQ5vuc3d/WW6szvxx+E8nqc/D76AZ51rzp1txsf4A==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   '@bendyline/squisq@2.13.15':
     resolution: {integrity: sha512-kBtRUdN53KlcT9J9yF7wXGdZ6JMmx5cCa/v4Qz5oxD1WLADJjXTPm5L95zpPJgsZuARgcKLW2xWMBcpr8UMjqA==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
-  '@bendyline/squisq@2.13.16':
-    resolution: {integrity: sha512-lNwGOSvfgXBIqnfUKT9j8Sf0G1S7AAGeElp7h6j384elL6YB+3eO8Q5wgIH99DM3s7ZJu2g+t4IZS4Hq1f8nOw==}
+  '@bendyline/squisq@2.13.17':
+    resolution: {integrity: sha512-2nFMs9D2yBpJH8j+lnwiHq/i9lHLR5Ow64WR8JCl1jyknZxr2Zk9W+fvw4kGg/28Uoh/bEiGKozU5lJcHEOyvw==}
     engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
 
   '@biomejs/biome@1.9.4':
@@ -5450,6 +5450,9 @@ packages:
   fast-uri@3.1.9:
     resolution: {integrity: sha512-hS/0Wt3Ya043oKXs0sIxrMpKQITXhMLIrVAKKXi4gozGC9v7YRWVnXIZzjNPTO02M9BdxLCWqK1yRXgNziVyJQ==}
 
+  fastdom@1.0.12:
+    resolution: {integrity: sha512-LB+xjSTEbjHE1cWsxu+tN2Xqr1kpi+V9aADI7sVM5ZMaXyYGPHULQMzpJMYqOTULK/73pUkWVzzObFRBkPr+hg==}
+
   fastq@1.20.1:
     resolution: {integrity: sha512-GGToxJ/w1x32s/D2EKND7kTil4n8OVk/9mycTc4VDza13lOvpUZTGX3mFSCtV9ksdGBVzvsyAVLM6mHFThxXxw==}
 
@@ -5726,14 +5729,14 @@ packages:
   hast-util-from-html@2.0.3:
     resolution: {integrity: sha512-CUSRHXyKjzHov8yKsQjGOElXy/3EKpyX56ELnkHH34vDVw1N1XSQ1ZcAvTyAPtGqLTuKP/uxM+aLkSPqF/EtMw==}
 
-  hast-util-from-parse5@8.0.3:
-    resolution: {integrity: sha512-3kxEVkEKt0zvcZ3hCRYI8rqrgwtlIOFMWkbclACvjlDw8Li9S2hk/d51OI0nr/gIpdMHNepwgOKqZ/sy0Clpyg==}
+  hast-util-from-parse5@8.0.4:
+    resolution: {integrity: sha512-Yq7XlXor0Cpb71sI2E0zpv8QxQ5a6rfhDEETk4bcgrFX2SvJAY2PHocWwFtL6U9qyfiyByW3wZ6sZEfP2kW81g==}
 
   hast-util-parse-selector@4.0.0:
     resolution: {integrity: sha512-wkQCkSYoOGCRKERFWcxMVMOcYE2K1AaNLU8DXS9arxnLOUEWbOXKXiJUNzEpqZ3JOKpnha3jkFrumEjVliDe7A==}
 
-  hastscript@9.0.1:
-    resolution: {integrity: sha512-g7df9rMFX/SPi34tyGCyUBREQoKkapwdY/T04Qn9TDWfHhAYt4/I0gMVirzK5wEzeUqIjEB+LXC/ypb7Aqno5w==}
+  hastscript@9.0.3:
+    resolution: {integrity: sha512-1ALZXSmCGmW3h8AMz4R4+QKSKFi7sNgXLVwmwB8FYVtl1CwQ3WDkSAEY/d5tp1g/vbQgq2s1WlHgfO3jbw1TsA==}
 
   he@1.2.0:
     resolution: {integrity: sha512-F/1DnUGPopORZi0ni+CvrCgHQ5FyEAHRLSApuYWMmrbSwoN2Mn/7k+Gl38gJnR7yyDZk6WLXwiGod1JOWNDKGw==}
@@ -6322,8 +6325,8 @@ packages:
   linkify-it@5.0.2:
     resolution: {integrity: sha512-ONTm2jCMAVZjgQa/Fy1kScXsuOoF5NPTsoFBdE1KVIZ2vAh/r9+Bqo+0jINCBYnavTPQZz38QzFTme79ENoN3Q==}
 
-  linkifyjs@4.3.3:
-    resolution: {integrity: sha512-P8aEP5U/D1/IlTY2OeYsErdwh9bGuLE30NcXtKEjgdHcahveQoQwM2yZNsioQHsWFz0P7KKudisbrzCgR0sDHg==}
+  linkifyjs@4.4.0:
+    resolution: {integrity: sha512-InTexvtbai+2c+dEVGcc6O6P2DMVIiwD9a/i4zFroazOIYLOS6FSVmAJ7kFeumnCMx6/gQqNAkbUvgMubV4+MA==}
 
   load-json-file@4.0.0:
     resolution: {integrity: sha512-Kx8hMakjX03tiGTLAIdJ+lL0htKnXjEZN6hk/tozf/WOuYGdZBJrZ+rCJRbVCugsjB3jMLn9746NsQIf5VjBMw==}
@@ -6447,8 +6450,8 @@ packages:
     resolution: {integrity: sha512-L//tDAkjTjJCU6pBUSBTgs3Kg4InVaZuUZog/b6V12UKhcDQ7S78877ibbCanRExwPuYP1CZD7Gd2dxSy1GXRg==}
     hasBin: true
 
-  markdown-table@3.0.4:
-    resolution: {integrity: sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw==}
+  markdown-table@3.1.0:
+    resolution: {integrity: sha512-xpeSCdM+B+6P3ncfgaB7FoDbtJ30xAe6Z18TGT7AgXJsHqCElCICZovQqdRMm7kHgpTyYv36EupqewoFFSB8vw==}
 
   marked-terminal@7.3.0:
     resolution: {integrity: sha512-t4rBvPsHc57uE/2nJOLmMbZCQ4tgAccAED3ngXQqW6g+TxA488JzJ+FK3lQkzBQOI1mRV/r/Kq+1ZlJ4D0owQw==}
@@ -6483,11 +6486,11 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
-  mdast-util-directive@3.1.1:
-    resolution: {integrity: sha512-Gqpa3MHorXYEZ0VfbroyvBlVKUfz371V6mIERqOYMcb0W1D3LwmFq1ZW4O2TDrbn+4ZmGLwMWeFRJgYZ+bc5fQ==}
+  mdast-util-directive@3.2.0:
+    resolution: {integrity: sha512-Yxq+hH4pBEmtaLIJyMVcNbtBiCIKzdOK3HvDeM+JAqC8XVAT1e5PUYbHBpwFvQLIJuJfO2zCu7aNUXWoyZLmhw==}
 
-  mdast-util-find-and-replace@3.0.3:
-    resolution: {integrity: sha512-xPgpDNl0/OXHsI7TlaIs22lWnH3KlpvZdXG1ET/m/YT2Hhdkx8lJV4kLphE6l9simyM4KPDFBwas08BgEob6Jw==}
+  mdast-util-find-and-replace@3.0.4:
+    resolution: {integrity: sha512-z4B5c6jrnJ1ltOQemhWYPBSAo6y42Z8Gt2yEgfgNTMcLSU59B8bfj8Z8AnAlJrBGLnqkdAUZ7jdDEqQw3KuipQ==}
 
   mdast-util-from-markdown@2.1.0:
     resolution: {integrity: sha512-KRLgmPaP2H1ul2bpoJkOS+9pAcDAAj9Nu1mqLnh8NLeJG5tlvj42TH80PIGBpROWlRXLk0lDrWNuZCFy/tsB4A==}
@@ -6495,8 +6498,8 @@ packages:
   mdast-util-frontmatter@2.0.1:
     resolution: {integrity: sha512-LRqI9+wdgC25P0URIJY9vwocIzCcksduHQ9OF2joxQoyTNVduwLAFUzjoopuRJbJAReaKrNQKAZKL3uCMugWJA==}
 
-  mdast-util-gfm-autolink-literal@2.0.1:
-    resolution: {integrity: sha512-5HVP2MKaP6L+G6YaxPNjuL0BPrq9orG3TsrZ9YXbA3vDw/ACI4MEsnoDpn6ZNm7GnZgtAcONJyPhOP8tNJQavQ==}
+  mdast-util-gfm-autolink-literal@2.1.0:
+    resolution: {integrity: sha512-Jx6QSK8wDo558Bcf7q+1pe0v81g2PVs09Hlvu9xJHmCFRF3sAPW7vXFVIAwBncs3sde92WbsVqNxwdqViA2XnQ==}
 
   mdast-util-gfm-footnote@2.1.0:
     resolution: {integrity: sha512-sqpDWlsHn7Ac9GNZQMeUzPQSMzR6Wv0WKRNvQRg0KqHh02fpTz69Qc1QSseNX29bhz1ROIyNyxExfawVKTm1GQ==}
@@ -6504,11 +6507,11 @@ packages:
   mdast-util-gfm-strikethrough@2.0.1:
     resolution: {integrity: sha512-OuJHqvr455pwu2OaOrir7dbzqs4jlWKOtlu9L6GjcIjjQwNyw02VntQsr/Ek6/A13vgnXfUhBekWRUP1OkNivw==}
 
-  mdast-util-gfm-table@2.0.0:
-    resolution: {integrity: sha512-78UEvebzz/rJIxLvE7ZtDd/vIQ0RHv+3Mh5DR96p7cS7HsBhYIICDBCu8csTNWNO6tBWfqXPWekRuj2FNOGOZg==}
+  mdast-util-gfm-table@2.0.1:
+    resolution: {integrity: sha512-fiIjPrAy4kz68/eFbPHhsiWDGHhqUSVoU1XsfLM5DsEPXw7MxgiVVyulUggFRckVWeT1KXQXkg5vm3kv4oMSOA==}
 
-  mdast-util-gfm-task-list-item@2.0.0:
-    resolution: {integrity: sha512-IrtvNvjxC1o06taBAVJznEnkiHxLFTzgonUdy8hzFVeDun0uTjxxrRGVaNFqkU1wJR3RBPEfsxmU6jDWPofrTQ==}
+  mdast-util-gfm-task-list-item@2.0.1:
+    resolution: {integrity: sha512-jXVO1hvB2hs82g1esi7I9nIJDqiijbQLIyH2jDUb5s7jIAZMr/79h0VHSq7XHKTqpLARRm+DDNjduB7S9+6XZA==}
 
   mdast-util-gfm@3.1.0:
     resolution: {integrity: sha512-0ulfdQOM3ysHhCJ1p06l0b0VKlhU0wuQs3thxZQagjcjPrlFRqY215uZGHHJan9GEAXd9MbfPjFJz+qMkVR6zQ==}
@@ -6519,8 +6522,8 @@ packages:
   mdast-util-phrasing@4.1.0:
     resolution: {integrity: sha512-TqICwyvJJpBwvGAMZjj4J2n0X8QWp21b9l0o7eXyVJ25YNWYbJDVIyD1bZXE6WtV6RmKJVYmQAKWa0zWOABz2w==}
 
-  mdast-util-to-markdown@2.2.0:
-    resolution: {integrity: sha512-2Jn/ADrHFFyyniBMi0bncTbJqU78K3/TEYvzvwrWWzD9MYPUa/Gm4r3nOeKFQg/PDM5BsbDYdc8ackW4NTY6NA==}
+  mdast-util-to-markdown@2.2.3:
+    resolution: {integrity: sha512-dImdB6VZRMRac1SwAW6o1c0ESk/7pFFAMCMuKM+9v7LpTSthMM5nzXpqKw4Mjo66aXVKhNkyrP4bMB9MurPyWg==}
 
   mdast-util-to-string@4.0.0:
     resolution: {integrity: sha512-0H44vDimn51F0YwvxSJSm0eCDOJTRlmN0R1yBh4HLj9wiV1Dn0QoXGbvFAWj2hSItVTlCmBF1hqKlIyUBVFLPg==}
@@ -6554,8 +6557,8 @@ packages:
     resolution: {integrity: sha512-8q7VEgMJW4J8tcfVPy8g09NcQwZdbwFEqhe/WZkoIzjn/3TGDwtOCYtXGxA3O8tPzpczCCDgv+P2P5y00ZJOOg==}
     engines: {node: '>= 8'}
 
-  mermaid@11.16.1:
-    resolution: {integrity: sha512-TQsq6u22fAn3rek5VOubrhKPo1g5hwC3FXUN9hiyupTckcYiGuuKGkNQrKYwGJkXUxZdojwRG46gsSCFZMDp4g==}
+  mermaid@11.17.2:
+    resolution: {integrity: sha512-V6K3C8EBdEsPFZXSKMJe6ppQOENxuHARr9GvHX4hh47lAbhMRD9qf4oEK7LoaRQxULMa80/qt5gHO73aCleBBg==}
 
   micromark-core-commonmark@2.0.4:
     resolution: {integrity: sha512-wxEeE8v8XVvOrxn1TZj74qYhAtTQsSqufHVS3uNVyT1MupXxhyaHk8/9xDNPh9BmL77QNDgWTkZ3RsYHB2ry7w==}
@@ -7356,8 +7359,8 @@ packages:
   property-information@7.2.0:
     resolution: {integrity: sha512-IAtzIB6sUiWaJYrX9smp3V46pBGbBeLFRGdh25kg1334VcBlD8HzhPeNIWQH9zhGmo2itIe25EHt9dQP7G5hmg==}
 
-  prosemirror-changeset@2.4.4:
-    resolution: {integrity: sha512-Gyuz9jYdrAeA9I7AholyOes9KUmv/lEwsC5O9s5xF5VB3EgTPsXMGUxz4+H1B+wKVPdZbvRcg1Cp3x8qX+8ofA==}
+  prosemirror-changeset@2.4.6:
+    resolution: {integrity: sha512-P0cY3DSLm4M2boUOCmHDyaID5o6HgWmb21Bvs9p8lLqfJjKBBEHG5Ma5qW5SCmwOYamtWOLf2k+yvt6077zlTg==}
 
   prosemirror-collab@1.3.1:
     resolution: {integrity: sha512-4SnynYR9TTYaQVXd/ieUvsVV4PDMBzrq2xPUWutHivDuOshZXqQ5rGbZM84HEaXKbLdItse7weMGOUdDVcLKEQ==}
@@ -7380,20 +7383,20 @@ packages:
   prosemirror-keymap@1.2.3:
     resolution: {integrity: sha512-4HucRlpiLd1IPQQXNqeo81BGtkY8Ai5smHhKW9jjPKRc2wQIxksg7Hl1tTI2IfT2B/LgX6bfYvXxEpJl7aKYKw==}
 
-  prosemirror-markdown@1.13.8:
-    resolution: {integrity: sha512-Zi43BXX28jmxDJKvk8TDS2gMkBY/mgP8ynd6l/Vxrv8rgNFs5hsV1G0VscxTID1UCzVPcidADP9fUOBY3xxUeA==}
+  prosemirror-markdown@1.13.9:
+    resolution: {integrity: sha512-qAI3I9YdtjWHjTCBErc08ivr24KSrUjcTh5dYncCxFM+JS02kT0iHeWYjO35xeTPwt5t8rhFrelewXhXz16WZQ==}
 
   prosemirror-menu@1.3.2:
     resolution: {integrity: sha512-6VgUJTYod0nMBlCaYJGhXGLu7Gt4AvcwcOq0YfJCY/6Uh+3S7UsWhpy6rJFCBFOmonq1hD8KyWOtZhkppd4YPg==}
 
-  prosemirror-model@1.25.12:
-    resolution: {integrity: sha512-Ue2gTmXMa7EhpLNhC7J+h4+ykD8ha12K6rrZFFKKJHBForfIStw5gJ6Zrf1mqqAa9NmpmEB4wp9bKmA4eUVjWg==}
+  prosemirror-model@1.25.13:
+    resolution: {integrity: sha512-MlDMWGjYXaYOeCiO17jcybntCOzPnN+97U0809ke2QsgPtxW3n5/sD6ZKyJONUgMw1iP93ohZTjeKjnRJ7L6kQ==}
 
   prosemirror-schema-basic@1.2.5:
     resolution: {integrity: sha512-McBWhfgOfThyu3Nltbs8SOUbM4t/h0pxteibaaHd1QR4S+F1t0u7M1ETaCE6/cveFoF+2fowTIBNkJOyeZQjNg==}
 
-  prosemirror-schema-list@1.5.1:
-    resolution: {integrity: sha512-927lFx/uwyQaGwJxLWCZRkjXG0p48KpMj6ueoYiu4JX05GGuGcgzAy62dfiV8eFZftgyBUvLx76RsMe20fJl+Q==}
+  prosemirror-schema-list@1.6.0:
+    resolution: {integrity: sha512-G1srDtan+VqWn+qpmWFj/6j0YsZ5zMU+ZIlGVIW41a5JF2jAI3jzfMRWmSABmEH2Qoq1PmAG/o2mucMMdLOsLg==}
 
   prosemirror-state@1.4.4:
     resolution: {integrity: sha512-6jiYHH2CIGbCfnxdHbXZ12gySFY/fz/ulZE333G6bPqIZ4F+TXo9ifiR86nAHpWnfoNjOb3o5ESi7J8Uz1jXHw==}
@@ -7408,11 +7411,11 @@ packages:
       prosemirror-state: ^1.4.2
       prosemirror-view: ^1.33.8
 
-  prosemirror-transform@1.12.2:
-    resolution: {integrity: sha512-PE/aY0HEY4zczvmqrilgkUK/WautF0chvMqkmM/iN5/aPHvwrCWaQZjS6CIZp+K84YrvPFqrL+YArrfJX8xX7g==}
+  prosemirror-transform@1.12.5:
+    resolution: {integrity: sha512-3EBXZBM4h3MKuWvs9sQ7IA0/v6jCqCZ4wC08PIvzY1VSQWDL90KEyfg5C0Ex52UJesf/QVogxvuBsZdKmLc3NQ==}
 
-  prosemirror-view@1.42.6:
-    resolution: {integrity: sha512-3g25f6hKV2bBxo3puH3EcYWmmVNSH0iWmNsMVT7sugDSpA025jgpOLarcDWr39SdzPjYMaiYtRdNtXialPSjEQ==}
+  prosemirror-view@1.42.9:
+    resolution: {integrity: sha512-bKbfzeKZOu2H2JQU2TaJmYu6EBcor3VnGIR4jR31cbEt1ztUnfUB6bKGV1+fJzOJdrVWR+tRU0208zM3oQx4wA==}
 
   proto-list@1.2.4:
     resolution: {integrity: sha512-vtK/94akxsTMhe0/cbfpR+syPuszcuwhqVjJq26CuNDgFGj682oRBXOP5MJpv2r7JtE8MsiepGIqvvOTBwn2vA==}
@@ -8013,6 +8016,9 @@ packages:
   stream-combiner2@1.1.1:
     resolution: {integrity: sha512-3PnJbYgS56AeWgtKF5jtJRT6uFJe56Z0Hc5Ngg/6sI6rIt8iiMBTa9cvdyFfpMQjaVHr8dusbNeFGIIonxOvKw==}
 
+  strictdom@1.0.1:
+    resolution: {integrity: sha512-cEmp9QeXXRmjj/rVp9oyiqcvyocWab/HaoN4+bwFeZ7QzykJD6L3yD4v12K1x0tHpqRqVpJevN3gW7kyM39Bqg==}
+
   string-width@4.2.3:
     resolution: {integrity: sha512-wKyQRQpjJ0sIp62ErSZdGsjMJWsap5oRNihHhu6G7JVO/9jIB6UyevL+tXuOqrng8j/cxKTWyWUwvSTriiZz/g==}
     engines: {node: '>=8'}
@@ -8400,11 +8406,11 @@ packages:
   unist-util-stringify-position@4.0.0:
     resolution: {integrity: sha512-0ASV06AAoKCDkS2+xw5RXJywruurpbC4JZSm7nr7MOt1ojAzvyyaO+UxZf18j8FCF6kmzCZKcAgN/yu2gm2XgQ==}
 
-  unist-util-visit-parents@6.0.2:
-    resolution: {integrity: sha512-goh1s1TBrqSqukSc8wrjwWhL0hiJxgA8m4kFxGlQ+8FYQ3C/m11FcTs4YYem7V664AhHVvgoQLk890Ssdsr2IQ==}
+  unist-util-visit-parents@6.1.0:
+    resolution: {integrity: sha512-vKXxz6O38sKDj1mtx/k2cWvkkFBuYGx6uGrlzBkVeWCRF/F8sdI0j3Wbkz/5rVNRRuVc8UrgRdbCxNhmYXgP3w==}
 
-  unist-util-visit@5.1.0:
-    resolution: {integrity: sha512-m+vIdyeCOpdr/QeQCu2EzxX/ohgS8KbnPDgFni4dQsfSCtpz8UqDyY5GjRru8PDKuYn7Fq19j1CQ+nJSsGKOzg==}
+  unist-util-visit@5.2.0:
+    resolution: {integrity: sha512-fpsYs/VVoZxfGY9/j3FQpZmN8wdLJaV1Pt38AaJNZu9uKIHcFU3halCdBveEq1HGKO1OEfJY65w1zvoFV1b3qQ==}
 
   universal-user-agent@7.0.3:
     resolution: {integrity: sha512-TmnEAEAsBJVZM/AADELsK76llnwcf9vMKuPz8JflO1frO8Lchitr0fNaN9d+Ap0BjKtqWqd/J17qeDnXh8CL2A==}
@@ -8495,11 +8501,11 @@ packages:
     resolution: {integrity: sha512-BNGbWLfd0eUPabhkXUVm0j8uuvREyTh5ovRa/dyow/BqAbZJyC+5fU+IzQOzmAKzYqYRAISoRhdQr3eIZ/PXqg==}
     engines: {node: '>= 0.8'}
 
-  vfile-location@5.0.3:
-    resolution: {integrity: sha512-5yXvWDEgqeiYiBe1lbxYF7UMAIm/IcopxMHrMQDq3nvKcjPKIhZklUKL+AE7J7uApI4kwe2snsK+eI6UTj9EHg==}
+  vfile-location@5.0.4:
+    resolution: {integrity: sha512-vEvxatYZCIpNvzGk2UD+u4I/sZkSKoOsdRCbkOIsN73QpJbriJ1qvvBAL1PeI0y55Leoqf7pORbaSPpG/smmOg==}
 
-  vfile-message@4.0.3:
-    resolution: {integrity: sha512-QTHzsGd1EhbZs4AsQ20JX1rC3cOlt/IWJruk893DfLRr57lcnOeMaWG4K0JrRta4mIJZKth2Au3mM3u03/JWKw==}
+  vfile-message@4.0.4:
+    resolution: {integrity: sha512-66ycRswIkNmHH9PHku7ADtv5RVwgIrOcuv3J8Svz6h4qgGRrKVa+9/neuKyJZUXyOpYwLTvS+whZ4R2urHHgQg==}
 
   vfile@6.0.3:
     resolution: {integrity: sha512-KzIbH/9tXat2u30jf+smMwFCsno4wHVdNmzFyL+T/L3UGqqk6JKfVqOFOZEpZSHADH1k40ab6NUIXZq422ov3Q==}
@@ -9073,25 +9079,25 @@ snapshots:
       - hyparquet
       - supports-color
 
-  '@bendyline/squisq-cli@2.9.32(supports-color@8.1.1)':
+  '@bendyline/squisq-cli@2.9.33(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.16(supports-color@8.1.1)
-      '@bendyline/squisq-formats': 2.8.18(supports-color@8.1.1)
-      '@bendyline/squisq-video': 2.4.22(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.17(supports-color@8.1.1)
+      '@bendyline/squisq-formats': 2.8.19(supports-color@8.1.1)
+      '@bendyline/squisq-video': 2.4.23(supports-color@8.1.1)
       commander: 12.1.0
       playwright-core: 1.63.0
     transitivePeerDependencies:
       - hyparquet
       - supports-color
 
-  '@bendyline/squisq-editor-react@2.13.23(@ironcalc/wasm@0.8.4)(@types/react@19.2.17)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-editor-react@2.13.25(@ironcalc/wasm@0.8.4)(@types/react@19.2.17)(harper.js@2.7.0)(monaco-editor@0.50.0)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.16(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.17(supports-color@8.1.1)
       '@bendyline/squisq-calc': 2.11.2(@ironcalc/wasm@0.8.4)
-      '@bendyline/squisq-formats': 2.8.18(supports-color@8.1.1)
-      '@bendyline/squisq-grid-react': 2.11.45(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
-      '@bendyline/squisq-react': 2.12.28(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
-      '@bendyline/squisq-video-react': 2.5.29(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+      '@bendyline/squisq-formats': 2.8.19(supports-color@8.1.1)
+      '@bendyline/squisq-grid-react': 2.11.46(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+      '@bendyline/squisq-react': 2.12.29(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+      '@bendyline/squisq-video-react': 2.5.31(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
       '@fortawesome/fontawesome-free': 7.3.1
       '@tiptap/core': 2.27.3(@tiptap/pm@2.27.3)
       '@tiptap/extension-heading': 2.27.3(@tiptap/core@2.27.3(@tiptap/pm@2.27.3))
@@ -9110,7 +9116,7 @@ snapshots:
       '@tiptap/starter-kit': 2.27.3
       '@tiptap/suggestion': 2.27.3(@tiptap/core@2.27.3(@tiptap/pm@2.27.3))(@tiptap/pm@2.27.3)
       lucide-react: 1.52.0(@types/react@19.2.17)(react@19.2.8)
-      mermaid: 11.16.1
+      mermaid: 11.17.2
       monaco-editor: 0.50.0
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -9135,9 +9141,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-formats@2.8.18(supports-color@8.1.1)':
+  '@bendyline/squisq-formats@2.8.19(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.16(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.17(supports-color@8.1.1)
       '@pdf-lib/fontkit': 1.1.1
       '@pdf-lib/upng': 1.0.1
       '@xmldom/xmldom': 0.9.12
@@ -9149,9 +9155,9 @@ snapshots:
 
   '@bendyline/squisq-graph@2.13.1': {}
 
-  '@bendyline/squisq-grid-react@2.11.45(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-grid-react@2.11.46(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.16(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.17(supports-color@8.1.1)
       '@tanstack/react-virtual': 3.14.13(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -9162,27 +9168,27 @@ snapshots:
     dependencies:
       '@bendyline/squisq': 2.13.15(supports-color@8.1.1)
       '@bendyline/squisq-graph': 2.13.1
-      mermaid: 11.16.1
+      mermaid: 11.17.2
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-react@2.12.28(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-react@2.12.29(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.16(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.17(supports-color@8.1.1)
       '@bendyline/squisq-graph': 2.13.1
-      mermaid: 11.16.1
+      mermaid: 11.17.2
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-video-react@2.5.29(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
+  '@bendyline/squisq-video-react@2.5.31(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.16(supports-color@8.1.1)
-      '@bendyline/squisq-react': 2.12.28(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
-      '@bendyline/squisq-video': 2.4.22(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.17(supports-color@8.1.1)
+      '@bendyline/squisq-react': 2.12.29(react-dom@19.2.8(react@19.2.8))(react@19.2.8)(supports-color@8.1.1)
+      '@bendyline/squisq-video': 2.4.23(supports-color@8.1.1)
       '@ffmpeg/core': 0.12.10
       '@ffmpeg/ffmpeg': 0.12.15
       '@ffmpeg/util': 0.12.2
@@ -9201,9 +9207,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq-video@2.4.22(supports-color@8.1.1)':
+  '@bendyline/squisq-video@2.4.23(supports-color@8.1.1)':
     dependencies:
-      '@bendyline/squisq': 2.13.16(supports-color@8.1.1)
+      '@bendyline/squisq': 2.13.17(supports-color@8.1.1)
       '@ffmpeg/ffmpeg': 0.12.15
       '@ffmpeg/util': 0.12.2
     transitivePeerDependencies:
@@ -9226,7 +9232,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/squisq@2.13.16(supports-color@8.1.1)':
+  '@bendyline/squisq@2.13.17(supports-color@8.1.1)':
     dependencies:
       '@bendyline/squisq-graph': 2.13.1
       genson-js: 0.0.8
@@ -11465,7 +11471,7 @@ snapshots:
     dependencies:
       '@tiptap/core': 2.27.3(@tiptap/pm@2.27.3)
       '@tiptap/pm': 2.27.3
-      linkifyjs: 4.3.3
+      linkifyjs: 4.4.0
 
   '@tiptap/extension-list-item@2.27.3(@tiptap/core@2.27.3(@tiptap/pm@2.27.3))':
     dependencies:
@@ -11530,7 +11536,7 @@ snapshots:
 
   '@tiptap/pm@2.27.3':
     dependencies:
-      prosemirror-changeset: 2.4.4
+      prosemirror-changeset: 2.4.6
       prosemirror-collab: 1.3.1
       prosemirror-commands: 1.7.2
       prosemirror-dropcursor: 1.8.4
@@ -11538,16 +11544,16 @@ snapshots:
       prosemirror-history: 1.5.1
       prosemirror-inputrules: 1.5.1
       prosemirror-keymap: 1.2.3
-      prosemirror-markdown: 1.13.8
+      prosemirror-markdown: 1.13.9
       prosemirror-menu: 1.3.2
-      prosemirror-model: 1.25.12
+      prosemirror-model: 1.25.13
       prosemirror-schema-basic: 1.2.5
-      prosemirror-schema-list: 1.5.1
+      prosemirror-schema-list: 1.6.0
       prosemirror-state: 1.4.4
       prosemirror-tables: 1.8.5
-      prosemirror-trailing-node: 3.0.0(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-view@1.42.6)
-      prosemirror-transform: 1.12.2
-      prosemirror-view: 1.42.6
+      prosemirror-trailing-node: 3.0.0(prosemirror-model@1.25.13)(prosemirror-state@1.4.4)(prosemirror-view@1.42.9)
+      prosemirror-transform: 1.12.5
+      prosemirror-view: 1.42.9
 
   '@tiptap/react@2.27.3(@tiptap/core@2.27.3(@tiptap/pm@2.27.3))(@tiptap/pm@2.27.3)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)':
     dependencies:
@@ -13345,6 +13351,10 @@ snapshots:
 
   fast-uri@3.1.9: {}
 
+  fastdom@1.0.12:
+    dependencies:
+      strictdom: 1.0.1
+
   fastq@1.20.1:
     dependencies:
       reusify: 1.1.0
@@ -13660,27 +13670,27 @@ snapshots:
     dependencies:
       '@types/hast': 3.0.5
       devlop: 1.1.0
-      hast-util-from-parse5: 8.0.3
+      hast-util-from-parse5: 8.0.4
       parse5: 7.3.0
       vfile: 6.0.3
-      vfile-message: 4.0.3
+      vfile-message: 4.0.4
 
-  hast-util-from-parse5@8.0.3:
+  hast-util-from-parse5@8.0.4:
     dependencies:
       '@types/hast': 3.0.5
       '@types/unist': 3.0.3
       devlop: 1.1.0
-      hastscript: 9.0.1
+      hastscript: 9.0.3
       property-information: 7.2.0
       vfile: 6.0.3
-      vfile-location: 5.0.3
+      vfile-location: 5.0.4
       web-namespaces: 2.0.1
 
   hast-util-parse-selector@4.0.0:
     dependencies:
       '@types/hast': 3.0.5
 
-  hastscript@9.0.1:
+  hastscript@9.0.3:
     dependencies:
       '@types/hast': 3.0.5
       comma-separated-tokens: 2.0.3
@@ -14264,7 +14274,7 @@ snapshots:
     dependencies:
       uc.micro: 2.1.0
 
-  linkifyjs@4.3.3: {}
+  linkifyjs@4.4.0: {}
 
   load-json-file@4.0.0:
     dependencies:
@@ -14390,7 +14400,7 @@ snapshots:
       punycode.js: 2.3.1
       uc.micro: 2.1.0
 
-  markdown-table@3.0.4: {}
+  markdown-table@3.1.0: {}
 
   marked-terminal@7.3.0(marked@15.0.12):
     dependencies:
@@ -14420,27 +14430,26 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
-  mdast-util-directive@3.1.1(supports-color@8.1.1):
+  mdast-util-directive@3.2.0(supports-color@8.1.1):
     dependencies:
       '@types/mdast': 4.0.4
       '@types/unist': 3.0.3
       ccount: 2.0.1
       devlop: 1.1.0
       mdast-util-from-markdown: 2.1.0(supports-color@8.1.1)
-      mdast-util-to-markdown: 2.2.0
+      mdast-util-to-markdown: 2.2.3
       micromark-util-character: 2.1.1
       parse-entities: 4.0.2
       stringify-entities: 4.0.4
-      unist-util-visit-parents: 6.0.2
     transitivePeerDependencies:
       - supports-color
 
-  mdast-util-find-and-replace@3.0.3:
+  mdast-util-find-and-replace@3.0.4:
     dependencies:
       '@types/mdast': 4.0.4
       escape-string-regexp: 5.0.0
       unist-util-is: 6.0.1
-      unist-util-visit-parents: 6.0.2
+      unist-util-visit-parents: 6.1.0
 
   mdast-util-from-markdown@2.1.0(supports-color@8.1.1):
     dependencies:
@@ -14465,17 +14474,17 @@ snapshots:
       devlop: 1.1.0
       escape-string-regexp: 5.0.0
       mdast-util-from-markdown: 2.1.0(supports-color@8.1.1)
-      mdast-util-to-markdown: 2.2.0
+      mdast-util-to-markdown: 2.2.3
       micromark-extension-frontmatter: 2.0.0
     transitivePeerDependencies:
       - supports-color
 
-  mdast-util-gfm-autolink-literal@2.0.1:
+  mdast-util-gfm-autolink-literal@2.1.0:
     dependencies:
       '@types/mdast': 4.0.4
       ccount: 2.0.1
       devlop: 1.1.0
-      mdast-util-find-and-replace: 3.0.3
+      mdast-util-find-and-replace: 3.0.4
       micromark-util-character: 2.1.1
 
   mdast-util-gfm-footnote@2.1.0(supports-color@8.1.1):
@@ -14483,7 +14492,7 @@ snapshots:
       '@types/mdast': 4.0.4
       devlop: 1.1.0
       mdast-util-from-markdown: 2.1.0(supports-color@8.1.1)
-      mdast-util-to-markdown: 2.2.0
+      mdast-util-to-markdown: 2.2.3
       micromark-util-normalize-identifier: 2.0.1
     transitivePeerDependencies:
       - supports-color
@@ -14492,38 +14501,40 @@ snapshots:
     dependencies:
       '@types/mdast': 4.0.4
       mdast-util-from-markdown: 2.1.0(supports-color@8.1.1)
-      mdast-util-to-markdown: 2.2.0
+      mdast-util-to-markdown: 2.2.3
     transitivePeerDependencies:
       - supports-color
 
-  mdast-util-gfm-table@2.0.0(supports-color@8.1.1):
+  mdast-util-gfm-table@2.0.1(supports-color@8.1.1):
     dependencies:
       '@types/mdast': 4.0.4
       devlop: 1.1.0
-      markdown-table: 3.0.4
+      markdown-table: 3.1.0
       mdast-util-from-markdown: 2.1.0(supports-color@8.1.1)
-      mdast-util-to-markdown: 2.2.0
+      mdast-util-to-markdown: 2.2.3
+      mdast-util-to-string: 4.0.0
+      unist-util-visit: 5.2.0
     transitivePeerDependencies:
       - supports-color
 
-  mdast-util-gfm-task-list-item@2.0.0(supports-color@8.1.1):
+  mdast-util-gfm-task-list-item@2.0.1(supports-color@8.1.1):
     dependencies:
       '@types/mdast': 4.0.4
       devlop: 1.1.0
       mdast-util-from-markdown: 2.1.0(supports-color@8.1.1)
-      mdast-util-to-markdown: 2.2.0
+      mdast-util-to-markdown: 2.2.3
     transitivePeerDependencies:
       - supports-color
 
   mdast-util-gfm@3.1.0(supports-color@8.1.1):
     dependencies:
       mdast-util-from-markdown: 2.1.0(supports-color@8.1.1)
-      mdast-util-gfm-autolink-literal: 2.0.1
+      mdast-util-gfm-autolink-literal: 2.1.0
       mdast-util-gfm-footnote: 2.1.0(supports-color@8.1.1)
       mdast-util-gfm-strikethrough: 2.0.1(supports-color@8.1.1)
-      mdast-util-gfm-table: 2.0.0(supports-color@8.1.1)
-      mdast-util-gfm-task-list-item: 2.0.0(supports-color@8.1.1)
-      mdast-util-to-markdown: 2.2.0
+      mdast-util-gfm-table: 2.0.1(supports-color@8.1.1)
+      mdast-util-gfm-task-list-item: 2.0.1(supports-color@8.1.1)
+      mdast-util-to-markdown: 2.2.3
     transitivePeerDependencies:
       - supports-color
 
@@ -14534,7 +14545,7 @@ snapshots:
       devlop: 1.1.0
       longest-streak: 3.1.0
       mdast-util-from-markdown: 2.1.0(supports-color@8.1.1)
-      mdast-util-to-markdown: 2.2.0
+      mdast-util-to-markdown: 2.2.3
       unist-util-remove-position: 5.0.0
     transitivePeerDependencies:
       - supports-color
@@ -14544,7 +14555,7 @@ snapshots:
       '@types/mdast': 4.0.4
       unist-util-is: 6.0.1
 
-  mdast-util-to-markdown@2.2.0:
+  mdast-util-to-markdown@2.2.3:
     dependencies:
       '@types/mdast': 4.0.4
       '@types/unist': 3.0.3
@@ -14555,7 +14566,7 @@ snapshots:
       micromark-util-classify-character: 2.0.1
       micromark-util-decode-string: 2.0.1
       micromark-util-html-tag-name: 2.0.1
-      unist-util-visit: 5.1.0
+      unist-util-visit: 5.2.0
       zwitch: 2.0.4
 
   mdast-util-to-string@4.0.0:
@@ -14590,7 +14601,7 @@ snapshots:
 
   merge2@1.4.1: {}
 
-  mermaid@11.16.1:
+  mermaid@11.17.2:
     dependencies:
       '@braintree/sanitize-url': 7.1.2
       '@iconify/utils': 3.1.4
@@ -14606,6 +14617,7 @@ snapshots:
       dayjs: 1.11.23
       dompurify: 3.4.17
       es-toolkit: 1.49.0
+      fastdom: 1.0.12
       katex: 0.18.2
       khroma: 2.1.0
       marked: 16.4.2
@@ -15465,9 +15477,9 @@ snapshots:
 
   property-information@7.2.0: {}
 
-  prosemirror-changeset@2.4.4:
+  prosemirror-changeset@2.4.6:
     dependencies:
-      prosemirror-transform: 1.12.2
+      prosemirror-transform: 1.12.5
 
   prosemirror-collab@1.3.1:
     dependencies:
@@ -15475,45 +15487,45 @@ snapshots:
 
   prosemirror-commands@1.7.2:
     dependencies:
-      prosemirror-model: 1.25.12
+      prosemirror-model: 1.25.13
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.2
+      prosemirror-transform: 1.12.5
 
   prosemirror-dropcursor@1.8.4:
     dependencies:
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.2
-      prosemirror-view: 1.42.6
+      prosemirror-transform: 1.12.5
+      prosemirror-view: 1.42.9
 
   prosemirror-gapcursor@1.4.1:
     dependencies:
       prosemirror-keymap: 1.2.3
-      prosemirror-model: 1.25.12
+      prosemirror-model: 1.25.13
       prosemirror-state: 1.4.4
-      prosemirror-view: 1.42.6
+      prosemirror-view: 1.42.9
 
   prosemirror-history@1.5.1:
     dependencies:
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.2
-      prosemirror-view: 1.42.6
+      prosemirror-transform: 1.12.5
+      prosemirror-view: 1.42.9
       rope-sequence: 1.3.4
 
   prosemirror-inputrules@1.5.1:
     dependencies:
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.2
+      prosemirror-transform: 1.12.5
 
   prosemirror-keymap@1.2.3:
     dependencies:
       prosemirror-state: 1.4.4
       w3c-keyname: 2.2.8
 
-  prosemirror-markdown@1.13.8:
+  prosemirror-markdown@1.13.9:
     dependencies:
       '@types/markdown-it': 14.2.0
       markdown-it: 14.3.3
-      prosemirror-model: 1.25.12
+      prosemirror-model: 1.25.13
 
   prosemirror-menu@1.3.2:
     dependencies:
@@ -15522,51 +15534,51 @@ snapshots:
       prosemirror-history: 1.5.1
       prosemirror-state: 1.4.4
 
-  prosemirror-model@1.25.12:
+  prosemirror-model@1.25.13:
     dependencies:
       orderedmap: 2.1.1
 
   prosemirror-schema-basic@1.2.5:
     dependencies:
-      prosemirror-model: 1.25.12
+      prosemirror-model: 1.25.13
 
-  prosemirror-schema-list@1.5.1:
+  prosemirror-schema-list@1.6.0:
     dependencies:
-      prosemirror-model: 1.25.12
+      prosemirror-model: 1.25.13
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.2
+      prosemirror-transform: 1.12.5
 
   prosemirror-state@1.4.4:
     dependencies:
-      prosemirror-model: 1.25.12
-      prosemirror-transform: 1.12.2
-      prosemirror-view: 1.42.6
+      prosemirror-model: 1.25.13
+      prosemirror-transform: 1.12.5
+      prosemirror-view: 1.42.9
 
   prosemirror-tables@1.8.5:
     dependencies:
       prosemirror-keymap: 1.2.3
-      prosemirror-model: 1.25.12
+      prosemirror-model: 1.25.13
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.2
-      prosemirror-view: 1.42.6
+      prosemirror-transform: 1.12.5
+      prosemirror-view: 1.42.9
 
-  prosemirror-trailing-node@3.0.0(prosemirror-model@1.25.12)(prosemirror-state@1.4.4)(prosemirror-view@1.42.6):
+  prosemirror-trailing-node@3.0.0(prosemirror-model@1.25.13)(prosemirror-state@1.4.4)(prosemirror-view@1.42.9):
     dependencies:
       '@remirror/core-constants': 3.0.0
       escape-string-regexp: 4.0.0
-      prosemirror-model: 1.25.12
+      prosemirror-model: 1.25.13
       prosemirror-state: 1.4.4
-      prosemirror-view: 1.42.6
+      prosemirror-view: 1.42.9
 
-  prosemirror-transform@1.12.2:
+  prosemirror-transform@1.12.5:
     dependencies:
-      prosemirror-model: 1.25.12
+      prosemirror-model: 1.25.13
 
-  prosemirror-view@1.42.6:
+  prosemirror-view@1.42.9:
     dependencies:
-      prosemirror-model: 1.25.12
+      prosemirror-model: 1.25.13
       prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.2
+      prosemirror-transform: 1.12.5
 
   proto-list@1.2.4: {}
 
@@ -15798,7 +15810,7 @@ snapshots:
   remark-directive@3.0.1(supports-color@8.1.1):
     dependencies:
       '@types/mdast': 4.0.4
-      mdast-util-directive: 3.1.1(supports-color@8.1.1)
+      mdast-util-directive: 3.2.0(supports-color@8.1.1)
       micromark-extension-directive: 3.0.2
       unified: 11.0.5
     transitivePeerDependencies:
@@ -15845,7 +15857,7 @@ snapshots:
   remark-stringify@11.0.0:
     dependencies:
       '@types/mdast': 4.0.4
-      mdast-util-to-markdown: 2.2.0
+      mdast-util-to-markdown: 2.2.3
       unified: 11.0.5
 
   remove-trailing-separator@1.1.0: {}
@@ -16287,6 +16299,8 @@ snapshots:
       duplexer2: 0.1.4
       readable-stream: 2.3.8
 
+  strictdom@1.0.1: {}
+
   string-width@4.2.3:
     dependencies:
       emoji-regex: 8.0.0
@@ -16641,22 +16655,22 @@ snapshots:
   unist-util-remove-position@5.0.0:
     dependencies:
       '@types/unist': 3.0.3
-      unist-util-visit: 5.1.0
+      unist-util-visit: 5.2.0
 
   unist-util-stringify-position@4.0.0:
     dependencies:
       '@types/unist': 3.0.3
 
-  unist-util-visit-parents@6.0.2:
+  unist-util-visit-parents@6.1.0:
     dependencies:
       '@types/unist': 3.0.3
       unist-util-is: 6.0.1
 
-  unist-util-visit@5.1.0:
+  unist-util-visit@5.2.0:
     dependencies:
       '@types/unist': 3.0.3
       unist-util-is: 6.0.1
-      unist-util-visit-parents: 6.0.2
+      unist-util-visit-parents: 6.1.0
 
   universal-user-agent@7.0.3: {}
 
@@ -16728,12 +16742,12 @@ snapshots:
 
   vary@1.1.2: {}
 
-  vfile-location@5.0.3:
+  vfile-location@5.0.4:
     dependencies:
       '@types/unist': 3.0.3
       vfile: 6.0.3
 
-  vfile-message@4.0.3:
+  vfile-message@4.0.4:
     dependencies:
       '@types/unist': 3.0.3
       unist-util-stringify-position: 4.0.0
@@ -16741,7 +16755,7 @@ snapshots:
   vfile@6.0.3:
     dependencies:
       '@types/unist': 3.0.3
-      vfile-message: 4.0.3
+      vfile-message: 4.0.4
 
   vite@8.1.5(@types/node@24.13.3)(esbuild@0.27.7)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.0):
     dependencies:

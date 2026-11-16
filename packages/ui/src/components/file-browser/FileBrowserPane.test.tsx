@@ -166,6 +166,102 @@ describe('FileBrowserPane tree collapse', () => {
   });
 });
 
+describe('FileBrowserPane heading and rail', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => 1024);
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    // The folded preference is stored, and the suites after this one start expanded.
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  function Pane({
+    paneSource,
+    paneMutations = mutations,
+  }: {
+    paneSource: FileBrowserSource;
+    paneMutations?: FileMutations;
+  }) {
+    return (
+      <FileBrowserPane
+        source={paneSource}
+        entries={[entry]}
+        onSelect={() => {}}
+        viewMode="tree-alpha"
+        modes={['tree-alpha']}
+        onViewModeChange={() => {}}
+        showHidden={false}
+        onShowHiddenChange={() => {}}
+        emptyMessage="No files"
+        mutations={paneMutations}
+        viewer={null}
+      />
+    );
+  }
+
+  // "Workspace" said nothing about which folder a person was looking at.
+  it('names the place in the header and on the rail, with its path as the tooltip', () => {
+    const folder = {
+      ...source,
+      heading: 'vehicle-physics',
+      headingHint: 'D:\\projects\\vehicle-physics',
+    };
+    const { container } = render(<Pane paneSource={folder} />);
+    const title = container.querySelector('.file-tree-title') as HTMLElement;
+    expect(title).toHaveTextContent('vehicle-physics');
+    expect(title).toHaveAttribute('title', 'D:\\projects\\vehicle-physics');
+
+    // Controls keep the tree's short name, so they read the same in every folder.
+    fireEvent.click(screen.getByRole('button', { name: 'Hide Workspace files' }));
+    expect(container.querySelector('.file-tree-collapsed-label')).toHaveTextContent(
+      'vehicle-physics',
+    );
+  });
+
+  it('falls back to the tree name when the source gives no heading', () => {
+    const { container } = render(<Pane paneSource={source} />);
+    expect(container.querySelector('.file-tree-title')).toHaveTextContent('Workspace');
+  });
+
+  // A folded tree used to offer only the way back.
+  it('keeps New file on the folded rail and leaves the tree folded', () => {
+    window.localStorage.setItem('gezel:project-file-tree-collapsed:v1', '1');
+    const newFile = vi.fn();
+    const newFolder = vi.fn();
+    render(
+      <Pane
+        paneSource={{ ...source, canWrite: true }}
+        paneMutations={{ ...mutations, newFile, newFolder }}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Show Workspace files' })).toBeVisible();
+    // A folder made on the rail would land in a tree nobody can see.
+    expect(screen.queryByRole('button', { name: 'New folder' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New file' }));
+    expect(newFile).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Show Workspace files' })).toBeVisible();
+  });
+
+  it('offers no rail keys a read-only tree cannot use', () => {
+    window.localStorage.setItem('gezel:project-file-tree-collapsed:v1', '1');
+    const { container } = render(<Pane paneSource={source} />);
+    expect(screen.queryByRole('button', { name: 'New file' })).toBeNull();
+    expect(container.querySelector('.gz-key-strip-end')).toBeNull();
+  });
+});
+
 describe('FileBrowserPane viewer notice', () => {
   // A person who opened a quote from a review question had no way back to it.
   it('renders the notice above the viewer at full width', () => {

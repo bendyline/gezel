@@ -327,9 +327,10 @@
 
 /* ── Sections ──────────────────────────────────────────────────────────
    Each section is one zone of tinted paper whose edges line up with the
-   section keys above, and the zone is the only box: what it holds are flat
-   rows parted by a hairline. A zone used to hold bordered cards that held
-   inset strips, three boxes deep. */
+   section keys above. What it holds are flat rows parted by a hairline,
+   except a question, which is a card of its own (Decisions, below). A zone
+   once held bordered cards that held inset strips, three boxes deep, so a
+   card's insides stay flat. */
 .activity-section {
   scroll-margin-top: 0.75rem;
   padding: 0.7rem 0.9rem 0.25rem;
@@ -603,11 +604,31 @@
 }
 
 /* ── Decisions ─────────────────────────────────────────────────────────
-   A question is the one thing that opens into a card, and the zone is its
-   box: who asked, the task it is about, the question, the answers. */
+   A question is the one thing that opens into a card: who asked, the task
+   it is about, the question, the answers. Each card is a sheet of paler
+   paper set on the zone, outlined in the zone's edge and parted from the
+   next by a gap, not a hairline: parted only by rules, a stack of night
+   reports read as one long document, each report's page running on from
+   the last one's Dismiss. Inside, the card stays flat (its strips are rows,
+   its document a full-width band), so the panel is two boxes deep at most.
+   Keys inside take paler paper again, so they still read against the card. */
 .activity-question {
-  padding: 0.6rem 0 0.7rem;
   overflow-wrap: anywhere;
+}
+.activity-section > .activity-question:not(.activity-question-result) {
+  --activity-card-inline: 0.85rem;
+  --surface: color-mix(in srgb, var(--activity-inset) 72%, var(--tone-wash));
+  margin: 0.3rem 0 0.65rem;
+  padding: 0.7rem var(--activity-card-inline) 0.75rem;
+  border: 1px solid var(--tone-edge);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--activity-inset) 45%, var(--tone-wash));
+}
+/* A flat row after a card needs no rule: the card's own edge parts them. */
+.activity-section
+  > .activity-question:not(.activity-question-result)
+  + :is(.activity-question-result, .activity-row, .activity-queue, .activity-fold) {
+  border-top-color: transparent;
 }
 .activity-question-result {
   padding: 0;
@@ -647,6 +668,16 @@
   font-size: var(--text-md);
   font-weight: 600;
 }
+/* An attached document's page runs edge to edge across the card under its
+   name, a band of the card rather than a framed box inside it. */
+.activity-question
+  .pending-question-context
+  > .pending-question-document:last-child
+  > .pending-question-document-preview:last-child {
+  margin: 0.1rem calc(-1 * var(--activity-card-inline, 0px)) 0;
+  border-block: 1px solid var(--tone-rule);
+  border-radius: 0;
+}
 /* The question is plain text on the zone's paper, in the panel's face.
    Squisq sets a reading surface and its page defaults inline, so these must
    take precedence (as for a step's instructions, below). */
@@ -667,7 +698,7 @@
 }
 .activity-question:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 3px;
+  outline-offset: 2px;
 }
 /* The night's summary lists its reports and finished tasks as the panel's
    flat rows, not as boxed keys inside the zone. */

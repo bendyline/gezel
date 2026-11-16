@@ -1497,9 +1497,9 @@ describe('ProjectsView', () => {
     await screen.findByTestId('project-chat');
     fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
 
-    const layout = (await screen.findByText('Workspace', { selector: '.file-tree-title' })).closest(
-      '.project-files-layout',
-    ) as HTMLElement;
+    const layout = (
+      await screen.findByText('Workspace', { selector: '.file-tree-title-text' })
+    ).closest('.project-files-layout') as HTMLElement;
     expect(layout.style.getPropertyValue('--file-tree-user-width')).toBe('240px');
 
     const grip = screen.getByRole('separator', { name: 'Resize workspace files' });
@@ -1516,12 +1516,14 @@ describe('ProjectsView', () => {
     fireEvent.mouseUp(window);
 
     expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBe('1');
-    expect(screen.queryByText('Workspace', { selector: '.file-tree-title' })).toBeNull();
+    expect(screen.queryByText('Workspace', { selector: '.file-tree-title-text' })).toBeNull();
     // The stored width survives the collapse, so expanding restores it.
     expect(window.localStorage.getItem('gezel:project-file-tree-width:v1')).toBe('360');
 
     fireEvent.click(screen.getByRole('button', { name: 'Show Workspace files' }));
-    expect(await screen.findByText('Workspace', { selector: '.file-tree-title' })).toBeVisible();
+    expect(
+      await screen.findByText('Workspace', { selector: '.file-tree-title-text' }),
+    ).toBeVisible();
     expect(layout.style.getPropertyValue('--file-tree-user-width')).toBe('360px');
     expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBe('0');
   });
@@ -1544,13 +1546,19 @@ describe('ProjectsView', () => {
     });
     await screen.findByTestId('editor');
     expect(screen.getByRole('button', { name: 'Show Artifacts files' })).toBeVisible();
-    expect(screen.queryByText('Artifacts', { selector: '.file-tree-title' })).toBeNull();
+    expect(
+      screen.queryByText('Artifacts drawer', { selector: '.file-tree-title-text' }),
+    ).toBeNull();
     expect(window.localStorage.getItem('gezel:project-file-tree-collapsed:v1')).toBeNull();
 
     fireEvent.click(screen.getByRole('tab', { name: 'Workspace' }));
-    expect(await screen.findByText('Workspace', { selector: '.file-tree-title' })).toBeVisible();
+    expect(
+      await screen.findByText('Workspace', { selector: '.file-tree-title-text' }),
+    ).toBeVisible();
     fireEvent.click(screen.getByRole('tab', { name: 'Artifacts' }));
-    expect(await screen.findByText('Artifacts', { selector: '.file-tree-title' })).toBeVisible();
+    expect(
+      await screen.findByText('Artifacts drawer', { selector: '.file-tree-title-text' }),
+    ).toBeVisible();
   });
 
   it('ranks the issue triage views by count and weighted criticality', async () => {

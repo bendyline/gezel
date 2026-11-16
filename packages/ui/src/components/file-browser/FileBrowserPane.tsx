@@ -9,9 +9,11 @@ import {
   useState,
 } from 'react';
 import { formatAbsoluteTime } from '../../relative-time.js';
+import { AreaIcon } from '../AreaIcon.js';
 import { FileFlatList } from '../FileFlatList.js';
 import { type FileEntry, FileTree, type FileTreeAction } from '../FileTree.js';
 import { FileHiddenKey, FileRevealKey, FileViewModeKeys } from '../FileViewModeKeys.js';
+import { SectionIcon } from '../SectionIcon.js';
 import { openInFileManagerLabel } from '../file-manager-label.js';
 import {
   type FileViewMode,
@@ -19,6 +21,7 @@ import {
   formatRelativeFileTime,
 } from '../file-view-modes.js';
 import { useCompactLayout } from '../useCompactLayout.js';
+import { FoldChevronGlyph, NewFileGlyph, NewFolderGlyph } from './glyphs.js';
 import type { FileBrowserSource } from './source.js';
 import type { FileMutations } from './useFileMutations.js';
 
@@ -282,7 +285,12 @@ export function FileBrowserPane({
     : [];
 
   const listLabel = source.title.toLowerCase();
+  const heading = source.heading ?? source.title;
+  const newFileLabel = source.kind === 'documents' ? 'New document' : 'New file';
   const revealLabel = openInFileManagerLabel(window.__GEZEL__?.platform);
+  const revealKey = source.reveal ? (
+    <FileRevealKey label={revealLabel} onReveal={() => void source.reveal?.()} />
+  ) : null;
 
   // Actions every panel offers, after the host's own for that row.
   const { setStatus } = mutations;
@@ -318,7 +326,9 @@ export function FileBrowserPane({
     >
       {mutations.dialogs}
       {treeCollapsed && (
-        <div className="file-tree-panel file-tree-panel-collapsed">
+        // The key strip stood on end: the way back on top, the place's name
+        // down its length, and the keys that need no tree at its foot.
+        <div className="file-tree-panel file-tree-panel-collapsed gz-key-strip gz-key-strip--rail">
           <button
             type="button"
             className="file-tree-expand-btn"
@@ -327,18 +337,30 @@ export function FileBrowserPane({
             aria-label={`Show ${source.title} files`}
             title={`Show ${source.title} files`}
           >
-            <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-              <path
-                d="M6 3.5 10.5 8 6 12.5"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.6"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span className="file-tree-collapsed-label">{source.title}</span>
+            {/* One control, so one Tab stop and one name: the key face is its
+                picture and the name beneath stays part of the target. */}
+            <span className="gz-key gz-key--icon" aria-hidden="true">
+              {/* At the keys' own glyph size, so this key matches those at the foot. */}
+              <FoldChevronGlyph direction="right" size={14} />
+            </span>
+            <span className="file-tree-collapsed-label">{heading}</span>
           </button>
+          {(mutations.newFile || revealKey) && (
+            <div className="gz-key-strip-end">
+              {mutations.newFile && (
+                <button
+                  type="button"
+                  className="gz-key gz-key--icon"
+                  aria-label={newFileLabel}
+                  title={newFileLabel}
+                  onClick={() => mutations.newFile?.()}
+                >
+                  <NewFileGlyph />
+                </button>
+              )}
+              {revealKey}
+            </div>
+          )}
         </div>
       )}
       {!treeCollapsed && (
@@ -352,71 +374,67 @@ export function FileBrowserPane({
           {...mutations.dropZoneProps('tree', '')}
         >
           <div className="file-tree-header">
-            {titleReplacement ?? <span className="file-tree-title">{source.title}</span>}
-            {/* Create actions ride the title row rather than the key toolbar:
-                at the pane's default width the workspace's five view-mode keys
-                already fill a row on their own. */}
+            {titleReplacement ?? (
+              <span className="file-tree-title" title={source.headingHint}>
+                {source.kind === 'documents' ? (
+                  <AreaIcon area="documents" size={15} className="file-tree-title-icon" />
+                ) : (
+                  <SectionIcon name={source.kind} size={15} className="file-tree-title-icon" />
+                )}
+                <span className="file-tree-title-text">{heading}</span>
+              </span>
+            )}
+            {/* What you do to the place rides the title row as quiet buttons;
+                how you look at it is the key strip below. Five trays between
+                them once made the header heavier than the list it heads. */}
             <div className="file-tree-header-actions">
-              {(mutations.newFolder || mutations.newFile) && (
-                <div className="gz-tray file-create-tray">
-                  {mutations.newFolder && (
-                    <button
-                      type="button"
-                      className="gz-key gz-key--icon"
-                      aria-label="New folder"
-                      title="New folder"
-                      onClick={() => mutations.newFolder?.()}
-                    >
-                      {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable */}
-                      <i className="fa-solid fa-folder-plus" aria-hidden="true" />
-                    </button>
-                  )}
-                  {mutations.newFile && (
-                    <button
-                      type="button"
-                      className="gz-key gz-key--icon"
-                      aria-label={source.kind === 'documents' ? 'New document' : 'New file'}
-                      title={source.kind === 'documents' ? 'New document' : 'New file'}
-                      onClick={() => mutations.newFile?.()}
-                    >
-                      {/* biome-ignore lint/a11y/noAriaHiddenOnFocusable: decorative icon, not focusable */}
-                      <i className="fa-solid fa-file-circle-plus" aria-hidden="true" />
-                    </button>
-                  )}
-                </div>
+              {mutations.newFolder && (
+                <button
+                  type="button"
+                  className="file-tree-action"
+                  aria-label="New folder"
+                  title="New folder"
+                  onClick={() => mutations.newFolder?.()}
+                >
+                  <NewFolderGlyph />
+                </button>
+              )}
+              {mutations.newFile && (
+                <button
+                  type="button"
+                  className="file-tree-action"
+                  aria-label={newFileLabel}
+                  title={newFileLabel}
+                  onClick={() => mutations.newFile?.()}
+                >
+                  <NewFileGlyph />
+                </button>
               )}
               {!narrow && (
-                <div className="gz-tray file-tree-collapse-tray">
-                  <button
-                    type="button"
-                    className="gz-key gz-key--icon"
-                    onClick={() => commitCollapsed(true)}
-                    aria-expanded={true}
-                    aria-label={`Hide ${source.title} files`}
-                    title={`Hide ${source.title} files`}
-                  >
-                    <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true">
-                      <path
-                        d="M10 3.5 5.5 8 10 12.5"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.6"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  </button>
-                </div>
+                <button
+                  type="button"
+                  className="file-tree-action"
+                  onClick={() => commitCollapsed(true)}
+                  aria-expanded={true}
+                  aria-label={`Hide ${source.title} files`}
+                  title={`Hide ${source.title} files`}
+                >
+                  <FoldChevronGlyph direction="left" />
+                </button>
               )}
             </div>
             {headerExtra}
-            <div className="file-tree-toolbar">
-              <FileViewModeKeys value={viewMode} modes={modes} onChange={onViewModeChange} />
-              <FileHiddenKey kind={source.kind} value={showHidden} onChange={onShowHiddenChange} />
-              {source.reveal && (
-                <FileRevealKey label={revealLabel} onReveal={() => void source.reveal?.()} />
-              )}
-            </div>
+          </div>
+          <div
+            className="gz-key-strip file-tree-toolbar"
+            // biome-ignore lint/a11y/useSemanticElements: a strip of keys, not a form; <fieldset> would bring a legend and form-group styling.
+            role="group"
+            aria-label={`${source.title} file list`}
+          >
+            <FileViewModeKeys value={viewMode} modes={modes} onChange={onViewModeChange} />
+            <span className="gz-tray-divider" aria-hidden="true" />
+            <FileHiddenKey kind={source.kind} value={showHidden} onChange={onShowHiddenChange} />
+            {revealKey && <div className="gz-key-strip-end">{revealKey}</div>}
           </div>
           {mutations.status && <output className="file-tree-status">{mutations.status}</output>}
           {notices}

@@ -3479,9 +3479,13 @@ button.machine-memory-unload-button {
   /* Ink, as in the navigation rail: a project's mark is a thing, not a link. */
   color: var(--text);
   /* The 18px glyph is centered inside this 24px alignment box. Offset that
-     built-in 3px inset so the visible mark sits on the row's leading edge,
-     then lower it by the same amount for optical alignment with the label. */
-  transform: translate(-3px, 3px);
+     built-in 3px inset so the visible mark sits on the row's leading edge;
+     the row's flex centering lines it up with the name. */
+  transform: translateX(-3px);
+}
+/* Folded to icons, the row holds only the mark. */
+.side.collapsed .project-rail-name {
+  justify-content: center;
 }
 .project-rail-label {
   min-width: 0;
@@ -4132,7 +4136,6 @@ body.app-resizing webview {
   button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.project-row-thinking):not(
     .gezel-row
   ) {
-  display: block;
   width: 100%;
   text-align: left;
   padding: 0.5rem 0.75rem;
@@ -4141,6 +4144,17 @@ body.app-resizing webview {
   color: inherit;
   border-radius: var(--radius-md);
   cursor: pointer;
+}
+/* A project row lays out its mark and name as a centered flex row of its own
+   (`.project-rail-name`). This selector outranks that class, and as a block
+   it set the mark on the text baseline, which pushed the name below the
+   middle of the row. */
+.side
+  li
+  button:not(.project-actions-trigger):not(.gezel-actions-trigger):not(.project-row-thinking):not(
+    .gezel-row
+  ):not(.project-rail-name) {
+  display: block;
 }
 
 .side

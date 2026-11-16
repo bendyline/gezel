@@ -5,7 +5,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { ReportErrorLink } from '../components/ReportErrorLink.js';
 import { SettingCheck } from '../components/SettingsSection.js';
 import { type SystemNotice, serviceNotice, updateNotice } from '../system-notices.js';
-import { useUpdateState } from '../update-state.js';
+import { useUpdateActions, useUpdateState } from '../update-state.js';
 
 /** Human form of the daemon's start time — raw ISO reads as a dev artifact. */
 export function formatStartedAt(iso: string): string {
@@ -345,8 +345,7 @@ export function UpdateStatus() {
   const platform = window.__GEZEL__?.platform;
   const notice =
     state?.kind === 'error' || state?.kind === 'available' ? updateNotice(state, platform) : null;
-  const [installing, setInstalling] = useState(false);
-  const [installError, setInstallError] = useState<string | null>(null);
+  const actions = useUpdateActions(platform);
 
   if (notice) return <SystemNoticeNote notice={notice} />;
 
@@ -394,41 +393,17 @@ export function UpdateStatus() {
   }
 
   if (state?.kind === 'ready') {
+    const installing = actions.busy === 'install';
     return (
       <output className="update-status update-status-ready" data-testid="update-status-ready">
         <strong>Gezel {state.version} is ready to install.</strong>
         <span className="muted small">
           {platform === 'darwin'
-            ? 'Open the verified installer when you are ready.'
+            ? 'Open the verified installer when you are ready. Gezel restarts by itself when it finishes.'
             : 'It will install automatically after you quit Gezel completely. Closing the window may leave Gezel running in the system tray.'}
         </span>
         <span>
-          <button
-            type="button"
-            className="primary"
-            disabled={installing}
-            onClick={() => {
-              setInstalling(true);
-              setInstallError(null);
-              const install = window.__GEZEL__?.update?.install;
-              if (!install) {
-                setInstallError('Installing updates needs the Gezel desktop app.');
-                setInstalling(false);
-                return;
-              }
-              void install()
-                .then((result) => {
-                  if (!result.ok) {
-                    setInstallError(result.error);
-                    setInstalling(false);
-                  }
-                })
-                .catch((err: unknown) => {
-                  setInstallError(err instanceof Error ? err.message : String(err));
-                  setInstalling(false);
-                });
-            }}
-          >
+          <button type="button" className="primary" disabled={installing} onClick={actions.install}>
             {installing
               ? platform === 'darwin'
                 ? 'Opening installer…'
@@ -438,7 +413,52 @@ export function UpdateStatus() {
                 : 'Install and restart'}
           </button>
         </span>
-        {installError && <span className="error small">{installError}</span>}
+        {actions.error && <span className="error small">{actions.error}</span>}
+      </output>
+    );
+  }
+
+  if (state?.kind === 'installing') {
+    return (
+      <output className="update-status" data-testid="update-status-installing">
+        <strong>Installing Gezel {state.version}…</strong>
+        <span className="muted small">
+          Finish the steps in the macOS installer. Gezel restarts by itself when the installer is
+          done.
+        </span>
+        <span>
+          <button type="button" disabled={actions.busy !== null} onClick={actions.install}>
+            Show installer
+          </button>
+        </span>
+        {actions.error && <span className="error small">{actions.error}</span>}
+      </output>
+    );
+  }
+
+  if (state?.kind === 'installed') {
+    const restarting = state.restarting || actions.busy === 'restart';
+    return (
+      <output className="update-status update-status-ready" data-testid="update-status-installed">
+        <strong>Gezel {state.version} is installed.</strong>
+        <span className="muted small">
+          {restarting
+            ? 'Gezel is restarting to start using it.'
+            : 'Restart Gezel to start using it.'}
+        </span>
+        {!state.restarting && (
+          <span>
+            <button
+              type="button"
+              className="primary"
+              disabled={restarting}
+              onClick={actions.restart}
+            >
+              {restarting ? 'Restarting…' : 'Restart Gezel'}
+            </button>
+          </span>
+        )}
+        {actions.error && <span className="error small">{actions.error}</span>}
       </output>
     );
   }

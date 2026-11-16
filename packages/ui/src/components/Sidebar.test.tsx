@@ -4,7 +4,7 @@ import {
   type Project,
   type RecentTab,
 } from '@bendyline/gezel';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -75,6 +75,7 @@ const { Sidebar } = await import('./Sidebar.js');
 const { api } = await import('../api.js');
 const { resetUpdateStateForTests } = await import('../update-state.js');
 const { consumeFocusSessionError } = await import('./pending-focus-session-error.js');
+const { setProjectListCollapsed } = await import('../views/projects/project-list-collapsed.js');
 
 const PROJECTS: Project[] = [
   { id: 'p1', name: 'Alpha' } as Project,
@@ -1013,6 +1014,19 @@ describe('Sidebar', () => {
     expect(window.localStorage.getItem('gezel:nav:sidebar-stay-open')).toBe('0');
     rerender(<Sidebar selection={project} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
     expect(screen.getByTestId('app-sidebar')).not.toHaveClass('collapsed');
+  });
+
+  it('folds in Projects only while the project list beside it is open', () => {
+    const projects = { kind: 'area', area: 'projects', at: 0, order: 0 } as const;
+    render(<Sidebar selection={projects} onSelect={vi.fn()} onOpenArea={vi.fn()} />);
+    expect(screen.getByTestId('app-sidebar')).toHaveClass('collapsed');
+
+    act(() => setProjectListCollapsed(true));
+    expect(screen.getByTestId('app-sidebar')).not.toHaveClass('collapsed');
+
+    act(() => setProjectListCollapsed(false));
+    expect(screen.getByTestId('app-sidebar')).toHaveClass('collapsed');
+    expect(window.localStorage.getItem('gezel:nav:sidebar-collapsed')).toBeNull();
   });
 
   it('opens compact navigation without changing the saved desktop width or collapse state', async () => {

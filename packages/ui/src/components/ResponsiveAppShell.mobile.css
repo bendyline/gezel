@@ -79,12 +79,13 @@
 
 .app.app-compact .home-workshop-tab {
   min-height: 44px;
-  padding-inline: 10px;
+  padding-inline: var(--home-tab-pad-inline);
 }
 
 /* A finger needs more rail to take hold of than a pointer does. */
 .app.app-compact .home-workshop {
   --home-sheet-rail-h: 28px;
+  --home-tab-pad-inline: 10px;
 }
 
 /* A collapsed band's chips wrap below the tabs, so they carry the bottom

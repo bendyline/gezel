@@ -844,8 +844,9 @@ describe('HomeView', () => {
     }
   });
 
-  // Finished work used to leave nothing to click once Updates emptied.
-  it('shows finished work as ready, not as waiting, and opens Updates', async () => {
+  // Finished work is counted by the title bar's Activity key, so Home neither
+  // repeats it in a chip nor counts it as waiting.
+  it('neither repeats finished work in a chip nor counts it as waiting', async () => {
     vi.mocked(api.listQuestions).mockResolvedValue({
       questions: [
         {
@@ -858,19 +859,20 @@ describe('HomeView', () => {
           intent: { kind: 'task-finished', taskRef: 'default/2' },
           createdAt: new Date().toISOString(),
         },
+        {
+          id: 'q-ask',
+          projectId: 'default',
+          gezelId: 'gz-meester',
+          sessionId: 's1',
+          prompt: 'Approve?',
+          createdAt: new Date().toISOString(),
+        },
       ],
     } as never);
-    const opened = vi.fn();
-    window.addEventListener('gezel:open-updates', opened);
-    try {
-      render(<HomeView />);
-      fireEvent.click(await screen.findByRole('button', { name: /1 ready for you/ }));
-      expect(opened).toHaveBeenCalledTimes(1);
-      expect(opened.mock.calls[0]![0].detail).toEqual({ section: 'ready' });
-      expect(screen.queryByText('1 waiting on you')).not.toBeInTheDocument();
-    } finally {
-      window.removeEventListener('gezel:open-updates', opened);
-    }
+    render(<HomeView />);
+    // The waiting chip proves the questions loaded before the absence is read.
+    await screen.findByRole('button', { name: /1 waiting on you/ });
+    expect(screen.queryByText(/ready for you/)).not.toBeInTheDocument();
   });
 
   it('opens the owner task from the chip when only a task waits', async () => {

@@ -301,6 +301,14 @@ export async function loadEmbeddedLicenses(root = EMBEDDED_LICENSES_ROOT) {
           );
         }
       }
+      // Only a linked sibling checkout bundles this version (`pnpm link:squisq`),
+      // so an unlinked build must not report it as stale.
+      if (
+        entry.linkedWorkspace !== undefined &&
+        (typeof entry.linkedWorkspace !== 'string' || entry.linkedWorkspace.length === 0)
+      ) {
+        throw new Error(`${name}@${entry.version} linkedWorkspace must say which checkout`);
+      }
       const identity = `${name}@${entry.version}`;
       if (carriers.has(identity))
         throw new Error(`duplicate embedded-licenses carrier ${identity}`);
@@ -309,6 +317,7 @@ export async function loadEmbeddedLicenses(root = EMBEDDED_LICENSES_ROOT) {
         version: entry.version,
         components: entry.components,
         unattributed: new Set(Object.keys(unattributed)),
+        linkedWorkspace: entry.linkedWorkspace ?? null,
       });
     }
   }
@@ -362,8 +371,8 @@ export function embeddedLicenseRecords(packages, embedded, registry) {
     }
   }
   if (packages.size > 0) {
-    for (const name of registry.carriers.keys()) {
-      if (!bundledCarriers.has(name)) {
+    for (const [name, entry] of registry.carriers) {
+      if (!bundledCarriers.has(name) && !entry.linkedWorkspace) {
         problems.push(
           `legal/embedded-licenses/manifest.json lists ${name}, which the service bundles no longer inline anything from`,
         );

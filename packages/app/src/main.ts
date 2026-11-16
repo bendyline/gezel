@@ -9,7 +9,7 @@
 const require = createRequire(import.meta.url);
 // biome-ignore format: `typeof import(...)` cannot be broken across lines
 const { app, BrowserWindow, Menu, Notification, dialog, ipcMain, nativeTheme, powerMonitor, powerSaveBlocker, session, shell } = require('electron') as typeof import('electron');
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
 import { realpath, rename, rm, stat } from 'node:fs/promises';
@@ -94,10 +94,17 @@ import {
   isNewerAppVersion,
 } from './updater/app-release.js';
 import {
+  MacInstallWatch,
+  macAppBundlePath,
+  openInstallerAndWait,
+  probeInstalledMacUpdate,
+} from './updater/mac-install-watch.js';
+import {
   type UpdateState,
   appUpdateDeliveryPolicy,
   downloadingUpdateState,
   shouldPublishDownloadState,
+  updateCheckWouldInterrupt,
   updateErrorStage,
 } from './updater/update-state.js';
 import { createUpdaterLog } from './updater/updater-log.js';
@@ -235,6 +242,8 @@ let appUpdateRelease: PublishedAppRelease | null = null;
 let updateState: UpdateState | null = null;
 /** Verified installer staged by the macOS update flow, awaiting the user. */
 let macUpdatePkgPath: string | null = null;
+/** Notices when a macOS package finished installing under this process. */
+let macInstallWatch: MacInstallWatch | null = null;
 const quitCoordinator = new QuitCoordinator({
   shutdown: async () => {
     // The service may take several seconds to save and stop a large model.
@@ -1307,8 +1316,16 @@ ipcMain.handle('gezel:update:install', async () => {
       return { ok: false as const, error: message };
     }
   }
+  if (updateState?.kind === 'installed') {
+    return {
+      ok: false as const,
+      error: 'This update is already installed. Restart Gezel to use it.',
+    };
+  }
   const result = await installStagedMacUpdate();
   if (result.ok) return { ok: true as const };
+  // A second open while the first installer is still up changes nothing.
+  if (updateState?.kind === 'installing') return { ok: false as const, error: result.error };
   setUpdateState({
     kind: 'error',
     stage: 'install',
@@ -1316,6 +1333,13 @@ ipcMain.handle('gezel:update:install', async () => {
     message: result.error ?? 'The verified installer could not be opened.',
   });
   return { ok: false as const, error: result.error };
+});
+ipcMain.handle('gezel:update:restart', () => {
+  if (updateState?.kind !== 'installed') {
+    return { ok: false as const, error: 'No installed update is waiting for a restart.' };
+  }
+  relaunchIntoInstalledUpdate();
+  return { ok: true as const };
 });
 
 /**
@@ -2603,6 +2627,10 @@ async function triggerAuthorizedUpdateCheck(): Promise<void> {
  * give electron-updater a generic feed rooted at that immutable tag.
  */
 async function checkAppReleaseForUpdates(): Promise<void> {
+  if (updateCheckWouldInterrupt(updateState)) {
+    console.info(`[updater] skipping check: an update is ${updateState?.kind}`);
+    return;
+  }
   appUpdateRelease = null;
   setUpdateState({ kind: 'checking' });
   try {
@@ -2756,6 +2784,7 @@ function ensureAutoUpdater(): import('electron-updater').AppUpdater | null {
 async function handleMacUpdateAvailable(version: string): Promise<void> {
   if (
     updateState?.kind === 'downloading' ||
+    updateCheckWouldInterrupt(updateState) ||
     (updateState?.kind === 'ready' && updateState.version === version)
   ) {
     return;
@@ -2798,16 +2827,87 @@ async function handleMacUpdateAvailable(version: string): Promise<void> {
  * Launch the staged installer. Installer.app authenticates the user itself,
  * replaces the root-owned bundle, and re-runs the postinstall that registers
  * the LaunchDaemon and refreshes the daemon's service tree — the parts a ZIP
- * swap silently skipped.
+ * swap silently skipped. Gezel then watches for the install to finish and
+ * relaunches into it (mac-install-watch.ts).
  */
 async function installStagedMacUpdate(): Promise<{ ok: boolean; error?: string }> {
   if (!macUpdatePkgPath) return { ok: false, error: 'No verified update is staged.' };
-  const failure = await shell.openPath(macUpdatePkgPath);
-  if (failure) {
-    console.warn('[updater] could not open staged package:', failure);
-    return { ok: false, error: failure };
+  const version =
+    updateState?.kind === 'ready' || updateState?.kind === 'installing'
+      ? updateState.version
+      : (appUpdateRelease?.version ?? app.getVersion());
+  const alreadyOpen = updateState?.kind === 'installing';
+  const watch = ensureMacInstallWatch();
+  watch?.startHandoff();
+  const opened = await openInstallerAndWait(macUpdatePkgPath, {
+    spawn: (command, args) => spawn(command, args, { stdio: ['ignore', 'ignore', 'pipe'] }),
+  });
+  if (!opened.ok) {
+    if (!alreadyOpen) watch?.cancelHandoff();
+    console.warn('[updater] could not open staged package:', opened.error);
+    return { ok: false, error: opened.error };
   }
+  if (!watch?.installed) setUpdateState({ kind: 'installing', version });
+  void opened.closed.then(async () => {
+    const finished = (await watch?.installerClosed()) ?? false;
+    // Closed without finishing: cancelled, or the install failed and
+    // Installer.app said so. Either way the package is still staged.
+    if (!finished && updateState?.kind === 'installing') {
+      console.info('[updater] installer closed before the update finished installing');
+      setUpdateState({ kind: 'ready', version });
+    }
+  });
   return { ok: true };
+}
+
+function ensureMacInstallWatch(): MacInstallWatch | null {
+  if (macInstallWatch) return macInstallWatch;
+  if (process.platform !== 'darwin' || !app.isPackaged || storeBuild.channel !== null) return null;
+  const bundlePath = macAppBundlePath(process.execPath);
+  if (!bundlePath) return null;
+  const run = promisify(execFile);
+  macInstallWatch = new MacInstallWatch({
+    probe: (sinceEpochSeconds) =>
+      probeInstalledMacUpdate(
+        { bundlePath, runningVersion: app.getVersion(), sinceEpochSeconds },
+        {
+          execFile: async (file, args) => {
+            const { stdout, stderr } = await run(file, args);
+            return { stdout: String(stdout), stderr: String(stderr) };
+          },
+        },
+      ),
+    onInstalled: ({ version, fromHandoff }) => handleMacUpdateInstalled(version, fromHandoff),
+  });
+  return macInstallWatch;
+}
+
+/** Long enough for the renderer to show "Restarting…" before the window goes. */
+const UPDATE_RELAUNCH_DELAY_MS = 2_000;
+
+/**
+ * The new release is on disk and its installer is done. When this app opened
+ * that installer, the person already chose to update, so restart into it as
+ * Windows does after its handoff. A package someone ran by hand gets a
+ * Restart button instead.
+ */
+function handleMacUpdateInstalled(version: string, fromHandoff: boolean): void {
+  console.info(
+    `[updater] Gezel ${version} finished installing${fromHandoff ? '; restarting into it' : ''}`,
+  );
+  setUpdateState({ kind: 'installed', version, restarting: fromHandoff });
+  tray?.setTooltip('Gezel — restart to finish updating');
+  if (fromHandoff) setTimeout(relaunchIntoInstalledUpdate, UPDATE_RELAUNCH_DELAY_MS);
+}
+
+function relaunchIntoInstalledUpdate(): void {
+  macInstallWatch?.stop();
+  isQuitting = true;
+  // A clean start: the original argv can carry a gezel:// link or a .gezmodel
+  // path, which the new process would act on a second time, and the
+  // hidden-at-login flag, which would bring it back without a window.
+  app.relaunch({ args: [] });
+  app.quit();
 }
 
 function setUpdateState(next: UpdateState): void {
@@ -3362,6 +3462,11 @@ app.whenReady().then(async () => {
     else if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
       void ensureWindow();
     }
+  });
+  // A person who ran a downloaded package themselves comes back to a Gezel
+  // whose bundle was replaced underneath it; offer the restart then.
+  app.on('browser-window-focus', () => {
+    void ensureMacInstallWatch()?.focused();
   });
 });
 

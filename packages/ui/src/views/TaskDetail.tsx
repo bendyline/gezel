@@ -602,6 +602,52 @@ export function TaskDetail({
   const planGuards =
     task.status === 'draft' && !curatedBook ? planGuardrails(summarizePlanDocument(task)) : [];
 
+  // Whose task it is. A picker where the task can be reassigned, a flat
+  // readout where it cannot: what cannot be pressed must not wear a key's face.
+  const ownerControl = isSystemJob ? (
+    <div
+      className="task-owner-readout"
+      title={`${systemOwner?.name ?? 'The Librarian'} manages a service-run job. It does not open a duplicate chat turn.`}
+    >
+      {systemOwner && (
+        <GezelIcon
+          svg={systemOwner.icon ?? null}
+          poppetje={systemOwner.poppetje}
+          iconOverride={systemOwner.iconOverride}
+          name={systemOwner.name}
+          size={20}
+        />
+      )}
+      <span>
+        {systemOwner?.name ?? 'Librarian'} <small>· system-run</small>
+      </span>
+    </div>
+  ) : runtimeCapabilities().taskStructureEditing ? (
+    <Select.Root
+      value={task.assignee.kind === 'user' ? '__user' : task.assignee.gezelId}
+      disabled={busy}
+      onValueChange={(v) => {
+        void setAssignee(v === '__user' ? { kind: 'user' } : { kind: 'gezel', gezelId: v });
+      }}
+    >
+      <Select.Trigger className="gz-key gz-key--dropdown" aria-label="Task assignee">
+        <Select.Value />
+      </Select.Trigger>
+      <Select.Content>
+        <Select.Item value="__user">You</Select.Item>
+        {gezels.map((g) => (
+          <Select.Item key={g.id} value={g.id}>
+            <PersonLabel name={g.name} roleTitle={g.role && plainRoleTitle(g.role)} />
+          </Select.Item>
+        ))}
+      </Select.Content>
+    </Select.Root>
+  ) : (
+    <span className="task-owner-readout">
+      {task.assignee.kind === 'user' ? 'You' : gezelName(task.assignee.gezelId)}
+    </span>
+  );
+
   const chatTabActive = selectedStepId === null && tab === 'chat';
   const parentRef = task.parentTaskRef;
   const parentTitle = parentTask?.title?.trim();
@@ -631,23 +677,38 @@ export function TaskDetail({
           )}
           <h3>{task.title}</h3>
         </div>
+        {/* Every control here is a key at one size: choice keys in a tray, the
+            assignee as a dropdown key, and the row's one filled key (Start
+            task, or Try again) last, under New task. */}
         <div className="task-detail-actions">
           {task.parentTaskRef ? (
-            <span
-              className={`task-status task-status-${effectiveStatus}`}
-              title={`Lifecycle follows parent task ${task.parentTaskRef}`}
-              aria-label={`Task status: ${effectiveStatus}. Follows parent task ${task.parentTaskRef}`}
-            >
-              {effectiveStatus} · follows parent
-            </span>
+            <>
+              <span
+                className={`task-status task-status-${effectiveStatus}`}
+                title={`Lifecycle follows parent task ${task.parentTaskRef}`}
+                aria-label={`Task status: ${effectiveStatus}. Follows parent task ${task.parentTaskRef}`}
+              >
+                {effectiveStatus} · follows parent
+              </span>
+              {ownerControl}
+            </>
           ) : task.status === 'draft' ? (
-            <div className="task-draft-activate">
+            <>
               <span className="task-detail-status-badge status-draft">
                 {curatedBook ? 'ready' : 'draft'}
               </span>
+              {ownerControl}
               <button
                 type="button"
-                className="primary"
+                className="gz-key"
+                disabled={busy}
+                onClick={() => void setStatus('canceled')}
+              >
+                Discard
+              </button>
+              <button
+                type="button"
+                className="gz-key gz-key--primary"
                 disabled={busy}
                 title={
                   planGuards.length > 0 ? `Before running: ${planGuards.join('; ')}` : undefined
@@ -656,28 +717,30 @@ export function TaskDetail({
               >
                 {busy ? 'Starting…' : 'Start task'}
               </button>
-              <button
-                type="button"
-                className="subtle"
-                disabled={busy}
-                onClick={() => void setStatus('canceled')}
-              >
-                Discard
-              </button>
-            </div>
+            </>
           ) : (
             <>
-              <TaskStatusKeys
-                value={task.status}
-                options={isSystemJob ? SYSTEM_JOB_STATUS_VALUES : undefined}
-                disabled={busy}
-                onChange={(status) => void setStatus(status)}
-              />
+              <div
+                className="gz-tray task-state-tray"
+                // biome-ignore lint/a11y/useSemanticElements: a tray of keys, not a form; <fieldset> would bring a legend and form-group styling.
+                role="group"
+                aria-label="Status and assignee"
+              >
+                <TaskStatusKeys
+                  inTray
+                  value={task.status}
+                  options={isSystemJob ? SYSTEM_JOB_STATUS_VALUES : undefined}
+                  disabled={busy}
+                  onChange={(status) => void setStatus(status)}
+                />
+                <span className="gz-tray-divider" aria-hidden="true" />
+                {ownerControl}
+              </div>
               {(task.status === 'paused' ||
                 (!runtimeCapabilities().background && task.status === 'active')) && (
                 <button
                   type="button"
-                  className="primary"
+                  className="gz-key gz-key--primary"
                   disabled={busy}
                   onClick={() => void retry()}
                 >
@@ -685,49 +748,6 @@ export function TaskDetail({
                 </button>
               )}
             </>
-          )}
-          {isSystemJob ? (
-            <div
-              className="task-system-owner"
-              title={`${systemOwner?.name ?? 'The Librarian'} manages a service-run job. It does not open a duplicate chat turn.`}
-            >
-              {systemOwner && (
-                <GezelIcon
-                  svg={systemOwner.icon ?? null}
-                  poppetje={systemOwner.poppetje}
-                  iconOverride={systemOwner.iconOverride}
-                  name={systemOwner.name}
-                  size={22}
-                />
-              )}
-              <span>
-                {systemOwner?.name ?? 'Librarian'} <small>· system-run</small>
-              </span>
-            </div>
-          ) : runtimeCapabilities().taskStructureEditing ? (
-            <Select.Root
-              value={task.assignee.kind === 'user' ? '__user' : task.assignee.gezelId}
-              disabled={busy}
-              onValueChange={(v) => {
-                void setAssignee(v === '__user' ? { kind: 'user' } : { kind: 'gezel', gezelId: v });
-              }}
-            >
-              <Select.Trigger aria-label="Task assignee">
-                <Select.Value />
-              </Select.Trigger>
-              <Select.Content>
-                <Select.Item value="__user">You</Select.Item>
-                {gezels.map((g) => (
-                  <Select.Item key={g.id} value={g.id}>
-                    <PersonLabel name={g.name} roleTitle={g.role && plainRoleTitle(g.role)} />
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          ) : (
-            <span className="task-assignee">
-              {task.assignee.kind === 'user' ? 'You' : gezelName(task.assignee.gezelId)}
-            </span>
           )}
         </div>
       </header>

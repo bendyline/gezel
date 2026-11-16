@@ -79,6 +79,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       submitOnEnter,
       minHeight,
       maxHeight,
+      toolbarPosition,
     }: {
       initialMarkdown?: string;
       placeholder?: string;
@@ -88,6 +89,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
       submitOnEnter?: () => void;
       minHeight?: string;
       maxHeight?: string;
+      toolbarPosition?: string;
     }) => {
       // Match Squisq's mount-time-only placeholder configuration so this
       // mock catches regressions where a recipient change merely updates a
@@ -121,6 +123,7 @@ vi.mock('@bendyline/squisq-editor-react', async () => {
             />
             <span data-testid="editor-placeholder">{mountedPlaceholder}</span>
             <span data-testid="editor-heights">{`${minHeight ?? ''}/${maxHeight ?? ''}`}</span>
+            <span data-testid="editor-toolbar-position">{toolbarPosition ?? 'top'}</span>
             <span data-testid="editor-draft">{draft}</span>
             <button
               type="button"
@@ -1945,6 +1948,14 @@ describe('ChatComposer expand toggle', () => {
     const trailing = screen.getByTestId('address-line-trailing');
     expect(toggle.nextElementSibling).toBe(trailing);
     expect(trailing.nextElementSibling).toBeNull();
+  });
+
+  it('asks for the toolbar under the draft', () => {
+    render(
+      <ChatComposer gezelId="tomas" gezelName="Tomas" projectId="default" sessionId="session-1" />,
+    );
+
+    expect(screen.getByTestId('editor-toolbar-position').textContent).toBe('bottom');
   });
 
   it('hands the draft the chat window and gives it back', () => {

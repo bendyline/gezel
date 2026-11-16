@@ -7,7 +7,30 @@ vi.mock('../api.js', () => ({ api: createMockApi() }));
 vi.mock('../primitives/index.js', () => primitivesMock);
 vi.mock('../theme.js', () => ({ useEffectiveTheme: () => 'light' }));
 
-const { StreamingBubble } = await import('./chat-bubbles.js');
+const { StreamingBubble, StreamingStatusLine } = await import('./chat-bubbles.js');
+
+describe('StreamingStatusLine work chunks', () => {
+  const line = (debugMode: boolean) =>
+    render(
+      <StreamingStatusLine
+        failed={false}
+        queued={false}
+        queueAhead={undefined}
+        elapsedSeconds={60}
+        toolCount={0}
+        wirePulseCount={3}
+        debugMode={debugMode}
+      />,
+    ).container.querySelector('.msg-wire-pulse');
+
+  it('drops the dot before the hammer when the clock is hidden', () => {
+    expect(line(false)?.textContent).not.toMatch(/·/);
+  });
+
+  it('keeps the dot between the clock and the hammer in debug mode', () => {
+    expect(line(true)?.textContent).toMatch(/·/);
+  });
+});
 
 describe('StreamingBubble status', () => {
   it('splits an activity path so the filename remains visible through middle truncation', () => {
@@ -157,6 +180,20 @@ describe('StreamingBubble — waiting for the engine vs wedged mid-turn', () => 
 });
 
 describe('StreamingBubble elapsed clock', () => {
+  it('is hidden outside debug mode', () => {
+    const { container } = render(
+      <StreamingBubble
+        authorLabel="Koray"
+        authorIcon={null}
+        segments={[]}
+        startedAt={Date.now() - 90_000}
+      />,
+    );
+    const status = container.querySelector('.msg-live-status')?.textContent ?? '';
+    expect(status).not.toMatch(/1:30/);
+    expect(status).not.toMatch(/·/);
+  });
+
   it('stops counting once the turn has failed', async () => {
     // A dead turn kept ticking: the failed shell read "11:15" and climbing
     // on a turn that had aborted 40 seconds earlier, so the first question
@@ -171,6 +208,7 @@ describe('StreamingBubble elapsed clock', () => {
           segments={[]}
           startedAt={startedAt}
           error="[Mac AI] no first byte from the engine"
+          debugMode
         />,
       );
       const clock = () => container.querySelector('.msg-live-status')?.textContent ?? '';
@@ -185,6 +223,7 @@ describe('StreamingBubble elapsed clock', () => {
           segments={[]}
           startedAt={startedAt}
           error="[Mac AI] no first byte from the engine"
+          debugMode
         />,
       );
       expect(clock()).toBe(before);

@@ -27,16 +27,27 @@ interface TransformToolbarButtonProps {
 const BEFORE_CONTEXT_CHARS = 2000;
 const AFTER_CONTEXT_CHARS = 1000;
 
-function WandIcon() {
+/**
+ * DocBlocks' AI sparkles (`SparklesGlyph` in its AiEditorAssistant), path
+ * for path. Only the viewBox differs: the two stars span x 3.25-15.7 and
+ * y 2.2-14.4, so DocBlocks' `0 0 18 18` draws them right of center and
+ * high; this box is centered on them.
+ */
+function SparklesGlyph() {
   return (
-    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-      <path d="m2 14 8.5-8.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-      <path
-        d="M12 1.8l.7 1.7 1.7.7-1.7.7-.7 1.7-.7-1.7-1.7-.7 1.7-.7.7-1.7Z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
+    <svg
+      viewBox="0.475 -0.7 18 18"
+      width="18"
+      height="18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.35"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M7.2 2.2c.45 2.2 1.75 3.5 3.95 3.95-2.2.45-3.5 1.75-3.95 3.95-.45-2.2-1.75-3.5-3.95-3.95C5.45 5.7 6.75 4.4 7.2 2.2Z" />
+      <path d="M13.1 9.2c.3 1.45 1.15 2.3 2.6 2.6-1.45.3-2.3 1.15-2.6 2.6-.3-1.45-1.15-2.3-2.6-2.6 1.45-.3 2.3-1.15 2.6-2.6Z" />
     </svg>
   );
 }
@@ -146,7 +157,7 @@ export function TransformToolbarButton({
     <>
       <button
         type="button"
-        className="ai-btn"
+        className="squisq-toolbar-button gezel-ai-transform-btn"
         onClick={() => setSnapshot(captureSnapshot())}
         disabled={!supported}
         title={
@@ -156,7 +167,7 @@ export function TransformToolbarButton({
         }
         aria-label="Transform with AI"
       >
-        <WandIcon />
+        <SparklesGlyph />
       </button>
       {snapshot && (
         <TransformDialog

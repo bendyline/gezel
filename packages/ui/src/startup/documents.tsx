@@ -75,7 +75,16 @@ export function StartupDocuments({
           <IntroArticleDocument doc={doc} mode={dark ? 'dark' : 'light'} />
         </div>
       ) : (
-        <div className="home-workshop-status-report" data-testid="night-review-panel">
+        // Quiet on the same terms as the live panel, so the handover does not
+        // shift the text: no report and no change proposal to list.
+        <div
+          className={`home-workshop-status-report${
+            reports.length === 0 && !snapshot?.night?.proposals
+              ? ' home-workshop-status-report-quiet'
+              : ''
+          }`}
+          data-testid="night-review-panel"
+        >
           {snapshot?.night ? (
             <NightReviewSummary
               completed={snapshot.night.completed}

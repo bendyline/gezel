@@ -123,6 +123,36 @@
   gap: 0;
 }
 
+/* The primary key: a view's one filled action (create or commit) at a key's
+   size, for a row where it stands beside keys. The bare `button` is the same
+   fill at 15px with a 4px corner, and next to a tray that read as a control
+   from another kit. It is raised, never latched, and never sits in a tray:
+   beside a latched key the two fills would read as two choices. */
+.gz-key--primary {
+  background: var(--action-bg);
+  border-color: var(--key-pressed-border);
+  color: var(--action-ink);
+}
+
+/* The dropdown key: a Select or menu trigger wearing the key's face, so a
+   row of keys and pickers is one height and one type size. Pass it to
+   `Select.Trigger` beside `gz-key`; it keeps the select's own chevron. */
+.gz-key--dropdown {
+  justify-content: flex-start;
+  gap: 0.4rem;
+  padding-inline: 0.7rem 0.55rem;
+}
+
+.gz-key--dropdown .gz-select-icon {
+  color: var(--text-muted);
+}
+
+/* A dropdown key whose choice is narrowing what is listed says so in the
+   accent ink. It is a value, not a latch, so it keeps the raised face. */
+.gz-key--filtering {
+  color: var(--accent-text);
+}
+
 .gz-key:where(:hover:not(:disabled)),
 .provider-pill:where(:hover:not(:disabled)),
 .gz-type-chip:where(:hover:not(:disabled)),
@@ -130,6 +160,19 @@
 .catalog-category:where(:hover:not(:disabled)),
 .gezel-json-editor .squisq-jf-segmented__btn:where(:hover:not(:disabled)) {
   background: var(--key-bg-hover);
+}
+
+/* After the hover rule, so the fill survives it: a primary key lights up
+   instead of turning into a plain key under the pointer. */
+.gz-key--primary:where(:hover:not(:disabled)) {
+  background: var(--action-bg);
+  filter: brightness(1.08);
+}
+
+/* A select trigger turns its border accent on hover; a key says hover with
+   its face, and one accent-rimmed key in a tray reads as the chosen one. */
+.gz-key--dropdown:hover {
+  border-color: var(--key-border);
 }
 
 /* Mousedown: the key physically pushes in. */
@@ -249,6 +292,65 @@
 .gz-tray-description strong {
   color: var(--text);
   font-weight: 600;
+}
+
+/* Key strips: a pane's toolbar is one tray, run edge to edge. Several small
+   trays in a narrow header — three of them around a single key each — read
+   as a row of wells with a control lost in every one; the file pane had five
+   above a 240px list. The strip is the tray surface without side walls or
+   corners, because the pane's own edges are the only edges, and every key on
+   it is the ordinary `.gz-key`. Its icon keys are square so a 240px pane
+   seats seven. `.gz-key-group` holds a radiogroup's keys together,
+   `.gz-tray-divider` parts a choice from what is not one more choice, and
+   `.gz-key-strip-end` sends the verbs to the far end.
+   `.gz-key-strip--rail` is the same strip stood on end, for a pane folded to
+   its rail. docs/ux.md → "A pane's toolbar is one key strip". */
+.gz-key-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.5rem;
+  background: var(--tray-bg);
+  border-block: 1px solid var(--tray-border);
+  box-shadow: var(--tray-shadow);
+}
+
+.gz-key-strip .gz-key--icon {
+  padding: 0.3rem;
+}
+
+.gz-key-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.gz-tray-divider {
+  flex: none;
+  align-self: stretch;
+  width: 1px;
+  margin: 0.25rem 0.15rem;
+  background: var(--tray-border);
+}
+
+.gz-key-strip-end {
+  display: inline-flex;
+  gap: 0.3rem;
+  margin-left: auto;
+}
+
+.gz-key-strip--rail {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  padding: 0.4rem 0;
+  border-block: 0;
+}
+
+.gz-key-strip--rail .gz-key-strip-end {
+  flex-direction: column;
+  margin-top: auto;
+  margin-left: 0;
 }
 
 /* ==========================================================================
