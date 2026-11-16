@@ -18,10 +18,13 @@ beforeAll(async () => {
   svc = await startService({ home });
   baseUrl = `${svc.cert ? 'https' : 'http'}://127.0.0.1:${svc.port}`;
   httpFetch = svc.cert ? createTrustingFetch({ cert: svc.cert.certPem }) : fetch;
-}, 30_000);
+  // A full service boot resolves a large slice of its module graph through
+  // dynamic imports, so the cost lands inside this hook: 12-22 s alone on a
+  // Windows ARM workstation, and past 30 s under full-suite pressure.
+}, 60_000);
 
 afterAll(async () => {
-  await svc.stop();
+  await svc?.stop();
   await rm(home, { recursive: true, force: true }).catch(() => {});
   if (priorMockFlag === undefined) delete process.env.GEZEL_MOCK_PROVIDER;
   else process.env.GEZEL_MOCK_PROVIDER = priorMockFlag;

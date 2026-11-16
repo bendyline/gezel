@@ -38,6 +38,15 @@ async function expectProjectSelected(page: Page, name: string): Promise<void> {
   });
 }
 
+/**
+ * Open the navigation rail. Projects folds it to icons while its own project
+ * list is open, which hides the crew roster; open it as a person would.
+ */
+async function expandRail(page: Page): Promise<void> {
+  const expand = page.getByRole('button', { name: 'Expand sidebar', exact: true });
+  if (await expand.isVisible()) await expand.click();
+}
+
 let gezelHome: string;
 let app: ElectronApplication;
 let page: Page;
@@ -118,6 +127,7 @@ test('gallery lists the Language Trainer type and creates a project with a pinne
   // Applying the type also creates its Language Trainer gezel. The global
   // sidebar must invalidate its roster after apply (the earlier
   // project-created event fires before this gezel exists).
+  await expandRail(page);
   await expect(page.locator('[data-testid="app-sidebar"]')).toContainText('Language Trainer');
   await captureScreenshot(page, { path: '/tmp/gezel-project-type-dashboard.png', fullPage: false });
 });
@@ -164,6 +174,7 @@ test('gallery creates a Job Hunt project: two-gezel crew and the pipeline board'
 
   // The two-gezel crew materialized: coach voorman + mock interviewer both
   // land on the sidebar roster.
+  await expandRail(page);
   await expect(page.locator('[data-testid="app-sidebar"]')).toContainText(
     /Loopbaancoach|Career Coach/,
   );

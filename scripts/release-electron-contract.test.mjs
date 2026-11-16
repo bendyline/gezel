@@ -367,7 +367,7 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
     /"dompurify@>=3 <4": "3\.4\.17"/,
     /"js-yaml@<4": "3\.15\.2"/,
     /"js-yaml@>=4 <5": "4\.3\.2"/,
-    /"mermaid@>=11 <12": "11\.16\.1"/,
+    /"mermaid@>=11 <12": "11\.17\.2"/,
   ]) {
     assert.match(workspace, dependencyFloor);
   }
@@ -376,7 +376,7 @@ test('dependency security floors fix B3 and preserve the intended vulnerability 
     /dompurify@3\.4\.17:/,
     /js-yaml@3\.15\.2:/,
     /js-yaml@4\.3\.2:/,
-    /mermaid@11\.16\.1:/,
+    /mermaid@11\.17\.2:/,
   ]) {
     assert.match(lockfile, patchedResolution);
   }
