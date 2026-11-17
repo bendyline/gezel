@@ -108,7 +108,10 @@ the browser-safe SDK. Supply `maxPromptCharacters`, `maxMessages`, optional
 and 12,000 passage characters by default, accounts for serialized evidence, and
 keeps retrieval failures from blocking the original request. Cancellation still
 propagates. The helper labels retrieved evidence as untrusted, never truncates
-the task, and treats character-based context budgeting as advisory. Plain
+the task, and treats character-based context budgeting as advisory. Evidence
+joins the request's leading system prompt, ahead of it, rather than adding a
+second system message, which Qwen's chat template and the Capacitor runtime
+refuse anywhere but first. Plain
 `app.chat` never retrieves implicitly. `streamText` opts in per request through
 its `knowledge` field, using the same budgets.
 

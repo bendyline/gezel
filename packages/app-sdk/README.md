@@ -599,7 +599,10 @@ service release containing the progress extension, not just an SDK update.
 evidence within explicit `maxPromptCharacters` and `maxMessages` limits. Optional
 context/output budgets use a conservative character estimate, not a tokenizer.
 It fails open on unavailable or malformed knowledge and propagates cancellation;
-plain `app.chat` does not enrich requests automatically. This helper is also
+plain `app.chat` does not enrich requests automatically. Evidence goes into a
+leading system message, joined ahead of the request's own system prompt when it
+has one, so the request never gains a second system message (Qwen's chat
+template and the Capacitor runtime refuse one anywhere but first). This helper is also
 available from `/browser`. `knowledgeContext(…)` takes the same options and also
 reports what it added (`status`, `reason`, `passages`). Pass `query` to search
 for what the person asked rather than the last user message, and

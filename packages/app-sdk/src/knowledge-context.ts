@@ -38,7 +38,11 @@ export interface KnowledgePassage {
 }
 
 export interface KnowledgeContext {
-  /** The request to send: the original messages, with passages ahead of them when `used`. */
+  /**
+   * The request to send: the original messages, with passages ahead of them
+   * when `used`. Passages join a leading system message rather than adding a
+   * second one, so the request keeps at most one system message, first.
+   */
   messages: ChatMessage[];
   /**
    * `used`: passages are in `messages`. `none`: the catalogs were searched and
@@ -138,9 +142,13 @@ export async function knowledgeContext(
     const passages = result.passages.map((passage, index) => ({ n: index + 1, ...passage }));
     const evidence =
       options.citations === 'numbered' ? numberedEvidence(passages) : plainEvidence(passages);
-    if (evidence.length > Math.min(remaining, contextRoom)) return unavailable('budget_exceeded');
+    const next = withEvidence(messages, evidence);
+    // Joining a system prompt adds the separator as well.
+    const added =
+      evidence.length + (next.length === messages.length ? EVIDENCE_SEPARATOR.length : 0);
+    if (added > Math.min(remaining, contextRoom)) return unavailable('budget_exceeded');
     return {
-      messages: [{ role: 'system', content: evidence }, ...messages],
+      messages: next,
       status: 'used',
       reason: null,
       passages,
@@ -160,6 +168,21 @@ export async function withKnowledgeContext(
   options: KnowledgeContextOptions,
 ): Promise<ChatMessage[]> {
   return (await knowledgeContext(client, messages, options)).messages;
+}
+
+const EVIDENCE_SEPARATOR = '\n\n';
+
+/**
+ * `messages` with `evidence` ahead of them in one leading system message.
+ * Qwen's chat template and Gezel's Capacitor runtime refuse a system message
+ * anywhere but first, so evidence joins the request's own system prompt
+ * instead of preceding it as a second one.
+ */
+function withEvidence(messages: readonly ChatMessage[], evidence: string): ChatMessage[] {
+  const [lead, ...rest] = messages;
+  return lead?.role === 'system' && typeof lead.content === 'string'
+    ? [{ ...lead, content: `${evidence}${EVIDENCE_SEPARATOR}${lead.content}` }, ...rest]
+    : [{ role: 'system', content: evidence }, ...messages];
 }
 
 function plainEvidence(passages: readonly KnowledgePassage[]): string {
