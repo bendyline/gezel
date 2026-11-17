@@ -19,6 +19,7 @@ export type SectionIconName =
   | 'reports'
   | 'gallery'
   | 'timeline'
+  | 'web'
   | 'settings'
   | 'skills'
   | 'references';
@@ -162,6 +163,14 @@ const SECTION_PATHS: Record<Exclude<SectionIconName, 'tasks' | 'settings'>, JSX.
     </>
   ),
   // A page with a heading line and three lines of text — a report to read
+  // A globe: the saved copies of the web pages a project follows
+  web: (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.5 12h17" />
+      <path d="M12 3.5c2.6 2.4 3.8 5.2 3.8 8.5s-1.2 6.1-3.8 8.5c-2.6-2.4-3.8-5.2-3.8-8.5s1.2-6.1 3.8-8.5z" />
+    </>
+  ),
   reports: (
     <>
       <path d="M6.5 3.5h8l4 4v13h-12z" />

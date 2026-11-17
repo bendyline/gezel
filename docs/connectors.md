@@ -316,9 +316,13 @@ One `ConnectorSyncManager` ([connectors/sync-manager.ts](../packages/service/src
 generalized from mail's original loop) serves every type. Its discipline is the reason autonomous sync is safe to leave running:
 
 - **Idle-gated.** Never fights a live chat turn; respects OS idle and the night-shift flag.
-- **Posture-gated.** Dormant under lockdown / super-lockdown; autonomous sync rides
-  `resolveSecurityPolicy(cfg).allowExternalServices`. A manual, user-initiated sync is a
-  separate route with its own (stricter) gate.
+- **Posture-gated.** Read-only types (no write-back actions declared: websites, feeds,
+  wikis) sync in the background whenever `allowConnectorData` is on, so at Lockdown too;
+  types that can send or post keep `allowExternalServices`. Super-lockdown stops the loop.
+  `ConnectorManager.backgroundBindings` decides per binding, and the loop lists only
+  eligible bindings so a held-back one never makes its project look due. A manual,
+  user-initiated sync is a separate route, refused at the sink when `allowConnectorData`
+  is off.
 - **One unit per tick, staleness-ordered.** Bounded work; the least-recently-synced due
   binding goes first.
 - **Cursor-resumed.** Resume from the persisted cursor; never re-walk the whole source.
@@ -425,6 +429,15 @@ Sources compose **local → bundled → community** like every other kind. First
 discoverable, versioned face over them — the same "wrap native code in a bundled manifest for
 gallery unity" move [project-types.md](./project-types.md) makes for the mail pipeline.
 
+A type's identity manifest may carry `"logo": "logo.webp"`, a cut-paper mark from the same
+family as craftbook artwork. Gezel draws it on a ground chosen by what the type brings in
+(`connectorTypeGround`), in the Connections gallery, the composer and under a sent message.
+
+A connector can also be offered from the words of a draft: a web address in a message is
+saved by the website connector when the person sends it, and a future rule can offer a
+GitHub connection for a `github.com` link. That path (rules, resolvers, the composer strip,
+what the turn is given) is specified in [prompt-connectors.md](./prompt-connectors.md).
+
 Connectors are the **missing input primitive** for [custom project types](./project-types.md).
 A project type is a composition manifest; today it composes gezels, craftbooks, scripts,
 toolsets, pages, and schedules. Add `connectors` to that list and an "Inbox Triage" or
@@ -463,7 +476,8 @@ adapter. State per connector whether the user is getting a **mirror** or a **win
 Connectors extend the existing `SecurityPolicy` ladder ([schemas/api.ts](../packages/core/src/schemas/api.ts)),
 they do not add a parallel one:
 
-- Autonomous sync is gated by `allowExternalServices`; lockdown postures stop the loop.
+- Autonomous sync of a read-only type is gated by `allowConnectorData`, of a type with
+  write-back actions by `allowExternalServices`; super-lockdown stops the loop.
 - **User-initiated data movement is gated by `allowConnectorData` (derived from
   `allowAppNetwork`), not by `allowExternalServices`.** That flag governs *agency* — what the
   model may reach for on its own — and a connector is the opposite arrangement: the runtime

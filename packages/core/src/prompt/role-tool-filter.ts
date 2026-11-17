@@ -1418,9 +1418,18 @@ function applySecurityPolicyGates(
 const CLAUDE_BUILTIN_BY_GROUP: Record<string, readonly string[]> = {
   'workspace-fs-read': ['Read', 'Grep', 'Glob'],
   'workspace-fs-write': ['Write', 'Edit', 'NotebookEdit'],
-  'code-execution': ['Bash'],
+  // Claude Code on Windows runs commands through `PowerShell` as well.
+  'code-execution': ['Bash', 'PowerShell'],
   web: ['WebFetch', 'WebSearch'],
 };
+
+/**
+ * Claude Code's own shells. They run as the person with no Gezel gate in
+ * between, so they follow the security policy's `allowAgentShell` as well
+ * as the role.
+ */
+export const CLAUDE_AGENT_SHELL_TOOLS: readonly string[] =
+  CLAUDE_BUILTIN_BY_GROUP['code-execution']!;
 
 const ALL_GATED_CLAUDE_BUILTINS: readonly string[] = [
   ...CLAUDE_BUILTIN_BY_GROUP['workspace-fs-read']!,

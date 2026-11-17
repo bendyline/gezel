@@ -288,8 +288,8 @@ importers:
         specifier: workspace:*
         version: link:../knowledge
       '@bendyline/gilde':
-        specifier: 0.3.10
-        version: 0.3.10
+        specifier: 0.3.12
+        version: 0.3.12
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1
@@ -831,8 +831,8 @@ importers:
         specifier: workspace:*
         version: link:../sdk
       '@bendyline/gilde':
-        specifier: 0.3.10
-        version: 0.3.10
+        specifier: 0.3.12
+        version: 0.3.12
       '@bendyline/squisq':
         specifier: 2.13.17
         version: 2.13.17(supports-color@8.1.1)
@@ -848,6 +848,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 1.32.2
         version: 1.32.2(supports-color@8.1.1)(zod@4.6.7(patch_hash=ef5de5bf46fa98636fcccbe6d16124792588ae4facb62a1974692340403b2b9b))
+      '@mozilla/readability':
+        specifier: 0.6.0
+        version: 0.6.0
       '@napi-rs/keyring':
         specifier: ^1.3.0
         version: 1.3.0
@@ -1318,8 +1321,8 @@ packages:
     resolution: {integrity: sha512-rzr1yjwWbcFZeeWlBfgVO/2tVeFD4yY82l9c6KmSEt11yEu5mjzFfW4pqW3sZ2qyGyyUJbILuU1jL2t1+DxppQ==}
     engines: {node: ^24.18.0 || >=26.0.0}
 
-  '@bendyline/gilde@0.3.10':
-    resolution: {integrity: sha512-Sva/qG/iIiFqqnGlLR19svbjGW0hdW98Efs5hOFS7RL5oGztYFnNDQoaj6OwhM0JzniXJFAY1kNzDL906dt0dQ==}
+  '@bendyline/gilde@0.3.12':
+    resolution: {integrity: sha512-/+8B+1YaCbuSGPlGH/qLpoFxcfSX5nyZJ2+icr7IFjisvbUSG/LZa9e17sZlje5O1u7BJtXxPBk2Lw5VGjhCBQ==}
 
   '@bendyline/squisq-calc@2.11.2':
     resolution: {integrity: sha512-5F73g6ZyO5/QtOgv4JTw2cycBGr26mVU11ajXf4+Ynz9uGh/mxdBfY3yXLKceUUUqRYiIfDd+X28FqkQXge3Ag==}
@@ -2301,6 +2304,10 @@ packages:
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
+
+  '@mozilla/readability@0.6.0':
+    resolution: {integrity: sha512-juG5VWh4qAivzTAeMzvY9xs9HY5rAcr2E4I7tiSSCokRFi7XIZCAu92ZkSTsIj1OPceCifL3cpfteP3pDT9/QQ==}
+    engines: {node: '>=14.0.0'}
 
   '@napi-rs/keyring-darwin-arm64@1.3.0':
     resolution: {integrity: sha512-pl76hJvdYUBn6I24bXiOBMA9nbDapo3I5B+f3OorjDU4dUMSypXeKbOVehJe8fhgTiH24flMyTS3aAIy43xegQ==}
@@ -9062,7 +9069,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@bendyline/gilde@0.3.10': {}
+  '@bendyline/gilde@0.3.12': {}
 
   '@bendyline/squisq-calc@2.11.2(@ironcalc/wasm@0.8.4)':
     optionalDependencies:
@@ -10050,6 +10057,8 @@ snapshots:
       zod-to-json-schema: 3.25.2(zod@4.6.7(patch_hash=ef5de5bf46fa98636fcccbe6d16124792588ae4facb62a1974692340403b2b9b))
     transitivePeerDependencies:
       - supports-color
+
+  '@mozilla/readability@0.6.0': {}
 
   '@napi-rs/keyring-darwin-arm64@1.3.0':
     optional: true

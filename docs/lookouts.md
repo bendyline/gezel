@@ -1,9 +1,12 @@
 # Lookouts
 
 A **lookout** is the person's standing instruction to a project: *keep a
-lookout for X, then do Y.* Today X is judged by a camera
-([device-connectors.md](./device-connectors.md)); the shape is general so mail
-and feed connectors can be sources later. The person-facing article is
+lookout for X, then do Y.* X is judged by a camera
+([device-connectors.md](./device-connectors.md)) or by a website connection's
+changes ([website-connector.md](./website-connector.md): `page-changed`,
+`page-added`, `text-appears`, each with an optional path prefix, admitted by
+core's model-free `admitWebsiteLookout` once per pass); mail and feed
+connectors can be sources later. The person-facing article is
 [Cameras and lookouts](./handboek/conceptual/cameras-and-lookouts.md); the
 decision record is [ADR 0026](./decisions/0026-lookouts.md).
 
@@ -100,7 +103,7 @@ and `/api/lookouts/recent-alerts`. Mutations need an owner caller.
 
 ## Not yet
 
-Lookouts on other connectors (`connector-records` sources evaluated after a
+Lookouts on other connectors besides websites (`connector-records` sources evaluated after a
 sync with keywords or a one-shot JSON question), lookout presets in project
 types (`consent: 'ask'`), a question-card approval flow, email attachments,
 and the gilde content (a `wachter` template, `lookout-sighting` and

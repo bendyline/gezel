@@ -32,8 +32,13 @@ import {
   serializeCraftbookDoc,
   slugifyStepId,
 } from '@bendyline/gezel';
-import type { CraftbookDocError, CraftbookDocFormat } from '@bendyline/gezel';
-import { type Handler, Hono } from 'hono';
+import type {
+  CraftbookDocError,
+  CraftbookDocFormat,
+  StepPatch,
+  TaskCraftbookStep,
+} from '@bendyline/gezel';
+import { type Context, type Handler, Hono } from 'hono';
 import { z } from 'zod';
 import {
   type DiskProbeBudget,
@@ -54,10 +59,28 @@ import {
   TaskNotActiveError,
 } from '../../tasks/manager.js';
 import { retryPausedTask } from '../../tasks/retry.js';
+import {
+  sessionRecipeRefusal,
+  stepOrderRefusal,
+  stepPatchRefusal,
+  stepRemovalRefusal,
+} from '../../tasks/session-recipe-guard.js';
 import { askTaskTeammate } from '../../tasks/teammates.js';
 import type { ServiceContext } from '../context.js';
 
 const taskDocLog = createLogger('craftbooks');
+
+/** A gezel's session token, as opposed to the person's own app. */
+function isSessionCaller(c: Context): boolean {
+  return c.get('auth')?.scopes.includes('session') === true;
+}
+
+function recipeRefused(c: Context, reason: string) {
+  return c.json(
+    { error: `${reason} Ask the person if it needs to change.`, code: 'recipe_locked' },
+    403,
+  );
+}
 
 function taskDocFormat(raw: string | undefined): CraftbookDocFormat {
   if (raw === 'json') return 'json';
@@ -417,6 +440,12 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const num = parseNum(c.req.param('num'));
     if (num == null) return c.json({ error: 'invalid num' }, 400);
     const body = UpdateTaskStepRequestSchema.parse(await c.req.json());
+    if (isSessionCaller(c)) {
+      const current = await ctx.tasks.get(projectId, num);
+      const refusal =
+        current && stepPatchRefusal(current, c.req.param('stepId'), body as StepPatch);
+      if (refusal) return recipeRefused(c, refusal);
+    }
     const task = await ctx.tasks.updateStep(projectId, num, c.req.param('stepId'), body);
     if (!task) return c.json({ error: 'not found' }, 404);
     return c.json({ task });
@@ -426,6 +455,11 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const projectId = c.req.param('projectId');
     const num = parseNum(c.req.param('num'));
     if (num == null) return c.json({ error: 'invalid num' }, 400);
+    if (isSessionCaller(c)) {
+      const current = await ctx.tasks.get(projectId, num);
+      const refusal = current && stepRemovalRefusal(current, c.req.param('stepId'));
+      if (refusal) return recipeRefused(c, refusal);
+    }
     const task = await ctx.tasks.removeStep(projectId, num, c.req.param('stepId'));
     if (!task) return c.json({ error: 'not found' }, 404);
     return c.json({ task });
@@ -437,6 +471,11 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const num = parseNum(c.req.param('num'));
     if (num == null) return c.json({ error: 'invalid num' }, 400);
     const body = z.object({ order: z.array(z.string()).min(1) }).parse(await c.req.json());
+    if (isSessionCaller(c)) {
+      const current = await ctx.tasks.get(projectId, num);
+      const refusal = current && stepOrderRefusal(current, body.order);
+      if (refusal) return recipeRefused(c, refusal);
+    }
     const task = await ctx.tasks.reorderSteps(projectId, num, body.order);
     return c.json({ task });
   });
@@ -447,6 +486,16 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const num = parseNum(c.req.param('num'));
     if (num == null) return c.json({ error: 'invalid num' }, 400);
     const body = UpdateTaskCraftbookRequestSchema.parse(await c.req.json());
+    if (isSessionCaller(c) && body.entryStepId !== undefined) {
+      const current = await ctx.tasks.get(projectId, num);
+      const refusal =
+        current &&
+        sessionRecipeRefusal(current, {
+          steps: current.craftbook.steps,
+          entryStepId: body.entryStepId,
+        });
+      if (refusal) return recipeRefused(c, refusal);
+    }
     const task = await ctx.tasks.updateCraftbookMeta(projectId, num, body);
     return c.json({ task });
   });
@@ -522,6 +571,13 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
           422,
         );
       }
+    }
+    if (isSessionCaller(c)) {
+      const refusal = sessionRecipeRefusal(existing, {
+        steps: built.craftbook.steps as TaskCraftbookStep[],
+        entryStepId: built.craftbook.entryStepId,
+      });
+      if (refusal) return recipeRefused(c, refusal);
     }
     const task = await ctx.tasks.replaceCraftbook(projectId, num, built.craftbook);
     const gated = task.craftbook.steps.filter((s) => s.gate || s.advanceWhen).length;

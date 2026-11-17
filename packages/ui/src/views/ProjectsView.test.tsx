@@ -2305,8 +2305,8 @@ describe('ProjectsView', () => {
     expect(screen.getByRole('checkbox', { name: 'Views' })).toBeChecked();
   });
 
-  // A bakery's invoice project showed Tools, Workspace (package.json),
-  // Artifacts (prompt drafts) and a code-city map beside its board.
+  // A bakery's invoice project showed Tools, Workspace (package.json) and a
+  // code-city map beside its board. Artifacts stays: it is where the work lands.
   describe('developer tabs', () => {
     const plain = {
       id: 'pj-alpha',
@@ -2316,20 +2316,54 @@ describe('ProjectsView', () => {
     };
     const tabNames = () => screen.getAllByRole('tab').map((t) => t.textContent ?? '');
 
-    it('belong to code projects: a plain project shows Chat, Overview, Tasks and Settings', async () => {
+    it('belong to code projects: a plain project shows Chat, Overview, Tasks, Artifacts and Settings', async () => {
       vi.mocked(api.getProject).mockResolvedValue(plain as never);
       render(<ProjectsView forceProjectId="pj-alpha" />);
       await screen.findByTestId('project-chat');
       const names = tabNames();
-      for (const hidden of ['Tools', 'Workspace', 'Artifacts', 'Village view']) {
+      for (const hidden of ['Tools', 'Workspace', 'Village view']) {
         expect(names.some((n) => n.includes(hidden))).toBe(false);
       }
-      for (const shown of ['Chat', 'Overview', 'Tasks', 'Settings']) {
+      for (const shown of ['Chat', 'Overview', 'Tasks', 'Artifacts', 'Settings']) {
         expect(names.some((n) => n.includes(shown))).toBe(true);
       }
       // Settings offers them, unchecked, so a person can turn one on.
       fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
       expect(screen.getByRole('checkbox', { name: 'Workspace' })).not.toBeChecked();
+      expect(screen.getByRole('checkbox', { name: 'Artifacts' })).toBeChecked();
+    });
+
+    it('show Artifacts in the Default project and the shared library', async () => {
+      vi.mocked(api.getProject).mockResolvedValue({
+        ...plain,
+        id: 'default',
+        name: 'Default',
+      } as never);
+      const first = render(<ProjectsView forceProjectId="default" />);
+      await screen.findByTestId('project-chat');
+      expect(screen.getByRole('tab', { name: 'Artifacts' })).toBeInTheDocument();
+      expect(screen.queryByRole('tab', { name: 'Workspace' })).not.toBeInTheDocument();
+      first.unmount();
+
+      vi.mocked(api.getProject).mockResolvedValue({
+        ...plain,
+        id: 'shared',
+        name: 'Shared',
+        properties: { 'gezel.sharedLibrary': '1' },
+      } as never);
+      render(<ProjectsView forceProjectId="shared" />);
+      await screen.findByTestId('project-chat');
+      expect(screen.getByRole('tab', { name: 'Artifacts' })).toBeInTheDocument();
+    });
+
+    it('hide Artifacts when the project or its app turned it off', async () => {
+      vi.mocked(api.getProject).mockResolvedValue({
+        ...plain,
+        tabVisibility: { artifacts: false },
+      } as never);
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      await screen.findByTestId('project-chat');
+      expect(screen.queryByRole('tab', { name: 'Artifacts' })).not.toBeInTheDocument();
     });
 
     it('show for a plain project in debug mode', async () => {

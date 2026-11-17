@@ -103,3 +103,5 @@ export * from './page-imports.js';
 export * from './startup-home.js';
 export * from './devices.js';
 export * from './lookout.js';
+export * from './web-pages.js';
+export * from './prompt-connectors.js';

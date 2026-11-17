@@ -26,7 +26,7 @@ import {
   selectQueueRows,
   useQueueLiveTurns,
 } from './QueueMeter.js';
-import { useActivity } from './activity-context.js';
+import { keepsAnswerReceipt, useActivity } from './activity-context.js';
 import { useHeaderDensity } from './header-density.js';
 import { OPEN_UPDATES_EVENT, type OpenActivityIntent, navigateToTab } from './nav-actions.js';
 import { QuestionDraftProvider } from './question-drafts.js';
@@ -289,9 +289,14 @@ export function ActivityControl() {
   };
   const answer = (question: Question) => {
     activity.answered(question);
-    // Keep keyboard focus with the answer receipt instead of losing it to body.
+    // Keep keyboard focus with the answer receipt instead of losing it to
+    // body; a card that was put away leaves none, so its section takes it.
+    const section = isReadyQuestion(question) ? 'ready' : 'needs-you';
     requestAnimationFrame(() =>
-      document.getElementById(`activity-question-${question.id}`)?.focus(),
+      (keepsAnswerReceipt(question)
+        ? document.getElementById(`activity-question-${question.id}`)
+        : document.querySelector<HTMLElement>(`#activity-${section} h3`)
+      )?.focus({ preventScroll: true }),
     );
   };
   return (

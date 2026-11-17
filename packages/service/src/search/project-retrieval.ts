@@ -336,6 +336,11 @@ export async function retrieveProjectContext(args: {
    */
   excludeSources?: readonly RetrievalSource[];
   /**
+   * Artifact paths the turn already carries (a saved page the person named in
+   * the message): an excerpt of the same file would spend the budget twice.
+   */
+  alreadyGiven?: readonly string[];
+  /**
    * Fired as soon as the scoped search returns — BEFORE the relevance floor
    * and hydration can turn the whole call into `null`. This is the telemetry
    * seam: without it, "every arm scored under the floor" and "retrieval never
@@ -450,6 +455,7 @@ export async function retrieveProjectContext(args: {
     return false;
   });
 
+  const given = new Set((args.alreadyGiven ?? []).map((path) => path.replace(/\\/g, '/')));
   const foreign =
     taskContext && args.record.taskRef
       ? await otherTasksFolders(args.store, args.record.projectId, args.record.taskRef)
@@ -473,6 +479,14 @@ export async function retrieveProjectContext(args: {
       return false;
     }
     if (onReferenceList(result, taskContext?.task.references)) {
+      trace.reject(result, 'reference-list');
+      return false;
+    }
+    if (
+      result.retrievalSource === 'artifacts' &&
+      result.path &&
+      given.has(result.path.replace(/\\/g, '/'))
+    ) {
       trace.reject(result, 'reference-list');
       return false;
     }

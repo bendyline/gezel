@@ -6320,6 +6320,59 @@ describe('ChatManager — mission objectives are voorman-only context', () => {
     }
   });
 
+  it('gives a CLI agent its own shell and no-sandbox modes only at Unrestricted', async () => {
+    for (const level of ['lockdown', 'free'] as const) {
+      for (const provider of ['anthropic-cli', 'codex-cli'] as const) {
+        await manager.shutdown();
+        mock = new MockProvider({ name: 'copilot' });
+        manager = new ChatManager({
+          store,
+          events,
+          memory: noopMemory,
+          getPort: () => 0,
+          getToken: () => 'test-token',
+          issueSessionToken: () => ({ token: 'session-token' }),
+          issueSessionBootstrapCode: (appId) => `code-for-${appId}`,
+          home,
+          providers: [[provider, mock]],
+          catalog: new CatalogService(),
+          secrets: new FileSecretStore(home),
+        });
+        await store.writeConfig({
+          provider,
+          defaultModel: { [provider]: 'm' },
+          securityPolicy: securityPolicyForLevel(level),
+        });
+        await store.updateProject('default', {
+          claudePermissionMode: 'bypassPermissions',
+          codexPermissionMode: 'full',
+        });
+        const session = await manager.createSession({ gezelId: 'ada', projectId: 'default' });
+        mock.script('ok');
+        await manager.send(session.id, 'Run the tests.');
+        const create = mock.calls.find((call) => call.kind === 'create')!;
+        const hidden = create.opts!.mcpServer!.env.GEZEL_MCP_EXCLUDE?.split(',') ?? [];
+        const unrestricted = level === 'free';
+        expect(hidden.includes('run_nodejs_script')).toBe(unrestricted);
+        if (provider === 'anthropic-cli') {
+          const context = create.opts!.claudeCliContext!;
+          expect(context.permissionModeOverride).toBe(
+            unrestricted ? 'bypassPermissions' : 'acceptEdits',
+          );
+          expect((context.disallowedBuiltinTools ?? []).includes('Bash')).toBe(!unrestricted);
+          expect((context.disallowedBuiltinTools ?? []).includes('PowerShell')).toBe(!unrestricted);
+          expect((context.allowedBuiltinTools ?? []).includes('Bash')).toBe(unrestricted);
+          expect(context.mintMcpBootstrapCode?.()).toBe(`code-for-session:${session.id}`);
+        } else {
+          const context = create.opts!.codexCliContext!;
+          expect(context.permissionModeOverride).toBe(unrestricted ? 'full' : 'edit');
+          expect(context.shellTool).toBe(unrestricted ? undefined : false);
+          expect(context.mintMcpBootstrapCode?.()).toBe(`code-for-session:${session.id}`);
+        }
+      }
+    }
+  });
+
   it('rebuilds the live session when the catalog content root flips (live gilde update)', async () => {
     await manager.shutdown();
     mock = new MockProvider({ name: 'copilot' });

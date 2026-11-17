@@ -2299,15 +2299,22 @@ one concept keeps one picture. To keep every section on a phone, an
 iconified project tab may narrow below 44px wide, down to WCAG's 24px
 minimum. It keeps the 44px height.
 
-**Developer tabs belong to code projects.** Tools, Workspace and Artifacts
-show by default only for a codebase (core's `projectHoldsCode`: a code
-folder, a code-category type, a coding type, or a linked repository) and in
-debug mode. The Views tab shows when a view fits a codebase, a watched
-folder, or debug mode. A bakery's invoice project showed `package.json`,
-prompt drafts and a code-city map beside its board, none of which it needed.
-Hiding is only a default: an explicit choice in Project Settings → Project
-tabs always wins (the boxes show the default), and the tab a person is on
-stays visible, so opening a file into Artifacts never lands on a missing tab.
+**Developer tabs belong to code projects.** Tools and Workspace show by
+default only for a codebase (core's `projectHoldsCode`: a code folder, a
+code-category type, a coding type, or a linked repository) and in debug
+mode. The Views tab shows when a view fits a codebase, a watched folder, or
+debug mode. A bakery's invoice project showed `package.json` and a code-city
+map beside its board, neither of which it needed. Hiding is only a default:
+an explicit choice in Project Settings → Project tabs always wins (the boxes
+show the default), and the tab a person is on stays visible, so opening a
+file into a hidden tab never lands on a missing one.
+
+**Artifacts shows on every project.** It is where finished work lands (a
+report, a deck, a picture), so Default and the shared library show it like
+any other project. It was once a developer tab because a bakery's Artifacts
+tab listed the composer's prompt drafts; those no longer list there. An app
+with nothing to keep there (a board game, Just Chat) turns it off in its
+manifest's `tabVisibility`.
 
 **The Connections tab holds what the project reaches outside itself.** Its
 Connections section (the outside sources mirrored in, with the Lookouts that
@@ -3213,6 +3220,67 @@ action did and, when held, why — in plain words — plus *Not this*.
 A lookout alert while the app is open is a bottom-right toast with
 *Stop sound* when a sound is playing; it never replaces the OS notification
 when the window is not focused.
+
+A website lookout is the same sentence with the site in the camera's place
+and "has" for "sees": "When [shop.test] has [A page that changed | A new
+page | Words that appear] …", the words in a one-line field, an optional
+"/pricing" field under it, and one muted line saying page text is matched
+as written. The source picker lists cameras and websites together.
+
+**Saved web pages read like a reader, not a crawler.** The **Web pages**
+view (offered when a project follows a website) is the Reports view's
+recipe: pages by site in a list, a reader beside it. A list row says what a
+person wants to know first — "Changed 2 days ago", "Checked 5 hours ago",
+"Waiting to be saved", or the reason it could not be saved — never a crawl
+state word. Links found but not saved sit behind one quiet toggle. The
+reader leads with the title, the original address (opening in the browser),
+checked and changed times, and a synopsis labeled "written from the page";
+**Reading** and **Screenshots** are keys in a tray, never tabs, because the
+same page is re-presented. A link inside a saved page to another saved page
+opens it in place. A website connection's row on the Connections tab
+carries its status line, Sync now, Edit (in place, from the catalog form),
+Sign in… / Sign out and Remove; signing in shows one short instruction —
+check the address bar, sign in, come back and press Done — beside Done and
+Cancel.
+
+**A connection the draft calls for is a notice, not a question.** When a
+message names something a connector can bring in, the composer says what Send
+will do in a dashed strip above the To line, in the task strip's frame
+([`ComposerConnectorStrip`](../packages/ui/src/components/ComposerConnectorStrip.tsx),
+`.chat-composer-connector-*`): one row per thing, at most three. A row is the
+connector's mark in a small `--radius-md` tile, one sentence, and two keys.
+For a web address with no saved copy: "**gezel.com/platform** will be saved
+here and included in the chat", **Save now**, and ×. Send saves the page and
+gives it to the gezel; × means this address is not fetched; Save now does it
+early and the row becomes "Saved **The Gezel platform**. It will be included
+in the chat." While it works the row reads "Saving …", and a failure gives
+the reason in plain words with **Try again**. Rules the strip keeps:
+
+- **It says what will happen, so it must be true for every send.** Send,
+  Nudge and Interrupt all take the open rows first.
+- **The row shows what is fetched.** Host and path, a query as `?…`, the whole
+  address in the tooltip.
+- **Something that needs setting up is an offer.** A connection that wants a
+  sign-in reads "… can be connected with GitHub Issues" with **Connect…**,
+  and Send never does it.
+- **Nothing is shown that cannot be done.** No row when connector data is off
+  or the catalog lacks the connection.
+
+Under the sent message, each saved copy is a row that opens the local file:
+the mark, the page's title, "Saved copy of gezel.com/platform", and two lines
+of synopsis ([`MessageInclusions`](../packages/ui/src/components/MessageInclusions.tsx)).
+A page that could not be saved says so there, with the reason. Contract in
+[prompt-connectors.md](prompt-connectors.md).
+
+**Connections have marks.** Every connector type carries a cut-paper mark
+from the craftbook family (an envelope for mail, a zipper for pull requests, a
+globe with a bookmark for websites), drawn on the ground its family takes:
+teal for the web, terracotta for mail, rose for calendars, ochre for files,
+indigo for code, plum for social, slate for data, forest for devices
+([`ConnectorMark`](../packages/ui/src/components/ConnectorMark.tsx),
+`connectorTypeGround`). The same mark shows in the Connections gallery, the
+composer strip and the message row. A type without art gets a line glyph on
+the same ground, never a broken image.
 
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet

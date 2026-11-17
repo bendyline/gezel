@@ -23,6 +23,7 @@ import type { ContentIndex } from './content-index.js';
 import { EnrichTimeoutBreaker } from './enrich-breaker.js';
 import { type EnrichDeps, buildEnrichDeps } from './enrich.js';
 import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
+import { summarizeWebPages } from './web-page-summaries.js';
 
 /**
  * Background "boekwachter" enrichment loop. When the machine is idle, it picks a
@@ -76,6 +77,11 @@ export interface IndexEnrichmentActivity {
 }
 
 export interface IndexEnrichmentManagerOptions {
+  /**
+   * New synopses for saved web pages (artifact path → summary); the website
+   * connector shows them in its overview and the Web pages view.
+   */
+  onWebPageSummaries?: (projectId: string, summaries: { path: string; summary: string }[]) => void;
   store: Store;
   chat: ChatManager;
   contentIndex: ContentIndex;
@@ -207,6 +213,7 @@ export class IndexEnrichmentManager {
   private readonly isPaused: () => Promise<boolean> | boolean;
   private readonly isBackgroundHeld: () => Promise<boolean> | boolean;
   private readonly events: Pick<ChatEventBus, 'publishGlobalEvent'> | undefined;
+  private readonly onWebPageSummaries: IndexEnrichmentManagerOptions['onWebPageSummaries'];
   private readonly resolveBoekwachter: (projectId: string) => Promise<GezelDetail | null>;
   private readonly shadowProducers: AiShadowProducers | undefined;
   private readonly history: IndexEnrichmentManagerOptions['history'];
@@ -273,6 +280,7 @@ export class IndexEnrichmentManager {
     this.isPaused = opts.isPaused ?? (() => false);
     this.isBackgroundHeld = opts.isBackgroundHeld ?? (() => false);
     this.events = opts.events;
+    this.onWebPageSummaries = opts.onWebPageSummaries;
     this.resolveBoekwachter =
       opts.resolveBoekwachter ??
       ((projectId) => resolveProjectBoekwachter(this.store, projectId).catch(() => null));
@@ -1205,6 +1213,18 @@ export class IndexEnrichmentManager {
           if (deadline && Date.now() >= deadline) return;
         }
         if (drained) {
+          // Saved web pages get a synopsis once the project's own files are
+          // done; their text is a connector's, so it waits its turn.
+          const pages = await summarizeWebPages(
+            this.contentIndex.webPageSummaryHost(p.id),
+            deps,
+            batch,
+          ).catch(() => null);
+          if (pages && pages.summaries.length > 0) {
+            didWork = true;
+            log.info(`[enrich] ${p.id}: ${pages.summaries.length} saved page synopses`);
+            this.onWebPageSummaries?.(p.id, pages.summaries);
+          }
           // File tier done for this project → hash-gated deep pass (folder +
           // architecture rollups). Costs nothing when nothing changed.
           this.activity = {

@@ -3720,6 +3720,7 @@ export function ChatTimelineView({
           ? { deliverable: m.deliverable }
           : {})}
         {...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {})}
+        {...(m.inclusions && m.inclusions.length > 0 ? { inclusions: m.inclusions } : {})}
         {...(m.grounding ? { grounding: m.grounding } : {})}
         {...(m.referencedTasks ? { referencedTasks: m.referencedTasks } : {})}
         {...(m.toolCalls && m.toolCalls.length > 0 ? { toolCalls: m.toolCalls } : {})}

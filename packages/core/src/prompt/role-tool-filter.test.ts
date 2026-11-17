@@ -2256,6 +2256,7 @@ describe('claudeBuiltinsToDisallow', () => {
         'Glob',
         'Grep',
         'NotebookEdit',
+        'PowerShell',
         'Read',
         'WebFetch',
         'WebSearch',
@@ -2277,7 +2278,7 @@ describe('claudeBuiltinsToDisallow', () => {
       provider: 'anthropic-cli',
     });
     expect(disallowed.sort()).toEqual(
-      ['Bash', 'Edit', 'NotebookEdit', 'WebFetch', 'WebSearch', 'Write'].sort(),
+      ['Bash', 'Edit', 'NotebookEdit', 'PowerShell', 'WebFetch', 'WebSearch', 'Write'].sort(),
     );
   });
 
@@ -2290,7 +2291,7 @@ describe('claudeBuiltinsToDisallow', () => {
       provider: 'anthropic-cli',
     });
     expect(disallowed.sort()).toEqual(
-      ['Bash', 'Edit', 'Glob', 'Grep', 'NotebookEdit', 'Read', 'Write'].sort(),
+      ['Bash', 'Edit', 'Glob', 'Grep', 'NotebookEdit', 'PowerShell', 'Read', 'Write'].sort(),
     );
   });
 
@@ -2322,7 +2323,7 @@ describe('claudeBuiltinsToDisallow', () => {
       mode: 'always',
       provider: 'anthropic-cli',
     });
-    expect(disallowed).toEqual(['Bash']);
+    expect(disallowed).toEqual(['Bash', 'PowerShell']);
   });
 
   it('honors `mode: never` and returns no disallowances', () => {
@@ -2469,7 +2470,17 @@ describe('claudeBuiltinsToAllow', () => {
       provider: 'anthropic-cli',
     });
     expect(allowed.sort()).toEqual(
-      ['Bash', 'Edit', 'Glob', 'Grep', 'NotebookEdit', 'Read', 'TodoWrite', 'Write'].sort(),
+      [
+        'Bash',
+        'Edit',
+        'Glob',
+        'Grep',
+        'NotebookEdit',
+        'PowerShell',
+        'Read',
+        'TodoWrite',
+        'Write',
+      ].sort(),
     );
   });
 
@@ -2486,6 +2497,7 @@ describe('claudeBuiltinsToAllow', () => {
         'Glob',
         'Grep',
         'NotebookEdit',
+        'PowerShell',
         'Read',
         'TodoWrite',
         'WebFetch',

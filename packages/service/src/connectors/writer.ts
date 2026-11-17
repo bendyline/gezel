@@ -159,10 +159,11 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
   }
   const fileName = `${ordinal}--${record.fileStem}--${recordHash8}.md`;
   const relPath = `${relDir}/${fileName}`;
+  const body = linkOwnAttachments(record.bodyMarkdown, ordinal, record.attachments);
 
   // Scan the (untrusted) body.
   const verdict = contentScanner.scan({
-    markdown: record.bodyMarkdown,
+    markdown: body,
     origin: record.scanOrigin,
     sourceRef: record.recordId,
   });
@@ -182,7 +183,7 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
       quarantineDir,
       `${record.quarantineNamespace}/${recordHash8}.md`,
     );
-    await writeFileAtomic(qAbs, withFrontmatter(frontmatter, record.bodyMarkdown));
+    await writeFileAtomic(qAbs, withFrontmatter(frontmatter, body));
     const stub = `${record.quarantineLabel} was held for safety review (flags: ${verdict.flags.join(', ') || 'injection'}). Its content is not indexed; the original is kept in gezel's private quarantine folder.`;
     await writeFileAtomic(
       await resolveInside(storageDir, relPath),
@@ -200,6 +201,33 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
   await writeAttachments(dirAbs, ordinal, record.attachments);
   await updateSidecar(dirAbs, recordHash8, record, { contentHash: hash, file: fileName });
   return { status: refreshed ? 'refreshed' : 'written', relPath };
+}
+
+/**
+ * Point `](attachment:<name>)` links in a record body at that record's own
+ * attachment folder, `attachments/<NNN>/<name>`, relative to the record file.
+ * An adapter cannot know the ordinal the writer assigns, so it writes the
+ * placeholder. Only names of attachments the record actually carries are
+ * rewritten; anything else is left as written, so text from the source can
+ * never point a link at another record's files.
+ */
+export function linkOwnAttachments(
+  body: string,
+  ordinal: string,
+  attachments: NormalizedRecord['attachments'],
+): string {
+  if (!attachments?.length || !body.includes('](attachment:')) return body;
+  const safeNames = new Map(attachments.map((a) => [a.filename, safeFilename(a.filename)]));
+  return body.replace(/\]\(attachment:([^)\s]+)\)/g, (whole, name: string) => {
+    let decoded = name;
+    try {
+      decoded = decodeURIComponent(name);
+    } catch {
+      /* keep the raw form */
+    }
+    const safe = safeNames.get(decoded) ?? safeNames.get(name);
+    return safe ? `](attachments/${ordinal}/${encodeURIComponent(safe)})` : whole;
+  });
 }
 
 async function writeAttachments(

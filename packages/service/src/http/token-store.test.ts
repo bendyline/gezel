@@ -1,8 +1,8 @@
 import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createTokenStore } from './token-store.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { BOOTSTRAP_REUSE_MS, createTokenStore } from './token-store.js';
 
 let home: string;
 
@@ -333,6 +333,40 @@ describe('TokenStore — session tokens (#10)', () => {
     expect(rec.gezelId).toBe('gz-1');
     expect(rec.team).toBe(false);
     expect(store.lookup(rec.token)?.projectId).toBe('proj-a');
+  });
+
+  it('trades a bootstrap code for its session token, briefly after the first trade, never after it expires or is revoked', async () => {
+    const store = await createTokenStore({ home, rootToken: 'ROOT' });
+    const rec = store.issueSession({
+      appId: 'session:s1',
+      projectId: 'p',
+      gezelId: 'g',
+      team: false,
+    });
+    const code = store.issueSessionBootstrap('session:s1');
+    expect(code).not.toBe(rec.token);
+    expect(store.lookup(code)).toBeNull();
+    const started = Date.now();
+    vi.useFakeTimers({ now: started, toFake: ['Date'] });
+    try {
+      expect(store.redeemSessionBootstrap(code)?.token).toBe(rec.token);
+      // A CLI that starts its servers twice at launch.
+      vi.setSystemTime(started + BOOTSTRAP_REUSE_MS - 1_000);
+      expect(store.redeemSessionBootstrap(code)?.token).toBe(rec.token);
+      vi.setSystemTime(started + BOOTSTRAP_REUSE_MS + 1);
+      expect(store.redeemSessionBootstrap(code)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const expired = store.issueSessionBootstrap('session:s1', -1);
+    expect(store.redeemSessionBootstrap(expired)).toBeNull();
+
+    const pending = store.issueSessionBootstrap('session:s1');
+    store.revokeSession('session:s1');
+    expect(store.redeemSessionBootstrap(pending)).toBeNull();
+    expect(() => store.issueSessionBootstrap('session:s1')).toThrow(/no session token/);
+    expect(() => store.issueSessionBootstrap('root')).toThrow(/no session token/);
   });
 
   it('issueSession tokens are ephemeral — never written to tokens.json', async () => {

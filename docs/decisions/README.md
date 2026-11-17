@@ -37,3 +37,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0028](0028-package-scripts-and-egress-tripwire.md) | Accepted | Package scripts get their own switches, and tool calls pass an egress tripwire |
 | [0029](0029-container-hosting-and-accounts.md) | Accepted | Container hosting: a container listener, and accounts for network sign-in |
 | [0030](0030-per-backend-speculation.md) | Accepted | Speculation is chosen per backend, and a drafter can never cost a working model |
+| [0031](0031-website-connector.md) | Accepted | Websites: an offline web gezels can read without reaching it |

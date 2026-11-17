@@ -23,16 +23,29 @@ const DEFAULT_SYNC_INTERVAL_MS = 5 * 60_000;
 
 type ProjectListItem = Awaited<ReturnType<Store['listProjects']>>[number];
 
+type Policy = ReturnType<typeof resolveSecurityPolicy>;
+
 /** The source-specific behavior the generic loop delegates to. */
 export interface ConnectorSyncSource {
   /** Short tag for logs (`mail`, `connectors`). */
   readonly label: string;
-  /** Bindings on a project — their `lastSyncedAt` drives due/staleness. */
-  listBindings(project: ProjectListItem): { lastSyncedAt?: string }[];
-  /** Autonomous-sync posture gate (e.g. `pol => pol.allowExternalServices`). */
-  posture(policy: ReturnType<typeof resolveSecurityPolicy>): boolean;
-  /** Sync one project; returns per-binding written/quarantined counts. */
-  syncProject(project: ProjectDetail): Promise<Array<{ written: number; quarantined: number }>>;
+  /**
+   * The bindings on a project the loop may sync under `policy` — their
+   * `lastSyncedAt` drives due/staleness. A binding the policy holds back must
+   * not be listed, or a project would look due on every tick and starve the
+   * others.
+   */
+  listBindings(
+    project: ProjectListItem,
+    policy: Policy,
+  ): { lastSyncedAt?: string }[] | Promise<{ lastSyncedAt?: string }[]>;
+  /** Whether the loop runs at all under this policy. */
+  posture(policy: Policy): boolean;
+  /** Sync one project's eligible bindings; returns per-binding written/quarantined counts. */
+  syncProject(
+    project: ProjectDetail,
+    policy: Policy,
+  ): Promise<Array<{ written: number; quarantined: number }>>;
 }
 
 export interface ConnectorSyncManagerOptions {
@@ -104,25 +117,26 @@ export class ConnectorSyncManager {
     this.running = true;
     try {
       const cfg = await this.store.readConfig().catch(() => null);
-      // Autonomous sync rides the external-services posture (per source).
-      if (cfg && !this.source.posture(resolveSecurityPolicy(cfg))) return;
+      const policy = resolveSecurityPolicy(cfg ?? {});
+      // Autonomous sync rides the source's posture gate.
+      if (!this.source.posture(policy)) return;
 
       const projects = await this.store.listProjects().catch(() => []);
       const now = Date.now();
-      const due = projects
-        .filter(
-          (p) =>
-            this.source.listBindings(p).length > 0 &&
-            !this.chat.isProjectActive(p.id) &&
-            this.isDue(p, now),
-        )
-        .sort((a, b) => this.lastSync(a) - this.lastSync(b));
+      const candidates: { project: ProjectListItem; last: number }[] = [];
+      for (const p of projects) {
+        if (this.chat.isProjectActive(p.id)) continue;
+        const bindings = await Promise.resolve(this.source.listBindings(p, policy)).catch(() => []);
+        if (bindings.length === 0 || !this.isDue(bindings, now)) continue;
+        candidates.push({ project: p, last: this.lastSync(bindings) });
+      }
+      candidates.sort((a, b) => a.last - b.last);
 
-      const target = due[0];
+      const target = candidates[0]?.project;
       if (!target) return;
       const full = await this.store.getProject(target.id).catch(() => null);
       if (!full) return;
-      const results = await this.source.syncProject(full);
+      const results = await this.source.syncProject(full, policy);
       const wrote = results.reduce((n, r) => n + r.written + r.quarantined, 0);
       if (wrote > 0) {
         log.info(
@@ -134,19 +148,16 @@ export class ConnectorSyncManager {
     }
   }
 
-  /** Most-recent successful sync across a project's bindings (0 if never). */
-  private lastSync(p: ProjectListItem): number {
-    const times = this.source
-      .listBindings(p)
-      .map((a) => (a.lastSyncedAt ? Date.parse(a.lastSyncedAt) : 0));
+  /** Most-recent successful sync across a project's eligible bindings (0 if never). */
+  private lastSync(bindings: { lastSyncedAt?: string }[]): number {
+    const times = bindings.map((a) => (a.lastSyncedAt ? Date.parse(a.lastSyncedAt) : 0));
     return times.length ? Math.max(...times) : 0;
   }
 
-  private isDue(p: ProjectListItem, now: number): boolean {
+  private isDue(bindings: { lastSyncedAt?: string }[], now: number): boolean {
     // Due if any binding has never synced, or the freshest sync is stale.
-    const bindings = this.source.listBindings(p);
     if (bindings.some((a) => !a.lastSyncedAt)) return true;
-    return now - this.lastSync(p) >= this.syncIntervalMs;
+    return now - this.lastSync(bindings) >= this.syncIntervalMs;
   }
 
   private isIdle(): boolean {

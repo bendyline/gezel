@@ -65,6 +65,18 @@ class ActivityStore {
   }
 }
 
+/**
+ * Cards that only tell the person something (finished work, the night's
+ * review, a paused task) are put away, not answered, so they leave the panel
+ * at once. A receipt would read "Answered Dismiss" and look like a dead key.
+ */
+const NOTICE_KINDS = new Set(['task-finished', 'night-shift-review', 'task-paused']);
+
+/** Whether an answered question stays in the panel as its "Answered" form. */
+export function keepsAnswerReceipt(question: Question): boolean {
+  return !NOTICE_KINDS.has(question.intent?.kind ?? '');
+}
+
 const ActivityContext = createContext<ActivityStore | null>(null);
 const noStore = () => () => {};
 
@@ -179,7 +191,10 @@ export function ActivityProvider({ children }: { children: ReactNode }) {
   const answered = useCallback(
     (question: Question) => {
       acknowledged.current.add(question.id);
-      setReceipts((current) => [...current.filter((q) => q.id !== question.id), question]);
+      setReceipts((current) => [
+        ...current.filter((q) => q.id !== question.id),
+        ...(keepsAnswerReceipt(question) ? [question] : []),
+      ]);
       setSnapshot((current) =>
         current
           ? {

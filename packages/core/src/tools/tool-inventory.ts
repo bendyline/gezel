@@ -340,6 +340,12 @@ export const CONDITIONALLY_REGISTERED_TOOLS = {
   look_at_camera: { envVar: 'GEZEL_CAMERAS_ENABLED', envValue: '1', modelFacing: true },
   list_lookouts: { envVar: 'GEZEL_CAMERAS_ENABLED', envValue: '1', modelFacing: true },
   propose_lookout: { envVar: 'GEZEL_CAMERAS_ENABLED', envValue: '1', modelFacing: true },
+  // Saved web pages — registered only for projects with a website connection
+  // (the chat manager sets GEZEL_WEBSITES_ENABLED). Gezels read offline copies;
+  // request_web_page fetches only links the crawler already found.
+  list_web_pages: { envVar: 'GEZEL_WEBSITES_ENABLED', envValue: '1', modelFacing: true },
+  read_web_page: { envVar: 'GEZEL_WEBSITES_ENABLED', envValue: '1', modelFacing: true },
+  request_web_page: { envVar: 'GEZEL_WEBSITES_ENABLED', envValue: '1', modelFacing: true },
 } as const;
 
 /**

@@ -47,7 +47,7 @@ const TOGGLES: ReadonlyArray<{
   {
     key: 'allowPackageScriptExecution',
     label: 'Run package scripts',
-    help: "Let Gezel run a project's npm scripts and installed command-line tools, such as npm run test. These run outside the sandbox, as your account, with network access. It still asks you before each new or changed command. Coding craftbooks that check their work by running tests need this.",
+    help: "Let Gezel run a project's npm scripts and installed command-line tools, such as npm run test. These run outside the sandbox, as your account, with network access. It still asks you before each new or changed command. Coding craftbooks that check their work by running tests need this. With External services, Execute scripts and Edit files also on, it lets Claude Code, Codex and Copilot use their own shell and their no-sandbox modes, which run as your account too.",
   },
   {
     key: 'allowPackageScriptEdits',

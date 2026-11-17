@@ -279,7 +279,24 @@ its gate, and creating a task that trusts custom scripts are denied outright; re
 resuming a paused task (and, for a coordinator, canceling one) is admitted only inside a turn
 the user started (`ChatManager.isUserDirectedTurn`). A session-token `/scripts/run` is recorded
 as a `chat` run, never `manual`, so the script-execution policy and gezel-only artifact denials
-apply. Three ownership/role middlewares provide additional defense-in-depth:
+apply.
+
+Nothing a session sends may widen what it, or its crew, is allowed. Refused outright:
+credential grants and their origins, linked projects, the Claude/Codex permission modes and
+`gezel.*` properties on a project; a gezel's `sandboxCopilot`, permission modes,
+`factualWriting` and raw `gezel.md`; posting to `/api/gezels/:id/chat/*` (it has no sender, so
+it would read as the person's own turn and open every gate above); installing an AI App
+(previewing one stays open); the approval-free `/install`; project icons, prompt drafts, and
+jumping a task to a step. Admitted only inside a turn the person started: moving a project's
+folder (`workingDir`, on create too), switching on a schedule, night work or suggested work,
+and answering growth proposals. The task routes refuse a session's recipe edit that would
+change or remove the person's own step, or route around it, and on a started task one that
+changes or removes a check (`gate`, `advanceWhen`, `toolPolicy`) or rewires steps; adding
+steps and checks stays open (`tasks/session-recipe-guard.ts`). Below the guard, the Store
+starts a moved folder read-only for every caller and keeps the shared library's marker
+where it is, and a moved folder passes the same forbidden-root check as a new one.
+
+Three ownership/role middlewares provide additional defense-in-depth:
 
 | Guard | Confines a **non-team session** token to… | Env flag | Default |
 |---|---|---|---|
@@ -504,12 +521,46 @@ argument. Cross-project/team tools (`message_gezel`, `create_task`, `update_proj
   auto-update, but keeps open-web services, mail, unconfined third-party toolsets, and package
   scripts off. Package scripts run unsandboxed with the network, so they would reach the open
   web the level promises to keep closed; each package switch can be turned on by itself.
-- **free** — adds `fetch_url`/`web_search` (SSRF-guarded) and non-builtin MCP toolsets
-  (unconfined third-party code — the riskiest surface, `free` only).
+  Cloud CLI agents (Claude Code, Codex, Copilot) run here too, without their own shell (§7.1).
+- **free** — adds `fetch_url`/`web_search` (SSRF-guarded), non-builtin MCP toolsets
+  (unconfined third-party code — the riskiest surface, `free` only), and a CLI agent's own
+  shell and no-sandbox modes, which run as the person (§7.1).
 
-**Self-escalation is contained:** no MCP tool writes `securityPolicy` or grants, and the
-daemon token never reaches scripts (env scrub), so a script can't flip the policy via the
-config route.
+**Self-escalation is contained:** no MCP tool writes `securityPolicy`, the session guard
+refuses every field that would widen a session's reach (§4.2), and the daemon token never
+reaches scripts (env scrub), so a script can't flip the policy via the config route.
+
+### 7.1 CLI agents and their own tools
+
+Claude Code, Codex and Copilot bring their own shell and file tools beside Gezel's. Those run
+as the person, with the network and no Gezel gate in between, and the person's own credential
+(`runtime/auth-token`, the first-party client token) sits in a file that account can read. So
+they follow the resolved policy's `allowAgentShell` (core `security/policy.ts`): package
+scripts, external services, scripts and edits all on, which holds only at `free`. Below it,
+`chat/manager.ts` disallows Claude's `Bash`/`PowerShell` for every role, sets Codex's
+`shell_tool` and `unified_exec` off, keeps Copilot's sandbox on, and clamps
+`bypassPermissions` and Codex `full` to their edit modes; the agent runs code through Gezel's
+own tools instead, which `claudeCliExcludedMcpTools` / `codexCliExcludedMcpTools` then stop
+hiding. At `free` the agent's shell can read anything the person can, including that
+credential: that is what the level means.
+
+Three more layers keep credentials out of what an agent's own tools can reach at any level:
+
+- **No live token in a file.** The gezel MCP server a CLI agent starts reads its config from a
+  file the agent can read (`.mcp.json`, Codex's `config.toml`). That file carries a short-lived
+  code (`GEZEL_TOKEN_CODE`, minted per start by `TokenStore.issueSessionBootstrap`), which the
+  server trades at `POST /api/session-bootstrap` for its session token, held only in memory.
+  The route is public like `/api/health` and mounted on the loopback listener only. A code
+  expires 10 minutes after it is minted, or 30 seconds after its first trade
+  (`BOOTSTRAP_REUSE_MS`, for a CLI that starts its servers twice), and dies with its session.
+  Codex writes a fresh one each turn; Claude's file is removed when the CLI exits.
+- **A filtered environment.** The CLI process gets the daemon's environment minus every
+  `GEZEL_*` variable and secret-shaped name, plus only its own sign-in variables
+  (`providers/agent-cli-env.ts`); Codex's shell additionally excludes `GEZEL_*`.
+- **Deny rules.** Claude's settings file denies `Read`/`Edit` of the credential files under
+  the Gezel home (`anthropic-cli/credential-deny.ts`); a shell ignores those rules, which is
+  why the shell itself is gated. One-shot completions run with no built-ins, in `plan` mode,
+  in an empty folder.
 
 **Package-command approvals are content-bound.** A persistent approval for
 `run_package_script` or `run_npx` hashes a versioned envelope containing the exact command
@@ -628,6 +679,43 @@ a public URL can't 30x into an internal target. Unresolvable hosts are allowed t
 naturally (not a private-target threat). Validation is at DNS-resolution time — a determined
 DNS-rebinding attacker could flip between check and connect; a connect-time IP pin is the full
 fix and is not yet implemented.
+
+### 11.0 The website connector's capture browser
+
+`packages/service/src/page-capture/` — the one place a daemon-launched browser
+loads live, untrusted pages ([website-connector.md](./website-connector.md),
+[ADR 0031](./decisions/0031-website-connector.md)). Its boundary is not
+`assertPublicUrl`:
+
+- **A filtering forward proxy with a connect-time pin** (`filter-proxy.ts`). Chromium
+  sends every request to it (`--proxy-server`, loopback included); the proxy resolves
+  each host itself, refuses private / loopback / link-local / metadata / own-interface
+  answers, and connects to the address it checked, so DNS rebinding has nothing to flip.
+  A host the person typed may resolve privately only while its own page is captured.
+- **UDP closed by profile**, not flag: the seeded `webrtc.ip_handling_policy =
+  disable_non_proxied_udp` preference (the command-line switch does not exist in the
+  pinned Chrome, and the headless shell ignores the preference, so only full Chrome is
+  used); QUIC off. `capture.real.test.ts` asserts zero packets reach canaries on
+  loopback and the LAN.
+- **Chromium's own sandbox on**, in a child process the daemon kills to stop it
+  (`chromiumSandbox: true`, verified on `chrome://sandbox` where available); no
+  unsandboxed fallback, text-only instead.
+- **No input and GET-only navigation**, enforced in the worker (`no-input.test.ts`).
+- Gezels never drive it: bind, sync, sign-in and Save page refuse session tokens, and
+  `request_web_page` fetches only an address that exactly matches a link the crawler
+  already found on a followed site.
+- **A message that names an address is saved by the composer, never by the daemon's
+  send path.** The composer shows the address above the message ("… will be saved here
+  and included in the chat", host and path, a query as `?…`, the full address in the
+  tooltip) with a key that dismisses it, and saves it through the first-party
+  `/prompt-connectors/accept` route when the person sends. The send route itself only
+  reads saved copies (`resolveTurnNamedItems`), so a message that reaches a session by
+  any other road (a gezel's message, a nudge from the runtime, an app's `/v1` request)
+  fetches nothing. Session tokens are refused on both `/prompt-connectors` routes
+  ([prompt-connectors.md](prompt-connectors.md)).
+
+The text-only fallback (`http-session.ts`) uses `assertPublicUrl` per redirect hop and
+inherits its DNS-rebinding caveat above.
 
 ### 11.1 Egress tripwire on tool calls
 
@@ -750,6 +838,17 @@ architecture fixed. Preserve them.
 ---
 
 ## 14. Known limitations & deferred work
+
+### A CLI agent's shell can act as the person at `free`
+
+At `free`, Claude Code's, Codex's and an unsandboxed Copilot's own shells run as the person's
+OS account, so they can read `runtime/auth-token` and every other file that account can, and
+reach the daemon over loopback (§7.1). The per-session codes, environment filtering and deny
+rules narrow what leaks by accident; they do not stop a shell that sets out to read the file.
+Two designs would: running the CLI inside an OS boundary that hides the Gezel home and blocks
+loopback (MXC on Windows, bubblewrap or landlock on Linux, a seatbelt profile on macOS), or
+replacing the readable bearer file with an OS-authenticated channel for first-party
+authority (peer credentials, a named pipe checked by SID). Neither is built.
 
 ### Hosting scope is not client membership
 

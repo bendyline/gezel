@@ -587,6 +587,31 @@ describe('projects', () => {
     expect(cleared.workingDir).toBeUndefined();
   });
 
+  it('starts a folder moved through updateProject read-only, unless that update grants it', async () => {
+    await store.createProject({ name: 'Proj', workingDir: '/old/path' });
+    await store.updateProject('proj', { managedWorkspaceWritePolicy: 'allow' });
+    const moved = await store.updateProject('proj', { workingDir: '/new/path' });
+    expect(moved.managedWorkspaceWritePolicy).toBeUndefined();
+    const granted = await store.updateProject('proj', {
+      workingDir: '/other/path',
+      managedWorkspaceWritePolicy: 'allow',
+    });
+    expect(granted.managedWorkspaceWritePolicy).toBe('allow');
+    const unchanged = await store.updateProject('proj', { workingDir: '/other/path' });
+    expect(unchanged.managedWorkspaceWritePolicy).toBe('allow');
+  });
+
+  it('keeps the shared library marker on the library and off every other project', async () => {
+    const { id } = await store.ensureSharedProject();
+    await expect(
+      store.updateProject(id, { properties: { 'gezel.sharedLibrary': '' } }),
+    ).rejects.toThrow(/shared library identity/);
+    await store.createProject({ name: 'Other' });
+    await expect(
+      store.updateProject('other', { properties: { 'gezel.sharedLibrary': '1' } }),
+    ).rejects.toThrow(/shared library identity/);
+  });
+
   it('persists one-way project links, validates targets, and prunes deleted targets', async () => {
     const projectA = await store.createProject({ name: 'Project A' });
     const projectB = await store.createProject({ name: 'Project B' });

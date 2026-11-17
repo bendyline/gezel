@@ -7,6 +7,7 @@
 
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { ConnectorPolicyError } from '../../connectors/manager.js';
 import type { ServiceContext } from '../context.js';
 
 const BindRequestSchema = z.object({
@@ -105,10 +106,13 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
     try {
-      const result = await ctx.connectors.syncBinding(project, c.req.param('bindingId'));
+      const result = await ctx.connectors.syncBinding(project, c.req.param('bindingId'), {
+        trigger: 'manual',
+      });
       return c.json({ ok: true, result });
     } catch (err) {
-      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+      const status = err instanceof ConnectorPolicyError ? 403 : 400;
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, status);
     }
   });
 

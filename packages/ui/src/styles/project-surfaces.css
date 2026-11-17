@@ -3155,6 +3155,11 @@
   overflow: hidden;
 }
 
+.gz-connector-config-mark[data-painted] {
+  color: var(--titlebar-ink, #f3ede0);
+  background: color-mix(in srgb, var(--mark-ground) 88%, black);
+}
+
 .gz-connector-config-mark img {
   width: 100%;
   height: 100%;

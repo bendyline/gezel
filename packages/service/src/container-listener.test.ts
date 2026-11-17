@@ -95,6 +95,38 @@ function call(
   });
 }
 
+describe('the session bootstrap route', () => {
+  it('trades a code for its session token on the loopback listener only', async () => {
+    const store = svc.context.tokenStore;
+    const session = store.issueSession({
+      appId: 'session:bootstrap-test',
+      projectId: 'default',
+      gezelId: 'gz-1',
+      team: false,
+    });
+    const code = store.issueSessionBootstrap('session:bootstrap-test');
+    // The container listener faces a network: no route, and the code survives.
+    const remote = await call('POST', '/api/session-bootstrap', { body: { code } });
+    expect(remote.status).not.toBe(200);
+    expect(remote.body.token).toBeUndefined();
+
+    const loopback = (body: unknown) =>
+      fetch(`http://127.0.0.1:${svc.port}/api/session-bootstrap`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    const first = await loopback({ code });
+    expect(first.status).toBe(200);
+    expect(((await first.json()) as { token?: string }).token).toBe(session.token);
+    // A CLI that starts its servers twice at launch trades the code twice.
+    expect((await loopback({ code })).status).toBe(200);
+    expect((await loopback({ code: 'guessed' })).status).toBe(401);
+    expect((await loopback({})).status).toBe(401);
+    store.revokeSession('session:bootstrap-test');
+  });
+});
+
 describe('the container listener', () => {
   it('answers liveness without the pid or host details', async () => {
     const health = await call('GET', '/api/health');

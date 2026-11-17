@@ -115,8 +115,10 @@ export function claudeToolGuide(opts: ClaudeToolGuideOptions): string | null {
     const mapping = [...toolsByStandIn]
       .map(([label, tools]) => `${namesInProse(tools)} → ${label}`)
       .join('; ');
+    // Without Claude Code's shell, Gezel's own runners stay on the list.
+    const leftOut = reachable('Bash') ? 'file, search, shell and web' : 'file, search and web';
     sentences.push(
-      "Gezel's tools reach you as `mcp__gezel__<tool>`, except its file, search, shell and web tools, which are left out because Claude Code has its own.",
+      `Gezel's tools reach you as \`mcp__gezel__<tool>\`, except its ${leftOut} tools, which are left out because Claude Code has its own.`,
       `Where your instructions name one of those, use the built-in instead: ${mapping}.`,
       'Their absence is not a blocker, so do not search for them.',
     );

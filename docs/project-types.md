@@ -177,9 +177,11 @@ user can override it later in Project Settings.
 
 `tabVisibility` is an optional set of defaults for the supporting project tabs. Omitted
 keys preserve the existing project choice or the UI default. That default is code-aware:
-Tools, Workspace and Artifacts show only for a codebase (core's `projectHoldsCode`) or in
+Tools and Workspace show only for a codebase (core's `projectHoldsCode`) or in
 debug mode. The Views tab shows when a view fits a codebase, a watched folder, or debug
-mode. A non-code type needs no `tabVisibility` to stay focused. Adoption merges declared keys over any existing project
+mode. Artifacts shows for every project, so a type with nothing to keep there
+(a board game) declares `artifacts: false`; otherwise a non-code type needs no
+`tabVisibility` to stay focused. Adoption merges declared keys over any existing project
 choices; the user can change them later in Project Settings. Chat and Settings are
 permanent entry points, while Output remains capability-driven by the presence of a
 previewable page.

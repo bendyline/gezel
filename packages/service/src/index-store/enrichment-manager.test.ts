@@ -7,6 +7,9 @@ import type { ContentIndex } from './content-index.js';
 import { type EnrichDeps, buildEnrichDeps } from './enrich.js';
 import { IndexEnrichmentManager } from './enrichment-manager.js';
 
+/** No saved web pages: the synopsis pass finds nothing to do. */
+const noSavedPages = () => ({ openArtifacts: async () => null, artifactsDir: '' });
+
 const BOOK = {
   id: 'noor',
   name: 'Noor',
@@ -66,6 +69,7 @@ function make(opts: {
     embedOnly,
     embedImages,
     enrichAreas: vi.fn().mockResolvedValue({ areasUpdated: 0, architectureUpdated: false }),
+    webPageSummaryHost: noSavedPages,
   } as unknown as ContentIndex;
   const idle = opts.freshBoot ? new SystemIdleState() : agedIdleState();
   const mgr = new IndexEnrichmentManager({
@@ -395,6 +399,7 @@ describe('review tier scheduling', () => {
       review,
       embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
       embedImages: vi.fn().mockResolvedValue({ files: 0, embedded: 0, unavailable: false }),
+      webPageSummaryHost: noSavedPages,
     } as unknown as ContentIndex;
     const idle = agedIdleState();
     const mgr = new IndexEnrichmentManager({
@@ -505,6 +510,7 @@ describe('AI-shadow tier + review drain event', () => {
       listFileIssues,
       embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
       embedImages: vi.fn().mockResolvedValue({ files: 0, embedded: 0, unavailable: false }),
+      webPageSummaryHost: noSavedPages,
     } as unknown as ContentIndex;
     const mgr = new IndexEnrichmentManager({
       store,
@@ -637,6 +643,7 @@ describe('on-demand drives + night catch-up', () => {
       listFileIssues,
       embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
       embedImages: vi.fn().mockResolvedValue({ files: 0, embedded: 0, unavailable: false }),
+      webPageSummaryHost: noSavedPages,
     } as unknown as ContentIndex;
     const mgr = new IndexEnrichmentManager({
       store,
@@ -1168,6 +1175,7 @@ describe('night-shift stand-down', () => {
       })),
       embedOnly: vi.fn().mockResolvedValue({ files: 0, embedded: 0 }),
       embedImages: vi.fn().mockResolvedValue({ files: 0, embedded: 0, unavailable: false }),
+      webPageSummaryHost: noSavedPages,
     } as unknown as ContentIndex;
     const mgr = new IndexEnrichmentManager({
       store,

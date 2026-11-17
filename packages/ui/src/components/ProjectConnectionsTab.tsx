@@ -2,8 +2,6 @@ import type { ProjectDetail } from '@bendyline/gezel';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
-import { ProjectGlyph, type ProjectGlyphId } from '../views/projects/new-project-meta.js';
-import { CatalogArtwork } from './CatalogArtwork.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import {
   ConnectorConfigFields,
@@ -11,7 +9,9 @@ import {
   type ConnectorFormManifest,
   initialConnectorConfig,
 } from './ConnectorConfigFields.js';
+import { ConnectorMark } from './ConnectorMark.js';
 import { OAuthAppSetup, type RegisteredOAuthClient } from './OAuthAppSetup.js';
+import { WebsiteBindingRow } from './WebsiteBindingRow.js';
 import { CameraBindingCard } from './cameras/CameraBindingCard.js';
 import {
   type CameraForm,
@@ -50,18 +50,6 @@ interface ConnManifest extends ConnectorFormManifest {
 interface ConnectorOption extends ConnManifest {
   iconSvg?: string;
   logoUrl?: string;
-}
-
-function connectorGlyph(connector: ConnManifest): ProjectGlyphId {
-  const identity = `${connector.id} ${(connector.tags ?? []).join(' ')}`.toLowerCase();
-  if (/(camera|webcam)/.test(identity)) return 'camera';
-  if (identity.includes('wiki')) return 'sheet';
-  if (identity.includes('calendar')) return 'calendar';
-  if (/(mail|gmail|imap|email)/.test(identity)) return 'envelope';
-  if (/(github|git)/.test(identity)) return 'branch';
-  if (/(issue|linear)/.test(identity)) return 'bubbles';
-  if (/(airtable|record|data)/.test(identity)) return 'chart';
-  return 'dots';
 }
 
 function connectorCredentialLabel(connector: ConnManifest): string {
@@ -525,7 +513,24 @@ export function ProjectConnectionsTab({
       ) : (
         <ul className="settings-list">
           {bindings.map((b) =>
-            b.driver === 'device' ? (
+            b.type === 'website' ? (
+              <WebsiteBindingRow
+                key={b.id}
+                projectId={project.id}
+                binding={b}
+                onChanged={() => void refresh()}
+                onRemove={(id) => setConfirmUnbind(id)}
+                onNotice={(text, isError) => {
+                  if (isError) {
+                    setError(text);
+                    setNotice('');
+                  } else {
+                    setNotice(text);
+                    setError('');
+                  }
+                }}
+              />
+            ) : b.driver === 'device' ? (
               <li key={b.id} className="camera-card-item">
                 <CameraBindingCard
                   projectId={project.id}
@@ -648,14 +653,15 @@ export function ProjectConnectionsTab({
                   onClick={() => selectConnector(connector)}
                   style={{ '--card-i': Math.min(index, 11) } as CSSProperties}
                 >
-                  <span className="gz-npd-card-mark">
-                    <CatalogArtwork
-                      iconSvg={connector.iconSvg}
-                      logoUrl={connector.logoUrl}
-                      svgClassName="gz-npd-card-mark-svg"
-                      fallback={<ProjectGlyph glyph={connectorGlyph(connector)} size={19} />}
-                    />
-                  </span>
+                  <ConnectorMark
+                    className="gz-npd-card-mark"
+                    connectorType={connector.id}
+                    tags={connector.tags ?? []}
+                    iconSvg={connector.iconSvg}
+                    logoUrl={connector.logoUrl}
+                    size={19}
+                    svgClassName="gz-npd-card-mark-svg"
+                  />
                   <span className="gz-npd-card-name">{connector.name}</span>
                   <span className="gz-npd-card-description">{connector.description}</span>
                   <span className="gz-connector-card-meta" aria-hidden="true">
@@ -673,14 +679,15 @@ export function ProjectConnectionsTab({
               aria-label={`${selected.name} setup`}
             >
               <div className="gz-connector-config-heading">
-                <span className="gz-connector-config-mark">
-                  <CatalogArtwork
-                    iconSvg={selected.iconSvg}
-                    logoUrl={selected.logoUrl}
-                    svgClassName="gz-npd-card-mark-svg"
-                    fallback={<ProjectGlyph glyph={connectorGlyph(selected)} size={19} />}
-                  />
-                </span>
+                <ConnectorMark
+                  className="gz-connector-config-mark"
+                  connectorType={selected.id}
+                  tags={selected.tags ?? []}
+                  iconSvg={selected.iconSvg}
+                  logoUrl={selected.logoUrl}
+                  size={19}
+                  svgClassName="gz-npd-card-mark-svg"
+                />
                 <div>
                   <strong>Set up {selected.name}</strong>
                   <div className="small muted">

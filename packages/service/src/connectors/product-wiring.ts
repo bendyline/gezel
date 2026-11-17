@@ -15,6 +15,7 @@ import { registerGitHubWikiAdapters } from './natives/github-wiki.js';
 import { registerInstagramAdapters } from './natives/instagram-media.js';
 import { registerLinkedInAdapters } from './natives/linkedin-posts.js';
 import { registerRssFeedAdapters } from './natives/rss-feed.js';
+import { registerWebsiteAdapters } from './natives/website.js';
 import { registerXAdapters } from './natives/x-posts.js';
 import { registerYouTubeAdapters } from './natives/youtube-videos.js';
 import { runConnectorTaskPrep } from './task-prep.js';
@@ -25,6 +26,7 @@ export function registerProductConnectorAdapters(): void {
   registerCalendarAdapters();
   registerFilesAdapters();
   registerRssFeedAdapters();
+  registerWebsiteAdapters();
   registerYouTubeAdapters();
   registerBlueskyAdapters();
   registerXAdapters();
@@ -64,7 +66,8 @@ export function wireProductConnectorTaskPreparation(deps: {
       const prep = await runConnectorTaskPrep(
         {
           getProject: (id) => deps.store.getProject(id),
-          sync: (project, bindingId, opts) => deps.connectors.syncBinding(project, bindingId, opts),
+          sync: (project, bindingId, opts) =>
+            deps.connectors.syncBinding(project, bindingId, { ...opts, trigger: 'task' }),
           allowConnectorData: async () =>
             resolveSecurityPolicy(await deps.store.readConfig()).allowConnectorData,
           ensureBinding: async (project, need) => {

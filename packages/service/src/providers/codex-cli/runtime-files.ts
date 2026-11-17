@@ -91,6 +91,11 @@ export interface CodexRuntimeConfig {
   toolOutputTokenLimit?: number;
   /** Per-session MCP servers (gezel-mcp + extras). Keyed by stable id. */
   mcpServers: Record<string, CodexMcpServerEntry>;
+  /**
+   * `false` turns Codex's own shell off (`shell_tool`, `unified_exec`); the
+   * session then runs code through Gezel's execution tools. Default on.
+   */
+  shellTool?: boolean;
   /** Optional fixed callback port for Codex MCP OAuth login flows. */
   mcpOauthCallbackPort?: number;
   /** Optional fixed callback URL for Codex MCP OAuth login flows. */
@@ -144,6 +149,10 @@ export function buildCodexConfigToml(config: CodexRuntimeConfig): string {
   lines.push('plugins = false');
   lines.push('remote_plugin = false');
   lines.push('apps = false');
+  if (config.shellTool === false) {
+    lines.push('shell_tool = false');
+    lines.push('unified_exec = false');
+  }
 
   // Preserve the normal PATH/toolchain while retaining Codex's built-in
   // secret-name exclusions for model-generated shell commands.
@@ -151,6 +160,9 @@ export function buildCodexConfigToml(config: CodexRuntimeConfig): string {
   lines.push('[shell_environment_policy]');
   lines.push('inherit = "all"');
   lines.push('ignore_default_excludes = false');
+  // Gezel's own variables (MCP header values among them) never reach a
+  // model-written command, whatever their names.
+  lines.push('exclude = ["GEZEL_*"]');
 
   for (const [id, server] of Object.entries(config.mcpServers)) {
     lines.push('');
@@ -245,7 +257,8 @@ export async function writeRuntimeCodexHome(opts: {
   await mkdir(opts.path, { recursive: true });
   const configPath = join(opts.path, 'config.toml');
   if (!(await sameBody(configPath, body))) {
-    await writeFileAtomic(configPath, body);
+    // It names the MCP servers and their environment; the person's alone.
+    await writeFileAtomic(configPath, body, { mode: 0o600 });
   }
   await writeSafetyHook(opts.path, opts.installSafetyHook === true);
   const userAuthPath = opts.userAuthJsonPath ?? join(homedir(), '.codex', 'auth.json');

@@ -60,7 +60,9 @@ import { ConnectorActionManager } from './connectors/actions.js';
 import { CAMERA_ADAPTER_ID, CameraService } from './connectors/live/camera/service.js';
 import { LiveConnectorHost } from './connectors/live/host.js';
 import { registerLiveAdapter } from './connectors/live/registry.js';
-import { ConnectorManager } from './connectors/manager.js';
+import { ConnectorManager, type ConnectorSyncedInfo } from './connectors/manager.js';
+import { websiteLookoutFeed } from './connectors/natives/website-lookout-feed.js';
+import { WebsiteService } from './connectors/natives/website-service.js';
 import {
   registerProductConnectorAdapters,
   wireProductConnectorTaskPreparation,
@@ -84,6 +86,8 @@ import { ProjectDigestGenerator } from './digest/generator.js';
 import { prepareNativeEngines } from './engine-discovery.js';
 import { LookoutManager } from './lookouts/manager.js';
 import { SoundPlayer } from './lookouts/sound-player.js';
+import { FakePageCapturer } from './page-capture/fake-capturer.js';
+import { PageCaptureService } from './page-capture/service.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
 import { resolveCraftbookOwner, startCraftbookRun } from './tasks/craftbook-run.js';
 
@@ -185,6 +189,7 @@ import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
 import { ProjectTypeUpgrader } from './project-type/upgrader.js';
+import { createPromptConnectors } from './prompt-connectors/index.js';
 import { PromptDraftManager } from './prompt-drafts/manager.js';
 import { PromptDraftSweeper } from './prompt-drafts/sweeper.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
@@ -780,6 +785,7 @@ export async function startProductService(
     getCert: () => cert?.certPem ?? null,
     issueSessionToken: (input) => tokenStore.issueSession(input),
     revokeSessionToken: (appId) => tokenStore.revokeSession(appId),
+    issueSessionBootstrapCode: (appId) => tokenStore.issueSessionBootstrap(appId),
     cacheController,
     home,
     providers: mockProviders,
@@ -1790,7 +1796,11 @@ export async function startProductService(
   const indexingJob = new IndexingJobControl(store, tasks);
   // Background "boekwachter" enrichment: summaries + embeddings when idle,
   // bulk during night shift, folder/architecture rollups once files drain.
+  // Built later (it needs the connector manager); synopses arrive afterwards.
+  let websitesRef: WebsiteService | null = null;
   const indexEnrichment = new IndexEnrichmentManager({
+    onWebPageSummaries: (projectId, summaries) =>
+      void websitesRef?.noteSummaries(projectId, summaries).catch(() => {}),
     store,
     chat,
     contentIndex,
@@ -2048,6 +2058,15 @@ export async function startProductService(
   if (connectorFetch) {
     log.warn('[service] GEZEL_CONNECTOR_SIMULATOR is set — connectors sync simulated accounts');
   }
+  // Website connections render pages in a sandboxed browser behind a
+  // filtering proxy (docs/website-connector.md). Under the simulator they
+  // "render" from the simulated world instead, with no browser and no network.
+  const pageCapture = connectorFetch
+    ? new FakePageCapturer(connectorFetch)
+    : new PageCaptureService({
+        home,
+        isAllowed: async () => resolveSecurityPolicy(await store.readConfig()).allowConnectorData,
+      });
   // The live host (built below) runs device bindings; the manager tells it
   // when bindings change and folds its status into the Connections view.
   let liveConnectorsRef: LiveConnectorHost | null = null;
@@ -2059,9 +2078,28 @@ export async function startProductService(
     scriptRunner,
     locks: connectorLocks,
     ...(connectorFetch ? { fetch: connectorFetch } : {}),
+    capturer: pageCapture,
     onBindingsChanged: () => void liveConnectorsRef?.reconcile(),
     liveStatus: (projectId) => liveConnectorsRef?.status(projectId) ?? [],
+    onSynced: (projectId, info) => {
+      chatEvents.publishProjectEvent(projectId, {
+        type: 'connector_synced',
+        projectId,
+        bindingId: info.bindingId,
+        connectorType: info.type,
+        written: info.written,
+        removed: info.removed,
+        ...(info.continuing ? { continuing: true } : {}),
+      });
+      websiteSyncedHook?.(projectId, info);
+    },
   });
+  const websites = new WebsiteService({ store, connectors, secrets, capturer: pageCapture });
+  websitesRef = websites;
+  const promptConnectors = createPromptConnectors({ store, catalog, websites });
+  chat.setPromptConnectors(promptConnectors);
+  /** Set below once the lookout engine exists: website changes feed it. */
+  let websiteSyncedHook: ((projectId: string, info: ConnectorSyncedInfo) => void) | null = null;
   const connectorActions = new ConnectorActionManager({
     store,
     secrets,
@@ -2079,11 +2117,14 @@ export async function startProductService(
     isNightShiftActive: () => nightShift.isActive(),
     source: {
       label: 'connectors',
-      // Device bindings never sync (the live host runs them), so they must
-      // not make a project look "due" on every tick.
-      listBindings: (p) => (p.connectors ?? []).filter((b) => b.driver !== 'device'),
-      posture: (pol) => pol.allowExternalServices,
-      syncProject: (p) => connectors.syncProject(p),
+      // Read-only connections (feeds, wikis, saved web pages) refresh in the
+      // background whenever the machine may use the network for the person;
+      // ones that can send or post wait for Unrestricted. Device bindings
+      // never sync. Only eligible bindings are listed, so a held-back one
+      // never makes its project look due.
+      listBindings: (p, pol) => connectors.backgroundBindings(p, pol),
+      posture: (pol) => pol.allowConnectorData,
+      syncProject: (p, pol) => connectors.syncProject(p, { policy: pol }),
     },
   });
 
@@ -2185,6 +2226,7 @@ export async function startProductService(
     },
   });
   cameras.setLookoutSink(lookouts);
+  websiteSyncedHook = websiteLookoutFeed({ store, connectors, lookouts });
 
   // A craftbook that reads a connector corpus gets it pulled down at
   // LAUNCH, before its first step's prompt is built — the gezel then
@@ -2398,6 +2440,8 @@ export async function startProductService(
     inputStaging,
     connectors,
     connectorActions,
+    websites,
+    promptConnectors,
     liveConnectors,
     cameras,
     lookouts,
@@ -2871,6 +2915,8 @@ export async function startProductService(
       // An open document-edit window would otherwise lose its audit event.
       await shutdownStep('document audit flush', () => store.flushDocumentAudit().catch(() => {}));
       connectorSync.stop();
+      connectors.cancelPasses({}, 'Gezel is shutting down');
+      websites.closeAll();
       await shutdownStep('cameras', async () => {
         await liveConnectors.stop();
         await cameras.stop();

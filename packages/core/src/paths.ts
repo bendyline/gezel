@@ -545,6 +545,23 @@ export function projectCapturesDir(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'captures');
 }
 
+/**
+ * A connector binding's private working state: what an adapter must remember
+ * between passes but must not keep in `project.json` (rewritten on every
+ * pass) or in the corpus (read by gezels, and writable by them under `_`).
+ * The website connector keeps its crawl list, the last text of each page and
+ * a signed-in session here. Account-private, never under artifacts, and
+ * removed when the binding is.
+ */
+export function projectConnectorStateDir(
+  root: string,
+  projectId: string,
+  bindingId: string,
+): string {
+  const safe = bindingId.replace(/[^A-Za-z0-9._-]/g, '_');
+  return join(projectPrivateDir(root, projectId), 'connectors', safe);
+}
+
 /** Per-project documents folder — holds about.md, missionObjectives.md, etc. */
 export function projectDocsDir(
   root: string,

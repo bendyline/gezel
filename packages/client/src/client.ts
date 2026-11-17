@@ -5120,6 +5120,8 @@ export class GezelClient {
       live?: import('@bendyline/gezel').LiveBindingStatus;
       /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
       backoffUntil?: string;
+      /** One short line the connection offers (`Saved 40 pages · 3 waiting`). */
+      summary?: string;
       /**
        * Present only for an observation corpus — data mirrored as columnar
        * tables rather than readable records. Its absence means a document
@@ -5185,6 +5187,150 @@ export class GezelClient {
       'PATCH',
       `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}`,
       patch,
+    );
+  }
+
+  // ── Saved web pages ────────────────────────────────────────────────────
+
+  /** Every website connection's pages, saved and not (the Web pages view). */
+  listWebPages(
+    id: string,
+    opts?: { limit?: number; bindingId?: string },
+  ): Promise<import('@bendyline/gezel').WebPagesListResponse> {
+    const q = new URLSearchParams();
+    if (opts?.limit) q.set('limit', String(opts.limit));
+    if (opts?.bindingId) q.set('binding', opts.bindingId);
+    const qs = q.toString();
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/web-pages${qs ? `?${qs}` : ''}`,
+    );
+  }
+
+  /** The saved copy of one address; rejects with 404 when it is not saved. */
+  getWebPage(id: string, url: string): Promise<{ page: import('@bendyline/gezel').WebPageEntry }> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/web-pages/page?url=${encodeURIComponent(url)}`,
+    );
+  }
+
+  /** The person saves one address now (first-party only). */
+  saveWebPage(
+    id: string,
+    body: import('@bendyline/gezel').SaveWebPageRequest,
+  ): Promise<import('@bendyline/gezel').SaveWebPageResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/web-pages/save`, body);
+  }
+
+  /**
+   * Connections a draft calls for: what is in these words that a connector
+   * could bring in and has not yet (first-party only). Finds nothing on a
+   * daemon that cannot deliver it.
+   */
+  promptConnectorOffers(
+    id: string,
+    text: string,
+  ): Promise<import('@bendyline/gezel').PromptConnectorOffersResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/prompt-connectors/offers`,
+      { text },
+    );
+  }
+
+  /** The person takes one offer now: the connector fetches it into the project (first-party only). */
+  acceptPromptConnectorOffer(
+    id: string,
+    body: import('@bendyline/gezel').AcceptPromptConnectorRequest,
+  ): Promise<import('@bendyline/gezel').AcceptPromptConnectorResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/prompt-connectors/accept`,
+      body,
+    );
+  }
+
+  /**
+   * Ask for a page the crawler already found on a followed site. Anything
+   * else answers `needs-permission` and fetches nothing.
+   */
+  requestWebPage(
+    id: string,
+    url: string,
+  ): Promise<
+    | { status: 'saved'; page: import('@bendyline/gezel').WebPageEntry }
+    | { status: 'queued'; page: import('@bendyline/gezel').WebPageEntry; message: string }
+    | { status: 'needs-permission' | 'gone' | 'limit' | 'failed'; message: string }
+  > {
+    return this.request('POST', `/api/projects/${encodeURIComponent(id)}/web-pages/request`, {
+      url,
+    });
+  }
+
+  /** Open a browser window for the person to sign in to a website connection's site. */
+  startSiteSignIn(id: string, bindingId: string): Promise<{ signInId: string; host: string }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/sign-in`,
+      {},
+    );
+  }
+
+  /** The person is signed in: save and check the sign-in, close the window. */
+  finishSiteSignIn(
+    id: string,
+    bindingId: string,
+    signInId: string,
+  ): Promise<{ ok: boolean; message: string; unverifiable?: boolean }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/sign-in/${encodeURIComponent(signInId)}/finish`,
+      {},
+    );
+  }
+
+  cancelSiteSignIn(id: string, bindingId: string, signInId: string): Promise<{ ok: boolean }> {
+    return this.request(
+      'DELETE',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/sign-in/${encodeURIComponent(signInId)}`,
+    );
+  }
+
+  /** Whether a website connection has a saved sign-in, and when it last worked. */
+  getSiteSession(
+    id: string,
+    bindingId: string,
+  ): Promise<{
+    signedIn: boolean;
+    hosts?: string[];
+    savedAt?: string;
+    lastVerifiedAt?: string;
+    unverifiable?: boolean;
+  }> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/session`,
+    );
+  }
+
+  forgetSiteSession(id: string, bindingId: string): Promise<{ ok: boolean }> {
+    return this.request(
+      'DELETE',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/session`,
+    );
+  }
+
+  /** Where no window can open: save a browser storage state the person exported themselves. */
+  importSiteSession(
+    id: string,
+    bindingId: string,
+    state: { cookies: unknown[]; origins?: unknown[] },
+  ): Promise<{ ok: boolean }> {
+    return this.request(
+      'PUT',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/session`,
+      state,
     );
   }
 

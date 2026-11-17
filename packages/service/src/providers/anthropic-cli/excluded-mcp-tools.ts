@@ -54,3 +54,25 @@ export const CLAUDE_CLI_EXCLUDED_MCP_TOOLS = [
   'list_archive',
   'extract_archive',
 ];
+
+/**
+ * Hidden only while the agent has its own shell to do the same work. When
+ * the security level turns the shell off, these stay advertised so the agent
+ * still runs code, installs packages and opens archives through Gezel's own
+ * gated tools.
+ */
+export const AGENT_SHELL_COVERED_MCP_TOOLS: readonly string[] = [
+  'npm_install',
+  'run_nodejs_script',
+  'run_playwright_script',
+  'list_packages',
+  'list_archive',
+  'extract_archive',
+];
+
+/** The gezel-mcp tools a Claude CLI session hides, given whether it has a shell. */
+export function claudeCliExcludedMcpTools(opts: { agentShell: boolean }): string[] {
+  return opts.agentShell
+    ? [...CLAUDE_CLI_EXCLUDED_MCP_TOOLS]
+    : CLAUDE_CLI_EXCLUDED_MCP_TOOLS.filter((name) => !AGENT_SHELL_COVERED_MCP_TOOLS.includes(name));
+}

@@ -29,6 +29,16 @@ describe('claudeToolGuide', () => {
     for (const name of CLAUDE_CLI_EXCLUDED_MCP_TOOLS) expect(guide).toContain(`\`${name}\``);
   });
 
+  it('does not say the shell tools are left out when Claude Code has no shell', () => {
+    const guide =
+      claudeToolGuide({
+        permissionMode: 'acceptEdits',
+        disallowedBuiltinTools: ['Bash', 'PowerShell'],
+      }) ?? '';
+    expect(guide).toContain('except its file, search and web tools');
+    expect(guide).not.toContain('`extract_archive` → `Bash`');
+  });
+
   it('names only the receipt runners this session was granted', () => {
     const granted = new Set(['read_file', 'write_file', 'run_package_script']);
     const guide = claudeToolGuide({ permissionMode: 'acceptEdits', toolAllowlist: granted }) ?? '';

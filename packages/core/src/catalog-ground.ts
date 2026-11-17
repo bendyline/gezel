@@ -73,14 +73,43 @@ export const PROJECT_TYPE_CATEGORY_GROUND: Readonly<
 };
 
 /**
+ * Connector types have no category, so their ground follows what they bring
+ * in, read from the id and tags. First match wins; a type that fits none sits
+ * on sage.
+ */
+const CONNECTOR_FAMILY_GROUND: readonly (readonly [RegExp, CatalogGroundTone])[] = [
+  [/\b(camera|webcam|device)\b/, 'forest'],
+  [/\b(mail|email|gmail|imap)\b/, 'terracotta'],
+  [/\bcalendar\b/, 'rose'],
+  [/\b(files|documents|drive|onedrive|sharepoint)\b/, 'ochre'],
+  [/\b(github|issues|linear)\b/, 'indigo'],
+  [/\b(social|posts|video|media)\b/, 'plum'],
+  [/\b(table|logs|telemetry|records|data|json)\b/, 'slate'],
+  [/\b(web|website|pages|rss|feeds|news)\b/, 'teal'],
+];
+
+export function connectorTypeGround(manifest: {
+  id?: string;
+  tags?: readonly string[];
+}): CatalogGroundTone {
+  const words = [manifest.id ?? '', ...(manifest.tags ?? [])]
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ');
+  return CONNECTOR_FAMILY_GROUND.find(([pattern]) => pattern.test(words))?.[1] ?? 'sage';
+}
+
+/**
  * The ground for a catalog item's mark, or undefined for kinds whose artwork
  * carries its own ground (knowledge catalogs, toolsets, models).
  */
 export function catalogGroundFor(manifest: {
   kind: string;
+  id?: string;
   category?: string;
   tags?: readonly string[];
 }): CatalogGroundTone | undefined {
+  if (manifest.kind === 'connector-type') return connectorTypeGround(manifest);
   if (manifest.kind === 'craftbook-template') {
     const category = CraftbookCategorySchema.safeParse(manifest.category);
     return CRAFTBOOK_CATEGORY_GROUND[

@@ -20,6 +20,7 @@ import {
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   folderKindOf,
   getProjectType,
+  isConnectorCorpusPath,
   isSharedLibraryProject,
   listProjectTypes,
   normalizeCodexPermissionMode,
@@ -400,15 +401,17 @@ const PROJECT_TAB_VISIBILITY_OPTIONS: ReadonlyArray<{
 const DEVELOPER_PROJECT_TABS: ReadonlySet<ConfigurableProjectTab> = new Set([
   'approvals',
   'workspace',
-  'artifacts',
 ]);
 
 /**
- * Whether a tab shows. An explicit setting always wins. Otherwise Tools,
- * Workspace and Artifacts belong to code projects (and debug mode): a bakery's
- * invoice project showed package.json, prompt drafts and a code-city map
- * beside its board. `map` is the Views tab (the Village's old key): shown when
- * a view fits a code project, a watched folder, or debug mode.
+ * Whether a tab shows. An explicit setting always wins. Otherwise Tools and
+ * Workspace belong to code projects (and debug mode): a bakery's invoice
+ * project showed package.json and a code-city map beside its board. Artifacts
+ * shows everywhere, Default and the shared library included, because it is
+ * where every project's finished work lands; composer drafts no longer list
+ * there, which was the bakery's complaint about it. `map` is the Views tab
+ * (the Village's old key): shown when a view fits a code project, a watched
+ * folder, or debug mode.
  */
 function projectTabIsVisible(
   project: Pick<
@@ -2070,11 +2073,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // Workspace files are editable exactly when the managed-workspace write
   // policy allows it; artifacts always are. A rendered document additionally
   // needs its explicit Markdown-editing opt-in.
-  const isReadOnly = openFile?.outsideIn
-    ? !openFile.outsideIn.editingEnabled || !canWriteProjectFiles(openFile.source)
-    : fileTab
-      ? !canWriteProjectFiles(fileTab)
-      : true;
+  // A connector's record is rewritten on its next sync, so an edit there
+  // would be silently lost: those open read-only.
+  const connectorRecordOpen =
+    openFile?.source === 'artifacts' && isConnectorCorpusPath(openFile.path);
+  const isReadOnly = connectorRecordOpen
+    ? true
+    : openFile?.outsideIn
+      ? !openFile.outsideIn.editingEnabled || !canWriteProjectFiles(openFile.source)
+      : fileTab
+        ? !canWriteProjectFiles(fileTab)
+        : true;
   const selectedWorkspaceIssueCount = workspaceReviewPath
     ? indexedIssueCountForEntry(
         { name: basenameOf(workspaceReviewPath), path: workspaceReviewPath, isDirectory: false },

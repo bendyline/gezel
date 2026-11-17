@@ -14,6 +14,8 @@ export type LookoutSubject = z.infer<typeof LookoutSubjectSchema>;
 
 export const LookoutSourceSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('camera'), bindingId: z.string().min(1) }),
+  /** A website connection: its pages changing, appearing, or saying something new. */
+  z.object({ kind: z.literal('website'), bindingId: z.string().min(1) }),
 ]);
 export type LookoutSource = z.infer<typeof LookoutSourceSchema>;
 
@@ -32,8 +34,39 @@ export const LookoutConditionSchema = z.discriminatedUnion('kind', [
     question: z.string().trim().min(3).max(300),
     strictness: z.enum(['normal', 'sure']).default('normal'),
   }),
+  /**
+   * Website: a saved page's text changed. `pathPrefix` narrows it to pages
+   * under a folder of the site (`/pricing`, `/docs/`).
+   */
+  z.object({ kind: z.literal('page-changed'), pathPrefix: z.string().trim().max(300).optional() }),
+  /** Website: a new page appeared on the site (after the first crawl). */
+  z.object({ kind: z.literal('page-added'), pathPrefix: z.string().trim().max(300).optional() }),
+  /**
+   * Website: words the person wrote newly appear on a page (case-insensitive,
+   * in a line that was not there before): "sold out", "version 2.0".
+   */
+  z.object({
+    kind: z.literal('text-appears'),
+    text: z.string().trim().min(2).max(200),
+    pathPrefix: z.string().trim().max(300).optional(),
+  }),
 ]);
 export type LookoutCondition = z.infer<typeof LookoutConditionSchema>;
+
+/** Conditions a website lookout can use; never judged by a model. */
+export const WEBSITE_LOOKOUT_CONDITIONS = ['page-changed', 'page-added', 'text-appears'] as const;
+/** Conditions a camera lookout can use. */
+export const CAMERA_LOOKOUT_CONDITIONS = ['motion', 'subject', 'ask'] as const;
+
+/** Whether a condition makes sense for a source (a camera cannot see a page change). */
+export function lookoutConditionFitsSource(
+  source: Pick<LookoutSource, 'kind'>,
+  condition: Pick<LookoutCondition, 'kind'>,
+): boolean {
+  const fits: readonly string[] =
+    source.kind === 'website' ? WEBSITE_LOOKOUT_CONDITIONS : CAMERA_LOOKOUT_CONDITIONS;
+  return fits.includes(condition.kind);
+}
 
 export const LookoutSoundClipSchema = z.enum(['chime', 'alarm', 'whistle']);
 export type LookoutSoundClip = z.infer<typeof LookoutSoundClipSchema>;

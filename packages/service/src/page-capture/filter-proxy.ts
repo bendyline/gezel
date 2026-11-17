@@ -1,0 +1,351 @@
+/**
+ * The capture browser's only way out to the network. Every request Chromium
+ * makes (page, subresources, WebSockets, workers, preconnects) is sent to this
+ * forward proxy, which resolves the host itself, refuses any private,
+ * loopback, link-local or metadata address, and connects to the address it
+ * checked. Connecting to the checked address is what closes DNS rebinding:
+ * the browser never resolves a name, so a record that flips between the check
+ * and the connect has nothing to flip.
+ *
+ * What it does not see: the method and path inside a TLS tunnel (the worker's
+ * request rules cover those), and UDP (the seeded profile turns off
+ * non-proxied UDP; QUIC is disabled by flag). See docs/website-connector.md.
+ */
+
+import { lookup } from 'node:dns/promises';
+import http from 'node:http';
+import net from 'node:net';
+import os from 'node:os';
+import { createLogger, redactPageUrl } from '@bendyline/gezel';
+import { isPrivateAddress } from '../utils/ssrf.js';
+
+const log = createLogger('page-capture');
+
+/** Addresses never reachable, even for a private site the person typed. */
+function isMetadataAddress(ip: string): boolean {
+  const v = ip.toLowerCase();
+  return (
+    v.startsWith('169.254.') ||
+    v === '100.100.100.200' ||
+    v.startsWith('fe80') ||
+    v === 'fd00:ec2::254'
+  );
+}
+
+function isLoopback(ip: string): boolean {
+  return ip === '::1' || ip.startsWith('127.') || ip === '0.0.0.0' || ip === '::';
+}
+
+/** Per-page network limits. */
+export interface PageNetworkBudget {
+  /** Bytes the browser may receive for one page. */
+  bytes: number;
+  /** Connections (tunnels + plain requests) for one page. */
+  connections: number;
+  /** Distinct hosts for one page. */
+  hosts: number;
+}
+
+export const DEFAULT_PAGE_NETWORK_BUDGET: PageNetworkBudget = {
+  bytes: 30 * 1024 * 1024,
+  connections: 400,
+  hosts: 80,
+};
+
+export interface PageNetworkStats {
+  bytes: number;
+  connections: number;
+  hosts: number;
+  refused: Record<string, number>;
+  /** A budget ran out and later connections were refused. */
+  overBudget: boolean;
+}
+
+export interface FilterProxyOptions {
+  /**
+   * Hosts whose private addresses may be reached, each only while a page on
+   * that same host is being captured (an intranet wiki the person typed).
+   */
+  privateHosts?: readonly string[];
+  /** Allow plain-HTTP POST/PUT/… through (script requests). TLS methods are invisible here. */
+  allowScriptPost?: boolean;
+  /** Extra ports besides 80 and 443 the person's own site addresses use. */
+  extraPorts?: readonly number[];
+  /** Test seam: resolve a host to addresses. Production uses the system resolver. */
+  resolve?: (host: string) => Promise<string[]>;
+  /**
+   * Test seam only, never set from config: loopback targets a fixture server
+   * listens on. Production passes nothing and loopback is always refused.
+   */
+  allowLoopbackPorts?: readonly number[];
+}
+
+type Refusal =
+  | 'private'
+  | 'loopback'
+  | 'metadata'
+  | 'own-address'
+  | 'unresolvable'
+  | 'port'
+  | 'method'
+  | 'budget'
+  | 'no-page'
+  | 'bad-request';
+
+export class FilterProxy {
+  private server: http.Server | null = null;
+  private readonly sockets = new Set<net.Socket>();
+  private currentHost: string | null = null;
+  private budget: PageNetworkBudget = DEFAULT_PAGE_NETWORK_BUDGET;
+  private stats: PageNetworkStats = emptyStats();
+  private readonly pageHosts = new Set<string>();
+  private readonly privateHosts: Set<string>;
+  private readonly ports: Set<number>;
+  private readonly resolveHost: (host: string) => Promise<string[]>;
+  private readonly allowLoopbackPorts: Set<number>;
+  private ownAddresses: Set<string> = new Set();
+
+  private constructor(private readonly opts: FilterProxyOptions) {
+    this.privateHosts = new Set((opts.privateHosts ?? []).map((h) => h.toLowerCase()));
+    this.ports = new Set([80, 443, ...(opts.extraPorts ?? [])]);
+    this.resolveHost =
+      opts.resolve ??
+      (async (host) => (await lookup(host, { all: true, verbatim: true })).map((a) => a.address));
+    this.allowLoopbackPorts = new Set(opts.allowLoopbackPorts ?? []);
+  }
+
+  static async start(opts: FilterProxyOptions = {}): Promise<FilterProxy> {
+    const proxy = new FilterProxy(opts);
+    proxy.refreshOwnAddresses();
+    const server = http.createServer((req, res) => void proxy.onRequest(req, res));
+    server.on(
+      'connect',
+      (req, socket, head) => void proxy.onConnect(req, socket as net.Socket, head),
+    );
+    server.on('upgrade', (_req, socket) => {
+      (socket as net.Socket).end('HTTP/1.1 403 Forbidden\r\n\r\n');
+    });
+    server.on('connection', (socket) => {
+      proxy.sockets.add(socket);
+      socket.on('close', () => proxy.sockets.delete(socket));
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', () => resolve());
+    });
+    proxy.server = server;
+    return proxy;
+  }
+
+  get port(): number {
+    const addr = this.server?.address();
+    return typeof addr === 'object' && addr ? addr.port : 0;
+  }
+
+  /**
+   * Start accounting for one page. Tunnels left from the previous page are
+   * closed, so a private host's allowance cannot outlive its page.
+   */
+  beginPage(host: string, budget: PageNetworkBudget = DEFAULT_PAGE_NETWORK_BUDGET): void {
+    this.destroyTunnels();
+    this.currentHost = host.toLowerCase();
+    this.budget = budget;
+    this.stats = emptyStats();
+    this.pageHosts.clear();
+    this.refreshOwnAddresses();
+  }
+
+  /** Stop accounting; nothing new connects until the next `beginPage`. */
+  endPage(): PageNetworkStats {
+    const stats = { ...this.stats, refused: { ...this.stats.refused } };
+    this.currentHost = null;
+    this.destroyTunnels();
+    return stats;
+  }
+
+  async close(): Promise<void> {
+    this.currentHost = null;
+    this.destroyTunnels();
+    for (const s of this.sockets) s.destroy();
+    const server = this.server;
+    this.server = null;
+    if (server) await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+
+  private readonly tunnels = new Set<net.Socket>();
+
+  private destroyTunnels(): void {
+    for (const s of this.tunnels) s.destroy();
+    this.tunnels.clear();
+  }
+
+  private refreshOwnAddresses(): void {
+    const own = new Set<string>();
+    for (const list of Object.values(os.networkInterfaces())) {
+      for (const iface of list ?? []) own.add(iface.address.toLowerCase());
+    }
+    this.ownAddresses = own;
+  }
+
+  private refuse(why: Refusal): Refusal {
+    this.stats.refused[why] = (this.stats.refused[why] ?? 0) + 1;
+    return why;
+  }
+
+  /** The address to connect to, or why the target is refused. */
+  private async pin(hostRaw: string, port: number): Promise<{ ip: string } | { refused: Refusal }> {
+    if (this.currentHost === null) return { refused: this.refuse('no-page') };
+    const host = hostRaw.replace(/^\[|\]$/g, '').toLowerCase();
+    const loopbackFixture = this.allowLoopbackPorts.has(port);
+    if (!this.ports.has(port) && !loopbackFixture) return { refused: this.refuse('port') };
+    if (this.stats.connections >= this.budget.connections) {
+      this.stats.overBudget = true;
+      return { refused: this.refuse('budget') };
+    }
+    if (!this.pageHosts.has(host) && this.pageHosts.size >= this.budget.hosts) {
+      this.stats.overBudget = true;
+      return { refused: this.refuse('budget') };
+    }
+    let addresses: string[];
+    if (net.isIP(host)) addresses = [host];
+    else if (host === 'localhost' || host.endsWith('.localhost')) {
+      return { refused: this.refuse('loopback') };
+    } else {
+      try {
+        addresses = await this.resolveHost(host);
+      } catch {
+        return { refused: this.refuse('unresolvable') };
+      }
+    }
+    if (addresses.length === 0) return { refused: this.refuse('unresolvable') };
+    // A private address is allowed only for a host the person typed, while
+    // a page on that host is the one being captured.
+    const privateOk =
+      this.privateHosts.has(host) &&
+      (this.currentHost === host ||
+        this.currentHost.replace(/^www\./, '') === host.replace(/^www\./, ''));
+    for (const ip of addresses) {
+      const lower = ip.toLowerCase();
+      if (isMetadataAddress(lower)) return { refused: this.refuse('metadata') };
+      if (isLoopback(lower)) {
+        if (loopbackFixture) continue;
+        return { refused: this.refuse('loopback') };
+      }
+      if (this.ownAddresses.has(lower) && !privateOk)
+        return { refused: this.refuse('own-address') };
+      if (isPrivateAddress(lower) && !privateOk) return { refused: this.refuse('private') };
+    }
+    this.stats.connections++;
+    this.pageHosts.add(host);
+    this.stats.hosts = this.pageHosts.size;
+    return { ip: addresses[0]! };
+  }
+
+  private countBytes(n: number, sockets: net.Socket[]): void {
+    this.stats.bytes += n;
+    if (this.stats.bytes > this.budget.bytes) {
+      this.stats.overBudget = true;
+      for (const s of sockets) s.destroy();
+    }
+  }
+
+  private async onConnect(
+    req: http.IncomingMessage,
+    client: net.Socket,
+    head: Buffer,
+  ): Promise<void> {
+    client.on('error', () => {});
+    const m = /^(.+):(\d+)$/.exec(req.url ?? '');
+    if (!m) {
+      this.refuse('bad-request');
+      client.end('HTTP/1.1 400 Bad Request\r\n\r\n');
+      return;
+    }
+    const port = Number(m[2]);
+    const pinned = await this.pin(m[1]!, port);
+    if ('refused' in pinned) {
+      log.debug(`refused CONNECT ${m[1]}:${port} (${pinned.refused})`);
+      client.end('HTTP/1.1 403 Forbidden\r\n\r\n');
+      return;
+    }
+    const upstream = net.connect({ host: pinned.ip, port });
+    this.tunnels.add(client);
+    this.tunnels.add(upstream);
+    upstream.on('error', () => client.destroy());
+    client.on('close', () => {
+      upstream.destroy();
+      this.tunnels.delete(client);
+    });
+    upstream.on('close', () => {
+      client.destroy();
+      this.tunnels.delete(upstream);
+    });
+    upstream.on('connect', () => {
+      client.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      if (head.length) upstream.write(head);
+      upstream.on('data', (chunk: Buffer) => this.countBytes(chunk.length, [client, upstream]));
+      upstream.pipe(client);
+      client.pipe(upstream);
+    });
+  }
+
+  private async onRequest(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+    let target: URL;
+    try {
+      target = new URL(req.url ?? '');
+    } catch {
+      this.refuse('bad-request');
+      res.writeHead(400).end();
+      return;
+    }
+    if (target.protocol !== 'http:') {
+      this.refuse('bad-request');
+      res.writeHead(400).end();
+      return;
+    }
+    const method = (req.method ?? 'GET').toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD' && !this.opts.allowScriptPost) {
+      this.refuse('method');
+      res.writeHead(403).end();
+      return;
+    }
+    const port = Number(target.port || 80);
+    const pinned = await this.pin(target.hostname, port);
+    if ('refused' in pinned) {
+      log.debug(`refused ${method} ${redactPageUrl(target.href)} (${pinned.refused})`);
+      res.writeHead(403).end();
+      return;
+    }
+    const headers: http.OutgoingHttpHeaders = { ...req.headers, host: target.host };
+    delete headers['proxy-connection'];
+    delete headers['proxy-authorization'];
+    const upstream = http.request(
+      {
+        host: pinned.ip,
+        port,
+        method,
+        path: `${target.pathname}${target.search}`,
+        headers,
+        // Never pool: a pooled socket could be reused for another host.
+        agent: false,
+      },
+      (up) => {
+        res.writeHead(up.statusCode ?? 502, up.headers);
+        up.on('data', (chunk: Buffer) => {
+          const sockets = [res.socket, upstream.socket].filter((s): s is net.Socket => Boolean(s));
+          this.countBytes(chunk.length, sockets);
+        });
+        up.pipe(res);
+      },
+    );
+    upstream.on('error', () => {
+      if (!res.headersSent) res.writeHead(502);
+      res.end();
+    });
+    req.pipe(upstream);
+  }
+}
+
+function emptyStats(): PageNetworkStats {
+  return { bytes: 0, connections: 0, hosts: 0, refused: {}, overBudget: false };
+}

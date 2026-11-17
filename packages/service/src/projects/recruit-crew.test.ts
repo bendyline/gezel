@@ -5,7 +5,6 @@ import {
   CREW_RECRUITED_AT_PROPERTY,
   FOLDER_KIND_PROPERTY,
   INFERRED_PROJECT_WELL_KNOWN_PROPERTY,
-  SHARED_PROJECT_MARKER,
 } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -191,8 +190,8 @@ describe('recruitCrewForFolder', () => {
   });
 
   it('leaves the shared library and projects without a folder alone', async () => {
-    const library = await store.createProject({ name: 'Library', workingDir: join(home, 'lib') });
-    await store.updateProject(library.id, { properties: { [SHARED_PROJECT_MARKER]: '1' } });
+    // The real library: an update can no longer add its marker to a project.
+    const library = await store.ensureSharedProject();
     const plain = await store.createProject({ name: 'Plain' });
 
     expect((await recruitCrewForFolder(deps(), library.id)).skipped).toBe('library');

@@ -58,6 +58,21 @@ describe('catalog grounds', () => {
     );
   });
 
+  it('grounds a connector type by what it brings in', () => {
+    const ground = (id: string, tags: string[] = []) =>
+      catalogGroundFor({ kind: 'connector-type', id, tags });
+    expect(ground('website', ['web', 'pages', 'documentation', 'monitoring'])).toBe('teal');
+    expect(ground('rss-feed', ['rss', 'feeds', 'news'])).toBe('teal');
+    expect(ground('mail-gmail', ['email', 'oauth'])).toBe('terracotta');
+    expect(ground('calendar-microsoft', ['calendar', 'microsoft'])).toBe('rose');
+    expect(ground('files-google-drive', ['files', 'google-drive', 'documents'])).toBe('ochre');
+    expect(ground('github-wiki', ['github', 'wiki', 'documentation'])).toBe('indigo');
+    expect(ground('youtube-videos', ['youtube', 'video', 'social'])).toBe('plum');
+    expect(ground('http-json-rows', ['data', 'table', 'json'])).toBe('slate');
+    expect(ground('camera-local', ['camera', 'home', 'device'])).toBe('forest');
+    expect(ground('from-a-newer-gilde')).toBe('sage');
+  });
+
   it('leaves kinds whose artwork carries its own ground alone', () => {
     expect(catalogGroundFor({ kind: 'knowledge-catalog' })).toBeUndefined();
     expect(catalogGroundFor({ kind: 'toolset' })).toBeUndefined();

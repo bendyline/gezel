@@ -96,6 +96,7 @@ export async function createConnectorTestEnv(projectId = 'p1'): Promise<Connecto
       return project;
     },
     readConfig: async () => ({}),
+    homePath: join(root, 'home'),
     projectWorkspaceDir: async () => join(root, 'workspace'),
     projectArtifactsDir: () => artifactsDir,
     projectQuarantineDir: () => quarantineDir,

@@ -12,6 +12,7 @@ import type { ConnectorActionManager } from '../connectors/actions.js';
 import type { CameraService } from '../connectors/live/camera/service.js';
 import type { LiveConnectorHost } from '../connectors/live/host.js';
 import type { ConnectorManager } from '../connectors/manager.js';
+import type { WebsiteService } from '../connectors/natives/website-service.js';
 import type { HarnessToolsManager } from '../harness-tools/manager.js';
 import type { LookoutManager } from '../lookouts/manager.js';
 
@@ -39,6 +40,7 @@ import type { DuckRunner } from '../observations/duck.js';
 import type { OpenCodeSetupManager } from '../opencode-setup/manager.js';
 import type { PiSetupManager } from '../pi-setup/manager.js';
 import type { PreviewLogBuffer } from '../preview-log/buffer.js';
+import type { PromptConnectorService } from '../prompt-connectors/index.js';
 import type { PromptDraftManager } from '../prompt-drafts/manager.js';
 import type { InputStagingManager } from '../tasks/inputs/staging.js';
 
@@ -172,6 +174,10 @@ export interface ServiceContext extends EngineContext {
   inputStaging: InputStagingManager;
   connectors: ConnectorManager;
   connectorActions: ConnectorActionManager;
+  /** Saved web pages: listing, saving one page, gezel requests, signing in (docs/website-connector.md). */
+  websites: WebsiteService;
+  /** Connections a draft calls for: composer offers and what a turn is given (docs/prompt-connectors.md). */
+  promptConnectors: PromptConnectorService;
   /** Keeps device bindings (cameras) running; see docs/device-connectors.md. */
   liveConnectors: LiveConnectorHost;
   /** Camera discovery, test pictures, the live preview, and saved pictures. */

@@ -97,7 +97,7 @@ const CODEX_MODE_OPTIONS: ReadonlyArray<{
   {
     value: 'full',
     label: 'Full',
-    hint: 'Run without Codex sandboxing or approvals. Gezel still blocks a narrow set of unmistakably destructive commands.',
+    hint: 'Run without Codex sandboxing or approvals. Gezel still blocks a narrow set of unmistakably destructive commands. Only at the Unrestricted security level; below it, Codex runs as Edit.',
   },
 ];
 
@@ -108,11 +108,15 @@ const CLAUDE_MODE_OPTIONS: ReadonlyArray<{
 }> = [
   { value: 'plan', label: 'Plan', hint: 'Read and reason without changing workspace files.' },
   { value: 'default', label: 'Ask', hint: 'Let Claude request permission for tool use.' },
-  { value: 'acceptEdits', label: 'Edit', hint: 'Auto-approve file edits; gate shell commands.' },
+  {
+    value: 'acceptEdits',
+    label: 'Edit',
+    hint: 'Auto-approve file edits. Claude runs commands through its shell only at the Unrestricted security level.',
+  },
   {
     value: 'bypassPermissions',
     label: 'Full',
-    hint: 'Bypass Claude permission prompts, including for shell commands.',
+    hint: 'Bypass Claude permission prompts, including for shell commands. Only at the Unrestricted security level; below it, Claude runs as Edit.',
   },
 ];
 

@@ -39,11 +39,20 @@ export function ReportDocument({
   projectId,
   path,
   onOpenPath,
+  onOpenUrl,
+  transformContent,
   className,
 }: {
   projectId: string;
   path: string;
   onOpenPath?: (path: string, line?: number) => void;
+  /**
+   * A web link was clicked. Return true when it was handled in place (a
+   * saved copy of that page opened); otherwise the link opens as usual.
+   */
+  onOpenUrl?: (url: string) => boolean;
+  /** Change the text before it renders (drop a section shown elsewhere). */
+  transformContent?: (content: string) => string;
   className?: string;
 }) {
   const [content, setContent] = useState<string | null>(null);
@@ -67,10 +76,13 @@ export function ReportDocument({
     };
   }, [projectId, path]);
 
+  // transformContent is a view-level constant; re-rendering on its identity would re-parse for nothing.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: see above
   const doc = useMemo(() => {
     if (content === null) return null;
     try {
-      return markdownToDoc(parseMarkdown(content), { articleId: `report:${path}` });
+      const text = transformContent ? transformContent(content) : content;
+      return markdownToDoc(parseMarkdown(text), { articleId: `report:${path}` });
     } catch {
       return null;
     }
@@ -102,8 +114,15 @@ export function ReportDocument({
   }, [onOpenPath]);
 
   const open = (target: EventTarget, event: MouseEvent | KeyboardEvent): void => {
-    if (!onOpenPath || !(target instanceof Element)) return;
+    if (!(target instanceof Element)) return;
     const anchor = target.closest('a');
+    const href = anchor?.getAttribute('href') ?? '';
+    if (anchor && onOpenUrl && /^https?:\/\//i.test(href) && onOpenUrl(href)) {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    if (!onOpenPath) return;
     if (anchor) {
       const file = fileFromHref(anchor.getAttribute('href') ?? '');
       if (!file) return;

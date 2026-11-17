@@ -26,10 +26,11 @@ import type {
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import type { RateLimitGovernor } from '@bendyline/gezel/runtime';
 import { scriptToolNamesFromEnv } from '../../project-type/script-tools.js';
+import { CODEX_CLI_AUTH_ENV, agentCliEnv, withMcpBootstrapCode } from '../agent-cli-env.js';
 import { providerCanReachHostedMcp } from '../hosted-mcp-transports.js';
 import { type McpServerSpec, isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
 import type { CodexBinaryCapabilities } from './binary.js';
-import { CODEX_CLI_EXCLUDED_MCP_TOOLS } from './excluded-mcp-tools.js';
+import { codexCliExcludedMcpTools } from './excluded-mcp-tools.js';
 import { type CodexInvokerHooks, type CodexPermissionMode, runCodexTurn } from './invoker.js';
 import {
   type CodexMcpServerEntry,
@@ -149,9 +150,14 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
     return !allow || allow.has('write_file');
   }
 
+  /** The gezel-mcp tools hidden because Codex has its own; fewer without its shell. */
+  private excludedMcpTools(): string[] {
+    return codexCliExcludedMcpTools({ agentShell: this.deps.context.shellTool !== false });
+  }
+
   getRegisteredToolNames(): string[] {
     if (!this.deps.mcpServer) return [];
-    const excluded = new Set<string>(CODEX_CLI_EXCLUDED_MCP_TOOLS);
+    const excluded = new Set<string>(this.excludedMcpTools());
     const allow = this.deps.toolAllowlist;
     const out: string[] = [];
     for (const name of ALWAYS_REGISTERED_TOOLS) {
@@ -209,7 +215,7 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
         binaryPath: this.deps.binaryPath,
         cwd: this.deps.context.cwd,
         codexHome: runtime.codexHome,
-        baseEnv: { ...process.env, ...runtime.env },
+        baseEnv: { ...agentCliEnv(process.env, CODEX_CLI_AUTH_ENV), ...runtime.env },
         model: this.deps.model,
         permissionMode: this.deps.permissionMode,
         prompt,
@@ -286,7 +292,8 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       mcpServers.gezel = {
         command: this.deps.mcpServer.command,
         args: this.deps.mcpServer.args,
-        env: this.deps.mcpServer.env,
+        // A fresh single-use code each turn: `codex exec` starts the server anew.
+        env: withMcpBootstrapCode(this.deps.mcpServer.env, this.deps.context.mintMcpBootstrapCode),
         // A missing bridge makes task work impossible. Codex otherwise treats
         // MCP startup as optional and can "succeed" with no artifact/task tools.
         // Allow cold starts during concurrent builds, then fail before inference
@@ -300,11 +307,11 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
         // Gezel-side consent/security checks, so admit calls here just as the
         // bridge-backed providers do.
         defaultToolsApprovalMode: 'approve',
-        disabledTools: [...CODEX_CLI_EXCLUDED_MCP_TOOLS],
+        disabledTools: this.excludedMcpTools(),
         ...(this.deps.toolAllowlist
           ? {
               enabledTools: [...this.deps.toolAllowlist].filter(
-                (name) => !CODEX_CLI_EXCLUDED_MCP_TOOLS.includes(name),
+                (name) => !this.excludedMcpTools().includes(name),
               ),
             }
           : {}),
@@ -346,9 +353,11 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
     const config: CodexRuntimeConfig = {
       instructions: withCodexToolGuide(this.deps.systemMessage, this.getRegisteredToolNames(), {
         canEdit: this.mayEditWithBuiltins(),
+        shell: this.deps.context.shellTool !== false,
       }),
       model: this.deps.model,
       mcpServers,
+      ...(this.deps.context.shellTool === false ? { shellTool: false } : {}),
       // Default codex's built-in rollout compactor + per-tool-output
       // cap to ON for every session we manage. Codex's per-model
       // defaults leave both `null` for the gpt-5 family, which means

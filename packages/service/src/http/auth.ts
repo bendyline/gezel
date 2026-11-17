@@ -16,12 +16,19 @@ import type { TokenStore } from './token-store.js';
  * opt into query capabilities because the browser API cannot attach headers;
  * ordinary API routes must never accept credentials in URLs.
  */
+/**
+ * Where a gezel MCP server trades its short-lived bootstrap code for its
+ * session token. Public like `/api/health`: the code is the credential, and
+ * the route is mounted on the loopback listener only.
+ */
+export const SESSION_BOOTSTRAP_PATH = '/api/session-bootstrap';
+
 export function bearerAuth(
   store: TokenStore,
   options: { allowQueryToken?: (method: string, path: string) => boolean } = {},
 ): MiddlewareHandler {
   return async (c, next) => {
-    if (c.req.path === '/api/health') return next();
+    if (c.req.path === '/api/health' || c.req.path === SESSION_BOOTSTRAP_PATH) return next();
     const header = c.req.header('authorization') ?? '';
     const match = /^Bearer\s+(.+)$/i.exec(header);
     const queryAllowed = options.allowQueryToken?.(c.req.method, c.req.path) === true;
@@ -128,8 +135,9 @@ export function requireFirstParty(): MiddlewareHandler {
  */
 export function requireInternalApiAccess(): MiddlewareHandler {
   return async (c, next) => {
-    // `/api/health` is intentionally public for supervisor discovery.
-    if (c.req.path === '/api/health') return next();
+    // `/api/health` is intentionally public for supervisor discovery; the
+    // bootstrap route's code is its own credential.
+    if (c.req.path === '/api/health' || c.req.path === SESSION_BOOTSTRAP_PATH) return next();
     const auth = c.get('auth');
     if (!auth) return c.json({ error: 'unauthorized' }, 401);
     if (

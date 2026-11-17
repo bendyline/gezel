@@ -12,6 +12,8 @@ import './lookouts.css';
 
 export interface LookoutChoices {
   cameras: Array<{ id: string; name: string }>;
+  /** Website connections a lookout can follow. */
+  websites: Array<{ id: string; name: string }>;
   mailAccounts: Array<{ id: string; name: string }>;
   gezels: Array<{ id: string; name: string }>;
   craftbooks: Array<{ id: string; name: string }>;
@@ -24,6 +26,14 @@ const WATCH_FOR: Array<{ id: WatchFor; label: string }> = [
   { id: 'person', label: 'A person' },
   { id: 'pet', label: 'A pet' },
   { id: 'specific', label: 'Something specific' },
+];
+
+type PageWatch = 'page-changed' | 'page-added' | 'text-appears';
+
+const PAGE_WATCH: Array<{ id: PageWatch; label: string }> = [
+  { id: 'page-changed', label: 'A page that changed' },
+  { id: 'page-added', label: 'A new page' },
+  { id: 'text-appears', label: 'Words that appear' },
 ];
 
 const CLIPS: Array<{ id: LookoutSoundClip; label: string }> = [
@@ -41,8 +51,14 @@ function watchForOf(condition: LookoutCondition | undefined): WatchFor {
 
 interface Draft {
   name: string;
+  /** What the lookout follows: a camera or a website connection. */
+  sourceKind: 'camera' | 'website';
+  /** The binding id of that camera or website. */
   cameraId: string;
   watchFor: WatchFor;
+  pageWatch: PageWatch;
+  words: string;
+  pathPrefix: string;
   question: string;
   sure: boolean;
   notify: boolean;
@@ -63,10 +79,23 @@ function draftFrom(lookout: Lookout | undefined, choices: LookoutChoices): Draft
     actions.find((a) => a.kind === kind) as Extract<LookoutAction, { kind: K }> | undefined;
   const email = find('email');
   const ask = find('ask-gezel');
+  const c = lookout?.condition;
+  const sourceKind: Draft['sourceKind'] =
+    lookout?.source.kind ?? (choices.cameras.length > 0 ? 'camera' : 'website');
   return {
     name: lookout?.name ?? '',
-    cameraId: lookout?.source.bindingId ?? choices.cameras[0]?.id ?? '',
+    sourceKind,
+    cameraId:
+      lookout?.source.bindingId ??
+      (sourceKind === 'camera' ? choices.cameras[0]?.id : choices.websites[0]?.id) ??
+      '',
     watchFor: watchForOf(lookout?.condition),
+    pageWatch: c?.kind === 'page-added' || c?.kind === 'text-appears' ? c.kind : 'page-changed',
+    words: c?.kind === 'text-appears' ? c.text : '',
+    pathPrefix:
+      c && (c.kind === 'page-changed' || c.kind === 'page-added' || c.kind === 'text-appears')
+        ? (c.pathPrefix ?? '')
+        : '',
     question: lookout?.condition.kind === 'ask' ? lookout.condition.question : '',
     sure: lookout?.condition.kind === 'ask' ? lookout.condition.strictness === 'sure' : false,
     notify: lookout ? Boolean(find('notify')) : true,
@@ -83,6 +112,13 @@ function draftFrom(lookout: Lookout | undefined, choices: LookoutChoices): Draft
 }
 
 function conditionOf(d: Draft): LookoutCondition {
+  if (d.sourceKind === 'website') {
+    const prefix = d.pathPrefix.trim();
+    const under = prefix ? { pathPrefix: prefix } : {};
+    if (d.pageWatch === 'text-appears')
+      return { kind: 'text-appears', text: d.words.trim(), ...under };
+    return { kind: d.pageWatch, ...under };
+  }
   if (d.watchFor === 'motion') return { kind: 'motion' };
   if (d.watchFor === 'person') return { kind: 'subject', subjects: ['person'] };
   if (d.watchFor === 'pet') return { kind: 'subject', subjects: ['cat', 'dog', 'animal'] };
@@ -171,12 +207,24 @@ export function LookoutSentenceBuilder({
   const [problem, setProblem] = useState('');
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
     setD((cur) => ({ ...cur, [key]: value }));
+  const sources = [
+    ...choices.cameras.map((c) => ({ ...c, kind: 'camera' as const })),
+    ...choices.websites.map((c) => ({ ...c, kind: 'website' as const })),
+  ];
+  const pickSource = (id: string) => {
+    const kind = sources.find((x) => x.id === id)?.kind ?? 'camera';
+    setD((cur) => ({ ...cur, cameraId: id, sourceKind: kind }));
+  };
 
   const submit = () => {
     const actions = actionsOf(d);
-    if (!d.cameraId) return setProblem('Pick a camera.');
-    if (d.watchFor === 'specific' && d.question.trim().length < 3) {
+    const website = d.sourceKind === 'website';
+    if (!d.cameraId) return setProblem(website ? 'Pick a website.' : 'Pick a camera.');
+    if (!website && d.watchFor === 'specific' && d.question.trim().length < 3) {
       return setProblem('Say what to watch for, as a yes-or-no question.');
+    }
+    if (website && d.pageWatch === 'text-appears' && d.words.trim().length < 2) {
+      return setProblem('Say which words to watch for.');
     }
     if (actions.length === 0) return setProblem('Choose at least one thing to do.');
     if (d.email && actions.every((a) => a.kind !== 'email')) {
@@ -187,8 +235,12 @@ export function LookoutSentenceBuilder({
       return setProblem('Say what they should do.');
     }
     const camera = choices.cameras.find((c) => c.id === d.cameraId)?.name ?? 'the camera';
-    const fallbackName =
-      d.watchFor === 'specific'
+    const site = choices.websites.find((c) => c.id === d.cameraId)?.name ?? 'the website';
+    const fallbackName = website
+      ? d.pageWatch === 'text-appears'
+        ? `“${d.words.trim()}” on ${site}`
+        : `${PAGE_WATCH.find((w) => w.id === d.pageWatch)?.label} on ${site}`
+      : d.watchFor === 'specific'
         ? d.question
             .trim()
             .replace(/^is (there )?/i, '')
@@ -197,7 +249,7 @@ export function LookoutSentenceBuilder({
     setProblem('');
     onSave({
       name: (d.name.trim() || fallbackName).slice(0, 80),
-      source: { kind: 'camera', bindingId: d.cameraId },
+      source: { kind: d.sourceKind, bindingId: d.cameraId },
       condition: conditionOf(d),
       actions,
       limits: { cooldownMinutes: d.cooldownMinutes, maxPerDay: d.maxPerDay },
@@ -209,13 +261,13 @@ export function LookoutSentenceBuilder({
     <div className="lookout-builder" aria-label={initial ? 'Edit lookout' : 'New lookout'}>
       <div className="lookout-builder-line">
         <span>When</span>
-        {choices.cameras.length > 1 ? (
-          <Select.Root value={d.cameraId} onValueChange={(v) => set('cameraId', v)}>
-            <Select.Trigger className="lookout-builder-select" aria-label="Camera">
-              <Select.Value placeholder="Camera" />
+        {sources.length > 1 ? (
+          <Select.Root value={d.cameraId} onValueChange={pickSource}>
+            <Select.Trigger className="lookout-builder-select" aria-label="Camera or website">
+              <Select.Value placeholder="Camera or website" />
             </Select.Trigger>
             <Select.Content>
-              {choices.cameras.map((c) => (
+              {sources.map((c) => (
                 <Select.Item key={c.id} value={c.id}>
                   {c.name}
                 </Select.Item>
@@ -223,41 +275,78 @@ export function LookoutSentenceBuilder({
             </Select.Content>
           </Select.Root>
         ) : (
-          <strong>{choices.cameras[0]?.name ?? 'the camera'}</strong>
+          <strong>{sources[0]?.name ?? 'the camera'}</strong>
         )}
-        <span>sees</span>
+        <span>{d.sourceKind === 'website' ? 'has' : 'sees'}</span>
       </div>
-      <Tray
-        label="Watch for"
-        value={d.watchFor}
-        choices={WATCH_FOR}
-        onChange={(v) => set('watchFor', v)}
-      />
-      {d.watchFor === 'specific' ? (
-        <div className="lookout-builder-question">
-          <textarea
-            rows={2}
-            value={d.question}
-            placeholder="Is a cat squatting or pooping on the floor?"
-            aria-label="What to watch for, as a yes-or-no question"
-            onChange={(e) => set('question', e.target.value)}
+      {d.sourceKind === 'website' ? (
+        <>
+          <Tray
+            label="Watch for"
+            value={d.pageWatch}
+            choices={PAGE_WATCH}
+            onChange={(v) => set('pageWatch', v)}
           />
-          <label className="small">
+          {d.pageWatch === 'text-appears' ? (
+            <div className="lookout-builder-question">
+              <input
+                value={d.words}
+                maxLength={200}
+                placeholder="sold out"
+                aria-label="Words to watch for"
+                onChange={(e) => set('words', e.target.value)}
+              />
+            </div>
+          ) : null}
+          <div className="lookout-builder-question">
             <input
-              type="checkbox"
-              checked={d.sure}
-              onChange={(e) => set('sure', e.target.checked)}
-            />{' '}
-            Only when it is clearly happening (waits for a second picture)
-          </label>
-        </div>
-      ) : null}
-      {d.watchFor !== 'motion' ? (
-        <p className="muted small">
-          The on-device image reader answers this; the camera's "Recognize what's happening" must be
-          on.
-        </p>
-      ) : null}
+              value={d.pathPrefix}
+              maxLength={300}
+              placeholder="/pricing (optional)"
+              aria-label="Only pages under this part of the site (optional)"
+              onChange={(e) => set('pathPrefix', e.target.value)}
+            />
+          </div>
+          <p className="muted small">
+            Checked each time Gezel refreshes the site. Page text is matched as written; nothing on
+            the page can change what the lookout does.
+          </p>
+        </>
+      ) : (
+        <>
+          <Tray
+            label="Watch for"
+            value={d.watchFor}
+            choices={WATCH_FOR}
+            onChange={(v) => set('watchFor', v)}
+          />
+          {d.watchFor === 'specific' ? (
+            <div className="lookout-builder-question">
+              <textarea
+                rows={2}
+                value={d.question}
+                placeholder="Is a cat squatting or pooping on the floor?"
+                aria-label="What to watch for, as a yes-or-no question"
+                onChange={(e) => set('question', e.target.value)}
+              />
+              <label className="small">
+                <input
+                  type="checkbox"
+                  checked={d.sure}
+                  onChange={(e) => set('sure', e.target.checked)}
+                />{' '}
+                Only when it is clearly happening (waits for a second picture)
+              </label>
+            </div>
+          ) : null}
+          {d.watchFor !== 'motion' ? (
+            <p className="muted small">
+              The on-device image reader answers this; the camera's "Recognize what's happening"
+              must be on.
+            </p>
+          ) : null}
+        </>
+      )}
 
       <div className="lookout-builder-line">
         <span>then</span>

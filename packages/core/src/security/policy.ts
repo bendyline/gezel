@@ -103,6 +103,17 @@ export interface ResolvedSecurityPolicy extends SecurityCapabilities {
    * too: committing transmits, which is real outbound agency.
    */
   allowConnectorData: boolean;
+  /**
+   * Whether a CLI agent may use its own shell and its unsandboxed modes:
+   * Claude Code's `Bash`/`PowerShell` and `bypassPermissions`, Codex's shell
+   * and `full`, Copilot with `sandboxCopilot: false`. Those run as the person,
+   * with the network, and with no Gezel gate in between, so they can read the
+   * person's own credential in `runtime/auth-token` and act as them. Below
+   * this, the agent runs Gezel's own execution tools instead. Requires
+   * everything a package script needs plus edits, so it holds only at `free`
+   * among the presets.
+   */
+  allowAgentShell: boolean;
 }
 
 /**
@@ -396,5 +407,11 @@ export function resolveSecurityPolicy(
     allowMail: caps.allowExternalServices,
     // Runtime-side corpus movement, not model agency (see field doc).
     allowConnectorData: caps.allowAppNetwork,
+    // A CLI agent's own shell runs as the person (see field doc).
+    allowAgentShell:
+      caps.allowPackageScriptExecution &&
+      caps.allowExternalServices &&
+      caps.allowScriptExecution &&
+      caps.allowFileEdits,
   };
 }

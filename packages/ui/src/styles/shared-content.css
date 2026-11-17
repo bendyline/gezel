@@ -1528,6 +1528,147 @@
   padding: 0.5rem 0.25rem 0.25rem;
 }
 
+/* An address in the draft with no saved copy: one line and a small tray, on
+   the same edges as the other composer strips. */
+/* Connections the draft calls for (a web address that will be saved on
+   Send): one row each, in the task strip's frame. Dashed, like every strip
+   whose content comes from the message itself. See docs/ux.md. */
+.chat-composer-connector-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0 0 0.25rem;
+  padding: 0.3rem var(--chat-composer-action-inset, 0.4rem) 0.3rem 0.5rem;
+  background: color-mix(in srgb, var(--wash-tint) 7%, var(--surface-1));
+  border: 1px dashed color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: var(--radius-md);
+}
+
+.chat-composer-connector-row {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-inline-size: 0;
+}
+
+/* The connector type's cut-paper mark on its ground, the size of the task
+   strip's artwork tile. */
+.chat-composer-connector-mark,
+.msg-inclusion-mark {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 1.75rem;
+  height: 1.75rem;
+  overflow: hidden;
+  color: color-mix(in srgb, var(--accent) 76%, var(--text));
+  background: var(--surface-2, rgba(0, 0, 0, 0.04));
+  border-radius: var(--radius-md);
+}
+
+/* A connector with no artwork: its line glyph in cream on the family's
+   ground, the same full-bleed tile an illustrated mark fills. */
+.chat-composer-connector-mark[data-painted],
+.msg-inclusion-mark[data-painted] {
+  color: var(--titlebar-ink, #f3ede0);
+  background: color-mix(in srgb, var(--mark-ground) 88%, black);
+}
+
+.chat-composer-connector-mark img,
+.msg-inclusion-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.chat-composer-connector-mark img.chat-composer-connector-mark-svg,
+.msg-inclusion-mark img.chat-composer-connector-mark-svg {
+  width: 1.25rem;
+  height: 1.25rem;
+  object-fit: contain;
+}
+
+.chat-composer-connector-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--text-sm);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.chat-composer-connector-text[data-tone="error"] {
+  color: var(--danger-text, var(--danger));
+}
+
+.chat-composer-connector-row .gz-tray {
+  flex: 0 0 auto;
+}
+
+/* Under a sent message: the saved copy of what it named, with its synopsis.
+   The row opens the copy. */
+.msg-inclusions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.msg-inclusion {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  inline-size: 100%;
+  padding: 0.35rem 0.5rem;
+  color: var(--text);
+  background: color-mix(in srgb, var(--wash-tint) 7%, var(--surface-1));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  font-family: var(--font-ui);
+  text-align: left;
+}
+
+button.msg-inclusion {
+  cursor: pointer;
+}
+
+button.msg-inclusion:hover {
+  background: color-mix(in srgb, var(--wash-tint) 13%, var(--surface-1));
+}
+
+.msg-inclusion-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 0.1rem;
+  line-height: 1.3;
+}
+
+.msg-inclusion-title {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msg-inclusion-meta {
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+
+.msg-inclusion-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
 /* "To: {GezelName}" pill above the editor — small, muted, left-aligned.
    Makes the active recipient explicit so users aren't guessing whose
    inbox the next Send drops into. It and the strips above it (task, image,

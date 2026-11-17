@@ -422,8 +422,12 @@ Never traded away, for any driver:
    sandboxed script (a `script` connector reaches its credential parent-side through
    `gezel.http.authed` by *name*), not into the model's context.
 5. **Ingest-bound MCP servers stay off the model's tool surface.**
-6. **Autonomous sync rides `allowExternalServices`.** Lockdown stops the loop. A
-   user-initiated sync is a separate route with its own gate. Device connectors are not
+6. **Autonomous sync of a read-only type rides `allowConnectorData`; a type that declares
+   write-back actions rides `allowExternalServices`.** Super-lockdown stops the loop. A
+   user-initiated sync is a separate route, refused at the sink when `allowConnectorData` is
+   off. The website connector ([website-connector.md](./website-connector.md)) is the one
+   type with a model-reachable request path, and it fetches only addresses the crawler
+   already found on a site the person follows. Device connectors are not
    synced: a local device runs at any security level, a network device needs
    `allowConnectorData`, and only the person binds, pauses, or edits one.
 

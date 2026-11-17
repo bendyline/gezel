@@ -173,6 +173,13 @@ export const BUILTIN_TOOLSETS: BuiltinToolsetGroup[] = [
     tools: ['look_at_camera', 'list_lookouts', 'propose_lookout'],
   },
   {
+    id: 'web-pages',
+    name: 'Saved Web Pages',
+    description:
+      'Read the offline copies of web pages a project follows, and ask for a page the crawler already found as a link. Gezels never visit the web through these; an address that is not a found link is the person’s to save.',
+    tools: ['list_web_pages', 'read_web_page', 'request_web_page'],
+  },
+  {
     id: 'data-tables',
     name: 'Data Tables',
     description:

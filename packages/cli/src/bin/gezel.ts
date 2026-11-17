@@ -137,7 +137,11 @@ import {
   formatTaskOutput,
   withCopiedOutput,
 } from '../task-output.js';
-import { craftbookStartRequest, normalizeCraftbooks } from '../tui/craftbook-start.js';
+import {
+  craftbookScriptsTrusted,
+  craftbookStartRequest,
+  normalizeCraftbooks,
+} from '../tui/craftbook-start.js';
 import { closestCommand, unknownCommandMessage } from '../unknown-command.js';
 import { runWorkflow } from '../workflow-command.js';
 import { unsupportedNodeMessage } from './node-version.js';
@@ -983,7 +987,11 @@ Examples:
   )
   .option(
     '--strict-sandbox',
-    'require OS network isolation for custom scripts (CLI launches otherwise trust this recipe snapshot)',
+    'require OS network isolation for custom scripts (CLI launches otherwise trust a catalog recipe snapshot)',
+  )
+  .option(
+    '--trust-scripts',
+    "trust a local or project craftbook's scripts too; gezels can edit those books, so check them first",
   )
   .addOption(new Option(SHORTHAND_FLAG).hideHelp())
   .action(
@@ -997,6 +1005,7 @@ Examples:
         json?: boolean;
         allowEdits?: boolean;
         strictSandbox?: boolean;
+        trustScripts?: boolean;
         viaCraftbookShorthand?: boolean;
       },
     ) => {
@@ -1099,7 +1108,9 @@ Examples:
         .createTask(projectId, {
           ...craftbookStartRequest(book),
           ...craftbookDoLaunch(craftbook, parsed),
-          trustScripts: !opts.strictSandbox,
+          trustScripts:
+            !opts.strictSandbox &&
+            (opts.trustScripts === true || craftbookScriptsTrusted(book.sourceId)),
           roleBasedNameOnlyMode: true,
         })
         .catch(async (err: unknown) => {

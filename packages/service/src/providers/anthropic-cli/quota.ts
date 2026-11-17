@@ -25,6 +25,8 @@ export async function writeClaudeQuotaCaptureFiles(opts: {
   projectId: string;
   sessionId: string;
   nodePath?: string;
+  /** Claude Code `permissions.deny` rules (see credential-deny.ts). */
+  denyRules?: readonly string[];
 }): Promise<string> {
   const scriptPath = join(opts.runtimeDir, CAPTURE_SCRIPT_NAME);
   const snapshotPath = join(opts.runtimeDir, SNAPSHOT_NAME);
@@ -41,6 +43,9 @@ export async function writeClaudeQuotaCaptureFiles(opts: {
       type: 'command',
       command: `${shellQuote(nodePath)} ${shellQuote(scriptPath)}`,
     },
+    ...(opts.denyRules && opts.denyRules.length > 0
+      ? { permissions: { deny: [...opts.denyRules] } }
+      : {}),
   };
   await writeFileAtomic(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
   return settingsPath;

@@ -13,7 +13,7 @@ import type {
   ToolCallImage,
   ToolCallVideo,
 } from '@bendyline/gezel';
-import type { TaskHandoffNote } from '@bendyline/gezel';
+import type { PromptInclusion, TaskHandoffNote } from '@bendyline/gezel';
 import { plainRoleTitle, roleForMatching } from '@bendyline/gezel';
 import {
   handoffContextLine,
@@ -64,6 +64,7 @@ import { DraftPlanCard } from './DraftPlanCard.js';
 import { GezelIcon } from './GezelIcon.js';
 import { ImagePreview } from './ImagePreview.js';
 import { MessageActionIcon } from './MessageActionIcon.js';
+import { MessageInclusions } from './MessageInclusions.js';
 import { PendingQuestionCard } from './PendingQuestionCard.js';
 import { PersonLabel } from './PersonLabel.js';
 import { ReportErrorLink } from './ReportErrorLink.js';
@@ -334,6 +335,8 @@ export interface MessageBubbleProps {
    * chips next to the file chips.
    */
   referencedTasks?: string[];
+  /** Saved copies of what this USER turn named (a web page), shown as rows that open the copy. */
+  inclusions?: readonly PromptInclusion[];
   /**
    * Indexed-context sources this USER turn consulted (proactive retrieval) —
    * including the exact excerpt injected by newer daemons. Renders as a
@@ -715,6 +718,7 @@ function MessageBubbleView({
   deliverable,
   referencedTasks,
   retrieval,
+  inclusions,
   onFileReference,
   onOpenReference,
   onTaskReference,
@@ -1424,6 +1428,9 @@ function MessageBubbleView({
         />
       )}
       {chips}
+      {isUser && inclusions && inclusions.length > 0 && (
+        <MessageInclusions inclusions={inclusions} projectId={projectId} />
+      )}
       {isUser && consultedSources}
       {groundingSources}
       {planCards}

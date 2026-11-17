@@ -1460,7 +1460,7 @@ function GezelSettingsPanel({
       {effectiveProvider === 'copilot' && (
         <SettingKeys
           label="Sandbox"
-          description="Deny the Copilot CLI's built-in tools (bash, web_fetch, file edit, grep) and force this crew member through our MCP tools."
+          description="Deny the Copilot CLI's built-in tools (bash, web_fetch, file edit, grep) and force this crew member through our MCP tools. Off takes effect only at the Unrestricted security level."
           options={[
             { value: 'default', label: 'Inherit' },
             { value: 'on', label: 'On' },
@@ -1476,7 +1476,7 @@ function GezelSettingsPanel({
       {effectiveProvider === 'codex-cli' && (
         <SettingKeys
           label="Access"
-          description="Override this crew member's Codex execution posture. A project-level choice still takes precedence."
+          description="Override this crew member's Codex execution posture. A project-level choice still takes precedence. Full, and Codex's own shell, take effect only at the Unrestricted security level."
           options={[
             { value: 'inherit', label: 'Inherit' },
             { value: 'plan', label: 'Plan' },

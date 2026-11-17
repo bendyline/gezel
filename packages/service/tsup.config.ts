@@ -120,6 +120,10 @@ export default defineConfig({
     'providers/audio/kokoro-worker': 'src/providers/audio/kokoro-worker.ts',
     // Portable guest execution must never occupy the daemon/Electron event loop.
     'scripts/quickjs-worker': 'src/scripts/quickjs-worker.ts',
+    // The website connector's page capture: the only code that drives a
+    // browser at live web pages. A child process of its own, so the daemon
+    // cannot have its Chromium launch patched, and stopping it is a kill.
+    'page-capture/capture-worker': 'src/page-capture/capture-worker.ts',
     // Standalone subpath (`@bendyline/gezel-service/handboek`) so the CLI's
     // static-site export can run the documentation engine without importing
     // the whole daemon.
