@@ -79,6 +79,7 @@
     "build": "tsup",
     "build:handboek-gezk": "tsx scripts/build-handboek-gezk.ts",
     "connectors:draft-spectral": "tsx scripts/draft-spectral-connector.ts",
+    "connectors:export-credential": "tsx scripts/export-connector-credential.ts",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

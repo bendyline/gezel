@@ -633,6 +633,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   useEffect(() => {
     setFileTreeFold((current) => (current && current.tab !== tab ? null : current));
   }, [tab]);
+  // A folder another tab asked to show in Artifacts (a connection's Open).
+  // The ask lasts one visit, like the fold above.
+  const [artifactsReveal, setArtifactsReveal] = useState<{
+    path: string;
+    requestId: number;
+  } | null>(null);
+  const artifactsRevealSeq = useRef(0);
+  useEffect(() => {
+    if (tab !== 'artifacts') setArtifactsReveal(null);
+  }, [tab]);
   const [workspaceFiles, setWorkspaceFiles] = useState<FileEntry[]>([]);
   const [workspaceHtmlFiles, setWorkspaceHtmlFiles] = useState<string[]>([]);
   const [artifactFiles, setArtifactFiles] = useState<FileEntry[]>([]);
@@ -1746,6 +1756,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     },
     [selected, focusFile],
   );
+
+  // Show a folder in the Artifacts tab: its folders opened, its row marked
+  // and scrolled into view. A file already open there stays open.
+  const openArtifactsFolder = useCallback((path: string) => {
+    artifactsRevealSeq.current += 1;
+    setArtifactsReveal({ path, requestId: artifactsRevealSeq.current });
+    setTab('artifacts');
+  }, []);
 
   const allowOutsideInMarkdownEditing = useCallback(
     async (entry: FileEntry, source: FileTab) => {
@@ -3392,6 +3410,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       collapseTreeRequest={
                         fileTreeFold?.tab === fileTab ? fileTreeFold.requestId : null
                       }
+                      reveal={fileTab === 'artifacts' ? artifactsReveal : null}
                       entries={visibleActiveEntries}
                       truncated={
                         (fileTab === 'workspace' ? workspaceTruncated : artifactsTruncated) &&
@@ -3722,6 +3741,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             <ProjectConnectionsTab
                               project={selected}
                               onProjectChange={setSelected}
+                              onOpenFolder={openArtifactsFolder}
                             />
                           </ProjectPaneBoundary>
                           <ProjectPaneBoundary>

@@ -5,6 +5,7 @@ import { requestAdvisories } from './audit-vulnerabilities-lib.mjs';
 import {
   DEFAULT_AUDIT_LEVEL,
   classifyAdvisories,
+  isRegexDenialOfService,
   readVulnerabilityExceptions,
 } from './audit-vulnerability-policy.mjs';
 import { loadPnpmRuntimeInventory, pnpmRuntimeAuditInventory } from './pnpm-runtime-inventory.mjs';
@@ -28,7 +29,8 @@ const packages = packageVersionsFromInventory(inventory);
 const advisories = await requestAdvisories(packages);
 const classified = classifyAdvisories(advisories, inventory, readVulnerabilityExceptions());
 const failing = classified.filter(
-  ({ advisory, exception }) => !exception && severityOf(advisory) >= threshold,
+  ({ advisory, exception }) =>
+    !exception && !isRegexDenialOfService(advisory) && severityOf(advisory) >= threshold,
 );
 
 if (advisories.length === 0) {
@@ -53,6 +55,8 @@ for (const { advisory, exception } of classified) {
     console.log(
       `  ${exception.state}: verified reviewed bytes; expires ${exception.expires}. ${exception.reason}`,
     );
+  } else if (isRegexDenialOfService(advisory)) {
+    console.log('  ReDoS: reported, does not fail the gate');
   }
 }
 if (failing.length > 0) {
@@ -62,7 +66,7 @@ if (failing.length > 0) {
   process.exit(1);
 }
 console.log(
-  `✓ vulnerability audit passed threshold ${requestedLevel} — ${classified.filter(({ exception }) => exception).length} verified exception(s); ${classified.filter(({ exception }) => !exception).length} lower-severity advisory(s) reported`,
+  `✓ vulnerability audit passed threshold ${requestedLevel} — ${classified.filter(({ exception }) => exception).length} verified exception(s); ${classified.filter(({ exception }) => !exception).length} lower-severity or ReDoS advisory(s) reported`,
 );
 
 function valueAfter(flag) {

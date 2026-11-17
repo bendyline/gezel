@@ -67,6 +67,16 @@ import { SpectralComponentAdapter } from './drivers/spectral-component.js';
 import { SpectralConnectorAdapter } from './drivers/spectral.js';
 import { ReconnectRequiredError } from './natives/oauth-session.js';
 import {
+  AccountMismatchError,
+  type AccountProvider,
+  accountAuthParams,
+  accountProviderFor,
+  expectedAccountFrom,
+  isExpectedAccount,
+  signedInAccounts,
+  withAccountScopes,
+} from './oauth-account.js';
+import {
   type LongLivedExchange,
   type OAuthEndpoints,
   buildAuthorizeUrl,
@@ -79,12 +89,19 @@ import {
   resolveOAuthClient,
   validateOAuthEndpoints,
 } from './oauth.js';
+import { countCorpusRecords } from './record-count.js';
 import {
   NATIVE_ADAPTERS,
   NATIVE_ADAPTER_EXTRAS,
   connectorCredentialName,
   connectorSecretKey,
 } from './registry.js';
+import {
+  type StoredData,
+  connectionDataTargets,
+  deleteTargets,
+  measureTargets,
+} from './remove-data.js';
 import { connectorCorpusStorage } from './storage.js';
 import {
   type AdapterDeps,
@@ -98,6 +115,7 @@ import {
   type SyncTrigger,
   isObservationRecord,
 } from './types.js';
+import { type Unreachable, describeUnreachable, unreachableFrom } from './unreachable.js';
 import {
   type PruneInput,
   type PruneResult,
@@ -298,6 +316,12 @@ export interface BindingSyncResult<Cur = unknown> {
   deferred?: boolean;
   /** Hard failure (auth / list) message, when the whole pass aborted. */
   error?: string;
+  /**
+   * Every failure this pass was the network: no request reached the service
+   * (no network at all, or its host did not answer). The connection is
+   * waiting, not broken; what did land stays.
+   */
+  unreachable?: Unreachable;
 }
 
 /** Persisted shape of a per-scope cursor envelope. */
@@ -558,6 +582,16 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
   };
   // Legacy (non-scoped) mode threads one flat cursor through the pass.
   let flatCursor: Cur | undefined = opts.cursor;
+  // Whether the pass's failures were all the network (see `unreachable`).
+  const network = { failures: 0, other: 0, first: null as Unreachable | null };
+  const classify = (err: unknown): Unreachable | null => {
+    const u = unreachableFrom(err);
+    if (u) {
+      network.failures++;
+      network.first ??= u;
+    } else network.other++;
+    return u;
+  };
 
   try {
     await adapter.ensureAuth();
@@ -601,7 +635,12 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
           if (err instanceof ReconnectRequiredError) throw err;
           // One broken feed, calendar, or folder must not stop the others:
           // this scope keeps its cursor and the rest of the pass continues.
-          const message = err instanceof Error ? err.message : String(err);
+          const u = classify(err);
+          const message = u
+            ? describeUnreachable(u)
+            : err instanceof Error
+              ? err.message
+              : String(err);
           failedScopes.push({ scope, message });
           result.errors++;
           log.warn(`${adapter.typeId} ${scope || '(default)'}: listing failed: ${message}`);
@@ -705,6 +744,7 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
             if (err instanceof PassStoppedError) throw err;
             scopeErrors++;
             result.errors++;
+            classify(err);
             // Only a record that fails on its own counts toward giving up on
             // it. A dropped connection or a timeout (after the retries) fails
             // every record after it the same way; counting those abandoned
@@ -760,6 +800,7 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
           } catch (err) {
             scopeErrors++;
             result.errors++;
+            network.other++;
             log.warn(`record sweep failed (${adapter.typeId} ${scope}): ${err}`);
           }
         }
@@ -781,6 +822,7 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
           } catch (err) {
             scopeErrors++;
             result.errors++;
+            network.other++;
             log.warn(`full-listing reconcile failed (${adapter.typeId} ${scope}): ${err}`);
           }
         }
@@ -852,13 +894,15 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
         `${adapter.typeId}: throttled outside a list call (HTTP ${err.status}); backing off`,
       );
     } else {
-      result.error = err instanceof Error ? err.message : String(err);
+      const u = classify(err);
+      result.error = u ? describeUnreachable(u) : err instanceof Error ? err.message : String(err);
       result.errors++;
     }
     result.cursor = scoped ? (envelope as unknown as Cur) : flatCursor;
   } finally {
     await adapter.close().catch(() => {});
   }
+  if (network.first && network.other === 0) result.unreachable = network.first;
   return result;
 }
 
@@ -1032,6 +1076,8 @@ export interface BindConnectorInput {
   /** Internal provenance pin used by OAuth completion and migrations. */
   sourceId?: string;
   version?: string;
+  /** The account an OAuth sign-in reached, as the provider reported it. */
+  account?: string;
 }
 
 export interface ConnectorStatus {
@@ -1040,9 +1086,13 @@ export interface ConnectorStatus {
     id: string;
     type: string;
     displayName?: string;
+    /** The account the person signed in with (Google, Microsoft). */
+    account?: string;
     completeness?: string;
     lastSyncedAt?: string;
     lastError?: string;
+    /** Waiting for the network since `since` (not an error). */
+    unreachable?: { since: string; offline: boolean; host?: string };
     disabled?: boolean;
     disabledReason?: 'user' | 'emergency-stop';
     /** `device` for bindings the live host runs (cameras). */
@@ -1052,6 +1102,12 @@ export interface ConnectorStatus {
     live?: LiveBindingStatus;
     /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
     backoffUntil?: string;
+    /** Where its records land, relative to the project's artifacts (`data/<name>`). */
+    corpusDir?: string;
+    /** Records a document corpus holds; climbs while a pass runs. */
+    items?: number;
+    /** A pass is running, or another is due right after it. */
+    syncing?: boolean;
     /** One short line the adapter offers (`Saved 40 of about 150 pages`). */
     summary?: string;
     /**
@@ -1098,9 +1154,13 @@ interface PendingConnectorOAuth {
   redirectUri: string;
   verifier: string;
   createdAt: number;
-  completion?: { bindingId: string; credential: string };
+  completion?: { bindingId: string; credential: string; account?: string };
   /** Re-linking this existing binding: the new grant replaces its credential. */
   relinkBindingId?: string;
+  /** A provider whose ID token names the account that signed in. */
+  accountProvider?: AccountProvider;
+  /** The account this link is for; a sign-in that reaches another is refused. */
+  expectedAccount?: string;
 }
 
 /** What a connection check found: a trial pass that writes nothing the project keeps. */
@@ -1124,6 +1184,13 @@ export interface ConnectionCheck {
 /** The longest provider `Retry-After` a binding's backoff honors. */
 const MAX_RETRY_AFTER_MS = 6 * 60 * 60_000;
 
+/**
+ * While a connection cannot reach its service: 1m → 2m → 5m, then every 5m.
+ * An offline request fails at once and costs nothing, and a network that
+ * comes back is noticed sooner still (`retryWaiting`).
+ */
+const UNREACHABLE_RETRY_MS = [60_000, 120_000, 300_000] as const;
+
 /** Rate-limit backoff ladder: 1m → 5m → 15m → 30m (jittered). */
 const RATE_LIMIT_BACKOFF_MS = [60_000, 300_000, 900_000, 1_800_000] as const;
 
@@ -1144,9 +1211,19 @@ export class ConnectorManager {
    * a restart resetting backoff costs at most one extra request, and keeping
    * it here avoids project.json churn on every rate-limit event.
    */
-  private readonly backoff = new Map<string, { consecutive: number; nextEligibleAt: number }>();
+  private readonly backoff = new Map<
+    string,
+    { consecutive: number; nextEligibleAt: number; unreachable?: boolean }
+  >();
   /** The running pass per binding, so it can be stopped from outside. */
   private readonly passAborts = new Map<string, { projectId: string; ctl: AbortController }>();
+  /**
+   * Records in a running pass's corpus: what it held when the pass started
+   * and the new records written since, so the count climbs while it syncs.
+   */
+  private readonly passProgress = new Map<string, { base: number; added: number }>();
+  /** Counts for corpora whose `_meta.json` holds none (synced before counts were kept). */
+  private readonly recordCounts = new Map<string, number>();
   /** Scheduled follow-up passes per binding (`deferred`). */
   private readonly continuations = new Map<
     string,
@@ -1280,6 +1357,35 @@ export class ConnectorManager {
     log.info(`sync failed (${bindingId}); next autonomous attempt in ${Math.round(delay / 1000)}s`);
   }
 
+  /** The service could not be reached: try again soon, without the failure ladder. */
+  private noteUnreachable(bindingId: string, u: Unreachable): void {
+    const prior = this.backoff.get(bindingId);
+    const consecutive = (prior?.unreachable ? prior.consecutive : 0) + 1;
+    const delay = backoffDelayMs(consecutive - 1, UNREACHABLE_RETRY_MS);
+    this.backoff.set(bindingId, {
+      consecutive,
+      nextEligibleAt: Date.now() + delay,
+      unreachable: true,
+    });
+    log.info(
+      `${bindingId}: ${u.offline ? 'offline' : `cannot reach ${u.host ?? 'the service'} (${u.code})`}; trying again in ${Math.round(delay / 1000)}s`,
+    );
+  }
+
+  /**
+   * The network came back (or the host woke): connections waiting for it may
+   * try again now instead of waiting out their retry delay.
+   */
+  retryWaiting(): number {
+    let cleared = 0;
+    for (const [id, entry] of this.backoff) {
+      if (!entry.unreachable) continue;
+      this.backoff.delete(id);
+      cleared++;
+    }
+    return cleared;
+  }
+
   private withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
     return this.locks.run(projectId, fn);
   }
@@ -1352,6 +1458,7 @@ export class ConnectorManager {
         config: input.config ?? {},
         driver: type.driver,
         ...(input.displayName ? { displayName: input.displayName } : {}),
+        ...(input.account ? { account: input.account } : {}),
       };
       // A `script` connector's fetch script reaches its credential parent-side
       // via `gezel.http.authed` — grant the named credential on the project so
@@ -1515,11 +1622,12 @@ export class ConnectorManager {
       relinkBindingId?: string;
     },
   ): Promise<{ authUrl: string; state: string }> {
+    let relinking: ProjectConnectorBinding | undefined;
     if (input.relinkBindingId) {
-      const existing = (await this.reread(project)).connectors?.find(
+      relinking = (await this.reread(project)).connectors?.find(
         (b) => b.id === input.relinkBindingId,
       );
-      if (!existing || existing.type !== input.type) {
+      if (!relinking || relinking.type !== input.type) {
         throw new Error(`no ${input.type} connection ${input.relinkBindingId} to re-link`);
       }
     }
@@ -1561,10 +1669,25 @@ export class ConnectorManager {
       getSecret: (key) => this.opts.secrets.get(key),
     });
     const tokenAuth = parseTokenAuth(shape.tokenAuth);
+    const typeScopes = (shape.scopes ?? '').split(' ').filter(Boolean);
+    // Google and Microsoft hand over whichever account the browser is signed
+    // in to. Name the account this link is for (or make the person pick one),
+    // and ask for the ID token that says which account signed in.
+    const accountProvider = accountProviderFor(shape.authorizeUrl) ?? undefined;
+    const hinted = input.loginHint?.includes('@') ? input.loginHint.trim() : undefined;
+    const expectedAccount = relinking
+      ? (expectedAccountFrom(relinking.config) ?? relinking.account)
+      : (expectedAccountFrom(input.config) ?? hinted);
+    const signIn = accountProvider
+      ? accountAuthParams(accountProvider, shape.authParams, expectedAccount)
+      : {
+          ...(shape.authParams ? { authParams: shape.authParams } : {}),
+          ...(input.loginHint ? { loginHint: input.loginHint } : {}),
+        };
     const endpoints: OAuthEndpoints = validateOAuthEndpoints({
       authEndpoint: shape.authorizeUrl,
       tokenEndpoint: shape.tokenUrl,
-      scopes: (shape.scopes ?? '').split(' ').filter(Boolean),
+      scopes: accountProvider ? withAccountScopes(typeScopes, accountProvider) : typeScopes,
       ...(tokenAuth ? { clientAuth: tokenAuth } : {}),
     });
     // Validated up front so a malformed manifest fails at link start, before
@@ -1586,6 +1709,8 @@ export class ConnectorManager {
       ...(longLivedExchange ? { longLivedExchange } : {}),
       ...(shape.longLived === true ? { longLived: true } : {}),
       ...(input.relinkBindingId ? { relinkBindingId: input.relinkBindingId } : {}),
+      ...(accountProvider ? { accountProvider } : {}),
+      ...(accountProvider && expectedAccount ? { expectedAccount } : {}),
       redirectUri: input.redirectUri,
       verifier,
       createdAt: Date.now(),
@@ -1596,8 +1721,8 @@ export class ConnectorManager {
       redirectUri: input.redirectUri,
       state,
       challenge,
-      ...(shape.authParams ? { extraParams: shape.authParams } : {}),
-      ...(input.loginHint ? { loginHint: input.loginHint } : {}),
+      ...(signIn.authParams ? { extraParams: signIn.authParams } : {}),
+      ...(signIn.loginHint ? { loginHint: signIn.loginHint } : {}),
     });
     return { authUrl, state };
   }
@@ -1623,6 +1748,7 @@ export class ConnectorManager {
         redirectUri: pending.redirectUri,
         ...(this.opts.fetch ? { fetchImpl: this.opts.fetch } : {}),
       });
+      const account = this.signedInAccount(pending, tokens.idToken, args.state);
       let credential: string;
       if (pending.longLivedExchange) {
         // Meta issues no refresh token: trade the short-lived token for the
@@ -1677,6 +1803,7 @@ export class ConnectorManager {
       pending.completion = {
         bindingId: pending.relinkBindingId ?? `${pending.type}:${randomUUID().slice(0, 8)}`,
         credential,
+        ...(account ? { account } : {}),
       };
     }
     if (pending.relinkBindingId) {
@@ -1684,6 +1811,7 @@ export class ConnectorManager {
         project,
         pending.relinkBindingId,
         pending.completion.credential,
+        pending.completion.account,
       );
       this.pendingOAuth.delete(args.state);
       return binding;
@@ -1696,9 +1824,43 @@ export class ConnectorManager {
       config: pending.config,
       credential: pending.completion.credential,
       bindingId: pending.completion.bindingId,
+      ...(pending.completion.account ? { account: pending.completion.account } : {}),
     });
     this.pendingOAuth.delete(args.state);
     return binding;
+  }
+
+  /**
+   * The account a Google or Microsoft sign-in reached. Throws, keeping
+   * nothing, when it is not the account the link is for: a browser signed in
+   * to the person's own mailbox otherwise connects that one in its place.
+   */
+  private signedInAccount(
+    pending: PendingConnectorOAuth,
+    idToken: string | undefined,
+    state: string,
+  ): string | undefined {
+    if (!pending.accountProvider) return undefined;
+    const accounts = signedInAccounts(idToken, pending.clientId);
+    if (!accounts) {
+      log.warn(
+        `${pending.type}: the sign-in did not say which account it reached; the address was only suggested to the provider`,
+      );
+      return undefined;
+    }
+    const expected = pending.expectedAccount;
+    if (expected && !isExpectedAccount(accounts, expected)) {
+      this.pendingOAuth.delete(state);
+      throw new AccountMismatchError(
+        pending.accountProvider,
+        accounts[0]!,
+        expected,
+        Boolean(pending.relinkBindingId),
+      );
+    }
+    return expected
+      ? (accounts.find((a) => isExpectedAccount([a], expected)) ?? accounts[0])
+      : accounts[0];
   }
 
   /**
@@ -1813,6 +1975,7 @@ export class ConnectorManager {
     project: ProjectDetail,
     bindingId: string,
     credential: string,
+    account?: string,
   ): Promise<ProjectConnectorBinding> {
     this.cancelPasses({ bindingId }, 'the connection is being re-linked');
     return this.withLock(project.id, async () => {
@@ -1824,7 +1987,8 @@ export class ConnectorManager {
       }
       await this.opts.secrets.set(connectorSecretKey(binding.type, binding.id), credential);
       this.backoff.delete(bindingId);
-      const { lastError: _dropped, ...rest } = binding;
+      const { lastError: _dropped, ...kept } = binding;
+      const rest = account ? { ...kept, account } : kept;
       await this.opts.store.updateProject(project.id, {
         connectors: (current.connectors ?? []).map((b) => (b.id === bindingId ? rest : b)),
       });
@@ -1847,14 +2011,57 @@ export class ConnectorManager {
     }
   }
 
-  /** Remove a binding + its stored credential (and its origin allowlist entry). */
-  async unbind(project: ProjectDetail, bindingId: string): Promise<void> {
+  /**
+   * Where a connection's downloaded data is: its corpus folder and its held
+   * records. Throws when another connection writes into the same folder.
+   */
+  private async dataTargets(
+    project: ProjectDetail,
+    bindings: ProjectConnectorBinding[],
+    binding: ProjectConnectorBinding,
+  ): Promise<string[]> {
+    const others = bindings.filter((b) => b.id !== binding.id);
+    return connectionDataTargets({
+      artifactsDir: this.opts.store.projectArtifactsDir(project.id),
+      quarantineDir: this.opts.store.projectQuarantineDir(project.id),
+      corpusDir: corpusDirFor(bindings, binding),
+      type: binding.type,
+      // Resolved against the list that still holds this binding, so a binding
+      // with no persisted folder is not resolved into the one being freed.
+      otherCorpusDirs: others.map((b) => corpusDirFor(bindings, b)),
+      typeShared: others.some((b) => b.type === binding.type),
+    });
+  }
+
+  /** How much a connection has downloaded: files and bytes, held records included. */
+  async storedData(project: ProjectDetail, bindingId: string): Promise<StoredData> {
+    const bindings = (await this.reread(project)).connectors ?? [];
+    const binding = bindings.find((b) => b.id === bindingId);
+    if (!binding) throw new Error(`no connector binding ${bindingId}`);
+    return measureTargets(await this.dataTargets(project, bindings, binding));
+  }
+
+  /**
+   * Remove a binding + its stored credential (and its origin allowlist
+   * entry). Its downloaded data stays unless `deleteData` is set; then the
+   * corpus folder and its held records go too, and the search index is
+   * refreshed so nothing from them stays findable.
+   */
+  async unbind(
+    project: ProjectDetail,
+    bindingId: string,
+    opts: { deleteData?: boolean } = {},
+  ): Promise<{ deleted?: StoredData }> {
     // Stop a running pass first: it holds the project lock this needs.
     this.cancelPasses({ bindingId }, 'the connection was removed');
     return this.withLock(project.id, async () => {
       const current = await this.reread(project);
       const existing = current.connectors ?? [];
       const binding = existing.find((b) => b.id === bindingId);
+      // Checked before anything is removed: a folder another connection
+      // shares is refused with the connection still in place.
+      const targets =
+        opts.deleteData && binding ? await this.dataTargets(project, existing, binding) : [];
       if (binding) {
         await this.opts.secrets
           .delete(connectorSecretKey(binding.type, binding.id))
@@ -1875,14 +2082,35 @@ export class ConnectorManager {
       // Private working state (a crawl list, a saved sign-in) goes with it.
       const stateDir = this.stateDirFor(project.id, bindingId);
       if (stateDir) await rm(stateDir, { recursive: true, force: true }).catch(() => {});
+      let deleted: StoredData | undefined;
+      let deleteError: unknown;
+      if (targets.length > 0) {
+        deleted = await deleteTargets(targets).catch((err: unknown) => {
+          deleteError = err;
+          return undefined;
+        });
+      }
       await this.opts.store.historyManager
         ?.log({
           kind: 'project.connector.unbound',
           projectId: project.id,
-          summary: `Connector unbound: ${binding?.displayName ?? bindingId}`,
+          summary: `Connector unbound: ${binding?.displayName ?? bindingId}${
+            deleted ? ` (deleted ${deleted.files} downloaded file(s))` : ''
+          }`,
         })
         .catch(() => {});
       this.opts.onBindingsChanged?.(project.id);
+      // The index forgets records only on a pass, and a pass otherwise runs
+      // only after a sync that wrote something.
+      if (targets.length > 0) this.opts.contentIndex?.refreshArtifacts(project.id).catch(() => {});
+      if (deleteError) {
+        throw new Error(
+          `The connection was removed, but some of what it downloaded could not be deleted: ${
+            deleteError instanceof Error ? deleteError.message : String(deleteError)
+          }`,
+        );
+      }
+      return opts.deleteData ? { deleted: deleted ?? { files: 0, bytes: 0 } } : {};
     });
   }
 
@@ -1999,6 +2227,20 @@ export class ConnectorManager {
       }
       if (stats.length > 0) tablesByBinding.set(b.id, stats);
     }
+    // A document corpus's record count: climbing while a pass runs, else the
+    // count the last pass stored.
+    const itemsByBinding = new Map<string, number>();
+    for (const b of bindings) {
+      if (b.driver === 'device' || tablesByBinding.has(b.id)) continue;
+      if (manifestByType.get(b.type)?.normalize.kind === 'observations') continue;
+      const progress = this.passProgress.get(b.id);
+      const items = progress
+        ? progress.base + progress.added
+        : await this.storedRecordCount(storageDir, corpusDirFor(bindings, b), b.id).catch(
+            () => undefined,
+          );
+      if (items !== undefined) itemsByBinding.set(b.id, items);
+    }
 
     const live = new Map((this.opts.liveStatus?.(project.id) ?? []).map((s) => [s.bindingId, s]));
     return {
@@ -2012,9 +2254,11 @@ export class ConnectorManager {
           id: b.id,
           type: b.type,
           ...(b.displayName ? { displayName: b.displayName } : {}),
+          ...(b.account ? { account: b.account } : {}),
           ...(completeness ? { completeness } : {}),
           ...(b.lastSyncedAt ? { lastSyncedAt: b.lastSyncedAt } : {}),
           ...(b.lastError ? { lastError: b.lastError } : {}),
+          ...(b.unreachable ? { unreachable: b.unreachable } : {}),
           ...(b.disabled ? { disabled: b.disabled } : {}),
           ...(b.disabledReason ? { disabledReason: b.disabledReason } : {}),
           // A device binding's settings are what its card edits; synced
@@ -2025,6 +2269,9 @@ export class ConnectorManager {
           ...(b.type === 'website' ? { config: b.config } : {}),
           ...(liveStatus ? { live: liveStatus } : {}),
           ...(backoffAt ? { backoffUntil: new Date(backoffAt).toISOString() } : {}),
+          ...(b.driver === 'device' ? {} : { corpusDir: corpusDirFor(bindings, b) }),
+          ...(itemsByBinding.has(b.id) ? { items: itemsByBinding.get(b.id) } : {}),
+          ...(this.passProgress.has(b.id) || this.continuations.has(b.id) ? { syncing: true } : {}),
           ...(tables ? { tables } : {}),
           ...(summaries.has(b.id) ? { summary: summaries.get(b.id) } : {}),
         };
@@ -2251,6 +2498,7 @@ export class ConnectorManager {
   ): Promise<BindingSyncResult> {
     let binding = pinned;
     const abort = new AbortController();
+    let progress: { base: number; added: number } | null = null;
     this.passAborts.get(binding.id)?.ctl.abort(new Error('superseded'));
     this.passAborts.set(binding.id, { projectId: project.id, ctl: abort });
     try {
@@ -2303,6 +2551,12 @@ export class ConnectorManager {
                 : {}),
             })
           : null;
+      // A document corpus counts its new records as they land.
+      progress = observation
+        ? null
+        : { base: await this.storedRecordCount(storageDir, corpusDir, binding.id), added: 0 };
+      if (progress) this.passProgress.set(binding.id, progress);
+      const counting = progress;
 
       const r = await syncWithAdapter<unknown, NormalizedRecord | ConnectorRecord>(adapter, {
         storageDir,
@@ -2337,7 +2591,15 @@ export class ConnectorManager {
                 return { status: rows > 0 ? 'written' : 'exists' };
               },
             }
-          : {}),
+          : {
+              write: async (input) => {
+                const w = await defaultWriteRecord(
+                  input as Parameters<typeof defaultWriteRecord>[0],
+                );
+                if (counting && w.status === 'written') counting.added++;
+                return w;
+              },
+            }),
       });
 
       // Seal open parts before anything reads the corpus. Compaction to
@@ -2352,13 +2614,27 @@ export class ConnectorManager {
         );
       }
       if (r.rateLimited) this.noteRateLimit(binding.id, r.retryAfterMs);
+      else if (r.unreachable) this.noteUnreachable(binding.id, r.unreachable);
       else if (r.error) this.noteFailure(binding.id);
       else this.backoff.delete(binding.id);
       const lastSyncedAt = new Date().toISOString();
-      if (r.error) {
+      if (r.unreachable) {
+        // Waiting for the network is not an error: what landed stays, the
+        // cursor holds where it failed, and the next pass that gets through
+        // clears it. `since` keeps the moment it started.
+        await this.persistBinding(project.id, binding.id, {
+          cursor: r.cursor,
+          unreachable: {
+            since: binding.unreachable?.since ?? lastSyncedAt,
+            offline: r.unreachable.offline,
+            ...(r.unreachable.host ? { host: r.unreachable.host } : {}),
+          },
+        }).catch(() => {});
+      } else if (r.error) {
         await this.persistBinding(project.id, binding.id, {
           cursor: r.cursor,
           lastError: r.error,
+          unreachable: null,
         }).catch(() => {});
       } else {
         // A pass that landed most of its records is still a sync, but the
@@ -2371,13 +2647,22 @@ export class ConnectorManager {
           ...(partialNote ? { lastError: partialNote } : {}),
         });
       }
+      // Recounted only when the pass changed the corpus; a quiet pass keeps
+      // the count it started from.
+      const records = counting
+        ? r.written + r.quarantined + r.pruned > 0
+          ? await countCorpusRecords(storageDir, corpusDir)
+          : counting.base
+        : undefined;
       await this.writeCorpusMeta(storageDir, corpusDir, binding, resolved.manifest, {
         scopes: r.scopes ?? [],
         ...(r.abandoned?.length ? { abandoned: r.abandoned } : {}),
         ...(r.truncated?.length ? { truncated: r.truncated } : {}),
         ...(r.error ? {} : { lastSyncedAt }),
         ...(observationSummary ? { observations: observationSummary } : {}),
+        ...(records !== undefined ? { records } : {}),
       }).catch(() => {});
+      this.recordCounts.delete(binding.id);
       // Corpus records live under artifacts, outside the workspace indexer's
       // walk — the dedicated artifacts index is what makes them searchable.
       // Fire-and-forget; the façade debounces per project.
@@ -2415,11 +2700,27 @@ export class ConnectorManager {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn(`connector sync failed (${binding.id}): ${message}`);
-      this.noteFailure(binding.id);
-      await this.persistBinding(project.id, binding.id, {
-        cursor: binding.cursor,
-        lastError: message,
-      }).catch(() => {});
+      // Records may have landed before the failure; count them afresh.
+      if (progress && progress.added > 0) this.recordCounts.set(binding.id, -1);
+      const u = unreachableFrom(err);
+      if (u) {
+        this.noteUnreachable(binding.id, u);
+        await this.persistBinding(project.id, binding.id, {
+          cursor: binding.cursor,
+          unreachable: {
+            since: binding.unreachable?.since ?? new Date().toISOString(),
+            offline: u.offline,
+            ...(u.host ? { host: u.host } : {}),
+          },
+        }).catch(() => {});
+      } else {
+        this.noteFailure(binding.id);
+        await this.persistBinding(project.id, binding.id, {
+          cursor: binding.cursor,
+          lastError: message,
+          unreachable: null,
+        }).catch(() => {});
+      }
       return {
         written: 0,
         quarantined: 0,
@@ -2427,11 +2728,40 @@ export class ConnectorManager {
         pruned: 0,
         errors: 1,
         cursor: binding.cursor,
-        error: message,
+        error: u ? describeUnreachable(u) : message,
+        ...(u ? { unreachable: u } : {}),
       };
     } finally {
       if (this.passAborts.get(binding.id)?.ctl === abort) this.passAborts.delete(binding.id);
+      if (progress && this.passProgress.get(binding.id) === progress) {
+        this.passProgress.delete(binding.id);
+      }
     }
+  }
+
+  /**
+   * The records a document corpus holds: `_meta.json`'s count, else one walk
+   * remembered until the next pass writes the count. -1 in the memo means a
+   * failed pass may have changed the corpus, so it is walked again.
+   */
+  private async storedRecordCount(
+    storageDir: string,
+    corpusDir: string,
+    bindingId: string,
+  ): Promise<number> {
+    const memo = this.recordCounts.get(bindingId);
+    if (memo === undefined) {
+      const meta = await resolveInside(storageDir, `${corpusDir}/_meta.json`)
+        .then((abs) => readFile(abs, 'utf8'))
+        .then((text) => JSON.parse(text) as { records?: unknown })
+        .catch(() => null);
+      if (typeof meta?.records === 'number') return meta.records;
+    } else if (memo >= 0) {
+      return memo;
+    }
+    const counted = await countCorpusRecords(storageDir, corpusDir);
+    this.recordCounts.set(bindingId, counted);
+    return counted;
   }
 
   /**
@@ -2461,6 +2791,8 @@ export class ConnectorManager {
       observations?: ObservationWriteSummary;
       abandoned?: { scope: string; id: string }[];
       truncated?: { scope: string; dropped: number; limit: number }[];
+      /** Records the document corpus holds after the pass. */
+      records?: number;
     },
   ): Promise<void> {
     const abs = await resolveInside(storageDir, `${corpusDir}/_meta.json`);
@@ -2509,6 +2841,7 @@ export class ConnectorManager {
             rowsLastPass: pass.observations.rowsWritten,
           }
         : {}),
+      ...(pass.records !== undefined ? { records: pass.records } : {}),
       ...(skippedRecords.length > 0 ? { skippedRecords } : {}),
       // The last pass's truncation only: a gezel reading the corpus should
       // know it is missing older records, not just a smaller count.
@@ -2521,7 +2854,14 @@ export class ConnectorManager {
   private async persistBinding(
     projectId: string,
     bindingId: string,
-    patch: { cursor?: unknown; lastSyncedAt?: string; lastError?: string; corpusDir?: string },
+    patch: {
+      cursor?: unknown;
+      lastSyncedAt?: string;
+      lastError?: string;
+      corpusDir?: string;
+      /** Set while the service cannot be reached; null clears it. */
+      unreachable?: ProjectConnectorBinding['unreachable'] | null;
+    },
   ): Promise<void> {
     const project = await this.opts.store.getProject(projectId);
     if (!project?.connectors) return;
@@ -2532,9 +2872,12 @@ export class ConnectorManager {
             ...(patch.cursor !== undefined ? { cursor: patch.cursor } : {}),
             ...(patch.corpusDir ? { corpusDir: patch.corpusDir } : {}),
             ...(patch.lastSyncedAt
-              ? { lastSyncedAt: patch.lastSyncedAt, lastError: undefined }
+              ? { lastSyncedAt: patch.lastSyncedAt, lastError: undefined, unreachable: undefined }
               : {}),
             ...(patch.lastError ? { lastError: patch.lastError } : {}),
+            ...(patch.unreachable !== undefined
+              ? { unreachable: patch.unreachable ?? undefined }
+              : {}),
           }
         : b,
     );

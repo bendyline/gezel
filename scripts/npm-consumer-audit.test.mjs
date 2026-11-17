@@ -3,7 +3,11 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { blockingAdvisories, readAuditAllowlist } from './npm-consumer-audit.mjs';
+import {
+  blockingAdvisories,
+  readAuditAllowlist,
+  regexDenialAdvisories,
+} from './npm-consumer-audit.mjs';
 
 const REPORT = {
   vulnerabilities: {
@@ -88,4 +92,28 @@ test('the allowlist requires a reason and an expiry', () => {
 
 test('the committed allowlist parses', () => {
   assert.ok(Array.isArray(readAuditAllowlist()));
+});
+
+test('ReDoS advisories never block, and are listed for the report', () => {
+  const redos = {
+    source: 4,
+    title: 'picomatch vulnerable to ReDoS through single-branch repeated extglobs',
+    url: 'https://github.com/advisories/GHSA-fc5q-39xc-vjpf',
+    severity: 'high',
+    cwe: ['CWE-1333'],
+  };
+  const report = {
+    vulnerabilities: {
+      ...REPORT.vulnerabilities,
+      picomatch: { severity: 'high', via: [redos] },
+    },
+  };
+  assert.deepEqual(
+    blockingAdvisories(report, []).map((a) => a.id),
+    ['GHSA-7q85-xj36-vmfc', 'GHSA-v53p-9fqp-m79j'],
+  );
+  assert.deepEqual(
+    regexDenialAdvisories(report).map((a) => [a.id, a.pkg]),
+    [['GHSA-fc5q-39xc-vjpf', 'picomatch']],
+  );
 });

@@ -345,3 +345,166 @@ describe('long-lived exchange primitives', () => {
     ).rejects.toThrow(/no access token/);
   });
 });
+
+describe('the account a Google or Microsoft sign-in reaches', () => {
+  const GOOGLE_TOKEN = 'https://oauth2.googleapis.com/token';
+  const MS_TOKEN = 'https://login.microsoftonline.com/consumers/oauth2/v2.0/token';
+  const google = () =>
+    manifest({
+      authorizeUrl: 'https://accounts.google.com/o/oauth2/v2/auth',
+      tokenUrl: GOOGLE_TOKEN,
+      scopes: 'https://mail.google.com/',
+      authParams: { access_type: 'offline', prompt: 'consent' },
+    });
+  const microsoft = () =>
+    manifest({
+      authorizeUrl: 'https://login.microsoftonline.com/consumers/oauth2/v2.0/authorize',
+      tokenUrl: MS_TOKEN,
+      scopes: 'offline_access https://graph.microsoft.com/Mail.Read',
+    });
+  const idToken = (claims: Record<string, unknown>) => {
+    const part = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
+    return `${part({ alg: 'RS256' })}.${part({ aud: 'client-abc', ...claims })}.c2ln`;
+  };
+  const tokens = (tokenUrl: string, claims?: Record<string, unknown>) =>
+    stubFetch((url) =>
+      url.origin + url.pathname === tokenUrl
+        ? jsonResponse(200, {
+            access_token: 'acc-tok',
+            refresh_token: 'ref-tok',
+            expires_in: 3600,
+            ...(claims ? { id_token: idToken(claims) } : {}),
+          })
+        : undefined,
+    );
+
+  it('asks for the typed address and for the token that names the account', async () => {
+    const h = harness(google());
+    const { authUrl } = await h.mgr.startOAuth(h.getProject() as never, {
+      type: 'oauth-conn',
+      redirectUri: 'http://127.0.0.1:5000/callback',
+      config: { address: 'test@gmail.com' },
+    });
+    const q = new URL(authUrl).searchParams;
+    expect(q.get('login_hint')).toBe('test@gmail.com');
+    expect(q.get('prompt')).toBe('consent');
+    expect(q.get('scope')).toBe('https://mail.google.com/ openid email');
+  });
+
+  it('with no address to go on, makes the person pick an account', async () => {
+    const g = harness(google());
+    const gq = new URL(
+      (
+        await g.mgr.startOAuth(g.getProject() as never, {
+          type: 'oauth-conn',
+          redirectUri: 'http://127.0.0.1:5000/callback',
+        })
+      ).authUrl,
+    ).searchParams;
+    expect(gq.get('prompt')).toBe('consent select_account');
+    expect(gq.get('login_hint')).toBeNull();
+
+    const m = harness(microsoft());
+    const mq = new URL(
+      (
+        await m.mgr.startOAuth(m.getProject() as never, {
+          type: 'oauth-conn',
+          redirectUri: 'http://127.0.0.1:5000/callback',
+        })
+      ).authUrl,
+    ).searchParams;
+    expect(mq.get('prompt')).toBe('select_account');
+    expect(mq.get('scope')).toBe(
+      'offline_access https://graph.microsoft.com/Mail.Read openid profile email',
+    );
+  });
+
+  it('refuses another account and keeps nothing', async () => {
+    const h = harness(microsoft());
+    tokens(MS_TOKEN, { preferred_username: 'me@live.com', email: 'me@live.com' });
+    const { state } = await h.mgr.startOAuth(h.getProject() as never, {
+      type: 'oauth-conn',
+      redirectUri: 'http://127.0.0.1:5000/callback',
+      config: { address: 'test@outlook.com' },
+    });
+    await expect(
+      h.mgr.completeOAuth(h.getProject() as never, { state, code: 'code-1' }),
+    ).rejects.toThrow(
+      'You signed in to Microsoft as me@live.com, but this connection is for test@outlook.com.',
+    );
+    expect(h.secretMap.size).toBe(0);
+    expect(h.getProject().connectors ?? []).toEqual([]);
+    // The link is spent: retrying the same code cannot slip past the check.
+    await expect(
+      h.mgr.completeOAuth(h.getProject() as never, { state, code: 'code-1' }),
+    ).rejects.toThrow(/state not found/);
+  });
+
+  it('binds the expected account and records it', async () => {
+    const h = harness(google());
+    tokens(GOOGLE_TOKEN, { email: 'test.account@gmail.com' });
+    const { state } = await h.mgr.startOAuth(h.getProject() as never, {
+      type: 'oauth-conn',
+      redirectUri: 'http://127.0.0.1:5000/callback',
+      config: { address: 'testaccount@gmail.com' },
+    });
+    const binding = await h.mgr.completeOAuth(h.getProject() as never, { state, code: 'code-1' });
+    expect(binding.account).toBe('test.account@gmail.com');
+    expect(h.secretMap.size).toBe(1);
+  });
+
+  it('a re-link must reach the account the connection already has', async () => {
+    const h = harness(google());
+    tokens(GOOGLE_TOKEN, { email: 'first@gmail.com' });
+    const first = await h.mgr.startOAuth(h.getProject() as never, {
+      type: 'oauth-conn',
+      redirectUri: 'http://127.0.0.1:5000/callback',
+    });
+    const bound = await h.mgr.completeOAuth(h.getProject() as never, {
+      state: first.state,
+      code: 'code-1',
+    });
+    expect(bound.account).toBe('first@gmail.com');
+
+    vi.unstubAllGlobals();
+    tokens(GOOGLE_TOKEN, { email: 'second@gmail.com' });
+    const relink = await h.mgr.startOAuth(h.getProject() as never, {
+      type: 'oauth-conn',
+      redirectUri: 'http://127.0.0.1:5000/callback',
+      relinkBindingId: bound.id,
+    });
+    expect(new URL(relink.authUrl).searchParams.get('login_hint')).toBe('first@gmail.com');
+    await expect(
+      h.mgr.completeOAuth(h.getProject() as never, { state: relink.state, code: 'code-2' }),
+    ).rejects.toThrow(/Nothing was changed/);
+    const kept = JSON.parse(h.secretMap.get(`connector-oauth-conn:${bound.id}`)!) as {
+      refreshToken: string;
+    };
+    expect(kept.refreshToken).toBe('ref-tok');
+  });
+
+  it('proceeds on the hint alone when the provider names no account', async () => {
+    const h = harness(google());
+    tokens(GOOGLE_TOKEN);
+    const { state } = await h.mgr.startOAuth(h.getProject() as never, {
+      type: 'oauth-conn',
+      redirectUri: 'http://127.0.0.1:5000/callback',
+      config: { address: 'test@gmail.com' },
+    });
+    const binding = await h.mgr.completeOAuth(h.getProject() as never, { state, code: 'code-1' });
+    expect(binding.account).toBeUndefined();
+  });
+
+  it('leaves other providers exactly as they were', async () => {
+    const h = harness(manifest());
+    const { authUrl } = await h.mgr.startOAuth(h.getProject() as never, {
+      type: 'oauth-conn',
+      redirectUri: 'http://127.0.0.1:5000/callback',
+      config: { address: 'test@example.com' },
+    });
+    const q = new URL(authUrl).searchParams;
+    expect(q.get('scope')).toBe('basic');
+    expect(q.get('login_hint')).toBeNull();
+    expect(q.get('prompt')).toBeNull();
+  });
+});

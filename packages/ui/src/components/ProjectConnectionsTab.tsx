@@ -2,7 +2,7 @@ import type { ProjectDetail } from '@bendyline/gezel';
 import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
-import { ConfirmDialog } from './ConfirmDialog.js';
+import { setVisibleInterval } from '../visible-interval.js';
 import {
   ConnectorConfigFields,
   type ConnectorConfigValue,
@@ -11,6 +11,7 @@ import {
 } from './ConnectorConfigFields.js';
 import { ConnectorMark } from './ConnectorMark.js';
 import { OAuthAppSetup, type RegisteredOAuthClient } from './OAuthAppSetup.js';
+import { RemoveConnectionDialog } from './RemoveConnectionDialog.js';
 import { WebsiteBindingRow } from './WebsiteBindingRow.js';
 import { CameraBindingCard } from './cameras/CameraBindingCard.js';
 import {
@@ -19,6 +20,7 @@ import {
   DEFAULT_CAMERA_FORM,
   cameraConfigFromForm,
 } from './cameras/CameraSetupPanel.js';
+import { connectorItemCount, connectorItemNoun, connectorWaitingLine } from './connector-items.js';
 import { connectOAuth } from './connector-link.js';
 import { isOAuthNotConfiguredError, parseOAuthAppRequirement } from './oauth-app-setup.js';
 
@@ -109,9 +111,12 @@ function connectorCoverageLabel(connector: ConnManifest): string {
 export function ProjectConnectionsTab({
   project,
   onProjectChange,
+  onOpenFolder,
 }: {
   project: ProjectDetail;
   onProjectChange?: (p: ProjectDetail) => void;
+  /** Show a connection's folder (artifact-relative) in the project's Artifacts tab. */
+  onOpenFolder?: (path: string) => void;
 }) {
   const [status, setStatus] = useState<ConnStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -178,6 +183,25 @@ export function ProjectConnectionsTab({
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [project.id]);
+
+  // While a connection syncs its count climbs: read the status every second.
+  const syncingNow = (status?.bindings ?? []).some((b) => b.syncing || b.id === busy);
+  useEffect(() => {
+    if (!syncingNow) return;
+    let live = true;
+    const stop = setVisibleInterval(() => {
+      api
+        .listConnectors(project.id)
+        .then((next) => {
+          if (live) setStatus(next);
+        })
+        .catch(() => {});
+    }, 1000);
+    return () => {
+      live = false;
+      stop();
+    };
+  }, [syncingNow, project.id]);
 
   const handleCommit = useCallback(
     async (draftId: string) => {
@@ -269,17 +293,20 @@ export function ProjectConnectionsTab({
   }, [refreshOAuthClients]);
 
   const handleSync = useCallback(
-    async (bindingId: string) => {
+    async (bindingId: string, type: string) => {
       setBusy(bindingId);
       setError('');
       setNotice('');
       try {
         const res = await api.syncConnector(project.id, bindingId);
         const r = res.result as { written?: number; quarantined?: number; error?: string };
+        const added = (r.written ?? 0) + (r.quarantined ?? 0);
         setNotice(
           r.error
             ? `Sync error: ${r.error}`
-            : `Synced ${(r.written ?? 0) + (r.quarantined ?? 0)} new record(s).`,
+            : added === 0
+              ? 'Synced. Nothing new.'
+              : `Synced ${added.toLocaleString()} new or changed ${connectorItemNoun(type, added)}.`,
         );
         await refresh();
       } catch (err) {
@@ -337,10 +364,18 @@ export function ProjectConnectionsTab({
   );
 
   const handleUnbind = useCallback(
-    async (bindingId: string) => {
+    async (bindingId: string, deleteData = false) => {
       setBusy(bindingId);
+      setError('');
+      setNotice('');
       try {
-        await api.unbindConnector(project.id, bindingId);
+        const result = await api.unbindConnector(project.id, bindingId, { deleteData });
+        if (deleteData) {
+          const files = (result && 'deleted' in result ? result.deleted?.files : 0) ?? 0;
+          setNotice(
+            `Removed, and deleted ${files.toLocaleString()} downloaded ${files === 1 ? 'file' : 'files'}.`,
+          );
+        }
         await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -495,7 +530,7 @@ export function ProjectConnectionsTab({
     // The background loop only syncs under the most permissive posture, so a
     // freshly added connector would otherwise sit empty until someone found
     // the Sync button. A first sync is what the person just asked for.
-    if (added?.id) await handleSync(added.id);
+    if (added?.id) await handleSync(added.id, selected.id);
   }, [
     selected,
     project.id,
@@ -549,6 +584,7 @@ export function ProjectConnectionsTab({
   );
 
   const bindings = status?.bindings ?? [];
+  const offline = bindings.some((b) => b.unreachable?.offline && !b.disabled);
   const kind = selected?.secretShape?.kind;
   const selectConnector = (connector: ConnectorOption) => {
     if (connector.id === selected?.id) return;
@@ -580,93 +616,132 @@ export function ProjectConnectionsTab({
           into this project as searchable files.
         </p>
       ) : (
-        <ul className="settings-list">
-          {bindings.map((b) =>
-            b.type === 'website' ? (
-              <WebsiteBindingRow
-                key={b.id}
-                projectId={project.id}
-                binding={b}
-                onChanged={() => void refresh()}
-                onRemove={(id) => setConfirmUnbind(id)}
-                onNotice={(text, isError) => {
-                  if (isError) {
-                    setError(text);
-                    setNotice('');
-                  } else {
-                    setNotice(text);
-                    setError('');
-                  }
-                }}
-              />
-            ) : b.driver === 'device' ? (
-              <li key={b.id} className="camera-card-item">
-                <CameraBindingCard
+        <>
+          {offline ? (
+            <p className="muted small" aria-live="polite">
+              This computer is offline. Everything already downloaded is here, and connections catch
+              up on their own when you're back online.
+            </p>
+          ) : null}
+          <ul className="settings-list">
+            {bindings.map((b) =>
+              b.type === 'website' ? (
+                <WebsiteBindingRow
+                  key={b.id}
                   projectId={project.id}
                   binding={b}
                   onChanged={() => void refresh()}
                   onRemove={(id) => setConfirmUnbind(id)}
+                  onNotice={(text, isError) => {
+                    if (isError) {
+                      setError(text);
+                      setNotice('');
+                    } else {
+                      setNotice(text);
+                      setError('');
+                    }
+                  }}
                 />
-              </li>
-            ) : (
-              <li key={b.id} className="connected-app-row">
-                <div>
-                  <strong>{b.displayName || b.type}</strong>
-                  <span className="muted small"> · {b.type}</span>
-                  <div className="small">
-                    {b.disabled ? (
-                      <span className="muted">
-                        {b.disabledReason === 'emergency-stop'
-                          ? 'Stopped by the emergency stop. Resume it when you are ready.'
-                          : 'Paused. It does not sync until you resume it.'}
-                      </span>
-                    ) : b.lastError ? (
-                      <span className="error">Error: {b.lastError}</span>
-                    ) : b.lastSyncedAt ? (
-                      <span className="muted" title={formatAbsoluteTime(b.lastSyncedAt)}>
-                        Last synced {formatRelativeTime(b.lastSyncedAt)}
-                      </span>
-                    ) : (
-                      <span className="muted">Not synced yet</span>
-                    )}
+              ) : b.driver === 'device' ? (
+                <li key={b.id} className="camera-card-item">
+                  <CameraBindingCard
+                    projectId={project.id}
+                    binding={b}
+                    onChanged={() => void refresh()}
+                    onRemove={(id) => setConfirmUnbind(id)}
+                  />
+                </li>
+              ) : (
+                <li key={b.id} className="connected-app-row">
+                  <div>
+                    <strong>{b.displayName || b.type}</strong>
+                    <span className="muted small"> · {b.type}</span>
+                    {b.account ? <div className="small muted">Signed in as {b.account}</div> : null}
+                    <div className="small">
+                      {b.items !== undefined && !b.syncing && busy !== b.id ? (
+                        <span className="muted">{connectorItemCount(b.type, b.items)} · </span>
+                      ) : null}
+                      {b.syncing || busy === b.id ? (
+                        <span className="muted" aria-live="polite">
+                          Syncing…
+                          {b.items !== undefined
+                            ? ` ${connectorItemCount(b.type, b.items)} so far`
+                            : ''}
+                        </span>
+                      ) : b.disabled ? (
+                        <span className="muted">
+                          {b.disabledReason === 'emergency-stop'
+                            ? 'Stopped by the emergency stop. Resume it when you are ready.'
+                            : 'Paused. It does not sync until you resume it.'}
+                        </span>
+                      ) : b.unreachable ? (
+                        <span
+                          className="muted"
+                          title={
+                            b.lastSyncedAt
+                              ? `Last synced ${formatAbsoluteTime(b.lastSyncedAt)}`
+                              : undefined
+                          }
+                        >
+                          {connectorWaitingLine(b.unreachable)}
+                        </span>
+                      ) : b.lastError ? (
+                        <span className="error">Error: {b.lastError}</span>
+                      ) : b.lastSyncedAt ? (
+                        <span className="muted" title={formatAbsoluteTime(b.lastSyncedAt)}>
+                          Last synced {formatRelativeTime(b.lastSyncedAt)}
+                        </span>
+                      ) : (
+                        <span className="muted">Not synced yet</span>
+                      )}
+                    </div>
+                    {b.tables && b.tables.length > 0 ? <TableStats tables={b.tables} /> : null}
                   </div>
-                  {b.tables && b.tables.length > 0 ? <TableStats tables={b.tables} /> : null}
-                </div>
-                <div className="gz-mail-link-actions">
-                  <button
-                    type="button"
-                    onClick={() => void handleSync(b.id)}
-                    disabled={busy === b.id || Boolean(b.disabled)}
-                  >
-                    {busy === b.id ? 'Working…' : 'Sync now'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleCheck(b.id)}
-                    disabled={busy === b.id || Boolean(b.disabled)}
-                  >
-                    Check
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handlePause(b.id, !b.disabled)}
-                    disabled={busy === b.id}
-                  >
-                    {b.disabled ? 'Resume' : 'Pause'}
-                  </button>
-                  <button
-                    type="button"
-                    className="danger"
-                    onClick={() => setConfirmUnbind(b.id)}
-                    disabled={busy === b.id}
-                  >
-                    Remove
-                  </button>
-                </div>
-              </li>
-            ),
-          )}
-        </ul>
+                  <div className="gz-mail-link-actions">
+                    {onOpenFolder && b.corpusDir ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenFolder(b.corpusDir!)}
+                        title="Show what it downloaded in Artifacts"
+                      >
+                        Open
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void handleSync(b.id, b.type)}
+                      disabled={busy === b.id || Boolean(b.disabled)}
+                    >
+                      {busy === b.id ? 'Working…' : 'Sync now'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleCheck(b.id)}
+                      disabled={busy === b.id || Boolean(b.disabled)}
+                    >
+                      Check
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handlePause(b.id, !b.disabled)}
+                      disabled={busy === b.id}
+                    >
+                      {b.disabled ? 'Resume' : 'Pause'}
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => setConfirmUnbind(b.id)}
+                      disabled={busy === b.id}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </li>
+              ),
+            )}
+          </ul>
+        </>
       )}
 
       {pending.length > 0 && (
@@ -860,18 +935,15 @@ export function ProjectConnectionsTab({
       {error && <p className="error small">{error}</p>}
       {notice && <p className="muted small">{notice}</p>}
 
-      <ConfirmDialog
-        open={confirmUnbind !== null}
-        title="Remove connector?"
-        message={
-          bindings.find((b) => b.id === confirmUnbind)?.driver === 'device'
-            ? 'This stops the camera and deletes the pictures it saved on this computer. The moments it recorded stay in the project.'
-            : 'This removes the binding and its stored credential. Synced files stay on disk.'
+      <RemoveConnectionDialog
+        projectId={project.id}
+        binding={
+          confirmUnbind
+            ? (bindings.find((b) => b.id === confirmUnbind) ?? { id: confirmUnbind })
+            : null
         }
-        confirmLabel="Remove"
-        danger
-        onConfirm={() => {
-          if (confirmUnbind) void handleUnbind(confirmUnbind);
+        onConfirm={async (deleteData) => {
+          if (confirmUnbind) await handleUnbind(confirmUnbind, deleteData);
         }}
         onCancel={() => setConfirmUnbind(null)}
       />

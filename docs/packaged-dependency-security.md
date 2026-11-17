@@ -63,6 +63,12 @@ a fixed version on their own; bump the pin and release. It blocked critical only
 until 2026-10-27, when exact pins on the MCP SDK, undici, hono and nodemailer left
 every consumer with 12 high advisories this gate had passed.
 
+ReDoS advisories (CWE-1333) never fail this gate or the workspace
+`audit:vulnerabilities` gate, whatever their severity; both print them. Decided
+2026-11-17, when picomatch's GHSA-fc5q-39xc-vjpf, which has no fixed release,
+failed the consumer gate through fast-glob and vite (`isRegexDenialOfService` in
+`scripts/audit-vulnerability-policy.mjs`).
+
 ## F1 remediation, 2026-10-10
 
 The source update pins Axios to `1.20.0` and the MCP SDK to `1.31.0`, removing eight

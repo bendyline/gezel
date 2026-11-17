@@ -36,6 +36,13 @@ export interface SyncCandidateBinding {
   lastSyncedAt?: string;
   /** This binding's own interval (its type's `syncIntervalMinutes`), in place of the loop's. */
   intervalMs?: number;
+  /**
+   * Its passes could not reach the service (offline). It may catch up while
+   * the person is at the keyboard: the quiet-machine rule exists to keep
+   * routine syncs out of the way, and a connection that has fallen behind
+   * because of the network is what someone back online expects to see move.
+   */
+  waiting?: boolean;
 }
 
 /** The source-specific behavior the generic loop delegates to. */
@@ -93,6 +100,7 @@ export class ConnectorSyncManager {
 
   private startupTimer: ReturnType<typeof setTimeout> | null = null;
   private tickTimer: ReturnType<typeof setInterval> | null = null;
+  private soonTimer: ReturnType<typeof setTimeout> | null = null;
   private running = false;
   /**
    * When the loop last started a pass for each project. Ordering by attempt,
@@ -135,14 +143,37 @@ export class ConnectorSyncManager {
   stop(): void {
     if (this.startupTimer) clearTimeout(this.startupTimer);
     if (this.tickTimer) clearInterval(this.tickTimer);
+    if (this.soonTimer) clearTimeout(this.soonTimer);
     this.startupTimer = null;
     this.tickTimer = null;
+    this.soonTimer = null;
   }
 
-  /** Exposed for tests: run one sync unit, still idle- + posture-gated. */
+  /**
+   * Tick shortly instead of at the next interval: the network just came back
+   * and connections waiting for it should catch up now. The few seconds let
+   * a new network finish handing out addresses and resolvers.
+   */
+  tickSoon(delayMs = 5_000): void {
+    if (this.soonTimer || !this.tickTimer) return;
+    this.soonTimer = setTimeout(() => {
+      this.soonTimer = null;
+      void this.tick().catch((err) =>
+        log.warn(`[${this.source.label}-sync] tick failed: ${describe(err)}`),
+      );
+    }, delayMs);
+    unref(this.soonTimer);
+  }
+
+  /**
+   * Exposed for tests: run one sync unit, still posture-gated. Never during a
+   * chat turn; when the person is at the keyboard, only connections waiting
+   * for the network are picked.
+   */
   async tick(): Promise<void> {
     if (this.running) return;
-    if (!this.isIdle()) return;
+    if (this.chat.isAnyActive()) return;
+    const quiet = this.isIdle();
     this.running = true;
     try {
       const cfg = await this.store.readConfig().catch(() => null);
@@ -161,7 +192,7 @@ export class ConnectorSyncManager {
       for (const p of projects) {
         if (this.inFlight.has(p.id) || this.chat.isProjectActive(p.id)) continue;
         const bindings = await Promise.resolve(this.source.listBindings(p, policy)).catch(() => []);
-        const due = bindings.filter((b) => this.isDue(b, now));
+        const due = bindings.filter((b) => (quiet || b.waiting) && this.isDue(b, now));
         if (due.length === 0) continue;
         candidates.push({
           project: p,

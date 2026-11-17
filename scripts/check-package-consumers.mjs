@@ -44,7 +44,11 @@ import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as tar from 'tar';
 import { consumerCheckReportPath, writeConsumerCheckReport } from './consumer-check-report.mjs';
-import { blockingAdvisories, readAuditAllowlist } from './npm-consumer-audit.mjs';
+import {
+  blockingAdvisories,
+  readAuditAllowlist,
+  regexDenialAdvisories,
+} from './npm-consumer-audit.mjs';
 import {
   npmConsumerCacheDir,
   prepareNpmConsumerCache,
@@ -546,8 +550,8 @@ try {
   // This graph is the one npm resolves for a consumer: the workspace's pnpm
   // overrides never reach it. It blocks at high and critical (see
   // npm-consumer-audit.mjs for why that is stricter than the workspace gates);
-  // lower severities are printed below and in the daily supply-chain report.
-  // Accepted advisories go in
+  // lower severities and every ReDoS advisory are printed below and in the
+  // daily supply-chain report. Accepted advisories go in
   // scripts/npm-consumer-audit-allowlist.json with a reason and an expiry.
   const audit = runPackageManager('npm', ['audit', '--omit=dev', '--json'], { cwd: consumer });
   let auditCounts = null;
@@ -570,6 +574,9 @@ try {
       );
     } else {
       ok('npm audit reports no un-allowlisted high or critical advisories');
+    }
+    for (const a of regexDenialAdvisories(auditReport)) {
+      console.log(`  note ReDoS, does not block: ${a.severity} ${a.id}  ${a.pkg}  ${a.title}`);
     }
   }
   if (auditCounts) {

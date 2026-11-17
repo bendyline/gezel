@@ -1,4 +1,11 @@
-import { type DragEvent as ReactDragEvent, type ReactNode, useMemo, useState } from 'react';
+import {
+  type DragEvent as ReactDragEvent,
+  type ReactNode,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ContextMenu, DropdownMenu } from '../primitives/index.js';
 import { FileTypeIcon } from './FileTypeIcon.js';
 import { sortTreeNodes } from './file-view-modes.js';
@@ -67,6 +74,12 @@ export interface FileTreeProps {
    * a stamp sink to the end).
    */
   sortMode?: 'none' | 'alpha' | 'modified';
+  /**
+   * Show one path: open every folder on the way to it (and the folder
+   * itself), mark its row, and scroll it into view. A new `requestId` asks
+   * again for the same path.
+   */
+  reveal?: { path: string; requestId: number } | null;
 }
 
 /** Convert a flat list of file entries (with slash-separated `path`) into a tree. */
@@ -129,6 +142,7 @@ export function FileTree({
   labelFor = defaultLabelFor,
   selectableFolders = false,
   sortMode = 'none',
+  reveal = null,
 }: FileTreeProps) {
   const [draggedEntry, setDraggedEntry] = useState<FileEntry | null>(null);
   const [dropTargetPath, setDropTargetPath] = useState<string | null>(null);
@@ -155,6 +169,7 @@ export function FileTree({
           iconFor={iconFor}
           labelFor={labelFor}
           selectableFolders={selectableFolders}
+          reveal={reveal}
           draggedEntry={draggedEntry}
           dropTargetPath={dropTargetPath}
           onDragStart={(entry, event) => {
@@ -192,6 +207,7 @@ interface TreeItemProps {
   iconFor: (entry: FileEntry) => ReactNode;
   labelFor: (entry: FileEntry) => string;
   selectableFolders: boolean;
+  reveal: { path: string; requestId: number } | null;
   draggedEntry: FileEntry | null;
   dropTargetPath: string | null;
   onDragStart: (entry: FileEntry, event: ReactDragEvent<HTMLDivElement>) => void;
@@ -219,6 +235,7 @@ function TreeItem({
   iconFor,
   labelFor,
   selectableFolders,
+  reveal,
   draggedEntry,
   dropTargetPath,
   onDragStart,
@@ -226,6 +243,16 @@ function TreeItem({
   onDropTargetChange,
 }: TreeItemProps) {
   const [expanded, setExpanded] = useState(depth < defaultExpandedDepth);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const revealPath = reveal?.path;
+  const revealRequest = reveal?.requestId;
+  const revealed = revealPath === node.path;
+  useEffect(() => {
+    if (revealRequest === undefined || !revealPath) return;
+    const onTheWay = revealPath === node.path || revealPath.startsWith(`${node.path}/`);
+    if (onTheWay && node.isDirectory) setExpanded(true);
+    if (revealPath === node.path) rowRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [revealRequest, revealPath, node.path, node.isDirectory]);
   const entry: FileEntry = {
     name: node.name,
     path: node.path,
@@ -250,7 +277,8 @@ function TreeItem({
 
   const row = (
     <div
-      className={`tree-row${selectedPath === node.path ? ' tree-row-selected' : ''}${
+      ref={rowRef}
+      className={`tree-row${selectedPath === node.path || revealed ? ' tree-row-selected' : ''}${
         draggable ? ' tree-row-draggable' : ''
       }${isDragging ? ' tree-row-dragging' : ''}${isDropTarget ? ' tree-row-drop-target' : ''}`}
       style={{ paddingLeft: `${depth * 12 + 2}px` }}
@@ -449,6 +477,7 @@ function TreeItem({
               iconFor={iconFor}
               labelFor={labelFor}
               selectableFolders={selectableFolders}
+              reveal={reveal}
               draggedEntry={draggedEntry}
               dropTargetPath={dropTargetPath}
               onDragStart={onDragStart}

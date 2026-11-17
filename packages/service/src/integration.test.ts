@@ -644,10 +644,17 @@ describe('projects API', () => {
         'Integration test project for the working-directory endpoint — sets and reads back a workingDir.',
       missionObjectives: 'PUT /working-dir and GET project return matching values.',
     });
-    await api('PUT', '/api/projects/wdtest/working-dir', { workingDir: '/tmp' });
+    // A temp root is a folder gezel never owns; a folder inside it is fine.
+    const root = await api('PUT', '/api/projects/wdtest/working-dir', { workingDir: tmpdir() });
+    expect(root.status).toBe(403);
+    expect(((await root.json()) as { code?: string }).code).toBe('forbidden_root');
+    const folder = join(fixtureRoot, 'wd-project');
+    await mkdir(folder, { recursive: true });
+    const put = await api('PUT', '/api/projects/wdtest/working-dir', { workingDir: folder });
+    expect(put.status).toBe(200);
     const res = await api('GET', '/api/projects/wdtest');
     const proj = (await res.json()) as { workingDir: string };
-    expect(proj.workingDir).toBe('/tmp');
+    expect(proj.workingDir).toBe(folder);
   });
 
   // The Meester's kickoff macros seat their own Voorman; with the route

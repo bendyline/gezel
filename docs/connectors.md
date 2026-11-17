@@ -382,6 +382,86 @@ listener to that fixed port and the panel shows the literal
 quirks. Without one, the listener keeps its ephemeral port — RFC 8252 providers (Google,
 Microsoft) accept any loopback port, so there is nothing exact to register.
 
+### The account a sign-in reaches
+
+Google and Microsoft hand over whichever account the browser is already signed in to. A
+connection made for a test mailbox once copied the person's own mailbox that way: nothing
+compared the account that signed in with the address typed into the form, and the first
+sync started on its own. For these two providers (known by their sign-in host,
+[connectors/oauth-account.ts](../packages/service/src/connectors/oauth-account.ts)) the link
+flow now:
+
+- **Names the account.** The connection's `address` setting (or a re-link's existing
+  account) goes to the provider as `login_hint`. With nothing to name, the provider's
+  account picker is forced (`prompt=select_account`; Google takes it beside the `consent`
+  its types already ask for).
+- **Checks who signed in.** The link also asks for `openid` and `email` (Microsoft:
+  `profile` too), and `completeOAuth` reads the account from the ID token the token
+  endpoint returns, checking its audience. A sign-in that reached another account is
+  refused (`AccountMismatchError`) before anything is stored, and its link state is spent.
+  Gmail addresses compare the way Gmail delivers them (dots, `+tags` and googlemail.com
+  ignored); every other address compares exactly, so an alias needs the primary address.
+- **Records it.** The binding keeps `account`, the Connections row shows "Signed in as …",
+  and `connectors:export-credential` names it.
+
+A provider that returns no ID token is logged and connected on the hint alone.
+
+### Removing a connection
+
+Remove deletes the binding, its saved sign-in and its private state. What it downloaded
+stays unless the person ticks **Also delete what it downloaded**
+(`DELETE …/connectors/:bindingId?deleteData=1`): for mail the originals are still at the
+provider, but for a feed or a social account the copy may be the only one left. Deleting
+takes the corpus folder (records, attachments, tables, pending actions) and the records it
+held in quarantine. Quarantine is shared by every connection of a type, so when another
+remains only the records this corpus lists in its `_flags.json` sidecars go
+([connectors/remove-data.ts](../packages/service/src/connectors/remove-data.ts)). A folder
+another connection saves into is refused before anything is removed. The artifacts index is
+refreshed straight away: it otherwise forgets records only after a sync that writes
+something. The dialog reads the size from `GET …/connectors/:bindingId/stored`. Both routes
+are closed to session tokens.
+
+### Offline is a state, not an error
+
+A laptop on a plane, out of range, or with its cable pulled cannot reach any service, and
+every connection fails at once with Node's bare "fetch failed". None of them is broken.
+`unreachableFrom` ([connectors/unreachable.ts](../packages/service/src/connectors/unreachable.ts))
+reads the cause chain for a request that never got an answer (DNS, refused, reset, timed
+out; an HTTP status of any kind is the service speaking and stays an error) and says
+whether this computer has a usable network at all, from its own interfaces
+([system/network-presence.ts](../packages/service/src/system/network-presence.ts):
+loopback, link-local and virtual adapters do not count). A pass whose only failures were
+the network returns `unreachable`, and the manager:
+
+- records `binding.unreachable` (`since`, `offline`, `host`) instead of `lastError`; the
+  Connections tab shows "Offline since 10:45 AM" in gray, and one line above the list
+  while any connection is offline: everything already downloaded is here, and they catch
+  up on their own;
+- retries on a short ladder (1, 2, then every 5 minutes) instead of the failure ladder;
+  an offline request fails at once and costs nothing;
+- lets a waiting connection sync while the person is at the keyboard (never during a chat
+  turn), since one that fell behind because of the network is what someone back online
+  expects to see move;
+- retries every waiting connection a few seconds after a usable network appears or the
+  host wakes (`watchNetworkPresence` → `retryWaiting` → `tickSoon`).
+
+The first pass that gets through clears the state. Records that failed mid-pass because
+the network dropped never count toward giving up on them.
+
+### What a connection holds
+
+Each row in the Connections tab says how many records its connection holds, in the
+family's word ("1,204 emails", "38 events", "items" for a type not named in
+[connector-items.ts](../packages/ui/src/components/connector-items.ts)), and **Open** shows
+its folder in the Artifacts tab. A pass that changes a document corpus recounts its record
+files ([record-count.ts](../packages/service/src/connectors/record-count.ts): files in the
+writer's `RECORD_FILE_RE` grammar, outside `attachments/` and `_`-folders) and stores the
+total as `records` in `_meta.json`; a quiet pass keeps the count it started from. While a
+pass runs, the status adds the new records it has written so far to that starting count,
+so the number climbs, and `syncing` stays set through the follow-up passes a manual sync
+schedules; the tab re-reads the status every second while anything syncs. Observation
+corpora report rows through `tables` instead.
+
 ## Write-back and the morning briefing
 
 Generalized from mail's outbox (now [connectors/consent.ts](../packages/service/src/connectors/consent.ts) +

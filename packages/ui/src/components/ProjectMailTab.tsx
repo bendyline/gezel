@@ -2,6 +2,7 @@ import type { ProjectDetail } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
+import { connectorWaitingLine } from './connector-items.js';
 import {
   MAIL_PROVIDERS,
   type MailProviderId,
@@ -166,7 +167,9 @@ export function ProjectMailTab({
                 <span className="muted small"> · {a.type.replace(/^mail-/, '')}</span>
               </div>
               <div className="small">
-                {a.lastError ? (
+                {a.unreachable ? (
+                  <span className="muted">{connectorWaitingLine(a.unreachable)}</span>
+                ) : a.lastError ? (
                   <span className="error">Error: {a.lastError}</span>
                 ) : a.lastSyncedAt ? (
                   <span className="muted" title={formatAbsoluteTime(a.lastSyncedAt)}>

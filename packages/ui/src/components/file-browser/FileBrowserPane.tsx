@@ -115,6 +115,12 @@ export interface FileBrowserPaneProps {
    * already answered never folds the tree again.
    */
   collapseTreeRequest?: number | null;
+  /**
+   * Shows one path in the tree: its folders open, its row marked and in view.
+   * A folded tree comes back for this ask without changing the stored
+   * preference; folding it again answers the ask.
+   */
+  reveal?: { path: string; requestId: number } | null;
 }
 
 /**
@@ -153,10 +159,12 @@ export function FileBrowserPane({
   customList,
   layoutClassName,
   collapseTreeRequest,
+  reveal = null,
 }: FileBrowserPaneProps) {
   const [width, setWidth] = useState<number>(() => readStoredFileTreeWidth());
   const [collapsed, setCollapsed] = useState<boolean>(() => readStoredFileTreeCollapsed());
   const [answeredCollapseRequest, setAnsweredCollapseRequest] = useState<number | null>(null);
+  const [answeredReveal, setAnsweredReveal] = useState<number | null>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
   const narrow = useCompactLayout(layoutRef, 520);
   const [viewerOpen, setViewerOpen] = useState(Boolean(selectedPath));
@@ -167,6 +175,12 @@ export function FileBrowserPane({
   useEffect(() => {
     setViewerOpen(Boolean(selectedPath));
   }, [selectedPath]);
+
+  // A revealed folder is shown in the tree, so a narrow layout shows the tree.
+  const revealRequest = reveal?.requestId;
+  useEffect(() => {
+    if (revealRequest !== undefined) setViewerOpen(false);
+  }, [revealRequest]);
 
   const selectEntry = (entry: FileEntry, select = onSelect) => {
     select(entry);
@@ -186,7 +200,8 @@ export function FileBrowserPane({
 
   const hostCollapsed =
     collapseTreeRequest != null && collapseTreeRequest !== answeredCollapseRequest;
-  const effectiveCollapsed = collapsed || hostCollapsed;
+  const revealing = reveal != null && reveal.requestId !== answeredReveal;
+  const effectiveCollapsed = (collapsed && !revealing) || hostCollapsed;
   // Phone navigation is temporary; it must never overwrite the desktop
   // split preference or unmount an editor holding an unsaved draft.
   const treeCollapsed = !narrow && effectiveCollapsed;
@@ -204,13 +219,14 @@ export function FileBrowserPane({
     (next: boolean) => {
       setCollapsed(next);
       if (!next) setAnsweredCollapseRequest(collapseTreeRequest ?? null);
+      if (next) setAnsweredReveal(reveal?.requestId ?? null);
       try {
         window.localStorage.setItem(FILE_TREE_COLLAPSED_STORAGE_KEY, next ? '1' : '0');
       } catch {
         /* quota / private mode — state still in memory */
       }
     },
-    [collapseTreeRequest],
+    [collapseTreeRequest, reveal?.requestId],
   );
 
   const onGripMouseDown = useCallback(
@@ -467,6 +483,7 @@ export function FileBrowserPane({
                   onMove={source.kind === 'documents' ? mutations.move : undefined}
                   trailingForEntry={trailingForEntry}
                   actionsForEntry={rowActions}
+                  reveal={reveal}
                 />
               )
             ) : (

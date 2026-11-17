@@ -136,12 +136,31 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
     }
   });
 
+  // What a connection has downloaded, for the remove dialog to name.
+  app.get('/:id/connectors/:bindingId/stored', async (c) => {
+    const project = await ctx.store.getProject(c.req.param('id'));
+    if (!project) return c.json({ error: 'not found' }, 404);
+    try {
+      return c.json(await ctx.connectors.storedData(project, c.req.param('bindingId')));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  // `?deleteData=1` also deletes what the connection downloaded; without it
+  // the records stay in the project.
   app.delete('/:id/connectors/:bindingId', async (c) => {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
     const bindingId = c.req.param('bindingId');
     const binding = project.connectors?.find((b) => b.id === bindingId);
-    await ctx.connectors.unbind(project, bindingId);
+    const deleteData = c.req.query('deleteData') === '1';
+    let result: Awaited<ReturnType<typeof ctx.connectors.unbind>>;
+    try {
+      result = await ctx.connectors.unbind(project, bindingId, { deleteData });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
     // A camera's saved pictures go with it unless the person keeps them.
     if (binding?.driver === 'device' && c.req.query('keepPictures') !== '1') {
       await ctx.cameras
@@ -149,7 +168,7 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
         .clear()
         .catch(() => {});
     }
-    return c.body(null, 204);
+    return deleteData ? c.json({ ok: true, ...result }) : c.body(null, 204);
   });
 
   // Re-link in place: a new credential for an existing connection, keeping

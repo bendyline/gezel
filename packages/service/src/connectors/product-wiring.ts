@@ -1,8 +1,9 @@
-import { resolveSecurityPolicy } from '@bendyline/gezel';
+import { createLogger, resolveSecurityPolicy } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { GitManager } from '../git/manager.js';
 import type { GitHubPrs } from '../github/prs.js';
 import { registerMailAdapters } from '../mail/registry.js';
+import { watchNetworkPresence } from '../system/network-presence.js';
 import type { TaskManager } from '../tasks/manager.js';
 import type { ConnectorManager } from './manager.js';
 import { registerAzureMonitorLogsAdapters } from './natives/azure-monitor-logs.js';
@@ -18,8 +19,42 @@ import { registerRssFeedAdapters } from './natives/rss-feed.js';
 import { registerWebsiteAdapters } from './natives/website.js';
 import { registerXAdapters } from './natives/x-posts.js';
 import { registerYouTubeAdapters } from './natives/youtube-videos.js';
-import type { ConnectorSyncSource } from './sync-manager.js';
+import type { ComponentStore } from './spectral/component-store.js';
+import { sweepConnectorStaging } from './staging-sweep.js';
+import type { ConnectorSyncManager, ConnectorSyncSource } from './sync-manager.js';
 import { runConnectorTaskPrep } from './task-prep.js';
+
+const log = createLogger('service');
+
+/**
+ * The connector runtime's housekeeping: staging folders a daemon that stopped
+ * mid-pass left behind, components no connection uses any more (a day after
+ * their last use), and an early pass when the network comes back (a network
+ * joined, the lid opened) for connections that could not reach their service.
+ * Returns the stop function.
+ */
+export function startConnectorHousekeeping(deps: {
+  connectors: Pick<ConnectorManager, 'componentPinsInUse' | 'retryWaiting'>;
+  components: Pick<ComponentStore, 'prune'>;
+  sync: Pick<ConnectorSyncManager, 'tickSoon'>;
+}): () => void {
+  void sweepConnectorStaging().catch(() => {});
+  const pruneComponents = () =>
+    void deps.connectors
+      .componentPinsInUse()
+      .then((pins) => deps.components.prune(pins))
+      .catch((err) => log.warn(`[connectors] component cleanup failed: ${String(err)}`));
+  pruneComponents();
+  const pruneTimer = setInterval(pruneComponents, 24 * 60 * 60_000);
+  pruneTimer.unref?.();
+  const stopNetworkWatch = watchNetworkPresence(() => {
+    if (deps.connectors.retryWaiting() > 0) deps.sync.tickSoon();
+  });
+  return () => {
+    clearInterval(pruneTimer);
+    stopNetworkWatch();
+  };
+}
 
 /**
  * What the background loop syncs. Read-only connections (feeds, wikis, saved
@@ -45,6 +80,7 @@ export function connectorSyncSource(
             id: b.id,
             ...(b.lastSyncedAt ? { lastSyncedAt: b.lastSyncedAt } : {}),
             ...(intervalMs ? { intervalMs } : {}),
+            ...(b.unreachable ? { waiting: true } : {}),
           };
         }),
       );

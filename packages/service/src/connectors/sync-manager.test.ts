@@ -21,6 +21,8 @@ interface FakeBinding {
   lastSyncedAt?: string;
   /** The type's own interval (`syncIntervalMinutes`), in ms. */
   intervalMs?: number;
+  /** Its last pass could not reach the service. */
+  waiting?: boolean;
 }
 
 /**
@@ -39,6 +41,7 @@ function fakeConnectors(projects: Map<string, FakeBinding[]>) {
           type: 'rss-feed',
           ...(b.disabled ? { disabled: true } : {}),
           ...(b.lastSyncedAt ? { lastSyncedAt: b.lastSyncedAt } : {}),
+          ...(b.waiting ? { unreachable: { since: '2026-11-16T08:00:00Z', offline: true } } : {}),
         }) as ProjectConnectorBinding,
     );
   const connectors = {
@@ -95,15 +98,19 @@ function fakeConnectors(projects: Map<string, FakeBinding[]>) {
   return { connectors, store, synced };
 }
 
-function loop(projects: Map<string, FakeBinding[]>, opts: { passBudgetMs?: number } = {}) {
+function loop(
+  projects: Map<string, FakeBinding[]>,
+  opts: { passBudgetMs?: number; osIdleSeconds?: number; chatActive?: () => boolean } = {},
+) {
   const { connectors, store, synced } = fakeConnectors(projects);
+  const { osIdleSeconds = null, chatActive = () => false, ...rest } = opts;
   const manager = new ConnectorSyncManager({
     store,
-    chat: { isAnyActive: () => false, isProjectActive: () => false } as unknown as ChatManager,
-    idle: { osIdleSeconds: () => null } as unknown as SystemIdleState,
+    chat: { isAnyActive: chatActive, isProjectActive: () => false } as unknown as ChatManager,
+    idle: { osIdleSeconds: () => osIdleSeconds } as unknown as SystemIdleState,
     source: connectorSyncSource(connectors as never),
     syncIntervalMs: SYNC_INTERVAL,
-    ...opts,
+    ...rest,
   });
   return { manager, synced };
 }
@@ -141,6 +148,23 @@ describe('ConnectorSyncManager', () => {
       policy,
     );
     expect(listed.map((b) => b.id)).toEqual(['a']);
+  });
+
+  it('while the person works, only a connection waiting for the network catches up', async () => {
+    let chatting = false;
+    const { manager, synced } = loop(
+      new Map([
+        ['A', [{ id: 'routine', health: 'ok' }]],
+        ['B', [{ id: 'landed', health: 'ok', waiting: true }]],
+      ]),
+      { osIdleSeconds: 5, chatActive: () => chatting },
+    );
+    chatting = true;
+    await ticks(manager, 2);
+    expect(synced).toEqual([]);
+    chatting = false;
+    await ticks(manager, 2);
+    expect(synced).toEqual(['landed']);
   });
 
   it('syncs two healthy projects in turn', async () => {

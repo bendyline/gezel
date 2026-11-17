@@ -6,6 +6,7 @@ import {
   type ConnectorConfigValue,
   type ConnectorFormManifest,
 } from './ConnectorConfigFields.js';
+import { connectorWaitingLine } from './connector-items.js';
 
 interface WebsiteBinding {
   id: string;
@@ -13,6 +14,7 @@ interface WebsiteBinding {
   displayName?: string;
   lastSyncedAt?: string;
   lastError?: string;
+  unreachable?: { since: string; offline: boolean; host?: string };
   summary?: string;
   config?: Record<string, unknown>;
 }
@@ -185,7 +187,12 @@ export function WebsiteBindingRow({
         <strong>{label}</strong>
         <span className="muted small"> · Websites</span>
         <div className="small">
-          {binding.lastError ? (
+          {binding.unreachable ? (
+            <span className="muted">
+              {binding.summary ? `${binding.summary} · ` : ''}
+              {connectorWaitingLine(binding.unreachable)}
+            </span>
+          ) : binding.lastError ? (
             <span className="error">{binding.lastError}</span>
           ) : binding.lastSyncedAt ? (
             <span className="muted" title={formatAbsoluteTime(binding.lastSyncedAt)}>

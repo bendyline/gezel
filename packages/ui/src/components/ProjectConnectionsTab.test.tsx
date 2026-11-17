@@ -290,7 +290,82 @@ describe('ProjectConnectionsTab connector picker', () => {
     await waitFor(() => {
       expect(api.syncConnector).toHaveBeenCalledWith('project-alpha', 'github-issues:abc');
     });
-    expect(await screen.findByText('Synced 7 new record(s).')).toBeInTheDocument();
+    expect(await screen.findByText('Synced 7 new or changed issues.')).toBeInTheDocument();
+  });
+
+  it('shows a connection waiting for the network calmly, not as an error', async () => {
+    const since = new Date();
+    since.setHours(10, 45, 0, 0);
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      bindings: [
+        {
+          id: 'mail-gmail:1',
+          type: 'mail-gmail',
+          items: 3,
+          unreachable: { since: since.toISOString(), offline: true },
+        },
+        {
+          id: 'rss:1',
+          type: 'rss-feed',
+          items: 12,
+          unreachable: { since: since.toISOString(), offline: false, host: 'feeds.example.test' },
+        },
+      ],
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+
+    expect(
+      await screen.findByText(
+        "This computer is offline. Everything already downloaded is here, and connections catch up on their own when you're back online.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/^Offline since 10:45/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/^Couldn't reach feeds\.example\.test since 10:45.*\. Trying again\.$/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^Error:/)).toBeNull();
+  });
+
+  it('shows each connection’s count, counts up while it syncs, and opens its folder', async () => {
+    const row = (extra: Record<string, unknown>) => ({
+      bindings: [
+        {
+          id: 'mail-gmail:1',
+          type: 'mail-gmail',
+          corpusDir: 'data/mail-gmail',
+          lastSyncedAt: new Date().toISOString(),
+          ...extra,
+        },
+      ],
+    });
+    vi.mocked(api.listConnectors)
+      .mockResolvedValueOnce(row({ items: 3 }) as never)
+      .mockResolvedValueOnce(row({ items: 3 }) as never)
+      .mockResolvedValueOnce(row({ items: 40, syncing: true }) as never)
+      .mockResolvedValue(row({ items: 1204 }) as never);
+    let finish!: () => void;
+    vi.mocked(api.syncConnector).mockReset();
+    vi.mocked(api.syncConnector).mockReturnValue(
+      new Promise((resolve) => {
+        finish = () => resolve({ ok: true, result: { written: 1201, quarantined: 0 } } as never);
+      }) as never,
+    );
+    const onOpenFolder = vi.fn();
+    render(<ProjectConnectionsTab project={PROJECT} onOpenFolder={onOpenFolder} />);
+    const user = userEvent.setup();
+
+    expect(await screen.findByText(/^3 emails ·/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    expect(onOpenFolder).toHaveBeenCalledWith('data/mail-gmail');
+
+    await user.click(screen.getByRole('button', { name: 'Sync now' }));
+    expect(await screen.findByText('Syncing… 3 emails so far')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Syncing… 40 emails so far', undefined, { timeout: 3000 }),
+    ).toBeInTheDocument();
+    finish();
+    expect(await screen.findByText('Synced 1,201 new or changed emails.')).toBeInTheDocument();
+    expect(await screen.findByText(/^1,204 emails ·/)).toBeInTheDocument();
   });
 
   it('preserves JSON-schema boolean defaults and numeric config values', async () => {

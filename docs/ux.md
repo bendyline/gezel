@@ -2222,6 +2222,17 @@ changes). Everything else — create forms, rename prompts, icon iteration,
 template pickers — is a plain `Dialog`. AlertDialogs block the user until
 they respond; Dialogs are dismissable with Escape/backdrop-click.
 
+**A confirmation can carry one option, off by default.** When removing
+something can also delete what it made, the confirmation keeps one red key
+and puts the extra deletion under the message as a `SettingCheck` (through
+`ConfirmDialog`'s `children`): "Also delete what it downloaded", with a hint
+that says how much and what is not touched ("1,654 files, 26 MB, in this
+project. The originals at the source stay where they are."). Ticking it
+changes the message and the key ("Remove and delete"). It starts unticked:
+deleting the only copy should take a second, deliberate click. When there
+is nothing to delete, the option is not shown. Removing a connection is the
+reference ([RemoveConnectionDialog](../packages/ui/src/components/RemoveConnectionDialog.tsx)).
+
 **Select vs keys vs tab bar.** If the content panel below changes based on
 the choice, use **Tabs**. If it's one of many equivalent values (a long
 model list), use **Select**. If there are roughly 2–5 mutually exclusive
@@ -3242,6 +3253,18 @@ carries its status line, Sync now, Edit (in place, from the catalog form),
 Sign in… / Sign out and Remove; signing in shows one short instruction —
 check the address bar, sign in, come back and press Done — beside Done and
 Cancel.
+
+**Offline is a state, never an error.** Gezel keeps everything on this
+computer, so losing the network takes nothing away, and the interface says
+so rather than alarming anyone. A connection that could not reach its
+service reads "Offline since 10:45 AM" (or "Couldn't reach … since …. Trying
+again.") in muted text, never the red error line, and the Connections tab
+puts one sentence above the list while any connection is offline: everything
+already downloaded is here, and connections catch up on their own. Each row
+still leads with its count, so the person sees what they have. Coming back
+online needs no click: waiting connections catch up within seconds, and the
+line goes away. Red is for a service that answered with a problem the person
+may have to act on.
 
 **A connection the draft calls for is a notice, not a question.** When a
 message names something a connector can bring in, the composer says what Send

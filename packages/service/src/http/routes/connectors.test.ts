@@ -29,6 +29,10 @@ const upstream = {
   items: [] as { id: string; title: string; body: string; fail?: boolean }[],
   committed: [] as { action: string; input: unknown }[],
   credentialsSeen: [] as (string | null)[],
+  /** Lets `after` records through, then holds each fetch until `release` settles. */
+  hold: null as { after: number; fetched: number; release: Promise<void> } | null,
+  /** The service cannot be reached: listing fails the way undici does. */
+  unreachable: false,
 };
 
 registerNativeAdapter(ADAPTER_ID, async (binding, deps): Promise<ConnectorAdapter> => {
@@ -42,6 +46,13 @@ registerNativeAdapter(ADAPTER_ID, async (binding, deps): Promise<ConnectorAdapte
     },
     listScopes: async () => ['inbox'],
     listChangesSince: async (_scope, cursor) => {
+      if (upstream.unreachable) {
+        const cause = Object.assign(new Error('getaddrinfo ENOTFOUND api.example.test'), {
+          code: 'ENOTFOUND',
+          hostname: 'api.example.test',
+        });
+        throw new TypeError('fetch failed', { cause });
+      }
       const seen = new Set(Array.isArray(cursor) ? (cursor as string[]) : []);
       return {
         records: upstream.items.filter((i) => !seen.has(i.id)).map((i) => ({ id: i.id })),
@@ -49,6 +60,8 @@ registerNativeAdapter(ADAPTER_ID, async (binding, deps): Promise<ConnectorAdapte
       };
     },
     fetchRecord: async (_scope: string, ref: RecordRef): Promise<NormalizedRecord> => {
+      const hold = upstream.hold;
+      if (hold && ++hold.fetched > hold.after) await hold.release;
       const item = upstream.items.find((i) => i.id === ref.id)!;
       if (item.fail) throw new Error(`cannot parse ${item.id}`);
       return {
@@ -160,6 +173,8 @@ beforeEach(async () => {
   upstream.items = [];
   upstream.committed = [];
   upstream.credentialsSeen = [];
+  upstream.hold = null;
+  upstream.unreachable = false;
   // Every test starts from a project with no bindings.
   const project = await svc.context.store.getProject(PROJECT);
   for (const b of project?.connectors ?? []) {
@@ -407,6 +422,131 @@ describe('/api/projects/:id/connectors', () => {
     expect(await svc.context.secrets.get(connectorSecretKey(TYPE_ID, binding.id))).toBeNull();
     const status = await call<{ bindings: unknown[] }>('GET', '/connectors');
     expect(status.body.bindings).toEqual([]);
+  });
+
+  it('counts the records a connection holds, climbing while it syncs', async () => {
+    interface Row {
+      id: string;
+      corpusDir?: string;
+      items?: number;
+      syncing?: boolean;
+    }
+    const row = async (id: string) =>
+      (await call<{ bindings: Row[] }>('GET', '/connectors')).body.bindings.find(
+        (b) => b.id === id,
+      );
+    const binding = await bind({ displayName: 'Counted inbox' });
+    expect(await row(binding.id)).toMatchObject({ corpusDir: binding.corpusDir, items: 0 });
+
+    upstream.items = [
+      { id: 'm1', title: 'First', body: 'one' },
+      { id: 'm2', title: 'Second', body: 'two' },
+      { id: 'm3', title: 'Third', body: 'three' },
+    ];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    upstream.hold = { after: 1, fetched: 0, release: gate };
+    const syncing = call('POST', `/connectors/${encodeURIComponent(binding.id)}/sync`);
+    let midway: Row | undefined;
+    for (let i = 0; i < 100; i++) {
+      midway = await row(binding.id);
+      if (midway?.items === 1) break;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(midway).toMatchObject({ items: 1, syncing: true });
+    release();
+    expect((await syncing).status).toBe(200);
+
+    const after = await row(binding.id);
+    expect(after?.items).toBe(3);
+    expect(after?.syncing).toBeUndefined();
+    const meta = JSON.parse(
+      await readFile(
+        join(svc.context.store.projectArtifactsDir(PROJECT), binding.corpusDir, '_meta.json'),
+        'utf8',
+      ),
+    );
+    expect(meta.records).toBe(3);
+
+    // A quiet pass keeps the count; a record the source drops is not counted twice.
+    await call('POST', `/connectors/${encodeURIComponent(binding.id)}/sync`);
+    expect((await row(binding.id))?.items).toBe(3);
+  });
+
+  it('waits calmly while the service cannot be reached, and catches up after', async () => {
+    interface Row {
+      id: string;
+      lastError?: string;
+      lastSyncedAt?: string;
+      unreachable?: { since: string; offline: boolean; host?: string };
+    }
+    const row = async (id: string) =>
+      (await call<{ bindings: Row[] }>('GET', '/connectors')).body.bindings.find(
+        (b) => b.id === id,
+      );
+    const binding = await bind({ displayName: 'Plane inbox' });
+    const sync = () =>
+      call<{ result: { error?: string; unreachable?: unknown } }>(
+        'POST',
+        `/connectors/${encodeURIComponent(binding.id)}/sync`,
+      );
+    upstream.items = [{ id: 'm1', title: 'Boarding pass', body: 'Gate 12' }];
+
+    upstream.unreachable = true;
+    const first = await sync();
+    expect(first.body.result.error).toMatch(/^Couldn't reach api\.example\.test: /);
+    const waiting = await row(binding.id);
+    expect(waiting?.lastError).toBeUndefined();
+    expect(waiting?.unreachable).toMatchObject({ host: 'api.example.test' });
+    const since = waiting?.unreachable?.since;
+    expect(since).toBeTruthy();
+
+    await new Promise((r) => setTimeout(r, 5));
+    await sync();
+    expect((await row(binding.id))?.unreachable?.since).toBe(since);
+    expect(svc.context.connectors.retryWaiting()).toBeGreaterThan(0);
+
+    upstream.unreachable = false;
+    await sync();
+    const back = await row(binding.id);
+    expect(back?.unreachable).toBeUndefined();
+    expect(back?.lastError).toBeUndefined();
+    expect(back?.lastSyncedAt).toBeTruthy();
+  });
+
+  it('says what a connection downloaded, and deletes it only when asked', async () => {
+    const corpus = (b: BindingView) =>
+      join(svc.context.store.projectArtifactsDir(PROJECT), b.corpusDir);
+    const exists = (p: string) =>
+      readFile(join(p, '_meta.json')).then(
+        () => true,
+        () => false,
+      );
+    upstream.items = [{ id: 'm1', title: 'Quarterly review', body: 'Numbers attached.' }];
+
+    const kept = await bind();
+    await call('POST', `/connectors/${encodeURIComponent(kept.id)}/sync`);
+    expect((await call('DELETE', `/connectors/${encodeURIComponent(kept.id)}`)).status).toBe(204);
+    expect(await exists(corpus(kept))).toBe(true);
+    await rm(corpus(kept), { recursive: true, force: true });
+
+    const gone = await bind();
+    await call('POST', `/connectors/${encodeURIComponent(gone.id)}/sync`);
+    const stored = await call<{ files: number; bytes: number }>(
+      'GET',
+      `/connectors/${encodeURIComponent(gone.id)}/stored`,
+    );
+    expect(stored.body.files).toBeGreaterThan(0);
+    expect(stored.body.bytes).toBeGreaterThan(0);
+    const removed = await call<{ ok: boolean; deleted: { files: number } }>(
+      'DELETE',
+      `/connectors/${encodeURIComponent(gone.id)}?deleteData=1`,
+    );
+    expect(removed.status).toBe(200);
+    expect(removed.body).toMatchObject({ ok: true, deleted: { files: stored.body.files } });
+    expect(await exists(corpus(gone))).toBe(false);
   });
 
   it('refuses to start an OAuth link from a non-bundled manifest', async () => {

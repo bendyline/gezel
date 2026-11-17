@@ -38,6 +38,8 @@ export interface OAuthTokens {
   refreshToken?: string;
   /** ISO expiry, computed from `expires_in`. */
   expiresAt: string;
+  /** The OpenID Connect ID token, when `openid` was asked for. */
+  idToken?: string;
 }
 
 /** Authorize/token endpoints + scopes for one source. */
@@ -148,6 +150,7 @@ async function postToken(
     accessToken,
     ...(json.refresh_token ? { refreshToken: String(json.refresh_token) } : {}),
     expiresAt: expiresAtFrom(json.expires_in),
+    ...(typeof json.id_token === 'string' ? { idToken: json.id_token } : {}),
   };
 }
 

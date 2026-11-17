@@ -413,6 +413,16 @@ describe('sessionRouteGuard', () => {
     expect((await app.request('/api/projects/proj-a/connectors/website:1/session')).status).toBe(
       403,
     );
+    expect((await app.request('/api/projects/proj-a/connectors/mail-imap:1/stored')).status).toBe(
+      403,
+    );
+    expect(
+      (
+        await app.request('/api/projects/proj-a/connectors/mail-imap:1?deleteData=1', {
+          method: 'DELETE',
+        })
+      ).status,
+    ).toBe(403);
     expect((await post('/api/projects/proj-a/web-pages/save')).status).toBe(403);
     expect((await post('/api/projects/proj-a/prompt-connectors/offers')).status).toBe(403);
     expect((await post('/api/projects/proj-a/prompt-connectors/accept')).status).toBe(403);

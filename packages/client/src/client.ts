@@ -5105,10 +5105,18 @@ export class GezelClient {
       id: string;
       type: string;
       displayName?: string;
+      /** The account the person signed in with (Google, Microsoft). */
+      account?: string;
       /** `mirror` (faithful copy) vs `window` (recent activity only). */
       completeness?: string;
       lastSyncedAt?: string;
       lastError?: string;
+      /**
+       * Waiting for the network since `since`: this computer was offline, or
+       * `host` did not answer. Not an error; it clears on the next sync that
+       * gets through.
+       */
+      unreachable?: { since: string; offline: boolean; host?: string };
       disabled?: boolean;
       /** Why a device binding is paused (`emergency-stop` needs the person to resume it). */
       disabledReason?: 'user' | 'emergency-stop';
@@ -5120,6 +5128,12 @@ export class GezelClient {
       live?: import('@bendyline/gezel').LiveBindingStatus;
       /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
       backoffUntil?: string;
+      /** Where its records land, relative to the project's artifacts (`data/<name>`). */
+      corpusDir?: string;
+      /** Records the connection holds (emails, files, …); climbs while it syncs. */
+      items?: number;
+      /** A sync is running, or another is due right after it. */
+      syncing?: boolean;
       /** One short line the connection offers (`Saved 40 pages · 3 waiting`). */
       summary?: string;
       /**
@@ -5189,14 +5203,31 @@ export class GezelClient {
     );
   }
 
+  /** What a connection has downloaded: its files and held records, and their size. */
+  connectorStoredData(id: string, bindingId: string): Promise<{ files: number; bytes: number }> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/stored`,
+    );
+  }
+
   /**
-   * Remove a binding + its stored credential. A camera's saved pictures go
-   * with it unless `keepPictures` is set.
+   * Remove a binding + its stored credential. What it downloaded stays in
+   * the project unless `deleteData` is set, which answers with what was
+   * deleted. A camera's saved pictures go with it unless `keepPictures` is set.
    */
-  unbindConnector(id: string, bindingId: string, opts?: { keepPictures?: boolean }): Promise<void> {
+  unbindConnector(
+    id: string,
+    bindingId: string,
+    opts?: { keepPictures?: boolean; deleteData?: boolean },
+  ): Promise<undefined | { ok: boolean; deleted?: { files: number; bytes: number } }> {
+    const query = new URLSearchParams();
+    if (opts?.keepPictures) query.set('keepPictures', '1');
+    if (opts?.deleteData) query.set('deleteData', '1');
+    const qs = query.toString() ? `?${query.toString()}` : '';
     return this.request(
       'DELETE',
-      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}${opts?.keepPictures ? '?keepPictures=1' : ''}`,
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}${qs}`,
     );
   }
 
