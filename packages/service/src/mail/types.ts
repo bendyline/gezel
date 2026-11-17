@@ -36,6 +36,12 @@ export interface MailCursor {
   graphDeltaLink?: string;
   /** Graph: the next page of an unfinished round. */
   graphNextLink?: string;
+  /**
+   * When this folder's last round finished (ms since epoch). A resync after
+   * the provider forgot its position reaches back to here, not only to
+   * `backfillDays`, so mail that arrived during a long outage is not skipped.
+   */
+  syncedAt?: number;
 }
 
 /** A mailbox folder / label. */
@@ -196,6 +202,22 @@ export function backfillStartMs(opts: MailSyncOptions): number {
       ? opts.backfillDays
       : DEFAULT_BACKFILL_DAYS;
   return (opts.now ?? Date.now)() - days * 86_400_000;
+}
+
+/** The furthest back a resync after an outage reaches, whatever the outage. */
+const MAX_RESYNC_DAYS = 365;
+
+/**
+ * Start of a resync's window: the backfill window, widened back to a day
+ * before the last finished round when that was earlier (an outage longer
+ * than `backfillDays`), never further than a year.
+ */
+export function resyncStartMs(opts: MailSyncOptions, syncedAt: number | undefined): number {
+  const window = backfillStartMs(opts);
+  if (syncedAt === undefined || !Number.isFinite(syncedAt)) return window;
+  const now = (opts.now ?? Date.now)();
+  const floor = now - MAX_RESYNC_DAYS * 86_400_000;
+  return Math.min(window, Math.max(floor, syncedAt - 86_400_000));
 }
 
 /** A batch limit the engine passed, or a sane default when it passed none. */

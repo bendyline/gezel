@@ -57,6 +57,8 @@ interface Fault {
   respond: (req: FakeRequest) => Response;
   /** A canned response, copied fresh for every serve. */
   template?: Response;
+  /** Never answer: the request settles only when its signal aborts. */
+  hang?: boolean;
 }
 
 /** JSON response helper. */
@@ -185,6 +187,18 @@ export class FakeHttp {
     return this;
   }
 
+  /**
+   * The next `times` requests matching `url` never answer, as a server that
+   * accepted the connection and went quiet: each settles only when the
+   * caller's signal aborts, with that signal's reason. A caller with no
+   * timeout waits forever, which is the defect this exists to show.
+   */
+  hangNext(match: { method?: string; url: string | RegExp }, times = 1): this {
+    this.failNext(match, () => status(599), times);
+    this.faults.at(-1)!.hang = true;
+    return this;
+  }
+
   /** True when a route (not a fault) would answer this request. */
   handles(method: string, url: string): boolean {
     const u = new URL(url);
@@ -225,6 +239,14 @@ export class FakeHttp {
     );
     if (fault) {
       fault.remaining--;
+      if (fault.hang) {
+        const signal = init?.signal ?? request?.signal;
+        return await new Promise<Response>((_, reject) => {
+          if (!signal) return;
+          if (signal.aborted) reject(signal.reason);
+          else signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      }
       if (fault.template) {
         const body = await fault.template.clone().arrayBuffer();
         return new Response(body.byteLength > 0 ? body : null, {
@@ -277,6 +299,11 @@ export class FakeTokenEndpoint {
       expiresIn?: number;
       /** More token URLs sharing this grant state (Microsoft's per-tenant endpoints). */
       alsoAt?: string[];
+      /**
+       * A confidential client must authenticate with HTTP Basic, and a secret
+       * in the form is refused, as X's token endpoint does.
+       */
+      confidentialBasicOnly?: { clientId: string; clientSecret: string };
     } = {},
   ) {}
 
@@ -297,6 +324,19 @@ export class FakeTokenEndpoint {
   private grant(req: FakeRequest): Response {
     const form = req.form();
     this.grants.push(form);
+    const basicOnly = this.opts.confidentialBasicOnly;
+    if (basicOnly) {
+      const header = req.headers.get('authorization') ?? '';
+      const expected = `Basic ${Buffer.from(
+        `${encodeURIComponent(basicOnly.clientId)}:${encodeURIComponent(basicOnly.clientSecret)}`,
+      ).toString('base64')}`;
+      if (form.has('client_secret') || header !== expected) {
+        return status(401, {
+          error: 'unauthorized_client',
+          error_description: 'Missing valid authorization header',
+        });
+      }
+    }
     const grant = form.get('grant_type');
     if (grant === 'authorization_code') {
       if (!form.get('code') || !form.get('code_verifier')) {

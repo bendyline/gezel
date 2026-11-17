@@ -5157,6 +5157,29 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/connectors/bind`, body);
   }
 
+  /**
+   * What connecting a type fetches first: a published component it runs, and
+   * whether this build and security level allow the download.
+   */
+  connectorReadiness(
+    id: string,
+    type: string,
+  ): Promise<
+    | { needed: false }
+    | {
+        needed: true;
+        package: { name: string; version: string };
+        installed: boolean;
+        downloadable: boolean;
+        reason?: string;
+      }
+  > {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/connectors/readiness?type=${encodeURIComponent(type)}`,
+    );
+  }
+
   /** Trigger a manual sync of one binding. */
   syncConnector(id: string, bindingId: string): Promise<{ ok: boolean; result: unknown }> {
     return this.request(
@@ -5174,6 +5197,48 @@ export class GezelClient {
     return this.request(
       'DELETE',
       `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}${opts?.keepPictures ? '?keepPictures=1' : ''}`,
+    );
+  }
+
+  /**
+   * Check a connection with a trial pass that changes nothing the project
+   * keeps. `cassette` adds the scrubbed exchanges.
+   */
+  checkConnector(
+    id: string,
+    bindingId: string,
+    opts: { cassette?: boolean } = {},
+  ): Promise<{
+    ok: boolean;
+    check: {
+      ok: boolean;
+      error?: string;
+      scopes: string[];
+      records: number;
+      failedScopes?: { scope: string; message: string }[];
+      rateLimited?: boolean;
+      requests: { method: string; endpoint: string; status: number }[];
+      notes: string[];
+      cassette?: import('@bendyline/gezel').ConnectorTestExchange[];
+    };
+  }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/check`,
+      opts,
+    );
+  }
+
+  /** Re-link a connection in place: a new credential, same settings and records. */
+  reconnectConnector(
+    id: string,
+    bindingId: string,
+    credential: string | Record<string, unknown>,
+  ): Promise<{ ok: boolean; binding: { id: string; type: string } }> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(id)}/connectors/${encodeURIComponent(bindingId)}/reconnect`,
+      { credential },
     );
   }
 

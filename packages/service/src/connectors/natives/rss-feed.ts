@@ -28,6 +28,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { lookup } from 'node:dns/promises';
 import { HttpStatusError, createLogger, isRateLimitStatus } from '@bendyline/gezel';
 import { DOMParser, type Element, type Node, XMLSerializer } from '@xmldom/xmldom';
 import { htmlBodyToMarkdown } from '../../mail/html.js';
@@ -337,14 +338,37 @@ interface FetchOptions {
   etag?: string;
   lastModified?: string;
   allowPrivate: boolean;
+  /**
+   * Whether a host name resolves to a private or loopback address. Set on
+   * the real network so a public feed cannot redirect, or point discovery,
+   * at a name like `router.example` whose DNS answers 127.0.0.1. Literal
+   * addresses are refused without it.
+   */
+  resolvesPrivate?: (hostname: string) => Promise<boolean>;
   timeoutMs: number;
   maxBytes: number;
   /** Shown in messages in place of the (possibly secret-bearing) URL. */
   display: string;
 }
 
+/** Whether any address `hostname` resolves to is private. Unresolvable is not. */
+export async function hostResolvesPrivate(hostname: string): Promise<boolean> {
+  const host = hostname.replace(/^\[/, '').replace(/\]$/, '');
+  try {
+    const addrs = await lookup(host, { all: true, verbatim: true });
+    return addrs.some((a) => isPrivateAddress(a.address));
+  } catch {
+    return false;
+  }
+}
+
 /** Throws unless `next` is a URL we may follow on the publisher's say-so. */
-function checkFollowTarget(next: URL, allowPrivate: boolean, display: string): void {
+async function checkFollowTarget(
+  next: URL,
+  allowPrivate: boolean,
+  display: string,
+  resolvesPrivate?: (hostname: string) => Promise<boolean>,
+): Promise<void> {
   // A non-http(s) Location is how a feed steers a reader at file:, data: or
   // an app-specific scheme; credentials in a Location would be sent to a host
   // the person never chose.
@@ -358,7 +382,7 @@ function checkFollowTarget(next: URL, allowPrivate: boolean, display: string): v
       `The feed at ${display} points to an address carrying credentials; it was not followed.`,
     );
   }
-  if (!allowPrivate && isPrivateHost(next.hostname)) {
+  if (!allowPrivate && (isPrivateHost(next.hostname) || (await resolvesPrivate?.(next.hostname)))) {
     throw new FeedUnavailableError(
       `The feed at ${display} points to a private or loopback address; it was not followed.`,
     );
@@ -466,7 +490,7 @@ export async function fetchFeedDocument(
           `The feed at ${opts.display} redirected to an address that could not be read.`,
         );
       }
-      checkFollowTarget(next, opts.allowPrivate, opts.display);
+      await checkFollowTarget(next, opts.allowPrivate, opts.display, opts.resolvesPrivate);
       url = next.href;
       continue;
     }
@@ -610,14 +634,16 @@ function decodeHtmlEntities(s: string): string {
 /** Markup-free single-line text (titles, names, categories). */
 function plainText(s: string | undefined, max = 300): string {
   if (!s) return '';
-  const text = decodeHtmlEntities(s.replace(/<\/?[a-z][^>]*>/gi, ' '))
+  // `[^<>]`, not `[^>]`: an unclosed tag must not scan to the end of the
+  // string from every `<`, which is quadratic on publisher-controlled text.
+  const text = decodeHtmlEntities(s.replace(/<\/?[a-z][^<>]*>/gi, ' '))
     .replace(/\s+/g, ' ')
     .trim();
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
 
 function looksLikeHtml(s: string): boolean {
-  return /<\/?[a-z][a-z0-9]*(\s[^>]*)?\/?>/i.test(s) || /&(#\d+|#x[0-9a-f]+|[a-z]+);/i.test(s);
+  return /<\/?[a-z][a-z0-9]*(\s[^<>]*)?\/?>/i.test(s) || /&(#\d+|#x[0-9a-f]+|[a-z]+);/i.test(s);
 }
 
 /** An absolute http(s) URL for `href` against `base`, or undefined. */
@@ -690,6 +716,12 @@ export function parseFeedDate(raw: string | null | undefined): string | undefine
   if (!s) return undefined;
   if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(s)) s = `${s.replace(' ', 'T')}Z`;
   s = s.replace(/\b([A-Z]{3,4})$/, (zone) => TZ_OFFSETS[zone] ?? zone);
+  // RFC 822 without a zone (`Tue, 10 Jun 2003 04:00:00`, or a bare date):
+  // JavaScript reads both as local time, so pin them to UTC.
+  if (!/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    if (/\s\d{1,2}:\d{2}(?::\d{2})?$/.test(s)) s = `${s} +0000`;
+    else if (/(?:^|[\s,])\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4}$/.test(s)) s = `${s} 00:00:00 +0000`;
+  }
   const ms = Date.parse(s);
   if (!Number.isFinite(ms)) return undefined;
   return new Date(ms).toISOString();
@@ -1127,10 +1159,24 @@ function parseJsonFeed(source: string, docUrl: string, display: string): ParsedF
   };
 }
 
-/** True when a fetched document is a web page rather than a feed. */
+/**
+ * True when a fetched document is a web page rather than a feed. The body is
+ * sniffed before the header is trusted: a feed served as `text/html` is a
+ * common server misconfiguration. Only the first few KB are examined, with
+ * patterns that cannot backtrack, because the document is the publisher's.
+ */
 export function isHtmlDocument(source: string, contentType = ''): boolean {
-  if (/\btext\/html\b|application\/xhtml\+xml/i.test(contentType)) return true;
-  return /^\s*(﻿)?\s*(<!doctype\s+html|<html[\s>])/i.test(source);
+  const start = source.search(/[^\s﻿]/);
+  let root = start < 0 ? '' : source.slice(start, start + 4096);
+  // Skip the XML declaration, stylesheet instructions and comments.
+  for (let i = 0; i < 8; i++) {
+    const lead = /^(?:<\?[^<>]{0,500}\?>|<!--[\s\S]{0,2000}?-->)\s*/.exec(root);
+    if (!lead) break;
+    root = root.slice(lead[0].length);
+  }
+  if (/^(?:<rss[\s>]|<feed[\s>]|<rdf:rdf[\s>]|\{)/i.test(root)) return false;
+  if (/^(?:<!doctype\s+html|<html[\s>])/i.test(root)) return true;
+  return /\btext\/html\b|application\/xhtml\+xml/i.test(contentType);
 }
 
 /**
@@ -1161,7 +1207,9 @@ const FEED_LINK_TYPES = new Set([
 /** `<link rel="alternate" type="application/rss+xml" href>` targets on a web page. */
 export function findFeedLinks(html: string, pageUrl: string): string[] {
   const out: string[] = [];
-  for (const tag of html.matchAll(/<link\b[^>]*>/gi)) {
+  // `[^<>]` keeps an unclosed `<link` from scanning to the end of the page
+  // once per occurrence, which made a hostile page quadratic.
+  for (const tag of html.matchAll(/<link\b[^<>]*>/gi)) {
     const attrs: Record<string, string> = {};
     for (const m of tag[0].matchAll(/([a-z-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/gi)) {
       attrs[m[1]!.toLowerCase()] = m[2] ?? m[3] ?? m[4] ?? '';
@@ -1275,6 +1323,8 @@ interface ItemRaw {
 
 export class RssFeedAdapter implements ConnectorAdapter {
   readonly typeId = RSS_FEED_TYPE_ID;
+  /** Each feed is its own publisher: one that throttles holds back only itself. */
+  readonly throttlesPerScope = true;
   /** An edited pubDate can move an item into another month bucket. */
   readonly recordsMayMove = true;
   private config?: FeedConfig;
@@ -1318,6 +1368,9 @@ export class RssFeedAdapter implements ConnectorAdapter {
     const prior = parseCursor(cursor);
     const fetchOpts = {
       fetchImpl: this.deps.fetch ?? fetch,
+      // Only the real network resolves names; an injected transport (tests,
+      // the simulator) answers every host itself.
+      ...(this.deps.fetch ? {} : { resolvesPrivate: hostResolvesPrivate }),
       allowPrivate: target.allowPrivate,
       timeoutMs: this.options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
       maxBytes: this.options.maxBytes ?? DEFAULT_MAX_FEED_BYTES,
@@ -1354,12 +1407,16 @@ export class RssFeedAdapter implements ConnectorAdapter {
       if (got.notModified) return { records: [], cursor };
       let doc = got;
       let source = decodeFeedBytes(doc.bytes, doc.contentType);
+      if (discovered && isHtmlDocument(source, doc.contentType)) {
+        // The feed found on the page now answers with a page (it moved, or
+        // redirects to the site's home): look for it on the page again.
+        discovered = undefined;
+        got = await fetchFeedDocument(pageUrl, fetchOpts);
+        if (got.notModified) return { records: [], cursor };
+        doc = got;
+        source = decodeFeedBytes(doc.bytes, doc.contentType);
+      }
       if (isHtmlDocument(source, doc.contentType)) {
-        if (discovered) {
-          throw new FeedUnavailableError(
-            `The feed at ${target.display} now serves a web page instead of a feed.`,
-          );
-        }
         // Autodiscovery, followed once: the person pasted a site's address.
         const link = findFeedLinks(source, doc.finalUrl)[0];
         if (!link) {
@@ -1367,7 +1424,12 @@ export class RssFeedAdapter implements ConnectorAdapter {
             `${target.display} is a web page that names no RSS, Atom or JSON feed. Paste the feed's own address instead.`,
           );
         }
-        checkFollowTarget(new URL(link), target.allowPrivate, target.display);
+        await checkFollowTarget(
+          new URL(link),
+          target.allowPrivate,
+          target.display,
+          fetchOpts.resolvesPrivate,
+        );
         got = await fetchFeedDocument(link, fetchOpts);
         if (got.notModified) return { records: [], cursor };
         doc = got;

@@ -4,7 +4,7 @@
 // Runs off-platform through the connectors-spectral host.
 
 import type { Connection } from '@prismatic-io/spectral';
-import { createClient } from '@prismatic-io/spectral/dist/clients/http';
+import { createClient } from '@prismatic-io/spectral/http';
 
 export const createAirtableClient = (airtableConnection: Connection, debug = false) => {
   const apiKey = airtableConnection.token?.access_token || airtableConnection.fields.apiKey;

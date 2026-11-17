@@ -107,7 +107,7 @@ Owned entirely by [writer.ts](../packages/service/src/connectors/writer.ts). Ada
 the pieces; they never build a path.
 
 ```
-<NNN>--<fileStem>--<recordHash8>.md      NNN = 3-digit ordinal within its directory
+<NNN>--<fileStem>--<recordHash8>.md      NNN = ordinal within its directory, padded to 3 digits
 attachments/<NNN>/<safe-filename>        original bytes, filename sanitized to one segment
 ```
 
@@ -146,11 +146,17 @@ data/<corpusName>/
 ├── _actions/
 │   ├── _drafts/<id>.md             drafted by a gezel — the human review surface
 │   ├── _outbox/<id>.md             staged, awaiting daytime approval
+│   ├── _sending/<id>.md            being sent, or a send that may have gone out
 │   └── _sent/<id>.md               committed receipt
 └── <scope>/
     ├── _flags.json                 read/seen/content-hash sidecar, not a record
+    ├── _listing.json               a full listing in progress across batches
     └── …record files (connector-managed)…
 ```
+
+Gezels may write only `_actions/_drafts/`. `_outbox/`, `_sending/`, `_sent/`,
+`_meta.json`, `_flags.json` and `_listing.json` belong to the engine
+(`ENGINE_OWNED_CORPUS_ENTRIES` in the artifact store).
 
 `_meta.json` is the discoverability surface — binding id, type id and version, display name,
 scopes, completeness (`mirror` | `window`), and `lastSyncedAt` — so that listing
@@ -260,8 +266,14 @@ Two obligations that follow:
   an adapter that can page returns at most that many records with `partial: true` and a
   cursor covering exactly the batch — the engine then loops the scope (bounded rounds per
   pass, remainder next tick), so nothing is lost. An adapter that over-returns gets the
-  newest-`limit` slice, the overflow counted in `skipped` **and logged** — that is the mail
-  backfill-cap model (deliberate windowing), visible rather than silent.
+  newest-`limit` slice and its cursor still advances, so the oldest records are lost for
+  good: the overflow is counted in `skipped`, listed in `BindingSyncResult.truncated`, and
+  reported in the binding's `lastError` and in `_meta.json` (`truncatedLastPass`). Treat
+  that report as a bug in the adapter; page instead.
+- **Ordinals grow past 999.** The record grammar is `writer.ts`'s `RECORD_FILE_RE`; import
+  it, never copy it. A three-digit-only copy once hid every record after the 999th in a
+  directory from refresh, prune and sweep. Directories damaged that way heal as their
+  records are written again.
 
 ### 2.4 Backpressure
 
@@ -275,6 +287,45 @@ Autonomous sync skips a backed-off binding; a user-initiated sync overrides. Per
 fetches additionally get three `retryTransient` attempts, so a socket blip is not a scope
 error. The `mcp` / `script` / `spectral` drivers have no reliable throttle signal and do not
 set `rateLimited` — documented limitation.
+
+An adapter whose scopes are separate services sets `throttlesPerScope` (RSS: each feed is
+its own publisher). A throttle then holds back only that scope; the pass goes on with the
+others, and the binding is still backed off. Without it, one feed answering 429 on every
+pass kept every feed listed after it from ever syncing.
+
+The background loop orders projects by when it last *tried* them, lists only bindings that
+are not paused and not backing off, and syncs only the bindings that are due. Ordering by
+last success let one project whose binding kept failing be picked on every tick, so no
+other project synced. A binding is due on its type's `syncIntervalMinutes` when the
+manifest sets one, otherwise on the loop's interval.
+
+### 2.5 Reconciling what is gone
+
+A mirror learns of deletions three ways: a tombstone (`ChangeBatch.removed`), a single
+batch that is the whole scope (`enumeratedAll`), or a full listing spread over batches
+and passes (`fullListing: { first, last }`). The engine keeps what such a listing has
+returned in the scope's `_listing.json` and, once its last batch lands with nothing
+overflowed or given up, removes what it did not return. An expired cursor (Drive, Graph,
+Gmail) re-lists this way, so a deletion made while the cursor was expired still leaves.
+
+A `window` type is never pruned, with one exception: a listing that names the dates it
+covers (`fullListing.within: { start, end }`) proves absence inside them. Calendars
+re-list their window this way after a sync token expires, so an event cancelled during the
+gap leaves, and history that aged out of the window stays.
+
+When a binding's settings change, its cursor is marked `reconcileScopes`. The next pass
+drops the cursor of every scope the adapter no longer lists, and for a mirror its records
+too (a window type keeps them; that history cannot be fetched again). Only then: a scope
+listing that comes back short once must never empty a scope.
+
+### 2.6 Type versions move forward
+
+A binding records the type version it was bound with. On each pass it moves to the newest
+version in the same major of the same catalog source, when that version keeps the driver
+and accepts the binding's settings; the move is logged in History
+(`project.connector.updated`). The cursor is kept, so a minor or patch version must read
+its predecessor's cursor; a version that cannot bumps its major, which is never crossed
+automatically.
 
 ## 3. Choosing a driver
 
@@ -311,7 +362,8 @@ data/connector-types/{shard}/{id}/
 ├── manifest.json                  identity: id, name, description, tags, maintainer, kind
 └── versions/{semver}/
     └── manifest.json              driver + source + normalize + configSchema + secretShape
-                                   + actions + completeness + notes
+                                   + actions + completeness + allowedOrigins
+                                   + syncIntervalMinutes + notes
 ```
 
 Checklist:
@@ -386,6 +438,17 @@ this shape for any future write whose effect stays inside the person's own accou
 Draft/queue/commit and discard are serialized per project through the same
 `ProjectLocks` instance the sync engine uses, so a commit can't race a sync or a concurrent
 discard.
+
+Three more rules hold every commit:
+
+- **The send is journaled first.** The commit moves the draft to `_actions/_sending/`
+  before it transmits. A send that fails, times out, or is interrupted stays there as
+  "may have been sent" and is never transmitted again without a person.
+- **The input has a shape.** An action may declare `inputSchema` (the `configSchema`
+  subset). A draft that does not fit is refused at draft time, naming each problem, and the
+  queued copy is checked again at commit, since a person may have edited it.
+- **Posture is checked at commit.** A commit a gezel asks for, of an action that sends or
+  posts, needs `allowExternalServices` at that moment, not only when the tool was offered.
 
 ## 6. Discoverability
 
@@ -526,7 +589,7 @@ lands most of its records but not all writes a `lastError` naming how many faile
 | 7 | `_`-prefix marks the mutable surface | Met — stated here, enforced by the artifact corpus gate | fs/project-artifacts-store.ts |
 | 8 | `_meta.json` provenance | Met — written after every sync pass | manager.ts |
 | 9 | Cursor advances only on a clean batch | Met — "clean" excludes records gone upstream (`RecordGoneError`) and records given up after `POISON_RECORD_PASSES` (§8) | manager.ts |
-| 10 | Bounded pass without silent loss | Met — `limit` + `partial` paging; over-return windowing counted and logged; `ordinalKey` from timestamps in generic drivers | manager.ts, drivers/ |
+| 10 | Bounded pass without silent loss | Partly met — `limit` + `partial` paging; over-return windowing reported in `lastError` and `_meta.json`; `github-pulls` pages; the mcp/script/spectral drivers still over-return | manager.ts, drivers/ |
 | 11 | Backpressure on `rateLimited` | Met for native HTTP adapters — pass stops, binding backs off (jittered ladder), status shows `backoffUntil`; mcp/script/spectral have no throttle signal | manager.ts, mail/adapter.ts |
 | 12 | `completeness` surfaced per binding | Met — status + `_meta.json` | manager.ts |
 | 13 | `configSchema` validated at bind | Met — subset validator, field-level 400 | config-validate.ts |

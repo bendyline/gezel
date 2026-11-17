@@ -111,6 +111,42 @@ describe('ImapMailProvider', () => {
     expect(await readCorpus(world.env.artifactsDir, 'data/mail')).toHaveLength(7);
   });
 
+  it('a failed SEARCH fails the folder and keeps the backfill, not ends it', async () => {
+    world = await imapWorld();
+    for (const d of [5, 4, 3, 2, 1]) {
+      world.server.addMessage('INBOX', { subject: `Day ${d}`, text: `d${d}`, date: daysAgoIso(d) });
+    }
+    const first = await pass(world, undefined, 2);
+    expect(first.written).toBeGreaterThan(0);
+    // The server fails every SEARCH of the next pass, then recovers.
+    world.server.failSearches = 10;
+    const failed = await pass(world, first.cursor, 2);
+    expect(failed.failedScopes?.[0]?.message).toMatch(/did not answer a search/);
+    world.server.failSearches = 0;
+    let cursor = failed.cursor;
+    for (let i = 0; i < 4; i++) cursor = (await pass(world, cursor, 2)).cursor;
+    expect(await readCorpus(world.env.artifactsDir, 'data/mail')).toHaveLength(5);
+  });
+
+  it('reconnects when the connection drops mid-pass instead of failing the rest', async () => {
+    world = await imapWorld();
+    for (let i = 1; i <= 6; i++)
+      world.server.addMessage('INBOX', { subject: `M${i}`, text: `m${i}` });
+    world.server.dropOnFetch = 3;
+    const r = await syncWithAdapter(await world.adapter(), {
+      storageDir: world.env.artifactsDir,
+      quarantineDir: world.env.quarantineDir,
+      corpusDir: 'data/mail',
+      backfillLimit: 500,
+      cursor: undefined,
+      retrySchedule: [1, 1, 1],
+    });
+    expect(r.error).toBeUndefined();
+    expect(r.errors).toBe(0);
+    expect(r.written).toBe(6);
+    expect(world.server.connections.length).toBe(2);
+  });
+
   it('resyncs the window after a UIDVALIDITY change without duplicating', async () => {
     world = await imapWorld();
     world.server.addMessage('INBOX', { subject: 'A', text: 'a' });
@@ -168,6 +204,19 @@ describe('ImapMailProvider', () => {
       references: ['<root@example.com>'],
     });
     expect(world.smtp.closed).toBe(1);
+    // Port 587 is a plain connection: the password must never go out unless
+    // the server upgrades it, whatever an attacker strips from its greeting.
+    expect(world.smtp.transports[0]).toMatchObject({ secure: false, requireTLS: true });
+  });
+
+  it('insists on STARTTLS for a plain IMAP connection, and leaves implicit TLS alone', async () => {
+    world = await imapWorld();
+    const adapter = await world.adapter();
+    await adapter.ensureAuth();
+    await adapter.close();
+    const first = world.server.connections[0] as { secure?: boolean; doSTARTTLS?: boolean };
+    if (first.secure) expect(first.doSTARTTLS).toBeUndefined();
+    else expect(first.doSTARTTLS).toBe(true);
   });
 
   it('saves a draft with APPEND to the \\Drafts folder and never touches SMTP', async () => {

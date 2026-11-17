@@ -120,4 +120,61 @@ describe('parseRawMessage', () => {
     const msg = await parseRawMessage(raw, ctx);
     expect(msg.attachments).toEqual([]);
   });
+
+  it('reads the HTML when the plain-text part is only a stub', async () => {
+    const raw = [
+      'From: news@shop.example',
+      'Subject: Your order shipped',
+      'Message-ID: <stub@shop.example>',
+      'Content-Type: multipart/alternative; boundary="alt"',
+      '',
+      '--alt',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      'To view this message, please use an HTML-capable email reader.',
+      '--alt',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      '<html><body><p>Order 1234 shipped on Monday and arrives Thursday.</p></body></html>',
+      '--alt--',
+    ].join('\r\n');
+    const msg = await parseRawMessage(raw, ctx);
+    expect(msg.bodyMarkdown).toContain('Order 1234 shipped');
+  });
+
+  it('drops inline data images from a converted HTML body', async () => {
+    const pixel = 'A'.repeat(4000);
+    const raw = [
+      'From: a@x.com',
+      'Subject: picture',
+      'Message-ID: <img@x.com>',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      `<p>Look at this</p><img src="data:image/png;base64,${pixel}">`,
+    ].join('\r\n');
+    const msg = await parseRawMessage(raw, ctx);
+    expect(msg.bodyMarkdown).toContain('Look at this');
+    expect(msg.bodyMarkdown).not.toContain(pixel.slice(0, 100));
+  });
+
+  it('keeps a forwarded message whole', async () => {
+    const raw = [
+      'From: robin@crafts.example',
+      'Subject: Fwd: Invoice 42',
+      'Message-ID: <fwd@crafts.example>',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      'See below.',
+      '-- ',
+      'Robin',
+      '',
+      'From: Billing <b@x.com>',
+      'Sent: Monday',
+      'Subject: Invoice 42',
+      '',
+      'Please pay invoice 42 by Friday.',
+    ].join('\r\n');
+    const msg = await parseRawMessage(raw, ctx);
+    expect(msg.bodyMarkdown).toContain('Please pay invoice 42 by Friday.');
+  });
 });

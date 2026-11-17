@@ -716,10 +716,27 @@ export function normalizeArtifactPath(p: string): string {
   return out;
 }
 
+/**
+ * Underscore entries a gezel may still not write: what a person queued for
+ * daytime approval (`_outbox`), an action mid-commit (`_sending`), the
+ * receipts (`_sent`), and the engine's own bookkeeping. A gezel drafts into
+ * `_drafts`; editing a queued action would change what the person approved.
+ */
+const ENGINE_OWNED_CORPUS_ENTRIES = new Set([
+  '_outbox',
+  '_sending',
+  '_sent',
+  '_meta.json',
+  '_listing.json',
+  '_flags.json',
+]);
+
 function isProtectedConnectorCorpusPath(path: string): boolean {
   const collapsed = artifactSegments(path);
   if (collapsed[0]?.toLowerCase() !== 'data') return false;
-  return !collapsed.slice(1).some((segment) => segment.startsWith('_'));
+  const rest = collapsed.slice(1);
+  if (rest.some((segment) => ENGINE_OWNED_CORPUS_ENTRIES.has(segment.toLowerCase()))) return true;
+  return !rest.some((segment) => segment.startsWith('_'));
 }
 
 /**

@@ -4,6 +4,8 @@ export * from './craftbook.js';
 export * from './craftbook-contract.js';
 export * from './craftbook-doc.js';
 export * from './craftbook-test.js';
+export * from './connector-type-test.js';
+export * from './connector-source.js';
 export * from './tolerant-parse.js';
 export * from './run-recording.js';
 export * from './claude.js';

@@ -244,6 +244,47 @@ describe('bluesky-posts against the fake PDS', () => {
     expect(after.some((x) => x.frontmatter.title === 'Keeper')).toBe(true);
   });
 
+  it('a post indexed after the last pass but dated before it is still picked up', async () => {
+    env = await createConnectorTestEnv();
+    const fake = new FakeBluesky();
+    // No engagement re-walk to find it by accident.
+    const cfg = config(fake, { metricsRefreshHours: 24, syncMentions: false });
+    await env.storeCredential(binding(cfg), { appPassword: fake.appPassword });
+    const postedAt = fake.now;
+    fake.addPost('On time');
+    const first = await pass(adapterFor(fake, env, cfg), undefined);
+
+    // Written two minutes before the pass; the relay delivered it ten after.
+    fake.advance(10 * MINUTE);
+    fake.addPost('Delivered late', { createdAt: new Date(postedAt.getTime() - 2 * MINUTE) });
+    const r = await pass(adapterFor(fake, env, cfg), first.cursor);
+    expect(r.error).toBeUndefined();
+    const titles = (await readCorpus(env.artifactsDir, 'data/bsky/posts')).map(
+      (x) => x.frontmatter.title,
+    );
+    expect(titles.sort()).toEqual(['Delivered late', 'On time']);
+    const quiet = await pass(adapterFor(fake, env, cfg), r.cursor);
+    expect(quiet.written).toBe(0);
+  });
+
+  it('a server that goes quiet fails the request within its budget instead of holding the pass', async () => {
+    env = await createConnectorTestEnv();
+    const fake = new FakeBluesky();
+    const cfg = config(fake, { syncMentions: false });
+    await env.storeCredential(binding(cfg), { appPassword: fake.appPassword });
+    fake.addPost('Seed');
+    fake.http.hangNext({ url: `${fake.service}/xrpc/app.bsky.feed.getAuthorFeed` });
+    const runtime = {
+      ...createBlueskyRuntime(fake.http.fetch, { requestTimeoutMs: 50 }),
+      now: () => fake.now,
+    };
+    const started = Date.now();
+    const r = await pass(new BlueskyPostsAdapter(binding(cfg), env.deps(), runtime), undefined);
+    expect(Date.now() - started).toBeLessThan(5_000);
+    const failure = r.error ?? r.failedScopes?.map((x) => x.message).join('; ') ?? '';
+    expect(failure).toMatch(/timed out|timeout|abort/i);
+  });
+
   it('publishes through createRecord on the injected transport', async () => {
     env = await createConnectorTestEnv();
     const fake = new FakeBluesky();

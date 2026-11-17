@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "kind": "hand-written",
+    "source": "Airtable's List records API (https://airtable.com/developers/web/api/list-records): 100 records per page, an `offset` for the next one."
+  },
+  "cases": [
+    {
+      "id": "lists-every-page-and-removes-deleted-rows",
+      "description": "The first pass lists two pages; on the second a row is gone, and the mirror loses it.",
+      "config": { "baseId": "appTEST", "tableName": "Tasks" },
+      "credential": "placeholder",
+      "passes": 2,
+      "exchanges": [
+        {
+          "kind": "http",
+          "request": {
+            "method": "GET",
+            "url": "https://api.airtable.com/v0/appTEST/Tasks?offset="
+          },
+          "response": {
+            "body": {
+              "records": [
+                {
+                  "id": "recA1",
+                  "createdTime": "2026-06-01T10:00:00.000Z",
+                  "fields": { "Name": "Design review" }
+                },
+                {
+                  "id": "recA2",
+                  "createdTime": "2026-06-02T10:00:00.000Z",
+                  "fields": { "Name": "Ship notes" }
+                }
+              ],
+              "offset": "itrNEXT/recA2"
+            }
+          }
+        },
+        {
+          "kind": "http",
+          "request": {
+            "method": "GET",
+            "url": "https://api.airtable.com/v0/appTEST/Tasks?offset=itrNEXT%2FrecA2"
+          },
+          "response": {
+            "body": {
+              "records": [
+                {
+                  "id": "recA3",
+                  "createdTime": "2026-06-03T10:00:00.000Z",
+                  "fields": { "Name": "Retro" }
+                }
+              ]
+            }
+          }
+        },
+        {
+          "kind": "http",
+          "request": {
+            "method": "GET",
+            "url": "https://api.airtable.com/v0/appTEST/Tasks?offset="
+          },
+          "response": {
+            "body": {
+              "records": [
+                {
+                  "id": "recA1",
+                  "createdTime": "2026-06-01T10:00:00.000Z",
+                  "fields": { "Name": "Design review" }
+                },
+                {
+                  "id": "recA3",
+                  "createdTime": "2026-06-03T10:00:00.000Z",
+                  "fields": { "Name": "Retro" }
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "expect": {
+        "records": [
+          { "id": "recA1", "frontmatter": { "title": "Design review" } },
+          { "id": "recA3", "frontmatter": { "title": "Retro" } }
+        ]
+      }
+    }
+  ]
+}

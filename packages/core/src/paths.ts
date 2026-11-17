@@ -1400,6 +1400,16 @@ export function systemToolsetsInstallDir(root: string): string {
 }
 
 /**
+ * Published Prismatic components a Spectral connector type pins, downloaded
+ * when a connection is made: `<scope>__<name>@<version>-<sha12>/package/`,
+ * each beside a `.gezel-component.json` marker. Owned by the component store
+ * (`connectors/spectral/component-store.ts`); safe to delete.
+ */
+export function connectorComponentsDir(root: string): string {
+  return join(root, 'connector-components');
+}
+
+/**
  * Opt-in live gilde content cache — newer `@bendyline/gilde` patch releases
  * fetched at runtime by the GildeUpdateManager. Holds `versions/<v>/` (the
  * extracted npm package) plus `state.json`. Rebuildable: the bundled pin is

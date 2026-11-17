@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "kind": "hand-written",
+    "source": "The fetch script's own contract: rows at itemsPath, next page at nextPagePath."
+  },
+  "cases": [
+    {
+      "id": "pages-rows-on-one-origin",
+      "description": "Rows from two pages land in the table; the next-page link is followed on the same origin.",
+      "config": {
+        "url": "https://metrics.example.test/v1/rows",
+        "itemsPath": "data",
+        "timeField": "at",
+        "nextPagePath": "next"
+      },
+      "exchanges": [
+        {
+          "kind": "http",
+          "request": { "url": "https://metrics.example.test/v1/rows" },
+          "response": {
+            "body": {
+              "data": [
+                { "at": "2026-11-15T10:00:00Z", "path": "/", "status": 200 },
+                { "at": "2026-11-15T10:01:00Z", "path": "/docs", "status": 404 }
+              ],
+              "next": "https://metrics.example.test/v1/rows?page=2"
+            }
+          }
+        },
+        {
+          "kind": "http",
+          "request": { "url": "https://metrics.example.test/v1/rows?page=2" },
+          "response": {
+            "body": { "data": [{ "at": "2026-11-15T10:02:00Z", "path": "/", "status": 200 }] }
+          }
+        }
+      ],
+      "expect": { "rows": 3 }
+    }
+  ]
+}

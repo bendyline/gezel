@@ -14,6 +14,10 @@ export function validateScriptOutput(meta: ScriptMeta, value: unknown): unknown 
   for (const [name, spec] of Object.entries(meta.outputs)) {
     const v = src[name];
     if (v === undefined) {
+      // A field that may be null may also be left out: scripts set optional
+      // flags with a conditional spread (`...(more ? { partial: true } : {})`),
+      // and refusing that failed every github-issues and http-json-rows sync.
+      if ((spec as { nullable?: boolean }).nullable || spec.type === 'json') continue;
       throw new Error(`output is missing declared field "${name}"`);
     }
     if (v === null) {

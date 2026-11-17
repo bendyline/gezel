@@ -954,6 +954,21 @@ describe('project artifacts', () => {
         { initiatedByGezel: true },
       ),
     ).resolves.toBeUndefined();
+    // A queued action is what the person approved; a receipt is a record of
+    // what was sent; the engine's sidecars are its bookkeeping. None of them
+    // is a gezel's to edit, although each sits on the `_` surface.
+    for (const path of [
+      'data/work-mail/_actions/_outbox/action.md',
+      'data/work-mail/_actions/_sending/action.md',
+      'data/work-mail/_actions/_sent/action.md',
+      'data/work-mail/_meta.json',
+      'data/work-mail/inbox/_flags.json',
+    ]) {
+      await expect(
+        store.writeProjectArtifact('connectorartifacts', path, 'x', { initiatedByGezel: true }),
+        path,
+      ).rejects.toMatchObject({ code: 'connector-corpus-readonly' });
+    }
     await expect(
       store.writeProjectArtifact(
         'connectorartifacts',

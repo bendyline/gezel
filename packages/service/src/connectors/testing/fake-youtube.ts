@@ -269,7 +269,8 @@ export class FakeYouTube {
       return googleError(400, 'playlistIdRequired', 'No playlistId was specified.');
     }
     const channel = this.channels.find((c) => this.uploadsPlaylistId(c.id) === playlistId);
-    if (!channel) {
+    // A channel that has never uploaded has no uploads playlist yet.
+    if (!channel || channel.videos.length === 0) {
       return googleError(
         404,
         'playlistNotFound',

@@ -3,9 +3,7 @@ import { action } from '@prismatic-io/spectral';
 /**
  * A minimal spectral action that proves the off-platform host mechanism (SDK
  * loads, `action.perform(shim, params)` runs, returns `{ data }`) without
- * needing a real vendored Prismatic component. Real components (e.g. Airtable
- * `listRecords`, which hits the deep `dist/clients/http` path guarded by the
- * deep-import test) are vendored here later.
+ * needing a real vendored Prismatic component.
  */
 export const list = action({
   display: {

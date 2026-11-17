@@ -1,0 +1,9 @@
+{
+  "name": "@prismatic-io/components-gezel-echo-fixture",
+  "version": "1.0.0",
+  "description": "Test fixture: a callable component built the way Prismatic publishes theirs. Never published.",
+  "license": "Apache-2.0",
+  "main": "./npm-dist/index.cjs",
+  "peerDependencies": { "@prismatic-io/spectral": "^10.39.1" },
+  "dependencies": {}
+}

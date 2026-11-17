@@ -10,7 +10,7 @@ on:
         required: true
         default: provider
         type: choice
-        options: [provider, native, all]
+        options: [provider, native, connectors, all]
 
 env:
   NODE_VERSION: '24'
@@ -101,5 +101,119 @@ jobs:
         with:
           name: native-engine-smoke
           path: evals/runs/
+          if-no-files-found: warn
+          retention-days: 14
+
+  connectors-smoke:
+    name: Connectors against real servers, no accounts
+    if: >-
+      (github.event_name == 'schedule' && vars.GEZEL_ENABLE_CONNECTOR_SMOKE == '1') ||
+      (github.event_name == 'workflow_dispatch' && (inputs.lane == 'connectors' || inputs.lane == 'all'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      greenmail:
+        # GreenMail 2.1.15 (2026-10-25), pinned by digest. IMAPS and SMTPS with
+        # its own self-signed certificate; one user.
+        image: greenmail/standalone@sha256:309ba544ea482e5d4265d09921cdab07c8dad2cc4481d715c9b8ff5d3f0a149f
+        env:
+          GREENMAIL_OPTS: >-
+            -Dgreenmail.setup.test.all -Dgreenmail.hostname=0.0.0.0
+            -Dgreenmail.users=alice:live-lane-secret@example.test
+        ports:
+          - 3465:3465
+          - 3993:3993
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - run: pnpm --filter @bendyline/gezel-service... run build
+      - name: Start Dovecot with a throwaway certificate
+        # Dovecot 2.4.4 (2026-06-03), pinned by digest. Started here rather than
+        # as a service so its certificate exists first; the image reads it from
+        # /etc/dovecot/ssl and takes every user's password from USER_PASSWORD.
+        shell: bash
+        run: |
+          ssl="$RUNNER_TEMP/dovecot-ssl"
+          mkdir -p "$ssl"
+          openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=localhost" \
+            -keyout "$ssl/tls.key" -out "$ssl/tls.crt"
+          chmod 644 "$ssl/tls.key"
+          docker run -d --name dovecot -p 31993:31993 \
+            -e USER_PASSWORD='{PLAIN}live-lane-secret' \
+            -v "$ssl:/etc/dovecot/ssl:ro" \
+            dovecot/dovecot@sha256:723e3392fe16c6fad8ddc605ea767cc01b4bad9cd9f13eb1dbac15e79c89b2d4
+      - name: Wait for the mail servers
+        shell: bash
+        run: |
+          for port in 3993 3465 31993; do
+            for _ in $(seq 60); do
+              (echo > "/dev/tcp/127.0.0.1/$port") 2>/dev/null && break
+              sleep 1
+            done
+          done
+      - name: Mail against real IMAP and SMTP servers
+        env:
+          GEZEL_CONNECTOR_LIVE_LOCAL: '1'
+          GEZEL_LIVE_MAIL: >-
+            [{"name":"greenmail","address":"alice@example.test","user":"alice","pass":"live-lane-secret",
+            "imap":{"host":"127.0.0.1","port":3993,"secure":true},
+            "smtp":{"host":"127.0.0.1","port":3465,"secure":true}},
+            {"name":"dovecot","address":"alice@example.test","user":"alice","pass":"live-lane-secret",
+            "imap":{"host":"127.0.0.1","port":31993,"secure":true}}]
+        run: pnpm --filter @bendyline/gezel-service exec vitest run src/connectors/testing/live-local.integration.test.ts
+      - name: Dovecot log
+        if: failure()
+        run: docker logs dovecot 2>&1 | tail -100
+      - name: Restore the public-source streak
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .connector-public-streak
+          key: connector-public-streak-${{ github.run_id }}
+          restore-keys: connector-public-streak-
+      - name: Is this the third degraded run in a row?
+        id: streak
+        shell: bash
+        run: |
+          previous=$(cat .connector-public-streak/degraded 2>/dev/null || echo 0)
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          echo "strict=$([ "$previous" -ge 2 ] && echo 1 || echo 0)" >> "$GITHUB_OUTPUT"
+      - name: Public sources
+        # A source that answers but yields nothing valid fails every run: that
+        # is our adapter. One that cannot be reached is degraded, a warning,
+        # until the third degraded run in a row.
+        env:
+          GEZEL_CONNECTOR_LIVE_PUBLIC: '1'
+          GEZEL_LIVE_PUBLIC_STRICT: ${{ steps.streak.outputs.strict }}
+          GEZEL_LIVE_REPORT: ${{ github.workspace }}/artifacts/connectors/public.json
+        run: |
+          mkdir -p artifacts/connectors
+          pnpm --filter @bendyline/gezel-service exec vitest run src/connectors/testing/live-public.integration.test.ts
+      - name: Record the streak
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p .connector-public-streak
+          report=artifacts/connectors/public.json
+          if [ -f "$report" ] && node -e 'process.exit(JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")).every((r)=>r.status==="ok")?0:1)' "$report"; then
+            echo 0 > .connector-public-streak/degraded
+          else
+            echo $(( ${{ steps.streak.outputs.previous || 0 }} + 1 )) > .connector-public-streak/degraded
+            echo "::warning::Public connector sources degraded ($(cat .connector-public-streak/degraded) run(s) in a row)"
+          fi
+      - name: Save the public-source streak
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: .connector-public-streak
+          key: connector-public-streak-${{ github.run_id }}
+      - name: Preserve connector evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: connector-smoke
+          path: artifacts/connectors/
           if-no-files-found: warn
           retention-days: 14

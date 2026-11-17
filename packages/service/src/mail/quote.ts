@@ -7,7 +7,10 @@
  * relevance.
  *
  * Heuristic and intentionally aggressive: it truncates at the first reply
- * attribution / quote block / forwarded header / signature delimiter it finds.
+ * attribution / quote block / signature delimiter it finds. Three things it
+ * never does: cut a forward (what was forwarded is in no sibling message),
+ * drop a reply written below or between the quoted lines, or leave a message
+ * empty.
  */
 
 /** A line that begins a quoted-reply / forwarded section. */
@@ -33,6 +36,18 @@ function isQuoteBoundary(line: string, next: string | undefined): boolean {
   return false;
 }
 
+/** A "Forwarded message" separator: what follows is the message being passed on. */
+function isForwardSeparator(line: string): boolean {
+  return /^\s*-{2,}\s*Forwarded message\s*-{2,}/i.test(line.trimEnd());
+}
+
+/** An "On <date>, <person> wrote:" attribution line (or its opening half). */
+function isAttribution(line: string, next: string | undefined): boolean {
+  const l = line.trimEnd();
+  if (/\bwrote:\s*$/.test(l)) return true;
+  return /^On\b.{0,200}$/.test(l) && next !== undefined && /\bwrote:\s*$/.test(next.trimEnd());
+}
+
 /** A line that begins a signature block (RFC 3676 `-- `, or common variants). */
 function isSignatureBoundary(line: string): boolean {
   const l = line.trimEnd();
@@ -47,7 +62,9 @@ function isSignatureBoundary(line: string): boolean {
  * plain-text or markdown body (markdown blockquotes also use `>` so the same
  * quote rule catches converted HTML replies).
  */
-export function stripQuotedAndSignature(body: string): string {
+export function stripQuotedAndSignature(body: string, opts: { forwarded?: boolean } = {}): string {
+  const tidy = (text: string) => text.replace(/\n{3,}/g, '\n\n').trim();
+  if (opts.forwarded) return tidy(body);
   const lines = body.split(/\r?\n/);
   let cut = lines.length;
   for (let i = 0; i < lines.length; i++) {
@@ -57,9 +74,18 @@ export function stripQuotedAndSignature(body: string): string {
       break;
     }
   }
-  return lines
-    .slice(0, cut)
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  if (cut < lines.length && isForwardSeparator(lines[cut]!)) return tidy(body);
+  const head = tidy(lines.slice(0, cut).join('\n'));
+  if (head) return head;
+
+  // Nothing above the history: a reply written below or between the quoted
+  // lines. Keep the sender's own lines, up to their signature.
+  const own: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (/^\s*>/.test(line) || isAttribution(line, lines[i + 1])) continue;
+    if (isSignatureBoundary(line) && own.some((l) => l.trim())) break;
+    own.push(line);
+  }
+  return tidy(own.join('\n')) || tidy(body);
 }

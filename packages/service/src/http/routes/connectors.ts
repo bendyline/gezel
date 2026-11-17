@@ -8,6 +8,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { ConnectorPolicyError } from '../../connectors/manager.js';
+import { isFirstPartyCaller } from '../auth.js';
 import type { ServiceContext } from '../context.js';
 
 const BindRequestSchema = z.object({
@@ -25,6 +26,13 @@ const OAuthStartSchema = z.object({
   displayName: z.string().optional(),
   /** Pre-fill the provider's account picker (mail: the address being linked). */
   loginHint: z.string().optional(),
+  /** Re-link this existing connection in place instead of adding one. */
+  relinkBindingId: z.string().optional(),
+});
+
+const ReconnectSchema = z.object({
+  /** The new credential — object (stringified) or string. */
+  credential: z.unknown(),
 });
 
 const OAuthCompleteSchema = z.object({
@@ -50,6 +58,18 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
     return c.json(await ctx.connectors.status(project));
+  });
+
+  // What connecting a type fetches first (a published component), or why it
+  // cannot: the form says so before the person fills it in.
+  app.get('/:id/connectors/readiness', async (c) => {
+    const type = c.req.query('type');
+    if (!type) return c.json({ error: 'type is required' }, 400);
+    try {
+      return c.json(await ctx.connectors.componentReadiness(type));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
   });
 
   app.post('/:id/connectors/bind', async (c) => {
@@ -130,6 +150,45 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
         .catch(() => {});
     }
     return c.body(null, 204);
+  });
+
+  // Re-link in place: a new credential for an existing connection, keeping
+  // its settings, cursor, and records. OAuth types re-link through
+  // /oauth/start with `relinkBindingId`.
+  app.post('/:id/connectors/:bindingId/reconnect', async (c) => {
+    const project = await ctx.store.getProject(c.req.param('id'));
+    if (!project) return c.json({ error: 'not found' }, 404);
+    const body = ReconnectSchema.safeParse(await c.req.json().catch(() => null));
+    if (!body.success || body.data.credential === undefined || body.data.credential === null) {
+      return c.json({ error: 'a credential is required' }, 400);
+    }
+    const credential =
+      typeof body.data.credential === 'string'
+        ? body.data.credential
+        : JSON.stringify(body.data.credential);
+    try {
+      const binding = await ctx.connectors.reconnect(project, c.req.param('bindingId'), credential);
+      return c.json({ ok: true, binding });
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
+  // Check a connection: a trial pass that changes nothing the project keeps.
+  // `cassette: true` adds the scrubbed exchanges, for a person to keep or send.
+  app.post('/:id/connectors/:bindingId/check', async (c) => {
+    const project = await ctx.store.getProject(c.req.param('id'));
+    if (!project) return c.json({ error: 'not found' }, 404);
+    const body = (await c.req.json().catch(() => ({}))) as { cassette?: unknown };
+    try {
+      const check = await ctx.connectors.checkConnection(project, c.req.param('bindingId'), {
+        cassette: body?.cassette === true,
+      });
+      return c.json({ ok: true, check });
+    } catch (err) {
+      if (err instanceof ConnectorPolicyError) return c.json({ error: err.message }, 403);
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
   });
 
   // Rename, reconfigure, pause, or resume a binding (a camera's settings).
@@ -237,7 +296,9 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
     try {
-      const result = await ctx.connectorActions.commit(project, c.req.param('draftId'));
+      const result = await ctx.connectorActions.commit(project, c.req.param('draftId'), {
+        agentInitiated: !isFirstPartyCaller(c),
+      });
       return c.json({ ok: true, ...result });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);

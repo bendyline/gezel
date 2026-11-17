@@ -434,7 +434,9 @@ async function isSessionRouteAllowed(
         !/^\/connectors\/actions\//.test(rest)) ||
       // A saved sign-in: a gezel must never open a password window on the
       // person's desktop, plant cookies of its choosing, or read or forget one.
-      /^\/connectors\/[^/]+\/(?:preview|captures|sign-in|session)(?:\/|$)/.test(rest) ||
+      /^\/connectors\/[^/]+\/(?:preview|captures|sign-in|session|reconnect|check)(?:\/|$)/.test(
+        rest,
+      ) ||
       // Saving a page is the person's click; a gezel asks with request_web_page.
       (method === 'POST' && /^\/web-pages\/save\/?$/.test(rest)) ||
       // What a draft offers, and taking an offer, are the composer's: accepting

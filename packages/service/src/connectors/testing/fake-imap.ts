@@ -69,6 +69,14 @@ export class FakeImapServer {
   unreachable = false;
   /** Advertise UIDPLUS (APPEND returns the new UID). */
   uidPlus = true;
+  /** Answer the next N SEARCH commands with `false`, as imapflow does on failure. */
+  failSearches = 0;
+  /**
+   * The connection drops on the Nth message fetch from now (a NAT timeout,
+   * a server restart): that fetch fails with a reset and the client is no
+   * longer usable, as imapflow's is after its socket closes.
+   */
+  dropOnFetch = 0;
   private validity = 1_700_000_000n;
 
   constructor(
@@ -144,7 +152,11 @@ export class FakeImapServer {
   readonly createClient = (options: ClientOptions): FakeImapClient =>
     new FakeImapClient(this, options);
 
+  /** Options of every connection attempt, for asserting TLS settings. */
+  readonly connections: ClientOptions[] = [];
+
   connect(options: ClientOptions): void {
+    this.connections.push(options);
     if (this.unreachable) {
       throw Object.assign(new Error(`connect ECONNREFUSED ${options.host}:${options.port}`), {
         code: 'ECONNREFUSED',
@@ -246,6 +258,11 @@ export class FakeImapClient {
     const mb = this.requireSelected();
     if (!options.uid) throw new Error('FakeImapClient models UID SEARCH only');
     this.server.commands.push(`UID SEARCH ${JSON.stringify(query)}`);
+    // imapflow resolves `false`, not a rejection, when SEARCH fails or times out.
+    if (this.server.failSearches > 0) {
+      this.server.failSearches--;
+      return false;
+    }
     const max = mb.messages.reduce((n, m) => Math.max(n, m.uid), 0);
     let hits = mb.messages;
     if (query.since !== undefined) {
@@ -292,6 +309,10 @@ export class FakeImapClient {
     this.live();
     const mb = this.requireSelected();
     if (!options.uid) throw new Error('FakeImapClient models UID FETCH only');
+    if (this.server.dropOnFetch > 0 && --this.server.dropOnFetch === 0) {
+      this.usable = false;
+      throw Object.assign(new Error('Socket closed unexpectedly'), { code: 'ECONNRESET' });
+    }
     this.server.commands.push(`UID FETCH ${range}`);
     const m = mb.messages.find((x) => x.uid === Number(range));
     if (!m) return false;

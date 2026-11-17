@@ -29,14 +29,29 @@ export function parseFrontmatter(content: string): Frontmatter {
   return { data, body };
 }
 
+// U+2028 and U+2029 end a line in JavaScript and in YAML 1.1 readers, and
+// JSON.stringify leaves them raw; they are built here rather than written as
+// escapes so no tool that rewrites escapes can turn them into line breaks.
+const LINE_SEPARATORS = String.fromCharCode(0x2028, 0x2029);
+/**
+ * Any control character is quoted: a bare carriage return or line separator
+ * from a source's title would start a new key in other YAML readers.
+ */
+const NEEDS_QUOTE = new RegExp(`[:#"\\x00-\\x1f\\x7f${LINE_SEPARATORS}]`);
+const RAW_SEPARATOR = new RegExp(`[${LINE_SEPARATORS}]`, 'g');
+
+function quoteValue(v: string): string {
+  return JSON.stringify(v).replace(RAW_SEPARATOR, (c) => `\\u${c.charCodeAt(0).toString(16)}`);
+}
+
 /** Serialize a flat string map as a YAML frontmatter block + body. */
 export function withFrontmatter(data: Record<string, string>, body: string): string {
   const keys = Object.keys(data);
   if (keys.length === 0) return body;
   const lines = keys.map((k) => {
     const v = data[k] ?? '';
-    const needsQuote = /[:#"\n]/.test(v);
-    return `${k}: ${needsQuote ? JSON.stringify(v) : v}`;
+    const needsQuote = NEEDS_QUOTE.test(v);
+    return `${k}: ${needsQuote ? quoteValue(v) : v}`;
   });
   return `---\n${lines.join('\n')}\n---\n\n${body}`;
 }

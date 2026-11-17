@@ -37,6 +37,7 @@ import type {
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
+import { retryAfterOf } from '../types.js';
 import { sha8 } from '../writer.js';
 import {
   type CalendarAttendee,
@@ -153,6 +154,8 @@ export interface MicrosoftCalendarCursor {
   window: CalendarWindow;
   next?: string;
   delta?: string;
+  /** `next` continues a first round over the window, not a delta round. */
+  initial?: true;
 }
 
 interface MicrosoftCalendar {
@@ -370,7 +373,13 @@ function readCursor(raw: unknown): MicrosoftCalendarCursor | undefined {
   };
   const next = link(c.next);
   const delta = link(c.delta);
-  return { v: 1, window, ...(next ? { next } : {}), ...(delta ? { delta } : {}) };
+  return {
+    v: 1,
+    window,
+    ...(next ? { next } : {}),
+    ...(delta ? { delta } : {}),
+    ...(next && c.initial === true ? { initial: true as const } : {}),
+  };
 }
 
 /** Graph's "start over" signals: 410, or a sync-state error on 400/404. */
@@ -444,14 +453,15 @@ export class MicrosoftCalendarAdapter implements ConnectorAdapter<NormalizedReco
     try {
       return await this.collect(calendar, cur, limit);
     } catch (err) {
-      if (isThrottle(err)) return { records: [], cursor, rateLimited: true };
+      if (isThrottle(err)) return { records: [], cursor, rateLimited: true, ...retryAfterOf(err) };
       if (isSyncReset(err)) {
         log.info(`${this.typeId} ${scope}: delta state expired; starting a fresh round`);
         const fresh = this.freshCursor();
         try {
           return await this.collect(calendar, fresh, limit);
         } catch (again) {
-          if (isThrottle(again)) return { records: [], cursor: fresh, rateLimited: true };
+          if (isThrottle(again))
+            return { records: [], cursor: fresh, rateLimited: true, ...retryAfterOf(again) };
           throw again;
         }
       }
@@ -490,6 +500,26 @@ export class MicrosoftCalendarAdapter implements ConnectorAdapter<NormalizedReco
     const removed: string[] = [];
     const pageSize = Math.min(PAGE_SIZE, limit);
     let url = trustedGraphUrl(cur.next ?? cur.delta ?? this.initialUrl(calendar.id, cur.window));
+    // A first round lists every live event in the window, so once it ends
+    // what it left out was deleted meanwhile (an expired delta, a new window).
+    const initial = !cur.next && !cur.delta ? true : cur.initial === true;
+    const first = !cur.next && !cur.delta;
+    const listing = (last: boolean): Pick<ChangeBatch<unknown>, 'fullListing'> =>
+      initial
+        ? {
+            fullListing: {
+              first,
+              last,
+              within: { start: cur.window.start, end: cur.window.end },
+            },
+          }
+        : {};
+    const pending = (next: string): MicrosoftCalendarCursor => ({
+      v: 1,
+      window: cur.window,
+      next,
+      ...(initial ? { initial: true as const } : {}),
+    });
     for (let guard = 0; guard < 10_000; guard++) {
       let page: GraphDeltaPage;
       try {
@@ -502,12 +532,7 @@ export class MicrosoftCalendarAdapter implements ConnectorAdapter<NormalizedReco
         );
       } catch (err) {
         if (isThrottle(err) && (records.length > 0 || removed.length > 0)) {
-          return {
-            records,
-            removed,
-            cursor: { v: 1, window: cur.window, next: url },
-            rateLimited: true,
-          };
+          return { records, removed, cursor: pending(url), rateLimited: true, ...listing(false) };
         }
         throw err;
       }
@@ -516,12 +541,7 @@ export class MicrosoftCalendarAdapter implements ConnectorAdapter<NormalizedReco
       if (nextLink) {
         url = trustedGraphUrl(nextLink);
         if (limit - records.length < pageSize) {
-          return {
-            records,
-            removed,
-            cursor: { v: 1, window: cur.window, next: url },
-            partial: true,
-          };
+          return { records, removed, cursor: pending(url), partial: true, ...listing(false) };
         }
         continue;
       }
@@ -536,9 +556,9 @@ export class MicrosoftCalendarAdapter implements ConnectorAdapter<NormalizedReco
       if (windowNeedsRefresh(done.window, this.now(), this.windowConfig)) {
         // This round already brought deletions up to now; the new round only
         // has to cover the new range.
-        return { records, removed, cursor: this.freshCursor(), partial: true };
+        return { records, removed, cursor: this.freshCursor(), partial: true, ...listing(true) };
       }
-      return { records, removed, cursor: done };
+      return { records, removed, cursor: done, ...listing(true) };
     }
     throw new Error('Microsoft Graph calendar delta round did not end');
   }

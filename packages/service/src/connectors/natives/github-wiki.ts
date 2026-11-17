@@ -3,6 +3,10 @@
  * rather than through the REST API, so a shallow, disposable clone is the
  * read-only transport for a normalized page corpus. Public wikis clone
  * anonymously; a binding may carry a PAT for private repositories.
+ *
+ * Each pass first asks the remote for its HEAD (`git ls-remote`, one round
+ * trip). A wiki that has not moved since the last complete pass is never
+ * cloned; one that has is cloned shallowly and listed.
  */
 
 import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
@@ -81,6 +85,10 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
   private commitSha = '';
   private commitDate = '';
   private pages: WikiPage[] = [];
+  /** The remote's HEAD from `ls-remote`, when the probe answered. */
+  private remoteSha = '';
+  private cloneUrl = '';
+  private gitAuth: { args: string[]; redact: string[] } = { args: [], redact: [] };
 
   constructor(
     private readonly binding: ConnectorBindingRef,
@@ -98,10 +106,7 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
       connectorSecretKey(this.binding.type, this.binding.id),
     );
     const token = secret?.trim() ?? '';
-    this.tempDir = await this.runtime.makeTempDir();
-    this.checkoutDir = join(this.tempDir, 'wiki');
-
-    const cloneUrl = `https://${this.config.host}/${this.config.owner}/${this.config.repository}.wiki.git`;
+    this.cloneUrl = `https://${this.config.host}/${this.config.owner}/${this.config.repository}.wiki.git`;
     const args: string[] = [];
     const redact: string[] = [];
     if (token) {
@@ -111,16 +116,37 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
       args.push('-c', `http.https://${this.config.host}/.extraheader=${authHeader}`);
       redact.push(token, basic, authHeader);
     }
-    args.push(
+    this.gitAuth = { args, redact };
+
+    // The cheap probe; when it cannot answer, the clone below will say why.
+    try {
+      const head = await this.runtime.runGit([...args, 'ls-remote', '--', this.cloneUrl, 'HEAD'], {
+        redact,
+      });
+      this.remoteSha = /^([0-9a-f]{40,64})\s/m.exec(head.stdout)?.[1] ?? '';
+    } catch {
+      this.remoteSha = '';
+    }
+    if (!this.remoteSha) await this.checkout();
+  }
+
+  /** Clone the wiki shallowly and read its page list (once per pass). */
+  private async checkout(): Promise<void> {
+    if (this.checkoutDir && this.commitSha) return;
+    const config = this.config!;
+    this.tempDir = await this.runtime.makeTempDir();
+    this.checkoutDir = join(this.tempDir, 'wiki');
+    const args = [
+      ...this.gitAuth.args,
       'clone',
       '--depth=1',
       '--single-branch',
       '--no-tags',
       '--',
-      cloneUrl,
+      this.cloneUrl,
       this.checkoutDir,
-    );
-
+    ];
+    const redact = this.gitAuth.redact;
     try {
       await this.runtime.runGit(args, { redact });
       const [commit, date, files] = await Promise.all([
@@ -136,14 +162,14 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
       await this.cleanup();
       const detail = error instanceof Error ? ` ${error.message}` : '';
       throw new Error(
-        `Unable to read the GitHub wiki for ${this.config.owner}/${this.config.repository}. ` +
+        `Unable to read the GitHub wiki for ${config.owner}/${config.repository}. ` +
           `Check that the wiki exists and that the optional PAT can access the repository.${detail}`,
       );
     }
   }
 
   async listScopes(): Promise<string[]> {
-    this.assertReady();
+    if (!this.config) throw new Error('GitHub wiki connector has not been initialized.');
     return [''];
   }
 
@@ -152,8 +178,14 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
     cursor: unknown,
     opts?: { limit?: number },
   ): Promise<ChangeBatch<GitHubWikiCursor>> {
-    this.assertReady();
+    if (!this.config) throw new Error('GitHub wiki connector has not been initialized.');
     const prior = parseCursor(cursor);
+    // The remote has not moved since the last complete pass: no clone.
+    if (prior?.complete && this.remoteSha && prior.sha === this.remoteSha) {
+      return { records: [], cursor: prior };
+    }
+    await this.checkout();
+    this.assertReady();
     if (prior?.sha === this.commitSha && prior.complete) {
       return { records: [], cursor: prior };
     }
@@ -175,13 +207,16 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
       })),
       cursor: nextCursor,
       ...(nextCursor.complete ? {} : { partial: true }),
-      // Only a single batch covering the whole page list from the start is a
-      // full enumeration (prune-safe); multi-round passes are not.
-      ...(nextCursor.complete && offset === 0 ? { enumeratedAll: true } : {}),
+      // A single batch from the start is the whole wiki; a list spread over
+      // batches is reconciled once its last batch lands.
+      ...(nextCursor.complete && offset === 0
+        ? { enumeratedAll: true }
+        : { fullListing: { first: offset === 0, last: nextCursor.complete } }),
     };
   }
 
   async fetchRecord(_scope: string, ref: RecordRef): Promise<NormalizedRecord> {
+    await this.checkout();
     this.assertReady();
     const page = parsePageRef(ref.raw);
     const pagePath = safeJoin(this.checkoutDir!, page.path);
@@ -235,6 +270,7 @@ export class GitHubWikiAdapter implements ConnectorAdapter {
     const tempDir = this.tempDir;
     this.tempDir = undefined;
     this.checkoutDir = undefined;
+    this.commitSha = '';
     this.pages = [];
     if (tempDir) await this.runtime.removeTempDir(tempDir);
   }

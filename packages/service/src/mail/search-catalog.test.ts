@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { mailCatalogEntries, parseMailPath } from './search-catalog.js';
+import { messageToRecord } from './storage.js';
 
 const MAIL_PATH =
   'data/work-mail/inbox/2026-08-19--quarterly-numbers--1a2b3c4d/001--2026-08-19T14-32--from-alice--deadbeef.md';
@@ -16,6 +17,29 @@ describe('parseMailPath', () => {
     expect(parseMailPath('p1', MAIL_PATH)).toEqual({
       projectId: 'p1',
       path: MAIL_PATH,
+      subject: 'quarterly numbers',
+      from: 'alice',
+      date: '2026-08-19 14:32',
+    });
+  });
+
+  it('reads the paths the writer produces today', () => {
+    const record = messageToRecord('me@example.test', {
+      messageId: '<m1@example.test>',
+      threadKey: '<t1@example.test>',
+      references: [],
+      subject: 'Re: Quarterly numbers',
+      from: 'Alice <alice@example.test>',
+      to: 'me@example.test',
+      cc: '',
+      date: '2026-08-19T14:32:00.000Z',
+      flags: [],
+      folder: 'INBOX',
+      bodyMarkdown: 'Numbers attached.',
+      attachments: [],
+    });
+    const path = `data/work-mail/inbox/${record.dirSegments.join('/')}/001--${record.fileStem}--deadbeef.md`;
+    expect(parseMailPath('p1', path)).toMatchObject({
       subject: 'quarterly numbers',
       from: 'alice',
       date: '2026-08-19 14:32',

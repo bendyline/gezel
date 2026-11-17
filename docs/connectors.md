@@ -138,13 +138,13 @@ manifest*, so a new source is a JSON file, not a compile. The registry dispatche
   or a CLI invocation. Gezel injects the credential from the SecretStore as env/args, runs the
   fetch on the schedule, and applies the same normalization + safety pipeline. This is the
   project-type "script-tool" primitive pointed at ingest instead of the model.
-- **`spectral` — host a Prismatic component.** Run an Apache-2.0
-  [Prismatic component](#seeding-from-an-external-library-prismatic-components) on its
-  `@prismatic-io/spectral` SDK (MIT): the sync host calls the component's read actions and
-  populates its `connection` from our SecretStore. Buys a large library of production-used auth
-  definitions + REST plumbing; costs a hosted third-party SDK we version-pin and shim. A
-  specialization of `script` (external code, our schedule), broken out because the library is
-  big enough to be a strategy of its own — see the section below.
+- **`spectral` — host a Prismatic component.** Run one of Prismatic's published, Apache-2.0
+  [components](#seeding-from-an-external-library-prismatic-components) on our pinned
+  `@prismatic-io/spectral` SDK (MIT), in a sandboxed child. The manifest pins the npm package by
+  version and hash; it is downloaded when a connection is made. A polling trigger's position
+  becomes the cursor, or an action is listed whole every pass, and **our** normalize runs over
+  the raw output. A specialization of `script` (external code, our schedule), broken out because
+  the library is big enough to be a strategy of its own — see the section below.
 - **`native` — bespoke code.** The escape hatch, for **cornerstone corpora** the user lives in
   that resist declarative expression. Email is the exemplar (MIME, threading, quote-stripping,
   HTML→markdown, high-fidelity IMAP/Gmail/Graph cursors — none of which an MCP tool hands you
@@ -209,39 +209,56 @@ feature rests on.
 
 ### Seeding from an external library (Prismatic components)
 
-[Prismatic's `components`](https://github.com/prismatic-io/components) is ~170 pre-built SaaS
-connectors (Salesforce, Jira, Slack, Dropbox, S3, …) under **Apache-2.0**, each built on the
-`@prismatic-io/spectral` SDK (**MIT**). Both licenses are permissive and compatible with gezel's
-MIT — we may vendor and modify. Prismatic accepts no external PRs and calls off-platform use
-"unsupported," so we fork and own maintenance. It is a strong seed library — but the value is
-**not uniform**, and adopting it well means cutting along that seam rather than swallowing it
-whole:
+Prismatic publishes every one of its ~175 SaaS components to npm as
+`@prismatic-io/components-<key>` (**Apache-2.0**, no dependencies, peer `@prismatic-io/spectral`
+**MIT**), each exporting a *callable component*: its actions, triggers, connections and data
+sources, runnable inside the SDK's context. 110 of them have polling triggers whose position is a
+plain object the host keeps. Gezel runs them as published rather than vendoring source slices
+([ADR 0033](decisions/0033-spectral-published-components.md)):
 
-- **Auth definitions (`connections.ts`) — high value, ~zero coupling.** Each component's OAuth
-  authorize/token URLs, scopes, and client-id/secret field shapes are pure declarative config.
-  A build-time importer can transpile them into the auth half of our `connector-type` manifests
-  (`secretShape` + connect UX). This is 170 services' correct, production-proven auth as a
-  ready-made credential catalog — and it feeds **every** driver, not just `spectral`.
-- **Read actions (`actions/*`) — medium value, spectral-host coupling.** The `list*` / `get*`
-  verbs are the "pull data" calls. Reusing them is what the **`spectral` driver** does: host
-  spectral, inject the connection from our SecretStore, call the action, run **our** normalize.
-- **Triggers — skip.** Built for Prismatic's webhook/poll event model, not our idle-gated host.
-- **Normalization — theirs is none.** Actions return raw provider JSON (`{ data }`) by design;
-  the canonical mapping is ours to write. The two hardest things — normalization and resumable
-  cursors — the library does not provide.
+- **The manifest pins the component** (`source.package`): name, exact version, tarball and entry
+  SHA-256, the SDK range it was published for, license, publish date. Only the bundled catalog may
+  ask for one, because it asks Gezel to download and run code.
+- **Downloaded when a connection is made** into `~/.gezel/connector-components/`, by the component
+  store ([spectral/component-store.ts](../packages/service/src/connectors/spectral/component-store.ts)).
+  The tarball and entry must match their pins, the package must have no dependencies (so nothing
+  is installed and no install script runs), and the runner's pinned SDK must satisfy its range.
+  Store builds refuse (they may not download code), as does a security level that keeps
+  connectors off the network; the connect form says which. An install no connection uses is
+  removed a day after its last use.
+- **Run by runner v2** ([run.ts](../packages/connectors-spectral/src/run.ts)) in the sandbox, with
+  the network on and the corpus out of reach. A resolve hook serves the component's SDK imports
+  from the runner's own pinned copy and refuses any other package and the built-ins that open
+  sockets or processes; the entry's hash is checked again before it loads. An HTTP guard keeps
+  requests to the origins the manifest declares (on the SDK's axios, on `node:http(s)` per
+  redirect hop, and on `fetch`) and names a failure (throttled with its `Retry-After`, auth,
+  forbidden, …). The credential arrives over stdin and is scrubbed from everything that leaves.
+  This guard is defense in depth: the OS grants the child the network as a whole.
+- **Two modes.** `trigger` drains a polling trigger: its polling state is the cursor, and a drain
+  larger than one run continues from where the run stopped. `action` lists an action to the end
+  every pass, a full listing, so a mirror removes what the source no longer returns. Either way
+  the records are staged in the binding's private folder and handed to the engine a page at a
+  time; the cursor moves to the run's new position only after the last page is taken.
+- **Authoring** goes through `pnpm --filter @bendyline/gezel-service run connectors:draft-spectral
+  -- <key> <version> --action|--trigger <k>`: it refuses a version under 7 days old, checks the
+  registry's integrity, installs through the store, reads the component's shape in the sandbox
+  with the network denied, and drafts the manifest (pin, connection, settings form, candidate
+  origins). A person prunes the origins and writes the normalize mapping.
+- **Contracts** run each type's recorded exchanges through the real component with the network
+  denied ([catalog-contract.spectral.integration.test.ts](../packages/service/src/connectors/catalog-contract.spectral.integration.test.ts)).
 
-Honest caveats: coverage is **standardized but only ~40% unit-tested** (the flagship `github`
-ships no tests — treat it as "production-used," not "verified for us"); components deep-import
-`@prismatic-io/spectral/dist/...` (private paths → pin a spectral version, expect a shim); and
-they're webpack-bundled for `prism publish`, so we consume `src/` and compile ourselves. Running
-vendored third-party code on our schedule is the autonomous-execution surface from the posture
-section — sandbox it, sha-pin it.
+Honest caveats: most components are unit-tested only against mocks, and Airtable not at all;
+their evidence is production use on Prismatic's platform. Prismatic accepts no outside PRs and
+makes no statement supporting off-platform use. OAuth token refresh for Spectral connections is
+not built yet.
+
+The vendored Airtable slice (`packages/connectors-spectral/vendor/`, `run-action.ts`) serves the
+`airtable-records` 1.0.x bindings until the 2.0.0 type, built on the published component, ships
+in gilde; then it goes.
 
 Preference rule for the long tail: **`mcp` first when a decent server exists** (cleaner
-boundary, the server owns its own auth), **`spectral` / Prismatic when it doesn't.** The
-auth-catalog harvest is worth doing regardless of which driver a given source ends up using.
-Whether to fold the **entire** library plus a pinned spectral into gezel — versus curating
-components on demand — is a later evaluate-then-decide (see phases).
+boundary, the server owns its own auth), **`spectral` / Prismatic when it doesn't.** Components
+are curated one type at a time, each with a contract, never folded in wholesale.
 
 ## On-disk layout and normalization
 

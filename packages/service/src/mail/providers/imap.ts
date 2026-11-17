@@ -72,6 +72,12 @@ export interface ImapClientOptions {
   host: string;
   port: number;
   secure: boolean;
+  /**
+   * On a plain connection, insist on the STARTTLS upgrade. Left unset,
+   * imapflow upgrades only when the server offers it, so anyone on the path
+   * who removes the offer receives the password in clear.
+   */
+  doSTARTTLS?: boolean;
   auth: { user: string; pass: string };
   logger: false;
   socketTimeout: number;
@@ -87,6 +93,8 @@ export interface SmtpTransportOptions {
   host: string;
   port: number;
   secure: boolean;
+  /** On a plain connection, refuse to authenticate without STARTTLS (see `doSTARTTLS`). */
+  requireTLS?: boolean;
   auth: { user: string; pass: string };
 }
 export type SmtpTransportFactory = (options: SmtpTransportOptions) => SmtpTransport;
@@ -101,8 +109,16 @@ export interface ImapProviderOptions extends MailSyncOptions {
   createTransport?: SmtpTransportFactory;
 }
 
-/** UIDs a search returned, as a number array (imapflow answers `false` on failure). */
-const uids = (r: number[] | false): number[] => (Array.isArray(r) ? r : []);
+/**
+ * UIDs a search returned. imapflow answers `false` when the SEARCH command
+ * failed or timed out; read as "no messages", that once ended a folder's
+ * backfill for good with no error. It fails the folder's pass instead, and
+ * the next pass retries from the same state.
+ */
+const uids = (r: number[] | false): number[] => {
+  if (!Array.isArray(r)) throw new Error('the mail server did not answer a search; will retry');
+  return r;
+};
 
 export class ImapMailProvider implements MailProvider {
   readonly kind = 'imap' as const;
@@ -122,6 +138,7 @@ export class ImapMailProvider implements MailProvider {
       host: this.cred.host,
       port,
       secure,
+      ...(secure ? {} : { doSTARTTLS: true }),
       auth: { user: this.cred.user, pass: this.cred.pass },
       logger: false,
       // Don't let a wedged server hang a sync tick forever.
@@ -143,13 +160,30 @@ export class ImapMailProvider implements MailProvider {
     this.client = client;
   }
 
-  private require(): ImapClient {
+  /**
+   * The live connection. One that dropped mid-pass (a NAT timeout, a server
+   * restart) is replaced, so the rest of the pass and the engine's retry of
+   * the failed message reach the server again.
+   */
+  private async require(): Promise<ImapClient> {
     if (!this.client) throw new Error('imap provider not connected; call ensureAuth() first');
-    return this.client;
+    if (!this.client.usable) {
+      log.info(`imap connection to ${this.cred.host} dropped; reconnecting`);
+      const dead = this.client;
+      this.client = null;
+      try {
+        dead.close();
+      } catch {
+        // Already closed.
+      }
+      await this.ensureAuth();
+    }
+    return this.client!;
   }
 
   async listFolders(): Promise<MailFolder[]> {
-    const list = await this.require().list();
+    const client = await this.require();
+    const list = await client.list();
     return list.map((f) => ({ path: f.path, name: f.name }));
   }
 
@@ -166,7 +200,7 @@ export class ImapMailProvider implements MailProvider {
     cursor: MailCursor | undefined,
     opts?: ListOptions,
   ): Promise<FolderChanges> {
-    const client = this.require();
+    const client = await this.require();
     const limit = batchLimit(opts);
     const lock = await this.lock(client, folder);
     try {
@@ -242,7 +276,7 @@ export class ImapMailProvider implements MailProvider {
 
   async fetchMessage(folder: string, id: string): Promise<MailMessage> {
     const uid = Number(id);
-    const client = this.require();
+    const client = await this.require();
     const lock = await this.lock(client, folder);
     try {
       const msg = await client.fetchOne(
@@ -278,6 +312,7 @@ export class ImapMailProvider implements MailProvider {
       host: smtp.host,
       port: smtp.port ?? (secure ? 465 : 587),
       secure,
+      ...(secure ? {} : { requireTLS: true }),
       auth: { user: smtp.user ?? this.cred.user, pass: smtp.pass ?? this.cred.pass },
     });
     const inReplyTo = normalizeMessageId(mail.inReplyTo);
@@ -304,7 +339,7 @@ export class ImapMailProvider implements MailProvider {
    * named Drafts, with the `\Draft` flag. Nothing is transmitted.
    */
   async saveDraft(from: string | undefined, mail: OutgoingMail): Promise<SavedDraft> {
-    const client = this.require();
+    const client = await this.require();
     const folders = await client.list();
     const drafts =
       folders.find((f) => f.specialUse === '\\Drafts') ??

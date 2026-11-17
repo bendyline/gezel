@@ -15,6 +15,7 @@ import {
   backupsDir,
   binRuntimeRoot,
   channelsDir,
+  connectorComponentsDir,
   craftbookTemplatesRoot,
   deviceIdentityFile,
   enginesRoot,
@@ -241,7 +242,8 @@ export const STORAGE_CATEGORIES: StorageCategoryDef[] = [
     id: 'toolsets',
     class: 'redownloadable',
     label: 'Tools and browsers',
-    description: 'Installed toolset packages and the automation browser.',
+    description:
+      'Installed toolset packages, the automation browser, and the components connections download.',
     deletable: true,
     inBackup: false,
     async resolve({ home, store }) {
@@ -252,6 +254,7 @@ export const STORAGE_CATEGORIES: StorageCategoryDef[] = [
           coDelete: [systemToolsetsFile(home), systemInstalledToolsetsFile(home)],
         },
         localEntry(playwrightBrowsersDir(home)),
+        localEntry(connectorComponentsDir(home)),
         {
           path: sharedToolsetsInstallDir(home),
           external: false,
@@ -570,6 +573,7 @@ export function classifiedTopLevelNames(): string[] {
     'gilde',
     'system-toolsets',
     'system-toolsets.json',
+    'connector-components',
     'installed-toolsets-system.json',
     'toolsets',
     'toolsets.json',

@@ -50,3 +50,46 @@ describe('pull-request review paging', () => {
     expect(filterUnifiedDiffByPath(DIFF, 'src/missing.ts')).toBe('');
   });
 });
+
+describe('pull-request comments', () => {
+  /** GitHub pages lists with `per_page` and a `Link: <…>; rel="next"` header. */
+  function pagedComments(counts: { issue: number; review: number }): typeof fetch {
+    return async (input) => {
+      const url = new URL(input instanceof Request ? input.url : String(input));
+      const review = url.pathname.endsWith('/pulls/7/comments');
+      const total = review ? counts.review : counts.issue;
+      const perPage = Number(url.searchParams.get('per_page') ?? 30);
+      const page = Number(url.searchParams.get('page') ?? 1);
+      const start = (page - 1) * perPage;
+      const items = Array.from(
+        { length: Math.max(0, Math.min(perPage, total - start)) },
+        (_, i) => ({
+          id: (review ? 100_000 : 0) + start + i,
+          user: { login: 'ada' },
+          body: `${review ? 'review' : 'issue'} comment ${start + i}`,
+          created_at: new Date(Date.UTC(2026, 8, 1, 0, 0, start + i)).toISOString(),
+          ...(review ? { path: 'src/a.ts' } : {}),
+        }),
+      );
+      const headers: Record<string, string> = { 'content-type': 'application/json' };
+      if (start + perPage < total) {
+        const next = new URL(url);
+        next.searchParams.set('page', String(page + 1));
+        headers.link = `<${next.href}>; rel="next"`;
+      }
+      return new Response(JSON.stringify(items), { status: 200, headers });
+    };
+  }
+
+  it('reads every page of both kinds, not only the first hundred', async () => {
+    const { GitHubPrs } = await import('./prs.js');
+    const manager = { getToken: async () => 'token' } as unknown as ConstructorParameters<
+      typeof GitHubPrs
+    >[0];
+    const prs = new GitHubPrs(manager, { fetch: pagedComments({ issue: 230, review: 120 }) });
+    const project = { id: 'p', github: { url: 'https://github.com/acme/widgets' } } as never;
+    const comments = await prs.listComments(project, 7);
+    expect(comments.filter((c) => c.kind === 'issue')).toHaveLength(230);
+    expect(comments.filter((c) => c.kind === 'review')).toHaveLength(120);
+  });
+});

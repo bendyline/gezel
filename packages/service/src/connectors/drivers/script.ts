@@ -12,8 +12,16 @@
  */
 
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
+import { parseScriptMeta } from '../../scripts/meta.js';
 import type { ScriptRunner } from '../../scripts/runner.js';
-import { type NormalizeSpec, applyNormalize, jget, ordinalKeyFromTs } from '../normalize.js';
+import {
+  type NormalizeSpec,
+  applyNormalize,
+  carryCursor,
+  itemsAt,
+  jget,
+  ordinalKeyFromTs,
+} from '../normalize.js';
 import {
   type ObservationSourceSpec,
   isObservationNormalize,
@@ -93,7 +101,15 @@ export class ScriptConnectorAdapter
     );
     const run = await this.runner.run({
       projectId: this.projectId,
-      scriptName: this.src.fetch ?? `connector-fetch-${this.type.id}`,
+      // The runner refuses a script whose declared name differs from the one
+      // it is run under, so an inline fetch runs under its own `meta.name`.
+      // Naming it `connector-fetch-<type>` failed every github-issues and
+      // http-json-rows sync before it reached the network.
+      scriptName:
+        this.src.fetch ??
+        (inlineSource
+          ? parseScriptMeta(inlineSource, `<connector>/${this.type.id}.ts`).name
+          : `connector-fetch-${this.type.id}`),
       ...(inlineSource ? { inlineSource } : {}),
       scope: this.src.scope ?? 'project',
       inputs: { cursor: cursor ?? null, config: this.binding.config ?? {} },
@@ -106,7 +122,8 @@ export class ScriptConnectorAdapter
       rateLimited?: unknown;
       partial?: unknown;
     };
-    const items = out.records ?? [];
+    const items = itemsAt(out, '$.records', `${this.typeId} fetch script`);
+    const nextCursor = carryCursor(out.cursor, cursor);
     if (this.observations) {
       // One ref per PAGE. The engine's backfill cap counts refs, so mapping a
       // 10,000-row page to 10,000 refs would silently window most of it away.
@@ -119,7 +136,7 @@ export class ScriptConnectorAdapter
       }
       return {
         records: items.length > 0 ? [observationPageRef(items, pageIndex)] : [],
-        cursor: out.cursor,
+        cursor: nextCursor,
         ...(out.rateLimited === true ? { rateLimited: true } : {}),
         ...(out.partial === true ? { partial: true } : {}),
       };
@@ -143,7 +160,7 @@ export class ScriptConnectorAdapter
     // APIs hardest).
     return {
       records,
-      cursor: out.cursor,
+      cursor: nextCursor,
       ...(out.rateLimited === true ? { rateLimited: true } : {}),
       ...(out.partial === true ? { partial: true } : {}),
     };

@@ -18,7 +18,42 @@ import { registerRssFeedAdapters } from './natives/rss-feed.js';
 import { registerWebsiteAdapters } from './natives/website.js';
 import { registerXAdapters } from './natives/x-posts.js';
 import { registerYouTubeAdapters } from './natives/youtube-videos.js';
+import type { ConnectorSyncSource } from './sync-manager.js';
 import { runConnectorTaskPrep } from './task-prep.js';
+
+/**
+ * What the background loop syncs. Read-only connections (feeds, wikis, saved
+ * web pages) refresh whenever the machine may use the network for the
+ * person; ones that can send or post wait for Unrestricted. Device bindings
+ * never sync. A binding backing off after a failure is left out until its
+ * backoff ends, so it cannot keep its project due and starve the others.
+ */
+export function connectorSyncSource(
+  connectors: Pick<ConnectorManager, 'backgroundBindings' | 'backoffUntil' | 'syncProject'> &
+    Partial<Pick<ConnectorManager, 'syncIntervalMs'>>,
+): ConnectorSyncSource {
+  return {
+    label: 'connectors',
+    listBindings: async (project, policy) => {
+      const eligible = (await connectors.backgroundBindings(project, policy)).filter(
+        (b) => !connectors.backoffUntil(b.id),
+      );
+      return Promise.all(
+        eligible.map(async (b) => {
+          const intervalMs = await connectors.syncIntervalMs?.(b);
+          return {
+            id: b.id,
+            ...(b.lastSyncedAt ? { lastSyncedAt: b.lastSyncedAt } : {}),
+            ...(intervalMs ? { intervalMs } : {}),
+          };
+        }),
+      );
+    },
+    posture: (policy) => policy.allowConnectorData,
+    syncProject: (project, policy, bindingIds) =>
+      connectors.syncProject(project, { policy, bindingIds }),
+  };
+}
 
 /** Register the native connector catalog before the connector managers start. */
 export function registerProductConnectorAdapters(): void {

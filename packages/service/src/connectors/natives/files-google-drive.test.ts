@@ -108,6 +108,7 @@ describeConnectorConformance('files-google-drive', {
     const { env, drive, ids, seeded, adapter } = await setup();
     let added = 0;
     return {
+      completeness: 'mirror',
       env,
       seeded,
       requiredKeys: REQUIRED_KEYS,
@@ -268,6 +269,67 @@ describe('files-google-drive records', () => {
       cursor = r.cursor;
     }
     expect(total).toBe(8);
+  });
+
+  it('a folder listing whose page token went stale between passes starts that folder again', async () => {
+    const s = await setup();
+    env = s.env;
+    for (let i = 0; i < 30; i++) {
+      s.drive.addFile(`bulk-${String(i).padStart(2, '0')}.txt`, s.ids.projects, {
+        content: `file ${i}`,
+      });
+    }
+    const first = await sync(s.adapter(), undefined, 'data/drive', 2);
+    expect(first.error).toBeUndefined();
+    expect(JSON.stringify(first.cursor)).toContain('queueToken');
+    s.drive.expireTokens();
+    let cursor = first.cursor;
+    for (let i = 0; i < 12; i++) {
+      const r = await sync(s.adapter(), cursor, 'data/drive', 2);
+      expect(r.error).toBeUndefined();
+      expect(r.errors).toBe(0);
+      cursor = r.cursor;
+    }
+    const titles = (await readCorpus(env.artifactsDir, 'data/drive')).map(
+      (x) => x.frontmatter.title,
+    );
+    expect(titles.filter((t) => t?.startsWith('bulk-'))).toHaveLength(30);
+    expect(titles).toHaveLength(38);
+  });
+
+  it('a file whose listed size went stale before the download is mirrored, not failed', async () => {
+    const s = await setup();
+    env = s.env;
+    // Drive's listing said 999 bytes; the download is complete at its own length.
+    s.drive.addFile('edited.txt', s.ids.projects, {
+      content: 'newer and shorter',
+      reportedSize: 999,
+    });
+    const r = await sync(s.adapter(), undefined);
+    expect(r.error).toBeUndefined();
+    expect(r.errors).toBe(0);
+    const rec = (await readCorpus(env.artifactsDir, 'data/drive')).find(
+      (x) => x.frontmatter.title === 'edited.txt',
+    );
+    expect(rec?.body).toContain('newer and shorter');
+  });
+
+  it('a download quota refusal says so, instead of blaming the owner', async () => {
+    const s = await setup();
+    env = s.env;
+    s.drive.addFile('popular.pdf', s.ids.projects, {
+      mimeType: 'application/pdf',
+      content: PDF,
+      quotaExceeded: true,
+    });
+    const r = await sync(s.adapter(), undefined);
+    expect(r.error).toBeUndefined();
+    const rec = (await readCorpus(env.artifactsDir, 'data/drive')).find(
+      (x) => x.frontmatter.title === 'popular.pdf',
+    );
+    expect(rec?.frontmatter.content).toBe('metadata-only');
+    expect(rec?.body).toMatch(/download limit/i);
+    expect(rec?.body).not.toMatch(/turned off downloading/);
   });
 
   it('mirrors details only when Drive refuses a download or an oversized export', async () => {

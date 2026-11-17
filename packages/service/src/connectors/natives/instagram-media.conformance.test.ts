@@ -174,6 +174,68 @@ describe('instagram-media against the fake Graph API', () => {
     await assertCorpusInvariants(env.artifactsDir, 'data/ig');
   });
 
+  it('the first sync takes the newest maxMedia items even when that is more than one round', async () => {
+    env = await createConnectorTestEnv();
+    const fake = new FakeInstagram();
+    const config = { ...CONFIG, maxMedia: 50 };
+    await env.storeCredential(binding(config), fake.credential());
+    for (let i = 1; i <= 70; i++) {
+      fake.addMedia(`Post ${i}`);
+      fake.advance(MINUTE);
+    }
+    let cursor: unknown;
+    for (let i = 0; i < 4; i++)
+      cursor = (await pass(adapterFor(fake, env, config), cursor, 15)).cursor;
+    const titles = (await readCorpus(env.artifactsDir, 'data/ig/media')).map(
+      (x) => x.frontmatter.title,
+    );
+    expect(titles.sort()).toEqual(Array.from({ length: 50 }, (_, i) => `Post ${i + 21}`).sort());
+    // Older history stays out, and the backfill does not run again.
+    fake.advance(20 * MINUTE);
+    fake.addMedia('After the backfill');
+    const next = await pass(adapterFor(fake, env, config), cursor, 15);
+    expect(next.written).toBe(1);
+  });
+
+  it('a hidden like count is left out, not recorded as zero', async () => {
+    env = await createConnectorTestEnv();
+    const fake = new FakeInstagram();
+    await env.storeCredential(binding(), fake.credential());
+    fake.hideLikes(fake.addMedia('Likes hidden', { likes: 40 }));
+    fake.addMedia('Likes shown', { likes: 7 });
+    await pass(adapterFor(fake, env), undefined);
+    const media = await readCorpus(env.artifactsDir, 'data/ig/media');
+    const byTitle = new Map(media.map((x) => [x.frontmatter.title, x.frontmatter]));
+    expect(byTitle.get('Likes hidden')?.likes).toBeUndefined();
+    expect(byTitle.get('Likes shown')?.likes).toBe('7');
+  });
+
+  it('a paging cursor that went stale between passes restarts the walk instead of failing', async () => {
+    env = await createConnectorTestEnv();
+    const fake = new FakeInstagram();
+    const config = { ...CONFIG, metricsRefreshHours: 24 };
+    await env.storeCredential(binding(config), fake.credential());
+    fake.addMedia('Before the backlog');
+    let cursor = (await pass(adapterFor(fake, env, config), undefined)).cursor;
+    fake.advance(20 * MINUTE);
+    for (let i = 1; i <= 70; i++) {
+      fake.addMedia(`Backlog ${i}`);
+      fake.advance(MINUTE);
+    }
+    // Four rounds of 15 end the pass on the second page of 50.
+    const first = await pass(adapterFor(fake, env, config), cursor, 15);
+    expect(JSON.stringify(first.cursor)).toContain('"page"');
+    fake.expireCursors();
+    cursor = first.cursor;
+    for (let i = 0; i < 6; i++) {
+      const r = await pass(adapterFor(fake, env, config), cursor, 15);
+      expect(r.error).toBeUndefined();
+      cursor = r.cursor;
+    }
+    expect(await readCorpus(env.artifactsDir, 'data/ig/media')).toHaveLength(71);
+    await assertCorpusInvariants(env.artifactsDir, 'data/ig');
+  });
+
   it('renews a near-expiry token through ig_refresh_token and re-persists it', async () => {
     env = await createConnectorTestEnv();
     const fake = new FakeInstagram();

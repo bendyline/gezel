@@ -64,9 +64,12 @@ import { ConnectorManager, type ConnectorSyncedInfo } from './connectors/manager
 import { websiteLookoutFeed } from './connectors/natives/website-lookout-feed.js';
 import { WebsiteService } from './connectors/natives/website-service.js';
 import {
+  connectorSyncSource,
   registerProductConnectorAdapters,
   wireProductConnectorTaskPreparation,
 } from './connectors/product-wiring.js';
+import { ComponentStore } from './connectors/spectral/component-store.js';
+import { sweepConnectorStaging } from './connectors/staging-sweep.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import {
@@ -2070,12 +2073,24 @@ export async function startProductService(
   // The live host (built below) runs device bindings; the manager tells it
   // when bindings change and folds its status into the Connections view.
   let liveConnectorsRef: LiveConnectorHost | null = null;
+  // Spectral types built on a published Prismatic component fetch it when a
+  // connection is made (connectors/spectral/component-store.ts).
+  const connectorComponents = new ComponentStore({
+    home,
+    policy: {
+      refusal: async () =>
+        resolveSecurityPolicy(await store.readConfig()).allowConnectorData
+          ? undefined
+          : 'Connections are off at this security level. Turn on App network in Settings → Security & compliance to connect.',
+    },
+  });
   const connectors = new ConnectorManager({
     store,
     secrets,
     catalog,
     contentIndex,
     scriptRunner,
+    components: connectorComponents,
     locks: connectorLocks,
     ...(connectorFetch ? { fetch: connectorFetch } : {}),
     capturer: pageCapture,
@@ -2115,18 +2130,19 @@ export async function startProductService(
     chat,
     idle: systemIdle,
     isNightShiftActive: () => nightShift.isActive(),
-    source: {
-      label: 'connectors',
-      // Read-only connections (feeds, wikis, saved web pages) refresh in the
-      // background whenever the machine may use the network for the person;
-      // ones that can send or post wait for Unrestricted. Device bindings
-      // never sync. Only eligible bindings are listed, so a held-back one
-      // never makes its project look due.
-      listBindings: (p, pol) => connectors.backgroundBindings(p, pol),
-      posture: (pol) => pol.allowConnectorData,
-      syncProject: (p, pol) => connectors.syncProject(p, { policy: pol }),
-    },
+    source: connectorSyncSource(connectors),
   });
+  // Folders a pass staged downloads in, left by a daemon that stopped mid-pass.
+  void sweepConnectorStaging().catch(() => {});
+  // Components no connection uses any more, a day after their last use.
+  const pruneConnectorComponents = () =>
+    void connectors
+      .componentPinsInUse()
+      .then((pins) => connectorComponents.prune(pins))
+      .catch((err) => log.warn(`[connectors] component cleanup failed: ${String(err)}`));
+  pruneConnectorComponents();
+  const componentPruneTimer = setInterval(pruneConnectorComponents, 24 * 60 * 60_000);
+  componentPruneTimer.unref?.();
 
   // Device connectors (cameras) and lookouts. A camera binding is a
   // long-running capture the live host keeps going — never a sync pass — and
@@ -2866,6 +2882,7 @@ export async function startProductService(
       stopping = true;
       bootMaintenance.stop();
       optionalDownloads.stop();
+      clearInterval(componentPruneTimer);
       // Model workers refuse new work from here and drain while the rest
       // shuts down; each is terminated once idle, never mid-run, because
       // process.exit tearing one down inside onnxruntime aborts the process.

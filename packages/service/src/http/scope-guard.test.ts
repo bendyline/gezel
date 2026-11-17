@@ -408,6 +408,8 @@ describe('sessionRouteGuard', () => {
     expect((await post('/api/projects/proj-a/connectors/bind')).status).toBe(403);
     expect((await post('/api/projects/proj-a/connectors/website:1/sync')).status).toBe(403);
     expect((await post('/api/projects/proj-a/connectors/website:1/sign-in')).status).toBe(403);
+    expect((await post('/api/projects/proj-a/connectors/mail-imap:1/reconnect')).status).toBe(403);
+    expect((await post('/api/projects/proj-a/connectors/mail-imap:1/check')).status).toBe(403);
     expect((await app.request('/api/projects/proj-a/connectors/website:1/session')).status).toBe(
       403,
     );

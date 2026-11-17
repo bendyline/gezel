@@ -42,8 +42,32 @@ export interface GitHubPullDiffPage {
   nextOffset?: number;
 }
 
+/** Comments of each kind read for one pull request; past it the oldest are kept. */
+const MAX_COMMENTS_PER_KIND = 2_000;
+
+/** Read pages until the iterator ends or `cap` items have arrived. */
+async function collectPages<T>(pages: AsyncIterable<{ data: T[] }>, cap: number): Promise<T[]> {
+  const out: T[] = [];
+  for await (const page of pages) {
+    out.push(...page.data);
+    if (out.length >= cap) break;
+  }
+  return out.slice(0, cap);
+}
+
 export class GitHubPrs {
-  constructor(private readonly manager: GitManager) {}
+  constructor(
+    private readonly manager: GitManager,
+    private readonly opts: { fetch?: typeof fetch } = {},
+  ) {}
+
+  /**
+   * The same service over another HTTP transport: the pull-request connector
+   * passes its own, so tests and the provider simulator answer GitHub.
+   */
+  withFetch(fetchImpl: typeof fetch): GitHubPrs {
+    return new GitHubPrs(this.manager, { fetch: fetchImpl });
+  }
 
   private async client(): Promise<Octokit> {
     const token = await this.manager.getToken();
@@ -51,6 +75,7 @@ export class GitHubPrs {
     return new Octokit({
       auth: token,
       userAgent: 'gezel/0.0.0',
+      ...(this.opts.fetch ? { request: { fetch: this.opts.fetch } } : {}),
     });
   }
 
@@ -190,19 +215,37 @@ export class GitHubPrs {
   async listComments(project: ProjectDetail, num: number): Promise<GitHubPullComment[]> {
     const octo = await this.client();
     const { owner, repo } = this.repoOf(project);
+    // Every page, up to a ceiling: a long review thread is exactly the one
+    // whose later comments matter.
     const [issueComments, reviewComments] = await Promise.all([
-      octo.issues.listComments({ owner, repo, issue_number: num, per_page: 100 }),
-      octo.pulls.listReviewComments({ owner, repo, pull_number: num, per_page: 100 }),
+      collectPages(
+        octo.paginate.iterator(octo.issues.listComments, {
+          owner,
+          repo,
+          issue_number: num,
+          per_page: 100,
+        }),
+        MAX_COMMENTS_PER_KIND,
+      ),
+      collectPages(
+        octo.paginate.iterator(octo.pulls.listReviewComments, {
+          owner,
+          repo,
+          pull_number: num,
+          per_page: 100,
+        }),
+        MAX_COMMENTS_PER_KIND,
+      ),
     ]);
     const merged: GitHubPullComment[] = [
-      ...issueComments.data.map((c) => ({
+      ...issueComments.map((c) => ({
         id: c.id,
         author: c.user?.login ?? '?',
         body: c.body ?? '',
         createdAt: c.created_at,
         kind: 'issue' as const,
       })),
-      ...reviewComments.data.map((c) => ({
+      ...reviewComments.map((c) => ({
         id: c.id,
         author: c.user?.login ?? '?',
         body: c.body ?? '',

@@ -128,6 +128,12 @@ const IMPORTABLE = [
   '@bendyline/gezel-capacitor',
 ];
 
+/** The `@types/node` the workspace resolved, so the consumer's check sees the same Node types. */
+function workspaceTypesNodeVersion() {
+  const manifest = join(repoRoot, 'node_modules', '@types', 'node', 'package.json');
+  return JSON.parse(readFileSync(manifest, 'utf8')).version;
+}
+
 /** Declarations a Node program imports, checked without the DOM lib. */
 const NODE_ONLY_TYPE_SPECIFIERS = [
   '@bendyline/gezel-service',
@@ -585,6 +591,25 @@ try {
   else ok(`imported ${IMPORTABLE.length} subpaths`);
 
   step('typechecking installed declarations with skipLibCheck=false');
+  // A Node consumer brings its own Node types. Until 2026-11 one arrived by
+  // accident (the Spectral SDK's jest-mock depended on @types/node), and the
+  // check silently relied on it. Install the workspace's own version.
+  const typesNode = await runNpmConsumerInstall(() =>
+    runPackageManager(
+      'npm',
+      [
+        'install',
+        '--no-save',
+        '--no-audit',
+        '--no-fund',
+        `@types/node@${workspaceTypesNodeVersion()}`,
+      ],
+      { cwd: consumer },
+    ),
+  );
+  if (typesNode.status !== 0) {
+    throw new Error(`npm install @types/node failed\n${typesNode.stdout}\n${typesNode.stderr}`);
+  }
   const typeProbe = join(consumer, 'probe-types.mts');
   writeFileSync(
     typeProbe,
@@ -770,6 +795,27 @@ try {
     fail(`Spectral subprocess smoke failed\n${spectral.stdout}\n${spectral.stderr}`);
   } else {
     ok('Spectral subprocess executed echo/list through its packed entry point');
+  }
+  // The same runner the way a sync starts it: inside the sandbox, with only
+  // the folders the service grants. A plain `node run-action.js` cannot see
+  // a missing grant, which is how a runner unable to load its SDK shipped.
+  const spectralSandboxProbe = join(consumer, 'probe-spectral-sandbox.mjs');
+  writeFileSync(
+    spectralSandboxProbe,
+    [
+      "import { runSpectralSelfTest } from '@bendyline/gezel-service';",
+      'const result = await runSpectralSelfTest();',
+      'console.log(JSON.stringify(result));',
+      'process.exit(result.ok ? 0 : 1);',
+    ].join('\n'),
+  );
+  const spectralSandbox = run(process.execPath, [spectralSandboxProbe], { cwd: consumer });
+  if (spectralSandbox.status !== 0) {
+    fail(
+      `Spectral runner failed inside the sandbox\n${spectralSandbox.stdout}\n${spectralSandbox.stderr}`,
+    );
+  } else {
+    ok('Spectral runner loaded its SDK inside the sandbox with the grants a sync uses');
   }
 
   // ── 5. The CLI binary ──────────────────────────────────────────────────

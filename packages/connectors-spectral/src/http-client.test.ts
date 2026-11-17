@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 
-const { createClient } = require('@prismatic-io/spectral/dist/clients/http');
+const { createClient } = require('@prismatic-io/spectral/http');
 let server: ReturnType<typeof createServer>;
 let baseUrl: string;
 let requests: { url: string; authorization: string | undefined }[];

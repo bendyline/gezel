@@ -11,6 +11,7 @@
  */
 
 import { isThrottle } from '../connectors/natives/oauth-session.js';
+import { retryAfterOf } from '../connectors/types.js';
 import type {
   ChangeBatch,
   ConnectorAdapter,
@@ -100,7 +101,9 @@ export class MailConnectorAdapter implements ConnectorAdapter<NormalizedRecord, 
       // A throttled list call is backpressure, not a failure: keep the cursor,
       // report rateLimited so the engine stops the pass and the manager backs
       // the binding off.
-      if (isThrottle(err)) return { records: [], cursor: cursor ?? {}, rateLimited: true };
+      if (isThrottle(err)) {
+        return { records: [], cursor: cursor ?? {}, rateLimited: true, ...retryAfterOf(err) };
+      }
       throw err;
     }
     const records: RecordRef[] = changes.envelopes.map((e) => {

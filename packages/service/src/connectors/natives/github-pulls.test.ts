@@ -2,7 +2,9 @@ import type { GitHubPullFile, ProjectDetail } from '@bendyline/gezel';
 import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
+import { syncWithAdapter } from '../manager.js';
 import { clearConnectorTaskPreps, connectorTaskPrepFor } from '../task-prep.js';
+import { createConnectorTestEnv, readCorpus } from '../testing/harness.js';
 import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
 import { sha8 } from '../writer.js';
 import {
@@ -270,6 +272,101 @@ describe('GitHubPullsAdapter', () => {
     const first = await adapter.listChangesSince('pr-52', undefined);
     const second = await adapter.listChangesSince('pr-52', first.cursor);
     expect(second.records).toEqual([]);
+  });
+
+  it('an unchanged pull request costs one detail call on the next pass, not the whole bundle', async () => {
+    const rt = runtime();
+    const calls: string[] = [];
+    for (const key of [
+      'getPullRequest',
+      'listFiles',
+      'listComments',
+      'getPullRequestDiff',
+    ] as const) {
+      const real = rt.prs[key] as (...args: unknown[]) => Promise<unknown>;
+      (rt.prs as Record<string, unknown>)[key] = (...args: unknown[]) => {
+        calls.push(key);
+        return real(...args);
+      };
+    }
+    const first = new GitHubPullsAdapter(binding(), deps(), rt);
+    await first.ensureAuth();
+    const batch = await first.listChangesSince('pr-52', undefined);
+    calls.length = 0;
+    // A later pass is a fresh adapter with nothing cached.
+    const next = new GitHubPullsAdapter(binding(), deps(), rt);
+    await next.ensureAuth();
+    const again = await next.listChangesSince('pr-52', batch.cursor);
+    expect(again.records).toEqual([]);
+    expect(calls).toEqual(['getPullRequest']);
+  });
+
+  it('pages a pull request larger than one batch instead of dropping files', async () => {
+    const files = Array.from({ length: 7 }, (_, i) => ({
+      filename: `src/f${i}.ts`,
+      status: 'modified',
+      additions: 1,
+      deletions: 0,
+      patch: '@@ -1 +1 @@\n+x',
+    }));
+    const adapter = new GitHubPullsAdapter(binding(), deps(), runtime({ files }));
+    await adapter.ensureAuth();
+    const seen: string[] = [];
+    let cursor: unknown;
+    let pages = 0;
+    for (;;) {
+      const batch = await adapter.listChangesSince('pr-52', cursor, { limit: 3 });
+      pages++;
+      seen.push(...batch.records.map((r) => r.id));
+      cursor = batch.cursor;
+      expect(batch.records.length).toBeLessThanOrEqual(3);
+      if (!batch.partial) break;
+    }
+    expect(pages).toBe(3);
+    expect(new Set(seen).size).toBe(8); // the overview plus seven files
+    const quiet = await adapter.listChangesSince('pr-52', cursor, { limit: 3 });
+    expect(quiet.records).toEqual([]);
+  });
+
+  it('drops the record of a file that left the pull request', async () => {
+    const env = await createConnectorTestEnv();
+    try {
+      const file = (filename: string) => ({
+        filename,
+        status: 'modified',
+        additions: 1,
+        deletions: 0,
+        patch: '@@ -1 +1 @@\n+x',
+      });
+      let files = [file('src/a.ts'), file('src/b.ts'), file('src/c.ts')];
+      const pass = async (cursor: unknown) =>
+        syncWithAdapter(
+          new GitHubPullsAdapter(binding(), env.deps(), {
+            ...runtime(),
+            ...{ prs: { ...runtime({ files }).prs } },
+          }),
+          {
+            storageDir: env.artifactsDir,
+            quarantineDir: env.quarantineDir,
+            corpusDir: 'data/prs',
+            backfillLimit: 2,
+            cursor,
+            scopes: ['pr-52'],
+          },
+        );
+      const first = await pass(undefined);
+      const second = await pass(first.cursor);
+      expect((await readCorpus(env.artifactsDir, 'data/prs')).length).toBe(4);
+      // A force-push drops b.ts from the pull request.
+      files = [file('src/a.ts'), file('src/c.ts')];
+      let cursor = second.cursor;
+      for (let i = 0; i < 3; i++) cursor = (await pass(cursor)).cursor;
+      const titles = (await readCorpus(env.artifactsDir, 'data/prs')).map((r) => r.path);
+      expect(titles).toHaveLength(3);
+      expect(titles.some((p) => p.includes('b-ts'))).toBe(false);
+    } finally {
+      await env.dispose();
+    }
   });
 
   it('refuses to sync a project with no GitHub link', async () => {

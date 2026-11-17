@@ -259,11 +259,7 @@ external data sources into a project. Two upstreams are involved:
   recorded in
   [`vendor/provenance.json`](packages/connectors-spectral/vendor/provenance.json)
   with a pinned content hash — gated by `pnpm --filter
-  @bendyline/gezel-connectors-spectral verify:vendor`. The build-time auth
-  harvest
-  ([`packages/catalog/scripts/import-prismatic-auth.mts`](packages/catalog/scripts/import-prismatic-auth.mts))
-  likewise derives connector authentication config from this same Apache-2.0
-  source.
+  @bendyline/gezel-connectors-spectral verify:vendor`.
 
   The standalone npm package distributes its own `NOTICE.md`, the full
   Apache-2.0 text under `THIRD_PARTY_LICENSES/`, and the machine-readable

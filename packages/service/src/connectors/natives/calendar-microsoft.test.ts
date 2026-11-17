@@ -248,6 +248,24 @@ describe('MicrosoftCalendarAdapter', () => {
     expect(await readCorpus(w.env.artifactsDir, 'data/outlook')).toEqual([]);
   });
 
+  it('an event deleted while the delta state was expired leaves the corpus on the fresh round', async () => {
+    w = await world({ calendars: ['Calendar'] });
+    const now = Date.now();
+    w.fake.addEvent(w.main, { subject: 'Keep', ...at(now + DAY) });
+    const gone = w.fake.addEvent(w.main, { subject: 'Deleted in the gap', ...at(now + 2 * DAY) });
+    const first = await pass(w.adapter(), undefined);
+    expect(first.written).toBe(2);
+    w.fake.expireDeltaTokens();
+    w.fake.deleteEvent(w.main, gone.id);
+    const second = await pass(w.adapter(), first.cursor);
+    expect(second.error).toBeUndefined();
+    expect(second.pruned).toBe(1);
+    const titles = (await readCorpus(w.env.artifactsDir, 'data/outlook')).map(
+      (r) => r.frontmatter.title,
+    );
+    expect(titles).toEqual(['Keep']);
+  });
+
   it('starts a fresh round in the same pass when the delta state expired (410)', async () => {
     w = await world({ calendars: ['Calendar'] });
     const now = Date.now();

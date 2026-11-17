@@ -18,6 +18,7 @@ import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/ty
 import type { Store } from '../../fs/store.js';
 import { connectorSecretKey } from '../registry.js';
 import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
+import { RECORD_FILE_RE } from '../writer.js';
 
 type SecretKeyLike = { toolsetId?: string; fieldId?: string; kind?: string };
 
@@ -134,8 +135,6 @@ export interface CorpusRecord {
   frontmatter: Record<string, string>;
   body: string;
 }
-
-const RECORD_FILE_RE = /^(\d{3})--.*--([0-9a-f]{8})\.md$/;
 
 /** Parse the writer's frontmatter (values may be JSON-quoted). */
 export function parseRecordFile(content: string): {
@@ -280,7 +279,9 @@ export async function assertCorpusInvariants(
   }
   // Ordinals unique per directory.
   for (const [dir, recs] of byDir) {
-    const ords = recs.map((r) => r.path.slice(r.path.lastIndexOf('/') + 1).slice(0, 3));
+    const ords = recs.map(
+      (r) => RECORD_FILE_RE.exec(r.path.slice(r.path.lastIndexOf('/') + 1))?.[1] ?? '',
+    );
     if (new Set(ords).size !== ords.length) problems.push(`${dir}: duplicate ordinals`);
   }
   if (problems.length) {

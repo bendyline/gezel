@@ -87,6 +87,11 @@ export interface ConformanceWorld {
   corpusDir?: string;
   /** Per-pass cap (default 500). */
   backfillLimit?: number;
+  /**
+   * `mirror` when the type promises a faithful copy: passes may prune, and
+   * deletions made while the cursor was expired must still leave the corpus.
+   */
+  completeness?: 'mirror' | 'window';
 }
 
 export interface ConformanceOptions {
@@ -98,7 +103,7 @@ interface Run {
   world: ConformanceWorld;
   cursor: unknown;
   closes: number;
-  pass(): Promise<BindingSyncResult>;
+  pass(backfillLimit?: number): Promise<BindingSyncResult>;
   corpus(): Promise<CorpusRecord[]>;
 }
 
@@ -108,7 +113,7 @@ function startRun(world: ConformanceWorld): Run {
     world,
     cursor: undefined,
     closes: 0,
-    async pass() {
+    async pass(backfillLimit?: number) {
       const inner = await world.adapter();
       const counted: ConnectorAdapter<NormalizedRecord, unknown> = Object.create(inner);
       counted.close = async () => {
@@ -119,7 +124,8 @@ function startRun(world: ConformanceWorld): Run {
         storageDir: world.env.artifactsDir,
         quarantineDir: world.env.quarantineDir,
         corpusDir,
-        backfillLimit: world.backfillLimit ?? 500,
+        backfillLimit: backfillLimit ?? world.backfillLimit ?? 500,
+        allowPrune: world.completeness === 'mirror',
         cursor: run.cursor,
       });
       run.cursor = r.cursor;
@@ -131,10 +137,14 @@ function startRun(world: ConformanceWorld): Run {
 }
 
 /** Run passes until one writes nothing new (bounded), for paging adapters. */
-async function settle(run: Run, maxPasses = 8): Promise<BindingSyncResult[]> {
+async function settle(
+  run: Run,
+  maxPasses = 8,
+  backfillLimit?: number,
+): Promise<BindingSyncResult[]> {
   const results: BindingSyncResult[] = [];
   for (let i = 0; i < maxPasses; i++) {
-    const r = await run.pass();
+    const r = await run.pass(backfillLimit);
     results.push(r);
     if (r.error || r.rateLimited) break;
     if (r.written === 0 && r.pruned === 0 && i > 0) break;
@@ -266,6 +276,21 @@ export function describeConnectorConformance(name: string, opts: ConformanceOpti
       const quiet = await r.pass();
       expect(quiet.error).toBeUndefined();
       expect(quiet.written).toBe(0);
+    });
+
+    it('a deletion made while the cursor was expired leaves a mirror, past one batch', async (ctx) => {
+      const r = await begin();
+      const h = r.world.hooks;
+      if (r.world.completeness !== 'mirror' || !h.expireCursor || !h.remove) return ctx.skip();
+      // A batch smaller than the corpus, so the resync spans batches.
+      const limit = Math.max(1, Math.floor(r.world.seeded / 3));
+      await settle(r, 20, limit);
+      const before = (await r.corpus()).length;
+      await h.expireCursor();
+      await h.remove();
+      const next = await settle(r, 20, limit);
+      expect(sum(next, 'errors')).toBe(0);
+      expect(await r.corpus()).toHaveLength(before - 1);
     });
 
     it('a throttled list call reports rateLimited and keeps the cursor', async (ctx) => {

@@ -183,6 +183,7 @@ describeConnectorConformance('files-onedrive', {
     return {
       env: s.env,
       seeded: s.seeded,
+      completeness: 'mirror',
       requiredKeys: REQUIRED_KEYS,
       adapter: async () => s.adapter(),
       unrouted: () => [...s.graph.http.unrouted, ...s.graph.authLeaks],
@@ -197,6 +198,7 @@ describeConnectorConformance('files-sharepoint', {
     return {
       env: s.env,
       seeded: s.seeded,
+      completeness: 'mirror',
       requiredKeys: REQUIRED_KEYS,
       adapter: async () => s.adapter(),
       unrouted: () => [...s.graph.http.unrouted, ...s.graph.authLeaks],

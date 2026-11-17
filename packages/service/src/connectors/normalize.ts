@@ -64,6 +64,38 @@ export function jget(raw: unknown, path: unknown): unknown {
   return cur;
 }
 
+/**
+ * The list at `path` in a source response. Anything other than an array is an
+ * error naming the path and what the response held: a renamed field, an error
+ * page, or a tool answering in prose must fail the pass, not sync nothing.
+ */
+export function itemsAt(raw: unknown, path: string | undefined, source: string): unknown[] {
+  const value = jget(raw, path);
+  if (Array.isArray(value)) return value;
+  const found = value === undefined ? 'nothing' : Array.isArray(value) ? 'a list' : typeof value;
+  let hint = '';
+  if (raw !== null && typeof raw === 'object') {
+    const keys = Object.keys(raw as Record<string, unknown>);
+    const text = (raw as { text?: unknown }).text;
+    hint =
+      keys.length === 1 && typeof text === 'string'
+        ? `; it answered with text: "${text.slice(0, 120)}"`
+        : keys.length > 0
+          ? `; the response has ${keys.slice(0, 8).join(', ')}`
+          : '';
+  }
+  throw new Error(`${source}: expected a list at ${String(path)} but found ${found}${hint}`);
+}
+
+/**
+ * The cursor to persist after a list call: the new one when the source gave
+ * one, otherwise the previous one. A source that answers an empty page with
+ * no cursor (or `null`) must not reset the scope to a full re-fetch.
+ */
+export function carryCursor(next: unknown, previous: unknown): unknown {
+  return next === undefined || next === null ? previous : next;
+}
+
 export async function applyNormalize(
   spec: NormalizeSpec,
   raw: unknown,

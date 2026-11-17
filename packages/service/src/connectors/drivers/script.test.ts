@@ -161,4 +161,30 @@ describe('ScriptConnectorAdapter', () => {
     expect(batch.rateLimited).toBeUndefined();
     expect(batch.partial).toBeUndefined();
   });
+
+  function adapterWithOutput(output: unknown) {
+    const runner = {
+      run: async () => ({ status: 'ok', output }) as Awaited<ReturnType<ScriptRunner['run']>>,
+    } as unknown as ScriptRunner;
+    return new ScriptConnectorAdapter(
+      TYPE,
+      { id: 'github-issues:deadbeef', type: 'github-issues', config: {} },
+      { projectId: 'alpha', scriptRunner: runner, store: {} as Store, secrets: {} as SecretStore },
+    );
+  }
+
+  it('keeps the previous cursor when an empty page returns none (or null)', async () => {
+    for (const cursor of [undefined, null]) {
+      const batch = await adapterWithOutput({ records: [], cursor }).listChangesSince('', 'C7');
+      expect(batch.cursor).toBe('C7');
+    }
+  });
+
+  it('fails the pass when the script returns no records list', async () => {
+    await expect(
+      adapterWithOutput({ cursor: 'C8', items: [] }).listChangesSince('', 'C7'),
+    ).rejects.toThrow(
+      /expected a list at \$\.records but found nothing; the response has cursor, items/,
+    );
+  });
 });

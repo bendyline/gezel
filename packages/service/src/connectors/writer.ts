@@ -32,7 +32,7 @@ import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { copyFileAtomic, writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
-import { withFrontmatter } from '../index-store/frontmatter.js';
+import { parseFrontmatter, withFrontmatter } from '../index-store/frontmatter.js';
 import { contentScanner } from '../safety/index.js';
 import type { NormalizedRecord } from './types.js';
 
@@ -78,7 +78,13 @@ export interface WriteRecordResult {
   relPath?: string;
 }
 
-const RECORD_FILE_RE = /^(\d{3})--.*--([0-9a-f]{8})\.md$/;
+/**
+ * A record file: `<ordinal>--<stem>--<hash8>.md`. Ordinals are padded to
+ * three digits and grow past 999; a three-digit-only pattern once made every
+ * record after the 999th in a directory invisible to refresh, prune and
+ * sweep, and gave them all ordinal 1000. Import this, never copy it.
+ */
+export const RECORD_FILE_RE = /^(\d{3,})--.*--([0-9a-f]{8})\.md$/;
 
 /**
  * Content identity of a record: hash of the domain frontmatter (key-sorted, so
@@ -104,25 +110,53 @@ export function contentHash(record: NormalizedRecord): string {
 }
 
 /** Existing ordinal-prefixed record files in a dir, by record hash. */
-async function existingRecords(
-  dirAbs: string,
-): Promise<{ maxOrdinal: number; files: Map<string, { name: string; ordinal: string }> }> {
+async function existingRecords(dirAbs: string): Promise<{
+  maxOrdinal: number;
+  files: Map<string, { name: string; ordinal: string }>;
+  /** How many record files use each ordinal; above 1 only in a damaged dir. */
+  ordinalUse: Map<string, number>;
+}> {
   const files = new Map<string, { name: string; ordinal: string }>();
+  const ordinalUse = new Map<string, number>();
   let maxOrdinal = 0;
   let entries: string[] = [];
   try {
     entries = await readdir(dirAbs);
   } catch {
-    return { maxOrdinal: 0, files };
+    return { maxOrdinal: 0, files, ordinalUse };
   }
   for (const e of entries) {
     const m = RECORD_FILE_RE.exec(e);
     if (m) {
       maxOrdinal = Math.max(maxOrdinal, Number(m[1]));
       files.set(m[2]!, { name: e, ordinal: m[1]! });
+      ordinalUse.set(m[1]!, (ordinalUse.get(m[1]!) ?? 0) + 1);
     }
   }
-  return { maxOrdinal, files };
+  return { maxOrdinal, files, ordinalUse };
+}
+
+/**
+ * Directories written before ordinals could pass 999 hold several records
+ * on ordinal 1000, sharing `attachments/1000/`. When one of them is written
+ * again it moves to a fresh ordinal, and every record still on the shared
+ * ordinal loses its content hash, so each is rewritten (attachments too) the
+ * next time the source lists it. The shared folder is left in place: it may
+ * hold the only copy of attachments for records the source never lists again.
+ */
+async function releaseSharedOrdinal(
+  dirAbs: string,
+  ordinal: string,
+  files: Map<string, { name: string; ordinal: string }>,
+): Promise<void> {
+  const sidecar = await readSidecar(dirAbs);
+  let dirty = false;
+  for (const [hash8, file] of files) {
+    if (file.ordinal !== ordinal || !sidecar[hash8]?.contentHash) continue;
+    delete sidecar[hash8].contentHash;
+    dirty = true;
+  }
+  if (dirty) await writeFileAtomic(join(dirAbs, '_flags.json'), JSON.stringify(sidecar, null, 2));
 }
 
 /**
@@ -141,11 +175,16 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
   const dirAbs = await resolveInside(storageDir, relDir);
   await mkdir(dirAbs, { recursive: true });
 
-  const { maxOrdinal, files } = await existingRecords(dirAbs);
+  const { maxOrdinal, files, ordinalUse } = await existingRecords(dirAbs);
   const prior = files.get(recordHash8);
   let refreshed = false;
   let ordinal: string;
-  if (prior) {
+  if (prior && (ordinalUse.get(prior.ordinal) ?? 0) > 1) {
+    await releaseSharedOrdinal(dirAbs, prior.ordinal, files);
+    await rm(join(dirAbs, prior.name), { force: true });
+    ordinal = String(maxOrdinal + 1).padStart(3, '0');
+    refreshed = true;
+  } else if (prior) {
     const sidecar = await readSidecar(dirAbs);
     // A missing sidecar hash (pre-refresh corpus) counts as changed — the
     // record is rewritten once and carries a hash from then on.
@@ -161,35 +200,55 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
   const relPath = `${relDir}/${fileName}`;
   const body = linkOwnAttachments(record.bodyMarkdown, ordinal, record.attachments);
 
-  // Scan the (untrusted) body.
+  // Scan the (untrusted) body, and separately the text a reader sees before
+  // the body: a subject, a sender's display name, an attachment's name. An
+  // injection there reaches the frontmatter and every listing of the corpus.
   const verdict = contentScanner.scan({
     markdown: body,
     origin: record.scanOrigin,
     sourceRef: record.recordId,
   });
+  const headerText = headerScanText(record);
+  const header = headerText
+    ? contentScanner.scan({
+        markdown: headerText,
+        origin: record.scanOrigin,
+        sourceRef: record.recordId,
+      })
+    : null;
+  const action = worstScanAction(verdict.action, header?.action);
+  const flags = [...new Set([...verdict.flags, ...(header?.flags ?? [])])];
 
   const frontmatter: Record<string, string> = {
     ...record.frontmatter,
     trust: 'untrusted-external',
-    scan_action: verdict.action,
-    ...(verdict.flags.length ? { scan_flags: verdict.flags.join(', ') } : {}),
+    scan_action: action,
+    ...(flags.length ? { scan_flags: flags.join(', ') } : {}),
   };
 
-  if (verdict.action === 'quarantine') {
+  if (action === 'quarantine') {
     // Divert the raw body to quarantine (unindexed); index only a stub. Create
     // the dir before resolveInside so its realpath check has an existing base.
-    await mkdir(join(quarantineDir, record.quarantineNamespace), { recursive: true });
+    const qDir = join(quarantineDir, record.quarantineNamespace);
+    await mkdir(qDir, { recursive: true });
     const qAbs = await resolveInside(
       quarantineDir,
       `${record.quarantineNamespace}/${recordHash8}.md`,
     );
     await writeFileAtomic(qAbs, withFrontmatter(frontmatter, body));
-    const stub = `${record.quarantineLabel} was held for safety review (flags: ${verdict.flags.join(', ') || 'injection'}). Its content is not indexed; the original is kept in gezel's private quarantine folder.`;
+    // The attachments are held with the body, outside the corpus: a held
+    // message's files must not be one click away in the artifacts drawer.
+    await writeAttachments(qDir, recordHash8, record.attachments);
+    // When the hostile text is in the header itself, the corpus copy keeps
+    // the record's shape but not those words.
+    const headerHeld = header !== null && header.action !== 'pass';
+    const stubFrontmatter = headerHeld ? withHeldHeader(frontmatter) : frontmatter;
+    const label = headerHeld ? 'This record' : record.quarantineLabel;
+    const stub = `${label} was held for safety review (flags: ${flags.join(', ') || 'injection'}). Its content is not indexed; the original is kept in gezel's private quarantine folder.`;
     await writeFileAtomic(
       await resolveInside(storageDir, relPath),
-      withFrontmatter(frontmatter, stub),
+      withFrontmatter(stubFrontmatter, stub),
     );
-    await writeAttachments(dirAbs, ordinal, record.attachments);
     await updateSidecar(dirAbs, recordHash8, record, { contentHash: hash, file: fileName });
     return { status: 'quarantined', relPath };
   }
@@ -201,6 +260,46 @@ export async function writeRecord(input: WriteRecordInput): Promise<WriteRecordR
   await writeAttachments(dirAbs, ordinal, record.attachments);
   await updateSidecar(dirAbs, recordHash8, record, { contentHash: hash, file: fileName });
   return { status: refreshed ? 'refreshed' : 'written', relPath };
+}
+
+/** Frontmatter a person or a model reads before the body. */
+const HEADER_KEYS = [
+  'title',
+  'subject',
+  'summary',
+  'description',
+  'from',
+  'author',
+  'name',
+  'organizer',
+] as const;
+
+/** The header text the writer scans with its own verdict, or '' when there is none. */
+function headerScanText(record: NormalizedRecord): string {
+  const parts: string[] = [];
+  for (const key of HEADER_KEYS) {
+    const value = record.frontmatter[key];
+    if (value) parts.push(value);
+  }
+  for (const att of record.attachments ?? []) parts.push(att.filename);
+  return parts.join('\n');
+}
+
+function withHeldHeader(frontmatter: Record<string, string>): Record<string, string> {
+  const out = { ...frontmatter };
+  for (const key of HEADER_KEYS) {
+    if (out[key]) out[key] = '[held for safety review]';
+  }
+  return out;
+}
+
+const SCAN_RANK = { pass: 0, annotate: 1, quarantine: 2 } as const;
+
+function worstScanAction(
+  a: keyof typeof SCAN_RANK,
+  b: keyof typeof SCAN_RANK | undefined,
+): keyof typeof SCAN_RANK {
+  return b !== undefined && SCAN_RANK[b] > SCAN_RANK[a] ? b : a;
 }
 
 /**
@@ -299,6 +398,11 @@ export interface PruneInput {
   corpusDir: string;
   /** `sha8(recordId)` of every record the source still returns. */
   keepHashes: Set<string>;
+  /**
+   * The listing covered only records dated in this range (ISO instants or
+   * days): a record outside it, or with no readable `date`, is kept.
+   */
+  within?: { start: string; end: string };
 }
 
 export interface PruneResult {
@@ -338,6 +442,13 @@ export async function sweepRecords(input: SweepInput): Promise<{ removed: number
     }
     let sidecar: Record<string, SidecarEntry> | null = null;
     let sidecarDirty = false;
+    // An attachment folder goes with the last record on its ordinal; in a
+    // directory damaged before ordinals could pass 999 several share one.
+    const ordinalUse = new Map<string, number>();
+    for (const entry of entries) {
+      const ord = entry.isFile() ? RECORD_FILE_RE.exec(entry.name)?.[1] : undefined;
+      if (ord) ordinalUse.set(ord, (ordinalUse.get(ord) ?? 0) + 1);
+    }
     for (const entry of entries) {
       if (entry.name.startsWith('_')) continue;
       if (entry.isDirectory()) {
@@ -349,7 +460,11 @@ export async function sweepRecords(input: SweepInput): Promise<{ removed: number
       const m = RECORD_FILE_RE.exec(entry.name);
       if (!m || !input.remove(m[2]!, `${dirRel}/${entry.name}`)) continue;
       await rm(join(dirAbs, entry.name), { force: true });
-      await rm(join(dirAbs, 'attachments', m[1]!), { recursive: true, force: true });
+      const left = (ordinalUse.get(m[1]!) ?? 1) - 1;
+      ordinalUse.set(m[1]!, left);
+      if (left <= 0) {
+        await rm(join(dirAbs, 'attachments', m[1]!), { recursive: true, force: true });
+      }
       sidecar ??= await readSidecar(dirAbs);
       if (m[2]! in sidecar) {
         delete sidecar[m[2]!];
@@ -372,10 +487,41 @@ export async function sweepRecords(input: SweepInput): Promise<{ removed: number
  * (the engine enforces those gates).
  */
 export async function pruneRecords(input: PruneInput): Promise<PruneResult> {
+  if (!input.within) {
+    const { removed } = await sweepRecords({
+      storageDir: input.storageDir,
+      corpusDir: input.corpusDir,
+      remove: (hash8) => !input.keepHashes.has(hash8),
+    });
+    return { pruned: removed };
+  }
+  // Bounded by dates: find the unlisted records first, then remove only
+  // those whose own date falls inside what the listing covered.
+  const startMs = Date.parse(input.within.start);
+  const endMs = Date.parse(input.within.end);
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) return { pruned: 0 };
+  const unlisted: string[] = [];
+  await sweepRecords({
+    storageDir: input.storageDir,
+    corpusDir: input.corpusDir,
+    remove: (hash8, relPath) => {
+      if (!input.keepHashes.has(hash8)) unlisted.push(relPath);
+      return false;
+    },
+  });
+  const inRange = new Set<string>();
+  for (const relPath of unlisted) {
+    const text = await readFile(await resolveInside(input.storageDir, relPath), 'utf8').catch(
+      () => '',
+    );
+    const ms = Date.parse(parseFrontmatter(text).data.date ?? '');
+    if (Number.isFinite(ms) && ms >= startMs && ms < endMs) inRange.add(relPath);
+  }
+  if (inRange.size === 0) return { pruned: 0 };
   const { removed } = await sweepRecords({
     storageDir: input.storageDir,
     corpusDir: input.corpusDir,
-    remove: (hash8) => !input.keepHashes.has(hash8),
+    remove: (_hash8, relPath) => inRange.has(relPath),
   });
   return { pruned: removed };
 }

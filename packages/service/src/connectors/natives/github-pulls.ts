@@ -27,6 +27,7 @@ import type {
   ChangeBatch,
   ConnectorAdapter,
   ConnectorBindingRef,
+  ListChangesOptions,
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
@@ -112,6 +113,8 @@ export interface GitHubPullsRuntime {
       num: number,
       opts?: { limit?: number },
     ): Promise<string>;
+    /** The same service over another transport (tests, the provider simulator). */
+    withFetch?(fetchImpl: typeof fetch): GitHubPullsRuntime['prs'];
   };
   project(projectId: string): Promise<ProjectDetail>;
   /**
@@ -134,9 +137,12 @@ interface PullBundle {
 
 export class GitHubPullsAdapter implements ConnectorAdapter {
   readonly typeId = 'github-pulls';
+  /** Each pull request is listed whole: a file that left it leaves the corpus. */
+  readonly scopesAreMirrors = true;
   private config?: GitHubPullsConfig;
   private project?: ProjectDetail;
   private readonly bundles = new Map<number, PullBundle>();
+  private readonly details = new Map<number, Promise<GitHubPullDetail>>();
 
   constructor(
     private readonly binding: ConnectorBindingRef,
@@ -165,21 +171,34 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
     return open.slice(0, config.maxPulls).map((p) => pullScope(p.number));
   }
 
-  async listChangesSince(scope: string, cursor: unknown): Promise<ChangeBatch<string>> {
+  async listChangesSince(
+    scope: string,
+    cursor: unknown,
+    opts?: ListChangesOptions,
+  ): Promise<ChangeBatch<string>> {
     const { project } = this.ready();
     const num = pullNumberFromScope(scope);
     if (num === null) return { records: [], cursor: '' };
 
+    // `updatedAt` is the change signal for a PR: a new commit, a force-push
+    // or a new comment moves it. It comes from the detail call alone, so an
+    // unchanged PR costs that one request and never loads its files, comments
+    // or diff.
+    const detail = await this.loadDetail(project, num);
+    const signature = `${CURSOR_SCHEMA}:${detail.updatedAt}:${detail.headRef}:${detail.changedFiles ?? ''}`;
+    const prior = typeof cursor === 'string' ? cursor : '';
+    if (prior === signature) return { records: [], cursor: signature };
     const bundle = await this.loadBundle(project, num);
-    // `updatedAt` + head SHA is the whole change signal for a PR: a new
-    // commit or a new comment moves one of them. Unchanged → nothing to
-    // re-fetch, and the pass costs one API call.
-    const next = `${CURSOR_SCHEMA}:${bundle.detail.updatedAt}:${bundle.detail.headRef}:${bundle.files.length}`;
-    if (typeof cursor === 'string' && cursor === next) {
-      return { records: [], cursor: next, enumeratedAll: true };
-    }
+    // A PR larger than one batch pages: `<signature>#<offset>` while the
+    // listing is in progress. A new commit changes the signature and starts
+    // the listing over.
+    const hashAt = prior.lastIndexOf('#');
+    const offset =
+      hashAt > 0 && prior.slice(0, hashAt) === signature
+        ? Math.max(0, Number(prior.slice(hashAt + 1)) || 0)
+        : 0;
 
-    const records: RecordRef[] = [
+    const all: RecordRef[] = [
       {
         id: `pr-${num}`,
         ordinalKey: 0,
@@ -195,7 +214,22 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
         raw: { kind: 'file' as const, num, filename: file.filename },
       })),
     ];
-    return { records, cursor: next, enumeratedAll: true };
+    const limit = Math.max(1, opts?.limit ?? all.length);
+    const records = all.slice(offset, offset + limit);
+    const end = offset + records.length;
+    // Each listing is the whole pull request, so a file that left it (a
+    // force-push, a rename) leaves the corpus once the listing completes.
+    if (end < all.length) {
+      return {
+        records,
+        cursor: `${signature}#${end}`,
+        partial: true,
+        fullListing: { first: offset === 0, last: false },
+      };
+    }
+    return offset === 0
+      ? { records, cursor: signature, enumeratedAll: true }
+      : { records, cursor: signature, fullListing: { first: false, last: true } };
   }
 
   async fetchRecord(scope: string, ref: RecordRef): Promise<NormalizedRecord> {
@@ -215,6 +249,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
 
   async close(): Promise<void> {
     this.bundles.clear();
+    this.details.clear();
   }
 
   private ready(): { project: ProjectDetail; config: GitHubPullsConfig } {
@@ -224,12 +259,23 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
     return { project: this.project, config: this.config };
   }
 
+  /** The detail call, once per pull request per pass. */
+  private loadDetail(project: ProjectDetail, num: number): Promise<GitHubPullDetail> {
+    let detail = this.details.get(num);
+    if (!detail) {
+      detail = this.runtime.prs.getPullRequest(project, num);
+      this.details.set(num, detail);
+      detail.catch(() => this.details.delete(num));
+    }
+    return detail;
+  }
+
   private async loadBundle(project: ProjectDetail, num: number): Promise<PullBundle> {
     const cached = this.bundles.get(num);
     if (cached) return cached;
     const { config } = this.ready();
     const [detail, files, comments, diff] = await Promise.all([
-      this.runtime.prs.getPullRequest(project, num),
+      this.loadDetail(project, num),
       // Unlimited patches: these land in files the model opens, so a clip
       // mid-hunk would read as the change simply not being there.
       this.runtime.prs.listFiles(project, num, { patchLimit: Number.POSITIVE_INFINITY }),
@@ -463,7 +509,17 @@ export async function resolveLaunchPullNumber(
 /** Register the GitHub Pulls native adapter and its launch-time prep. */
 export function registerGitHubPullsAdapters(runtime: GitHubPullsRuntime): void {
   registerNativeAdapter('github-pulls', async (binding, deps) =>
-    Promise.resolve(new GitHubPullsAdapter(binding, deps, runtime)),
+    Promise.resolve(
+      new GitHubPullsAdapter(
+        binding,
+        deps,
+        // An injected transport (tests, the provider simulator) reaches
+        // Octokit too, like every other native adapter's.
+        deps.fetch && runtime.prs.withFetch
+          ? { ...runtime, prs: runtime.prs.withFetch(deps.fetch) }
+          : runtime,
+      ),
+    ),
   );
   registerConnectorTaskPrep('github-pulls', async (ctx) => {
     const num = await resolveLaunchPullNumber(runtime, ctx.project, ctx.params);

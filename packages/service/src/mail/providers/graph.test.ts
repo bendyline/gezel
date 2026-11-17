@@ -165,6 +165,29 @@ describe('GraphMailProvider', () => {
     expect(resumed.records.length).toBeGreaterThan(0);
   });
 
+  it('after an outage longer than the backfill window, the resync reaches back to the last sync', async () => {
+    world = await graphWorld({ backfillDays: 7 });
+    world.graph.addMessage({ subject: 'Before', text: 'before' });
+    const first = await pass(world, undefined);
+    const DAY = 86_400_000;
+    const cursor = first.cursor as { scopes: Record<string, { syncedAt?: number }> };
+    const [folder] = Object.keys(cursor.scopes);
+    expect(cursor.scopes[folder!]!.syncedAt).toBeTypeOf('number');
+    cursor.scopes[folder!] = { ...cursor.scopes[folder!], syncedAt: Date.now() - 30 * DAY };
+    world.graph.addMessage({
+      subject: 'During the outage',
+      text: 'twenty days ago',
+      receivedDateTime: new Date(Date.now() - 20 * DAY).toISOString(),
+    });
+    world.graph.expireTokens();
+    const second = await pass(world, cursor);
+    expect(second.error).toBeUndefined();
+    const subjects = (await readCorpus(world.env.artifactsDir, 'data/mail')).map(
+      (r) => r.frontmatter.subject,
+    );
+    expect(subjects).toContain('During the outage');
+  });
+
   it('carries isRead as the \\Seen flag and refreshes the record when it flips', async () => {
     world = await graphWorld();
     const id = world.graph.addMessage({ subject: 'Status', text: 's' });

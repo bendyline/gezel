@@ -6,6 +6,36 @@ apps, and runs that prove the fakes match the real services. It is the last mile
 an adapter that passes against a fake but meets a different API shape in the wild
 fails here, and the fix is usually to the fake as much as the adapter.
 
+## Without an account: the connectors lane
+
+Some real services need no account, and the `connectors` lane of
+[live-smoke.yml](../.github/workflows/live-smoke.yml) runs against them on a schedule
+(set the repository variable `GEZEL_ENABLE_CONNECTOR_SMOKE=1`, or dispatch the workflow
+with lane `connectors`):
+
+- **Mail.** GreenMail 2.1.15 (IMAPS and SMTPS) and Dovecot 2.4.4 (IMAPS), each pinned
+  by image digest, started in the job.
+  [live-local.integration.test.ts](../packages/service/src/connectors/testing/live-local.integration.test.ts)
+  seeds a fresh folder over IMAP, backfills it through the production IMAP provider,
+  checks a second pass is quiet and a late message is picked up, and on GreenMail sends
+  through SMTP and finds the message delivered. A failure here fails the job.
+- **Public feeds.** [live-public.integration.test.ts](../packages/service/src/connectors/testing/live-public.integration.test.ts)
+  syncs a few long-lived feeds (RSS 2.0 and Atom) through the production RSS adapter. A
+  feed that answers but yields nothing valid fails the job; one that cannot be reached
+  after three tries is degraded, a warning, until the third degraded run in a row.
+
+Run either locally by pointing it at servers of your own:
+
+```bash
+GEZEL_CONNECTOR_LIVE_LOCAL=1 GEZEL_LIVE_MAIL='[{"name":"local","address":"alice@example.test","user":"alice","pass":"…","imap":{"host":"127.0.0.1","port":3993,"secure":true}}]' \
+  pnpm --filter @bendyline/gezel-service exec vitest run src/connectors/testing/live-local.integration.test.ts
+GEZEL_CONNECTOR_LIVE_PUBLIC=1 pnpm --filter @bendyline/gezel-service exec vitest run src/connectors/testing/live-public.integration.test.ts
+```
+
+Not in the lane yet: a local AT Protocol server for Bluesky publishing, a public GitHub
+fixture repository (wiki, releases, a pull request over 500 files), and YouTube with a
+free API key.
+
 ## The accounts to create
 
 Use dedicated test accounts, never a personal mailbox: the live check writes a full

@@ -1,4 +1,4 @@
-import type { ConnectorTypeManifest } from '@bendyline/gezel';
+import { type ConnectorTypeManifest, connectorSourceProblems } from '@bendyline/gezel';
 import { CatalogService } from '@bendyline/gezel-catalog';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { registerGitHubPullsAdapters } from './natives/github-pulls.js';
@@ -102,6 +102,21 @@ describe('connector catalog ↔ adapter registry', () => {
     // so two providers behind one name would hand Google's client id to Microsoft.
     const conflicts = [...byEnv].filter(([, origins]) => origins.size > 1).map(([env]) => env);
     expect(conflicts).toEqual([]);
+  });
+
+  it('every version of every type has a source block its driver can read', async () => {
+    const catalog = new CatalogService();
+    const problems: string[] = [];
+    for (const m of manifests) {
+      for (const { version } of await catalog.listVersions('connector-type', m.id, 'bundled')) {
+        const detail = await catalog.get('connector-type', m.id, 'bundled', version);
+        if (detail?.manifest.kind !== 'connector-type') continue;
+        for (const p of connectorSourceProblems(detail.manifest.driver, detail.manifest.source)) {
+          problems.push(`${m.id}@${version}: ${p}`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
   });
 
   it('every declared action names a consent scope', () => {

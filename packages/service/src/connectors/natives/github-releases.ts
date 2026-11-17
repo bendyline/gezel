@@ -13,6 +13,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import { HttpStatusError, parseRetryAfterMs } from '@bendyline/gezel';
 import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { AmbientGitHubAuth } from '../../github/ambient.js';
 import { getStoredGitHubToken } from '../../github/identity.js';
@@ -47,7 +48,19 @@ interface GitHubReleasesConfig {
   maxAssetSizeMb?: number;
 }
 
+/**
+ * What the corpus holds: a fingerprint per release (release id → 12 hex
+ * characters over the release and the asset settings). A pass fetches only
+ * releases whose fingerprint changed, so one new release or an edited note
+ * no longer re-downloads every asset of every release.
+ */
 interface GitHubReleaseCursor {
+  v: 2;
+  seen: Record<string, string>;
+}
+
+/** The cursor shape before per-release fingerprints (one hash of the whole list). */
+interface LegacyReleaseCursor {
   fingerprint: string;
   offset: number;
   complete: boolean;
@@ -102,6 +115,8 @@ export class GitHubReleasesAdapter implements ConnectorAdapter {
   readonly typeId = 'github-releases';
   private config?: GitHubReleasesConfig;
   private token: string | null = null;
+  /** The token is the app-wide sign-in, not one stored on this binding. */
+  private tokenIsAmbient = false;
   private tempDir?: string;
   private releases?: GitHubRelease[];
   private fingerprint = '';
@@ -125,6 +140,7 @@ export class GitHubReleasesAdapter implements ConnectorAdapter {
         ? await this.runtime.signedInToken(this.deps.secrets)
         : null;
     this.token = bindingToken || signedIn?.trim() || null;
+    this.tokenIsAmbient = !bindingToken && Boolean(this.token);
     this.tempDir = await this.runtime.makeTempDir();
   }
 
@@ -140,21 +156,36 @@ export class GitHubReleasesAdapter implements ConnectorAdapter {
   ): Promise<ChangeBatch<GitHubReleaseCursor>> {
     this.assertReady();
     await this.loadReleases();
+    const releases = this.releases!;
+    const fingerprints = new Map(releases.map((r) => [String(r.id), this.releaseFingerprint(r)]));
     const prior = parseCursor(cursor);
-    if (prior?.fingerprint === this.fingerprint && prior.complete) {
-      return { records: [], cursor: prior };
+    let seen: Record<string, string>;
+    if (prior && 'v' in prior) {
+      seen = { ...prior.seen };
+    } else if (prior?.complete && prior.fingerprint === this.fingerprint) {
+      // A cursor from before per-release fingerprints, over a list that has
+      // not changed since: everything it covered is already in the corpus.
+      seen = Object.fromEntries(fingerprints);
+    } else {
+      seen = {};
+    }
+    const firstListing = Object.keys(seen).length === 0;
+
+    // The listing is the whole configured window (a repository past the hard
+    // cap fails instead), so a release no longer in it leaves the mirror.
+    const removed: string[] = [];
+    for (const id of Object.keys(seen)) {
+      if (!fingerprints.has(id)) {
+        removed.push(id);
+        delete seen[id];
+      }
     }
 
-    const offset =
-      prior?.fingerprint === this.fingerprint ? Math.min(prior.offset, this.releases!.length) : 0;
+    const changed = releases.filter((r) => seen[String(r.id)] !== fingerprints.get(String(r.id)));
     const limit = Math.max(1, Math.min(MAX_RELEASES, opts?.limit ?? PAGE_SIZE));
-    const selected = this.releases!.slice(offset, offset + limit);
-    const nextOffset = offset + selected.length;
-    const next: GitHubReleaseCursor = {
-      fingerprint: this.fingerprint,
-      offset: nextOffset,
-      complete: nextOffset >= this.releases!.length,
-    };
+    const selected = changed.slice(0, limit);
+    for (const r of selected) seen[String(r.id)] = fingerprints.get(String(r.id))!;
+    const partial = changed.length > selected.length;
 
     return {
       records: selected.map((release) => ({
@@ -163,10 +194,21 @@ export class GitHubReleasesAdapter implements ConnectorAdapter {
         ts: release.publishedAt || release.createdAt,
         raw: release,
       })),
-      cursor: next,
-      ...(next.complete ? {} : { partial: true }),
-      ...(next.complete && offset === 0 ? { enumeratedAll: true } : {}),
+      cursor: { v: 2, seen },
+      ...(removed.length > 0 ? { removed } : {}),
+      ...(partial ? { partial: true } : {}),
+      ...(!partial && firstListing ? { enumeratedAll: true } : {}),
     };
+  }
+
+  /** A release's fingerprint, including the settings that decide its attachments. */
+  private releaseFingerprint(release: GitHubRelease): string {
+    const c = this.config!;
+    const settings = [c.downloadAssets, c.assetNamePattern ?? '', c.maxAssetSizeMb ?? ''];
+    return createHash('sha256')
+      .update(JSON.stringify([release, settings]))
+      .digest('hex')
+      .slice(0, 12);
   }
 
   async fetchRecord(_scope: string, ref: RecordRef): Promise<NormalizedRecord> {
@@ -238,9 +280,19 @@ export class GitHubReleasesAdapter implements ConnectorAdapter {
       );
       url.searchParams.set('per_page', String(PAGE_SIZE));
       url.searchParams.set('page', String(page));
-      const response = await this.runtime.fetch(url, {
+      let response = await this.runtime.fetch(url, {
         headers: this.apiHeaders('application/vnd.github+json'),
       });
+      if (response.status === 401 && this.tokenIsAmbient) {
+        // The app-wide GitHub sign-in went stale: a public repository is
+        // still readable without it, so try once more anonymously.
+        void response.body?.cancel().catch(() => {});
+        this.token = null;
+        this.tokenIsAmbient = false;
+        response = await this.runtime.fetch(url, {
+          headers: this.apiHeaders('application/vnd.github+json'),
+        });
+      }
       if (!response.ok) throw await githubError(response, config, this.token !== null);
       const raw = (await response.json()) as unknown;
       if (!Array.isArray(raw)) throw new Error('GitHub returned a non-array releases response.');
@@ -452,9 +504,16 @@ function parseReleaseRef(raw: unknown): GitHubRelease {
   return raw as GitHubRelease;
 }
 
-function parseCursor(raw: unknown): GitHubReleaseCursor | undefined {
+function parseCursor(raw: unknown): GitHubReleaseCursor | LegacyReleaseCursor | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const value = raw as Record<string, unknown>;
+  if (value.v === 2 && value.seen && typeof value.seen === 'object') {
+    const seen: Record<string, string> = {};
+    for (const [id, fp] of Object.entries(value.seen as Record<string, unknown>)) {
+      if (typeof fp === 'string') seen[id] = fp;
+    }
+    return { v: 2, seen };
+  }
   if (
     typeof value.fingerprint !== 'string' ||
     !Number.isSafeInteger(value.offset) ||
@@ -533,10 +592,37 @@ async function githubError(
       `GitHub repository ${repo} was not found or is not accessible${authenticated ? ' with the current credential' : ' anonymously; sign in for private or draft releases'}.`,
     );
   }
-  if (response.status === 403 || response.status === 429) {
-    return new Error(`GitHub rate limit or access policy blocked releases for ${repo}. ${detail}`);
+  if (response.status === 429 || (response.status === 403 && isGitHubRateLimit(response))) {
+    // Backpressure, not a failure: the engine backs the binding off until
+    // GitHub's reset time instead of reporting an error a person must read.
+    const retryAfterMs = gitHubRetryAfterMs(response);
+    return new HttpStatusError(
+      429,
+      `GitHub rate limit reached for ${repo}. ${detail}`,
+      retryAfterMs !== undefined ? { retryAfterMs } : {},
+    );
+  }
+  if (response.status === 403) {
+    return new Error(`GitHub's access policy blocked releases for ${repo}. ${detail}`);
   }
   return new Error(`GitHub releases request failed (${response.status}) for ${repo}. ${detail}`);
+}
+
+/** GitHub answers an exhausted quota or a secondary limit with 403. */
+function isGitHubRateLimit(response: Response): boolean {
+  return (
+    response.headers.get('x-ratelimit-remaining') === '0' || response.headers.has('retry-after')
+  );
+}
+
+/** `Retry-After`, else the quota's `x-ratelimit-reset` (epoch seconds). */
+function gitHubRetryAfterMs(response: Response): number | undefined {
+  const asked = parseRetryAfterMs(response.headers.get('retry-after'));
+  if (asked !== undefined) return asked;
+  const reset = Number(response.headers.get('x-ratelimit-reset'));
+  return Number.isFinite(reset) && reset * 1000 > Date.now()
+    ? reset * 1000 - Date.now()
+    : undefined;
 }
 
 function parseSha256Digest(value: string | undefined): string | undefined {
@@ -610,7 +696,15 @@ function nonNegativeInt(value: unknown, label: string): number {
 
 /** Register the GitHub Releases native adapter. */
 export function registerGitHubReleasesAdapters(): void {
+  // The transport comes from the deps like every other native adapter's, so
+  // tests and the provider simulator reach this one too.
   registerNativeAdapter('github-releases', async (binding, deps) =>
-    Promise.resolve(new GitHubReleasesAdapter(binding, deps)),
+    Promise.resolve(
+      new GitHubReleasesAdapter(
+        binding,
+        deps,
+        deps.fetch ? { ...defaultRuntime, fetch: deps.fetch } : defaultRuntime,
+      ),
+    ),
   );
 }

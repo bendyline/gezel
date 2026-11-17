@@ -15,8 +15,8 @@
  * provider fakes in `connectors/testing/` drive these adapters end to end.
  */
 
-import { HttpStatusError, isRateLimitStatus } from '@bendyline/gezel';
-import { type OAuthEndpoints, isExpired, refreshToken } from '../oauth.js';
+import { HttpStatusError, isRateLimitStatus, parseRetryAfterMs } from '@bendyline/gezel';
+import { type OAuthEndpoints, isExpired, parseTokenAuth, refreshToken } from '../oauth.js';
 import { connectorSecretKey } from '../registry.js';
 import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
 
@@ -31,6 +31,8 @@ export interface StoredOAuthCredential {
   tenant?: string;
   /** The token endpoint that issued the grant (newer bindings only). */
   tokenUrl?: string;
+  /** How the client authenticates there, when the type says (`secretShape.tokenAuth`). */
+  tokenAuth?: string;
 }
 
 export interface OAuthSessionOptions {
@@ -117,10 +119,12 @@ export class OAuthSession {
       );
     }
     const tokenUrl = this.tokenUrl(cred);
+    const clientAuth = parseTokenAuth(cred.tokenAuth);
     const endpoints: OAuthEndpoints = {
       authEndpoint: tokenUrl,
       tokenEndpoint: tokenUrl,
       scopes: [],
+      ...(clientAuth ? { clientAuth } : {}),
     };
     let t: Awaited<ReturnType<typeof refreshToken>>;
     try {
@@ -211,7 +215,12 @@ export async function authorizedFetch(
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new HttpStatusError(res.status, `${label} ${res.status}: ${body}`.slice(0, 400));
+    const retryAfterMs = parseRetryAfterMs(res.headers.get('retry-after'));
+    throw new HttpStatusError(
+      res.status,
+      `${label} ${res.status}: ${body}`.slice(0, 400),
+      retryAfterMs !== undefined ? { retryAfterMs } : {},
+    );
   }
   return res;
 }

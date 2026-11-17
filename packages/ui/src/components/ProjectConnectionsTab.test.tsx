@@ -43,6 +43,8 @@ describe('ProjectConnectionsTab connector picker', () => {
     vi.mocked(api.listConnectorTypes).mockReset();
     vi.mocked(api.bindConnector).mockReset();
     vi.mocked(api.getProject).mockReset();
+    vi.mocked(api.connectorReadiness).mockReset();
+    vi.mocked(api.connectorReadiness).mockResolvedValue({ needed: false } as never);
 
     vi.mocked(api.listConnectors).mockResolvedValue({ bindings: [] } as never);
     vi.mocked(api.listConnectorActions).mockResolvedValue({ pending: [] } as never);
@@ -118,6 +120,81 @@ describe('ProjectConnectionsTab connector picker', () => {
     ).toBeInTheDocument();
   });
 
+  it('pauses and resumes a connection, and a paused one cannot be synced', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.patchConnector).mockReset();
+    vi.mocked(api.patchConnector).mockResolvedValue({ ok: true, binding: {} } as never);
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      bindings: [
+        {
+          id: 'rss:1',
+          type: 'rss-feed',
+          displayName: 'Blog',
+          lastSyncedAt: '2026-11-16T08:00:00Z',
+        },
+      ],
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    await user.click(await screen.findByRole('button', { name: 'Pause' }));
+    expect(api.patchConnector).toHaveBeenCalledWith('project-alpha', 'rss:1', { disabled: true });
+
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      bindings: [
+        {
+          id: 'rss:1',
+          type: 'rss-feed',
+          displayName: 'Blog',
+          disabled: true,
+          disabledReason: 'user',
+        },
+      ],
+    } as never);
+    await user.click(await screen.findByRole('button', { name: 'Pause' }));
+    expect(await screen.findByText(/Paused\. It does not sync until you resume it\./)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Sync now' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(api.patchConnector).toHaveBeenLastCalledWith('project-alpha', 'rss:1', {
+      disabled: false,
+    });
+  });
+
+  it('checks a connection and says what it found, saving nothing', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      bindings: [
+        { id: 'x:1', type: 'x-posts', displayName: 'X', lastSyncedAt: '2026-11-16T08:00:00Z' },
+      ],
+    } as never);
+    vi.mocked(api.checkConnector).mockReset();
+    vi.mocked(api.checkConnector).mockResolvedValueOnce({
+      ok: true,
+      check: { ok: true, scopes: ['posts'], records: 4, requests: [], notes: [] },
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    await user.click(await screen.findByRole('button', { name: 'Check' }));
+    expect(
+      await screen.findByText(/a trial read found 4 item\(s\)\. Nothing was saved\./),
+    ).toBeTruthy();
+
+    vi.mocked(api.checkConnector).mockResolvedValueOnce({
+      ok: true,
+      check: {
+        ok: false,
+        error: 'X refused the sign-in',
+        scopes: [],
+        records: 0,
+        requests: [],
+        notes: [],
+      },
+    } as never);
+    await user.click(screen.getByRole('button', { name: 'Check' }));
+    expect(
+      await screen.findByText(/The check found a problem: X refused the sign-in/),
+    ).toBeTruthy();
+  });
+
   it('binds the selected tile with its configured values', async () => {
     render(<ProjectConnectionsTab project={PROJECT} />);
     const user = userEvent.setup();
@@ -133,6 +210,41 @@ describe('ProjectConnectionsTab connector picker', () => {
         config: { repository: 'bendyline/gezel' },
       });
     });
+  });
+
+  it('says what connecting will download first', async () => {
+    vi.mocked(api.connectorReadiness).mockResolvedValueOnce({
+      needed: true,
+      package: { name: '@prismatic-io/components-airtable', version: '0.3.0' },
+      installed: false,
+      downloadable: true,
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'GitHub Issues' }));
+    expect(
+      await screen.findByText(/Connecting downloads @prismatic-io\/components-airtable 0\.3\.0/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeEnabled();
+  });
+
+  it('holds Add and says why when this build or security level cannot download', async () => {
+    vi.mocked(api.connectorReadiness).mockResolvedValue({
+      needed: true,
+      package: { name: '@prismatic-io/components-airtable', version: '0.3.0' },
+      installed: false,
+      downloadable: false,
+      reason: 'Connections are off at this security level.',
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'GitHub Issues' }));
+    expect(
+      await screen.findByText('Connections are off at this security level.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
   });
 
   it('asks for no token when the connector type declares no secret', async () => {

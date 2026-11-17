@@ -29,7 +29,7 @@ const hoisted = vi.hoisted(() => ({
   responses: [] as unknown[],
 }));
 
-vi.mock('@prismatic-io/spectral/dist/clients/http', () => ({
+vi.mock('@prismatic-io/spectral/http', () => ({
   createClient: (config: { baseUrl?: string; headers?: Record<string, string> }) => {
     hoisted.clientConfig = config;
     let call = 0;

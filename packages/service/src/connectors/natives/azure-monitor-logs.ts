@@ -457,8 +457,16 @@ export function escapeKqlDatetime(iso: string): string {
 }
 
 export function registerAzureMonitorLogsAdapters(): void {
+  // The transport comes from the deps like every other native adapter's, so
+  // tests and the provider simulator reach this one too.
   registerNativeAdapter(AZURE_MONITOR_LOGS_ADAPTER_ID, async (binding, deps) =>
-    Promise.resolve(new AzureMonitorLogsAdapter(binding, deps)),
+    Promise.resolve(
+      new AzureMonitorLogsAdapter(
+        binding,
+        deps,
+        deps.fetch ? { fetch: deps.fetch } : defaultRuntime,
+      ),
+    ),
   );
 }
 

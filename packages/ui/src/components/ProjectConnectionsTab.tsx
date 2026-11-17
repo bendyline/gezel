@@ -126,6 +126,11 @@ export function ProjectConnectionsTab({
   const [loadingTypes, setLoadingTypes] = useState(false);
   const [types, setTypes] = useState<ConnectorOption[]>([]);
   const [selected, setSelected] = useState<ConnectorOption | null>(null);
+  // A type that runs a published component downloads it when connected; the
+  // form says so, or says why this build or security level cannot.
+  const [readiness, setReadiness] = useState<Awaited<
+    ReturnType<typeof api.connectorReadiness>
+  > | null>(null);
   const [config, setConfig] = useState<Record<string, ConnectorConfigValue>>({});
   const [displayName, setDisplayName] = useState('');
   const [credential, setCredential] = useState('');
@@ -141,6 +146,25 @@ export function ProjectConnectionsTab({
   // Counts failed "OAuth is not configured" connects; each bump pops the
   // setup panel open as the error-driven fallback.
   const [oauthSetupNudge, setOauthSetupNudge] = useState(0);
+
+  useEffect(() => {
+    setReadiness(null);
+    if (!selected) return;
+    let live = true;
+    // Best effort: an older daemon has no readiness route, and Connect still
+    // reports a refusal itself.
+    Promise.resolve()
+      .then(() => api.connectorReadiness(project.id, selected.id))
+      .then((r) => {
+        if (live) setReadiness(r);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [project.id, selected]);
+  const cannotDownload =
+    readiness?.needed === true && !readiness.installed && !readiness.downloadable;
 
   const refresh = useCallback(async () => {
     try {
@@ -256,6 +280,51 @@ export function ProjectConnectionsTab({
           r.error
             ? `Sync error: ${r.error}`
             : `Synced ${(r.written ?? 0) + (r.quarantined ?? 0)} new record(s).`,
+        );
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [project.id, refresh],
+  );
+
+  const handleCheck = useCallback(
+    async (bindingId: string) => {
+      setBusy(bindingId);
+      setError('');
+      try {
+        const { check } = await api.checkConnector(project.id, bindingId);
+        const problem =
+          check.error ??
+          check.failedScopes?.map((f) => `${f.scope}: ${f.message}`).join('; ') ??
+          (check.rateLimited ? 'the service asked to wait before more requests' : '');
+        setNotice(
+          check.ok && !problem
+            ? `The connection works: a trial read found ${check.records} item(s). Nothing was saved.`
+            : `The check found a problem: ${problem}`,
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [project.id],
+  );
+
+  const handlePause = useCallback(
+    async (bindingId: string, pause: boolean) => {
+      setBusy(bindingId);
+      setError('');
+      try {
+        await api.patchConnector(project.id, bindingId, { disabled: pause });
+        setNotice(
+          pause
+            ? 'Paused. It will not sync until you resume it.'
+            : 'Resumed. It syncs again on its usual schedule.',
         );
         await refresh();
       } catch (err) {
@@ -545,7 +614,13 @@ export function ProjectConnectionsTab({
                   <strong>{b.displayName || b.type}</strong>
                   <span className="muted small"> · {b.type}</span>
                   <div className="small">
-                    {b.lastError ? (
+                    {b.disabled ? (
+                      <span className="muted">
+                        {b.disabledReason === 'emergency-stop'
+                          ? 'Stopped by the emergency stop. Resume it when you are ready.'
+                          : 'Paused. It does not sync until you resume it.'}
+                      </span>
+                    ) : b.lastError ? (
                       <span className="error">Error: {b.lastError}</span>
                     ) : b.lastSyncedAt ? (
                       <span className="muted" title={formatAbsoluteTime(b.lastSyncedAt)}>
@@ -561,9 +636,23 @@ export function ProjectConnectionsTab({
                   <button
                     type="button"
                     onClick={() => void handleSync(b.id)}
-                    disabled={busy === b.id}
+                    disabled={busy === b.id || Boolean(b.disabled)}
                   >
                     {busy === b.id ? 'Working…' : 'Sync now'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handleCheck(b.id)}
+                    disabled={busy === b.id || Boolean(b.disabled)}
+                  >
+                    Check
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void handlePause(b.id, !b.disabled)}
+                    disabled={busy === b.id}
+                  >
+                    {b.disabled ? 'Resume' : 'Pause'}
                   </button>
                   <button
                     type="button"
@@ -741,6 +830,15 @@ export function ProjectConnectionsTab({
             </div>
           )}
 
+          {readiness?.needed && !readiness.installed ? (
+            <p className="muted small">
+              {readiness.downloadable
+                ? `Connecting downloads ${readiness.package.name} ${readiness.package.version}, a component this connection runs in a sandbox.`
+                : (readiness.reason ??
+                  'This build cannot download the component this connection needs.')}
+            </p>
+          ) : null}
+
           <div className="gz-mail-link-actions gz-connector-picker-actions">
             <button type="button" onClick={closeAdd} disabled={busy === 'add'}>
               Cancel
@@ -750,7 +848,7 @@ export function ProjectConnectionsTab({
                 type="button"
                 className="primary"
                 onClick={() => void handleBind()}
-                disabled={busy === 'add'}
+                disabled={busy === 'add' || cannotDownload}
               >
                 {busy === 'add' ? 'Working…' : kind === 'oauth2' ? 'Connect' : 'Add'}
               </button>

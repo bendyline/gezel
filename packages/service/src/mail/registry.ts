@@ -148,10 +148,19 @@ export async function createMailAdapter(
   };
   const provider = mailProviderFor(binding, adapterKind);
   const address = typeof config.address === 'string' ? config.address : '';
-  const folders =
-    Array.isArray(config.syncFolders) && config.syncFolders.length
-      ? config.syncFolders.filter((f): f is string => typeof f === 'string' && f.length > 0)
-      : defaultFoldersFor(provider);
+  // A list with nothing usable in it falls back to the defaults: an empty
+  // list would reach the adapter as "every folder", Trash and Spam included.
+  const named = Array.isArray(config.syncFolders)
+    ? [
+        ...new Set(
+          config.syncFolders
+            .filter((f): f is string => typeof f === 'string')
+            .map((f) => f.trim())
+            .filter(Boolean),
+        ),
+      ]
+    : [];
+  const folders = named.length ? named : defaultFoldersFor(provider);
   const mailProvider = await buildProvider(
     provider,
     binding,

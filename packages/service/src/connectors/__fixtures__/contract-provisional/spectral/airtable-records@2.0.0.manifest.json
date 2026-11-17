@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "kind": "connector-type",
+  "id": "airtable-records",
+  "name": "Airtable Records",
+  "description": "Mirror an Airtable table into a searchable corpus, one file per record, through Prismatic's published Airtable component. Each sync lists the table's current rows; rows removed in Airtable are removed here.",
+  "tags": ["airtable", "records", "spectral"],
+  "maintainer": { "name": "Gezel" },
+  "version": "2.0.0",
+  "releasedAt": "2026-11-17T00:00:00Z",
+  "minGezelVersion": "1.26322.0",
+  "driver": "spectral",
+  "source": {
+    "package": {
+      "name": "@prismatic-io/components-airtable",
+      "version": "0.3.0",
+      "sha256": "da4e2c3b116fe1b7a559b35645524297b8cfc771e41be2f18022e2ed9343778d",
+      "entry": "npm-dist/index.cjs",
+      "entrySha256": "328c24b3b7559cf46be5fc3d81f64e099a423f037c8aa41b322c144e38ecb54c",
+      "spectral": "^10.39.1",
+      "license": "Apache-2.0",
+      "publishedAt": "2026-11-09T21:32:38.846Z"
+    },
+    "mode": "action",
+    "action": "listRecords",
+    "connection": { "key": "personalAccessToken", "input": "airtableConnection" },
+    "inputs": {
+      "baseId": "$config.baseId",
+      "tableName": "$config.tableName",
+      "view": "$config.view",
+      "filterByFormula": "$config.filterByFormula"
+    },
+    "items": { "paths": ["$.data"] },
+    "idPath": "$.id",
+    "tsPath": "$.createdTime",
+    "origins": ["https://api.airtable.com"]
+  },
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "baseId": { "type": "string", "title": "Base ID" },
+      "tableName": { "type": "string", "title": "Table name" },
+      "view": { "type": "string", "title": "View (optional)" },
+      "filterByFormula": { "type": "string", "title": "Filter by formula (optional)" }
+    },
+    "required": ["baseId", "tableName"]
+  },
+  "secretShape": {
+    "kind": "apikey",
+    "field": "apiKey",
+    "label": "Airtable personal access token",
+    "required": true,
+    "x-gezel-priority": "primary",
+    "description": "Use an Airtable personal access token, not a legacy API key. Give it read access to records and access only to the base you want Gezel to sync.",
+    "helpUrl": "https://airtable.com/create/tokens",
+    "helpLabel": "Open Airtable token settings"
+  },
+  "setupInstructions": {
+    "title": "Create an Airtable personal access token",
+    "description": "Airtable retired legacy API keys. Create a separate, narrowly scoped token for Gezel instead of sharing your Airtable account password.",
+    "steps": [
+      "Open Airtable's token settings using the link below and choose Create token.",
+      "Name the token Gezel and add the data.records:read scope.",
+      "Under Access, add only the base or workspace that contains the table you want to sync.",
+      "Create the token, copy it once, and paste it into the Airtable personal access token field."
+    ],
+    "url": "https://airtable.com/create/tokens",
+    "urlLabel": "Open Airtable token settings"
+  },
+  "normalize": {
+    "kind": "mapping",
+    "map": {
+      "id": "$.id",
+      "title": "$.fields.Name",
+      "timestamp": "$.createdTime",
+      "body": "$.fields",
+      "frontmatter": { "recordId": "$.id", "createdTime": "$.createdTime" }
+    }
+  },
+  "completeness": "mirror",
+  "notes": "Runs Prismatic's published Airtable component (Apache-2.0), downloaded when the connection is made and pinned by hash. Each sync lists the whole table through the component's List Records action, so rows deleted in Airtable are removed from the corpus. An incremental mode on the component's polling trigger waits for a check against a real base that rows never edited since creation are returned."
+}

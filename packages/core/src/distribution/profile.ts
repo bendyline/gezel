@@ -33,7 +33,8 @@ export type RestrictedFeature =
   | 'copilot-install'
   | 'engine-download'
   | 'python'
-  | 'npm';
+  | 'npm'
+  | 'connector-component';
 
 export interface ResolvedDistributionPolicy {
   /** Echoed for UI/telemetry; never read by enforcement. */
@@ -74,6 +75,8 @@ const STORE_REFUSALS: Record<RestrictedFeature, string> = {
   python:
     'This build does not include the Python runtime that model needs. Choose an on-device model that runs on the built-in engine, or install Gezel from gezel.com.',
   npm: 'This build cannot install packages. Write dependency-free code using Node built-ins instead.',
+  'connector-component':
+    'This connection needs a component Gezel downloads when you connect, which this build cannot do. Install Gezel from gezel.com to use it.',
 };
 
 function standardRefusal(feature: RestrictedFeature): string {
