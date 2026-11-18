@@ -3096,7 +3096,8 @@ function DaemonSettingsView() {
                       <code>web_fetch</code>, <code>view</code>, file ops, <code>grep</code>) and
                       work through gezel&rsquo;s tools instead, which gives you an audit trail for
                       every action and the same behavior across providers. Each crew member&rsquo;s
-                      Settings tab can override this.
+                      Settings tab can override this. Below the Unrestricted security level, the
+                      sandbox stays on either way.
                     </>
                   }
                   checked={config?.sandboxCopilot === true}

@@ -13,26 +13,38 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import type {
+  ConnectorTestExchange,
   ConnectorTypeManifest,
+  GezelConfig,
   LiveBindingStatus,
   ProjectConnectorBinding,
   ProjectDetail,
+  ResolvedSecurityPolicy,
 } from '@bendyline/gezel';
 import {
   HttpStatusError,
   KeyedLock,
+  type SpectralComponentSource,
   backoffDelayMs,
+  compareSemver,
+  connectorSourceProblems,
   createLogger,
   isRateLimitStatus,
+  isSemver,
+  isSpectralComponentSource,
+  isTransientNetworkError,
+  resolveSecurityPolicy,
   retryTransient,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
+import { projectConnectorStateDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
 import type { ContentIndex } from '../index-store/content-index.js';
 import {
@@ -44,12 +56,26 @@ import {
   readTableState,
 } from '../observations/layout.js';
 import { type ObservationWriteSummary, ObservationWriter } from '../observations/writer.js';
+import type { PageCapturer } from '../page-capture/types.js';
 import { normalizeHttpsOrigin } from '../secrets/origins.js';
+import { captureFetch } from './capture/capture-fetch.js';
+import { CassetteLeakError, scrubExchanges } from './capture/scrub.js';
 import { validateConnectorConfig } from './config-validate.js';
 import { McpConnectorAdapter } from './drivers/mcp.js';
 import { ScriptConnectorAdapter } from './drivers/script.js';
+import { SpectralComponentAdapter } from './drivers/spectral-component.js';
 import { SpectralConnectorAdapter } from './drivers/spectral.js';
 import { ReconnectRequiredError } from './natives/oauth-session.js';
+import {
+  AccountMismatchError,
+  type AccountProvider,
+  accountAuthParams,
+  accountProviderFor,
+  expectedAccountFrom,
+  isExpectedAccount,
+  signedInAccounts,
+  withAccountScopes,
+} from './oauth-account.js';
 import {
   type LongLivedExchange,
   type OAuthEndpoints,
@@ -58,11 +84,24 @@ import {
   exchangeAuthCode,
   exchangeLongLivedToken,
   parseLongLivedExchange,
+  parseTokenAuth,
   randomState,
   resolveOAuthClient,
   validateOAuthEndpoints,
 } from './oauth.js';
-import { NATIVE_ADAPTERS, connectorCredentialName, connectorSecretKey } from './registry.js';
+import { countCorpusRecords } from './record-count.js';
+import {
+  NATIVE_ADAPTERS,
+  NATIVE_ADAPTER_EXTRAS,
+  connectorCredentialName,
+  connectorSecretKey,
+} from './registry.js';
+import {
+  type StoredData,
+  connectionDataTargets,
+  deleteTargets,
+  measureTargets,
+} from './remove-data.js';
 import { connectorCorpusStorage } from './storage.js';
 import {
   type AdapterDeps,
@@ -70,9 +109,13 @@ import {
   type ConnectorBindingRef,
   type ConnectorRecord,
   type NormalizedRecord,
+  PassStoppedError,
   RecordGoneError,
+  RecordSkippedError,
+  type SyncTrigger,
   isObservationRecord,
 } from './types.js';
+import { type Unreachable, describeUnreachable, unreachableFrom } from './unreachable.js';
 import {
   type PruneInput,
   type PruneResult,
@@ -199,6 +242,16 @@ export interface SyncBindingOptions<Cur = unknown, Rec = NormalizedRecord> {
   scopes?: readonly string[];
   /** Newest-N cap per scope on each round. */
   backfillLimit: number;
+  /**
+   * Waits between the per-record retries (default: core's backoff schedule).
+   * Tests pass a short one so injected transient faults do not sleep.
+   */
+  retrySchedule?: readonly number[];
+  /**
+   * Stops the pass at the next record. What already landed stays; the
+   * current scope's cursor does not advance; the reason becomes the error.
+   */
+  signal?: AbortSignal;
   /** Starting cursor (opaque, adapter-shaped). */
   cursor: Cur | undefined;
   /**
@@ -238,6 +291,12 @@ export interface BindingSyncResult<Cur = unknown> {
   abandoned?: { scope: string; id: string }[];
   /** Scopes whose listing failed this pass; the others still synced. */
   failedScopes?: { scope: string; message: string }[];
+  /**
+   * Scopes where the adapter returned more records than one pass syncs
+   * without paging: the oldest `dropped` were left out and the cursor moved
+   * past them. Reported in `lastError` and `_meta.json`, never silent.
+   */
+  truncated?: { scope: string; dropped: number; limit: number }[];
   /** Advanced cursor to persist. */
   cursor: Cur | undefined;
   /** Scopes the pass covered (feeds the corpus `_meta.json`). */
@@ -248,8 +307,21 @@ export interface BindingSyncResult<Cur = unknown> {
    * backs the binding off before its next autonomous sync.
    */
   rateLimited?: boolean;
+  /** The longest `Retry-After` the source sent this pass, in ms. */
+  retryAfterMs?: number;
+  /**
+   * The adapter stopped on its own budget with more due (`ChangeBatch.deferred`).
+   * After a pass the person started, the manager runs follow-up passes.
+   */
+  deferred?: boolean;
   /** Hard failure (auth / list) message, when the whole pass aborted. */
   error?: string;
+  /**
+   * Every failure this pass was the network: no request reached the service
+   * (no network at all, or its host did not answer). The connection is
+   * waiting, not broken; what did land stays.
+   */
+  unreachable?: Unreachable;
 }
 
 /** Persisted shape of a per-scope cursor envelope. */
@@ -262,6 +334,12 @@ export interface ScopedCursor {
    * cursor advances. Absent when nothing is failing.
    */
   failures?: Record<string, Record<string, number>>;
+  /**
+   * The binding's settings changed since the last pass: scopes the adapter
+   * no longer lists lose their cursor, and a mirror's records with them.
+   * Only then, so a listing that once comes back short never empties a scope.
+   */
+  reconcileScopes?: true;
 }
 
 function asFailureCounts(raw: unknown): ScopedCursor['failures'] | undefined {
@@ -296,9 +374,143 @@ export function asScopedCursor(raw: unknown): ScopedCursor {
       v: 2,
       scopes: { ...(raw as ScopedCursor).scopes },
       ...(failures ? { failures } : {}),
+      ...((raw as ScopedCursor).reconcileScopes === true ? { reconcileScopes: true as const } : {}),
     };
   }
   return { v: 2, scopes: {} };
+}
+
+/** What a full listing has returned so far, kept beside the scope's records. */
+interface ListingProgress {
+  hashes: string[];
+  /** A batch overflowed or gave up on a record: absence proves nothing. */
+  incomplete?: boolean;
+  /** The date range the listing covers, from its first batch. */
+  within?: { start: string; end: string };
+}
+
+const LISTING_FILE = '_listing.json';
+
+/**
+ * One batch of a full listing that spans batches. Returns how many records
+ * it pruned (only on the last batch, only for a mirror, only when every
+ * batch of the listing landed).
+ */
+async function trackFullListing(input: {
+  storageDir: string;
+  corpusDir: string;
+  listing: { first: boolean; last: boolean; within?: { start: string; end: string } };
+  seen: Set<string>;
+  complete: boolean;
+  prune?: (input: PruneInput) => Promise<PruneResult>;
+}): Promise<number> {
+  const file = await resolveInside(input.storageDir, `${input.corpusDir}/${LISTING_FILE}`);
+  let progress: ListingProgress | null = { hashes: [] };
+  if (!input.listing.first) {
+    progress = await readFile(file, 'utf8')
+      .then((text) => JSON.parse(text) as ListingProgress)
+      .catch(() => null);
+  }
+  // A continuation without its start (the sidecar was lost) can still sync,
+  // but cannot prove what is gone.
+  const hashes = new Set(progress?.hashes ?? []);
+  for (const h of input.seen) hashes.add(h);
+  const within = input.listing.first ? input.listing.within : progress?.within;
+  // A listing whose range changed between its batches proves nothing.
+  const rangeMoved =
+    !input.listing.first &&
+    JSON.stringify(progress?.within) !== JSON.stringify(input.listing.within);
+  const incomplete = !progress || Boolean(progress.incomplete) || !input.complete || rangeMoved;
+  if (!input.listing.last) {
+    await mkdir(dirname(file), { recursive: true });
+    await writeFileAtomic(
+      file,
+      JSON.stringify({
+        hashes: [...hashes],
+        ...(incomplete ? { incomplete } : {}),
+        ...(within ? { within } : {}),
+      }),
+    );
+    return 0;
+  }
+  await rm(file, { force: true });
+  if (!input.prune || incomplete) return 0;
+  const r = await input.prune({
+    storageDir: input.storageDir,
+    corpusDir: input.corpusDir,
+    keepHashes: hashes,
+    ...(within ? { within } : {}),
+  });
+  return r.pruned;
+}
+
+/**
+ * After a settings change: forget the scopes the adapter no longer lists.
+ * A mirror's records for them go too (the person removed that source); a
+ * window type keeps them, since that history cannot be fetched again.
+ */
+async function dropUnlistedScopes(
+  envelope: ScopedCursor,
+  listed: readonly string[],
+  where: {
+    storageDir: string;
+    corpusDir: string;
+    asDir: boolean;
+    sweep?: (input: SweepInput) => Promise<{ removed: number }>;
+  },
+): Promise<number> {
+  let removed = 0;
+  for (const scope of Object.keys(envelope.scopes)) {
+    if (listed.includes(scope)) continue;
+    delete envelope.scopes[scope];
+    if (envelope.failures) delete envelope.failures[scope];
+    if (!where.sweep || !where.asDir || scope === '') continue;
+    try {
+      const r = await where.sweep({
+        storageDir: where.storageDir,
+        corpusDir: `${where.corpusDir}/${scopeDirName(scope)}`,
+        remove: () => true,
+      });
+      removed += r.removed;
+    } catch (err) {
+      log.warn(`removing the records of dropped scope ${scope} failed: ${err}`);
+    }
+  }
+  if (envelope.failures && Object.keys(envelope.failures).length === 0) delete envelope.failures;
+  return removed;
+}
+
+/** Every string inside a stored credential (a token, or a JSON blob's values). */
+function credentialStrings(secret: string | null | undefined): string[] {
+  if (!secret) return [];
+  const out = [secret];
+  try {
+    const walk = (v: unknown): void => {
+      if (typeof v === 'string') out.push(v);
+      else if (v && typeof v === 'object') for (const x of Object.values(v)) walk(x);
+    };
+    walk(JSON.parse(secret));
+  } catch {
+    // A plain token.
+  }
+  return out.filter((v) => v.length >= 6);
+}
+
+/** Record a throttle on the pass, keeping the longest wait the source asked for. */
+function noteThrottle(result: { rateLimited?: boolean; retryAfterMs?: number }, ms?: number) {
+  result.rateLimited = true;
+  if (ms !== undefined && ms > (result.retryAfterMs ?? 0)) result.retryAfterMs = ms;
+}
+
+/**
+ * Per-record fetches retry what core counts as transient, plus a request
+ * that hit its own timeout: a slow response to one message is worth a
+ * second try, unlike a person's cancel.
+ */
+function isTransientFetchError(err: unknown): boolean {
+  return (
+    isTransientNetworkError(err) || (err as { name?: unknown } | null)?.name === 'TimeoutError'
+  );
 }
 
 /** Max same-scope continuation rounds per pass when an adapter pages via `partial`. */
@@ -355,6 +567,8 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
     opts.write ??
     (defaultWriteRecord as unknown as NonNullable<SyncBindingOptions<Cur, Rec>['write']>);
   const prune = opts.prune ?? pruneRecords;
+  // A window type whose scopes are each listed whole prunes per scope.
+  const allowPrune = Boolean(opts.allowPrune || adapter.scopesAreMirrors);
   const sweep = opts.sweep ?? sweepRecords;
   const scoped = opts.scopedCursors ?? true;
   const envelope = scoped ? asScopedCursor(opts.cursor) : null;
@@ -368,6 +582,16 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
   };
   // Legacy (non-scoped) mode threads one flat cursor through the pass.
   let flatCursor: Cur | undefined = opts.cursor;
+  // Whether the pass's failures were all the network (see `unreachable`).
+  const network = { failures: 0, other: 0, first: null as Unreachable | null };
+  const classify = (err: unknown): Unreachable | null => {
+    const u = unreachableFrom(err);
+    if (u) {
+      network.failures++;
+      network.first ??= u;
+    } else network.other++;
+    return u;
+  };
 
   try {
     await adapter.ensureAuth();
@@ -377,6 +601,15 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
       ? [...new Set([...listed.filter((s) => requested.includes(s)), ...requested])]
       : listed;
     result.scopes = scopes;
+    if (envelope?.reconcileScopes && !requested) {
+      result.pruned += await dropUnlistedScopes(envelope, scopes, {
+        storageDir: opts.storageDir,
+        corpusDir: opts.corpusDir,
+        asDir: opts.scopeAsDir ?? true,
+        ...(allowPrune ? { sweep } : {}),
+      });
+      delete envelope.reconcileScopes;
+    }
     const failedScopes: { scope: string; message: string }[] = [];
     outer: for (const scope of scopes) {
       const scopeCorpusDir =
@@ -393,19 +626,31 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
         } catch (err) {
           // A throttle is backpressure for the whole binding, and a dead grant
           // fails every scope alike — both end the pass, not just this scope.
-          if (err instanceof HttpStatusError && isRateLimitStatus(err.status)) throw err;
+          if (err instanceof HttpStatusError && isRateLimitStatus(err.status)) {
+            // One throttled publisher holds back only its own scope.
+            if (!adapter.throttlesPerScope) throw err;
+            noteThrottle(result, err.retryAfterMs);
+            continue outer;
+          }
           if (err instanceof ReconnectRequiredError) throw err;
           // One broken feed, calendar, or folder must not stop the others:
           // this scope keeps its cursor and the rest of the pass continues.
-          const message = err instanceof Error ? err.message : String(err);
+          const u = classify(err);
+          const message = u
+            ? describeUnreachable(u)
+            : err instanceof Error
+              ? err.message
+              : String(err);
           failedScopes.push({ scope, message });
           result.errors++;
           log.warn(`${adapter.typeId} ${scope || '(default)'}: listing failed: ${message}`);
           continue outer;
         }
-        // Newest-first, bounded by the backfill cap. Overflow past the cap is
-        // deliberate windowing (the mail backfill-cap model) but never silent:
-        // it is counted skipped and logged.
+        // Newest-first, bounded by the backfill cap. An adapter that pages
+        // never over-returns; one that does loses its oldest records here, so
+        // the loss is reported on the result (lastError, `_meta.json`), not
+        // only logged. Holding the cursor instead would re-list the same
+        // newest records every pass and never reach the rest.
         const ordered = [...changes.records].sort(
           (a, b) => (b.ordinalKey ?? 0) - (a.ordinalKey ?? 0),
         );
@@ -413,6 +658,10 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
         const overflow = ordered.length - take.length;
         if (overflow > 0) {
           result.skipped += overflow;
+          result.truncated = [
+            ...(result.truncated ?? []),
+            { scope, dropped: overflow, limit: opts.backfillLimit },
+          ];
           log.warn(
             `${adapter.typeId} ${scope || '(default)'}: ${overflow} record(s) past the ` +
               `${opts.backfillLimit}-record cap were skipped this pass (adapter returned ` +
@@ -427,12 +676,18 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
         const newlyPlaced = new Map<string, string>();
         const failureCounts = scoped ? envelope!.failures?.[scope] : undefined;
         for (const ref of take) {
+          if (opts.signal?.aborted) {
+            const reason = opts.signal.reason;
+            throw reason instanceof Error ? reason : new Error(String(reason ?? 'stopped'));
+          }
           try {
             // Transient faults (5xx/408/429, socket drops) get three attempts
             // with jittered backoff; real errors rethrow immediately.
             const record = await retryTransient(() => adapter.fetchRecord(scope, ref), {
               attempts: 3,
               label: `${adapter.typeId} record ${ref.id}`,
+              isRetryable: isTransientFetchError,
+              ...(opts.retrySchedule ? { schedule: [...opts.retrySchedule] } : {}),
             });
             // Prune identity is a document-corpus concept: `pruneRecords`
             // matches on the markdown filename grammar, and observation
@@ -450,6 +705,15 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
             if (w.status === 'written' || w.status === 'refreshed') result.written++;
             else if (w.status === 'quarantined') result.quarantined++;
             else result.skipped++;
+            // The adapter commits what it remembers about this record only
+            // now that it is on disk. A failing hook fails the record like a
+            // failed write, so the scope's cursor holds and it is retried.
+            if (adapter.recordWritten) {
+              await adapter.recordWritten(scope, ref, {
+                status: w.status,
+                ...(w.relPath ? { relPath: w.relPath } : {}),
+              });
+            }
             if (
               adapter.recordsMayMove &&
               typeof recordId === 'string' &&
@@ -469,12 +733,27 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
               );
               continue;
             }
+            // Nothing to write this pass (unchanged, or a failure the adapter
+            // retries on its own schedule). Clean for the cursor's purposes.
+            if (err instanceof RecordSkippedError) {
+              result.skipped++;
+              landed++;
+              continue;
+            }
+            // The adapter says the rest of the pass cannot work either.
+            if (err instanceof PassStoppedError) throw err;
             scopeErrors++;
             result.errors++;
-            failedRefs.push(ref.id);
+            classify(err);
+            // Only a record that fails on its own counts toward giving up on
+            // it. A dropped connection or a timeout (after the retries) fails
+            // every record after it the same way; counting those abandoned
+            // the tail of a mailbox on a flaky link after three passes.
+            if (!isTransientFetchError(err)) failedRefs.push(ref.id);
             log.warn(`fetch/write failed (${adapter.typeId} ${scope} id ${ref.id}): ${err}`);
           }
         }
+        let abandonedHere = false;
         // Poison records: a ref that keeps failing while its neighbors land
         // stops holding the cursor after POISON_RECORD_PASSES passes.
         if (scoped && failedRefs.length > 0 && landed > 0) {
@@ -487,6 +766,7 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
             counts[id] = n;
             if (n >= POISON_RECORD_PASSES) {
               scopeErrors--;
+              abandonedHere = true;
               result.skipped++;
               result.abandoned = [...(result.abandoned ?? []), { scope, id }];
               log.warn(
@@ -520,7 +800,30 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
           } catch (err) {
             scopeErrors++;
             result.errors++;
+            network.other++;
             log.warn(`record sweep failed (${adapter.typeId} ${scope}): ${err}`);
+          }
+        }
+        // A full listing spread over batches: remember what it returned, and
+        // once it ends cleanly remove what it did not (mirrors only).
+        if (changes.fullListing && scopeErrors === 0) {
+          try {
+            const pruned = await trackFullListing({
+              storageDir: opts.storageDir,
+              corpusDir: scopeCorpusDir,
+              listing: changes.fullListing,
+              seen: seenHashes,
+              complete: overflow === 0 && !abandonedHere && !changes.fullListing.incomplete,
+              // A listing bounded by dates proves absence inside them even
+              // for a type that is not a mirror.
+              ...(allowPrune || changes.fullListing.within ? { prune } : {}),
+            });
+            result.pruned += pruned;
+          } catch (err) {
+            scopeErrors++;
+            result.errors++;
+            network.other++;
+            log.warn(`full-listing reconcile failed (${adapter.typeId} ${scope}): ${err}`);
           }
         }
         // Advance only on a clean batch; otherwise keep the prior cursor so
@@ -537,7 +840,7 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
         // Mirror prune: only after a clean, single-batch, full enumeration of
         // the scope — anything less and absence from the batch proves nothing.
         if (
-          opts.allowPrune &&
+          allowPrune &&
           changes.enumeratedAll &&
           !changes.partial &&
           round === 0 &&
@@ -551,10 +854,13 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
           });
           result.pruned += p.pruned;
         }
+        if (changes.deferred) result.deferred = true;
         // Rate limited: what the source returned is written and its cursor
         // persisted; stop the whole pass and let the manager back off.
         if (changes.rateLimited) {
-          result.rateLimited = true;
+          noteThrottle(result, changes.retryAfterMs);
+          // A throttled feed must not stop the feeds listed after it.
+          if (adapter.throttlesPerScope) break;
           break outer;
         }
         // Continue the same scope only when the adapter paged cleanly and
@@ -583,18 +889,20 @@ export async function syncWithAdapter<Cur = unknown, Rec = NormalizedRecord>(
     // which has no `rateLimited` channel) is still backpressure: the same
     // back-off, not a pass error a person has to read.
     if (err instanceof HttpStatusError && isRateLimitStatus(err.status)) {
-      result.rateLimited = true;
+      noteThrottle(result, err.retryAfterMs);
       log.info(
         `${adapter.typeId}: throttled outside a list call (HTTP ${err.status}); backing off`,
       );
     } else {
-      result.error = err instanceof Error ? err.message : String(err);
+      const u = classify(err);
+      result.error = u ? describeUnreachable(u) : err instanceof Error ? err.message : String(err);
       result.errors++;
     }
     result.cursor = scoped ? (envelope as unknown as Cur) : flatCursor;
   } finally {
     await adapter.close().catch(() => {});
   }
+  if (network.first && network.other === 0) result.unreachable = network.first;
   return result;
 }
 
@@ -618,7 +926,23 @@ export function partialFailureNote(r: BindingSyncResult): string | undefined {
       `${abandoned} record(s) failed ${POISON_RECORD_PASSES} passes in a row and were skipped`,
     );
   }
+  for (const t of r.truncated ?? []) {
+    parts.push(
+      `${t.dropped} older record(s)${t.scope ? ` in ${t.scope}` : ''} were not synced: ` +
+        `this source returns everything at once and a pass keeps the newest ${t.limit}`,
+    );
+  }
   return parts.length > 0 ? `${parts.join('; ')}.` : undefined;
+}
+
+/** A native adapter's own config check (`NativeAdapterExtras.validateConfig`). */
+function nativeConfigProblems(
+  type: ConnectorTypeManifest,
+  config: Record<string, unknown>,
+): string[] {
+  if (type.driver !== 'native') return [];
+  const adapterId = String((type.source as { adapterId?: string }).adapterId ?? '');
+  return NATIVE_ADAPTER_EXTRAS.get(adapterId)?.validateConfig?.(config) ?? [];
 }
 
 /**
@@ -643,7 +967,9 @@ export async function createConnectorAdapter(
     case 'script':
       return new ScriptConnectorAdapter(type, binding, deps);
     case 'spectral':
-      return new SpectralConnectorAdapter(type, binding, deps);
+      return isSpectralComponentSource(type.source)
+        ? new SpectralComponentAdapter(type, binding, deps)
+        : new SpectralConnectorAdapter(type, binding, deps);
     default:
       throw new Error(`unknown connector driver: ${String(type.driver)}`);
   }
@@ -663,6 +989,8 @@ export interface ConnectorManagerOptions {
    * Production leaves it unset; tests inject the provider simulator.
    */
   fetch?: typeof fetch;
+  /** Test seam for the `mcp` driver (`AdapterDeps.resolveMcpServer`). Never set in production. */
+  resolveMcpServer?: AdapterDeps['resolveMcpServer'];
   /**
    * Called after a binding is added, edited, paused, or removed — the live
    * host reconciles its running devices against disk.
@@ -670,7 +998,65 @@ export interface ConnectorManagerOptions {
   onBindingsChanged?: (projectId: string) => void;
   /** Live status of a project's device bindings (cameras), merged into `status()`. */
   liveStatus?: (projectId: string) => LiveBindingStatus[];
+  /**
+   * Renders web pages for website bindings (`AdapterDeps.capturer`).
+   * Production passes the page-capture service; tests a fake.
+   */
+  capturer?: PageCapturer;
+  /** Called after a pass that changed the corpus; feeds the project event stream. */
+  onSynced?: (projectId: string, info: ConnectorSyncedInfo) => void;
+  /** Delay before a follow-up pass (`BindingSyncResult.deferred`). Tests shorten it. */
+  continuationDelayMs?: number;
+  /**
+   * Published Prismatic components, for Spectral types built on one. Absent,
+   * such types cannot be connected or synced.
+   */
+  components?: import('./spectral/component-store.js').ComponentStore;
+  /** Test seam (`AdapterDeps.spectralReplay`). Never set in production. */
+  spectralReplay?: AdapterDeps['spectralReplay'];
 }
+
+/**
+ * A Spectral type that runs a downloaded component: only the reviewed,
+ * bundled catalog may ask for code to be fetched and run, and its pin must
+ * be well formed before anything is fetched.
+ */
+function assertRunnableComponentType(
+  type: ConnectorTypeManifest,
+  sourceId: string,
+): SpectralComponentSource | undefined {
+  if (type.driver !== 'spectral' || !isSpectralComponentSource(type.source)) return undefined;
+  if (sourceId !== 'bundled') {
+    throw new Error(
+      `'${type.id}' runs a downloaded component, which only Gezel's own catalog may ask for (this one is from '${sourceId}')`,
+    );
+  }
+  const problems = connectorSourceProblems('spectral', type.source);
+  if (problems.length) {
+    throw new Error(`'${type.id}' has a malformed component pin: ${problems.join('; ')}`);
+  }
+  return type.source as unknown as SpectralComponentSource;
+}
+
+/** What a pass changed, for the `connector_synced` event and History. */
+export interface ConnectorSyncedInfo {
+  bindingId: string;
+  type: string;
+  written: number;
+  removed: number;
+  continuing: boolean;
+}
+
+/** A sync the security policy does not allow right now. */
+export class ConnectorPolicyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ConnectorPolicyError';
+  }
+}
+
+/** Follow-up passes after one a person started, at most. */
+const MAX_CONTINUATIONS = 60;
 
 export interface PatchConnectorInput {
   displayName?: string;
@@ -690,6 +1076,8 @@ export interface BindConnectorInput {
   /** Internal provenance pin used by OAuth completion and migrations. */
   sourceId?: string;
   version?: string;
+  /** The account an OAuth sign-in reached, as the provider reported it. */
+  account?: string;
 }
 
 export interface ConnectorStatus {
@@ -698,9 +1086,13 @@ export interface ConnectorStatus {
     id: string;
     type: string;
     displayName?: string;
+    /** The account the person signed in with (Google, Microsoft). */
+    account?: string;
     completeness?: string;
     lastSyncedAt?: string;
     lastError?: string;
+    /** Waiting for the network since `since` (not an error). */
+    unreachable?: { since: string; offline: boolean; host?: string };
     disabled?: boolean;
     disabledReason?: 'user' | 'emergency-stop';
     /** `device` for bindings the live host runs (cameras). */
@@ -710,6 +1102,14 @@ export interface ConnectorStatus {
     live?: LiveBindingStatus;
     /** Rate-limit backoff expiry (ISO); autonomous sync skips until then. */
     backoffUntil?: string;
+    /** Where its records land, relative to the project's artifacts (`data/<name>`). */
+    corpusDir?: string;
+    /** Records a document corpus holds; climbs while a pass runs. */
+    items?: number;
+    /** A pass is running, or another is due right after it. */
+    syncing?: boolean;
+    /** One short line the adapter offers (`Saved 40 of about 150 pages`). */
+    summary?: string;
     /**
      * Present only for an observation corpus — a binding whose data is
      * columnar tables rather than readable records. Its absence is what the
@@ -754,8 +1154,42 @@ interface PendingConnectorOAuth {
   redirectUri: string;
   verifier: string;
   createdAt: number;
-  completion?: { bindingId: string; credential: string };
+  completion?: { bindingId: string; credential: string; account?: string };
+  /** Re-linking this existing binding: the new grant replaces its credential. */
+  relinkBindingId?: string;
+  /** A provider whose ID token names the account that signed in. */
+  accountProvider?: AccountProvider;
+  /** The account this link is for; a sign-in that reaches another is refused. */
+  expectedAccount?: string;
 }
+
+/** What a connection check found: a trial pass that writes nothing the project keeps. */
+export interface ConnectionCheck {
+  ok: boolean;
+  /** Why the trial pass failed, in the adapter's words. */
+  error?: string;
+  scopes: string[];
+  /** Records the trial pass produced (rows, for a table type). */
+  records: number;
+  failedScopes?: { scope: string; message: string }[];
+  rateLimited?: boolean;
+  /** Each request, as method, scrubbed origin and path, and status. */
+  requests: { method: string; endpoint: string; status: number }[];
+  /** Plain notes on what the check could not see. */
+  notes: string[];
+  /** The scrubbed exchanges, only when asked for. */
+  cassette?: ConnectorTestExchange[];
+}
+
+/** The longest provider `Retry-After` a binding's backoff honors. */
+const MAX_RETRY_AFTER_MS = 6 * 60 * 60_000;
+
+/**
+ * While a connection cannot reach its service: 1m → 2m → 5m, then every 5m.
+ * An offline request fails at once and costs nothing, and a network that
+ * comes back is noticed sooner still (`retryWaiting`).
+ */
+const UNREACHABLE_RETRY_MS = [60_000, 120_000, 300_000] as const;
 
 /** Rate-limit backoff ladder: 1m → 5m → 15m → 30m (jittered). */
 const RATE_LIMIT_BACKOFF_MS = [60_000, 300_000, 900_000, 1_800_000] as const;
@@ -777,10 +1211,127 @@ export class ConnectorManager {
    * a restart resetting backoff costs at most one extra request, and keeping
    * it here avoids project.json churn on every rate-limit event.
    */
-  private readonly backoff = new Map<string, { consecutive: number; nextEligibleAt: number }>();
+  private readonly backoff = new Map<
+    string,
+    { consecutive: number; nextEligibleAt: number; unreachable?: boolean }
+  >();
+  /** The running pass per binding, so it can be stopped from outside. */
+  private readonly passAborts = new Map<string, { projectId: string; ctl: AbortController }>();
+  /**
+   * Records in a running pass's corpus: what it held when the pass started
+   * and the new records written since, so the count climbs while it syncs.
+   */
+  private readonly passProgress = new Map<string, { base: number; added: number }>();
+  /** Counts for corpora whose `_meta.json` holds none (synced before counts were kept). */
+  private readonly recordCounts = new Map<string, number>();
+  /** Scheduled follow-up passes per binding (`deferred`). */
+  private readonly continuations = new Map<
+    string,
+    { projectId: string; timer: ReturnType<typeof setTimeout>; round: number }
+  >();
+  /** Manifest action presence per type id, for background-sync eligibility. */
+  private readonly readOnlyTypes = new Map<string, boolean>();
 
   constructor(private readonly opts: ConnectorManagerOptions) {
     this.locks = opts.locks ?? new KeyedLock();
+  }
+
+  /**
+   * Stop running passes and drop scheduled follow-ups: everything, or one
+   * project's, or one binding's. Called when the network setting goes off, on
+   * emergency stop, when a binding is paused or removed, and at shutdown. A
+   * stopped pass keeps what it already wrote; its cursor is not advanced.
+   */
+  cancelPasses(filter: { projectId?: string; bindingId?: string } = {}, reason = 'stopped'): void {
+    const matches = (bindingId: string, projectId: string) =>
+      (filter.bindingId === undefined || filter.bindingId === bindingId) &&
+      (filter.projectId === undefined || filter.projectId === projectId);
+    for (const [bindingId, pass] of this.passAborts) {
+      if (matches(bindingId, pass.projectId)) pass.ctl.abort(new Error(reason));
+    }
+    for (const [bindingId, c] of this.continuations) {
+      if (!matches(bindingId, c.projectId)) continue;
+      clearTimeout(c.timer);
+      this.continuations.delete(bindingId);
+    }
+  }
+
+  /** The binding's private working-state folder, when the store has a home. */
+  private stateDirFor(projectId: string, bindingId: string): string | undefined {
+    const home = (this.opts.store as { homePath?: unknown }).homePath;
+    return typeof home === 'string'
+      ? projectConnectorStateDir(home, projectId, bindingId)
+      : undefined;
+  }
+
+  /**
+   * Whether a type only reads: it declares no write-back actions. Read-only
+   * connectors refresh in the background whenever the machine may use the
+   * network for the person (`allowConnectorData`); a type that can send or
+   * post keeps the stricter `allowExternalServices` rule.
+   */
+  private readonly typeIntervals = new Map<string, number | undefined>();
+
+  private async isReadOnlyType(binding: ProjectConnectorBinding): Promise<boolean> {
+    const cached = this.readOnlyTypes.get(binding.type);
+    if (cached !== undefined) return cached;
+    const manifest = await this.loadType(
+      binding.type,
+      binding.version,
+      binding.sourceId ?? 'bundled',
+    )
+      .then((r) => r.manifest)
+      .catch(() => null);
+    if (!manifest) return false;
+    const readOnly = (manifest.actions ?? []).length === 0;
+    this.readOnlyTypes.set(binding.type, readOnly);
+    return readOnly;
+  }
+
+  /** A binding's own background interval in ms, when its type declares one. */
+  async syncIntervalMs(binding: ProjectConnectorBinding): Promise<number | undefined> {
+    const key = `${binding.sourceId ?? 'bundled'}:${binding.type}@${binding.version ?? ''}`;
+    if (!this.typeIntervals.has(key)) {
+      const manifest = await this.loadType(
+        binding.type,
+        binding.version,
+        binding.sourceId ?? 'bundled',
+      )
+        .then((r) => r.manifest)
+        .catch(() => null);
+      const minutes = manifest?.syncIntervalMinutes;
+      this.typeIntervals.set(key, minutes ? minutes * 60_000 : undefined);
+    }
+    return this.typeIntervals.get(key);
+  }
+
+  /**
+   * The bindings the background loop may sync under `policy`. Device bindings
+   * never sync; a paused one waits for its person.
+   */
+  async backgroundBindings(
+    project: Pick<ProjectDetail, 'connectors'>,
+    policy: Pick<ResolvedSecurityPolicy, 'allowConnectorData' | 'allowExternalServices'>,
+  ): Promise<ProjectConnectorBinding[]> {
+    if (!policy.allowConnectorData) return [];
+    const out: ProjectConnectorBinding[] = [];
+    for (const binding of project.connectors ?? []) {
+      if (binding.driver === 'device' || binding.disabled) continue;
+      if (policy.allowExternalServices || (await this.isReadOnlyType(binding))) out.push(binding);
+    }
+    return out;
+  }
+
+  /** Refuse a pass the security policy does not allow. A store with no config allows it. */
+  private async assertConnectorDataAllowed(): Promise<void> {
+    const readConfig = (this.opts.store as { readConfig?: () => Promise<unknown> }).readConfig;
+    if (typeof readConfig !== 'function') return;
+    const config = await readConfig.call(this.opts.store).catch(() => null);
+    if (config && !resolveSecurityPolicy(config as GezelConfig).allowConnectorData) {
+      throw new ConnectorPolicyError(
+        'Connections are off at this security level. Turn on App network in Settings → Security & compliance to sync.',
+      );
+    }
   }
 
   /** When the binding's rate-limit backoff expires (undefined = eligible now). */
@@ -789,9 +1340,12 @@ export class ConnectorManager {
     return entry && entry.nextEligibleAt > Date.now() ? entry.nextEligibleAt : undefined;
   }
 
-  private noteRateLimit(bindingId: string): void {
+  private noteRateLimit(bindingId: string, retryAfterMs?: number): void {
     const consecutive = (this.backoff.get(bindingId)?.consecutive ?? 0) + 1;
-    const delay = backoffDelayMs(consecutive - 1, RATE_LIMIT_BACKOFF_MS);
+    // Never sooner than the source asked; never longer than six hours,
+    // whatever a misbehaving server says.
+    const asked = Math.min(retryAfterMs ?? 0, MAX_RETRY_AFTER_MS);
+    const delay = Math.max(backoffDelayMs(consecutive - 1, RATE_LIMIT_BACKOFF_MS), asked);
     this.backoff.set(bindingId, { consecutive, nextEligibleAt: Date.now() + delay });
     log.info(`rate limited (${bindingId}); backing off ${Math.round(delay / 1000)}s`);
   }
@@ -803,8 +1357,51 @@ export class ConnectorManager {
     log.info(`sync failed (${bindingId}); next autonomous attempt in ${Math.round(delay / 1000)}s`);
   }
 
+  /** The service could not be reached: try again soon, without the failure ladder. */
+  private noteUnreachable(bindingId: string, u: Unreachable): void {
+    const prior = this.backoff.get(bindingId);
+    const consecutive = (prior?.unreachable ? prior.consecutive : 0) + 1;
+    const delay = backoffDelayMs(consecutive - 1, UNREACHABLE_RETRY_MS);
+    this.backoff.set(bindingId, {
+      consecutive,
+      nextEligibleAt: Date.now() + delay,
+      unreachable: true,
+    });
+    log.info(
+      `${bindingId}: ${u.offline ? 'offline' : `cannot reach ${u.host ?? 'the service'} (${u.code})`}; trying again in ${Math.round(delay / 1000)}s`,
+    );
+  }
+
+  /**
+   * The network came back (or the host woke): connections waiting for it may
+   * try again now instead of waiting out their retry delay.
+   */
+  retryWaiting(): number {
+    let cleared = 0;
+    for (const [id, entry] of this.backoff) {
+      if (!entry.unreachable) continue;
+      this.backoff.delete(id);
+      cleared++;
+    }
+    return cleared;
+  }
+
   private withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
     return this.locks.run(projectId, fn);
+  }
+
+  /**
+   * Run `fn` under the project's connector lock: after any pass in flight,
+   * before the next. For edits to an adapter's private state that a pass
+   * would otherwise overwrite when it saves its own copy.
+   */
+  withProjectLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
+    return this.withLock(projectId, fn);
+  }
+
+  /** A binding's private working-state folder (`projectConnectorStateDir`). */
+  bindingStateDir(projectId: string, bindingId: string): string | undefined {
+    return this.stateDirFor(projectId, bindingId);
   }
 
   private async loadType(
@@ -820,13 +1417,30 @@ export class ConnectorManager {
     return { manifest: detail.manifest, sourceId: detail.sourceId };
   }
 
+  /** Whether this install's catalog carries a connector type. */
+  async typeAvailable(typeId: string): Promise<boolean> {
+    return this.loadType(typeId).then(
+      () => true,
+      () => false,
+    );
+  }
+
   /** Bind a new connector: validate the type + config, store the credential, record it. */
   async bind(project: ProjectDetail, input: BindConnectorInput): Promise<ProjectConnectorBinding> {
     const resolved = await this.loadType(input.type, input.version, input.sourceId);
     const type = resolved.manifest;
     const configErrors = validateConnectorConfig(type.configSchema, input.config ?? {});
+    if (configErrors.length === 0)
+      configErrors.push(...nativeConfigProblems(type, input.config ?? {}));
     if (configErrors.length) {
       throw new Error(`invalid ${input.type} configuration: ${configErrors.join('; ')}`);
+    }
+    const component = assertRunnableComponentType(type, resolved.sourceId);
+    if (component) {
+      if (!this.opts.components) throw new Error('this build cannot run Prismatic components');
+      // Download (or verify) now, while the person is connecting, so a
+      // refusal is theirs to read and the first sync does not wait on it.
+      await this.opts.components.ensure(component.package);
     }
     const id = input.bindingId ?? `${input.type}:${randomUUID().slice(0, 8)}`;
     return this.withLock(project.id, async () => {
@@ -844,6 +1458,7 @@ export class ConnectorManager {
         config: input.config ?? {},
         driver: type.driver,
         ...(input.displayName ? { displayName: input.displayName } : {}),
+        ...(input.account ? { account: input.account } : {}),
       };
       // A `script` connector's fetch script reaches its credential parent-side
       // via `gezel.http.authed` — grant the named credential on the project so
@@ -902,6 +1517,8 @@ export class ConnectorManager {
         before.sourceId ?? 'bundled',
       );
       const errors = validateConnectorConfig(resolved.manifest.configSchema, patch.config);
+      if (errors.length === 0)
+        errors.push(...nativeConfigProblems(resolved.manifest, patch.config));
       if (errors.length)
         throw new Error(`invalid ${before.type} configuration: ${errors.join('; ')}`);
     }
@@ -915,7 +1532,17 @@ export class ConnectorManager {
         if (name) updated.displayName = name;
         else delete updated.displayName;
       }
-      if (patch.config) updated.config = patch.config;
+      if (patch.config) {
+        updated.config = patch.config;
+        // New settings can drop sources: the next pass forgets what the
+        // adapter no longer lists (see ScopedCursor.reconcileScopes).
+        if (
+          JSON.stringify(patch.config) !== JSON.stringify(binding.config ?? {}) &&
+          (updated.cursor as { v?: unknown } | undefined)?.v === 2
+        ) {
+          updated.cursor = { ...asScopedCursor(updated.cursor), reconcileScopes: true };
+        }
+      }
       if (patch.disabled === true) {
         updated.disabled = true;
         updated.disabledReason = 'user';
@@ -937,6 +1564,7 @@ export class ConnectorManager {
       }
       return updated;
     });
+    if (patch.disabled === true) this.cancelPasses({ bindingId }, 'the connection was paused');
     this.opts.onBindingsChanged?.(project.id);
     return next;
   }
@@ -990,8 +1618,19 @@ export class ConnectorManager {
       displayName?: string;
       /** Pre-fill the provider's account picker (mail: the address being linked). */
       loginHint?: string;
+      /** Re-link this binding in place instead of adding a new one. */
+      relinkBindingId?: string;
     },
   ): Promise<{ authUrl: string; state: string }> {
+    let relinking: ProjectConnectorBinding | undefined;
+    if (input.relinkBindingId) {
+      relinking = (await this.reread(project)).connectors?.find(
+        (b) => b.id === input.relinkBindingId,
+      );
+      if (!relinking || relinking.type !== input.type) {
+        throw new Error(`no ${input.type} connection ${input.relinkBindingId} to re-link`);
+      }
+    }
     const resolved = await this.loadType(input.type);
     const type = resolved.manifest;
     // OAuth manifests can choose where authorization codes, client secrets,
@@ -1011,6 +1650,7 @@ export class ConnectorManager {
       clientIdEnv?: string;
       clientSecretEnv?: string;
       authParams?: Record<string, string>;
+      tokenAuth?: unknown;
       longLivedExchange?: unknown;
       longLived?: unknown;
     };
@@ -1028,10 +1668,27 @@ export class ConnectorManager {
       getConfiguredClients: async () => (await this.opts.store.readConfig()).oauthClients,
       getSecret: (key) => this.opts.secrets.get(key),
     });
+    const tokenAuth = parseTokenAuth(shape.tokenAuth);
+    const typeScopes = (shape.scopes ?? '').split(' ').filter(Boolean);
+    // Google and Microsoft hand over whichever account the browser is signed
+    // in to. Name the account this link is for (or make the person pick one),
+    // and ask for the ID token that says which account signed in.
+    const accountProvider = accountProviderFor(shape.authorizeUrl) ?? undefined;
+    const hinted = input.loginHint?.includes('@') ? input.loginHint.trim() : undefined;
+    const expectedAccount = relinking
+      ? (expectedAccountFrom(relinking.config) ?? relinking.account)
+      : (expectedAccountFrom(input.config) ?? hinted);
+    const signIn = accountProvider
+      ? accountAuthParams(accountProvider, shape.authParams, expectedAccount)
+      : {
+          ...(shape.authParams ? { authParams: shape.authParams } : {}),
+          ...(input.loginHint ? { loginHint: input.loginHint } : {}),
+        };
     const endpoints: OAuthEndpoints = validateOAuthEndpoints({
       authEndpoint: shape.authorizeUrl,
       tokenEndpoint: shape.tokenUrl,
-      scopes: (shape.scopes ?? '').split(' ').filter(Boolean),
+      scopes: accountProvider ? withAccountScopes(typeScopes, accountProvider) : typeScopes,
+      ...(tokenAuth ? { clientAuth: tokenAuth } : {}),
     });
     // Validated up front so a malformed manifest fails at link start, before
     // the user has consented in the browser.
@@ -1051,6 +1708,9 @@ export class ConnectorManager {
       endpoints,
       ...(longLivedExchange ? { longLivedExchange } : {}),
       ...(shape.longLived === true ? { longLived: true } : {}),
+      ...(input.relinkBindingId ? { relinkBindingId: input.relinkBindingId } : {}),
+      ...(accountProvider ? { accountProvider } : {}),
+      ...(accountProvider && expectedAccount ? { expectedAccount } : {}),
       redirectUri: input.redirectUri,
       verifier,
       createdAt: Date.now(),
@@ -1061,8 +1721,8 @@ export class ConnectorManager {
       redirectUri: input.redirectUri,
       state,
       challenge,
-      ...(shape.authParams ? { extraParams: shape.authParams } : {}),
-      ...(input.loginHint ? { loginHint: input.loginHint } : {}),
+      ...(signIn.authParams ? { extraParams: signIn.authParams } : {}),
+      ...(signIn.loginHint ? { loginHint: signIn.loginHint } : {}),
     });
     return { authUrl, state };
   }
@@ -1088,6 +1748,7 @@ export class ConnectorManager {
         redirectUri: pending.redirectUri,
         ...(this.opts.fetch ? { fetchImpl: this.opts.fetch } : {}),
       });
+      const account = this.signedInAccount(pending, tokens.idToken, args.state);
       let credential: string;
       if (pending.longLivedExchange) {
         // Meta issues no refresh token: trade the short-lived token for the
@@ -1135,13 +1796,25 @@ export class ConnectorManager {
           // The endpoint that issued the grant is the one that can refresh
           // it; adapters prefer it over a type default (Microsoft tenants).
           tokenUrl: pending.endpoints.tokenEndpoint,
+          ...(pending.endpoints.clientAuth ? { tokenAuth: pending.endpoints.clientAuth } : {}),
         };
         credential = JSON.stringify(cred);
       }
       pending.completion = {
-        bindingId: `${pending.type}:${randomUUID().slice(0, 8)}`,
+        bindingId: pending.relinkBindingId ?? `${pending.type}:${randomUUID().slice(0, 8)}`,
         credential,
+        ...(account ? { account } : {}),
       };
+    }
+    if (pending.relinkBindingId) {
+      const binding = await this.reconnect(
+        project,
+        pending.relinkBindingId,
+        pending.completion.credential,
+        pending.completion.account,
+      );
+      this.pendingOAuth.delete(args.state);
+      return binding;
     }
     const binding = await this.bind(project, {
       type: pending.type,
@@ -1151,9 +1824,184 @@ export class ConnectorManager {
       config: pending.config,
       credential: pending.completion.credential,
       bindingId: pending.completion.bindingId,
+      ...(pending.completion.account ? { account: pending.completion.account } : {}),
     });
     this.pendingOAuth.delete(args.state);
     return binding;
+  }
+
+  /**
+   * The account a Google or Microsoft sign-in reached. Throws, keeping
+   * nothing, when it is not the account the link is for: a browser signed in
+   * to the person's own mailbox otherwise connects that one in its place.
+   */
+  private signedInAccount(
+    pending: PendingConnectorOAuth,
+    idToken: string | undefined,
+    state: string,
+  ): string | undefined {
+    if (!pending.accountProvider) return undefined;
+    const accounts = signedInAccounts(idToken, pending.clientId);
+    if (!accounts) {
+      log.warn(
+        `${pending.type}: the sign-in did not say which account it reached; the address was only suggested to the provider`,
+      );
+      return undefined;
+    }
+    const expected = pending.expectedAccount;
+    if (expected && !isExpectedAccount(accounts, expected)) {
+      this.pendingOAuth.delete(state);
+      throw new AccountMismatchError(
+        pending.accountProvider,
+        accounts[0]!,
+        expected,
+        Boolean(pending.relinkBindingId),
+      );
+    }
+    return expected
+      ? (accounts.find((a) => isExpectedAccount([a], expected)) ?? accounts[0])
+      : accounts[0];
+  }
+
+  /**
+   * Check a connection without changing it: a trial pass from no cursor into
+   * a throwaway folder, its requests recorded. The binding's cursor, records,
+   * error and backoff are untouched; a rotated token is kept, since the
+   * provider has already retired the old one. A scrubbed recording of the
+   * exchanges comes back only when `cassette` is asked for, and never if
+   * scrubbing could not make it safe.
+   */
+  async checkConnection(
+    project: ProjectDetail,
+    bindingId: string,
+    opts: { cassette?: boolean; limit?: number } = {},
+  ): Promise<ConnectionCheck> {
+    await this.assertConnectorDataAllowed();
+    const binding = (await this.reread(project)).connectors?.find((b) => b.id === bindingId);
+    if (!binding) throw new Error(`no connector binding ${bindingId}`);
+    if (binding.driver === 'device')
+      throw new Error('A camera is checked by watching it, not by a sync.');
+    const resolved = await this.loadType(
+      binding.type,
+      binding.version,
+      binding.sourceId ?? 'bundled',
+    );
+    const capture = captureFetch(this.opts.fetch ?? fetch);
+    const notes: string[] = [];
+    if (resolved.manifest.driver === 'script') {
+      notes.push('Requests the connector script makes are not recorded.');
+    } else if (resolved.manifest.driver === 'mcp' || resolved.manifest.driver === 'spectral') {
+      notes.push(
+        'This kind of connector talks to its service in a separate process; only the outcome is shown.',
+      );
+    }
+    const scratch = await mkdtemp(join(tmpdir(), 'gezel-connector-check-'));
+    let result: BindingSyncResult;
+    try {
+      assertRunnableComponentType(resolved.manifest, resolved.sourceId);
+      const adapter = await createConnectorAdapter(resolved.manifest, binding, {
+        secrets: this.opts.secrets,
+        store: this.opts.store,
+        ...(this.opts.components ? { components: this.opts.components } : {}),
+        ...(this.opts.scriptRunner ? { scriptRunner: this.opts.scriptRunner } : {}),
+        projectId: project.id,
+        fetch: capture.fetch,
+        ...(this.opts.resolveMcpServer ? { resolveMcpServer: this.opts.resolveMcpServer } : {}),
+        trigger: 'manual',
+      });
+      const observation = resolved.manifest.normalize.kind === 'observations';
+      result = await syncWithAdapter<unknown, NormalizedRecord | ConnectorRecord>(adapter, {
+        storageDir: scratch,
+        quarantineDir: join(scratch, 'quarantine'),
+        corpusDir: 'check',
+        backfillLimit: Math.max(1, Math.min(opts.limit ?? 20, 200)),
+        cursor: undefined,
+        retrySchedule: [500, 1_000],
+        ...(observation
+          ? {
+              write: async (input: { record: NormalizedRecord | ConnectorRecord }) => {
+                const record = input.record;
+                const rows = isObservationRecord(record)
+                  ? record.batches.reduce((n, b) => n + b.rows.length, 0)
+                  : 0;
+                return { status: rows > 0 ? ('written' as const) : ('exists' as const) };
+              },
+            }
+          : {}),
+      });
+    } finally {
+      await rm(scratch, { recursive: true, force: true }).catch(() => {});
+    }
+    const secret = await this.opts.secrets
+      .get(connectorSecretKey(binding.type, binding.id))
+      .catch(() => null);
+    let cassette: ConnectorTestExchange[] | undefined;
+    try {
+      cassette = scrubExchanges(capture.exchanges, { secrets: credentialStrings(secret) });
+    } catch (err) {
+      if (!(err instanceof CassetteLeakError)) throw err;
+      notes.push('The recording could not be made safe to keep, so none is included.');
+    }
+    const requests = (cassette ?? []).flatMap((ex) => {
+      if (ex.kind !== 'http') return [];
+      const url = new URL(ex.request.url);
+      return [
+        {
+          method: ex.request.method ?? 'GET',
+          endpoint: `${url.origin}${url.pathname}`,
+          status: ex.response.status ?? 200,
+        },
+      ];
+    });
+    return {
+      ok: !result.error && !result.failedScopes?.length,
+      ...(result.error ? { error: result.error } : {}),
+      scopes: result.scopes ?? [],
+      records: result.written + result.quarantined + result.skipped,
+      ...(result.failedScopes?.length ? { failedScopes: result.failedScopes } : {}),
+      ...(result.rateLimited ? { rateLimited: true } : {}),
+      requests,
+      notes,
+      ...(opts.cassette && cassette ? { cassette } : {}),
+    };
+  }
+
+  /**
+   * Re-link a connection in place: store a new credential under the same
+   * binding and keep its settings, cursor, and records. Clears the error and
+   * the backoff the old credential earned, so the next pass tries at once.
+   */
+  async reconnect(
+    project: ProjectDetail,
+    bindingId: string,
+    credential: string,
+    account?: string,
+  ): Promise<ProjectConnectorBinding> {
+    this.cancelPasses({ bindingId }, 'the connection is being re-linked');
+    return this.withLock(project.id, async () => {
+      const current = await this.reread(project);
+      const binding = (current.connectors ?? []).find((b) => b.id === bindingId);
+      if (!binding) throw new Error(`no connector binding ${bindingId}`);
+      if (binding.driver === 'device') {
+        throw new Error('A camera has no sign-in to re-link.');
+      }
+      await this.opts.secrets.set(connectorSecretKey(binding.type, binding.id), credential);
+      this.backoff.delete(bindingId);
+      const { lastError: _dropped, ...kept } = binding;
+      const rest = account ? { ...kept, account } : kept;
+      await this.opts.store.updateProject(project.id, {
+        connectors: (current.connectors ?? []).map((b) => (b.id === bindingId ? rest : b)),
+      });
+      await this.opts.store.historyManager
+        ?.log({
+          kind: 'project.connector.updated',
+          projectId: project.id,
+          summary: `Connector re-linked: ${binding.displayName ?? binding.type}`,
+        })
+        .catch(() => {});
+      this.opts.onBindingsChanged?.(project.id);
+      return rest;
+    });
   }
 
   private gcPendingOAuth(): void {
@@ -1163,12 +2011,57 @@ export class ConnectorManager {
     }
   }
 
-  /** Remove a binding + its stored credential (and its origin allowlist entry). */
-  async unbind(project: ProjectDetail, bindingId: string): Promise<void> {
+  /**
+   * Where a connection's downloaded data is: its corpus folder and its held
+   * records. Throws when another connection writes into the same folder.
+   */
+  private async dataTargets(
+    project: ProjectDetail,
+    bindings: ProjectConnectorBinding[],
+    binding: ProjectConnectorBinding,
+  ): Promise<string[]> {
+    const others = bindings.filter((b) => b.id !== binding.id);
+    return connectionDataTargets({
+      artifactsDir: this.opts.store.projectArtifactsDir(project.id),
+      quarantineDir: this.opts.store.projectQuarantineDir(project.id),
+      corpusDir: corpusDirFor(bindings, binding),
+      type: binding.type,
+      // Resolved against the list that still holds this binding, so a binding
+      // with no persisted folder is not resolved into the one being freed.
+      otherCorpusDirs: others.map((b) => corpusDirFor(bindings, b)),
+      typeShared: others.some((b) => b.type === binding.type),
+    });
+  }
+
+  /** How much a connection has downloaded: files and bytes, held records included. */
+  async storedData(project: ProjectDetail, bindingId: string): Promise<StoredData> {
+    const bindings = (await this.reread(project)).connectors ?? [];
+    const binding = bindings.find((b) => b.id === bindingId);
+    if (!binding) throw new Error(`no connector binding ${bindingId}`);
+    return measureTargets(await this.dataTargets(project, bindings, binding));
+  }
+
+  /**
+   * Remove a binding + its stored credential (and its origin allowlist
+   * entry). Its downloaded data stays unless `deleteData` is set; then the
+   * corpus folder and its held records go too, and the search index is
+   * refreshed so nothing from them stays findable.
+   */
+  async unbind(
+    project: ProjectDetail,
+    bindingId: string,
+    opts: { deleteData?: boolean } = {},
+  ): Promise<{ deleted?: StoredData }> {
+    // Stop a running pass first: it holds the project lock this needs.
+    this.cancelPasses({ bindingId }, 'the connection was removed');
     return this.withLock(project.id, async () => {
       const current = await this.reread(project);
       const existing = current.connectors ?? [];
       const binding = existing.find((b) => b.id === bindingId);
+      // Checked before anything is removed: a folder another connection
+      // shares is refused with the connection still in place.
+      const targets =
+        opts.deleteData && binding ? await this.dataTargets(project, existing, binding) : [];
       if (binding) {
         await this.opts.secrets
           .delete(connectorSecretKey(binding.type, binding.id))
@@ -1186,26 +2079,108 @@ export class ConnectorManager {
         connectors: existing.filter((b) => b.id !== bindingId),
         ...originsPatch,
       });
+      // Private working state (a crawl list, a saved sign-in) goes with it.
+      const stateDir = this.stateDirFor(project.id, bindingId);
+      if (stateDir) await rm(stateDir, { recursive: true, force: true }).catch(() => {});
+      let deleted: StoredData | undefined;
+      let deleteError: unknown;
+      if (targets.length > 0) {
+        deleted = await deleteTargets(targets).catch((err: unknown) => {
+          deleteError = err;
+          return undefined;
+        });
+      }
       await this.opts.store.historyManager
         ?.log({
           kind: 'project.connector.unbound',
           projectId: project.id,
-          summary: `Connector unbound: ${binding?.displayName ?? bindingId}`,
+          summary: `Connector unbound: ${binding?.displayName ?? bindingId}${
+            deleted ? ` (deleted ${deleted.files} downloaded file(s))` : ''
+          }`,
         })
         .catch(() => {});
       this.opts.onBindingsChanged?.(project.id);
+      // The index forgets records only on a pass, and a pass otherwise runs
+      // only after a sync that wrote something.
+      if (targets.length > 0) this.opts.contentIndex?.refreshArtifacts(project.id).catch(() => {});
+      if (deleteError) {
+        throw new Error(
+          `The connection was removed, but some of what it downloaded could not be deleted: ${
+            deleteError instanceof Error ? deleteError.message : String(deleteError)
+          }`,
+        );
+      }
+      return opts.deleteData ? { deleted: deleted ?? { files: 0, bytes: 0 } } : {};
     });
+  }
+
+  /** The component pins every Spectral connection still uses, for cleanup. */
+  async componentPinsInUse(): Promise<SpectralComponentSource['package'][]> {
+    const pins: SpectralComponentSource['package'][] = [];
+    for (const project of await this.opts.store.listProjects()) {
+      for (const b of (project as { connectors?: ProjectConnectorBinding[] }).connectors ?? []) {
+        if (b.driver !== 'spectral') continue;
+        const resolved = await this.loadType(b.type, b.version, b.sourceId ?? 'bundled').catch(
+          () => undefined,
+        );
+        const source = resolved?.manifest.source;
+        if (isSpectralComponentSource(source)) {
+          pins.push((source as unknown as SpectralComponentSource).package);
+        }
+      }
+    }
+    return pins;
+  }
+
+  /**
+   * What connecting a type will fetch first, so the form can say so (or say
+   * why it cannot). Types that run no downloaded component need nothing.
+   */
+  async componentReadiness(
+    typeId: string,
+  ): Promise<
+    | { needed: false }
+    | ({ needed: true } & Awaited<
+        ReturnType<import('./spectral/component-store.js').ComponentStore['readiness']>
+      >)
+  > {
+    const resolved = await this.loadType(typeId);
+    const component = assertRunnableComponentType(resolved.manifest, resolved.sourceId);
+    if (!component) return { needed: false };
+    if (!this.opts.components) {
+      return {
+        needed: true,
+        package: { name: component.package.name, version: component.package.version },
+        installed: false,
+        downloadable: false,
+        reason: 'this build cannot run Prismatic components',
+      };
+    }
+    return { needed: true, ...(await this.opts.components.readiness(component.package)) };
   }
 
   async status(project: ProjectDetail): Promise<ConnectorStatus> {
     const bindings = project.connectors ?? [];
     const completenessByType = new Map<string, string | undefined>();
+    const manifestByType = new Map<string, ConnectorTypeManifest | null>();
     for (const b of bindings) {
       if (completenessByType.has(b.type)) continue;
       const manifest = await this.loadType(b.type, b.version, b.sourceId ?? 'bundled')
         .then((r) => r.manifest)
         .catch(() => null);
       completenessByType.set(b.type, manifest?.completeness);
+      manifestByType.set(b.type, manifest);
+    }
+    const summaries = new Map<string, string>();
+    for (const b of bindings) {
+      const manifest = manifestByType.get(b.type);
+      if (manifest?.driver !== 'native') continue;
+      const adapterId = String((manifest.source as { adapterId?: string }).adapterId ?? '');
+      const describe = NATIVE_ADAPTER_EXTRAS.get(adapterId)?.describeStatus;
+      const stateDir = this.stateDirFor(project.id, b.id);
+      if (!describe || !stateDir) continue;
+      const line = await describe({ stateDir, binding: b }).catch(() => undefined);
+      if (line) summaries.set(b.id, line);
     }
     // Table stats are read from the corpus on disk rather than recomputed, so
     // this stays a stat() walk even for a binding holding hundreds of
@@ -1252,6 +2227,20 @@ export class ConnectorManager {
       }
       if (stats.length > 0) tablesByBinding.set(b.id, stats);
     }
+    // A document corpus's record count: climbing while a pass runs, else the
+    // count the last pass stored.
+    const itemsByBinding = new Map<string, number>();
+    for (const b of bindings) {
+      if (b.driver === 'device' || tablesByBinding.has(b.id)) continue;
+      if (manifestByType.get(b.type)?.normalize.kind === 'observations') continue;
+      const progress = this.passProgress.get(b.id);
+      const items = progress
+        ? progress.base + progress.added
+        : await this.storedRecordCount(storageDir, corpusDirFor(bindings, b), b.id).catch(
+            () => undefined,
+          );
+      if (items !== undefined) itemsByBinding.set(b.id, items);
+    }
 
     const live = new Map((this.opts.liveStatus?.(project.id) ?? []).map((s) => [s.bindingId, s]));
     return {
@@ -1265,17 +2254,26 @@ export class ConnectorManager {
           id: b.id,
           type: b.type,
           ...(b.displayName ? { displayName: b.displayName } : {}),
+          ...(b.account ? { account: b.account } : {}),
           ...(completeness ? { completeness } : {}),
           ...(b.lastSyncedAt ? { lastSyncedAt: b.lastSyncedAt } : {}),
           ...(b.lastError ? { lastError: b.lastError } : {}),
+          ...(b.unreachable ? { unreachable: b.unreachable } : {}),
           ...(b.disabled ? { disabled: b.disabled } : {}),
           ...(b.disabledReason ? { disabledReason: b.disabledReason } : {}),
           // A device binding's settings are what its card edits; synced
           // types keep their config out of the status payload.
           ...(b.driver === 'device' ? { driver: 'device', config: b.config } : {}),
+          // A website's settings are addresses and limits, nothing secret; its
+          // row edits them in place.
+          ...(b.type === 'website' ? { config: b.config } : {}),
           ...(liveStatus ? { live: liveStatus } : {}),
           ...(backoffAt ? { backoffUntil: new Date(backoffAt).toISOString() } : {}),
+          ...(b.driver === 'device' ? {} : { corpusDir: corpusDirFor(bindings, b) }),
+          ...(itemsByBinding.has(b.id) ? { items: itemsByBinding.get(b.id) } : {}),
+          ...(this.passProgress.has(b.id) || this.continuations.has(b.id) ? { syncing: true } : {}),
           ...(tables ? { tables } : {}),
+          ...(summaries.has(b.id) ? { summary: summaries.get(b.id) } : {}),
         };
       }),
     };
@@ -1290,32 +2288,117 @@ export class ConnectorManager {
   async syncBinding(
     project: ProjectDetail,
     bindingId: string,
-    opts?: { scopes?: readonly string[]; backfillLimit?: number },
+    opts?: { scopes?: readonly string[]; backfillLimit?: number; trigger?: SyncTrigger },
   ): Promise<BindingSyncResult> {
-    return this.withLock(project.id, async () => {
+    // The sink enforces the policy, whichever route asked.
+    await this.assertConnectorDataAllowed();
+    const trigger = opts?.trigger ?? 'manual';
+    const result = await this.withLock(project.id, async () => {
       const current = await this.reread(project);
       const binding = (current.connectors ?? []).find((b) => b.id === bindingId);
       if (!binding) throw new Error(`no connector binding ${bindingId}`);
       if (binding.driver === 'device') {
         throw new Error('This connection watches a device continuously; there is nothing to sync.');
       }
-      return this.syncBindingInner(current, binding, opts);
+      return this.syncBindingInner(current, binding, { ...opts, trigger });
     });
+    // A pass the person (or their task) started keeps going in short passes,
+    // releasing the project lock between them, rather than waiting for the
+    // machine to fall idle.
+    if (
+      result.deferred &&
+      (trigger === 'manual' || trigger === 'task') &&
+      !result.error &&
+      !result.rateLimited
+    ) {
+      this.scheduleContinuation(project.id, bindingId, 1);
+    } else {
+      this.continuations.delete(bindingId);
+    }
+    return result;
   }
 
-  /** Sync every enabled binding on a project (drives the sync manager). */
-  async syncProject(project: ProjectDetail): Promise<BindingSyncResult[]> {
+  private scheduleContinuation(projectId: string, bindingId: string, round: number): void {
+    const existing = this.continuations.get(bindingId);
+    if (existing) clearTimeout(existing.timer);
+    if (round > MAX_CONTINUATIONS) {
+      this.continuations.delete(bindingId);
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (this.continuations.get(bindingId)?.timer !== timer) return;
+      void (async () => {
+        const project = await this.opts.store.getProject(projectId).catch(() => null);
+        const binding = project?.connectors?.find((b) => b.id === bindingId);
+        if (!project || !binding || binding.disabled) {
+          this.continuations.delete(bindingId);
+          return;
+        }
+        try {
+          await this.assertConnectorDataAllowed();
+          const r = await this.withLock(projectId, async () => {
+            const current = await this.reread(project);
+            const live = (current.connectors ?? []).find((b) => b.id === bindingId);
+            if (!live || live.disabled) return null;
+            return this.syncBindingInner(current, live, { trigger: 'manual' });
+          });
+          if (this.continuations.get(bindingId)?.timer !== timer) return;
+          if (r?.deferred && !r.error && !r.rateLimited) {
+            this.scheduleContinuation(projectId, bindingId, round + 1);
+          } else {
+            this.continuations.delete(bindingId);
+          }
+        } catch (err) {
+          this.continuations.delete(bindingId);
+          log.info(
+            `follow-up pass for ${bindingId} stopped: ${err instanceof Error ? err.message : err}`,
+          );
+        }
+      })();
+    }, this.opts.continuationDelayMs ?? 2_000);
+    if (typeof (timer as { unref?: () => void }).unref === 'function') {
+      (timer as { unref: () => void }).unref();
+    }
+    this.continuations.set(bindingId, { projectId, timer, round });
+  }
+
+  /** Whether a follow-up pass is scheduled or running for a binding. */
+  isContinuing(bindingId: string): boolean {
+    return this.continuations.has(bindingId);
+  }
+
+  /**
+   * Sync every binding the background loop may sync on a project (drives the
+   * sync manager). Without a policy, every enabled binding — the historical
+   * behavior callers outside the loop rely on.
+   */
+  async syncProject(
+    project: ProjectDetail,
+    opts?: {
+      policy?: Pick<ResolvedSecurityPolicy, 'allowConnectorData' | 'allowExternalServices'>;
+      /** Sync only these bindings (the loop names the ones that are due). */
+      bindingIds?: readonly string[];
+    },
+  ): Promise<BindingSyncResult[]> {
     return this.withLock(project.id, async () => {
       let current = await this.reread(project);
+      const eligible = opts?.policy
+        ? new Set((await this.backgroundBindings(current, opts.policy)).map((b) => b.id))
+        : null;
+      const named = opts?.bindingIds ? new Set(opts.bindingIds) : null;
       const results: BindingSyncResult[] = [];
       for (const binding of current.connectors ?? []) {
         if (binding.disabled) continue;
         // Device bindings are kept running by the live host, never synced.
         if (binding.driver === 'device') continue;
+        if (eligible && !eligible.has(binding.id)) continue;
+        if (named && !named.has(binding.id)) continue;
         // Rate-limit backoff applies to the autonomous loop; a user-initiated
         // syncBinding deliberately bypasses it.
         if (this.backoffUntil(binding.id)) continue;
-        results.push(await this.syncBindingInner(current, binding));
+        // A follow-up pass the person started is already on it.
+        if (this.continuations.has(binding.id)) continue;
+        results.push(await this.syncBindingInner(current, binding, { trigger: 'schedule' }));
         current = await this.reread(project);
       }
       return results;
@@ -1351,13 +2434,76 @@ export class ConnectorManager {
       .catch((err) => log.warn(`origin heal failed for ${binding.id}:`, err));
   }
 
+  /**
+   * Move a binding to the newest version of its type in the same catalog
+   * source when that version keeps the major, the driver, and accepts the
+   * binding's config as it stands. The cursor is kept: a minor or patch
+   * version must read the cursor its predecessor wrote (a type that cannot
+   * bumps its major, and a major is never crossed here). Called under the
+   * project lock. Returns the moved binding, or null when it stays.
+   */
+  private async moveToCompatibleVersion(
+    project: ProjectDetail,
+    binding: ProjectConnectorBinding,
+  ): Promise<ProjectConnectorBinding | null> {
+    if (!binding.version || binding.driver === 'device') return null;
+    const sourceId = binding.sourceId ?? 'bundled';
+    const current = binding.version;
+    const major = (v: string) => v.split('.')[0];
+    // The newest version in the same major: a newer major may sit above it.
+    const versions = await Promise.resolve()
+      .then(() => this.opts.catalog.listVersions('connector-type', binding.type, sourceId))
+      .catch(() => []);
+    const next = versions
+      .map((v) => v.version)
+      .filter((v) => isSemver(v) && major(v) === major(current) && compareSemver(v, current) > 0)
+      .sort(compareSemver)
+      .at(-1);
+    if (!next) return null;
+    const latest = await this.loadType(binding.type, next, sourceId).catch(() => null);
+    if (!latest || latest.manifest.version !== next) return null;
+    if (binding.driver !== undefined && latest.manifest.driver !== binding.driver) return null;
+    const config = binding.config ?? {};
+    const problems = validateConnectorConfig(latest.manifest.configSchema, config);
+    if (problems.length === 0) problems.push(...nativeConfigProblems(latest.manifest, config));
+    if (problems.length > 0) {
+      log.info(
+        `${binding.id} stays on ${binding.type} ${binding.version}: ${next} does not accept its settings (${problems.join('; ')})`,
+      );
+      return null;
+    }
+    const fresh = await this.reread(project);
+    const moved: ProjectConnectorBinding = { ...binding, version: next };
+    await this.opts.store.updateProject(project.id, {
+      connectors: (fresh.connectors ?? []).map((b) =>
+        b.id === binding.id ? { ...b, version: next } : b,
+      ),
+    });
+    await this.opts.store.historyManager
+      ?.log({
+        kind: 'project.connector.updated',
+        projectId: project.id,
+        summary: `Connector updated: ${binding.displayName ?? binding.type} ${binding.version} → ${next}`,
+      })
+      .catch(() => {});
+    log.info(`${binding.id} moved from ${binding.type} ${binding.version} to ${next}`);
+    return moved;
+  }
+
   /** The per-binding sync body — always called under the project lock. */
   private async syncBindingInner(
     project: ProjectDetail,
-    binding: ProjectConnectorBinding,
-    opts?: { scopes?: readonly string[]; backfillLimit?: number },
+    pinned: ProjectConnectorBinding,
+    opts?: { scopes?: readonly string[]; backfillLimit?: number; trigger?: SyncTrigger },
   ): Promise<BindingSyncResult> {
+    let binding = pinned;
+    const abort = new AbortController();
+    let progress: { base: number; added: number } | null = null;
+    this.passAborts.get(binding.id)?.ctl.abort(new Error('superseded'));
+    this.passAborts.set(binding.id, { projectId: project.id, ctl: abort });
     try {
+      // A corrected manifest or script reaches connections that exist.
+      binding = (await this.moveToCompatibleVersion(project, binding)) ?? binding;
       // Legacy bindings predate provenance pins and could otherwise be
       // shadowed by a newly installed local manifest with the same id. Their
       // historical source was the bundled catalog, so resolve them there.
@@ -1367,12 +2513,21 @@ export class ConnectorManager {
         binding.sourceId ?? 'bundled',
       );
       await this.ensureDeclaredOrigins(project, binding, resolved.manifest);
+      assertRunnableComponentType(resolved.manifest, resolved.sourceId);
+      const stateDir = this.stateDirFor(project.id, binding.id);
       const adapter = await createConnectorAdapter(resolved.manifest, binding, {
         secrets: this.opts.secrets,
         store: this.opts.store,
+        ...(this.opts.components ? { components: this.opts.components } : {}),
+        ...(this.opts.spectralReplay ? { spectralReplay: this.opts.spectralReplay } : {}),
         ...(this.opts.scriptRunner ? { scriptRunner: this.opts.scriptRunner } : {}),
         projectId: project.id,
         ...(this.opts.fetch ? { fetch: this.opts.fetch } : {}),
+        ...(this.opts.resolveMcpServer ? { resolveMcpServer: this.opts.resolveMcpServer } : {}),
+        ...(this.opts.capturer ? { capturer: this.opts.capturer } : {}),
+        ...(stateDir ? { stateDir } : {}),
+        trigger: opts?.trigger ?? 'manual',
+        signal: abort.signal,
       });
       const corpusDir = await this.ensureCorpusDir(project, binding);
       const { storageDir, quarantineDir, migrated } = await connectorCorpusStorage(
@@ -1396,6 +2551,12 @@ export class ConnectorManager {
                 : {}),
             })
           : null;
+      // A document corpus counts its new records as they land.
+      progress = observation
+        ? null
+        : { base: await this.storedRecordCount(storageDir, corpusDir, binding.id), added: 0 };
+      if (progress) this.passProgress.set(binding.id, progress);
+      const counting = progress;
 
       const r = await syncWithAdapter<unknown, NormalizedRecord | ConnectorRecord>(adapter, {
         storageDir,
@@ -1408,6 +2569,7 @@ export class ConnectorManager {
         allowPrune: !observation && resolved.manifest.completeness === 'mirror',
         backfillLimit: Math.max(1, Math.min(opts?.backfillLimit ?? DEFAULT_BACKFILL_LIMIT, 5_000)),
         cursor: binding.cursor,
+        signal: abort.signal,
         ...(opts?.scopes ? { scopes: opts.scopes } : {}),
         ...(observation
           ? {
@@ -1429,7 +2591,15 @@ export class ConnectorManager {
                 return { status: rows > 0 ? 'written' : 'exists' };
               },
             }
-          : {}),
+          : {
+              write: async (input) => {
+                const w = await defaultWriteRecord(
+                  input as Parameters<typeof defaultWriteRecord>[0],
+                );
+                if (counting && w.status === 'written') counting.added++;
+                return w;
+              },
+            }),
       });
 
       // Seal open parts before anything reads the corpus. Compaction to
@@ -1443,14 +2613,28 @@ export class ConnectorManager {
           `${binding.type}: wrote ${observationSummary.rowsWritten} row(s) across ${observationSummary.tables.length} table(s)`,
         );
       }
-      if (r.rateLimited) this.noteRateLimit(binding.id);
+      if (r.rateLimited) this.noteRateLimit(binding.id, r.retryAfterMs);
+      else if (r.unreachable) this.noteUnreachable(binding.id, r.unreachable);
       else if (r.error) this.noteFailure(binding.id);
       else this.backoff.delete(binding.id);
       const lastSyncedAt = new Date().toISOString();
-      if (r.error) {
+      if (r.unreachable) {
+        // Waiting for the network is not an error: what landed stays, the
+        // cursor holds where it failed, and the next pass that gets through
+        // clears it. `since` keeps the moment it started.
+        await this.persistBinding(project.id, binding.id, {
+          cursor: r.cursor,
+          unreachable: {
+            since: binding.unreachable?.since ?? lastSyncedAt,
+            offline: r.unreachable.offline,
+            ...(r.unreachable.host ? { host: r.unreachable.host } : {}),
+          },
+        }).catch(() => {});
+      } else if (r.error) {
         await this.persistBinding(project.id, binding.id, {
           cursor: r.cursor,
           lastError: r.error,
+          unreachable: null,
         }).catch(() => {});
       } else {
         // A pass that landed most of its records is still a sync, but the
@@ -1463,12 +2647,22 @@ export class ConnectorManager {
           ...(partialNote ? { lastError: partialNote } : {}),
         });
       }
+      // Recounted only when the pass changed the corpus; a quiet pass keeps
+      // the count it started from.
+      const records = counting
+        ? r.written + r.quarantined + r.pruned > 0
+          ? await countCorpusRecords(storageDir, corpusDir)
+          : counting.base
+        : undefined;
       await this.writeCorpusMeta(storageDir, corpusDir, binding, resolved.manifest, {
         scopes: r.scopes ?? [],
         ...(r.abandoned?.length ? { abandoned: r.abandoned } : {}),
+        ...(r.truncated?.length ? { truncated: r.truncated } : {}),
         ...(r.error ? {} : { lastSyncedAt }),
         ...(observationSummary ? { observations: observationSummary } : {}),
+        ...(records !== undefined ? { records } : {}),
       }).catch(() => {});
+      this.recordCounts.delete(binding.id);
       // Corpus records live under artifacts, outside the workspace indexer's
       // walk — the dedicated artifacts index is what makes them searchable.
       // Fire-and-forget; the façade debounces per project.
@@ -1481,15 +2675,52 @@ export class ConnectorManager {
       if (migrated && this.opts.contentIndex) {
         await this.opts.contentIndex.refresh(project.id).catch(() => {});
       }
+      const written = r.written + r.quarantined;
+      if (written + r.pruned > 0) {
+        const label = binding.displayName ?? binding.type;
+        await this.opts.store.historyManager
+          ?.log({
+            kind: 'project.connector.synced',
+            projectId: project.id,
+            summary: `Connector synced: ${label} (${written} new or changed, ${r.pruned} removed)`,
+            details: { bindingId: binding.id, type: binding.type, written, removed: r.pruned },
+          })
+          .catch(() => {});
+      }
+      if (written + r.pruned > 0 || r.deferred) {
+        this.opts.onSynced?.(project.id, {
+          bindingId: binding.id,
+          type: binding.type,
+          written,
+          removed: r.pruned,
+          continuing: Boolean(r.deferred),
+        });
+      }
       return r;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn(`connector sync failed (${binding.id}): ${message}`);
-      this.noteFailure(binding.id);
-      await this.persistBinding(project.id, binding.id, {
-        cursor: binding.cursor,
-        lastError: message,
-      }).catch(() => {});
+      // Records may have landed before the failure; count them afresh.
+      if (progress && progress.added > 0) this.recordCounts.set(binding.id, -1);
+      const u = unreachableFrom(err);
+      if (u) {
+        this.noteUnreachable(binding.id, u);
+        await this.persistBinding(project.id, binding.id, {
+          cursor: binding.cursor,
+          unreachable: {
+            since: binding.unreachable?.since ?? new Date().toISOString(),
+            offline: u.offline,
+            ...(u.host ? { host: u.host } : {}),
+          },
+        }).catch(() => {});
+      } else {
+        this.noteFailure(binding.id);
+        await this.persistBinding(project.id, binding.id, {
+          cursor: binding.cursor,
+          lastError: message,
+          unreachable: null,
+        }).catch(() => {});
+      }
       return {
         written: 0,
         quarantined: 0,
@@ -1497,9 +2728,40 @@ export class ConnectorManager {
         pruned: 0,
         errors: 1,
         cursor: binding.cursor,
-        error: message,
+        error: u ? describeUnreachable(u) : message,
+        ...(u ? { unreachable: u } : {}),
       };
+    } finally {
+      if (this.passAborts.get(binding.id)?.ctl === abort) this.passAborts.delete(binding.id);
+      if (progress && this.passProgress.get(binding.id) === progress) {
+        this.passProgress.delete(binding.id);
+      }
     }
+  }
+
+  /**
+   * The records a document corpus holds: `_meta.json`'s count, else one walk
+   * remembered until the next pass writes the count. -1 in the memo means a
+   * failed pass may have changed the corpus, so it is walked again.
+   */
+  private async storedRecordCount(
+    storageDir: string,
+    corpusDir: string,
+    bindingId: string,
+  ): Promise<number> {
+    const memo = this.recordCounts.get(bindingId);
+    if (memo === undefined) {
+      const meta = await resolveInside(storageDir, `${corpusDir}/_meta.json`)
+        .then((abs) => readFile(abs, 'utf8'))
+        .then((text) => JSON.parse(text) as { records?: unknown })
+        .catch(() => null);
+      if (typeof meta?.records === 'number') return meta.records;
+    } else if (memo >= 0) {
+      return memo;
+    }
+    const counted = await countCorpusRecords(storageDir, corpusDir);
+    this.recordCounts.set(bindingId, counted);
+    return counted;
   }
 
   /**
@@ -1528,6 +2790,9 @@ export class ConnectorManager {
       lastSyncedAt?: string;
       observations?: ObservationWriteSummary;
       abandoned?: { scope: string; id: string }[];
+      truncated?: { scope: string; dropped: number; limit: number }[];
+      /** Records the document corpus holds after the pass. */
+      records?: number;
     },
   ): Promise<void> {
     const abs = await resolveInside(storageDir, `${corpusDir}/_meta.json`);
@@ -1576,7 +2841,11 @@ export class ConnectorManager {
             rowsLastPass: pass.observations.rowsWritten,
           }
         : {}),
+      ...(pass.records !== undefined ? { records: pass.records } : {}),
       ...(skippedRecords.length > 0 ? { skippedRecords } : {}),
+      // The last pass's truncation only: a gezel reading the corpus should
+      // know it is missing older records, not just a smaller count.
+      ...(pass.truncated?.length ? { truncatedLastPass: pass.truncated } : {}),
       ...(pass.lastSyncedAt ? { lastSyncedAt: pass.lastSyncedAt } : {}),
     };
     await writeFileAtomic(abs, `${JSON.stringify(meta, null, 2)}\n`);
@@ -1585,7 +2854,14 @@ export class ConnectorManager {
   private async persistBinding(
     projectId: string,
     bindingId: string,
-    patch: { cursor?: unknown; lastSyncedAt?: string; lastError?: string; corpusDir?: string },
+    patch: {
+      cursor?: unknown;
+      lastSyncedAt?: string;
+      lastError?: string;
+      corpusDir?: string;
+      /** Set while the service cannot be reached; null clears it. */
+      unreachable?: ProjectConnectorBinding['unreachable'] | null;
+    },
   ): Promise<void> {
     const project = await this.opts.store.getProject(projectId);
     if (!project?.connectors) return;
@@ -1596,9 +2872,12 @@ export class ConnectorManager {
             ...(patch.cursor !== undefined ? { cursor: patch.cursor } : {}),
             ...(patch.corpusDir ? { corpusDir: patch.corpusDir } : {}),
             ...(patch.lastSyncedAt
-              ? { lastSyncedAt: patch.lastSyncedAt, lastError: undefined }
+              ? { lastSyncedAt: patch.lastSyncedAt, lastError: undefined, unreachable: undefined }
               : {}),
             ...(patch.lastError ? { lastError: patch.lastError } : {}),
+            ...(patch.unreachable !== undefined
+              ? { unreachable: patch.unreachable ?? undefined }
+              : {}),
           }
         : b,
     );

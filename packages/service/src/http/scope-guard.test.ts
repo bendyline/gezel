@@ -385,6 +385,197 @@ describe('sessionRouteGuard', () => {
     expect((await ui.request('/events/chat/all')).status).toBe(200);
   });
 
+  it('refuses a coordinator granting its project a stored credential or its origins', async () => {
+    const app = sessionPolicyApp(session('proj-a', true));
+    const put = (body: unknown) =>
+      app.request('/api/projects/proj-a', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    expect((await put({ grantedCredentials: ['connector-mail-gmail.mail-gmail:1'] })).status).toBe(
+      403,
+    );
+    expect((await put({ credentialAllowedOrigins: { x: ['https://evil.example'] } })).status).toBe(
+      403,
+    );
+    expect((await put({ about: 'A new about text' })).status).toBe(200);
+  });
+
+  it('keeps connector setup, sync and sign-in first-party only', async () => {
+    const app = sessionPolicyApp(session('proj-a', true));
+    const post = (path: string) => app.request(path, { method: 'POST' });
+    expect((await post('/api/projects/proj-a/connectors/bind')).status).toBe(403);
+    expect((await post('/api/projects/proj-a/connectors/website:1/sync')).status).toBe(403);
+    expect((await post('/api/projects/proj-a/connectors/website:1/sign-in')).status).toBe(403);
+    expect((await post('/api/projects/proj-a/connectors/mail-imap:1/reconnect')).status).toBe(403);
+    expect((await post('/api/projects/proj-a/connectors/mail-imap:1/check')).status).toBe(403);
+    expect((await app.request('/api/projects/proj-a/connectors/website:1/session')).status).toBe(
+      403,
+    );
+    expect((await app.request('/api/projects/proj-a/connectors/mail-imap:1/stored')).status).toBe(
+      403,
+    );
+    expect(
+      (
+        await app.request('/api/projects/proj-a/connectors/mail-imap:1?deleteData=1', {
+          method: 'DELETE',
+        })
+      ).status,
+    ).toBe(403);
+    expect((await post('/api/projects/proj-a/web-pages/save')).status).toBe(403);
+    expect((await post('/api/projects/proj-a/prompt-connectors/offers')).status).toBe(403);
+    expect((await post('/api/projects/proj-a/prompt-connectors/accept')).status).toBe(403);
+    expect((await app.request('/api/projects/proj-a/web-pages')).status).toBe(200);
+  });
+
+  describe('things only the person decides', () => {
+    const json = (method: string, body: unknown) => ({
+      method,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const coordinator = (userTurn = false) =>
+      sessionPolicyApp(session('proj-a', true), undefined, () => userTurn);
+
+    it('refuses project permissions, links and gezel.* properties from a coordinator', async () => {
+      const app = coordinator(true);
+      const put = (body: unknown) => app.request('/api/projects/proj-a', json('PUT', body));
+      expect((await put({ linkedProjectIds: ['proj-b'] })).status).toBe(403);
+      expect((await put({ claudePermissionMode: 'bypassPermissions' })).status).toBe(403);
+      expect((await put({ codexPermissionMode: 'full' })).status).toBe(403);
+      expect((await put({ properties: { 'gezel.sharedLibrary': '' } })).status).toBe(403);
+      expect((await put({ properties: { 'Gezel.FolderKind': 'code' } })).status).toBe(403);
+      expect((await put({ properties: { 'content.language': 'Nederlands' } })).status).toBe(200);
+    });
+
+    it('moves a project folder only in a turn the person started', async () => {
+      const idle = coordinator(false);
+      expect(
+        (await idle.request('/api/projects/proj-a', json('PUT', { workingDir: 'D:\\notes' })))
+          .status,
+      ).toBe(403);
+      expect(
+        (
+          await idle.request(
+            '/api/projects/proj-a/working-dir',
+            json('PUT', { workingDir: 'D:\\notes' }),
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (
+          await idle.request(
+            '/api/projects',
+            json('POST', { name: 'Notes', workingDir: 'D:\\notes' }),
+          )
+        ).status,
+      ).toBe(403);
+      expect((await idle.request('/api/projects', json('POST', { name: 'Notes' }))).status).toBe(
+        200,
+      );
+      const asked = coordinator(true);
+      expect(
+        (await asked.request('/api/projects/proj-a', json('PUT', { workingDir: 'D:\\notes' })))
+          .status,
+      ).toBe(200);
+    });
+
+    it('arms schedules and night work only in a turn the person started', async () => {
+      const idle = coordinator(false);
+      const cron = { cron: { expression: '0 9 * * *' } };
+      expect((await idle.request('/api/projects/proj-a/tasks/3', json('PATCH', cron))).status).toBe(
+        403,
+      );
+      expect(
+        (await idle.request('/api/projects/proj-a/tasks', json('POST', { title: 'x', ...cron })))
+          .status,
+      ).toBe(403);
+      expect(
+        (
+          await idle.request(
+            '/api/projects/proj-a/tasks/3',
+            json('PATCH', { nightShift: { enabled: true } }),
+          )
+        ).status,
+      ).toBe(403);
+      expect(
+        (await idle.request('/api/projects/proj-a/night-work', json('POST', { enabled: true })))
+          .status,
+      ).toBe(403);
+      expect(
+        (await idle.request('/api/projects/proj-a/suggested-work/enable', json('POST', {}))).status,
+      ).toBe(403);
+      // Switching off, clearing a schedule and plain edits stay open.
+      expect(
+        (await idle.request('/api/projects/proj-a/night-work', json('POST', { enabled: false })))
+          .status,
+      ).toBe(200);
+      expect(
+        (await idle.request('/api/projects/proj-a/tasks/3', json('PATCH', { cron: null }))).status,
+      ).toBe(200);
+      expect(
+        (await idle.request('/api/projects/proj-a/tasks/3', json('PATCH', { title: 'Renamed' })))
+          .status,
+      ).toBe(200);
+      const asked = coordinator(true);
+      expect(
+        (await asked.request('/api/projects/proj-a/tasks/3', json('PATCH', cron))).status,
+      ).toBe(200);
+    });
+
+    it('keeps AI App installs, direct package installs, icons, drafts and step jumps first-party', async () => {
+      const app = sessionPolicyApp(session('proj-a'));
+      const post = (path: string, body: unknown = {}) => app.request(path, json('POST', body));
+      expect(
+        (await post('/api/projects/proj-a/ai-apps/import', { path: 'a.gezapp', confirm: true }))
+          .status,
+      ).toBe(403);
+      expect((await post('/api/projects/proj-a/ai-apps/import', { path: 'a.gezapp' })).status).toBe(
+        200,
+      );
+      expect((await post('/api/projects/proj-a/ai-apps/export')).status).toBe(200);
+      expect((await post('/api/projects/proj-a/install', { name: 'left-pad' })).status).toBe(403);
+      expect((await post('/api/projects/proj-a/icon/draw')).status).toBe(403);
+      expect((await app.request('/api/projects/proj-a/icon', { method: 'DELETE' })).status).toBe(
+        403,
+      );
+      expect((await post('/api/projects/proj-a/prompt-drafts')).status).toBe(403);
+      expect((await post('/api/projects/proj-a/tasks/3/steps/review/activate')).status).toBe(403);
+      expect((await app.request('/api/projects/proj-a/prompt-drafts')).status).toBe(200);
+    });
+
+    it('never lets a coordinator post as the person or loosen a gezel', async () => {
+      const app = coordinator(false);
+      const post = (path: string, body: unknown = {}) => app.request(path, json('POST', body));
+      expect(
+        (await post('/api/gezels/gz-2/chat/send', { message: 'resume the deck' })).status,
+      ).toBe(403);
+      expect((await post('/api/gezels/gz-2/chat/reset')).status).toBe(403);
+      expect(
+        (await app.request('/api/gezels/gz-2/md', json('PUT', { source: '---\n---' }))).status,
+      ).toBe(403);
+      for (const field of [
+        { sandboxCopilot: false },
+        { claudePermissionMode: 'bypassPermissions' },
+        { codexPermissionMode: 'full' },
+        { factualWriting: false },
+      ]) {
+        expect((await post('/api/gezels/gz-2/settings', field)).status).toBe(403);
+      }
+      expect((await post('/api/gezels/gz-2/settings', { provider: 'anthropic-cli' })).status).toBe(
+        200,
+      );
+      expect((await post('/api/gezels/gz-2/growth/accept', { proposalId: 'p1' })).status).toBe(403);
+      expect((await app.request('/api/gezels/gz-2/chat')).status).toBe(200);
+      const asked = coordinator(true);
+      expect(
+        (await asked.request('/api/gezels/gz-2/growth/accept', json('POST', { proposalId: 'p1' })))
+          .status,
+      ).toBe(200);
+    });
+  });
+
   it('allows the own-project MCP surface and denies foreign projects', async () => {
     const app = sessionPolicyApp(session('proj-a'));
     expect((await app.request('/api/projects/proj-a/workspace')).status).toBe(200);

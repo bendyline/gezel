@@ -6,11 +6,13 @@
  * The source plist is only intent. electron-builder may stop reading it, use
  * a different inherited plist, or transform it while signing. The macOS
  * release job runs this after codesign verification so that the signed app and
- * every Electron executable host carry exactly the reviewed set.
+ * every Electron executable host carry exactly the reviewed set, and nothing
+ * under Contents/Resources carries any entitlement except the vendor binaries
+ * pinned in VENDOR_SIGNED_ENTITLEMENTS.
  */
 import { spawnSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { findMachOBinaries } from './sign-macho-tree.mjs';
@@ -32,6 +34,43 @@ export const REVIEWED_ENTITLEMENTS = new Map([
   [
     'com.apple.security.automation.apple-events',
     'the ambient wallpaper asking System Events (via osascript) to set the desktop picture',
+  ],
+]);
+
+/**
+ * Vendor binaries shipped exactly as their publisher signed and notarized
+ * them, keyed by path inside the app bundle. Their entitlements are the
+ * vendor's, not Gezel's, and re-signing them would drop the vendor signature
+ * the release pins. Each entry pins the signing team and the exact set, so a
+ * vendor release that adds or drops an entitlement fails the release job and
+ * gets reviewed here rather than shipping unnoticed.
+ */
+export const VENDOR_SIGNED_ENTITLEMENTS = new Map([
+  [
+    'Contents/Resources/app.asar.unpacked/dist/node-bundle/node',
+    {
+      vendor: 'Node.js Foundation',
+      teamIdentifier: 'HX7739G8FX',
+      entitlements: [
+        'com.apple.security.cs.allow-jit',
+        'com.apple.security.cs.allow-unsigned-executable-memory',
+        'com.apple.security.cs.disable-executable-page-protection',
+        'com.apple.security.cs.allow-dyld-environment-variables',
+        'com.apple.security.cs.disable-library-validation',
+        'com.apple.security.get-task-allow',
+      ],
+      accepted:
+        'Node.js release entitlements, get-task-allow included. Accepted in the 1.26320.110 release audit instead of re-signing node under the Gezel identity.',
+    },
+  ],
+  [
+    'Contents/Resources/app.asar.unpacked/dist/duckdb-bundle/duckdb',
+    {
+      vendor: 'Stichting DuckDB Foundation',
+      teamIdentifier: '7NCTQWA3HA',
+      entitlements: ['com.apple.security.cs.disable-library-validation'],
+      accepted: 'DuckDB release entitlement; reviewed in the 1.26320.110 release audit.',
+    },
   ],
 ]);
 
@@ -96,6 +135,50 @@ export function assertExactReviewedEntitlements(actual, label) {
   }
 }
 
+/**
+ * `actual` (null when the binary embeds no entitlements) must equal the vendor
+ * entry's set exactly: a missing key and an added key both mean the vendor
+ * release changed and needs a fresh review.
+ */
+export function assertExactVendorEntitlements(actual, entry, label) {
+  const expected = new Set(entry.entitlements);
+  for (const key of expected) {
+    if (actual?.get(key) !== true) {
+      throw new Error(
+        `${label} no longer carries ${entry.vendor}'s entitlement ${key}; review the vendor release and update VENDOR_SIGNED_ENTITLEMENTS`,
+      );
+    }
+  }
+  for (const [key, value] of actual ?? []) {
+    if (!expected.has(key)) {
+      throw new Error(
+        `${label} carries ${key}, which the reviewed ${entry.vendor} set does not include; review it before shipping`,
+      );
+    }
+    if (value !== true) {
+      throw new Error(`${label} includes ${key} with value false; expected the vendor's true set`);
+    }
+  }
+}
+
+/** A path inside the app bundle, with forward slashes, for VENDOR_SIGNED_ENTITLEMENTS. */
+export function appRelativePath(appPath, path) {
+  return relative(appPath, path).split(sep).join('/');
+}
+
+function codesignTeamIdentifier(path) {
+  const inspected = spawnSync('codesign', ['--display', '--verbose=2', path], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  if (inspected.error || inspected.status !== 0) {
+    const detail = `${inspected.stdout ?? ''}\n${inspected.stderr ?? ''}`.trim();
+    throw new Error(`codesign could not inspect ${path}${detail ? `: ${detail}` : ''}`);
+  }
+  const output = `${inspected.stdout ?? ''}\n${inspected.stderr ?? ''}`;
+  return /^TeamIdentifier=(\S+)$/m.exec(output)?.[1] ?? null;
+}
+
 function codesignEntitlements(path) {
   const inspected = spawnSync('codesign', ['--display', '--entitlements', ':-', path], {
     encoding: 'utf8',
@@ -156,7 +239,40 @@ export async function verifyMacosEntitlements(appPath) {
     if (actual) assertExactReviewedEntitlements(actual, binary);
   }
 
-  console.log(`✓ verified exact entitlement set on ${hosts.length} macOS executable hosts`);
+  // Contents/Resources holds no Electron host, so no binary there may carry an
+  // entitlement unless it is a pinned vendor binary. Before this walk, the
+  // bundled node's get-task-allow shipped without any check seeing it.
+  const resourceBinaries = await findMachOBinaries(join(resolvedApp, 'Contents', 'Resources'));
+  const vendorSeen = new Set();
+  for (const binary of resourceBinaries) {
+    const rel = appRelativePath(resolvedApp, binary);
+    const vendor = VENDOR_SIGNED_ENTITLEMENTS.get(rel);
+    const actual = codesignEntitlements(binary);
+    if (vendor) {
+      vendorSeen.add(rel);
+      const team = codesignTeamIdentifier(binary);
+      if (team !== vendor.teamIdentifier) {
+        throw new Error(
+          `${binary} is signed by team ${team ?? 'none'}, expected ${vendor.vendor} (${vendor.teamIdentifier})`,
+        );
+      }
+      assertExactVendorEntitlements(actual, vendor, binary);
+    } else if (actual && actual.size > 0) {
+      throw new Error(
+        `${binary} carries entitlements (${[...actual.keys()].join(', ')}); under Contents/Resources only the vendor binaries in VENDOR_SIGNED_ENTITLEMENTS may`,
+      );
+    }
+  }
+  const stale = [...VENDOR_SIGNED_ENTITLEMENTS.keys()].filter((rel) => !vendorSeen.has(rel));
+  if (stale.length > 0) {
+    throw new Error(
+      `VENDOR_SIGNED_ENTITLEMENTS names binaries the app no longer ships: ${stale.join(', ')}`,
+    );
+  }
+
+  console.log(
+    `✓ verified exact entitlement set on ${hosts.length} macOS executable hosts and ${resourceBinaries.length} resource binaries (${vendorSeen.size} vendor-signed)`,
+  );
 }
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : '';

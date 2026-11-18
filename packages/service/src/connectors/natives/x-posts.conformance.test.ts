@@ -225,6 +225,34 @@ describe('x-posts against the fake X API', () => {
     });
   });
 
+  it('a post over 280 characters is kept whole, from note_tweet', async () => {
+    env = await createConnectorTestEnv();
+    const fake = new FakeX();
+    await env.storeCredential(binding(), fake.credential());
+    const ending = 'and this is the sentence the timeline cuts off.';
+    fake.addPost(`${'A long thread opener. '.repeat(14)}${ending}`);
+    await pass(adapterFor(fake, env), undefined);
+    const [post] = await readCorpus(env.artifactsDir, 'data/x/posts');
+    expect(post!.body).toContain(ending);
+    expect(post!.body).not.toContain('https://t.co/');
+  });
+
+  it('reposts stay out of the corpus: only the account own posts are synced', async () => {
+    env = await createConnectorTestEnv();
+    const fake = new FakeX();
+    await env.storeCredential(binding(), fake.credential());
+    fake.addPost('My own post');
+    fake.addRepost({ id: '1999', text: 'Someone else wrote this', username: 'elsewhere' });
+    let cursor = (await pass(adapterFor(fake, env), undefined)).cursor;
+    fake.advance(61 * MINUTE);
+    cursor = (await pass(adapterFor(fake, env), cursor)).cursor;
+    const posts = await readCorpus(env.artifactsDir, 'data/x/posts');
+    expect(posts.map((x) => x.frontmatter.title)).toEqual(['My own post']);
+    const timeline = fake.http.requests('GET', `${X_API}/users/${fake.userId}/tweets`);
+    expect(timeline.length).toBeGreaterThan(1);
+    expect(timeline.every((c) => c.url.searchParams.get('exclude') === 'retweets')).toBe(true);
+  });
+
   it('a deleted post leaves with its engagement readings', async () => {
     env = await createConnectorTestEnv();
     const fake = new FakeX();
@@ -290,6 +318,27 @@ describe('x-posts against the fake X API', () => {
     expect(stored?.refreshToken).not.toBe(seeded.refreshToken);
     expect(stored?.accessToken).not.toBe('access-seed');
     expect(fake.tokens.grants.map((g) => g.get('grant_type'))).toEqual(['refresh_token']);
+  });
+
+  it('a confidential app refreshes with HTTP Basic client authentication, as X requires', async () => {
+    env = await createConnectorTestEnv();
+    const fake = new FakeX({ clientSecret: 'x-secret' });
+    const b = binding();
+    await env.storeCredential(b, fake.credential());
+    fake.addPost('One');
+    fake.http.failNext(
+      { url: `${X_API}/users/me` },
+      status(401, {
+        title: 'Unauthorized',
+        type: 'about:blank',
+        status: 401,
+        detail: 'Unauthorized',
+      }),
+    );
+    const r = await pass(adapterFor(fake, env), undefined);
+    expect(r.error).toBeUndefined();
+    expect(fake.tokens.grants.map((g) => g.get('grant_type'))).toEqual(['refresh_token']);
+    expect(fake.tokens.grants[0]!.has('client_secret')).toBe(false);
   });
 
   it('publishes through POST /2/tweets on the injected transport', async () => {

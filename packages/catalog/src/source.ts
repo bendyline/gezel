@@ -1339,6 +1339,12 @@ function mergeIdentityAndVersion(
       normalize: version.normalize,
       actions: version.actions,
       ...(version.completeness !== undefined ? { completeness: version.completeness } : {}),
+      // Dropping this left every script connector's credential with no
+      // allowed destination, so `http.authed` refused every call.
+      ...(version.allowedOrigins !== undefined ? { allowedOrigins: version.allowedOrigins } : {}),
+      ...(version.syncIntervalMinutes !== undefined
+        ? { syncIntervalMinutes: version.syncIntervalMinutes }
+        : {}),
       ...(version.notes !== undefined ? { notes: version.notes } : {}),
       availableVersions,
     };

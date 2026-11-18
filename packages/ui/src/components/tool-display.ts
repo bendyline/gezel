@@ -227,6 +227,9 @@ export const TOOL_DISPLAY_NAMES: Record<string, string> = {
   look_at_camera: 'Look at the camera',
   list_lookouts: 'Check lookouts',
   propose_lookout: 'Propose a lookout',
+  list_web_pages: 'Check saved web pages',
+  read_web_page: 'Read a saved web page',
+  request_web_page: 'Ask for a web page',
   draft_connector_action: 'Draft an action',
 
   // GitHub

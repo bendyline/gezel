@@ -279,6 +279,47 @@ describe('youtube-videos walking the uploads', () => {
     expect(await w.corpus()).toHaveLength(9);
   });
 
+  it('a channel that has never uploaded syncs as empty, then picks up its first upload', async () => {
+    const EMPTY = 'UCemptyEmptyEmptyEmpty00';
+    const w = await world({ syncIntervalHours: 0 }, [EMPTY]);
+    w.yt.channel({ id: EMPTY, title: 'Not yet', videos: [] });
+    const first = await w.pass();
+    expect(first.error).toBeUndefined();
+    expect(first.errors).toBe(0);
+    w.yt.upload(EMPTY, video(7));
+    const second = await w.pass();
+    expect(second.error).toBeUndefined();
+    expect(second.written).toBe(1);
+  });
+
+  it('a video that surfaces between ones already synced (published after sitting private) is picked up', async () => {
+    const w = await world({ syncIntervalHours: 0 });
+    await w.pass();
+    w.yt.upload(BENCH, video(4, { privacy: 'private' })).upload(BENCH, video(5));
+    expect((await w.pass()).written).toBe(1);
+    w.yt.updateVideo(video(4).id, { privacy: 'public' });
+    const r = await w.pass();
+    expect(r.written).toBe(1);
+    expect((await w.corpus()).map((x) => x.frontmatter.title)).toContain('Video number 4');
+    // Once held, it is not fetched again.
+    w.yt.calls.length = 0;
+    await w.pass();
+    expect(w.resources()).toEqual(['playlistItems']);
+  });
+
+  it('deleting the newest videos does not send the next walk back through the whole channel', async () => {
+    const w = await world({ syncIntervalHours: 0 });
+    for (let n = 4; n <= 40; n++) w.yt.upload(BENCH, video(n));
+    await w.pass();
+    for (let n = 16; n <= 40; n++) w.yt.deleteVideo(video(n).id);
+    w.yt.upload(BENCH, video(41));
+    w.yt.calls.length = 0;
+    const r = await w.pass();
+    expect(r.written).toBe(1);
+    const lookups = w.yt.calls.filter((c) => c.resource === 'videos');
+    expect(lookups.map((c) => c.query.get('id'))).toEqual([video(41).id]);
+  });
+
   it('skips a video made private between the playlist read and the lookup', async () => {
     const w = await world();
     const http = w.http;
@@ -317,6 +358,21 @@ describe('youtube-videos counts', () => {
     expect(byTitle['Video number 3']!.views).toBe('99999');
     expect(byTitle['Video number 3']!.metrics_updated_at).toBe(new Date(w.clock.now).toISOString());
     expect(byTitle['Video number 1']!.views).toBe('100');
+  });
+
+  it('a refresh bigger than one pass rotates, so every watched video gets its turn', async () => {
+    const w = await world({ syncIntervalHours: 0, metricsWindowDays: 10 });
+    await w.pass(2);
+    const refreshed = new Set<string>();
+    for (let cycle = 0; cycle < 2; cycle++) {
+      w.clock.now += 25 * 3_600_000;
+      w.yt.calls.length = 0;
+      await w.pass(2);
+      for (const c of w.yt.calls.filter((x) => x.resource === 'videos')) {
+        for (const id of c.query.get('id')!.split(',')) refreshed.add(id);
+      }
+    }
+    expect([...refreshed].sort()).toEqual([video(1).id, video(2).id, video(3).id].sort());
   });
 
   it('writes per-day engagement history when enabled', async () => {

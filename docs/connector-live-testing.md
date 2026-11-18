@@ -6,6 +6,36 @@ apps, and runs that prove the fakes match the real services. It is the last mile
 an adapter that passes against a fake but meets a different API shape in the wild
 fails here, and the fix is usually to the fake as much as the adapter.
 
+## Without an account: the connectors lane
+
+Some real services need no account, and the `connectors` lane of
+[live-smoke.yml](../.github/workflows/live-smoke.yml) runs against them on a schedule
+(set the repository variable `GEZEL_ENABLE_CONNECTOR_SMOKE=1`, or dispatch the workflow
+with lane `connectors`):
+
+- **Mail.** GreenMail 2.1.15 (IMAPS and SMTPS) and Dovecot 2.4.4 (IMAPS), each pinned
+  by image digest, started in the job.
+  [live-local.integration.test.ts](../packages/service/src/connectors/testing/live-local.integration.test.ts)
+  seeds a fresh folder over IMAP, backfills it through the production IMAP provider,
+  checks a second pass is quiet and a late message is picked up, and on GreenMail sends
+  through SMTP and finds the message delivered. A failure here fails the job.
+- **Public feeds.** [live-public.integration.test.ts](../packages/service/src/connectors/testing/live-public.integration.test.ts)
+  syncs a few long-lived feeds (RSS 2.0 and Atom) through the production RSS adapter. A
+  feed that answers but yields nothing valid fails the job; one that cannot be reached
+  after three tries is degraded, a warning, until the third degraded run in a row.
+
+Run either locally by pointing it at servers of your own:
+
+```bash
+GEZEL_CONNECTOR_LIVE_LOCAL=1 GEZEL_LIVE_MAIL='[{"name":"local","address":"alice@example.test","user":"alice","pass":"…","imap":{"host":"127.0.0.1","port":3993,"secure":true}}]' \
+  pnpm --filter @bendyline/gezel-service exec vitest run src/connectors/testing/live-local.integration.test.ts
+GEZEL_CONNECTOR_LIVE_PUBLIC=1 pnpm --filter @bendyline/gezel-service exec vitest run src/connectors/testing/live-public.integration.test.ts
+```
+
+Not in the lane yet: a local AT Protocol server for Bluesky publishing, a public GitHub
+fixture repository (wiki, releases, a pull request over 500 files), and YouTube with a
+free API key.
+
 ## The accounts to create
 
 Use dedicated test accounts, never a personal mailbox: the live check writes a full
@@ -99,6 +129,84 @@ is the shape to reproduce, because each item exercises a code path:
    in Gmail/Outlook/the IMAP Drafts folder, and that nothing was sent.
 5. Mutate the seed (reschedule, move, trash, edit) and re-run: the tombstone and
    moved-record paths only prove themselves against real change feeds.
+
+## Handing a connection to CI
+
+The nightly checks reuse connections you made by hand, so each provider's sign-in happens
+once, in the app. Export one into a GitHub environment secret (create the `connector-live`
+environment first, limited to the `main` branch, with no required reviewers so scheduled
+runs are not held):
+
+```bash
+cd packages/service
+pnpm --silent run connectors:export-credential -- --home ~/.gezel-dev --project <project> \
+  [--binding <connection id>] | gh secret set GEZEL_LIVE_GMAIL --env connector-live
+```
+
+The bundle is one line of JSON: the connection's type, version, settings and saved
+credential (for OAuth, the refresh token and the client it was issued to). It is written
+only to a pipe or, with `--out`, to a file only you can read; it never reaches a terminal.
+The export reads the home's secret store without changing it or refreshing the token.
+Export only test accounts, and read the line it prints: it names the account the sign-in
+reached. A browser already signed in to your own account used to connect that one in place
+of the test account; Gezel now refuses that at sign-in, but a connection made before the
+check records no account, so reconnect it before exporting. Google keeps about 100
+refresh tokens per account per app and drops the oldest without warning, and revokes them
+all when the password changes, so give CI a connection you do not reconnect while working
+locally.
+
+## The nightly check against real accounts
+
+[connector-accounts.yml](../.github/workflows/connector-accounts.yml) runs every night at
+09:23 UTC once the repository variable `GEZEL_ENABLE_CONNECTOR_ACCOUNTS=1` is set, and
+whenever it is dispatched by hand. Its job uses the `connector-live` environment, which
+holds:
+
+| Secret | What it is |
+|---|---|
+| `GEZEL_LIVE_GMAIL` | The Gmail test connection, exported as above |
+| `GEZEL_LIVE_OUTLOOK` | The Outlook.com test connection, exported as above |
+| `GEZEL_SECRETS_WRITER` | A token that may rewrite this environment's secrets (below) |
+
+[live-accounts.integration.test.ts](../packages/service/src/connectors/testing/live-accounts.integration.test.ts)
+starts a daemon in a fresh home, binds each exported connection over the HTTP API, and
+runs the same checks as the live acceptance run
+([acceptance.ts](../packages/service/src/connectors/testing/acceptance.ts)): the backfill
+settles with no error, the corpus keeps its invariants, records carry their family's
+frontmatter, and a second sync is quiet. An account that synced nothing fails, so keep a
+few messages in each test mailbox. A secret that is not set is skipped with a notice. A
+sign-in the provider no longer accepts is a warning naming the secret to export again,
+not a failure, since only a person can sign in.
+
+**Renewed sign-ins.** Microsoft issues a new refresh token every time one is used, and
+each lasts about 90 days. When a run's refresh changed the token, the job saves the
+renewed connection back into its secret, so the Outlook.com secret stays alive as long as
+the job runs. Google's refresh token does not change and is never rewritten. Saving needs
+`GEZEL_SECRETS_WRITER`; without it the job warns and keeps the old secret, which then has
+to be exported again within 90 days of its export.
+
+To create it: a fine-grained personal access token, resource owner **bendyline**,
+repository access **Only select repositories** → `bendyline/gezel`, repository
+permission **Environments: Read and write** and nothing else. Give it an expiry and a
+reminder, and store it in the `connector-live` environment (never as a repository
+secret, so only this job sees it). An organization that requires approval for
+fine-grained tokens has to approve it first.
+
+The logs are public, so the job prints only each secret's name, type, status and record
+count. The renewed tokens are masked before anything else runs, and failure details that
+name record files (whose names carry subjects and senders) are cut to their first line.
+To see them, run the check locally with the same bundles:
+
+```bash
+cd packages/service
+GEZEL_LIVE_GMAIL="$(pnpm --silent run connectors:export-credential -- --home ~/.gezel-dev \
+  --project <project> --binding <gmail connection id>)" \
+GEZEL_CONNECTOR_LIVE_ACCOUNTS=1 GEZEL_LIVE_ACCOUNTS=GEZEL_LIVE_GMAIL \
+  ../../node_modules/.bin/vitest run src/connectors/testing/live-accounts.integration.test.ts
+```
+
+A local run refreshes the token like a nightly one. Microsoft keeps the token it replaced
+valid until its own expiry, so this does not break the secret.
 
 ## What only a live run can confirm
 

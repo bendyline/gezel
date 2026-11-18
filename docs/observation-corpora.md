@@ -261,6 +261,15 @@ A native adapter can do better than either when the source reports its own
 types — `azure-monitor-logs` derives the schema from Azure's typed column
 list, which is the main reason it is native rather than a manifest.
 
+**`dedupeKey`** names the columns (up to eight) that identify one row. A
+source that delivers some rows again — an overlapping time window, a full
+re-fetch each pass — lands them twice on disk, and the table's view shows one
+row per key: the copy delivered last (NDJSON over Parquet, then the later
+part). The view applies it with a window function, so a filter on the
+partition column may no longer prune files: declare it only where re-delivery
+is real, and never where two identical rows are two real events. A key naming
+a column the manifest lacks is ignored.
+
 ## 7. The AI surface
 
 Three tools, registered **only** for projects that hold a tabular corpus (the

@@ -71,12 +71,7 @@ export function registerCameraTools(deps: CameraToolDependencies): void {
           id: l.id,
           name: l.name,
           status: l.state === 'proposed' ? 'proposed' : l.enabled ? 'on' : 'off',
-          watchesFor:
-            l.condition.kind === 'ask'
-              ? l.condition.question
-              : l.condition.kind === 'motion'
-                ? 'anything moving'
-                : l.condition.subjects.join(', '),
+          watchesFor: watchesFor(l.condition),
           actions: l.actions.map((a) => a.kind),
           firedToday: l.firedToday,
           ...(l.lastFiredAt ? { lastFiredAt: l.lastFiredAt } : {}),
@@ -141,4 +136,26 @@ export function registerCameraTools(deps: CameraToolDependencies): void {
       }
     },
   );
+}
+
+/** What a lookout watches for, in a few words. */
+function watchesFor(
+  condition: Awaited<ReturnType<GezelClient['listLookouts']>>['lookouts'][number]['condition'],
+): string {
+  const under =
+    'pathPrefix' in condition && condition.pathPrefix ? ` under ${condition.pathPrefix}` : '';
+  switch (condition.kind) {
+    case 'ask':
+      return condition.question;
+    case 'motion':
+      return 'anything moving';
+    case 'subject':
+      return condition.subjects.join(', ');
+    case 'page-changed':
+      return `a saved page changing${under}`;
+    case 'page-added':
+      return `a new page appearing${under}`;
+    case 'text-appears':
+      return `"${condition.text}" appearing on a page${under}`;
+  }
 }

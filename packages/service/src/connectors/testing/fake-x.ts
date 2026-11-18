@@ -11,6 +11,12 @@
  * errors are RFC 7807 problem bodies. Ids are real snowflakes minted from the
  * fake clock, so their order is their age. An edit mints a new id and the
  * timelines return only the newest version, as X does.
+ *
+ * A post over 280 characters arrives with `text` cut to 280 (ending in an
+ * ellipsis and a link) and its whole text in `note_tweet.text`, only when
+ * `tweet.fields` names `note_tweet`. A repost sits in the account's own
+ * timeline as `RT @author: …` with a `retweeted` reference, unless the
+ * request says `exclude=retweets`.
  */
 
 import { FakeHttp, type FakeRequest, FakeTokenEndpoint, json, status } from './fake-http.js';
@@ -26,6 +32,8 @@ interface FakePost {
   createdAt: string;
   authorId: string;
   inReplyTo?: string;
+  /** Set on a repost: the reposted post's id. */
+  repostOf?: string;
   likes: number;
   reposts: number;
   views: number;
@@ -35,15 +43,15 @@ export interface FakeXOptions {
   now?: Date;
   userId?: string;
   username?: string;
+  /** A confidential app: the token endpoint then accepts only HTTP Basic client auth. */
+  clientSecret?: string;
 }
 
 export class FakeX {
   readonly http = new FakeHttp();
-  readonly tokens = new FakeTokenEndpoint(X_TOKEN_URL, {
-    rotateRefreshToken: true,
-    expiresIn: 7200,
-  });
+  readonly tokens: FakeTokenEndpoint;
   now: Date;
+  private readonly clientSecret: string | undefined;
   readonly userId: string;
   readonly username: string;
   followers = 120;
@@ -56,6 +64,14 @@ export class FakeX {
   private seq = 0n;
 
   constructor(opts: FakeXOptions = {}) {
+    this.clientSecret = opts.clientSecret;
+    this.tokens = new FakeTokenEndpoint(X_TOKEN_URL, {
+      rotateRefreshToken: true,
+      expiresIn: 7200,
+      ...(opts.clientSecret
+        ? { confidentialBasicOnly: { clientId: 'x-client', clientSecret: opts.clientSecret } }
+        : {}),
+    });
     this.now = opts.now ?? new Date('2026-08-31T22:00:00.000Z');
     this.userId = opts.userId ?? '9001';
     this.username = opts.username ?? 'gezelfake';
@@ -71,6 +87,7 @@ export class FakeX {
       refreshToken: this.tokens.issueRefreshToken(),
       expiresAt: '2999-01-01T00:00:00.000Z',
       clientId: 'x-client',
+      ...(this.clientSecret ? { clientSecret: this.clientSecret } : {}),
     };
   }
 
@@ -90,6 +107,22 @@ export class FakeX {
       likes: opts.likes ?? 0,
       reposts: 0,
       views: 10,
+    });
+    return id;
+  }
+
+  /** The account reposts someone else's post; returns the repost's id. */
+  addRepost(original: { id: string; text: string; username: string }): string {
+    const id = this.mint();
+    this.posts.push({
+      versions: [id],
+      text: `RT @${original.username}: ${original.text}`,
+      createdAt: this.now.toISOString(),
+      authorId: this.userId,
+      repostOf: original.id,
+      likes: 0,
+      reposts: 0,
+      views: 0,
     });
     return id;
   }
@@ -171,14 +204,20 @@ export class FakeX {
     withAuthor: boolean,
   ): Record<string, unknown> {
     const id = post.versions.at(-1)!;
+    const long = post.text.length > 280;
+    const references = [
+      ...(post.inReplyTo ? [{ type: 'replied_to', id: post.inReplyTo }] : []),
+      ...(post.repostOf ? [{ type: 'retweeted', id: post.repostOf }] : []),
+    ];
     return {
       id,
-      text: post.text,
+      text: long ? `${post.text.slice(0, 256)}… https://t.co/${id.slice(-10)}` : post.text,
       edit_history_tweet_ids: [...post.versions],
+      ...(long && fields.has('note_tweet') ? { note_tweet: { text: post.text } } : {}),
       ...(fields.has('created_at') ? { created_at: post.createdAt } : {}),
       ...(fields.has('lang') ? { lang: 'en' } : {}),
-      ...(fields.has('referenced_tweets') && post.inReplyTo
-        ? { referenced_tweets: [{ type: 'replied_to', id: post.inReplyTo }] }
+      ...(fields.has('referenced_tweets') && references.length
+        ? { referenced_tweets: references }
         : {}),
       ...(fields.has('author_id') || withAuthor ? { author_id: post.authorId } : {}),
       ...(fields.has('public_metrics')
@@ -222,12 +261,15 @@ export class FakeX {
       });
     }
     const startTime = q.get('start_time');
+    const excluded = new Set((q.get('exclude') ?? '').split(',').filter(Boolean));
     const fields = new Set((q.get('tweet.fields') ?? '').split(',').filter(Boolean));
     let rows = this.sorted(list).filter((p) => {
       const id = BigInt(p.versions.at(-1)!);
       if (sinceId && id <= BigInt(sinceId)) return false;
       if (untilId && id >= BigInt(untilId)) return false;
       if (startTime && Date.parse(p.createdAt) < Date.parse(startTime)) return false;
+      if (p.repostOf && excluded.has('retweets')) return false;
+      if (p.inReplyTo && excluded.has('replies')) return false;
       return true;
     });
     const offset = Number(q.get('pagination_token') ?? '0') || 0;

@@ -299,18 +299,52 @@ function isEnumerator(before: string, after: string, value: number): boolean {
   return value < 100 && /^[\s*_#>-]*$/.test(before) && /^[.)](?:\s|\*|$)/.test(after);
 }
 
+const LINE_SPAN = String.raw`[~≈]?\d+(?:\s*(?:[-–—]|to|through)\s*[~≈]?\d+)?`;
+
+/**
+ * Where something sits in a file: a hunk header, `src/a.ts:42`, "lines
+ * 634–722" (a list of ranges after the plural), `L123`. A reviewer works
+ * these out by counting from a diff's hunk headers, so no source states
+ * them. A pull-request review was refused for nine such numbers and sent to
+ * re-read a diff that could not hold them (docblocks PR #58, 2026-11-17).
+ * "A 32-line addition" is a count and is still checked.
+ */
+const LINE_LOCATORS: readonly RegExp[] = [
+  /@@\s*-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?(?:\s*@@)?/g,
+  /(?<![\w./-])(?:[\w.@+-]+\/)*[\w@+-][\w.@+-]*\.[A-Za-z]\w*:\d+(?:[-–]\d+|:\d+)*/g,
+  /(?<![\w./-])(?:[\w.@+-]+\/)+[A-Za-z_][\w.@+-]*:\d+(?:[-–]\d+|:\d+)*/g,
+  new RegExp(
+    String.raw`\blines\s+${LINE_SPAN}(?:\s*(?:,\s*(?:and\s+)?|and\s+|&\s*)${LINE_SPAN})*`,
+    'gi',
+  ),
+  /\bline\s+[~≈]?\d+(?:\s*[-–—]\s*\d+)?/gi,
+  /(?<!\w)L\d+(?:[-–]L?\d+)?\b/g,
+];
+
+export interface ClaimOptions {
+  /** Whether quotation-mark spans are claims; see `GroundOptions.quotes`. */
+  quotes?: boolean;
+  /** Whether line numbers that locate code are claims; see `GroundOptions.lineLocators`. */
+  lineLocators?: boolean;
+}
+
 /** The checkable details a sentence states. */
-export function extractClaims(text: string): Claim[] {
+export function extractClaims(text: string, options: ClaimOptions = {}): Claim[] {
   // Code spans, link targets and file references name things in a workspace
   // or on the web, not facts about the world; their digits and identifiers are
   // not claims. "(timeline.md:36–42)" points at lines: it was refused as "36
   // next to Anita" (2026-10-20, incident-postmortem on GLM 5.3).
-  const sentence = text
+  const referenced = text
     .replace(/`[^`]*`/g, ' ')
     .replace(/\]\([^)]*\)/g, ']')
     .replace(/\bhttps?:\/\/\S+/g, ' ')
     .replace(ATTRIBUTION_PARENTHETICAL, ' ')
     .replace(FILE_REFERENCE, ' ');
+  const sentence =
+    options.lineLocators === false
+      ? LINE_LOCATORS.reduce((rest, locator) => rest.replace(locator, ' '), referenced)
+      : referenced;
+  const checkQuotes = options.quotes !== false;
   const claims: Claim[] = [];
   const seen = new Set<string>();
   const add = (
@@ -332,8 +366,10 @@ export function extractClaims(text: string): Claim[] {
       });
     }
   };
-  for (const m of sentence.matchAll(/["“]([^"”]{8,}?)["”]/g)) {
-    if ((m[1] ?? '').trim().split(/\s+/).length >= 3) add('quote', (m[1] ?? '').trim());
+  if (checkQuotes) {
+    for (const m of sentence.matchAll(/["“]([^"”]{8,}?)["”]/g)) {
+      if ((m[1] ?? '').trim().split(/\s+/).length >= 3) add('quote', (m[1] ?? '').trim());
+    }
   }
   const unquoted = sentence.replace(/["“][^"”]*["”]/g, ' ');
   for (const m of unquoted.matchAll(CLOCK_TIME)) add('number', m[1] ?? '', { clock: true });
@@ -702,6 +738,21 @@ export interface GroundOptions {
    * and quotes are still checked.
    */
   names?: boolean;
+  /**
+   * Whether a quotation-mark span is checked as a quotation (default on).
+   * Off for a codebase: what a reviewer quotes from code sits in backticks,
+   * already skipped, and what sits in quotation marks is the reviewer's own
+   * label or proposed wording. "is this dark" and "watcher expired / no
+   * notice element ever matched" were refused as quotes no source holds
+   * (docblocks PR #58, 2026-11-17).
+   */
+  quotes?: boolean;
+  /**
+   * Whether a line number that locates code is checked as a number (default
+   * on). Off for a codebase; see `LINE_LOCATORS`. Every other number is
+   * still checked.
+   */
+  lineLocators?: boolean;
 }
 
 interface GroundContext {
@@ -713,6 +764,7 @@ interface GroundContext {
   sources: string[];
   given: string;
   names: boolean;
+  claims: ClaimOptions;
   opaque?: (n: number) => boolean;
 }
 
@@ -729,6 +781,7 @@ function groundContext(
     sources: [...normalized.values(), ...(given ? [given] : [])],
     given,
     names: options.names ?? true,
+    claims: { quotes: options.quotes ?? true, lineLocators: options.lineLocators ?? true },
     ...(options.opaque ? { opaque: options.opaque } : {}),
   };
 }
@@ -802,7 +855,9 @@ function groundWith(
   if (sentence.cites.length === 0 && DISCLAIMS.test(sentence.text)) {
     return { ...sentence, status: 'non-factual', checks: [], missing: [] };
   }
-  const claims = extractClaims(sentence.text).filter((c) => ctx.names || c.kind !== 'name');
+  const claims = extractClaims(sentence.text, ctx.claims).filter(
+    (c) => ctx.names || c.kind !== 'name',
+  );
   const opaque = sentence.cites.filter((n) => !ctx.evidence.has(n) && ctx.opaque?.(n));
   const badCites = sentence.cites.filter((n) => !ctx.evidence.has(n) && !opaque.includes(n));
   if (badCites.length > 0) {

@@ -39,8 +39,8 @@ import {
   type MailSyncOptions,
   type OutgoingMail,
   type SavedDraft,
-  backfillStartMs,
   batchLimit,
+  resyncStartMs,
 } from '../types.js';
 
 const log = createLogger('mail');
@@ -138,6 +138,10 @@ export class GmailMailProvider implements MailProvider {
     }
   }
 
+  private now(): number {
+    return (this.opts.now ?? Date.now)();
+  }
+
   async listFolders(): Promise<MailFolder[]> {
     const data = await this.api<{ labels?: { id: string; name: string }[] }>('/labels');
     return (data.labels ?? []).map((l) => ({ path: l.id, name: l.name }));
@@ -160,7 +164,7 @@ export class GmailMailProvider implements MailProvider {
       } catch (err) {
         if (hasStatus(err, 404)) {
           log.info(`gmail ${folder}: history ${cursor.gmailHistoryId} has expired; resyncing`);
-          return this.backfill(folder, undefined, limit);
+          return this.backfill(folder, undefined, limit, cursor.syncedAt);
         }
         if (hasStatus(err, 400) && cursor.gmailHistoryPage?.token) {
           // A stale page token: walk the same history again from its start.
@@ -185,6 +189,7 @@ export class GmailMailProvider implements MailProvider {
     folder: string,
     state: MailCursor['gmailBackfill'],
     limit: number,
+    syncedAt?: number,
   ): Promise<FolderChanges> {
     let anchor = state?.anchor;
     let after = state?.after;
@@ -192,7 +197,7 @@ export class GmailMailProvider implements MailProvider {
       const profile = await this.api<{ historyId?: string }>('/profile');
       if (!profile.historyId) throw new Error('Gmail returned no history id for this mailbox');
       anchor = profile.historyId;
-      after = Math.floor(backfillStartMs(this.opts) / 1000);
+      after = Math.floor(resyncStartMs(this.opts, syncedAt) / 1000);
     }
     let pageToken = state?.pageToken;
     const envelopes: MailEnvelope[] = [];
@@ -218,7 +223,7 @@ export class GmailMailProvider implements MailProvider {
     if (pageToken) {
       return { envelopes, cursor: { gmailBackfill: { anchor, after, pageToken } }, partial: true };
     }
-    return { envelopes, cursor: { gmailHistoryId: anchor } };
+    return { envelopes, cursor: { gmailHistoryId: anchor, syncedAt: this.now() } };
   }
 
   /**
@@ -258,7 +263,10 @@ export class GmailMailProvider implements MailProvider {
       });
       if (used < ids.length) return { envelopes, cursor: at(token, used), partial: true };
       if (!data.nextPageToken) {
-        return { envelopes, cursor: { gmailHistoryId: data.historyId ?? start } };
+        return {
+          envelopes,
+          cursor: { gmailHistoryId: data.historyId ?? start, syncedAt: this.now() },
+        };
       }
       token = data.nextPageToken;
       skip = 0;

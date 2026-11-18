@@ -59,13 +59,33 @@ export async function sleepWithAbort(ms: number, signal?: AbortSignal): Promise<
  * the status code. Callers that want a friendlier message pass one in.
  */
 export class HttpStatusError extends Error {
+  /** The response's `Retry-After`, in milliseconds, when it carried one. */
+  readonly retryAfterMs?: number;
   constructor(
     readonly status: number,
     message?: string,
+    opts: { retryAfterMs?: number } = {},
   ) {
     super(message ?? `HTTP ${status}`);
     this.name = 'HttpStatusError';
+    if (opts.retryAfterMs !== undefined) this.retryAfterMs = opts.retryAfterMs;
   }
+}
+
+/**
+ * A `Retry-After` header in milliseconds: delta-seconds or an HTTP date.
+ * Undefined when absent, unreadable, or in the past.
+ */
+export function parseRetryAfterMs(
+  header: string | null | undefined,
+  now: number = Date.now(),
+): number | undefined {
+  const raw = header?.trim();
+  if (!raw) return undefined;
+  if (/^\d+(?:\.\d+)?$/.test(raw)) return Math.round(Number(raw) * 1_000);
+  const at = Date.parse(raw);
+  if (!Number.isFinite(at)) return undefined;
+  return at > now ? at - now : undefined;
 }
 
 /**

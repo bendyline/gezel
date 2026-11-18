@@ -60,11 +60,16 @@ import { ConnectorActionManager } from './connectors/actions.js';
 import { CAMERA_ADAPTER_ID, CameraService } from './connectors/live/camera/service.js';
 import { LiveConnectorHost } from './connectors/live/host.js';
 import { registerLiveAdapter } from './connectors/live/registry.js';
-import { ConnectorManager } from './connectors/manager.js';
+import { ConnectorManager, type ConnectorSyncedInfo } from './connectors/manager.js';
+import { websiteLookoutFeed } from './connectors/natives/website-lookout-feed.js';
+import { WebsiteService } from './connectors/natives/website-service.js';
 import {
+  connectorSyncSource,
   registerProductConnectorAdapters,
+  startConnectorHousekeeping,
   wireProductConnectorTaskPreparation,
 } from './connectors/product-wiring.js';
+import { ComponentStore } from './connectors/spectral/component-store.js';
 import { ConnectorSyncManager } from './connectors/sync-manager.js';
 import { makeCraftbookResolver } from './craftbook/resolve.js';
 import {
@@ -84,6 +89,8 @@ import { ProjectDigestGenerator } from './digest/generator.js';
 import { prepareNativeEngines } from './engine-discovery.js';
 import { LookoutManager } from './lookouts/manager.js';
 import { SoundPlayer } from './lookouts/sound-player.js';
+import { FakePageCapturer } from './page-capture/fake-capturer.js';
+import { PageCaptureService } from './page-capture/service.js';
 import { startMemoryDiagnostics } from './perf/memory-diagnostics.js';
 import { resolveCraftbookOwner, startCraftbookRun } from './tasks/craftbook-run.js';
 
@@ -185,6 +192,7 @@ import { normalizeBundledPnpmPath } from './packages/pnpm.js';
 import { PreviewLogBuffer } from './preview-log/buffer.js';
 import { recoverTypedProjectCreations } from './project-type/create.js';
 import { ProjectTypeUpgrader } from './project-type/upgrader.js';
+import { createPromptConnectors } from './prompt-connectors/index.js';
 import { PromptDraftManager } from './prompt-drafts/manager.js';
 import { PromptDraftSweeper } from './prompt-drafts/sweeper.js';
 import { SpeechToTextProviderManager } from './providers/audio/stt-manager.js';
@@ -780,6 +788,7 @@ export async function startProductService(
     getCert: () => cert?.certPem ?? null,
     issueSessionToken: (input) => tokenStore.issueSession(input),
     revokeSessionToken: (appId) => tokenStore.revokeSession(appId),
+    issueSessionBootstrapCode: (appId) => tokenStore.issueSessionBootstrap(appId),
     cacheController,
     home,
     providers: mockProviders,
@@ -1790,7 +1799,11 @@ export async function startProductService(
   const indexingJob = new IndexingJobControl(store, tasks);
   // Background "boekwachter" enrichment: summaries + embeddings when idle,
   // bulk during night shift, folder/architecture rollups once files drain.
+  // Built later (it needs the connector manager); synopses arrive afterwards.
+  let websitesRef: WebsiteService | null = null;
   const indexEnrichment = new IndexEnrichmentManager({
+    onWebPageSummaries: (projectId, summaries) =>
+      void websitesRef?.noteSummaries(projectId, summaries).catch(() => {}),
     store,
     chat,
     contentIndex,
@@ -2048,20 +2061,60 @@ export async function startProductService(
   if (connectorFetch) {
     log.warn('[service] GEZEL_CONNECTOR_SIMULATOR is set — connectors sync simulated accounts');
   }
+  // Website connections render pages in a sandboxed browser behind a
+  // filtering proxy (docs/website-connector.md). Under the simulator they
+  // "render" from the simulated world instead, with no browser and no network.
+  const pageCapture = connectorFetch
+    ? new FakePageCapturer(connectorFetch)
+    : new PageCaptureService({
+        home,
+        isAllowed: async () => resolveSecurityPolicy(await store.readConfig()).allowConnectorData,
+      });
   // The live host (built below) runs device bindings; the manager tells it
   // when bindings change and folds its status into the Connections view.
   let liveConnectorsRef: LiveConnectorHost | null = null;
+  // Spectral types built on a published Prismatic component fetch it when a
+  // connection is made (connectors/spectral/component-store.ts).
+  const connectorComponents = new ComponentStore({
+    home,
+    policy: {
+      refusal: async () =>
+        resolveSecurityPolicy(await store.readConfig()).allowConnectorData
+          ? undefined
+          : 'Connections are off at this security level. Turn on App network in Settings → Security & compliance to connect.',
+    },
+  });
   const connectors = new ConnectorManager({
     store,
     secrets,
     catalog,
     contentIndex,
     scriptRunner,
+    components: connectorComponents,
     locks: connectorLocks,
     ...(connectorFetch ? { fetch: connectorFetch } : {}),
+    capturer: pageCapture,
     onBindingsChanged: () => void liveConnectorsRef?.reconcile(),
     liveStatus: (projectId) => liveConnectorsRef?.status(projectId) ?? [],
+    onSynced: (projectId, info) => {
+      chatEvents.publishProjectEvent(projectId, {
+        type: 'connector_synced',
+        projectId,
+        bindingId: info.bindingId,
+        connectorType: info.type,
+        written: info.written,
+        removed: info.removed,
+        ...(info.continuing ? { continuing: true } : {}),
+      });
+      websiteSyncedHook?.(projectId, info);
+    },
   });
+  const websites = new WebsiteService({ store, connectors, secrets, capturer: pageCapture });
+  websitesRef = websites;
+  const promptConnectors = createPromptConnectors({ store, catalog, websites });
+  chat.setPromptConnectors(promptConnectors);
+  /** Set below once the lookout engine exists: website changes feed it. */
+  let websiteSyncedHook: ((projectId: string, info: ConnectorSyncedInfo) => void) | null = null;
   const connectorActions = new ConnectorActionManager({
     store,
     secrets,
@@ -2077,14 +2130,13 @@ export async function startProductService(
     chat,
     idle: systemIdle,
     isNightShiftActive: () => nightShift.isActive(),
-    source: {
-      label: 'connectors',
-      // Device bindings never sync (the live host runs them), so they must
-      // not make a project look "due" on every tick.
-      listBindings: (p) => (p.connectors ?? []).filter((b) => b.driver !== 'device'),
-      posture: (pol) => pol.allowExternalServices,
-      syncProject: (p) => connectors.syncProject(p),
-    },
+    source: connectorSyncSource(connectors),
+  });
+  // A network wake before connectorSync.start() is a no-op: tickSoon waits for the loop.
+  const stopConnectorHousekeeping = startConnectorHousekeeping({
+    connectors,
+    components: connectorComponents,
+    sync: connectorSync,
   });
 
   // Device connectors (cameras) and lookouts. A camera binding is a
@@ -2185,6 +2237,7 @@ export async function startProductService(
     },
   });
   cameras.setLookoutSink(lookouts);
+  websiteSyncedHook = websiteLookoutFeed({ store, connectors, lookouts });
 
   // A craftbook that reads a connector corpus gets it pulled down at
   // LAUNCH, before its first step's prompt is built — the gezel then
@@ -2398,6 +2451,8 @@ export async function startProductService(
     inputStaging,
     connectors,
     connectorActions,
+    websites,
+    promptConnectors,
     liveConnectors,
     cameras,
     lookouts,
@@ -2822,6 +2877,7 @@ export async function startProductService(
       stopping = true;
       bootMaintenance.stop();
       optionalDownloads.stop();
+      stopConnectorHousekeeping();
       // Model workers refuse new work from here and drain while the rest
       // shuts down; each is terminated once idle, never mid-run, because
       // process.exit tearing one down inside onnxruntime aborts the process.
@@ -2871,6 +2927,8 @@ export async function startProductService(
       // An open document-edit window would otherwise lose its audit event.
       await shutdownStep('document audit flush', () => store.flushDocumentAudit().catch(() => {}));
       connectorSync.stop();
+      connectors.cancelPasses({}, 'Gezel is shutting down');
+      websites.closeAll();
       await shutdownStep('cameras', async () => {
         await liveConnectors.stop();
         await cameras.stop();

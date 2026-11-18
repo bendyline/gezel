@@ -134,3 +134,23 @@ export {
   type CorpusCoverageMergeResult,
   type CorpusCoverageShardInput,
 } from './corpus-coverage.js';
+export {
+  PATCH_LINE_LEGEND,
+  PR_CANDIDATE_TEXT_LIMIT,
+  PR_FINDING_START_RE,
+  formatLineRanges,
+  generatedBatchObservations,
+  generatedFileKind,
+  numberUnifiedPatch,
+  parsePatchRecord,
+  parsePrVerificationCandidates,
+  prFindingBlocks,
+  prFindingWordingProblem,
+  type GeneratedBatchFile,
+  type GeneratedFileKind,
+  type ParsedPatchRecord,
+  type PatchLine,
+  type PrFindingBlock,
+  type PrFindingWordingProblem,
+  type PrVerificationCandidate,
+} from './pr-review.js';

@@ -45,8 +45,8 @@ import {
   type MailSyncOptions,
   type OutgoingMail,
   type SavedDraft,
-  backfillStartMs,
   batchLimit,
+  resyncStartMs,
 } from '../types.js';
 
 const log = createLogger('mail');
@@ -164,8 +164,10 @@ export class GraphMailProvider implements MailProvider {
     return (data.value ?? []).map((f) => ({ path: f.id, name: f.displayName }));
   }
 
-  private initialDeltaUrl(folder: string): string {
-    const since = new Date(backfillStartMs(this.opts)).toISOString().replace(/\.\d{3}Z$/, 'Z');
+  private initialDeltaUrl(folder: string, syncedAt?: number): string {
+    const since = new Date(resyncStartMs(this.opts, syncedAt))
+      .toISOString()
+      .replace(/\.\d{3}Z$/, 'Z');
     return (
       `${GRAPH}/mailFolders/${encodeURIComponent(mapFolder(folder))}/messages/delta` +
       `?$select=${DELTA_SELECT}&$filter=receivedDateTime+ge+${since}`
@@ -194,7 +196,7 @@ export class GraphMailProvider implements MailProvider {
         if (!restarted && isDeltaReset(err)) {
           log.info(`graph ${folder}: delta state expired; resyncing the window`);
           restarted = true;
-          url = this.initialDeltaUrl(folder);
+          url = this.initialDeltaUrl(folder, cursor?.syncedAt);
           continue;
         }
         throw err;
@@ -215,14 +217,27 @@ export class GraphMailProvider implements MailProvider {
       if (next) {
         const safe = validateGraphUrl(next);
         if (envelopes.length + pageSize > limit || pages + 1 >= MAX_PAGES_PER_CALL) {
-          return { envelopes, cursor: { graphNextLink: safe }, partial: true };
+          return {
+            envelopes,
+            cursor: {
+              graphNextLink: safe,
+              ...(cursor?.syncedAt !== undefined ? { syncedAt: cursor.syncedAt } : {}),
+            },
+            partial: true,
+          };
         }
         url = safe;
         continue;
       }
       const delta = data['@odata.deltaLink'];
       if (!delta) throw new Error('Microsoft Graph delta returned neither a next nor a delta link');
-      return { envelopes, cursor: { graphDeltaLink: validateGraphUrl(delta) } };
+      return {
+        envelopes,
+        cursor: {
+          graphDeltaLink: validateGraphUrl(delta),
+          syncedAt: (this.opts.now ?? Date.now)(),
+        },
+      };
     }
   }
 

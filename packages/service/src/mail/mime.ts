@@ -8,6 +8,7 @@
 
 import { createHash } from 'node:crypto';
 import { type AddressObject, type ParsedMail, simpleParser } from 'mailparser';
+import { stripDataImages } from '../connectors/markdown-images.js';
 import { htmlBodyToMarkdown } from './html.js';
 import { stripQuotedAndSignature } from './quote.js';
 import type { MailAttachment, MailMessage } from './types.js';
@@ -66,6 +67,19 @@ function headerDate(parsed: ParsedMail): string | undefined {
   return date.toISOString();
 }
 
+/**
+ * A plain-text alternative that only says to read the HTML one: newsletters,
+ * receipts and some marketing tools send these.
+ */
+function isPlainTextStub(text: string): boolean {
+  return (
+    text.length < 400 &&
+    /\bhtml\b|web ?page|in (?:your|a) browser|view (?:it|this|the email|this email) online|online version|does not support|cannot display/i.test(
+      text,
+    )
+  );
+}
+
 /** The first Message-ID of an In-Reply-To header (some clients list several). */
 function firstMessageId(value: string | undefined): string | undefined {
   if (!value?.trim()) return undefined;
@@ -87,16 +101,20 @@ export async function parseRawMessage(
   const threadKey = references[0] ?? inReplyTo ?? messageId;
   const date = ownDate ?? ctx.fallbackDate ?? new Date(0).toISOString();
 
-  // Body: prefer plain text; otherwise convert the HTML alternative.
+  // Body: prefer plain text, unless it is only a stub pointing at the HTML;
+  // otherwise convert the HTML alternative.
   let body: string;
-  if (parsed.text?.trim()) {
-    body = parsed.text;
+  const text = parsed.text?.trim() ?? '';
+  if (text && !(parsed.html && isPlainTextStub(text))) {
+    body = parsed.text!;
   } else if (parsed.html) {
     body = await htmlBodyToMarkdown(parsed.html);
   } else {
     body = '';
   }
-  const bodyMarkdown = stripQuotedAndSignature(body);
+  const forwarded = /^\s*(?:fwd?|fw)\s*:/i.test(parsed.subject ?? '');
+  // mailparser renders an HTML-only message's pictures into its own text too.
+  const bodyMarkdown = stripQuotedAndSignature(stripDataImages(body), { forwarded });
 
   const attachments: MailAttachment[] = [];
   for (const att of parsed.attachments ?? []) {

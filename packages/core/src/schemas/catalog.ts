@@ -1322,6 +1322,13 @@ const ConnectorActionSchema = z.object({
   name: z.string(),
   /** Consent gate this action clears at commit time (e.g. `recipient-allowlist`). */
   consentScope: z.string(),
+  /**
+   * The shape the action's input must have, in the same JSON-Schema subset as
+   * `configSchema`. Checked when a draft is made and again at commit, so a
+   * malformed draft is refused while its author can still fix it, not when a
+   * person approves it.
+   */
+  inputSchema: z.record(z.string(), z.unknown()).optional(),
 });
 
 /**
@@ -1368,6 +1375,12 @@ const ConnectorTypeCompositionShape = {
    * boundary).
    */
   allowedOrigins: z.array(z.string()).optional(),
+  /**
+   * How often the background loop syncs a binding of this type, in minutes,
+   * in place of the install-wide interval. Longer for a paid or tightly
+   * rationed API, shorter for a cheap feed.
+   */
+  syncIntervalMinutes: z.number().int().min(5).max(10_080).optional(),
   notes: z.string().optional(),
 } as const;
 
@@ -2741,6 +2754,11 @@ export const ToolsetConfigSchema = z.object({
 });
 export type ToolsetConfig = z.infer<typeof ToolsetConfigSchema>;
 
-export { compareSemver, isSemver, newestVersionFirst } from './catalog-semver.js';
+export {
+  compareSemver,
+  isSemver,
+  newestVersionFirst,
+  satisfiesRange,
+} from './catalog-semver.js';
 export * from './chat-model-sources.js';
 export * from './gezapp.js';

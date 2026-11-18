@@ -44,6 +44,7 @@ import type {
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
+import { retryAfterOf } from '../types.js';
 import { ReconnectRequiredError } from './oauth-session.js';
 import {
   type WatchedPost,
@@ -163,8 +164,10 @@ interface MediaWalk {
   page?: string;
   skip: number;
   lastId?: string;
-  /** The incremental floor the walk started from. */
-  floorTs: string;
+  /** The incremental floor the walk started from; absent while the first backfill runs. */
+  floorTs?: string;
+  /** Media the first backfill may still take, toward `maxMedia`; only set without a floor. */
+  backfillLeft?: number;
   /** High-water mark seen so far; becomes `sinceTs` when the walk completes. */
   newestTs?: string;
   metricsDue: boolean;
@@ -262,7 +265,8 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
       if (scope === 'stats') return await this.listStats(cursor);
       return { records: [], cursor };
     } catch (err) {
-      if (isRateLimitError(err)) return { records: [], cursor, rateLimited: true };
+      if (isRateLimitError(err))
+        return { records: [], cursor, rateLimited: true, ...retryAfterOf(err) };
       if (isTokenRejected(err)) {
         this.accountFailure = reconnectError();
         throw this.accountFailure;
@@ -405,10 +409,14 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
     const walk = prior?.walk;
     const floorTs = walk ? walk.floorTs : prior?.sinceTs;
     const sinceMs = tsMs(floorTs);
-    // The first sync is one window of the newest `maxMedia` items and never
-    // continues; older history is deliberately not backfilled.
+    // The first sync takes the newest `maxMedia` items, over as many engine
+    // rounds as that needs; older history is deliberately not backfilled.
     const firstPass = sinceMs === undefined;
-    const limit = Math.max(1, Math.min(opts?.limit ?? config.maxMedia, config.maxMedia));
+    const backfillLeft = firstPass ? (walk?.backfillLeft ?? config.maxMedia) : undefined;
+    const limit = Math.max(
+      1,
+      Math.min(opts?.limit ?? config.maxMedia, backfillLeft ?? config.maxMedia),
+    );
     // The first pass is one bounded backfill; it observes metrics for
     // everything it fetches, so the refresh window starts counting from it.
     const metricsDue = walk
@@ -432,9 +440,21 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
     let full = false;
 
     for (let p = 0; p < MAX_PAGES_PER_PASS && !done && !full; p++) {
-      const res = (await this.runtime.getJson(
-        page ? this.withToken(page) : this.firstMediaPageUrl(),
-      )) as { data?: unknown[]; paging?: { next?: unknown } };
+      let res: { data?: unknown[]; paging?: { next?: unknown } };
+      try {
+        res = (await this.runtime.getJson(
+          page ? this.withToken(page) : this.firstMediaPageUrl(),
+        )) as typeof res;
+      } catch (err) {
+        // Meta's paging cursors go stale. A stored page it refuses restarts
+        // the walk from the newest page: what it re-lists is unchanged, so
+        // the engine writes nothing for it.
+        if (p !== 0 || !page || !isStaleCursor(err)) throw err;
+        page = undefined;
+        skip = 0;
+        lastId = undefined;
+        res = (await this.runtime.getJson(this.firstMediaPageUrl())) as typeof res;
+      }
       const items = Array.isArray(res.data) ? res.data : [];
       let i = p === 0 ? resumeIndex(items, skip, lastId) : 0;
       for (; i < items.length; i++) {
@@ -495,7 +515,8 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
       ...new Set([...(walk?.confirmed ?? []), ...sightings.map(([id]) => id)]),
     ].filter((id) => recentIds.has(id));
 
-    if (!done && !firstPass && floorTs) {
+    const stillToBackfill = backfillLeft === undefined ? 0 : backfillLeft - records.length;
+    if (!done && (floorTs || stillToBackfill > 0)) {
       // More than one round's worth: hold the high-water mark and resume at
       // the exact item this round stopped before.
       const cursor: MediaCursor = {
@@ -506,7 +527,7 @@ export class InstagramMediaAdapter implements ConnectorAdapter {
           ...(page ? { page } : {}),
           skip,
           ...(lastId ? { lastId } : {}),
-          floorTs,
+          ...(floorTs ? { floorTs } : { backfillLeft: stillToBackfill }),
           ...(newestTs ? { newestTs } : {}),
           metricsDue,
           windowFloorMs,
@@ -677,12 +698,18 @@ function parsePublishInput(input: unknown): PublishInput {
 const nonEmpty = (value: unknown): string | undefined =>
   typeof value === 'string' && value ? value : undefined;
 
-/** A continuation only ever exists above an incremental floor. */
+/** A continuation exists above an incremental floor, or inside the first backfill. */
 function parseMediaWalk(raw: unknown): MediaWalk | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const value = raw as Record<string, unknown>;
   const floorTs = nonEmpty(value.floorTs);
-  if (!floorTs || tsMs(floorTs) === undefined) return undefined;
+  const backfillLeft =
+    typeof value.backfillLeft === 'number' &&
+    Number.isInteger(value.backfillLeft) &&
+    value.backfillLeft > 0
+      ? value.backfillLeft
+      : undefined;
+  if (floorTs ? tsMs(floorTs) === undefined : backfillLeft === undefined) return undefined;
   if (typeof value.windowFloorMs !== 'number' || !Number.isFinite(value.windowFloorMs)) {
     return undefined;
   }
@@ -701,7 +728,7 @@ function parseMediaWalk(raw: unknown): MediaWalk | undefined {
         ? value.skip
         : 0,
     ...(lastId ? { lastId } : {}),
-    floorTs,
+    ...(floorTs ? { floorTs } : { backfillLeft }),
     ...(newestTs ? { newestTs } : {}),
     metricsDue: value.metricsDue === true,
     windowFloorMs: value.windowFloorMs,
@@ -748,6 +775,11 @@ function localDay(now: Date): string {
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+/** Graph's answer to a paging cursor it no longer honours: a 400 with code 100. */
+function isStaleCursor(err: unknown): boolean {
+  return err instanceof InstagramApiError && err.status === 400 && err.igCode === 100;
 }
 
 function isApiOrigin(url: string): boolean {
@@ -839,6 +871,10 @@ const str = (value: unknown): string => (typeof value === 'string' ? value : '')
 const count = (value: unknown): string =>
   typeof value === 'number' && Number.isFinite(value) ? String(value) : '0';
 
+/** A count Meta may omit (a hidden like count): absent stays absent, never 0. */
+const countIfShown = (value: unknown): string | undefined =>
+  typeof value === 'number' && Number.isFinite(value) ? String(value) : undefined;
+
 const numeric = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 
@@ -882,7 +918,7 @@ export function mediaToRecord(item: unknown, opts: MediaRecordOptions): Normaliz
     ['media_type', mediaType || undefined],
     ['permalink', permalink || undefined],
     ['url', permalink || undefined],
-    ['likes', count(media.like_count)],
+    ['likes', countIfShown(media.like_count)],
     ['comments', count(media.comments_count)],
     ['has_media', true],
     ['metrics_updated_at', opts.metricsUpdatedAt],

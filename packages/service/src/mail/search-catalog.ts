@@ -21,7 +21,11 @@ export interface MailCatalogEntry {
   date: string;
 }
 
-const THREAD_DIR = /^(\d{4}-\d{2}-\d{2})--(.+)--[0-9a-f]{8}$/;
+// `<subject>--<hash8>` as the writer names thread folders today
+// (`messageToRecord` in storage.ts); corpora from before the connector
+// overhaul prefixed a date, which is skipped.
+const LEGACY_THREAD_DIR = /^\d{4}-\d{2}-\d{2}--(.*)--[0-9a-f]{8}$/;
+const THREAD_DIR = /^(.+)--[0-9a-f]{8}$/;
 const FILE_STEM = /^\d+--(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})--from-(.+?)--[0-9a-f]{8}\.md$/;
 
 /** De-slug for display: hyphens back to spaces (casing is lost; fine here). */
@@ -39,13 +43,13 @@ export function parseMailPath(projectId: string, path: string): MailCatalogEntry
   if (segments.length < 3) return null;
   const fileName = segments[segments.length - 1]!;
   const threadDir = segments[segments.length - 2]!;
-  const thread = THREAD_DIR.exec(threadDir);
+  const thread = LEGACY_THREAD_DIR.exec(threadDir) ?? THREAD_DIR.exec(threadDir);
   const stem = FILE_STEM.exec(fileName);
   if (!thread || !stem) return null;
   return {
     projectId,
     path,
-    subject: unslug(thread[2]!) || '(no subject)',
+    subject: unslug(thread[1]!) || '(no subject)',
     from: unslug(stem[4]!),
     date: `${stem[1]} ${stem[2]}:${stem[3]}`,
   };

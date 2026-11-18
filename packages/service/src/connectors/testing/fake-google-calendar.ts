@@ -16,6 +16,8 @@
  *   the original window (Google does not promise it is).
  * - `timeMin` bounds an event's END and `timeMax` its START, both exclusive.
  * - An invalidated token answers 410 with the `fullSyncRequired` body.
+ * - Cancelled events are kept for a while and then purged (`purgeCancelled`):
+ *   a full listing after that, even with `showDeleted`, no longer names them.
  * - Rate limiting can be 429 or a 403 `rateLimitExceeded` body.
  *
  * Events are stored as already-expanded instances (the `singleEvents=true`
@@ -283,6 +285,14 @@ export class FakeGoogleCalendar {
     return [...this.cal(calendarId).events.values()]
       .map((s) => s.resource)
       .filter((r) => r.status !== 'cancelled');
+  }
+
+  /** Google forgets cancelled events after a while; a full listing then omits them. */
+  purgeCancelled(): void {
+    for (const cal of this.calendars.values()) {
+      for (const [id, s] of cal.events)
+        if (s.resource.status === 'cancelled') cal.events.delete(id);
+    }
   }
 
   /** Invalidate every sync and page token (expiry, ACL change). */

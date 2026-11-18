@@ -545,6 +545,23 @@ export function projectCapturesDir(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'captures');
 }
 
+/**
+ * A connector binding's private working state: what an adapter must remember
+ * between passes but must not keep in `project.json` (rewritten on every
+ * pass) or in the corpus (read by gezels, and writable by them under `_`).
+ * The website connector keeps its crawl list, the last text of each page and
+ * a signed-in session here. Account-private, never under artifacts, and
+ * removed when the binding is.
+ */
+export function projectConnectorStateDir(
+  root: string,
+  projectId: string,
+  bindingId: string,
+): string {
+  const safe = bindingId.replace(/[^A-Za-z0-9._-]/g, '_');
+  return join(projectPrivateDir(root, projectId), 'connectors', safe);
+}
+
 /** Per-project documents folder — holds about.md, missionObjectives.md, etc. */
 export function projectDocsDir(
   root: string,
@@ -1380,6 +1397,16 @@ export function systemInstalledToolsetsFile(root: string): string {
 /** Install root for system-scope toolset extracts (Playwright, etc.). */
 export function systemToolsetsInstallDir(root: string): string {
   return join(root, 'system-toolsets');
+}
+
+/**
+ * Published Prismatic components a Spectral connector type pins, downloaded
+ * when a connection is made: `<scope>__<name>@<version>-<sha12>/package/`,
+ * each beside a `.gezel-component.json` marker. Owned by the component store
+ * (`connectors/spectral/component-store.ts`); safe to delete.
+ */
+export function connectorComponentsDir(root: string): string {
+  return join(root, 'connector-components');
 }
 
 /**

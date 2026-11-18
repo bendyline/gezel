@@ -937,13 +937,13 @@ describe('Activity reads as rows, with what is for the person first', () => {
     return fold;
   };
 
-  it('orders the sections: decisions, running, results, waiting', async () => {
+  it('orders the sections: decisions, running, waiting, results', async () => {
     const dialog = await openPanel(snapshot());
     expect(
       within(dialog)
         .getAllByRole('region')
         .map((region) => region.getAttribute('aria-label')),
-    ).toEqual(['Needs you', 'Working', 'Ready', 'Next']);
+    ).toEqual(['Needs you', 'Working', 'Next', 'Ready']);
   });
 
   it('folds a long schedule into one line and leaves a short one in view', async () => {
@@ -986,8 +986,13 @@ describe('Activity reads as rows, with what is for the person first', () => {
       prompt: '**Autumn flyer** is finished.\n\n- **`out/flyer.pdf`**\n- `notes.md`',
       taskRef: 'shop/1',
       referencedFiles: [{ kind: 'artifact', path: 'out/flyer.pdf' }],
+      choices: ['Dismiss'],
       intent: { kind: 'task-finished', taskRef: 'shop/1' },
     };
+    vi.mocked(api.answerQuestion).mockImplementationOnce(async (_id, answer) => ({
+      ...finished,
+      answer: { ...answer, at: '2026-10-02T12:01:00Z' },
+    }));
     const dialog = await openPanel(snapshot([finished]));
     const ready = within(dialog).getByRole('region', { name: 'Ready' });
     expect(within(ready).getByText('Autumn flyer')).toBeVisible();
@@ -1005,6 +1010,43 @@ describe('Activity reads as rows, with what is for the person first', () => {
     expect(api.answerQuestion).toHaveBeenCalledWith('ready-1', { selectedChoices: [0] });
     expect(screen.getByRole('dialog')).toBeVisible();
     await waitFor(() => expect(within(ready).queryByRole('button', { name: 'Open' })).toBeNull());
+    // Put away means gone: no "Answered Dismiss" left behind in its place.
+    expect(within(ready).queryByText('Autumn flyer')).toBeNull();
+    expect(within(ready).queryByText('Answered')).toBeNull();
+    expect(within(ready).queryByText('Dismiss')).toBeNull();
+    await waitFor(() =>
+      expect(within(ready).getByRole('heading', { name: 'Ready 0' })).toHaveFocus(),
+    );
+  });
+
+  it('lets a dismissed paused-task card leave the panel', async () => {
+    const paused: Question = {
+      ...question('paused-2'),
+      sessionId: '',
+      prompt: '"Autumn newsletter" stopped at "Write it". Open the task to see what happened.',
+      choices: ['Dismiss', 'Try again'],
+      allowWriteIn: false,
+      taskRef: 'shop/1',
+      intent: { kind: 'task-paused', taskRef: 'shop/1', reason: 'gate_exhausted' },
+    };
+    vi.mocked(api.getTaskByRef).mockResolvedValue({
+      ref: 'shop/1',
+      title: 'Autumn newsletter',
+      status: 'paused',
+    } as Task);
+    vi.mocked(api.answerQuestion).mockImplementationOnce(async (_id, answer) => ({
+      ...paused,
+      answer: { ...answer, at: '2026-10-02T12:01:00Z' },
+    }));
+    const dialog = await openPanel(snapshot([paused]));
+    const needs = within(dialog).getByRole('region', { name: 'Needs you' });
+    await userEvent.click(await within(needs).findByRole('button', { name: 'Dismiss' }));
+    expect(api.answerQuestion).toHaveBeenCalledWith('paused-2', { selectedChoices: [0] });
+    await waitFor(() =>
+      expect(within(needs).queryByRole('button', { name: 'Try again' })).toBeNull(),
+    );
+    expect(within(needs).queryByText('Answered')).toBeNull();
+    expect(screen.getByRole('dialog')).toBeVisible();
   });
 
   it('keeps what was finished earlier on record under Ready, outside its count', async () => {

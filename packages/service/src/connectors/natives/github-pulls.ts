@@ -19,6 +19,7 @@
 import type { GitHubPullComment, GitHubPullDetail, GitHubPullFile } from '@bendyline/gezel';
 import { createLogger, prioritizePullsForCurrentBranch } from '@bendyline/gezel';
 import type { ProjectDetail } from '@bendyline/gezel';
+import { PATCH_LINE_LEGEND, generatedFileKind, numberUnifiedPatch } from '@bendyline/gezel/checks';
 import { type GitHubPrs, filterUnifiedDiffByPath } from '../../github/prs.js';
 import { registerNativeAdapter } from '../registry.js';
 import { assertConnectorTaskSync, registerConnectorTaskPrep } from '../task-prep.js';
@@ -27,6 +28,7 @@ import type {
   ChangeBatch,
   ConnectorAdapter,
   ConnectorBindingRef,
+  ListChangesOptions,
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
@@ -42,22 +44,48 @@ const DEFAULT_MAX_PULLS = 20;
 /** GitHub caps one PR at 3,000 changed files; overview adds one record. */
 const TASK_PR_RECORD_LIMIT = 3_001;
 /** Bump when persisted corpus metadata must be refreshed for unchanged PRs. */
-const CURSOR_SCHEMA = 'v3';
+const CURSOR_SCHEMA = 'v4';
 /** A child reviewer should have one small, finishable unit of work. */
 export const REVIEW_MAX_FILES_PER_BATCH = 8;
 /** Patch text, rather than file count alone, bounds local-model context growth. */
 export const REVIEW_TARGET_PATCH_CHARS = 24_000;
 
-export function partitionPullReviewFiles(
-  files: readonly GitHubPullFile[],
-): Array<{ start: number; end: number; paths: string[]; patchChars: number }> {
-  const batches: Array<{ start: number; end: number; paths: string[]; patchChars: number }> = [];
+export interface PullReviewBatch {
+  start: number;
+  end: number;
+  paths: string[];
+  patchChars: number;
+  /** Lockfiles and the like: the runtime summarizes these, no reviewer reads them. */
+  generated?: true;
+}
+
+/**
+ * Hand-written files first, generated ones last, each group in listing order.
+ * A batch is a run of consecutive files, so a notices file listed between two
+ * source files would otherwise split one reviewer's batch into three.
+ */
+export function orderPullReviewFiles<T extends { filename: string }>(files: readonly T[]): T[] {
+  return [
+    ...files.filter((file) => generatedFileKind(file.filename) === null),
+    ...files.filter((file) => generatedFileKind(file.filename) !== null),
+  ];
+}
+
+export function partitionPullReviewFiles(files: readonly GitHubPullFile[]): PullReviewBatch[] {
+  const batches: PullReviewBatch[] = [];
   let paths: string[] = [];
   let patchChars = 0;
   let start = 1;
+  let generated = false;
   const flush = () => {
     if (paths.length === 0) return;
-    batches.push({ start, end: start + paths.length - 1, paths, patchChars });
+    batches.push({
+      start,
+      end: start + paths.length - 1,
+      paths,
+      patchChars,
+      ...(generated ? { generated: true as const } : {}),
+    });
     start += paths.length;
     paths = [];
     patchChars = 0;
@@ -66,12 +94,17 @@ export function partitionPullReviewFiles(
     // A missing patch still needs one review record; count its metadata so
     // binary/no-patch changes do not accumulate into an unbounded batch.
     const chars = Math.max(file.patch?.length ?? 0, file.filename.length + 256);
+    const fileGenerated = generatedFileKind(file.filename) !== null;
     if (
       paths.length > 0 &&
-      (paths.length >= REVIEW_MAX_FILES_PER_BATCH || patchChars + chars > REVIEW_TARGET_PATCH_CHARS)
+      (fileGenerated !== generated ||
+        paths.length >= REVIEW_MAX_FILES_PER_BATCH ||
+        // Patch text bounds what a reviewer must hold; nobody holds a generated batch.
+        (!generated && patchChars + chars > REVIEW_TARGET_PATCH_CHARS))
     ) {
       flush();
     }
+    generated = fileGenerated;
     paths.push(file.filename);
     patchChars += chars;
   }
@@ -112,6 +145,8 @@ export interface GitHubPullsRuntime {
       num: number,
       opts?: { limit?: number },
     ): Promise<string>;
+    /** The same service over another transport (tests, the provider simulator). */
+    withFetch?(fetchImpl: typeof fetch): GitHubPullsRuntime['prs'];
   };
   project(projectId: string): Promise<ProjectDetail>;
   /**
@@ -134,9 +169,12 @@ interface PullBundle {
 
 export class GitHubPullsAdapter implements ConnectorAdapter {
   readonly typeId = 'github-pulls';
+  /** Each pull request is listed whole: a file that left it leaves the corpus. */
+  readonly scopesAreMirrors = true;
   private config?: GitHubPullsConfig;
   private project?: ProjectDetail;
   private readonly bundles = new Map<number, PullBundle>();
+  private readonly details = new Map<number, Promise<GitHubPullDetail>>();
 
   constructor(
     private readonly binding: ConnectorBindingRef,
@@ -165,21 +203,34 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
     return open.slice(0, config.maxPulls).map((p) => pullScope(p.number));
   }
 
-  async listChangesSince(scope: string, cursor: unknown): Promise<ChangeBatch<string>> {
+  async listChangesSince(
+    scope: string,
+    cursor: unknown,
+    opts?: ListChangesOptions,
+  ): Promise<ChangeBatch<string>> {
     const { project } = this.ready();
     const num = pullNumberFromScope(scope);
     if (num === null) return { records: [], cursor: '' };
 
+    // `updatedAt` is the change signal for a PR: a new commit, a force-push
+    // or a new comment moves it. It comes from the detail call alone, so an
+    // unchanged PR costs that one request and never loads its files, comments
+    // or diff.
+    const detail = await this.loadDetail(project, num);
+    const signature = `${CURSOR_SCHEMA}:${detail.updatedAt}:${detail.headRef}:${detail.changedFiles ?? ''}`;
+    const prior = typeof cursor === 'string' ? cursor : '';
+    if (prior === signature) return { records: [], cursor: signature };
     const bundle = await this.loadBundle(project, num);
-    // `updatedAt` + head SHA is the whole change signal for a PR: a new
-    // commit or a new comment moves one of them. Unchanged → nothing to
-    // re-fetch, and the pass costs one API call.
-    const next = `${CURSOR_SCHEMA}:${bundle.detail.updatedAt}:${bundle.detail.headRef}:${bundle.files.length}`;
-    if (typeof cursor === 'string' && cursor === next) {
-      return { records: [], cursor: next, enumeratedAll: true };
-    }
+    // A PR larger than one batch pages: `<signature>#<offset>` while the
+    // listing is in progress. A new commit changes the signature and starts
+    // the listing over.
+    const hashAt = prior.lastIndexOf('#');
+    const offset =
+      hashAt > 0 && prior.slice(0, hashAt) === signature
+        ? Math.max(0, Number(prior.slice(hashAt + 1)) || 0)
+        : 0;
 
-    const records: RecordRef[] = [
+    const all: RecordRef[] = [
       {
         id: `pr-${num}`,
         ordinalKey: 0,
@@ -195,7 +246,22 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
         raw: { kind: 'file' as const, num, filename: file.filename },
       })),
     ];
-    return { records, cursor: next, enumeratedAll: true };
+    const limit = Math.max(1, opts?.limit ?? all.length);
+    const records = all.slice(offset, offset + limit);
+    const end = offset + records.length;
+    // Each listing is the whole pull request, so a file that left it (a
+    // force-push, a rename) leaves the corpus once the listing completes.
+    if (end < all.length) {
+      return {
+        records,
+        cursor: `${signature}#${end}`,
+        partial: true,
+        fullListing: { first: offset === 0, last: false },
+      };
+    }
+    return offset === 0
+      ? { records, cursor: signature, enumeratedAll: true }
+      : { records, cursor: signature, fullListing: { first: false, last: true } };
   }
 
   async fetchRecord(scope: string, ref: RecordRef): Promise<NormalizedRecord> {
@@ -215,6 +281,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
 
   async close(): Promise<void> {
     this.bundles.clear();
+    this.details.clear();
   }
 
   private ready(): { project: ProjectDetail; config: GitHubPullsConfig } {
@@ -224,12 +291,23 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
     return { project: this.project, config: this.config };
   }
 
+  /** The detail call, once per pull request per pass. */
+  private loadDetail(project: ProjectDetail, num: number): Promise<GitHubPullDetail> {
+    let detail = this.details.get(num);
+    if (!detail) {
+      detail = this.runtime.prs.getPullRequest(project, num);
+      this.details.set(num, detail);
+      detail.catch(() => this.details.delete(num));
+    }
+    return detail;
+  }
+
   private async loadBundle(project: ProjectDetail, num: number): Promise<PullBundle> {
     const cached = this.bundles.get(num);
     if (cached) return cached;
     const { config } = this.ready();
     const [detail, files, comments, diff] = await Promise.all([
-      this.runtime.prs.getPullRequest(project, num),
+      this.loadDetail(project, num),
       // Unlimited patches: these land in files the model opens, so a clip
       // mid-hunk would read as the change simply not being there.
       this.runtime.prs.listFiles(project, num, { patchLimit: Number.POSITIVE_INFINITY }),
@@ -257,19 +335,21 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
     // large file. Prefer the exact segment from the full diff whenever it is
     // available so the durable per-file record is not just a second copy of
     // that API limitation.
-    const completeFiles = diff
-      ? files.map((file) => {
-          const patch = filterUnifiedDiffByPath(diff, file.filename);
-          return patch
-            ? {
-                ...file,
-                patch,
-                patchChars: patch.length,
-                patchTruncated: false,
-              }
-            : file;
-        })
-      : files;
+    const completeFiles = orderPullReviewFiles(
+      diff
+        ? files.map((file) => {
+            const patch = filterUnifiedDiffByPath(diff, file.filename);
+            return patch
+              ? {
+                  ...file,
+                  patch,
+                  patchChars: patch.length,
+                  patchTruncated: false,
+                }
+              : file;
+          })
+        : files,
+    );
     const bundle: PullBundle = { detail, files: completeFiles, comments, diff };
     this.bundles.set(num, bundle);
     return bundle;
@@ -292,6 +372,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
         end: batch.end,
         paths: batch.paths,
         patchChars: batch.patchChars,
+        ...(batch.generated ? { generated: true as const } : {}),
       };
     });
     const manifest = {
@@ -301,19 +382,23 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
       batchSize: REVIEW_MAX_FILES_PER_BATCH,
       batchTargetPatchChars: REVIEW_TARGET_PATCH_CHARS,
       batches,
-      files: files.map((file, index) => ({
-        ordinal: index + 1,
-        path: file.filename,
-        // Stable join key into files/_flags.json. The writer owns the actual
-        // ordinal-prefixed filename and preserves it across refreshes/reorders;
-        // the sidecar therefore remains the authoritative path lookup.
-        recordHash: sha8(pullFileRecordId(num, file.filename)),
-        status: file.status,
-        additions: file.additions,
-        deletions: file.deletions,
-        changes: file.changes,
-        ...(file.previousFilename ? { previousPath: file.previousFilename } : {}),
-      })),
+      files: files.map((file, index) => {
+        const generated = generatedFileKind(file.filename);
+        return {
+          ordinal: index + 1,
+          path: file.filename,
+          ...(generated ? { generated } : {}),
+          // Stable join key into files/_flags.json. The writer owns the actual
+          // ordinal-prefixed filename and preserves it across refreshes/reorders;
+          // the sidecar therefore remains the authoritative path lookup.
+          recordHash: sha8(pullFileRecordId(num, file.filename)),
+          status: file.status,
+          additions: file.additions,
+          deletions: file.deletions,
+          changes: file.changes,
+          ...(file.previousFilename ? { previousPath: file.previousFilename } : {}),
+        };
+      }),
     };
     const body = [
       `# PR #${num}: ${detail.title}`,
@@ -333,7 +418,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
       '',
       ...batches.map(
         (batch) =>
-          `- Batch ${batch.number}: files ${batch.start}–${batch.end} (${batch.paths.length} path${batch.paths.length === 1 ? '' : 's'})`,
+          `- Batch ${batch.number}: files ${batch.start}–${batch.end} (${batch.paths.length} path${batch.paths.length === 1 ? '' : 's'}${batch.generated ? ', generated files the runtime summarizes' : ''})`,
       ),
       '',
       `The machine-readable manifest is attached as \`pr-${num}-files.json\`. Review every batch and record every exact path in the coverage ledger; the completion gate compares that ledger with the per-file corpus records.`,
@@ -389,14 +474,22 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
   }
 
   private fileRecord(num: number, file: GitHubPullFile): NormalizedRecord {
+    const numbered = file.patch ? numberUnifiedPatch(file.patch) : undefined;
+    const generated = generatedFileKind(file.filename);
     const body = [
       `# \`${file.filename}\``,
       '',
       `Status: ${file.status} (+${file.additions} / -${file.deletions}).`,
       ...(file.previousFilename ? [`Renamed from \`${file.previousFilename}\`.`] : []),
       '',
-      ...(file.patch
-        ? ['```diff', file.patch, '```']
+      ...(numbered !== undefined
+        ? [
+            // A deleted file has no new-file lines, so nothing was numbered.
+            ...(numbered !== file.patch ? [PATCH_LINE_LEGEND, ''] : []),
+            '```diff',
+            numbered,
+            '```',
+          ]
         : ['_No patch available (binary file, or the change is too large for the API)._']),
     ];
     return {
@@ -411,6 +504,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
         status: file.status,
         additions: String(file.additions),
         deletions: String(file.deletions),
+        ...(generated ? { generated } : {}),
       },
       bodyMarkdown: body.join('\n'),
       scanOrigin: 'github-pulls',
@@ -463,7 +557,17 @@ export async function resolveLaunchPullNumber(
 /** Register the GitHub Pulls native adapter and its launch-time prep. */
 export function registerGitHubPullsAdapters(runtime: GitHubPullsRuntime): void {
   registerNativeAdapter('github-pulls', async (binding, deps) =>
-    Promise.resolve(new GitHubPullsAdapter(binding, deps, runtime)),
+    Promise.resolve(
+      new GitHubPullsAdapter(
+        binding,
+        deps,
+        // An injected transport (tests, the provider simulator) reaches
+        // Octokit too, like every other native adapter's.
+        deps.fetch && runtime.prs.withFetch
+          ? { ...runtime, prs: runtime.prs.withFetch(deps.fetch) }
+          : runtime,
+      ),
+    ),
   );
   registerConnectorTaskPrep('github-pulls', async (ctx) => {
     const num = await resolveLaunchPullNumber(runtime, ctx.project, ctx.params);

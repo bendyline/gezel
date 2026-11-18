@@ -221,7 +221,7 @@ import {
 } from '../project-type/script-tools.js';
 import {
   AnthropicCliProvider,
-  CLAUDE_CLI_EXCLUDED_MCP_TOOLS,
+  claudeCliExcludedMcpTools,
   isClaudeReasoningEffort,
 } from '../providers/anthropic-cli/index.js';
 import { AnthropicProvider } from '../providers/anthropic.js';
@@ -230,8 +230,8 @@ import {
   recordRuntimeIntervention,
 } from '../providers/api-observation.js';
 import {
-  CODEX_CLI_EXCLUDED_MCP_TOOLS,
   CodexCliProvider,
+  codexCliExcludedMcpTools,
   isCodexReasoningEffort,
 } from '../providers/codex-cli/index.js';
 import {
@@ -307,6 +307,10 @@ import {
 import type { MlxRuntimeStatusBus } from '@bendyline/gezel-inference/internal/python/mlx-runtime-status-bus';
 import { getPairedRemoteFetch } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
 import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
+import type {
+  PromptConnectorService,
+  PromptConnectorTurnContext,
+} from '../prompt-connectors/service.js';
 import { normalizeCliToolEvent } from '../providers/cli-tool-event.js';
 import { OllamaProvider } from '../providers/ollama.js';
 import { OpenAIProvider } from '../providers/openai.js';
@@ -477,6 +481,7 @@ import {
   stripMarkdownImages,
 } from './fixed-function-adapters.js';
 import { resolveFixedFunctionTaskImageArgs } from './fixed-function-task-image.js';
+import { stepGateRejectedSince } from './gate-repair-turn.js';
 import {
   type ExecutionModelProfile,
   checkpointGapForStep,
@@ -554,6 +559,7 @@ import {
   looksStalled,
 } from './response-stall-heuristics.js';
 import {
+  CLAUDE_AGENT_SHELL_TOOLS,
   claudeBuiltinsToAllow,
   claudeBuiltinsToDisallow,
   gezelMcpToolsToAllow,
@@ -1244,6 +1250,11 @@ export interface ChatManagerOptions {
   }) => { token: string };
   /** Drop a session token minted by {@link issueSessionToken}. */
   revokeSessionToken?: (appId: string) => void;
+  /**
+   * A short-lived code for that session token, written into a CLI agent's
+   * MCP config in its place (see `TokenStore.issueSessionBootstrap`).
+   */
+  issueSessionBootstrapCode?: (appId: string) => string;
   home: string;
   /**
    * Optional pre-seeded providers. Useful in tests — pass a MockProvider
@@ -1791,6 +1802,7 @@ export class ChatManager extends LocalEngineRuntime {
   private readonly getWorkspacePreviewOrigin: () => string | null;
   private readonly issueSessionToken?: ChatManagerOptions['issueSessionToken'];
   private readonly revokeSessionToken?: ChatManagerOptions['revokeSessionToken'];
+  private readonly issueSessionBootstrapCode?: ChatManagerOptions['issueSessionBootstrapCode'];
   private readonly debug?: { isEnabled(): boolean };
   private readonly maxCompactionsPerSend: number;
   /** Set of session ids whose first-turn system prompt has been logged
@@ -1851,6 +1863,7 @@ export class ChatManager extends LocalEngineRuntime {
     this.getWorkspacePreviewOrigin = opts.getWorkspacePreviewOrigin ?? (() => null);
     this.issueSessionToken = opts.issueSessionToken;
     this.revokeSessionToken = opts.revokeSessionToken;
+    this.issueSessionBootstrapCode = opts.issueSessionBootstrapCode;
     if (opts.debug) this.debug = opts.debug;
     this.promptRecorder = new PromptRecorder({
       ...(opts.history ? { history: opts.history } : {}),
@@ -1976,6 +1989,12 @@ export class ChatManager extends LocalEngineRuntime {
     this.searchServiceRef = search;
   }
   private searchServiceRef?: SearchService;
+
+  /** What a person's turn is given for the things it names (docs/prompt-connectors.md). */
+  setPromptConnectors(service: PromptConnectorService): void {
+    this.promptConnectorsRef = service;
+  }
+  private promptConnectorsRef?: PromptConnectorService;
 
   /**
    * Workspace file index, used to recognize workspace paths an assistant
@@ -2772,6 +2791,17 @@ export class ChatManager extends LocalEngineRuntime {
     if (!this.isSessionTurnPending(sessionId)) return false;
     const providerName = this.states.get(sessionId)?.record.providerName;
     return providerName === undefined || isLocalProvider(providerName);
+  }
+
+  /**
+   * A CLI agent starts the gezel MCP server from a config file its own tools
+   * can read, so that file carries a short-lived code instead of the session
+   * token. Only when this manager minted a session token to trade for.
+   */
+  private mcpBootstrapMinter(sessionId: string): { mintMcpBootstrapCode?: () => string } {
+    const mint = this.issueSessionBootstrapCode;
+    if (!mint || !this.issueSessionToken) return {};
+    return { mintMcpBootstrapCode: () => mint(`session:${sessionId}`) };
   }
 
   /**
@@ -4708,6 +4738,9 @@ export class ChatManager extends LocalEngineRuntime {
         let rateLimitRetries = 0;
         let rateLimitRetryPending = false;
         let shardLeftStepOpen = false;
+        // The last attempt ended on the step's gate rejecting its work, so
+        // the next send repairs what the gate named; see gate-repair-turn.ts.
+        let retryRepairsGateRejection = false;
         for (let attempt = 1; attempt <= maxHandoffSendAttempts; attempt += 1) {
           const gap = await checkpointGapForStep(
             this.store,
@@ -4734,9 +4767,15 @@ export class ChatManager extends LocalEngineRuntime {
                   : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
           shardLeftStepOpen = false;
           rateLimitRetryPending = false;
+          const sendStartedAt = nowIso();
+          const repairsGateRejection: boolean = retryRepairsGateRejection;
+          retryRepairsGateRejection = false;
           try {
-            const sendStartedAt = nowIso();
-            await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
+            await this.sendWithBusyRetry(
+              handoffSession.id,
+              message,
+              repairsGateRejection ? { ...sendOptions, reducedThinking: true } : sendOptions,
+            );
             // Asking a question is a successful suspension point, not a
             // failed fixed-action attempt. In particular,
             // `run_package_script` raises a command-approval question and
@@ -4865,6 +4904,7 @@ export class ChatManager extends LocalEngineRuntime {
             ) {
               rateLimitRetries += 1;
               rateLimitRetryPending = true;
+              retryRepairsGateRejection = repairsGateRejection;
               // Not a failed attempt. The provider thread is intact, so no
               // reset: the re-send continues it once the queue admits it.
               attempt -= 1;
@@ -4895,9 +4935,13 @@ export class ChatManager extends LocalEngineRuntime {
                   `${resetError instanceof Error ? resetError.message : String(resetError)}`,
               );
             });
+            retryRepairsGateRejection = dispatchStepId
+              ? stepGateRejectedSince(currentTask, dispatchStepId, sendStartedAt)
+              : false;
             log.warn(
               `[chat] handoff turn failed for ${args.taskRef}/${dispatchStepId}; retrying ` +
-                `${attempt}/${maxHandoffSendAttempts - 1} in session ${handoffSession.id.slice(0, 8)}: ` +
+                `${attempt}/${maxHandoffSendAttempts - 1} in session ${handoffSession.id.slice(0, 8)}` +
+                `${retryRepairsGateRejection ? ' on a reduced thinking budget (the gate rejected its work)' : ''}: ` +
                 `${error instanceof Error ? error.message : String(error)}`,
             );
           }
@@ -6508,6 +6552,7 @@ export class ChatManager extends LocalEngineRuntime {
       messageOrigin?: TurnMessageOrigin;
       fileTurnIntent?: FileTurnIntent;
       relayedImages?: NonNullable<ChatMessage['relayedImages']>;
+      reducedThinking?: boolean;
     },
   ): Promise<ChatMessage> {
     return this.send(sessionId, userText, opts);
@@ -7470,6 +7515,12 @@ export class ChatManager extends LocalEngineRuntime {
        * whole job is one move (`ProjectTypeToolReaction.turn`).
        */
       requiredTool?: string;
+      /**
+       * The turn repairs a gate rejection: the gate already named what to
+       * fix, so it runs at a reduced thinking budget. See
+       * SendAndWaitOpts.reducedThinking.
+       */
+      reducedThinking?: boolean;
       fileTurnIntent?: FileTurnIntent;
       /**
        * Deliver into the model's history but never render a transcript
@@ -7561,6 +7612,7 @@ export class ChatManager extends LocalEngineRuntime {
       continuationMaxTokens?: number;
       standalone?: boolean;
       requiredTool?: string;
+      reducedThinking?: boolean;
       fileTurnIntent?: FileTurnIntent;
       hidden?: boolean;
       nudge?: boolean;
@@ -7685,6 +7737,7 @@ export class ChatManager extends LocalEngineRuntime {
       continuationMaxTokens?: number;
       standalone?: boolean;
       requiredTool?: string;
+      reducedThinking?: boolean;
       fileTurnIntent?: FileTurnIntent;
       hidden?: boolean;
       nudge?: boolean;
@@ -8431,9 +8484,21 @@ export class ChatManager extends LocalEngineRuntime {
       }
       // The book is the craftbook thread's whole context; the Default
       // project's files and library hits would only pull it elsewhere.
+      // Saved copies of what the person named in this message (a web address
+      // with a page saved here). Resolved first so indexed context does not
+      // spend its budget on excerpts of the same file.
+      const named =
+        craftbookFocus || opts?.nudge === true
+          ? null
+          : await this.resolveTurnNamedItems(state, userText, messageOrigin);
       const projectRetrieval = craftbookFocus
         ? null
-        : await this.resolveTurnProjectRetrieval(state, userText, messageOrigin);
+        : await this.resolveTurnProjectRetrieval(
+            state,
+            userText,
+            messageOrigin,
+            named?.inclusions.flatMap((item) => (item.path ? [item.path] : [])),
+          );
       // The unified retrieval includes the shared library. Keep the older
       // library-only behavior as a graceful fallback for tests/embedders that
       // have not wired SearchService yet.
@@ -8466,6 +8531,14 @@ export class ChatManager extends LocalEngineRuntime {
         promptForTurn = `${preludeForTurn.text}\n\n${promptForTurn}`;
         log.info(
           `session ${sessionId}: behavior ${preludeForTurn.behaviorId} fired — prepending prelude`,
+        );
+      }
+      if (named) {
+        // Nearer the person's words than indexed context: they asked about it.
+        promptForTurn = `${named.prompt}\n\n${promptForTurn}`;
+        userMessage.inclusions = named.inclusions;
+        log.info(
+          `session ${sessionId}: ${named.inclusions.length} named item(s) given to the turn (${Buffer.byteLength(named.prompt, 'utf8')} bytes)`,
         );
       }
       if (projectRetrieval) {
@@ -8600,6 +8673,9 @@ export class ChatManager extends LocalEngineRuntime {
       // or stack ordinary nudges on top of the corrective prompt.
       let keurmeesterConsultedThisSend = false;
       let keurmeesterCaseToClose: string | null = null;
+      // The next send carries a gate's verdict (or retries a handoff the gate
+      // just rejected), so it thinks on a reduced budget. Cleared once sent.
+      let gateRepairSend = opts?.reducedThinking === true;
       // A task step can cap its own turns (`turnTimeoutSec`); read it once.
       const stepTurnLimitMs = await stepTurnTimeoutMs(this.store, state.record);
 
@@ -8800,6 +8876,7 @@ export class ChatManager extends LocalEngineRuntime {
             : {}),
           ...(opts?.standalone ? { standalone: true } : {}),
           ...(continuations === 0 && turnRequiredTool ? { requiredTool: turnRequiredTool } : {}),
+          ...(gateRepairSend ? { reducedThinking: true } : {}),
           queue: {
             lane: opts?.lane ?? 'interactive',
             enginePriority: engineTurnPriority(resolveTurnMessageOrigin(opts), isAskTarget),
@@ -8820,6 +8897,10 @@ export class ChatManager extends LocalEngineRuntime {
         };
         if (continuations === 0 && pendingAttachments.length > 0) {
           sendOpts.attachments = pendingAttachments;
+        }
+        if (gateRepairSend) {
+          log.info(`session ${sessionId}: gate-repair turn — thinking on a reduced budget`);
+          gateRepairSend = false;
         }
         // Wall-clock at the start of this iteration. Used at commit
         // time below to find any mid-turn approval questions
@@ -9714,6 +9795,9 @@ export class ChatManager extends LocalEngineRuntime {
                 : buildGateRejectionNudge(advanceOutcome.gateRejected.message),
               'task-gate',
             );
+            // A review's rejection hands back real rework, not a fix the gate
+            // spelled out, so it keeps the full budget.
+            gateRepairSend = !advanceOutcome.gateRejected.review;
             continue;
           }
           // Ad-hoc deliverable plateau exhausted (stage 3): stop the
@@ -9837,6 +9921,7 @@ export class ChatManager extends LocalEngineRuntime {
               clampNudge ?? (dStage >= 1 ? dRej.message : buildGateRejectionNudge(dRej.message)),
               'deliverable-gate',
             );
+            gateRepairSend = true;
             continue;
           }
           // False-"done" on an edit gate: a requireChange step is waiting on
@@ -14221,10 +14306,51 @@ export class ChatManager extends LocalEngineRuntime {
     }
   }
 
+  /**
+   * What connectors hold for the things a person's own message names: today
+   * the saved copy of a web address. Local reads only; a failure here costs
+   * the turn nothing but the block.
+   */
+  private async resolveTurnNamedItems(
+    state: LiveSessionState,
+    userText: string,
+    messageOrigin: TurnMessageOrigin,
+  ): Promise<PromptConnectorTurnContext | null> {
+    const connectors = this.promptConnectorsRef;
+    if (!connectors || messageOrigin !== 'direct-user') return null;
+    // A visitor of a shared page reads nothing the owner saved.
+    if (state.record.visitorAccess) return null;
+    try {
+      const project = await this.store.getProject(state.record.projectId);
+      if (!project) return null;
+      const contextWindow =
+        state.record.numCtx ??
+        state.session?.numCtx ??
+        this.providers.get(state.record.providerName)?.getContextWindow?.();
+      const evidenceLedger = this.evidenceLedgers.get(state.record.id);
+      return await connectors.turnContext(project, userText, {
+        ...(contextWindow ? { contextWindow } : {}),
+        toolNames: new Set(liveTurnToolNames(state.session)),
+        ...(evidenceLedger
+          ? {
+              cite: (text: string, meta: { title?: string; ref?: string }) =>
+                evidenceLedger.add('retrieval', text, meta),
+            }
+          : {}),
+      });
+    } catch (err) {
+      log.warn(
+        `session ${state.record.id}: named items could not be read for the turn: ${err instanceof Error ? err.message : err}`,
+      );
+      return null;
+    }
+  }
+
   private async resolveTurnProjectRetrieval(
     state: LiveSessionState,
     userText: string,
     messageOrigin: TurnMessageOrigin,
+    alreadyGiven?: readonly string[],
   ) {
     const search = this.searchServiceRef;
     if (!search) return null;
@@ -14263,6 +14389,7 @@ export class ChatManager extends LocalEngineRuntime {
         userText,
         messageOrigin,
         ...(excludeSources.length > 0 ? { excludeSources } : {}),
+        ...(alreadyGiven && alreadyGiven.length > 0 ? { alreadyGiven } : {}),
         projectIds: [state.record.projectId, ...linkedProjectIds],
         ...(contextWindow ? { contextWindow } : {}),
         availableToolNames: liveTurnToolNames(state.session),
@@ -15912,7 +16039,7 @@ export class ChatManager extends LocalEngineRuntime {
         task: workTask,
       }),
     );
-    evidenceLedger?.setNameChecks(!(project && projectHoldsCode(project)));
+    evidenceLedger?.setCodeProject(Boolean(project && projectHoldsCode(project)));
     const promptSurface = await resolveSessionToolSurface({
       surface: 'prompt',
       session: record,
@@ -16240,9 +16367,15 @@ export class ChatManager extends LocalEngineRuntime {
     // non-Copilot providers — the flag only affects the Copilot SDK's
     // built-in tool kinds, and OpenAI/Ollama already route every tool
     // through our MCP bridge.
+    // A CLI agent's own shell and unsandboxed modes run as the person, with
+    // no Gezel gate between them and `runtime/auth-token`. Below the level
+    // that allows that, the sandbox stays on whatever the setting says.
+    const agentShell = resolveSecurityPolicy(config).allowAgentShell;
     const sandboxCopilotEffective =
       record.providerName === 'copilot'
-        ? reviewFocus || resolveSandboxCopilot(config.sandboxCopilot, gezelFm?.sandboxCopilot)
+        ? reviewFocus ||
+          !agentShell ||
+          resolveSandboxCopilot(config.sandboxCopilot, gezelFm?.sandboxCopilot)
         : false;
 
     const opts: BuiltSessionOpts = {
@@ -17027,6 +17160,10 @@ export class ChatManager extends LocalEngineRuntime {
         ...(project?.connectors?.some((b) => b.driver === 'device')
           ? { GEZEL_CAMERAS_ENABLED: '1' }
           : {}),
+        // Only projects that follow a website expose the saved-page tools.
+        ...(project?.connectors?.some((b) => b.type === 'website')
+          ? { GEZEL_WEBSITES_ENABLED: '1' }
+          : {}),
         // Same pattern again for the observation-table tools. A project with
         // no tabular corpus would otherwise carry list_tables/describe_table/
         // query_table in every system prompt's tool listing for nothing, and
@@ -17094,7 +17231,7 @@ export class ChatManager extends LocalEngineRuntime {
       // subprocess into registering the `request_tool_permission` tool so
       // the CLI's `--permission-prompt-tool` hook has something to call.
       if (record.providerName === 'anthropic-cli') {
-        mcpEnv.GEZEL_MCP_EXCLUDE = CLAUDE_CLI_EXCLUDED_MCP_TOOLS.join(',');
+        mcpEnv.GEZEL_MCP_EXCLUDE = claudeCliExcludedMcpTools({ agentShell }).join(',');
         mcpEnv.GEZEL_PERMISSION_PROMPT = '1';
       }
       // Codex CLI has its own built-in shell + file edit + web search, so we
@@ -17104,7 +17241,7 @@ export class ChatManager extends LocalEngineRuntime {
       // sandbox/approval flags gate natively, so there is no equivalent of
       // GEZEL_PERMISSION_PROMPT.
       if (record.providerName === 'codex-cli') {
-        mcpEnv.GEZEL_MCP_EXCLUDE = CODEX_CLI_EXCLUDED_MCP_TOOLS.join(',');
+        mcpEnv.GEZEL_MCP_EXCLUDE = codexCliExcludedMcpTools({ agentShell }).join(',');
       }
       opts.mcpServer = {
         command: 'node',
@@ -17480,12 +17617,15 @@ export class ChatManager extends LocalEngineRuntime {
     if (record.providerName === 'anthropic-cli') {
       const cwd = await this.store.projectWorkspaceDir(record.projectId);
       // `plan` keeps Claude's own edit and shell tools out of a review.
-      const permissionModeOverride = reviewFocus
+      const chosenClaudeMode = reviewFocus
         ? 'plan'
         : (project?.claudePermissionMode ??
           gezelFm?.claudePermissionMode ??
           config.anthropicCli?.defaultPermissionMode ??
           'acceptEdits');
+      // Skipping every prompt is an unsandboxed mode (see `agentShell`).
+      const permissionModeOverride =
+        !agentShell && chosenClaudeMode === 'bypassPermissions' ? 'acceptEdits' : chosenClaudeMode;
       // Compute the Claude CLI built-ins to disallow AND to auto-allow
       // from the same role+toolsets data the gezel-mcp filter uses. The
       // disallowed list is what the model literally can't reach
@@ -17504,8 +17644,18 @@ export class ChatManager extends LocalEngineRuntime {
         ...(toolsetsGroupOverride.length > 0 ? { toolsetsGroupOverride } : {}),
         ...(project?.mode ? { projectMode: project.mode } : {}),
       };
-      const disallowedBuiltinTools = claudeBuiltinsToDisallow(builtinFilterOpts);
-      const allowedBuiltinTools = claudeBuiltinsToAllow(builtinFilterOpts);
+      let disallowedBuiltinTools = claudeBuiltinsToDisallow(builtinFilterOpts);
+      let allowedBuiltinTools = claudeBuiltinsToAllow(builtinFilterOpts);
+      // Below the level that allows it, Claude Code's own shell is gone for
+      // every role; Gezel's gated execution tools stay advertised instead.
+      if (!agentShell) {
+        disallowedBuiltinTools = [
+          ...new Set([...disallowedBuiltinTools, ...CLAUDE_AGENT_SHELL_TOOLS]),
+        ];
+        allowedBuiltinTools = allowedBuiltinTools.filter(
+          (tool) => !CLAUDE_AGENT_SHELL_TOOLS.includes(tool),
+        );
+      }
       // Auto-approve our own gezel-mcp tools too — they're our
       // server, we trust them, no reason for `save_memory` /
       // `list_gezels` / `list_projects` / `search_memory` to pop a
@@ -17522,6 +17672,7 @@ export class ChatManager extends LocalEngineRuntime {
         ...(disallowedBuiltinTools.length > 0 ? { disallowedBuiltinTools } : {}),
         ...(allowedBuiltinTools.length > 0 ? { allowedBuiltinTools } : {}),
         ...(allowedMcpTools.length > 0 ? { allowedMcpTools } : {}),
+        ...this.mcpBootstrapMinter(record.id),
       };
     }
 
@@ -17531,7 +17682,7 @@ export class ChatManager extends LocalEngineRuntime {
       // Codex-specific gezel override. Fall back to the historical shared
       // Claude field so existing gezel files retain their prior behavior.
       // `plan` runs Codex in its read-only sandbox for a review.
-      const permissionModeOverride = reviewFocus
+      const chosenCodexMode = reviewFocus
         ? 'plan'
         : normalizeCodexPermissionMode(
             project?.codexPermissionMode ??
@@ -17539,6 +17690,9 @@ export class ChatManager extends LocalEngineRuntime {
               gezelFm?.claudePermissionMode ??
               config.codexCli?.defaultPermissionMode,
           );
+      // `full` turns Codex's sandbox off (see `agentShell`).
+      const permissionModeOverride =
+        !agentShell && chosenCodexMode === 'full' ? 'edit' : chosenCodexMode;
       // If the gezel's effort belongs to another provider's vocabulary,
       // drop it and let Codex fall back to the install/model default.
       const reasoningEffortOverride = isCodexReasoningEffort(gezelFm?.reasoningEffort)
@@ -17551,6 +17705,8 @@ export class ChatManager extends LocalEngineRuntime {
         cwd,
         permissionModeOverride,
         ...(reasoningEffortOverride ? { reasoningEffortOverride } : {}),
+        ...(agentShell ? {} : { shellTool: false }),
+        ...this.mcpBootstrapMinter(record.id),
       };
     }
 

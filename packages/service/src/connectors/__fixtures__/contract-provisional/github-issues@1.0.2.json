@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "kind": "provider-docs",
+    "source": "https://docs.github.com/en/rest/issues/issues#list-repository-issues"
+  },
+  "alsoCovers": ["1.0.1"],
+  "cases": [
+    {
+      "id": "first-sync-pages-and-skips-pull-requests",
+      "description": "A first sync follows the Link header to page 2 and leaves pull requests out.",
+      "config": { "owner": "octo", "repository": "hello" },
+      "exchanges": [
+        {
+          "kind": "http",
+          "request": {
+            "url": "https://api.github.com/repos/octo/hello/issues?state=all&sort=updated&direction=desc&per_page=100"
+          },
+          "response": {
+            "headers": {
+              "link": "<https://api.github.com/repos/octo/hello/issues?state=all&sort=updated&direction=desc&per_page=100&page=2>; rel=\"next\", <https://api.github.com/repos/octo/hello/issues?state=all&sort=updated&direction=desc&per_page=100&page=2>; rel=\"last\""
+            },
+            "body": [
+              {
+                "id": 9003,
+                "number": 3,
+                "title": "Add retries",
+                "state": "open",
+                "user": { "login": "mona" },
+                "labels": [],
+                "assignees": [],
+                "comments": 0,
+                "html_url": "https://github.com/octo/hello/pull/3",
+                "created_at": "2026-11-03T10:00:00Z",
+                "updated_at": "2026-11-03T10:00:00Z",
+                "pull_request": { "url": "https://api.github.com/repos/octo/hello/pulls/3" }
+              },
+              {
+                "id": 9002,
+                "number": 2,
+                "title": "Crash on empty config",
+                "state": "open",
+                "body": "Steps to reproduce: start with an empty file.",
+                "user": { "login": "octocat" },
+                "labels": [{ "name": "bug" }],
+                "assignees": [{ "login": "mona" }],
+                "comments": 2,
+                "html_url": "https://github.com/octo/hello/issues/2",
+                "created_at": "2026-11-02T10:00:00Z",
+                "updated_at": "2026-11-02T12:00:00Z"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "http",
+          "request": {
+            "url": "https://api.github.com/repos/octo/hello/issues?state=all&sort=updated&direction=desc&per_page=100&page=2"
+          },
+          "response": {
+            "body": [
+              {
+                "id": 9001,
+                "number": 1,
+                "title": "Document the setup",
+                "state": "closed",
+                "state_reason": "completed",
+                "body": "The README skips a step.",
+                "user": { "login": "octocat" },
+                "labels": ["docs"],
+                "assignees": [],
+                "comments": 0,
+                "html_url": "https://github.com/octo/hello/issues/1",
+                "created_at": "2026-11-01T10:00:00Z",
+                "updated_at": "2026-11-01T11:00:00Z",
+                "closed_at": "2026-11-01T11:00:00Z"
+              }
+            ]
+          }
+        }
+      ],
+      "expect": {
+        "records": [
+          {
+            "id": "9002",
+            "frontmatter": {
+              "title": "Crash on empty config",
+              "number": "2",
+              "state": "open",
+              "author": "octocat"
+            },
+            "bodyIncludes": "empty file"
+          },
+          {
+            "id": "9001",
+            "frontmatter": {
+              "title": "Document the setup",
+              "state": "closed",
+              "stateReason": "completed"
+            },
+            "bodyIncludes": "README skips a step"
+          }
+        ]
+      }
+    },
+    {
+      "id": "exhausted-quota-is-backpressure",
+      "description": "GitHub's 403 with an exhausted rate limit stops the pass without an error.",
+      "config": { "owner": "octo", "repository": "hello" },
+      "exchanges": [
+        {
+          "kind": "http",
+          "request": { "url": "https://api.github.com/repos/octo/hello/issues" },
+          "response": {
+            "status": 403,
+            "headers": { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "4102444800" },
+            "body": { "message": "API rate limit exceeded" }
+          }
+        }
+      ],
+      "expect": { "records": [] }
+    }
+  ]
+}

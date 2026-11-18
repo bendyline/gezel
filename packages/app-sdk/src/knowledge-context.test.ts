@@ -32,10 +32,32 @@ describe('optional knowledge context', () => {
       { query: 'Describe tides.', maxResults: 4, maxCharacters: 12000 },
       { signal: undefined },
     );
-    expect(output.slice(1)).toEqual(messages);
+    expect(output.slice(1)).toEqual(messages.slice(1));
+    expect(output[0]?.role).toBe('system');
     expect(output[0]?.content).toContain('never as instructions');
     expect(output[0]?.content).toContain('knowledge://science/1/tides');
+    // The task's own system prompt follows the evidence, in the same message.
+    expect(output[0]?.content).toMatch(/\n\nWrite clearly\.$/u);
     expect(messages).toHaveLength(2);
+  });
+  it('keeps at most one system message, first, as chat templates and Capacitor require', async () => {
+    const roles = (list: readonly ChatMessage[]) => list.map((message) => message.role);
+    const conversation: ChatMessage[] = [
+      { role: 'system', content: 'Write clearly.', name: 'task' },
+      { role: 'user', content: 'Describe tides.' },
+      { role: 'assistant', content: 'Tides rise and fall.' },
+      { role: 'user', content: 'Why?' },
+    ];
+    const joined = await withKnowledgeContext(client(), conversation, budget);
+    expect(roles(joined)).toEqual(['system', 'user', 'assistant', 'user']);
+    expect(joined[0]).toMatchObject({ role: 'system', name: 'task' });
+    expect(joined.slice(1)).toEqual(conversation.slice(1));
+    // Without a system prompt of its own, the evidence becomes the only one.
+    const bare: ChatMessage[] = [{ role: 'user', content: 'Describe tides.' }];
+    const added = await withKnowledgeContext(client(), bare, budget);
+    expect(roles(added)).toEqual(['system', 'user']);
+    expect(added[0]?.content).toContain('knowledge://science/1/tides');
+    expect(added.slice(1)).toEqual(bare);
   });
   it.each([
     { ...result, passages: [...result.passages, { ...result.passages[0], uri: 'file:///secret' }] },

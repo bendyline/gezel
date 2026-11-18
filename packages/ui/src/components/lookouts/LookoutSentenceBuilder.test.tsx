@@ -6,6 +6,7 @@ import { LookoutSentenceBuilder } from './LookoutSentenceBuilder.js';
 
 const choices = {
   cameras: [{ id: 'cam1', name: 'Mud room' }],
+  websites: [],
   mailAccounts: [{ id: 'mail1', name: 'Me at home' }],
   gezels: [],
   craftbooks: [],
@@ -54,5 +55,31 @@ describe('LookoutSentenceBuilder', () => {
     await user.click(screen.getByRole('button', { name: 'Keep a lookout' }));
     expect(screen.getByText('Who should the email go to?')).toBeInTheDocument();
     expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('builds a website lookout for words that appear', async () => {
+    const onSave = vi.fn((_input: LookoutInput) => {});
+    const user = userEvent.setup();
+    render(
+      <LookoutSentenceBuilder
+        choices={{ ...choices, cameras: [], websites: [{ id: 'web1', name: 'shop.test' }] }}
+        onSave={onSave}
+        onCancel={() => {}}
+      />,
+    );
+    expect(screen.getByText('shop.test')).toBeInTheDocument();
+    expect(screen.getByText('has')).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: 'Words that appear' }));
+    await user.type(screen.getByRole('textbox', { name: 'Words to watch for' }), 'sold out');
+    await user.type(
+      screen.getByRole('textbox', { name: 'Only pages under this part of the site (optional)' }),
+      '/shop',
+    );
+    await user.click(screen.getByRole('button', { name: 'Keep a lookout' }));
+    expect(onSave.mock.calls[0]?.[0]).toMatchObject({
+      name: '“sold out” on shop.test',
+      source: { kind: 'website', bindingId: 'web1' },
+      condition: { kind: 'text-appears', text: 'sold out', pathPrefix: '/shop' },
+    });
   });
 });

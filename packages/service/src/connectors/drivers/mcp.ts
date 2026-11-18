@@ -13,7 +13,14 @@
 
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
 import { McpBridge, type McpServerSpec } from '../../providers/mcp-bridge.js';
-import { type NormalizeSpec, applyNormalize, jget, ordinalKeyFromTs } from '../normalize.js';
+import {
+  type NormalizeSpec,
+  applyNormalize,
+  carryCursor,
+  itemsAt,
+  jget,
+  ordinalKeyFromTs,
+} from '../normalize.js';
 import {
   type ObservationSourceSpec,
   isObservationNormalize,
@@ -138,7 +145,8 @@ export class McpConnectorAdapter
     const secret = await this.deps.secrets.get(
       connectorSecretKey(this.binding.type, this.binding.id),
     );
-    await this.bridge.start(buildSpec(this.src.server, secret ?? undefined));
+    const spec = buildSpec(this.src.server, secret ?? undefined);
+    await this.bridge.start(this.deps.resolveMcpServer?.(spec) ?? spec);
   }
 
   async listScopes(): Promise<string[]> {
@@ -162,7 +170,7 @@ export class McpConnectorAdapter
       throw err;
     }
     const json = safeParse(text);
-    const items = (jget(json, list.itemsPath) as unknown[]) ?? [];
+    const items = itemsAt(json, list.itemsPath, `${this.typeId} ${list.tool}`);
     if (this.observations) {
       // One ref per PAGE, not per row — the engine's backfill cap counts refs,
       // and a tabular page routinely holds thousands of rows.
@@ -170,7 +178,7 @@ export class McpConnectorAdapter
       const advanced = list.cursorFrom
         ? jget(json, list.cursorFrom)
         : newestTimestamp(items, list.tsPath);
-      return { records: pageRecords, cursor: advanced };
+      return { records: pageRecords, cursor: carryCursor(advanced, cursor) };
     }
     const records: RecordRef[] = items.map((it, i) => {
       const ts = list.tsPath ? jget(it, list.tsPath) : undefined;
@@ -182,7 +190,7 @@ export class McpConnectorAdapter
       };
     });
     const next = list.cursorFrom ? jget(json, list.cursorFrom) : deriveWindowCursor(records);
-    return { records, cursor: next };
+    return { records, cursor: carryCursor(next, cursor) };
   }
 
   async fetchRecord(_scope: string, ref: RecordRef): Promise<ConnectorRecord | NormalizedRecord> {

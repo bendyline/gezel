@@ -661,6 +661,37 @@ to completion before the next starts), so a request that arrives mid-wave waits 
   Before this, a 300-token question waited behind a 55k-token re-prefill labelled "Processing
   prompt" and was aborted at 407 s by the pre-first-byte bound without ever starting.
 
+**One task session at a time behind a drafter (2026-11-17).** Static waves mean two task sessions
+that each loop through tool calls never share a wave: each one's next request arrives while the
+other's wave is running, is admitted alone, and a wave of one runs with the drafter. A
+fifteen-batch fanout ran two shards that way for 96 minutes, each waiting a median 193 s per
+generation for the other. When a drafter is armed the provider reports `batch.taskConcurrency = 1`
+and the task runner (`taskSessionWidth` in `tasks/runner.ts`) opens one task session on that engine
+at a time; the queue's lanes, and so chats, are unchanged. This raises no tokens per second: each
+task finishes in about half the wall-clock, and one context grows instead of two. The same
+alternation happens with no drafter, where the rule is not applied. A machine-engine install is not
+reached either: there the runner sees the `remote` provider's queue, which carries no task width.
+
+**Holding a wave open so two task sessions share it was measured and is not worth building.**
+A wave of two or more runs without the drafter, and batched decode scales poorly as context grows.
+Combined tokens per second against one speculative stream, same day, qwen3.8-27b-q4 with its MTP
+drafter on an M5 Max, sampling and thinking as the Reviewer runs them, 600 tokens per stream:
+
+| Context | One stream, speculative | Two together | Three together |
+|---|---|---|---|
+| 3.4k tokens | 30 | 32 (1.07x) | 40 (1.33x) |
+| 12.5k tokens | 22.5 | 21.4 (0.95x) | 0.94x, one run |
+| 26k tokens | 21.8 | 13.5 (0.62x) | not run |
+
+Those are the best case for sharing: every stream the same length. When one finishes first the
+other decodes on alone without the drafter, at about three quarters of speculative speed. Task
+sessions sit at 12k tokens and up, so sharing a wave is level at best and a clear loss at depth;
+it pays only for several short-context requests at once. Two things to know before repeating the
+measurement: decode settles about 30% below its first-minute rate under sustained load (34 tok/s
+fell to 22-24 at 12.5k with identical acceptance, and a fresh engine did not restore it), so
+alternate the arms instead of running them in blocks; and a run that stops before its token cap
+reports a rate that is too high unless the count comes from the engine's `output_tokens`.
+
 ### 5.3 L3 — `CapacityBroker` + `ProviderPool` (admission & eviction)
 
 - **`CapacityBroker`** (`providers/native/capacity-broker.ts`) is admission control by

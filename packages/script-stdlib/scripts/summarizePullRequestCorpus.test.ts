@@ -75,6 +75,25 @@ describe('summarizePullRequestCorpus', () => {
     expect(raw).not.toContain('data/a.md');
     expect(raw).not.toContain('src/a.ts');
   });
+  it('says how many batches a reviewer reads and how many files were only summarized', async () => {
+    h.files.set(
+      'tasks/1/pr-review/batches.json',
+      JSON.stringify([
+        { batchNumber: 1, start: 1, end: 2, paths: ['src/a.ts', 'src/b.ts'], records: ['a', 'b'] },
+        { batchNumber: 2, start: 3, end: 3, paths: ['yarn.lock'], records: ['c'], generated: true },
+      ]),
+    );
+    vi.resetModules();
+    await import('./summarizePullRequestCorpus');
+    const summary = JSON.parse(h.files.get('tasks/1/pr-review/scope-data.json')!);
+    expect(summary).toMatchObject({
+      batchCount: 2,
+      reviewBatchCount: 1,
+      generatedBatchCount: 1,
+      generatedFiles: 1,
+    });
+    expect(summary.ranges[1]).toEqual({ number: 2, start: 3, end: 3, files: 1, generated: true });
+  });
   it('fails closed when the manifest file count disagrees with its array', async () => {
     h.files.set(
       'data/pr/attachments/pr-files.json',

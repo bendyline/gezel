@@ -12,8 +12,9 @@ import { setVisibleInterval } from '../visible-interval.js';
  *   1. **Idle** — muted engine badge ("This Mac", "DwarfStar"). The
  *      model is named only in the tooltip and the popover.
  *   2. **Busy** — animated dot + the current `engine_phase` label
- *      (e.g. "Processing prompt (47% · 6,144 tokens)", "Generating",
- *      "Loading model") surfaced live from the SSE stream.
+ *      (e.g. "Processing prompt (47% · 6,144 tokens)", "Working",
+ *      "Loading model") surfaced live from the SSE stream, or "3 working"
+ *      while several turns share the engine.
  *
  * Click opens a dropdown with richer telemetry — per-turn tokens
  * in/out, generation tokens/sec, a rolling average over the last
@@ -90,6 +91,8 @@ type InflightTurn = {
   startedAt: number;
   elapsedMs: number;
   lastProgressAgoMs?: number;
+  /** The engine is holding this turn behind another (see `engine_phase` `hold`). */
+  engineHold?: 'behind' | 'yielding';
 };
 
 const ON_DEVICE_PROVIDER_ORDER: readonly OnDeviceProvider[] = [
@@ -823,20 +826,45 @@ function EngineStatusPillForProvider({
   // phase to show.
   const inflightActive = inflight.count > 0;
   const busy = activeMedia !== null || current !== null || inflightActive;
+  // Turns on the engine right now: not waiting for a slot, and not held
+  // behind another turn inside it. MLX runs several at once, and one turn's
+  // phase ("Generating · 2:08") said nothing about the other fourteen.
+  const runningTurns = activeMedia
+    ? []
+    : providerInflightTurns.filter(
+        (turn) => !waitingSessions.has(turn.sessionId) && !turn.engineHold,
+      );
+  const severalWorking = runningTurns.length > 1;
   // Unified "what's running" view — media engine wins over the chat turn,
   // which in turn wins over the label-less inflight backstop.
   const busyLabel = activeMedia
     ? activeMedia.label
-    : (current?.label ?? (inflightActive ? 'Working' : ''));
-  const busyProgress = activeMedia ? activeMedia.progress : current?.progress;
+    : severalWorking
+      ? `${runningTurns.length} working`
+      : current
+        ? workingPhaseWord(current.label)
+        : inflightActive
+          ? 'Working'
+          : '';
+  // One turn's prompt progress is not the progress of several.
+  const busyProgress = activeMedia
+    ? activeMedia.progress
+    : severalWorking
+      ? undefined
+      : current?.progress;
   const busyStartedAt = activeMedia
     ? activeMedia.startedAt
-    : (current?.startedAt ?? inflight.earliestStartedAt ?? undefined);
-  const activeGezelId = activeMedia?.gezelId ?? current?.gezelId ?? currentInflight?.gezelId;
-  const activeGezel = activeGezelId ? gezels.get(activeGezelId) : undefined;
-  const activeGezelName = activeGezel
-    ? displayName(activeGezel, config?.roleBasedNameOnlyMode === true)
-    : undefined;
+    : severalWorking
+      ? Math.min(...runningTurns.map((turn) => turn.startedAt))
+      : (current?.startedAt ?? inflight.earliestStartedAt ?? undefined);
+  const nameOf = (id: string | undefined) => {
+    const gezel = id ? gezels.get(id) : undefined;
+    return gezel ? displayName(gezel, config?.roleBasedNameOnlyMode === true) : undefined;
+  };
+  const activeGezelName = severalWorking
+    ? [...new Set(runningTurns.flatMap((turn) => nameOf(turn.gezelId) ?? []))].join(', ') ||
+      undefined
+    : nameOf(activeMedia?.gezelId ?? current?.gezelId ?? currentInflight?.gezelId);
   // Live decode counters. llama-server (`timings_per_token`) and MLX both
   // publish an exact running token count and decode rate on the phase
   // event; that is the truth and is printed bare. Only when an engine
@@ -1410,6 +1438,14 @@ function pickCurrentInflight(
       newestRunning = turn;
   }
   return newestRunning ?? newest;
+}
+
+/**
+ * A chat turn's phase in the person's words: an older engine's detail still
+ * opens with "Generating" ("Generating · 24 tok/s"), which reads as Working.
+ */
+function workingPhaseWord(label: string): string {
+  return label.replace(/^Generating\b/, 'Working');
 }
 
 function phaseLabelIncludesTokenCount(label: string): boolean {

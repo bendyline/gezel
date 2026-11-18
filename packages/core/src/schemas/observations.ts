@@ -149,6 +149,13 @@ export const ObservationTableManifestSchema = z.object({
    * reads only the partitions it needs, which is most of why this scales.
    */
   partitionColumn: z.string().max(120).optional(),
+  /**
+   * Columns that identify one row. A source that delivers some rows again
+   * (an overlapping time window, a full re-fetch) lands them twice; queries
+   * see one row per key, the copy delivered last. Leave it unset when two
+   * identical rows are two real events.
+   */
+  dedupeKey: z.array(z.string().min(1).max(120)).min(1).max(8).optional(),
   columns: z.array(ObservationColumnSchema).min(1).max(512),
   measures: z.array(ObservationMeasureSchema).max(64).default([]),
   exemplars: z.array(ObservationExemplarSchema).max(32).default([]),

@@ -26,7 +26,7 @@ import {
   selectQueueRows,
   useQueueLiveTurns,
 } from './QueueMeter.js';
-import { useActivity } from './activity-context.js';
+import { keepsAnswerReceipt, useActivity } from './activity-context.js';
 import { useHeaderDensity } from './header-density.js';
 import { OPEN_UPDATES_EVENT, type OpenActivityIntent, navigateToTab } from './nav-actions.js';
 import { QuestionDraftProvider } from './question-drafts.js';
@@ -45,9 +45,11 @@ const ActivityTaskStep = lazy(() =>
 // A soft traffic light: decisions, work in motion, finished results.
 type SectionTone = 'attention' | 'active' | 'quiet' | 'done';
 
-// A decision leads, then what is running now, then what is finished; the
-// waiting and scheduled work closes the panel. Ready used to sit last, under
-// every scheduled job, so the results were the furthest thing from the top.
+// A decision leads, then what is running now and what runs after it, then
+// what is finished. Next sat last until 2026-11-17, below a long Ready, so
+// work about to start was the furthest thing from the work running now.
+// Ready once sat last too, under every scheduled job; the scheduled fold
+// (past SCHEDULED_FOLD_AFTER rows) is what keeps Next short above it.
 const SECTIONS: { id: ActivitySection; label: string; empty: string; tone: SectionTone }[] = [
   {
     id: 'needs-you',
@@ -56,8 +58,8 @@ const SECTIONS: { id: ActivitySection; label: string; empty: string; tone: Secti
     tone: 'attention',
   },
   { id: 'working', label: 'Working', empty: 'No work is running right now.', tone: 'active' },
-  { id: 'ready', label: 'Ready', empty: 'New results will appear here.', tone: 'done' },
   { id: 'next', label: 'Next', empty: 'Nothing waiting or scheduled.', tone: 'quiet' },
+  { id: 'ready', label: 'Ready', empty: 'New results will appear here.', tone: 'done' },
 ];
 
 /** Scheduled work past this many rows folds into one line under Next. */
@@ -289,9 +291,14 @@ export function ActivityControl() {
   };
   const answer = (question: Question) => {
     activity.answered(question);
-    // Keep keyboard focus with the answer receipt instead of losing it to body.
+    // Keep keyboard focus with the answer receipt instead of losing it to
+    // body; a card that was put away leaves none, so its section takes it.
+    const section = isReadyQuestion(question) ? 'ready' : 'needs-you';
     requestAnimationFrame(() =>
-      document.getElementById(`activity-question-${question.id}`)?.focus(),
+      (keepsAnswerReceipt(question)
+        ? document.getElementById(`activity-question-${question.id}`)
+        : document.querySelector<HTMLElement>(`#activity-${section} h3`)
+      )?.focus({ preventScroll: true }),
     );
   };
   return (

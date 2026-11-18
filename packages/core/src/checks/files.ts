@@ -308,7 +308,12 @@ export async function notContainsPattern(
   }
   const match = re.exec(content);
   const target = label ? `: ${label}` : ` /${pattern}/`;
-  const matchedText = match?.[0]?.replace(/\s+/g, ' ').slice(0, 180);
+  // A pattern of the shape "this row ... forbidden word" matches from the row's
+  // start, so the word that caused it is at the END of the match. Quoting only
+  // the first 180 characters showed a reviewer the row and never the word.
+  const whole = match?.[0]?.replace(/\s+/g, ' ');
+  const matchedText =
+    whole && whole.length > 180 ? `${whole.slice(0, 60)} … ${whole.slice(-110)}` : whole;
   const matchedSuffix = label && matchedText ? ` (matched "${matchedText}")` : '';
   return match
     ? { ok: false, detail: `${file} contains forbidden content${target}${matchedSuffix}` }

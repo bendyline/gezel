@@ -2,6 +2,7 @@ import type { CatalogItemSummary } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   craftbookCategories,
+  craftbookScriptsTrusted,
   craftbookStartRequest,
   findCraftbook,
   normalizeCraftbooks,
@@ -179,7 +180,15 @@ describe('craftbook start helpers', () => {
       craftbookSourceId: 'bundled',
       craftbookVersion: '2.1.0',
       dispatchEntry: true,
+      trustScripts: true,
     });
     expect(request.description.length).toBeGreaterThanOrEqual(40);
+  });
+
+  it('vouches only for catalog books, never local or project books gezels can edit', () => {
+    expect(craftbookScriptsTrusted('bundled')).toBe(true);
+    expect(craftbookScriptsTrusted('installed-ai-apps')).toBe(true);
+    expect(craftbookScriptsTrusted('local')).toBe(false);
+    expect(craftbookScriptsTrusted('project')).toBe(false);
   });
 });

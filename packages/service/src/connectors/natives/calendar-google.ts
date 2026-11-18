@@ -43,6 +43,7 @@ import type {
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
+import { retryAfterOf } from '../types.js';
 import { registerMicrosoftCalendarAdapters } from './calendar-microsoft.js';
 import {
   type CalendarAttendee,
@@ -357,7 +358,8 @@ export class GoogleCalendarAdapter implements ConnectorAdapter<NormalizedRecord,
     try {
       return await this.collect(calendarId, cur, limit);
     } catch (err) {
-      if (isGoogleThrottle(err)) return { records: [], cursor, rateLimited: true };
+      if (isGoogleThrottle(err))
+        return { records: [], cursor, rateLimited: true, ...retryAfterOf(err) };
       // A 410 is Google's "full sync required". A 400 on a stored page token
       // means the token outlived its listing; restart that listing too.
       if (hasStatus(err, 410) || (hasStatus(err, 400) && cur.pageToken)) {
@@ -366,7 +368,8 @@ export class GoogleCalendarAdapter implements ConnectorAdapter<NormalizedRecord,
         try {
           return await this.collect(calendarId, fresh, limit);
         } catch (again) {
-          if (isGoogleThrottle(again)) return { records: [], cursor: fresh, rateLimited: true };
+          if (isGoogleThrottle(again))
+            return { records: [], cursor: fresh, rateLimited: true, ...retryAfterOf(again) };
           throw this.explain(again, calendarId);
         }
       }
@@ -406,6 +409,19 @@ export class GoogleCalendarAdapter implements ConnectorAdapter<NormalizedRecord,
     const removed: string[] = [];
     let pageToken = cur.pageToken;
     let offset = cur.offset ?? 0;
+    // A window listing (no sync token) returns every live event in the
+    // window, so once it ends what it left out was deleted meanwhile.
+    const first = !cur.pageToken && !cur.offset;
+    const listing = (last: boolean): Pick<ChangeBatch<unknown>, 'fullListing'> =>
+      cur.syncToken
+        ? {}
+        : {
+            fullListing: {
+              first,
+              last,
+              within: { start: cur.window.start, end: cur.window.end },
+            },
+          };
     for (let guard = 0; guard < 10_000; guard++) {
       let page: GoogleEventsPage;
       try {
@@ -418,7 +434,13 @@ export class GoogleCalendarAdapter implements ConnectorAdapter<NormalizedRecord,
         );
       } catch (err) {
         if (isGoogleThrottle(err) && (records.length > 0 || removed.length > 0)) {
-          return { records, removed, cursor: cursorAt(cur, pageToken, offset), rateLimited: true };
+          return {
+            records,
+            removed,
+            cursor: cursorAt(cur, pageToken, offset),
+            rateLimited: true,
+            ...listing(false),
+          };
         }
         throw err;
       }
@@ -428,13 +450,25 @@ export class GoogleCalendarAdapter implements ConnectorAdapter<NormalizedRecord,
         this.classify(items[i]!, calendarId, page, cur, records, removed);
       }
       if (i < items.length) {
-        return { records, removed, cursor: cursorAt(cur, pageToken, i), partial: true };
+        return {
+          records,
+          removed,
+          cursor: cursorAt(cur, pageToken, i),
+          partial: true,
+          ...listing(false),
+        };
       }
       if (page.nextPageToken) {
         pageToken = page.nextPageToken;
         offset = 0;
         if (limit - records.length < PAGE_SIZE) {
-          return { records, removed, cursor: cursorAt(cur, pageToken), partial: true };
+          return {
+            records,
+            removed,
+            cursor: cursorAt(cur, pageToken),
+            partial: true,
+            ...listing(false),
+          };
         }
         continue;
       }
@@ -449,9 +483,9 @@ export class GoogleCalendarAdapter implements ConnectorAdapter<NormalizedRecord,
       if (windowNeedsRefresh(done.window, this.now(), this.windowConfig)) {
         // Deletions up to now are already in this batch; the fresh listing
         // only has to bring the new far edge (or the new config) in.
-        return { records, removed, cursor: this.freshCursor(), partial: true };
+        return { records, removed, cursor: this.freshCursor(), partial: true, ...listing(true) };
       }
-      return { records, removed, cursor: done };
+      return { records, removed, cursor: done, ...listing(true) };
     }
     throw new Error('Google Calendar listing did not end');
   }

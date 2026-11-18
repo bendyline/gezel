@@ -13,6 +13,7 @@ export { Store } from './fs/store.js';
 export { TaskManager } from './tasks/manager.js';
 export { TaskScheduler } from './tasks/scheduler.js';
 export { runInSandbox } from './sandbox/runner.js';
+export { runSpectralSelfTest } from './connectors/drivers/spectral-host.js';
 export type { SandboxRunOptions, SandboxRunResult } from './sandbox/runner.js';
 export { MemoryManager } from './memory/manager.js';
 export { MemoryCompactor } from './memory/compaction.js';

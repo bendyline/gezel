@@ -1,0 +1,8 @@
+{
+  "name": "@prismatic-io/components-gezel-forbidden-fixture",
+  "version": "1.0.0",
+  "description": "Test fixture: a component that reaches for what a connector may not use. Never published.",
+  "license": "Apache-2.0",
+  "main": "./npm-dist/index.cjs",
+  "dependencies": {}
+}

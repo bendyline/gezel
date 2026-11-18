@@ -170,6 +170,28 @@ export const PERSON_MEMORY_NEEDS_USER_TURN_CODE = 'person_memory_needs_user_turn
 export const PERSON_MEMORY_NEEDS_USER_TURN_HINT =
   'notes about the person can be saved only while they are talking with you. Save this to your own memory instead (scope "gezel"), and do not retry with scope "user".';
 
+/** Read by the model, so each names the move that works. */
+const SCHEDULE_NEEDS_USER_TURN =
+  'schedules and overnight work start only when the person asks for them in this turn. Suggest it to them instead, and do not retry.';
+const FOLDER_NEEDS_USER_TURN =
+  'a project’s folder changes only when the person asks for it in this turn. Ask them which folder to use, and do not retry.';
+
+/** A task request that would make work run on a schedule or overnight. */
+function armsSchedule(body: Record<string, unknown> | null): boolean {
+  if (!body) return false;
+  const cron = body.cron as { expression?: unknown } | null | undefined;
+  const night = body.nightShift as { enabled?: unknown } | null | undefined;
+  return (
+    (typeof cron?.expression === 'string' && cron.expression.trim() !== '') ||
+    night?.enabled === true
+  );
+}
+
+function hasReservedProjectProperty(properties: unknown): boolean {
+  if (!properties || typeof properties !== 'object') return false;
+  return Object.keys(properties).some((key) => key.toLowerCase().startsWith('gezel.'));
+}
+
 type SessionRouteDecision =
   | { ok: true }
   /** `routine`: a refusal the caller expects and handles, logged at `logRoutine`. */
@@ -254,6 +276,7 @@ async function isSessionRouteAllowed(
 ): Promise<SessionRouteDecision> {
   const path = c.req.path;
   const method = c.req.method.toUpperCase();
+  const personTurn = () => isUserDirectedTurn?.(sessionId(auth)) === true;
 
   // Event streams expose live content for opaque session/project ids and are
   // renderer concerns, never an MCP back-channel requirement.
@@ -357,6 +380,10 @@ async function isSessionRouteAllowed(
     }
     // `force` skips the step's gate and is recorded as the user's own
     // "Complete anyway"; `advance_task_step` never sends it.
+    // Jumping a task to a step skips every step and check before it.
+    if (method === 'POST' && /^\/tasks\/[^/]+\/steps\/[^/]+\/activate\/?$/.test(rest)) {
+      return sessionDeny('moving a task to another step is the person’s move');
+    }
     if (method === 'POST' && /^\/tasks\/[^/]+\/steps\/[^/]+\/complete\/?$/.test(rest)) {
       const body = await readJsonSafe(c);
       if (body?.force) {
@@ -405,7 +432,16 @@ async function isSessionRouteAllowed(
       ((method === 'PATCH' || method === 'DELETE') &&
         /^\/connectors\/[^/]+\/?$/.test(rest) &&
         !/^\/connectors\/actions\//.test(rest)) ||
-      /^\/connectors\/[^/]+\/(?:preview|captures)(?:\/|$)/.test(rest)
+      // A saved sign-in: a gezel must never open a password window on the
+      // person's desktop, plant cookies of its choosing, or read or forget one.
+      /^\/connectors\/[^/]+\/(?:preview|captures|sign-in|session|reconnect|check|stored)(?:\/|$)/.test(
+        rest,
+      ) ||
+      // Saving a page is the person's click; a gezel asks with request_web_page.
+      (method === 'POST' && /^\/web-pages\/save\/?$/.test(rest)) ||
+      // What a draft offers, and taking an offer, are the composer's: accepting
+      // one fetches for the person, exactly as Save page does.
+      /^\/prompt-connectors(?:\/|$)/.test(rest)
     ) {
       return sessionDeny('connector setup and camera pictures require a first-party client');
     }
@@ -484,6 +520,50 @@ async function isSessionRouteAllowed(
       return sessionDeny('task-note actor does not match the session token');
     }
 
+    // An AI App adds project types, gezel templates and craftbooks for the
+    // whole install, and project scripts matching it run trusted.
+    // Previewing a package and exporting this project's own stay open.
+    if (method === 'POST' && /^\/ai-apps\/import\/?$/.test(rest)) {
+      const body = await readJsonSafe(c);
+      if (body?.confirm === true) {
+        return sessionDeny(
+          'installing an AI App is the person’s decision; tell them it passed the preview and ask them to add it in Gezel',
+        );
+      }
+    }
+    // `/install` adds a package with no approval card; `npm_install` asks.
+    if (method === 'POST' && /^\/install\/?$/.test(rest)) {
+      return sessionDeny('install packages with npm_install, which asks the person first');
+    }
+    // A project's icon and the person's unsent message drafts are theirs.
+    if (method !== 'GET' && /^\/icon(?:\/|$)/.test(rest)) {
+      return sessionDeny('a project’s icon is chosen by the person');
+    }
+    if (method !== 'GET' && /^\/prompt-drafts(?:\/|$)/.test(rest)) {
+      return sessionDeny('message drafts belong to the person writing them');
+    }
+    // Schedules and night work run while nobody watches, so only the
+    // person's own turn may switch them on. Switching them off stays open.
+    if (method === 'POST' && /^\/suggested-work\/enable\/?$/.test(rest) && !personTurn()) {
+      return sessionDeny(SCHEDULE_NEEDS_USER_TURN);
+    }
+    if (method === 'POST' && /^\/night-work\/?$/.test(rest)) {
+      const body = await readJsonSafe(c);
+      if (body?.enabled === true && !personTurn()) return sessionDeny(SCHEDULE_NEEDS_USER_TURN);
+    }
+    if (
+      (method === 'PATCH' && /^\/tasks\/[^/]+\/?$/.test(rest)) ||
+      (method === 'POST' && /^\/tasks(?:\/workflow)?\/?$/.test(rest))
+    ) {
+      const body = await readJsonSafe(c);
+      if (armsSchedule(body) && !personTurn()) return sessionDeny(SCHEDULE_NEEDS_USER_TURN);
+    }
+    // Which folder a project looks at decides what every gezel in it can
+    // read. Moving it is the person's move, made in a turn they started.
+    if (method === 'PUT' && /^\/working-dir\/?$/.test(rest) && !personTurn()) {
+      return sessionDeny(FOLDER_NEEDS_USER_TURN);
+    }
+
     // Project metadata, roster/import, and UI shell actions are coordinator
     // operations. Ordinary workers retain workspace/artifact/task-progress,
     // script, GitHub, connector, and project-tool routes inside their project.
@@ -511,6 +591,34 @@ async function isSessionRouteAllowed(
             'workspace permission changes require a user decision; request permission with ask_user_question and permissionRequest: workspace-write',
           );
         }
+        // A grant decides which stored secret a project's scripts may spend
+        // and where it may be sent. A coordinator that could set it could
+        // hand itself any connector's credential (`connector-<type>.<id>`)
+        // and point it at an origin of its choosing.
+        if (
+          body?.grantedCredentials !== undefined ||
+          body?.credentialAllowedOrigins !== undefined
+        ) {
+          return sessionDeny('credential grants are the person’s decision; ask them in Gezel');
+        }
+        // Linking opens another project's workspace to this one's crew; the
+        // permission modes switch a CLI agent's own sandbox and prompts off.
+        if (
+          body?.linkedProjectIds !== undefined ||
+          body?.claudePermissionMode !== undefined ||
+          body?.codexPermissionMode !== undefined
+        ) {
+          return sessionDeny('project permissions are the person’s decision; ask them in Gezel');
+        }
+        // `gezel.*` properties are the service's own records (the shared
+        // library's marker, a folder's kind, its night work); clearing the
+        // library's marker would let its folder be moved.
+        if (hasReservedProjectProperty(body?.properties)) {
+          return sessionDeny('gezel.* project properties are managed by Gezel');
+        }
+        if (body?.workingDir !== undefined && !personTurn()) {
+          return sessionDeny(FOLDER_NEEDS_USER_TURN);
+        }
       }
       return auth.team ? SESSION_ALLOW : sessionDeny('route requires a coordinator session');
     }
@@ -520,9 +628,15 @@ async function isSessionRouteAllowed(
   // Bare project collection is only needed by coordinator tools
   // (`list_projects`, `start_project`, `start_job`).
   if (path === '/api/projects' || path === '/api/projects/') {
-    return auth.team && (method === 'GET' || method === 'POST')
-      ? SESSION_ALLOW
-      : sessionDeny('project collection requires a coordinator session');
+    if (!auth.team || (method !== 'GET' && method !== 'POST')) {
+      return sessionDeny('project collection requires a coordinator session');
+    }
+    if (method === 'POST') {
+      const body = await readJsonSafe(c);
+      if (body?.workingDir !== undefined && !personTurn())
+        return sessionDeny(FOLDER_NEEDS_USER_TURN);
+    }
+    return SESSION_ALLOW;
   }
 
   // Gezel roster reads support delegation. Identity state is otherwise
@@ -564,6 +678,32 @@ async function isSessionRouteAllowed(
       return sessionDeny('route exposes sessions/projects outside the token scope');
     }
     if (method === 'GET') return SESSION_ALLOW;
+    // A message posted here has no sender, so it reads as the person's own
+    // turn and opens every gate that waits for them. Gezels use /message.
+    if (/^\/chat(?:\/|$)/.test(rest)) {
+      return sessionDeny('a gezel cannot post in a chat as the person; use message_gezel');
+    }
+    // The raw gezel.md carries every setting below in one write.
+    if (rest === '/md' || rest === '/md/') {
+      return sessionDeny('a gezel’s settings file is edited by the person');
+    }
+    if (rest === '/settings' || rest === '/settings/') {
+      const body = await readJsonSafe(c);
+      if (
+        body?.sandboxCopilot !== undefined ||
+        body?.claudePermissionMode !== undefined ||
+        body?.codexPermissionMode !== undefined ||
+        body?.factualWriting !== undefined
+      ) {
+        return sessionDeny(
+          'sandbox, permission and fact-checking settings are the person’s decision; ask them in Gezel',
+        );
+      }
+    }
+    // Accepting a growth proposal changes how a gezel behaves from then on.
+    if (/^\/growth\/(?:accept|decline|traits)(?:\/|$)/.test(rest) && !personTurn()) {
+      return sessionDeny('growth proposals are accepted or declined by the person');
+    }
     return auth.team ? SESSION_ALLOW : sessionDeny('gezel mutation requires a coordinator session');
   }
 

@@ -73,14 +73,77 @@ export const PROJECT_TYPE_CATEGORY_GROUND: Readonly<
 };
 
 /**
+ * What a connector type brings in. Connector types have no category, so the
+ * family is read from the id and tags. It is both the shelf the type sits on
+ * in the Add connection gallery and the ground its mark is painted on, so the
+ * two can never disagree.
+ */
+export const CONNECTOR_FAMILIES = [
+  'mail',
+  'calendars',
+  'files',
+  'web',
+  'social',
+  'code',
+  'data',
+  'devices',
+  'other',
+] as const;
+export type ConnectorFamily = (typeof CONNECTOR_FAMILIES)[number];
+
+/** First match wins; a type that fits none is `other`. */
+const CONNECTOR_FAMILY_PATTERNS: readonly (readonly [RegExp, ConnectorFamily])[] = [
+  [/\b(camera|webcam|device)\b/, 'devices'],
+  [/\b(mail|email|gmail|imap)\b/, 'mail'],
+  [/\bcalendar\b/, 'calendars'],
+  [/\b(files|documents|drive|onedrive|sharepoint)\b/, 'files'],
+  [/\b(github|issues|linear)\b/, 'code'],
+  [/\b(social|posts|video|media)\b/, 'social'],
+  [/\b(table|logs|telemetry|records|data|json)\b/, 'data'],
+  [/\b(web|website|pages|rss|feeds|news)\b/, 'web'],
+];
+
+export const CONNECTOR_FAMILY_GROUND: Readonly<Record<ConnectorFamily, CatalogGroundTone>> = {
+  devices: 'forest',
+  mail: 'terracotta',
+  calendars: 'rose',
+  files: 'ochre',
+  code: 'indigo',
+  social: 'plum',
+  data: 'slate',
+  web: 'teal',
+  other: 'sage',
+};
+
+export function connectorTypeFamily(manifest: {
+  id?: string;
+  tags?: readonly string[];
+}): ConnectorFamily {
+  const words = [manifest.id ?? '', ...(manifest.tags ?? [])]
+    .join(' ')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ');
+  return CONNECTOR_FAMILY_PATTERNS.find(([pattern]) => pattern.test(words))?.[1] ?? 'other';
+}
+
+export function connectorTypeGround(manifest: {
+  id?: string;
+  tags?: readonly string[];
+}): CatalogGroundTone {
+  return CONNECTOR_FAMILY_GROUND[connectorTypeFamily(manifest)];
+}
+
+/**
  * The ground for a catalog item's mark, or undefined for kinds whose artwork
  * carries its own ground (knowledge catalogs, toolsets, models).
  */
 export function catalogGroundFor(manifest: {
   kind: string;
+  id?: string;
   category?: string;
   tags?: readonly string[];
 }): CatalogGroundTone | undefined {
+  if (manifest.kind === 'connector-type') return connectorTypeGround(manifest);
   if (manifest.kind === 'craftbook-template') {
     const category = CraftbookCategorySchema.safeParse(manifest.category);
     return CRAFTBOOK_CATEGORY_GROUND[

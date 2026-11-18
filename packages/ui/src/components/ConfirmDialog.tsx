@@ -4,7 +4,8 @@ import { AlertDialog } from '../primitives/index.js';
 /**
  * Modal yes/no dialog. Backdrop click + Escape both cancel (Radix defaults),
  * Enter confirms via autoFocus on the action button. Use `danger` to mark
- * destructive actions — the primary button goes red.
+ * destructive actions — the primary button goes red. `children` sits under
+ * the message, for an option that changes what the confirm key does.
  */
 export function ConfirmDialog({
   open,
@@ -15,6 +16,7 @@ export function ConfirmDialog({
   danger = false,
   onConfirm,
   onCancel,
+  children,
 }: {
   open: boolean;
   title: string;
@@ -24,6 +26,7 @@ export function ConfirmDialog({
   danger?: boolean;
   onConfirm: () => void | Promise<void>;
   onCancel: () => void;
+  children?: React.ReactNode;
 }) {
   const [busy, setBusy] = useState(false);
 
@@ -53,6 +56,7 @@ export function ConfirmDialog({
           {message && (
             <AlertDialog.Description className="muted small">{message}</AlertDialog.Description>
           )}
+          {children}
           <AlertDialog.Actions>
             <AlertDialog.Cancel asChild>
               <button type="button" disabled={busy}>

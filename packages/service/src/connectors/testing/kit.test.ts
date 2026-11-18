@@ -161,13 +161,18 @@ afterEach(async () => {
   env = null;
 });
 
-async function pass(adapter: ConnectorAdapter, cursor: unknown) {
+async function pass(
+  adapter: ConnectorAdapter,
+  cursor: unknown,
+  extra: { retrySchedule?: readonly number[] } = {},
+) {
   return syncWithAdapter(adapter, {
     storageDir: env!.artifactsDir,
     quarantineDir: env!.quarantineDir,
     corpusDir: 'data/t',
     backfillLimit: 50,
     cursor,
+    ...extra,
   });
 }
 
@@ -325,6 +330,25 @@ describe('syncWithAdapter — poison records', () => {
     expect((last.cursor as { scopes: Record<string, unknown> }).scopes['']).toBe('next');
     expect((last.cursor as { failures?: unknown }).failures).toBeUndefined();
     expect(partialFailureNote(last)).toMatch(/failed 3 passes in a row and were skipped/);
+  });
+
+  it('never gives up on records that failed only on a dropped connection', async () => {
+    env = await createConnectorTestEnv();
+    // The first record lands, then the connection drops for the rest.
+    const adapter = new ScriptedAdapter(
+      () => ({ records: [{ id: 'early' }, { id: 'tail-1' }, { id: 'tail-2' }], cursor: 'next' }),
+      (ref) => {
+        if (ref.id === 'early') return rec(ref.id, 'd');
+        throw Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' });
+      },
+    );
+    let cursor: unknown;
+    for (let i = 0; i < POISON_RECORD_PASSES + 2; i++) {
+      const r = await pass(adapter, cursor, { retrySchedule: [1, 1, 1] });
+      cursor = r.cursor;
+      expect(r.abandoned).toBeUndefined();
+    }
+    expect((cursor as { scopes: Record<string, unknown> }).scopes['']).toBeUndefined();
   });
 
   it('never gives up on records when the whole batch fails (an outage, not a bad record)', async () => {

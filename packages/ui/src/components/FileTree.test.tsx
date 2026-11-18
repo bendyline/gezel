@@ -216,3 +216,39 @@ describe('FileTree row status', () => {
     expect(screen.getByLabelText('Status for notes.md')).toHaveTextContent('2');
   });
 });
+
+describe('FileTree reveal', () => {
+  const dir = (path: string) => ({ path, name: path.split('/').pop()!, isDirectory: true });
+  const file = (path: string) => ({ path, name: path.split('/').pop()!, isDirectory: false });
+  const ENTRIES = [
+    dir('data'),
+    dir('data/mail-gmail'),
+    dir('data/mail-gmail/inbox'),
+    file('data/mail-gmail/inbox/001--hello--1a2b3c4d.md'),
+    dir('reports'),
+    file('reports/weekly.md'),
+  ];
+
+  it('opens the folders on the way, marks the folder, and opens it too', () => {
+    const scrolled = vi.fn();
+    Element.prototype.scrollIntoView = scrolled;
+    const { rerender } = render(
+      <FileTree entries={ENTRIES} onSelect={vi.fn()} defaultExpandedDepth={0} />,
+    );
+    expect(screen.queryByRole('button', { name: 'inbox' })).toBeNull();
+
+    rerender(
+      <FileTree
+        entries={ENTRIES}
+        onSelect={vi.fn()}
+        defaultExpandedDepth={0}
+        reveal={{ path: 'data/mail-gmail', requestId: 1 }}
+      />,
+    );
+    const row = screen.getByRole('button', { name: 'mail-gmail' }).closest('.tree-row');
+    expect(row?.classList.contains('tree-row-selected')).toBe(true);
+    expect(screen.getByRole('button', { name: 'inbox' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'weekly.md' })).toBeNull();
+    expect(scrolled).toHaveBeenCalled();
+  });
+});

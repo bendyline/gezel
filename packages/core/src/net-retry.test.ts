@@ -8,9 +8,26 @@ import {
   innermostErrorReason,
   isTransientHttpStatus,
   isTransientNetworkError,
+  parseRetryAfterMs,
   retryTransient,
   sleepWithAbort,
 } from './net-retry.js';
+
+describe('parseRetryAfterMs', () => {
+  it('reads seconds and HTTP dates, and ignores the rest', () => {
+    const now = Date.parse('2026-11-16T10:00:00Z');
+    expect(parseRetryAfterMs('30', now)).toBe(30_000);
+    expect(parseRetryAfterMs('Mon, 16 Nov 2026 10:02:00 GMT', now)).toBe(120_000);
+    expect(parseRetryAfterMs('Mon, 16 Nov 2026 09:00:00 GMT', now)).toBeUndefined();
+    expect(parseRetryAfterMs('soon', now)).toBeUndefined();
+    expect(parseRetryAfterMs(null, now)).toBeUndefined();
+  });
+
+  it('rides on HttpStatusError', () => {
+    expect(new HttpStatusError(429, 'slow down', { retryAfterMs: 5_000 }).retryAfterMs).toBe(5_000);
+    expect(new HttpStatusError(503).retryAfterMs).toBeUndefined();
+  });
+});
 
 /** Keep the tests off the real backoff schedule. */
 const FAST = { schedule: [1, 1, 1, 1, 1] };

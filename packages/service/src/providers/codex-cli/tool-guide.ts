@@ -42,6 +42,8 @@ const RECEIPT_RUNNERS = ['run_package_script', 'run_npx'];
 export interface CodexToolGuideOptions {
   /** False for a read-only (`plan`) session, which must not be told to edit. */
   canEdit?: boolean;
+  /** False when the security level turned Codex's own shell off. */
+  shell?: boolean;
 }
 
 export function codexToolGuide(
@@ -65,13 +67,16 @@ export function codexToolGuide(
   ];
   if (opts.canEdit !== false) {
     const runners = RECEIPT_RUNNERS.filter((name) => gezelTools.includes(`${GEZEL_PREFIX}${name}`));
+    const shell = opts.shell !== false;
     lines.push(
       '',
-      `Gezel's file, shell and web tools (\`write_file\`, \`delete_path\`, \`make_dir\`, \`rename\`, \`run_nodejs_script\`, \`fetch_url\`, \`web_search\`) are left out because Codex has its own. Where your instructions name one, do that work with your built-in file editing, shell or web search. Its absence is not a blocker.${
-        runners.length > 0
-          ? ` Use ${runners.map((name) => `\`${name}\``).join(' and ')} where your instructions name them: the step's checks read their run records, which a shell run does not leave.`
-          : ''
-      }`,
+      shell
+        ? `Gezel's file, shell and web tools (\`write_file\`, \`delete_path\`, \`make_dir\`, \`rename\`, \`run_nodejs_script\`, \`fetch_url\`, \`web_search\`) are left out because Codex has its own. Where your instructions name one, do that work with your built-in file editing, shell or web search. Its absence is not a blocker.${
+            runners.length > 0
+              ? ` Use ${runners.map((name) => `\`${name}\``).join(' and ')} where your instructions name them: the step's checks read their run records, which a shell run does not leave.`
+              : ''
+          }`
+        : "Gezel's file and web tools (`write_file`, `delete_path`, `make_dir`, `rename`, `fetch_url`, `web_search`) are left out because Codex has its own. Where your instructions name one, do that work with your built-in file editing or web search. You have no shell here: run code and commands with Gezel's tools on this turn's list.",
     );
   }
   return lines.join('\n');

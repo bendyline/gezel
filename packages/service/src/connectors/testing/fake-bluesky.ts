@@ -80,8 +80,12 @@ export class FakeBluesky {
     this.now = new Date(this.now.getTime() + ms);
   }
 
-  /** The account posts at the fake clock; returns the rkey. */
-  addPost(text: string, opts: { likes?: number } = {}): string {
+  /**
+   * The account posts, indexed at the fake clock; returns the rkey. `createdAt`
+   * earlier than now is a post the AppView indexed late (a slow relay, a client
+   * clock behind, an archive import): the feed sorts it by that earlier time.
+   */
+  addPost(text: string, opts: { likes?: number; createdAt?: Date } = {}): string {
     const rkey = this.rkey();
     const at = this.now.toISOString();
     this.feed.push({
@@ -89,7 +93,7 @@ export class FakeBluesky {
       authorDid: this.did,
       authorHandle: this.handle,
       text,
-      createdAt: at,
+      createdAt: opts.createdAt?.toISOString() ?? at,
       indexedAt: at,
       likes: opts.likes ?? 0,
       reposts: 0,

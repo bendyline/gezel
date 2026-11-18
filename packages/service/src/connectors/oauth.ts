@@ -38,6 +38,8 @@ export interface OAuthTokens {
   refreshToken?: string;
   /** ISO expiry, computed from `expires_in`. */
   expiresAt: string;
+  /** The OpenID Connect ID token, when `openid` was asked for. */
+  idToken?: string;
 }
 
 /** Authorize/token endpoints + scopes for one source. */
@@ -45,6 +47,34 @@ export interface OAuthEndpoints {
   authEndpoint: string;
   tokenEndpoint: string;
   scopes: string[];
+  /**
+   * How a confidential client proves itself at the token endpoint: the secret
+   * in the form (`post`, the default) or an HTTP Basic header (`basic`).
+   * A manifest sets it with `secretShape.tokenAuth`.
+   */
+  clientAuth?: 'post' | 'basic';
+}
+
+/** Token hosts that refuse a secret in the form and require Basic (X documents this). */
+const BASIC_CLIENT_AUTH_HOSTS = new Set(['api.x.com', 'api.twitter.com']);
+
+/** The client authentication a token endpoint takes: the manifest's choice, else the host's. */
+export function clientAuthFor(
+  endpoints: Pick<OAuthEndpoints, 'tokenEndpoint' | 'clientAuth'>,
+): 'post' | 'basic' {
+  if (endpoints.clientAuth) return endpoints.clientAuth;
+  try {
+    return BASIC_CLIENT_AUTH_HOSTS.has(new URL(endpoints.tokenEndpoint).hostname)
+      ? 'basic'
+      : 'post';
+  } catch {
+    return 'post';
+  }
+}
+
+/** A `secretShape.tokenAuth` value, or undefined when absent or unknown. */
+export function parseTokenAuth(raw: unknown): 'post' | 'basic' | undefined {
+  return raw === 'basic' || raw === 'post' ? raw : undefined;
 }
 
 function assertCredentialUrl(label: string, raw: string): void {
@@ -72,15 +102,39 @@ export function expiresAtFrom(expiresIn: unknown): string {
   return new Date(Date.now() + (secs - 60) * 1000).toISOString();
 }
 
+/**
+ * The client's identity for a token request. With Basic, a confidential
+ * client's id and secret go in the header (form-encoded, RFC 6749 §2.3.1) and
+ * neither is repeated in the form; a public client always sends its id in the form.
+ */
+function clientCredentials(
+  endpoints: Pick<OAuthEndpoints, 'tokenEndpoint' | 'clientAuth'>,
+  clientId: string,
+  clientSecret: string | undefined,
+): { form: Record<string, string>; headers: Record<string, string> } {
+  if (clientSecret && clientAuthFor(endpoints) === 'basic') {
+    const pair = `${encodeURIComponent(clientId)}:${encodeURIComponent(clientSecret)}`;
+    return {
+      form: {},
+      headers: { Authorization: `Basic ${Buffer.from(pair).toString('base64')}` },
+    };
+  }
+  return {
+    form: { client_id: clientId, ...(clientSecret ? { client_secret: clientSecret } : {}) },
+    headers: {},
+  };
+}
+
 async function postToken(
   tokenEndpoint: string,
   body: Record<string, string>,
   fetchImpl: typeof fetch = fetch,
+  headers: Record<string, string> = {},
 ): Promise<OAuthTokens> {
   validateOAuthEndpoints({ authEndpoint: tokenEndpoint, tokenEndpoint, scopes: [] });
   const res = await fetchImpl(tokenEndpoint, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...headers },
     body: new URLSearchParams(body).toString(),
     redirect: 'error',
     signal: AbortSignal.timeout(30_000),
@@ -96,6 +150,7 @@ async function postToken(
     accessToken,
     ...(json.refresh_token ? { refreshToken: String(json.refresh_token) } : {}),
     expiresAt: expiresAtFrom(json.expires_in),
+    ...(typeof json.id_token === 'string' ? { idToken: json.id_token } : {}),
   };
 }
 
@@ -177,17 +232,18 @@ export interface ExchangeAuthCodeParams {
 
 /** Exchange an authorization code for tokens. */
 export function exchangeAuthCode(params: ExchangeAuthCodeParams): Promise<OAuthTokens> {
+  const client = clientCredentials(params.endpoints, params.clientId, params.clientSecret);
   return postToken(
     params.endpoints.tokenEndpoint,
     {
-      client_id: params.clientId,
-      ...(params.clientSecret ? { client_secret: params.clientSecret } : {}),
+      ...client.form,
       code: params.code,
       code_verifier: params.codeVerifier,
       redirect_uri: params.redirectUri,
       grant_type: 'authorization_code',
     },
     params.fetchImpl,
+    client.headers,
   );
 }
 
@@ -202,15 +258,16 @@ export interface RefreshTokenParams {
 
 /** Trade a refresh token for a fresh access token. */
 export function refreshToken(params: RefreshTokenParams): Promise<OAuthTokens> {
+  const client = clientCredentials(params.endpoints, params.clientId, params.clientSecret);
   return postToken(
     params.endpoints.tokenEndpoint,
     {
-      client_id: params.clientId,
-      ...(params.clientSecret ? { client_secret: params.clientSecret } : {}),
+      ...client.form,
       refresh_token: params.refreshToken,
       grant_type: 'refresh_token',
     },
     params.fetchImpl,
+    client.headers,
   );
 }
 

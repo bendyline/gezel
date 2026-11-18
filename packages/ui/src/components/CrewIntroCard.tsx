@@ -4,8 +4,8 @@ import { CrewMemberCard } from './CrewMemberCard.js';
 /**
  * Crew introduced in the thread the person reads: the crew a task brought,
  * or someone the thread's gezel hired in conversation. One card per gezel
- * with their portrait, their role in plain words ("Trip Planner"), what they
- * do, and a way to say hello. It replaced a line of prose that named people
+ * with their portrait, their role in plain words ("Trip Planner"), and what
+ * they do. It replaced a line of prose that named people
  * the reader had never met and could not see.
  */
 export function CrewIntroCard({

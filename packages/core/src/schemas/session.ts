@@ -915,6 +915,8 @@ export const TimelineMessageSchema = z.object({
    * it; citation-only messages from older sessions remain supported.
    */
   retrieval: ChatMessageSchema.shape.retrieval,
+  /** Mirrors `ChatMessage.inclusions` — saved copies of what the person named in this turn. */
+  inclusions: ChatMessageSchema.shape.inclusions,
   /** Mirrors `ChatMessage.grounding` — a factual-mode reply's numbered sources and check. */
   grounding: ChatMessageSchema.shape.grounding,
   /**

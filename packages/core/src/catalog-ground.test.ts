@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   CATALOG_GROUND_TONES,
+  CONNECTOR_FAMILIES,
+  CONNECTOR_FAMILY_GROUND,
   CRAFTBOOK_CATEGORY_GROUND,
   PROJECT_TYPE_CATEGORY_GROUND,
   catalogGroundFor,
+  connectorTypeFamily,
 } from './catalog-ground.js';
 import {
   CRAFTBOOK_CATEGORY_FAMILY_META,
@@ -56,6 +59,37 @@ describe('catalog grounds', () => {
     expect(catalogGroundFor({ kind: 'project-type', category: 'from-a-newer-gilde' })).toBe(
       PROJECT_TYPE_CATEGORY_GROUND.other,
     );
+  });
+
+  it('grounds a connector type by what it brings in', () => {
+    const ground = (id: string, tags: string[] = []) =>
+      catalogGroundFor({ kind: 'connector-type', id, tags });
+    expect(ground('website', ['web', 'pages', 'documentation', 'monitoring'])).toBe('teal');
+    expect(ground('rss-feed', ['rss', 'feeds', 'news'])).toBe('teal');
+    expect(ground('mail-gmail', ['email', 'oauth'])).toBe('terracotta');
+    expect(ground('calendar-microsoft', ['calendar', 'microsoft'])).toBe('rose');
+    expect(ground('files-google-drive', ['files', 'google-drive', 'documents'])).toBe('ochre');
+    expect(ground('github-wiki', ['github', 'wiki', 'documentation'])).toBe('indigo');
+    expect(ground('youtube-videos', ['youtube', 'video', 'social'])).toBe('plum');
+    expect(ground('http-json-rows', ['data', 'table', 'json'])).toBe('slate');
+    expect(ground('camera-local', ['camera', 'home', 'device'])).toBe('forest');
+    expect(ground('from-a-newer-gilde')).toBe('sage');
+  });
+
+  it('shelves a connector type by family, and paints it on that family’s ground', () => {
+    const shelve = (id: string, tags: string[] = []) => connectorTypeFamily({ id, tags });
+    expect(shelve('mail-imap', ['email'])).toBe('mail');
+    expect(shelve('calendar-google', ['calendar', 'oauth'])).toBe('calendars');
+    expect(shelve('files-onedrive', ['files', 'onedrive'])).toBe('files');
+    expect(shelve('linear-issues', ['issues', 'mcp'])).toBe('code');
+    expect(shelve('x-posts', ['x', 'twitter', 'social', 'posts'])).toBe('social');
+    expect(shelve('azure-monitor-logs', ['azure', 'logs', 'telemetry'])).toBe('data');
+    expect(shelve('website', ['web', 'website'])).toBe('web');
+    expect(shelve('camera-local', ['camera', 'device'])).toBe('devices');
+    expect(shelve('from-a-newer-gilde')).toBe('other');
+    for (const family of CONNECTOR_FAMILIES) {
+      expect(CONNECTOR_FAMILY_GROUND[family]).toBeDefined();
+    }
   });
 
   it('leaves kinds whose artwork carries its own ground alone', () => {

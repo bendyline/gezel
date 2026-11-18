@@ -1,7 +1,7 @@
 import { type ActivityTurn, isReadyQuestion } from '../activity.js';
 import type { CraftbookStepStage } from '../schemas/craftbook.js';
 import { type ChatMessage, isLocalProvider } from '../schemas/gezel.js';
-import { projectLeadGezelId } from '../schemas/project.js';
+import { type ProjectMode, projectLeadGezelId } from '../schemas/project.js';
 import type { Question } from '../schemas/question.js';
 import type { TaskDeliverable } from '../schemas/referenced-file.js';
 import type { RequestState, RequestStop, RequestTrack } from '../schemas/request-track.js';
@@ -57,6 +57,11 @@ export interface RequestTrackInput {
   questions: readonly Question[];
   /** Who the person hears from for a project; presentation only. */
   leadOf: (projectId: string) => string | undefined;
+  /**
+   * True when the project's lead works alone (a `solo` project) and so
+   * speaks only for work they hold. Missing reads as a crew lead.
+   */
+  soloOf?: (projectId: string) => boolean;
   estimates: DurationEstimates;
   engineOf?: (task: Task) => EtaEngine | undefined;
   now: number;
@@ -212,10 +217,17 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
     const kept = primaries.filter((t) => taskEffectiveStatus(t) !== 'canceled');
     const allDone = kept.length > 0 && kept.every((t) => taskEffectiveStatus(t) === 'complete');
     const allStopped = kept.length === 0;
-    const lead =
-      input.leadOf(current.projectId) ??
-      (current.assignee.kind === 'gezel' ? current.assignee.gezelId : undefined) ??
-      thread?.gezelId;
+    const owner = current.assignee.kind === 'gezel' ? current.assignee.gezelId : undefined;
+    const onWork = new Set(tasks.flatMap(stepGezels));
+    const projectLead = input.leadOf(current.projectId);
+    // A solo project's main gezel leads no crew, so a task handed to someone
+    // else is not theirs to speak for: "Hieu is merging the batch ledgers"
+    // credited a Builder with a Reviewer's whole run, and "Who's helping?"
+    // then listed the Reviewer as a helper on their own task (2026-11-17).
+    const speaksForWork =
+      projectLead !== undefined &&
+      (input.soloOf?.(current.projectId) !== true || onWork.has(projectLead) || !owner);
+    const lead = (speaksForWork ? projectLead : undefined) ?? owner ?? thread?.gezelId;
 
     const stop = allDone ? 'ready' : primaries.map(taskStop).reduce(furthest, 'got-it');
 
@@ -227,7 +239,13 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
     const threadTurn = turnsBySession.get(ref.sessionId);
     const newerAsk = thread?.messages.some((m) => m.at > ref.at && isPersonMessage(m, thread));
     const trailing = allDone && threadTurn !== undefined && !newerAsk;
-    const held = turns.find((turn) => turn.engineHold)?.engineHold;
+    // Held only when nothing of it is running: fifteen batch reviews share
+    // one engine, and the one queued behind its sibling read the whole
+    // review as "waiting for another chat to finish", under Next, while two
+    // of its turns were on the engine (2026-11-17).
+    const held = turns.every((turn) => turn.engineHold)
+      ? turns.find((turn) => turn.engineHold)?.engineHold
+      : undefined;
 
     let state: RequestState;
     // Finished work is Ready even with a question still open: the wrap-up
@@ -253,6 +271,7 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
       pausedTask && pauseCard?.intent?.kind === 'task-paused' ? pauseCard.intent : undefined;
 
     const active = activeStepOf(current);
+    const awaitingParts = active ? waitsOnParts(current, active, shards) : false;
     const stage = active
       ? liveStepStage(active, craftbookStepStages(current.craftbook.steps))
       : undefined;
@@ -273,6 +292,8 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
     else if (state === 'waiting') {
       const wait = waits[0];
       doing = wait ? WAIT_LINES[wait.reason] : 'is about to start';
+    } else if (awaitingParts) {
+      doing = 'is working through it in parts';
     } else if (active) {
       const label = noun ? { noun } : {};
       doing = `is ${
@@ -300,7 +321,7 @@ export function resolveRequestTracks(input: RequestTrackInput): RequestTrack[] {
       allDone && promised ? { ...promised, projectId: current.projectId } : undefined;
     const deliverable = wrapUp?.deliverable ?? fallback;
     const assignee = active ? taskActiveAssignee(current) : undefined;
-    const crew = [...new Set(tasks.flatMap(stepGezels))].filter((id) => id !== lead);
+    const crew = [...onWork].filter((id) => id !== lead);
     const joined = joinedCrewFor(thread, refs).filter((id) => id !== lead);
     const liveSessionIds = [
       ...new Set([
@@ -394,11 +415,30 @@ function activeStepOf(task: Task) {
   return task.craftbook.steps.find((step) => step.id === task.activeStepId);
 }
 
+/**
+ * True while `active` waits on parts an earlier step sent out. Its own name
+ * says what it does once they are back ("Merge the batch ledgers"), so read
+ * out while fifteen reviews were still running it claimed a merge nobody
+ * had started. A step that sends the parts out names their work and keeps
+ * its phrase ("Draft the invoices"), as does one with its own `personLabel`.
+ */
+function waitsOnParts(task: Task, active: TaskStep, shards: readonly Task[]): boolean {
+  if (active.spawnFanout || active.personLabel?.trim()) return false;
+  const running = shards.some((shard) => {
+    if (shard.parentTaskRef !== task.ref) return false;
+    const status = taskEffectiveStatus(shard);
+    return status === 'active' || status === 'draft';
+  });
+  return running && task.craftbook.steps.some((step) => step.spawnFanout && step.completedAt);
+}
+
 /** Where `assembleRequestTracks` reads; both hosts' stores fit it. */
 export interface RequestTrackSources {
   tasks: readonly Task[];
   session: (id: string) => Promise<RequestThread | null>;
-  project: (id: string) => Promise<{ id: string; voormanGezelId?: string } | null>;
+  project: (
+    id: string,
+  ) => Promise<{ id: string; voormanGezelId?: string; mode?: ProjectMode } | null>;
   meesterGezelId?: string;
   inflight: readonly ActivityTurn[];
   waiting: readonly TaskWaitState[];
@@ -459,7 +499,10 @@ export async function assembleRequestTracks(
     const thread = await session(id);
     if (thread) threads.set(id, thread);
   }
-  const projects = new Map<string, { id: string; voormanGezelId?: string } | null>();
+  const projects = new Map<
+    string,
+    { id: string; voormanGezelId?: string; mode?: ProjectMode } | null
+  >();
   for (const projectId of new Set(tasks.map((task) => task.projectId))) {
     projects.set(projectId, await src.project(projectId).catch(() => null));
   }
@@ -475,6 +518,7 @@ export async function assembleRequestTracks(
       const project = projects.get(projectId);
       return project ? projectLeadGezelId(project, src.meesterGezelId) : undefined;
     },
+    soloOf: (projectId) => projects.get(projectId)?.mode === 'solo',
     estimates: src.estimates,
     ...(src.engineOf ? { engineOf: src.engineOf } : {}),
     now: src.now,

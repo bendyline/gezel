@@ -3627,6 +3627,22 @@ export class Store {
     if (updated.properties && Object.keys(updated.properties).length === 0) {
       delete (updated as Partial<Project>).properties;
     }
+    // A write grant was given for the old folder; a new one starts read-only,
+    // as it does through updateProjectWorkingDir. Only a grant in this same
+    // patch carries over to the new folder.
+    if (
+      patch.workingDir !== undefined &&
+      (patch.workingDir || undefined) !== meta.workingDir &&
+      nextManagedWorkspaceWritePolicy === undefined
+    ) {
+      delete updated.managedWorkspaceWritePolicy;
+      delete updated.allowGezelWrites;
+    }
+    // The marker is how the library is recognized and what keeps its folder
+    // fixed; like the phone runtime, an update can neither add nor remove it.
+    if (isSharedLibraryProject(meta) !== isSharedLibraryProject(updated)) {
+      throw new Error('the shared library identity is managed by Gezel');
+    }
     await this.writeProjectMeta(updated);
     if (meta.customIcon && !updated.customIcon) await this.removeProjectIconArtFiles(id);
     if (patch.properties !== undefined) {
@@ -6368,6 +6384,7 @@ export class Store {
           ...(refs && refs.length > 0 ? { referencedFiles: refs } : {}),
           ...(m.deliverable ? { deliverable: m.deliverable } : {}),
           ...(m.retrieval && m.retrieval.hits.length > 0 ? { retrieval: m.retrieval } : {}),
+          ...(m.inclusions && m.inclusions.length > 0 ? { inclusions: m.inclusions } : {}),
           ...(m.grounding ? { grounding: m.grounding } : {}),
           ...(legacyArtifactRefs.length > 0 ? { referencedArtifacts: legacyArtifactRefs } : {}),
           ...(tRefs && tRefs.length > 0 ? { referencedTasks: tRefs } : {}),

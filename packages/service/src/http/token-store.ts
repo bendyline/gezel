@@ -89,6 +89,9 @@ export const PI_SETUP_RESERVED_APP_ID = 'gezel.pi.local-model-bridge';
 /** App id owned by the extension-free VS Code bridge. Same contract as Codex's. */
 export const VSCODE_SETUP_RESERVED_APP_ID = 'gezel.vscode.local-model-bridge';
 
+/** How long a session bootstrap code stays good after its first trade. */
+export const BOOTSTRAP_REUSE_MS = 30_000;
+
 /** App ids owned by the daemon itself rather than the public grant flow. */
 export function isReservedTokenAppId(appId: string): boolean {
   return (
@@ -293,6 +296,19 @@ export interface TokenStore {
   /** Drop an ephemeral session token (in-memory only; no disk write). */
   revokeSession(appId: string): void;
   /**
+   * A short-lived code that `redeemSessionBootstrap` trades for the session
+   * token of `appId`, for an MCP server started from a config file a CLI
+   * agent's own tools can read: the file holds a spent code, never the token.
+   * Expires after `ttlMs` (10 minutes) and with the session token.
+   */
+  issueSessionBootstrap(appId: string, ttlMs?: number): string;
+  /**
+   * The live session token for a code that has not expired. The first trade
+   * leaves the code good for {@link BOOTSTRAP_REUSE_MS} more, for a CLI that
+   * starts its servers twice; after that it is dead.
+   */
+  redeemSessionBootstrap(code: string): TokenRecord | null;
+  /**
    * Mint or return the EPHEMERAL token for an outside app's binding to one
    * project (`harness:<client>:<projectId|none>`), scope `harness`. Never
    * persisted, so `tokens.json` never carries a scope an older daemon cannot
@@ -370,6 +386,8 @@ export async function createTokenStore(opts: CreateTokenStoreOptions): Promise<T
   // appIds whose records live in-memory only and must never be flushed
   // to disk: the root token plus any caller-supplied ephemeral tokens.
   const ephemeralAppIds = new Set<string>(['root']);
+  /** Single-use MCP bootstrap codes: code → the session it opens, and until when. */
+  const bootstrapCodes = new Map<string, { appId: string; expiresAt: number }>();
 
   const rootRecord: TokenRecord = {
     appId: 'root',
@@ -601,7 +619,39 @@ export async function createTokenStore(opts: CreateTokenStoreOptions): Promise<T
       return record;
     },
 
+    issueSessionBootstrap(appId: string, ttlMs = 10 * 60_000): string {
+      const record = byAppId.get(appId);
+      if (!record || !record.scopes.includes('session')) {
+        throw new Error(`token-store: no session token for ${appId}`);
+      }
+      const now = Date.now();
+      for (const [code, entry] of bootstrapCodes) {
+        if (entry.expiresAt <= now) bootstrapCodes.delete(code);
+      }
+      const code = randomBytes(32).toString('base64url');
+      bootstrapCodes.set(code, { appId, expiresAt: now + ttlMs });
+      return code;
+    },
+
+    redeemSessionBootstrap(code: string): TokenRecord | null {
+      const entry = bootstrapCodes.get(code);
+      if (!entry) return null;
+      const now = Date.now();
+      if (entry.expiresAt <= now) {
+        bootstrapCodes.delete(code);
+        return null;
+      }
+      // A CLI that starts its servers twice at launch may trade the same code
+      // twice, so the first trade leaves it a few seconds more, not ten minutes.
+      if (entry.expiresAt - now > BOOTSTRAP_REUSE_MS) entry.expiresAt = now + BOOTSTRAP_REUSE_MS;
+      const record = byAppId.get(entry.appId);
+      return record?.scopes.includes('session') ? record : null;
+    },
+
     revokeSession(appId: string): void {
+      for (const [code, entry] of bootstrapCodes) {
+        if (entry.appId === appId) bootstrapCodes.delete(code);
+      }
       const existing = byAppId.get(appId);
       if (!existing) return;
       byAppId.delete(appId);

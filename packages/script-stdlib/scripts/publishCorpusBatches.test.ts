@@ -176,6 +176,8 @@ describe('publishCorpusBatches', () => {
       paths: 59,
       records: 59,
       bytes: expect.any(Number),
+      reviewBatches: 3,
+      generatedBatches: 0,
     });
 
     const published = JSON.parse(h.files.get('pr-review/batches.json') ?? '');
@@ -198,6 +200,31 @@ describe('publishCorpusBatches', () => {
     // Complete by construction: this is the failure the whole script exists
     // to remove — a truncated batch file that still parses as valid JSON.
     expect(published.flatMap((entry: { paths: string[] }) => entry.paths)).toHaveLength(59);
+  });
+
+  it('gives the fanout its own file without the generated batches, numbers unchanged', async () => {
+    const batches = [batch(1, 1, 2), { ...batch(2, 3, 1), generated: true }, batch(3, 4, 1)];
+    seedManifest(manifest({ totalFiles: 4, batches, files: filesForBatches(batches) }));
+    const out = await run(args({ reviewOutFile: 'artifacts/pr-review/review-batches.json' }));
+    expect(out).toMatchObject({ batches: 3, reviewBatches: 2, generatedBatches: 1 });
+    const all = JSON.parse(h.files.get('pr-review/batches.json') ?? '');
+    // Coverage is still held to every batch, generated or not.
+    expect(all.map((entry: { batchNumber: number }) => entry.batchNumber)).toEqual([1, 2, 3]);
+    expect(all[1].generated).toBe(true);
+    expect(all[0]).not.toHaveProperty('generated');
+    const review = JSON.parse(h.files.get('pr-review/review-batches.json') ?? '');
+    // A child addresses its batch by number in the full array, so the numbers
+    // survive the filter instead of being renumbered 1..N.
+    expect(review.map((entry: { batchNumber: number }) => entry.batchNumber)).toEqual([1, 3]);
+    expect(review[1].records).toEqual(all[2].records);
+  });
+
+  it('writes no second file unless asked, so an older book fans out as before', async () => {
+    seedManifest();
+    await run(args());
+    expect([...h.files.keys()].filter((key) => key.startsWith('pr-review/'))).toEqual([
+      'pr-review/batches.json',
+    ]);
   });
 
   it('tolerates the redundant artifacts/ prefix craftbook params carry', async () => {

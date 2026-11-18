@@ -518,11 +518,13 @@ async function previewFolderKind(
  * Why `POST /api/projects` must not create a project on `workingDir`: a folder
  * gezel never owns (home, a drive root, temp), or one a project already has.
  * Null when it may. The same forbidden-root rule as inference, so naming a
- * folder through either door gets the same answer.
+ * folder through either door gets the same answer. `movingProjectId` checks a
+ * move of that project instead: its own folder is not "in use".
  */
 export async function checkNewProjectFolder(
   deps: InferProjectDeps,
   workingDir: string,
+  movingProjectId?: string,
 ): Promise<{
   status: 403 | 409;
   body: { error: string; code: string; reason?: string; projectId?: string };
@@ -542,7 +544,9 @@ export async function checkNewProjectFolder(
     };
   }
   const refs = await existingProjectRefs(await deps.store.listProjects(), view.platform);
-  const owner = refs.find((r) => pathsEqual(r.workingDir, real, view.platform));
+  const owner = refs.find(
+    (r) => r.id !== movingProjectId && pathsEqual(r.workingDir, real, view.platform),
+  );
   if (owner) {
     return {
       status: 409,

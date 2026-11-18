@@ -44,7 +44,11 @@ import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as tar from 'tar';
 import { consumerCheckReportPath, writeConsumerCheckReport } from './consumer-check-report.mjs';
-import { blockingAdvisories, readAuditAllowlist } from './npm-consumer-audit.mjs';
+import {
+  blockingAdvisories,
+  readAuditAllowlist,
+  regexDenialAdvisories,
+} from './npm-consumer-audit.mjs';
 import {
   npmConsumerCacheDir,
   prepareNpmConsumerCache,
@@ -127,6 +131,12 @@ const IMPORTABLE = [
   '@bendyline/gezel-mcp',
   '@bendyline/gezel-capacitor',
 ];
+
+/** The `@types/node` the workspace resolved, so the consumer's check sees the same Node types. */
+function workspaceTypesNodeVersion() {
+  const manifest = join(repoRoot, 'node_modules', '@types', 'node', 'package.json');
+  return JSON.parse(readFileSync(manifest, 'utf8')).version;
+}
 
 /** Declarations a Node program imports, checked without the DOM lib. */
 const NODE_ONLY_TYPE_SPECIFIERS = [
@@ -540,8 +550,8 @@ try {
   // This graph is the one npm resolves for a consumer: the workspace's pnpm
   // overrides never reach it. It blocks at high and critical (see
   // npm-consumer-audit.mjs for why that is stricter than the workspace gates);
-  // lower severities are printed below and in the daily supply-chain report.
-  // Accepted advisories go in
+  // lower severities and every ReDoS advisory are printed below and in the
+  // daily supply-chain report. Accepted advisories go in
   // scripts/npm-consumer-audit-allowlist.json with a reason and an expiry.
   const audit = runPackageManager('npm', ['audit', '--omit=dev', '--json'], { cwd: consumer });
   let auditCounts = null;
@@ -565,6 +575,9 @@ try {
     } else {
       ok('npm audit reports no un-allowlisted high or critical advisories');
     }
+    for (const a of regexDenialAdvisories(auditReport)) {
+      console.log(`  note ReDoS, does not block: ${a.severity} ${a.id}  ${a.pkg}  ${a.title}`);
+    }
   }
   if (auditCounts) {
     const summary = ['info', 'low', 'moderate', 'high', 'critical']
@@ -585,6 +598,25 @@ try {
   else ok(`imported ${IMPORTABLE.length} subpaths`);
 
   step('typechecking installed declarations with skipLibCheck=false');
+  // A Node consumer brings its own Node types. Until 2026-11 one arrived by
+  // accident (the Spectral SDK's jest-mock depended on @types/node), and the
+  // check silently relied on it. Install the workspace's own version.
+  const typesNode = await runNpmConsumerInstall(() =>
+    runPackageManager(
+      'npm',
+      [
+        'install',
+        '--no-save',
+        '--no-audit',
+        '--no-fund',
+        `@types/node@${workspaceTypesNodeVersion()}`,
+      ],
+      { cwd: consumer },
+    ),
+  );
+  if (typesNode.status !== 0) {
+    throw new Error(`npm install @types/node failed\n${typesNode.stdout}\n${typesNode.stderr}`);
+  }
   const typeProbe = join(consumer, 'probe-types.mts');
   writeFileSync(
     typeProbe,
@@ -770,6 +802,27 @@ try {
     fail(`Spectral subprocess smoke failed\n${spectral.stdout}\n${spectral.stderr}`);
   } else {
     ok('Spectral subprocess executed echo/list through its packed entry point');
+  }
+  // The same runner the way a sync starts it: inside the sandbox, with only
+  // the folders the service grants. A plain `node run-action.js` cannot see
+  // a missing grant, which is how a runner unable to load its SDK shipped.
+  const spectralSandboxProbe = join(consumer, 'probe-spectral-sandbox.mjs');
+  writeFileSync(
+    spectralSandboxProbe,
+    [
+      "import { runSpectralSelfTest } from '@bendyline/gezel-service';",
+      'const result = await runSpectralSelfTest();',
+      'console.log(JSON.stringify(result));',
+      'process.exit(result.ok ? 0 : 1);',
+    ].join('\n'),
+  );
+  const spectralSandbox = run(process.execPath, [spectralSandboxProbe], { cwd: consumer });
+  if (spectralSandbox.status !== 0) {
+    fail(
+      `Spectral runner failed inside the sandbox\n${spectralSandbox.stdout}\n${spectralSandbox.stderr}`,
+    );
+  } else {
+    ok('Spectral runner loaded its SDK inside the sandbox with the grants a sync uses');
   }
 
   // ── 5. The CLI binary ──────────────────────────────────────────────────

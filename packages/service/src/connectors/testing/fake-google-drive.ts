@@ -17,7 +17,8 @@
  *
  * Tokens are opaque `<epoch>.<seq>` strings; `expireTokens()` bumps the epoch
  * so every token issued before it answers 400 Invalid Value (`pageToken`),
- * which is how Drive refuses a token it no longer recognizes.
+ * which is how Drive refuses a token it no longer recognizes. Folder-listing
+ * (`files.list`) page tokens carry the epoch too and expire with it.
  */
 
 import { FakeHttp, FakeTokenEndpoint, json, status } from './fake-http.js';
@@ -56,6 +57,8 @@ export interface FakeDriveFile {
   downloadRestricted?: boolean;
   /** Export answers Google's exportSizeLimitExceeded. */
   exportTooLarge?: boolean;
+  /** Downloads answer 403 downloadQuotaExceeded (too many downloads of a shared file today). */
+  quotaExceeded?: boolean;
 }
 
 interface ChangeEntry {
@@ -180,6 +183,7 @@ export class FakeGoogleDrive {
       reportedSize?: number;
       downloadRestricted?: boolean;
       exportTooLarge?: boolean;
+      quotaExceeded?: boolean;
     } = {},
   ): string {
     const content =
@@ -193,6 +197,7 @@ export class FakeGoogleDrive {
       ...(opts.reportedSize !== undefined ? { reportedSize: opts.reportedSize } : {}),
       ...(opts.downloadRestricted ? { downloadRestricted: true } : {}),
       ...(opts.exportTooLarge ? { exportTooLarge: true } : {}),
+      ...(opts.quotaExceeded ? { quotaExceeded: true } : {}),
       ...(this.files.get(parentId)?.driveId ? { driveId: this.files.get(parentId)!.driveId } : {}),
     });
   }
@@ -432,13 +437,23 @@ export class FakeGoogleDrive {
         (f) => f.parents[0] === parent && (!live || !f.trashed),
       );
       const size = Math.min(1000, Number(p.get('pageSize') ?? 100) || 100);
-      const offset = Number(p.get('pageToken') ?? 0) || 0;
+      const token = p.get('pageToken');
+      let offset = 0;
+      if (token) {
+        const tm = /^(\d+)~(\d+)$/.exec(token);
+        if (!tm || Number(tm[1]) !== this.epoch) {
+          return googleError(400, 'invalid', 'Invalid Value', 'pageToken');
+        }
+        offset = Number(tm[2]);
+      }
       const page = children.slice(offset, offset + size);
       const body = {
         kind: 'drive#fileList',
         incompleteSearch: false,
         files: page.map((f) => this.resource(f)),
-        ...(offset + size < children.length ? { nextPageToken: String(offset + size) } : {}),
+        ...(offset + size < children.length
+          ? { nextPageToken: `${this.epoch}~${offset + size}` }
+          : {}),
       };
       return masked(
         body,
@@ -465,6 +480,13 @@ export class FakeGoogleDrive {
             403,
             'cannotDownloadFile',
             'The user does not have sufficient permissions for this file.',
+          );
+        }
+        if (f.quotaExceeded) {
+          return googleError(
+            403,
+            'downloadQuotaExceeded',
+            'The download quota for this file has been exceeded.',
           );
         }
         const body = f.content ?? new Uint8Array();

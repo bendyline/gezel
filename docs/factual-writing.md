@@ -123,6 +123,26 @@ holds one session's evidence:
   a refused write is sent back to `read_file` on those files rather than to
   `search`. Searching for text a writer already read cost the core synthesis
   scenarios 3-5x their wall-clock on 2026-10-05/06.
+- **A file is named for a re-read only while part of it is unread.** The
+  ledger keeps each reader's own account of what it returned: the batch
+  readers' `1 OK <path> lines=1-283 totalLines=283 complete` status line,
+  `read_file`'s `[read_file … complete]` header, and `read_artifact`'s
+  `[lines 401-800 of 900. …]` footer, which it leaves off when it returned
+  the whole file. A file counts as read in full when one read returned it
+  whole or its ranged reads cover it end to end. A result the bridge cut to
+  its output budget counts for nothing, and neither does a rerouted read or
+  a reader that gives no account (`read_document`, `read_file` in raw mode),
+  so those files are still named for a re-read. When every source file was
+  read in full, the refusal says so and tells the writer to remove the
+  details or mark them unverified and save again, with no read first: the
+  files cannot hold what is missing. A pull-request reviewer holding all five
+  of its patch records in full was sent back to `read_artifact` six times in
+  one run for line numbers no diff states, while its step gate told it to
+  write next and read nothing (docblocks PR #58, 2026-11-17). The local turn
+  loop makes the difference mechanical: a refusal that names a next tool
+  narrows the next request to that tool alone
+  (`ConstrainedWriteRecovery.lookupPending`), and one that names none leaves
+  the roster as it was.
 - **What the person said.** All of the person's messages in the session
   count as evidence that needs no citation. Restating someone's own facts
   back to them is not invention. So do today's date, the gezel's and the
@@ -164,13 +184,30 @@ the year when the sentence gives one), common technical acronyms (HTTP, UTC, API
 vocabulary rather than names, and a name inside a file attribution
 ("(timeline.md, Notes)") never anchors a number.
 
-A project that holds code (`projectHoldsCode`) checks no names at all
-(`GroundOptions.names`, set through `EvidenceLedger.setNameChecks`). What a
-writer names there is an identifier or a path, which is already skipped as
-code, and Title Case is a label: a Test Coverage Review's `**Current State**:`
-and `**Schema Validation**:` were refused as unsourced names on every step
-(squisq/38, 2026-11-09). Numbers, dates, months and quotations are still
-checked.
+A project that holds code (`projectHoldsCode`) leaves three things unchecked,
+all set together through `EvidenceLedger.setCodeProject`:
+
+- **Names** (`GroundOptions.names`). What a writer names there is an
+  identifier or a path, which is already skipped as code, and Title Case is a
+  label: a Test Coverage Review's `**Current State**:` and
+  `**Schema Validation**:` were refused as unsourced names on every step
+  (squisq/38, 2026-11-09).
+- **Line locators** (`GroundOptions.lineLocators`). A number that says where
+  code sits is not a fact a source states: `src/a.ts:42`, `src/a.ts:42-57`,
+  "line 179", "new-side lines 884–886", a list of ranges after "lines", `L123`
+  and a hunk header (`@@ -613,16 +631,92 @@`). A reviewer works these out by
+  counting from a diff's hunk headers, so no evidence shows them.
+- **Quotation-mark spans** (`GroundOptions.quotes`). Code a reviewer quotes
+  sits in backticks, already skipped; what sits in quotation marks is the
+  reviewer's own label or proposed wording ("is this dark", "watcher expired
+  / no notice element ever matched").
+
+Every other number, date and month is still checked there: a count ("a
+32-line addition"), a version, a status code. Both of the last two were found
+on one pull-request review, where nine line numbers and three of the
+reviewer's own phrases refused its observations file (docblocks PR #58,
+2026-11-17). Every other project checks all of them as before. The
+`claimsGrounded` contract check does not read this switch.
 
 Each sentence ends up as one of:
 
@@ -215,7 +252,10 @@ facts, and its chat reply was a single line naming the file.
 
 A refusal names the session's lookup tools and the call to make next. Told
 only to "look it up", Gemma 4 31B instead told the person it had no sources
-and asked for some, with `wikipedia_search` on its roster.
+and asked for some, with `wikipedia_search` on its roster. The one refusal
+that names no next call is the one where every source file was already read
+in full: there the next call is the write itself, with the unsupported
+details removed or marked unverified.
 
 **Clamps keep the lookups.** "Write a paragraph about…" reads to the runtime
 as an immediate file write, and that clamp narrows a turn to `write_file`

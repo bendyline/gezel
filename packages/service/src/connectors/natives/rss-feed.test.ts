@@ -16,9 +16,18 @@ import {
   decodeFeedBytes,
   displayFeedUrl,
   feedScopeLabel,
+  findFeedLinks,
+  isHtmlDocument,
   parseFeedDate,
   parseFeedDocument,
 } from './rss-feed.js';
+
+/** Fails when `fn` takes longer than a linear pass over its input could. */
+function expectFast(fn: () => unknown, budgetMs = 1_000): void {
+  const started = performance.now();
+  fn();
+  expect(performance.now() - started).toBeLessThan(budgetMs);
+}
 
 const BLOG = 'https://blog.example.test/feed.xml';
 const NEWS = 'https://news.example.test/atom.xml';
@@ -242,6 +251,18 @@ describe('rss-feed throttling and paging', () => {
     expect(r.error).toBeUndefined();
   });
 
+  it('a feed that keeps throttling does not stop the feeds listed after it', async () => {
+    const w = await world();
+    w.feeds
+      .feed(BLOG, { format: 'rss', items: [item(1)] })
+      .feed(NEWS, { format: 'atom', items: [item(2)] });
+    w.http.failNext({ url: BLOG }, status(429), 10);
+    const r = await w.pass([BLOG, NEWS]);
+    expect(r.rateLimited).toBe(true);
+    expect(r.written).toBe(1);
+    expect((await w.corpus()).map((x) => x.frontmatter.title)).toEqual(['Post number 2']);
+  });
+
   it('pages an oversized document with partial batches, then stores the validators', async () => {
     const w = await world();
     w.feeds.feed(BLOG, {
@@ -450,6 +471,34 @@ describe('rss-feed autodiscovery', () => {
     ]);
   });
 
+  it('reads a feed served as text/html as a feed, not a page', async () => {
+    const w = await world();
+    const rss = `<?xml version="1.0"?>\n<?xml-stylesheet href="/s.xsl"?>\n<rss version="2.0"><channel><title>B</title><item><guid>g1</guid><title>Served as HTML</title><link>https://blog.example.test/1</link></item></channel></rss>`;
+    w.feeds.raw(BLOG, rss, 'text/html; charset=utf-8');
+    const r = await w.pass([BLOG]);
+    expect(r.error).toBeUndefined();
+    expect((await w.corpus()).map((x) => x.frontmatter.title)).toEqual(['Served as HTML']);
+  });
+
+  it('finds the feed again when the remembered one starts serving a page', async () => {
+    const w = await world();
+    const page = 'https://www.example.test/';
+    const html = (href: string) =>
+      `<!doctype html><html><head><link rel="alternate" type="application/rss+xml" href="${href}"></head></html>`;
+    w.feeds
+      .raw(page, html('/feed.xml'), 'text/html')
+      .feed('https://www.example.test/feed.xml', { format: 'rss', items: [item(1)] });
+    expect((await w.pass([page])).written).toBe(1);
+    // The old feed URL now answers with the site's home page; the page names a new feed.
+    w.feeds
+      .raw('https://www.example.test/feed.xml', html('/feed.xml'), 'text/html')
+      .raw(page, html('/rss2.xml'), 'text/html')
+      .feed('https://www.example.test/rss2.xml', { format: 'rss', items: [item(1), item(2)] });
+    const r = await w.pass([page]);
+    expect(r.error).toBeUndefined();
+    expect(r.written).toBe(1);
+  });
+
   it('a page that names no feed fails with a hint', async () => {
     const w = await world();
     w.feeds.raw(
@@ -464,6 +513,21 @@ describe('rss-feed autodiscovery', () => {
 });
 
 describe('rss-feed parsing hazards', () => {
+  // Each input made one of the old patterns scan to the end of the string
+  // from every position: minutes of blocked event loop on a 5 MB feed.
+  it('stays linear on pathological markup', () => {
+    const big = 200_000;
+    expectFast(() => isHtmlDocument(`${' '.repeat(big)}<rss/>`, 'application/xml'));
+    expectFast(() => findFeedLinks(`<html>${'<link '.repeat(big / 5)}`, 'https://x.test/'));
+    const title = `<![CDATA[${'<a'.repeat(big / 2)}]]>`;
+    expectFast(() =>
+      parseFeedDocument(
+        `<rss version="2.0"><channel><title>t</title><item><guid>g</guid><title>${title}</title></item></channel></rss>`,
+        { docUrl: BLOG },
+      ),
+    );
+  });
+
   it('does not expand DTD entities (XXE, billion laughs) and fetches nothing extra', async () => {
     const w = await world();
     const doc = `<?xml version="1.0"?>
@@ -543,6 +607,9 @@ describe('rss-feed parsing hazards', () => {
     expect(parseFeedDate('Tue, 10 Jun 2003 04:00:00 -0700')).toBe('2003-06-10T11:00:00.000Z');
     expect(parseFeedDate('Sun, 18 Oct 2026 08:00:00 CEST')).toBe('2026-10-18T06:00:00.000Z');
     expect(parseFeedDate('2026-10-18 08:00:00')).toBe('2026-10-18T08:00:00.000Z');
+    // No zone at all: UTC on every machine, not this computer's local time.
+    expect(parseFeedDate('Tue, 10 Jun 2003 04:00:00')).toBe('2003-06-10T04:00:00.000Z');
+    expect(parseFeedDate('10 Jun 2003')).toBe('2003-06-10T00:00:00.000Z');
     expect(parseFeedDate('2026-10-18T08:00:00+02:00')).toBe('2026-10-18T06:00:00.000Z');
     expect(parseFeedDate('Someday soon')).toBeUndefined();
     expect(parseFeedDate('')).toBeUndefined();

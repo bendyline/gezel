@@ -1,3 +1,5 @@
+import { AGENT_SHELL_COVERED_MCP_TOOLS } from '../anthropic-cli/excluded-mcp-tools.js';
+
 /**
  * gezel-mcp tools we hide from the Codex CLI provider so the model doesn't
  * flip-flop between two equivalent mutation surfaces. Codex has first-class
@@ -51,3 +53,10 @@ export const CODEX_CLI_EXCLUDED_MCP_TOOLS = [
   'list_archive',
   'extract_archive',
 ];
+
+/** The gezel-mcp tools a Codex CLI session hides, given whether it has a shell. */
+export function codexCliExcludedMcpTools(opts: { agentShell: boolean }): string[] {
+  return opts.agentShell
+    ? [...CODEX_CLI_EXCLUDED_MCP_TOOLS]
+    : CODEX_CLI_EXCLUDED_MCP_TOOLS.filter((name) => !AGENT_SHELL_COVERED_MCP_TOOLS.includes(name));
+}

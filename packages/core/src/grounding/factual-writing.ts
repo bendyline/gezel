@@ -151,8 +151,9 @@ const LOOKUP_TOOLS: Record<FactualLookupPreference, readonly string[]> = {
 
 /**
  * Readers for sources that already sit in the project. When a writer's
- * evidence came from these, a refused write is repaired by reading the
- * source again, not by searching for it.
+ * evidence came from these, a refused write is repaired from the source
+ * files, not by searching for them: by reading what the writer has not yet
+ * been shown, or by cutting the detail when it has been shown it all.
  */
 export const WORKSPACE_SOURCE_READERS: readonly string[] = [
   'read_file',

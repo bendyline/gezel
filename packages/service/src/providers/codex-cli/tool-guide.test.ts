@@ -39,6 +39,14 @@ describe('codexToolGuide', () => {
     expect(codexToolGuide(taskStep) ?? '').not.toContain('run records');
   });
 
+  it('without a shell, sends code to Gezel tools and never to a shell', () => {
+    const guide =
+      codexToolGuide([...taskStep, 'mcp__gezel__run_nodejs_script'], { shell: false }) ?? '';
+    expect(guide).toContain('You have no shell here');
+    expect(guide).not.toContain('`rename`, `run_nodejs_script`');
+    expect(guide).not.toContain('built-in file editing, shell');
+  });
+
   it('does not tell a read-only session to edit', () => {
     const guide = codexToolGuide(taskStep, { canEdit: false }) ?? '';
     expect(guide).toContain('### Calling Gezel tools');

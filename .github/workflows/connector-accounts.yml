@@ -1,0 +1,123 @@
+name: Connectors Against Real Test Accounts
+
+# Nightly: binds the Gmail and Outlook.com test connections exported into the
+# connector-live environment, syncs them against the real services, and saves
+# back a sign-in the provider renewed. docs/connector-live-testing.md says how
+# to export a connection and how to turn the schedule on.
+
+on:
+  schedule:
+    - cron: '23 9 * * *'
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '24'
+  PNPM_VERSION: '11.15.1'
+
+permissions:
+  contents: read
+
+# Two runs must never race to save a renewed sign-in: the slower one would
+# store a token the faster one had already replaced.
+concurrency:
+  group: connector-accounts
+  cancel-in-progress: false
+
+jobs:
+  accounts:
+    name: Gmail and Outlook.com test accounts
+    if: github.event_name == 'workflow_dispatch' || vars.GEZEL_ENABLE_CONNECTOR_ACCOUNTS == '1'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    # Limited to main by its branch policy; holds the exported connections and
+    # the token that may rewrite them.
+    environment: connector-live
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-workspace
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - run: pnpm --filter @bendyline/gezel-service... run build
+      - name: Sync each exported connection
+        env:
+          GEZEL_CONNECTOR_LIVE_ACCOUNTS: '1'
+          GEZEL_LIVE_ACCOUNTS: GEZEL_LIVE_GMAIL,GEZEL_LIVE_OUTLOOK
+          GEZEL_LIVE_GMAIL: ${{ secrets.GEZEL_LIVE_GMAIL }}
+          GEZEL_LIVE_OUTLOOK: ${{ secrets.GEZEL_LIVE_OUTLOOK }}
+          GEZEL_LIVE_ROTATED_DIR: ${{ runner.temp }}/renewed
+          GEZEL_LIVE_REPORT: ${{ runner.temp }}/accounts.json
+        run: pnpm --filter @bendyline/gezel-service exec vitest run src/connectors/testing/live-accounts.integration.test.ts
+      - name: Save renewed sign-ins
+        # Microsoft issues a new refresh token on every refresh, each good for
+        # about 90 days. Saving it keeps the secret alive; a failed check may
+        # still have renewed, so this runs either way.
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GEZEL_SECRETS_WRITER }}
+          RENEWED: ${{ runner.temp }}/renewed
+        shell: bash
+        run: |
+          set -euo pipefail
+          trap 'rm -rf "$RENEWED"' EXIT
+          shopt -s nullglob
+          files=("$RENEWED"/*.json)
+          [ ${#files[@]} -gt 0 ] || exit 0
+          # Mask the new tokens before anything could print them.
+          for f in "${files[@]}"; do
+            while IFS= read -r value; do
+              [ -n "$value" ] && echo "::add-mask::$value"
+            done < <(jq -r '.credential | fromjson | (.refreshToken // empty), (.accessToken // empty)' "$f")
+          done
+          for f in "${files[@]}"; do
+            name=$(basename "$f" .json)
+            if [[ ! "$name" =~ ^GEZEL_LIVE_[A-Z0-9_]+$ ]]; then
+              echo "::error::Unexpected renewed sign-in file: $name"
+              exit 1
+            fi
+            if [ -z "${GH_TOKEN:-}" ]; then
+              echo "::warning title=$name was not saved::The provider renewed this sign-in, but GEZEL_SECRETS_WRITER is not set, so the stored one was kept. It stops working about 90 days after it was exported; export the connection again before then."
+              continue
+            fi
+            gh secret set "$name" --env connector-live --repo "$GITHUB_REPOSITORY" < "$f"
+            echo "Saved the renewed sign-in for $name."
+          done
+      - name: Summary
+        if: always()
+        env:
+          REPORT: ${{ runner.temp }}/accounts.json
+        shell: bash
+        run: |
+          if [ ! -f "$REPORT" ]; then
+            echo "The check stopped before it reached the accounts." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node <<'EOF'
+          const fs = require('node:fs');
+          const report = JSON.parse(fs.readFileSync(process.env.REPORT, 'utf8'));
+          const cell = (v) => String(v ?? '').replace(/\|/g, '/').replace(/\n/g, ' ');
+          const rows = report.map(
+            (a) =>
+              `| ${cell(a.secret)} | ${cell(a.type)} | ${cell(a.status)} | ${cell(a.records)} | ${a.renewed ? 'yes' : ''} | ${cell(a.note)} |`,
+          );
+          fs.appendFileSync(
+            process.env.GITHUB_STEP_SUMMARY,
+            [
+              '### Connections to real test accounts',
+              '',
+              '| Secret | Type | Status | Records | Renewed | Note |',
+              '|---|---|---|---|---|---|',
+              ...rows,
+              '',
+            ].join('\n'),
+          );
+          for (const a of report) {
+            if (a.status === 'needs-relink') {
+              console.log(
+                `::warning title=${a.secret} needs a new sign-in::Connect the test account again in Gezel and export it into ${a.secret} (docs/connector-live-testing.md).`,
+              );
+            } else if (a.status === 'missing') {
+              console.log(`::notice title=${a.secret} is not set::No connection is exported into ${a.secret}, so it was skipped.`);
+            }
+          }
+          EOF

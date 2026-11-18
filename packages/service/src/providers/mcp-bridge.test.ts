@@ -151,6 +151,45 @@ afterAll(async () => {
 });
 
 describe('McpBridge', () => {
+  it('starts from a bootstrap code in place of the session token; an unknown code starts nothing', async () => {
+    const store = svc.context.tokenStore;
+    store.issueSession({
+      appId: 'session:code-start',
+      projectId: 'default',
+      gezelId: 'ada',
+      team: false,
+    });
+    const code = store.issueSessionBootstrap('session:code-start');
+    const { GEZEL_TOKEN: _token, ...withoutToken } = bridgeEnv;
+    const coded = new McpBridge();
+    try {
+      await coded.start({
+        command: 'node',
+        args: [mcpPath],
+        env: { ...withoutToken, GEZEL_TOKEN_CODE: code, GEZEL_SESSION_ID: 'code-start' },
+      });
+      await svc.context.store.writeProjectArtifact(
+        'default',
+        'tests/coded.md',
+        'hello from a coded start',
+      );
+      const read = await coded.callToolRich('read_artifact', { path: 'tests/coded.md' });
+      expect(read.text).toContain('hello from a coded start');
+    } finally {
+      await coded.stop();
+    }
+    const replay = new McpBridge();
+    await expect(
+      replay.start({
+        command: 'node',
+        args: [mcpPath],
+        env: { ...withoutToken, GEZEL_TOKEN_CODE: 'not-a-code-the-service-issued' },
+      }),
+    ).rejects.toThrow();
+    await replay.stop().catch(() => {});
+    store.revokeSession('session:code-start');
+  }, 60_000);
+
   it('flags a structured artifact read when the provider-visible text was capped', async () => {
     const path = 'tests/truncated-read-evidence.md';
     await svc.context.store.writeProjectArtifact('default', path, 'line\n'.repeat(5_000));

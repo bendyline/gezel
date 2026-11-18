@@ -1,8 +1,11 @@
 import type { GitHubPullFile, ProjectDetail } from '@bendyline/gezel';
 import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
+import { PATCH_LINE_LEGEND, parsePatchRecord } from '@bendyline/gezel/checks';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { Store } from '../../fs/store.js';
+import { syncWithAdapter } from '../manager.js';
 import { clearConnectorTaskPreps, connectorTaskPrepFor } from '../task-prep.js';
+import { createConnectorTestEnv, readCorpus } from '../testing/harness.js';
 import type { AdapterDeps, ConnectorBindingRef } from '../types.js';
 import { sha8 } from '../writer.js';
 import {
@@ -10,6 +13,7 @@ import {
   type GitHubPullsRuntime,
   REVIEW_MAX_FILES_PER_BATCH,
   REVIEW_TARGET_PATCH_CHARS,
+  orderPullReviewFiles,
   partitionPullReviewFiles,
   pullNumberFromScope,
   pullScope,
@@ -154,6 +158,36 @@ describe('review batching', () => {
     expect(batches.flatMap((batch) => batch.paths)).toEqual(files.map((entry) => entry.filename));
     expect(batches[1]?.patchChars).toBe(35_000);
   });
+
+  it('keeps generated files out of a reviewer batch and bounds them by count alone', () => {
+    const named = (filename: string, patch = '+small'): GitHubPullFile =>
+      ({ filename, status: 'modified', additions: 1, deletions: 0, patch }) as GitHubPullFile;
+    const listed = [
+      named('package-lock.json', 'x'.repeat(REVIEW_TARGET_PATCH_CHARS * 4)),
+      named('package.json'),
+      named('packages/cli/THIRD_PARTY_NOTICES.txt', 'x'.repeat(REVIEW_TARGET_PATCH_CHARS)),
+      named('packages/cli/package.json'),
+    ];
+    const ordered = orderPullReviewFiles(listed);
+    expect(ordered.map((entry) => entry.filename)).toEqual([
+      'package.json',
+      'packages/cli/package.json',
+      'package-lock.json',
+      'packages/cli/THIRD_PARTY_NOTICES.txt',
+    ]);
+    expect(partitionPullReviewFiles(ordered)).toEqual([
+      expect.objectContaining({ start: 1, end: 2 }),
+      expect.objectContaining({ start: 3, end: 4, generated: true }),
+    ]);
+    expect(partitionPullReviewFiles(ordered)[0]).not.toHaveProperty('generated');
+    // Left in listing order, the same files cost a reviewer three batches.
+    expect(partitionPullReviewFiles(listed).map((batch) => batch.generated ?? false)).toEqual([
+      true,
+      false,
+      true,
+      false,
+    ]);
+  });
 });
 
 describe('GitHubPullsAdapter', () => {
@@ -264,12 +298,183 @@ describe('GitHubPullsAdapter', () => {
     expect(file.bodyMarkdown).toContain('late-line-from-full-diff');
   });
 
+  it('prints each patch line with its new-file number, so nobody counts a hunk', async () => {
+    const adapter = new GitHubPullsAdapter(
+      binding(),
+      deps(),
+      runtime({
+        files: [
+          {
+            filename: 'src/auth.ts',
+            status: 'modified',
+            additions: 1,
+            deletions: 1,
+            patch: '@@ -40,3 +41,3 @@\n context\n-old\n+new\n tail',
+          },
+          {
+            filename: 'src/gone.ts',
+            status: 'removed',
+            additions: 0,
+            deletions: 1,
+            patch: '@@ -1 +0,0 @@\n-only',
+          },
+        ],
+      }),
+    );
+    await adapter.ensureAuth();
+    const batch = await adapter.listChangesSince('pr-52', undefined);
+    const file = await adapter.fetchRecord('pr-52', batch.records[1]!);
+    expect(file.bodyMarkdown).toContain(PATCH_LINE_LEGEND);
+    expect(file.bodyMarkdown).toContain(
+      ['@@ -40,3 +41,3 @@', '41  context', '   -old', '42 +new', '43  tail', '```'].join('\n'),
+    );
+    expect([...parsePatchRecord(file.bodyMarkdown)!.newLines]).toEqual([41, 42, 43]);
+    // A deleted file has no new-file lines: nothing to number, so no legend.
+    const gone = await adapter.fetchRecord('pr-52', batch.records[2]!);
+    expect(gone.bodyMarkdown).toContain('-only');
+    expect(gone.bodyMarkdown).not.toContain(PATCH_LINE_LEGEND);
+  });
+
+  it('lists generated files last and marks them for the runtime to summarize', async () => {
+    const adapter = new GitHubPullsAdapter(
+      binding(),
+      deps(),
+      runtime({
+        files: [
+          { filename: 'package-lock.json', status: 'modified', additions: 9, deletions: 9 },
+          { filename: 'src/auth.ts', status: 'modified', additions: 1, deletions: 0 },
+        ],
+      }),
+    );
+    await adapter.ensureAuth();
+    const batch = await adapter.listChangesSince('pr-52', undefined);
+    expect(batch.records.map((r) => r.id)).toEqual([
+      'pr-52',
+      'pr-52-file-src/auth.ts',
+      'pr-52-file-package-lock.json',
+    ]);
+    const overview = await adapter.fetchRecord('pr-52', batch.records[0]!);
+    const manifest = JSON.parse(new TextDecoder().decode(overview.attachments?.[1]?.content)) as {
+      batches: Array<{ batchNumber: number; paths: string[]; generated?: boolean }>;
+      files: Array<{ path: string; ordinal: number; generated?: string }>;
+    };
+    expect(manifest.batches).toEqual([
+      expect.objectContaining({ batchNumber: 1, paths: ['src/auth.ts'] }),
+      expect.objectContaining({ batchNumber: 2, paths: ['package-lock.json'], generated: true }),
+    ]);
+    expect(manifest.batches[0]).not.toHaveProperty('generated');
+    expect(manifest.files).toEqual([
+      expect.objectContaining({ path: 'src/auth.ts', ordinal: 1 }),
+      expect.objectContaining({ path: 'package-lock.json', ordinal: 2, generated: 'lockfile' }),
+    ]);
+    expect(overview.bodyMarkdown).toContain(
+      '- Batch 2: files 2–2 (1 path, generated files the runtime summarizes)',
+    );
+    const lock = await adapter.fetchRecord('pr-52', batch.records[2]!);
+    expect(lock.frontmatter.generated).toBe('lockfile');
+  });
+
   it('re-syncs nothing while the pull request is unchanged', async () => {
     const adapter = new GitHubPullsAdapter(binding(), deps(), runtime());
     await adapter.ensureAuth();
     const first = await adapter.listChangesSince('pr-52', undefined);
     const second = await adapter.listChangesSince('pr-52', first.cursor);
     expect(second.records).toEqual([]);
+  });
+
+  it('an unchanged pull request costs one detail call on the next pass, not the whole bundle', async () => {
+    const rt = runtime();
+    const calls: string[] = [];
+    for (const key of [
+      'getPullRequest',
+      'listFiles',
+      'listComments',
+      'getPullRequestDiff',
+    ] as const) {
+      const real = rt.prs[key] as (...args: unknown[]) => Promise<unknown>;
+      (rt.prs as Record<string, unknown>)[key] = (...args: unknown[]) => {
+        calls.push(key);
+        return real(...args);
+      };
+    }
+    const first = new GitHubPullsAdapter(binding(), deps(), rt);
+    await first.ensureAuth();
+    const batch = await first.listChangesSince('pr-52', undefined);
+    calls.length = 0;
+    // A later pass is a fresh adapter with nothing cached.
+    const next = new GitHubPullsAdapter(binding(), deps(), rt);
+    await next.ensureAuth();
+    const again = await next.listChangesSince('pr-52', batch.cursor);
+    expect(again.records).toEqual([]);
+    expect(calls).toEqual(['getPullRequest']);
+  });
+
+  it('pages a pull request larger than one batch instead of dropping files', async () => {
+    const files = Array.from({ length: 7 }, (_, i) => ({
+      filename: `src/f${i}.ts`,
+      status: 'modified',
+      additions: 1,
+      deletions: 0,
+      patch: '@@ -1 +1 @@\n+x',
+    }));
+    const adapter = new GitHubPullsAdapter(binding(), deps(), runtime({ files }));
+    await adapter.ensureAuth();
+    const seen: string[] = [];
+    let cursor: unknown;
+    let pages = 0;
+    for (;;) {
+      const batch = await adapter.listChangesSince('pr-52', cursor, { limit: 3 });
+      pages++;
+      seen.push(...batch.records.map((r) => r.id));
+      cursor = batch.cursor;
+      expect(batch.records.length).toBeLessThanOrEqual(3);
+      if (!batch.partial) break;
+    }
+    expect(pages).toBe(3);
+    expect(new Set(seen).size).toBe(8); // the overview plus seven files
+    const quiet = await adapter.listChangesSince('pr-52', cursor, { limit: 3 });
+    expect(quiet.records).toEqual([]);
+  });
+
+  it('drops the record of a file that left the pull request', async () => {
+    const env = await createConnectorTestEnv();
+    try {
+      const file = (filename: string) => ({
+        filename,
+        status: 'modified',
+        additions: 1,
+        deletions: 0,
+        patch: '@@ -1 +1 @@\n+x',
+      });
+      let files = [file('src/a.ts'), file('src/b.ts'), file('src/c.ts')];
+      const pass = async (cursor: unknown) =>
+        syncWithAdapter(
+          new GitHubPullsAdapter(binding(), env.deps(), {
+            ...runtime(),
+            ...{ prs: { ...runtime({ files }).prs } },
+          }),
+          {
+            storageDir: env.artifactsDir,
+            quarantineDir: env.quarantineDir,
+            corpusDir: 'data/prs',
+            backfillLimit: 2,
+            cursor,
+            scopes: ['pr-52'],
+          },
+        );
+      const first = await pass(undefined);
+      const second = await pass(first.cursor);
+      expect((await readCorpus(env.artifactsDir, 'data/prs')).length).toBe(4);
+      // A force-push drops b.ts from the pull request.
+      files = [file('src/a.ts'), file('src/c.ts')];
+      let cursor = second.cursor;
+      for (let i = 0; i < 3; i++) cursor = (await pass(cursor)).cursor;
+      const titles = (await readCorpus(env.artifactsDir, 'data/prs')).map((r) => r.path);
+      expect(titles).toHaveLength(3);
+      expect(titles.some((p) => p.includes('b-ts'))).toBe(false);
+    } finally {
+      await env.dispose();
+    }
   });
 
   it('refuses to sync a project with no GitHub link', async () => {

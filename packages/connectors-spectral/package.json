@@ -28,6 +28,7 @@
   "exports": {
     ".": "./dist/index.js",
     "./run-action": "./dist/run-action.js",
+    "./run": "./dist/run.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -44,7 +45,7 @@
     "verify:vendor": "node scripts/vendor-component.mjs"
   },
   "dependencies": {
-    "@prismatic-io/spectral": "10.23.0"
+    "@prismatic-io/spectral": "10.39.1"
   },
   "devDependencies": {
     "tsup": "^8.5.1",

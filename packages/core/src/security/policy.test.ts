@@ -84,6 +84,15 @@ describe('resolveSecurityPolicy', () => {
     expect(SECURITY_PRESETS.free.allowPackageScriptEdits).toBe(true);
   });
 
+  it('allows a CLI agent its own shell only under free, the default level included', () => {
+    const at = (level: 'super-lockdown' | 'lockdown' | 'free') =>
+      resolveSecurityPolicy({ securityPolicy: securityPolicyForLevel(level) }).allowAgentShell;
+    expect(at('super-lockdown')).toBe(false);
+    expect(at('lockdown')).toBe(false);
+    expect(at('free')).toBe(true);
+    expect(resolveSecurityPolicy({}).allowAgentShell).toBe(false);
+  });
+
   it('derives the package-script switches for a policy saved before they existed', () => {
     const legacy = (level: 'lockdown' | 'free' | 'custom', services: boolean, scripts: boolean) =>
       resolveSecurityPolicy({

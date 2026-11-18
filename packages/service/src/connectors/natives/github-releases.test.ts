@@ -192,10 +192,93 @@ describe('GitHubReleasesAdapter', () => {
     expect(first.partial).toBe(true);
     const second = await adapter.listChangesSince('', first.cursor, { limit: 2 });
     expect(second.records.map((record) => record.id)).toEqual(['1']);
-    expect(second.cursor.complete).toBe(true);
+    expect(second.partial).toBeUndefined();
     const unchanged = await adapter.listChangesSince('', second.cursor, { limit: 2 });
     expect(unchanged.records).toEqual([]);
     expect(calls).toHaveLength(1);
+    await adapter.close();
+  });
+
+  it('fetches only the releases that changed, and tombstones a deleted one', async () => {
+    let list = [release(3), release(2), release(1)];
+    const listing = () =>
+      fakeRuntime((call) => {
+        if (call.url.includes('/releases?')) return Response.json(list);
+        throw new Error(`unexpected fetch: ${call.url}`);
+      }).runtime;
+    const pass = async (cursor: unknown) => {
+      const adapter = new GitHubReleasesAdapter(binding(), deps(), listing());
+      await adapter.ensureAuth();
+      const batch = await adapter.listChangesSince('', cursor);
+      await adapter.close();
+      return batch;
+    };
+    const first = await pass(undefined);
+    expect(first.records.map((r) => r.id)).toEqual(['3', '2', '1']);
+
+    // A new release and an edited note: only those two come back.
+    list = [release(4), release(3), release(2, { body: 'Edited notes' }), release(1)];
+    const second = await pass(first.cursor);
+    expect(second.records.map((r) => r.id).sort()).toEqual(['2', '4']);
+
+    // A deleted release is reported gone.
+    list = [release(4), release(3), release(2, { body: 'Edited notes' })];
+    const third = await pass(second.cursor);
+    expect(third.records).toEqual([]);
+    expect(third.removed).toEqual(['1']);
+  });
+
+  it('carries an unchanged cursor from before per-release fingerprints without refetching', async () => {
+    const list = [release(2), release(1)];
+    const { runtime } = fakeRuntime((call) => {
+      if (call.url.includes('/releases?')) return Response.json(list);
+      throw new Error(`unexpected fetch: ${call.url}`);
+    });
+    const adapter = new GitHubReleasesAdapter(binding(), deps(), runtime);
+    await adapter.ensureAuth();
+    const parsedReleases = (await adapter.listChangesSince('', undefined)).records.map(
+      (r) => r.raw,
+    );
+    const legacy = {
+      fingerprint: createHash('sha256').update(JSON.stringify(parsedReleases)).digest('hex'),
+      offset: 2,
+      complete: true,
+    };
+    const batch = await adapter.listChangesSince('', legacy);
+    expect(batch.records).toEqual([]);
+    await adapter.close();
+  });
+
+  it('reports an exhausted GitHub quota as backpressure with its reset time', async () => {
+    const reset = Math.floor(Date.now() / 1000) + 600;
+    const { runtime } = fakeRuntime(
+      () =>
+        new Response('{"message":"API rate limit exceeded"}', {
+          status: 403,
+          headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(reset) },
+        }),
+    );
+    const adapter = new GitHubReleasesAdapter(binding(), deps(), runtime);
+    await adapter.ensureAuth();
+    const err = await adapter.listChangesSince('', undefined).catch((e: unknown) => e);
+    expect(err).toMatchObject({ name: 'HttpStatusError', status: 429 });
+    expect((err as { retryAfterMs: number }).retryAfterMs).toBeGreaterThan(500_000);
+    await adapter.close();
+  });
+
+  it('retries a public repository anonymously when the app-wide sign-in is stale', async () => {
+    const { runtime, calls } = fakeRuntime(
+      (call) =>
+        call.headers.has('authorization')
+          ? new Response('bad credentials', { status: 401 })
+          : Response.json([release(1)]),
+      'stale-token',
+    );
+    const adapter = new GitHubReleasesAdapter(binding(), deps(), runtime);
+    await adapter.ensureAuth();
+    const batch = await adapter.listChangesSince('', undefined);
+    expect(batch.records.map((r) => r.id)).toEqual(['1']);
+    expect(calls.map((c) => c.headers.has('authorization'))).toEqual([true, false]);
     await adapter.close();
   });
 

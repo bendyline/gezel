@@ -35,6 +35,11 @@ describe('validateScriptOutput', () => {
     ).toThrow('output is missing declared field "s"');
   });
 
+  it('lets a nullable field be left out', () => {
+    const optional = meta({ partial: { type: 'boolean', description: 'more', nullable: true } });
+    expect(validateScriptOutput(optional, {})).toEqual({});
+  });
+
   it.each([
     ['s', 1, 'must be string, got number'],
     ['n', '1', 'must be number, got string'],

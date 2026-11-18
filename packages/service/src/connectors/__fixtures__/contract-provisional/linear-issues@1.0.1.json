@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "kind": "hand-written",
+    "source": "Shapes the manifest's paths expect from Linear's MCP server; not yet checked against a recording."
+  },
+  "alsoCovers": ["1.0.0"],
+  "cases": [
+    {
+      "id": "lists-then-fetches-issues",
+      "description": "Issues listed by list_issues are fetched with get_issue and filed by team.",
+      "credential": "placeholder",
+      "exchanges": [
+        {
+          "kind": "mcp-tool",
+          "tool": "list_issues",
+          "result": {
+            "issues": [
+              {
+                "id": "lin-1",
+                "updatedAt": "2026-11-14T09:00:00Z"
+              },
+              {
+                "id": "lin-2",
+                "updatedAt": "2026-11-15T09:00:00Z"
+              }
+            ]
+          }
+        },
+        {
+          "kind": "mcp-tool",
+          "tool": "get_issue",
+          "args": {
+            "id": "lin-1"
+          },
+          "result": {
+            "id": "lin-1",
+            "identifier": "PLAT-1",
+            "title": "Document the release steps",
+            "team": {
+              "name": "Platform"
+            },
+            "updatedAt": "2026-11-14T09:00:00Z",
+            "description": "The checklist skips signing.",
+            "state": {
+              "name": "Todo"
+            },
+            "assignee": {
+              "name": "Kim"
+            },
+            "url": "https://linear.app/x/issue/PLAT-1"
+          }
+        },
+        {
+          "kind": "mcp-tool",
+          "tool": "get_issue",
+          "args": {
+            "id": "lin-2"
+          },
+          "result": {
+            "id": "lin-2",
+            "identifier": "PLAT-2",
+            "title": "Flaky CI on Windows",
+            "team": {
+              "name": "Platform"
+            },
+            "updatedAt": "2026-11-15T09:00:00Z",
+            "description": "The arm64 runner times out.",
+            "state": {
+              "name": "In Progress"
+            },
+            "assignee": {
+              "name": "Kim"
+            },
+            "url": "https://linear.app/x/issue/PLAT-2"
+          }
+        }
+      ],
+      "expect": {
+        "records": [
+          {
+            "id": "lin-1",
+            "frontmatter": {
+              "title": "Document the release steps",
+              "identifier": "PLAT-1",
+              "state": "Todo"
+            },
+            "bodyIncludes": "skips signing"
+          },
+          {
+            "id": "lin-2",
+            "frontmatter": {
+              "title": "Flaky CI on Windows",
+              "identifier": "PLAT-2",
+              "state": "In Progress"
+            },
+            "bodyIncludes": "arm64 runner"
+          }
+        ]
+      }
+    }
+  ]
+}

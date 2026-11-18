@@ -144,6 +144,13 @@ export interface SessionOpts {
      * `--permission-prompt-tool` path.
      */
     allowedMcpTools?: string[];
+    /**
+     * Mints a short-lived code the gezel MCP server trades for its session
+     * token at startup. When present, the provider writes a fresh code into
+     * the MCP config in place of `GEZEL_TOKEN` each time it starts the CLI,
+     * so the file the CLI's own tools can read never holds a live token.
+     */
+    mintMcpBootstrapCode?: () => string;
   };
   /**
    * `codex-cli` only: per-session context the Codex CLI provider needs
@@ -169,6 +176,14 @@ export interface SessionOpts {
     cwd: string;
     permissionModeOverride?: CodexPermissionModeCompat;
     reasoningEffortOverride?: CodexReasoningEffort;
+    /**
+     * `false` turns Codex's own shell off (`features.shell_tool` and
+     * `unified_exec`), and the session advertises Gezel's execution tools
+     * instead. Set from the security policy's `allowAgentShell`.
+     */
+    shellTool?: boolean;
+    /** See `claudeCliContext.mintMcpBootstrapCode`; minted before each turn. */
+    mintMcpBootstrapCode?: () => string;
   };
   /**
    * Local MCP server to launch and expose to the session. The primary
@@ -719,6 +734,15 @@ export interface BatchCapability {
    * engine-request gate both read this.
    */
   readonly maxConcurrency: number;
+  /**
+   * How many background task sessions are worth holding open on this engine
+   * at once, when that is fewer than its background lane admits. Two task
+   * sessions on an engine that serves them one generation at a time finish
+   * no sooner than one after the other; each only waits out the other's
+   * generations and keeps a second context growing. TaskRunner reads it.
+   * Omitted means the background lane's own width.
+   */
+  readonly taskConcurrency?: number;
   /**
    * Optional live headroom check — return false to refuse adding
    * `candidate` to the current in-flight set. Defaults to "admit while

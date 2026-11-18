@@ -30,6 +30,22 @@ describe('mail provider resolution', () => {
     expect(await adapter.listScopes()).toEqual(['INBOX']);
   });
 
+  it('reads syncFolders trimmed and once each, and falls back when none is usable', async () => {
+    world = await gmailWorld();
+    const deps = world.env.deps({ fetch: world.http.fetch });
+    const withFolders = (syncFolders: unknown) =>
+      mailAdapterFactory(
+        { ...world!.binding, config: { ...world!.binding.config, syncFolders } },
+        deps,
+      );
+    const named = await withFolders([' INBOX ', 'INBOX', 'Label_7', '']);
+    await named.ensureAuth();
+    expect(await named.listScopes()).toEqual(['INBOX', 'Label_7']);
+    const unusable = await withFolders(['', '   ', 42]);
+    await unusable.ensureAuth();
+    expect(await unusable.listScopes()).toEqual(['INBOX']);
+  });
+
   it('refuses a config.provider that disagrees with the type', () => {
     expect(() =>
       mailProviderFor({ id: 'b', type: 'mail-gmail', config: { provider: 'imap' } }),

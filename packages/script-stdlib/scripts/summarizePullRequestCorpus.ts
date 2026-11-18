@@ -83,8 +83,15 @@ const ranges = batches.map((value, index) => {
   ) {
     throw new Error(`Batch ${index + 1} has invalid numbering or bounds.`);
   }
-  return { number: index + 1, start: batch.start, end: batch.end, files: batch.paths.length };
+  return {
+    number: index + 1,
+    start: batch.start,
+    end: batch.end,
+    files: batch.paths.length,
+    ...(batch.generated === true ? { generated: true as const } : {}),
+  };
 });
+const generatedRanges = ranges.filter((range) => range.generated);
 const distribution = new Map<string, number>();
 for (const value of files) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
@@ -103,6 +110,11 @@ const content = `${JSON.stringify(
     pullRequest: fields.pullRequest,
     totalFiles,
     batchCount: ranges.length,
+    // What the report states as reviewed by a person-like reader versus
+    // summarized from the patch, so "57/57 files" is not read as 57 reviews.
+    reviewBatchCount: ranges.length - generatedRanges.length,
+    generatedBatchCount: generatedRanges.length,
+    generatedFiles: generatedRanges.reduce((sum, range) => sum + range.files, 0),
     ranges,
     topAreas,
   },

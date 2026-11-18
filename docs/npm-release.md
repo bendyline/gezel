@@ -295,7 +295,8 @@ packs every published package, `npm install`s the tarballs into a throwaway
    gates, because a consumer cannot move past our exact pins; lower severities
    are printed, not failed, because
    workspace overrides never reach this graph and advisories arrive on
-   npm's schedule rather than ours,
+   npm's schedule rather than ours, and ReDoS advisories (CWE-1333) are
+   printed, not failed, at any severity,
 4. proves a clean-install macOS `node-pty` can spawn a shell,
 5. imports every public subpath under plain node,
 6. resolves the runtime-resolved specifiers,

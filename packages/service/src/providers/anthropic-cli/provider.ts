@@ -1,3 +1,5 @@
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { createLogger } from '@bendyline/gezel';
 import { ProviderQueue } from '@bendyline/gezel-inference/internal/providers/queue';
 import {
@@ -15,6 +17,21 @@ import { type ClaudeBinary, resolveClaudeBinary } from './binary.js';
 import { type ClaudeReasoningEffort, isClaudeReasoningEffort } from './reasoning.js';
 import { AnthropicCliSession, type SessionDeps } from './session.js';
 import { ClaudeWorkerPool } from './worker-pool.js';
+
+/** Every built-in a one-shot (an icon, an about, a summary) could reach for. */
+const ONE_SHOT_DISALLOWED_BUILTINS = [
+  'Bash',
+  'PowerShell',
+  'Read',
+  'Write',
+  'Edit',
+  'NotebookEdit',
+  'Grep',
+  'Glob',
+  'WebFetch',
+  'WebSearch',
+  'Task',
+] as const;
 
 const DEFAULT_MODEL = 'sonnet';
 
@@ -283,12 +300,11 @@ export class AnthropicCliProvider implements LLMProvider {
     // those still work — runtime files land under a `oneshot/` bucket and
     // get garbage-collected by the runtime-dir-wide cleanup the next time
     // the manager prunes.
-    const ctx: NonNullable<SessionOpts['claudeCliContext']> = opts.claudeCliContext ?? {
-      sessionId: `oneshot-${Math.random().toString(36).slice(2, 10)}`,
-      gezelId: 'oneshot',
-      projectId: 'oneshot',
-      cwd: process.cwd(),
-    };
+    // A one-shot only writes text, often about untrusted content, so it gets
+    // an empty folder of its own, read-only `plan` mode and none of Claude's
+    // built-in tools — never the daemon's own working directory.
+    const ctx: NonNullable<SessionOpts['claudeCliContext']> =
+      opts.claudeCliContext ?? (await this.oneShotContext());
     const reasoningEffort = pickReasoningEffort(opts.reasoningEffort, this.defaultReasoningEffort);
     const deps: SessionDeps = {
       binaryPath: this.resolved.path,
@@ -309,6 +325,19 @@ export class AnthropicCliProvider implements LLMProvider {
       ...(opts.claudeCliSessionId ? { initialResumeId: opts.claudeCliSessionId } : {}),
     };
     return new AnthropicCliSession(deps);
+  }
+
+  private async oneShotContext(): Promise<NonNullable<SessionOpts['claudeCliContext']>> {
+    const cwd = join(this.runtimeDir, 'oneshot-cwd');
+    await mkdir(cwd, { recursive: true });
+    return {
+      sessionId: `oneshot-${Math.random().toString(36).slice(2, 10)}`,
+      gezelId: 'oneshot',
+      projectId: 'oneshot',
+      cwd,
+      permissionModeOverride: 'plan',
+      disallowedBuiltinTools: [...ONE_SHOT_DISALLOWED_BUILTINS],
+    };
   }
 
   async resumeSession(sessionId: string, opts: SessionOpts): Promise<LLMSession> {

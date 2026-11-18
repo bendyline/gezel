@@ -138,13 +138,13 @@ manifest*, so a new source is a JSON file, not a compile. The registry dispatche
   or a CLI invocation. Gezel injects the credential from the SecretStore as env/args, runs the
   fetch on the schedule, and applies the same normalization + safety pipeline. This is the
   project-type "script-tool" primitive pointed at ingest instead of the model.
-- **`spectral` — host a Prismatic component.** Run an Apache-2.0
-  [Prismatic component](#seeding-from-an-external-library-prismatic-components) on its
-  `@prismatic-io/spectral` SDK (MIT): the sync host calls the component's read actions and
-  populates its `connection` from our SecretStore. Buys a large library of production-used auth
-  definitions + REST plumbing; costs a hosted third-party SDK we version-pin and shim. A
-  specialization of `script` (external code, our schedule), broken out because the library is
-  big enough to be a strategy of its own — see the section below.
+- **`spectral` — host a Prismatic component.** Run one of Prismatic's published, Apache-2.0
+  [components](#seeding-from-an-external-library-prismatic-components) on our pinned
+  `@prismatic-io/spectral` SDK (MIT), in a sandboxed child. The manifest pins the npm package by
+  version and hash; it is downloaded when a connection is made. A polling trigger's position
+  becomes the cursor, or an action is listed whole every pass, and **our** normalize runs over
+  the raw output. A specialization of `script` (external code, our schedule), broken out because
+  the library is big enough to be a strategy of its own — see the section below.
 - **`native` — bespoke code.** The escape hatch, for **cornerstone corpora** the user lives in
   that resist declarative expression. Email is the exemplar (MIME, threading, quote-stripping,
   HTML→markdown, high-fidelity IMAP/Gmail/Graph cursors — none of which an MCP tool hands you
@@ -209,39 +209,56 @@ feature rests on.
 
 ### Seeding from an external library (Prismatic components)
 
-[Prismatic's `components`](https://github.com/prismatic-io/components) is ~170 pre-built SaaS
-connectors (Salesforce, Jira, Slack, Dropbox, S3, …) under **Apache-2.0**, each built on the
-`@prismatic-io/spectral` SDK (**MIT**). Both licenses are permissive and compatible with gezel's
-MIT — we may vendor and modify. Prismatic accepts no external PRs and calls off-platform use
-"unsupported," so we fork and own maintenance. It is a strong seed library — but the value is
-**not uniform**, and adopting it well means cutting along that seam rather than swallowing it
-whole:
+Prismatic publishes every one of its ~175 SaaS components to npm as
+`@prismatic-io/components-<key>` (**Apache-2.0**, no dependencies, peer `@prismatic-io/spectral`
+**MIT**), each exporting a *callable component*: its actions, triggers, connections and data
+sources, runnable inside the SDK's context. 110 of them have polling triggers whose position is a
+plain object the host keeps. Gezel runs them as published rather than vendoring source slices
+([ADR 0033](decisions/0033-spectral-published-components.md)):
 
-- **Auth definitions (`connections.ts`) — high value, ~zero coupling.** Each component's OAuth
-  authorize/token URLs, scopes, and client-id/secret field shapes are pure declarative config.
-  A build-time importer can transpile them into the auth half of our `connector-type` manifests
-  (`secretShape` + connect UX). This is 170 services' correct, production-proven auth as a
-  ready-made credential catalog — and it feeds **every** driver, not just `spectral`.
-- **Read actions (`actions/*`) — medium value, spectral-host coupling.** The `list*` / `get*`
-  verbs are the "pull data" calls. Reusing them is what the **`spectral` driver** does: host
-  spectral, inject the connection from our SecretStore, call the action, run **our** normalize.
-- **Triggers — skip.** Built for Prismatic's webhook/poll event model, not our idle-gated host.
-- **Normalization — theirs is none.** Actions return raw provider JSON (`{ data }`) by design;
-  the canonical mapping is ours to write. The two hardest things — normalization and resumable
-  cursors — the library does not provide.
+- **The manifest pins the component** (`source.package`): name, exact version, tarball and entry
+  SHA-256, the SDK range it was published for, license, publish date. Only the bundled catalog may
+  ask for one, because it asks Gezel to download and run code.
+- **Downloaded when a connection is made** into `~/.gezel/connector-components/`, by the component
+  store ([spectral/component-store.ts](../packages/service/src/connectors/spectral/component-store.ts)).
+  The tarball and entry must match their pins, the package must have no dependencies (so nothing
+  is installed and no install script runs), and the runner's pinned SDK must satisfy its range.
+  Store builds refuse (they may not download code), as does a security level that keeps
+  connectors off the network; the connect form says which. An install no connection uses is
+  removed a day after its last use.
+- **Run by runner v2** ([run.ts](../packages/connectors-spectral/src/run.ts)) in the sandbox, with
+  the network on and the corpus out of reach. A resolve hook serves the component's SDK imports
+  from the runner's own pinned copy and refuses any other package and the built-ins that open
+  sockets or processes; the entry's hash is checked again before it loads. An HTTP guard keeps
+  requests to the origins the manifest declares (on the SDK's axios, on `node:http(s)` per
+  redirect hop, and on `fetch`) and names a failure (throttled with its `Retry-After`, auth,
+  forbidden, …). The credential arrives over stdin and is scrubbed from everything that leaves.
+  This guard is defense in depth: the OS grants the child the network as a whole.
+- **Two modes.** `trigger` drains a polling trigger: its polling state is the cursor, and a drain
+  larger than one run continues from where the run stopped. `action` lists an action to the end
+  every pass, a full listing, so a mirror removes what the source no longer returns. Either way
+  the records are staged in the binding's private folder and handed to the engine a page at a
+  time; the cursor moves to the run's new position only after the last page is taken.
+- **Authoring** goes through `pnpm --filter @bendyline/gezel-service run connectors:draft-spectral
+  -- <key> <version> --action|--trigger <k>`: it refuses a version under 7 days old, checks the
+  registry's integrity, installs through the store, reads the component's shape in the sandbox
+  with the network denied, and drafts the manifest (pin, connection, settings form, candidate
+  origins). A person prunes the origins and writes the normalize mapping.
+- **Contracts** run each type's recorded exchanges through the real component with the network
+  denied ([catalog-contract.spectral.integration.test.ts](../packages/service/src/connectors/catalog-contract.spectral.integration.test.ts)).
 
-Honest caveats: coverage is **standardized but only ~40% unit-tested** (the flagship `github`
-ships no tests — treat it as "production-used," not "verified for us"); components deep-import
-`@prismatic-io/spectral/dist/...` (private paths → pin a spectral version, expect a shim); and
-they're webpack-bundled for `prism publish`, so we consume `src/` and compile ourselves. Running
-vendored third-party code on our schedule is the autonomous-execution surface from the posture
-section — sandbox it, sha-pin it.
+Honest caveats: most components are unit-tested only against mocks, and Airtable not at all;
+their evidence is production use on Prismatic's platform. Prismatic accepts no outside PRs and
+makes no statement supporting off-platform use. OAuth token refresh for Spectral connections is
+not built yet.
+
+The vendored Airtable slice (`packages/connectors-spectral/vendor/`, `run-action.ts`) serves the
+`airtable-records` 1.0.x bindings until the 2.0.0 type, built on the published component, ships
+in gilde; then it goes.
 
 Preference rule for the long tail: **`mcp` first when a decent server exists** (cleaner
-boundary, the server owns its own auth), **`spectral` / Prismatic when it doesn't.** The
-auth-catalog harvest is worth doing regardless of which driver a given source ends up using.
-Whether to fold the **entire** library plus a pinned spectral into gezel — versus curating
-components on demand — is a later evaluate-then-decide (see phases).
+boundary, the server owns its own auth), **`spectral` / Prismatic when it doesn't.** Components
+are curated one type at a time, each with a contract, never folded in wholesale.
 
 ## On-disk layout and normalization
 
@@ -316,9 +333,13 @@ One `ConnectorSyncManager` ([connectors/sync-manager.ts](../packages/service/src
 generalized from mail's original loop) serves every type. Its discipline is the reason autonomous sync is safe to leave running:
 
 - **Idle-gated.** Never fights a live chat turn; respects OS idle and the night-shift flag.
-- **Posture-gated.** Dormant under lockdown / super-lockdown; autonomous sync rides
-  `resolveSecurityPolicy(cfg).allowExternalServices`. A manual, user-initiated sync is a
-  separate route with its own (stricter) gate.
+- **Posture-gated.** Read-only types (no write-back actions declared: websites, feeds,
+  wikis) sync in the background whenever `allowConnectorData` is on, so at Lockdown too;
+  types that can send or post keep `allowExternalServices`. Super-lockdown stops the loop.
+  `ConnectorManager.backgroundBindings` decides per binding, and the loop lists only
+  eligible bindings so a held-back one never makes its project look due. A manual,
+  user-initiated sync is a separate route, refused at the sink when `allowConnectorData`
+  is off.
 - **One unit per tick, staleness-ordered.** Bounded work; the least-recently-synced due
   binding goes first.
 - **Cursor-resumed.** Resume from the persisted cursor; never re-walk the whole source.
@@ -360,6 +381,86 @@ listener to that fixed port and the panel shows the literal
 `http://127.0.0.1:<port>/callback` to register, with `redirectNote` carrying provider
 quirks. Without one, the listener keeps its ephemeral port — RFC 8252 providers (Google,
 Microsoft) accept any loopback port, so there is nothing exact to register.
+
+### The account a sign-in reaches
+
+Google and Microsoft hand over whichever account the browser is already signed in to. A
+connection made for a test mailbox once copied the person's own mailbox that way: nothing
+compared the account that signed in with the address typed into the form, and the first
+sync started on its own. For these two providers (known by their sign-in host,
+[connectors/oauth-account.ts](../packages/service/src/connectors/oauth-account.ts)) the link
+flow now:
+
+- **Names the account.** The connection's `address` setting (or a re-link's existing
+  account) goes to the provider as `login_hint`. With nothing to name, the provider's
+  account picker is forced (`prompt=select_account`; Google takes it beside the `consent`
+  its types already ask for).
+- **Checks who signed in.** The link also asks for `openid` and `email` (Microsoft:
+  `profile` too), and `completeOAuth` reads the account from the ID token the token
+  endpoint returns, checking its audience. A sign-in that reached another account is
+  refused (`AccountMismatchError`) before anything is stored, and its link state is spent.
+  Gmail addresses compare the way Gmail delivers them (dots, `+tags` and googlemail.com
+  ignored); every other address compares exactly, so an alias needs the primary address.
+- **Records it.** The binding keeps `account`, the Connections row shows "Signed in as …",
+  and `connectors:export-credential` names it.
+
+A provider that returns no ID token is logged and connected on the hint alone.
+
+### Removing a connection
+
+Remove deletes the binding, its saved sign-in and its private state. What it downloaded
+stays unless the person ticks **Also delete what it downloaded**
+(`DELETE …/connectors/:bindingId?deleteData=1`): for mail the originals are still at the
+provider, but for a feed or a social account the copy may be the only one left. Deleting
+takes the corpus folder (records, attachments, tables, pending actions) and the records it
+held in quarantine. Quarantine is shared by every connection of a type, so when another
+remains only the records this corpus lists in its `_flags.json` sidecars go
+([connectors/remove-data.ts](../packages/service/src/connectors/remove-data.ts)). A folder
+another connection saves into is refused before anything is removed. The artifacts index is
+refreshed straight away: it otherwise forgets records only after a sync that writes
+something. The dialog reads the size from `GET …/connectors/:bindingId/stored`. Both routes
+are closed to session tokens.
+
+### Offline is a state, not an error
+
+A laptop on a plane, out of range, or with its cable pulled cannot reach any service, and
+every connection fails at once with Node's bare "fetch failed". None of them is broken.
+`unreachableFrom` ([connectors/unreachable.ts](../packages/service/src/connectors/unreachable.ts))
+reads the cause chain for a request that never got an answer (DNS, refused, reset, timed
+out; an HTTP status of any kind is the service speaking and stays an error) and says
+whether this computer has a usable network at all, from its own interfaces
+([system/network-presence.ts](../packages/service/src/system/network-presence.ts):
+loopback, link-local and virtual adapters do not count). A pass whose only failures were
+the network returns `unreachable`, and the manager:
+
+- records `binding.unreachable` (`since`, `offline`, `host`) instead of `lastError`; the
+  Connections tab shows "Offline since 10:45 AM" in gray, and one line above the list
+  while any connection is offline: everything already downloaded is here, and they catch
+  up on their own;
+- retries on a short ladder (1, 2, then every 5 minutes) instead of the failure ladder;
+  an offline request fails at once and costs nothing;
+- lets a waiting connection sync while the person is at the keyboard (never during a chat
+  turn), since one that fell behind because of the network is what someone back online
+  expects to see move;
+- retries every waiting connection a few seconds after a usable network appears or the
+  host wakes (`watchNetworkPresence` → `retryWaiting` → `tickSoon`).
+
+The first pass that gets through clears the state. Records that failed mid-pass because
+the network dropped never count toward giving up on them.
+
+### What a connection holds
+
+Each row in the Connections tab says how many records its connection holds, in the
+family's word ("1,204 emails", "38 events", "items" for a type not named in
+[connector-items.ts](../packages/ui/src/components/connector-items.ts)), and **Open** shows
+its folder in the Artifacts tab. A pass that changes a document corpus recounts its record
+files ([record-count.ts](../packages/service/src/connectors/record-count.ts): files in the
+writer's `RECORD_FILE_RE` grammar, outside `attachments/` and `_`-folders) and stores the
+total as `records` in `_meta.json`; a quiet pass keeps the count it started from. While a
+pass runs, the status adds the new records it has written so far to that starting count,
+so the number climbs, and `syncing` stays set through the follow-up passes a manual sync
+schedules; the tab re-reads the status every second while anything syncs. Observation
+corpora report rows through `tables` instead.
 
 ## Write-back and the morning briefing
 
@@ -425,6 +526,15 @@ Sources compose **local → bundled → community** like every other kind. First
 discoverable, versioned face over them — the same "wrap native code in a bundled manifest for
 gallery unity" move [project-types.md](./project-types.md) makes for the mail pipeline.
 
+A type's identity manifest may carry `"logo": "logo.webp"`, a cut-paper mark from the same
+family as craftbook artwork. Gezel draws it on a ground chosen by what the type brings in
+(`connectorTypeGround`), in the Connections gallery, the composer and under a sent message.
+
+A connector can also be offered from the words of a draft: a web address in a message is
+saved by the website connector when the person sends it, and a future rule can offer a
+GitHub connection for a `github.com` link. That path (rules, resolvers, the composer strip,
+what the turn is given) is specified in [prompt-connectors.md](./prompt-connectors.md).
+
 Connectors are the **missing input primitive** for [custom project types](./project-types.md).
 A project type is a composition manifest; today it composes gezels, craftbooks, scripts,
 toolsets, pages, and schedules. Add `connectors` to that list and an "Inbox Triage" or
@@ -463,7 +573,8 @@ adapter. State per connector whether the user is getting a **mirror** or a **win
 Connectors extend the existing `SecurityPolicy` ladder ([schemas/api.ts](../packages/core/src/schemas/api.ts)),
 they do not add a parallel one:
 
-- Autonomous sync is gated by `allowExternalServices`; lockdown postures stop the loop.
+- Autonomous sync of a read-only type is gated by `allowConnectorData`, of a type with
+  write-back actions by `allowExternalServices`; super-lockdown stops the loop.
 - **User-initiated data movement is gated by `allowConnectorData` (derived from
   `allowAppNetwork`), not by `allowExternalServices`.** That flag governs *agency* — what the
   model may reach for on its own — and a connector is the opposite arrangement: the runtime

@@ -39,6 +39,8 @@ export interface ScriptRunnerOptions {
   mcpCall?: DispatcherDeps['mcpCall'];
   /** Resolves `credential:<name>` capabilities for `http.authed`. */
   credentials?: CredentialRegistry;
+  /** Test seam for the `http.*` methods (see `DispatcherDeps.http`). Never set in production. */
+  http?: DispatcherDeps['http'];
   /** Builds the default credential registry when `credentials` is not given. */
   secrets?: SecretStore;
   /** Catalog for provenance trust of installed project-type and test-shim scripts. */
@@ -69,6 +71,7 @@ export class ScriptRunner {
   private readonly memory?: MemoryManager;
   private readonly tasks?: TaskManager;
   private readonly credentials?: CredentialRegistry;
+  private readonly http?: DispatcherDeps['http'];
   private readonly remindersChanged?: (projectId: string) => void;
   private mcpCall: DispatcherDeps['mcpCall'];
   private indexAccess: DispatcherDeps['index'];
@@ -82,6 +85,7 @@ export class ScriptRunner {
     this.tasks = opts.tasks;
     this.mcpCall = opts.mcpCall;
     this.remindersChanged = opts.remindersChanged;
+    this.http = opts.http;
     this.credentials =
       opts.credentials ??
       (opts.secrets
@@ -119,6 +123,7 @@ export class ScriptRunner {
       tasks: this.tasks,
       mcpCall: this.mcpCall,
       credentials: this.credentials,
+      ...(this.http ? { http: this.http } : {}),
       index: this.indexAccess,
       ...(this.remindersChanged ? { remindersChanged: this.remindersChanged } : {}),
     });

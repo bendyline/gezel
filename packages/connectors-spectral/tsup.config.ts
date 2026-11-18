@@ -7,7 +7,7 @@ const prismaticLegalBanner = `/*!
  */`;
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/run-action.ts'],
+  entry: ['src/index.ts', 'src/run-action.ts', 'src/run.ts'],
   format: ['cjs'],
   target: 'node18',
   // No `dts`. Nothing type-imports this package: the service resolves

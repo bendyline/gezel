@@ -30,23 +30,13 @@
  * A JSON report of what each binding produced is written for the record.
  */
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createTrustingFetch, readRuntime } from '@bendyline/gezel-client/node';
 import { describe, expect, it } from 'vitest';
-import { assertCorpusInvariants } from './harness.js';
+import { type AcceptanceEntry, checkBinding } from './acceptance.js';
 
 const LIVE = process.env.GEZEL_CONNECTOR_LIVE === '1';
-
-/** Frontmatter keys a record of each family should carry. */
-const EXPECTED_KEYS: Array<[RegExp, string[]]> = [
-  [/^mail-/, ['subject', 'from', 'date', 'message_id']],
-  [/^calendar-/, ['title', 'date']],
-  [/^files-/, ['title', 'path', 'file_id']],
-  [/^rss-feed$/, ['title', 'url']],
-  [/^youtube-/, ['title', 'url', 'date']],
-  [/^(x|bluesky|instagram|linkedin)-/, ['url']],
-];
 
 interface BindingStatus {
   id: string;
@@ -54,16 +44,6 @@ interface BindingStatus {
   displayName?: string;
   completeness?: string;
   lastError?: string;
-}
-
-interface SyncResult {
-  written: number;
-  quarantined: number;
-  skipped: number;
-  pruned: number;
-  errors: number;
-  error?: string;
-  rateLimited?: boolean;
 }
 
 describe.skipIf(!LIVE)('connectors — live acceptance against a running daemon', () => {
@@ -117,71 +97,17 @@ describe.skipIf(!LIVE)('connectors — live acceptance against a running daemon'
         process.env.GEZEL_LIVE_ARTIFACTS_DIR ?? join(home, 'projects', projectId, 'artifacts');
       const tolerance = Number(process.env.GEZEL_LIVE_QUIET_TOLERANCE ?? 3);
 
-      const report: Record<string, unknown>[] = [];
+      const report: AcceptanceEntry[] = [];
       const failures: string[] = [];
       for (const b of bindings) {
-        const entry: Record<string, unknown> = {
-          id: b.id,
-          type: b.type,
-          completeness: b.completeness,
-        };
-        report.push(entry);
-        try {
-          // Paging adapters may need several passes to finish a first backfill.
-          const passes: SyncResult[] = [];
-          for (let i = 0; i < 6; i++) {
-            const r = (
-              await api<{ result: SyncResult }>(
-                'POST',
-                `/connectors/${encodeURIComponent(b.id)}/sync`,
-              )
-            ).result;
-            passes.push(r);
-            if (r.error) throw new Error(`sync failed: ${r.error}`);
-            if (r.rateLimited) break;
-            if (r.written === 0 && i > 0) break;
-          }
-          entry.passes = passes;
-          const corpusDir = project.connectors?.find((c) => c.id === b.id)?.corpusDir;
-          if (!corpusDir) throw new Error('binding has no corpusDir after syncing');
-          const records = await assertCorpusInvariants(artifactsDir, corpusDir);
-          entry.records = records.length;
-          const keys = EXPECTED_KEYS.find(([re]) => re.test(b.type))?.[1] ?? [];
-          const missing = new Map<string, number>();
-          for (const r of records) {
-            for (const k of keys) if (!r.frontmatter[k]) missing.set(k, (missing.get(k) ?? 0) + 1);
-          }
-          entry.missingKeys = Object.fromEntries(missing);
-          if (records.length > 0 && missing.size > 0) {
-            failures.push(`${b.id}: records missing ${[...missing.keys()].join(', ')}`);
-          }
-          entry.sample = records
-            .slice(0, 3)
-            .map((r) => ({ path: r.path, frontmatter: r.frontmatter }));
-          const meta = JSON.parse(
-            await readFile(join(artifactsDir, corpusDir, '_meta.json'), 'utf8'),
-          );
-          if (meta.binding !== b.id) failures.push(`${b.id}: _meta.json names ${meta.binding}`);
-          const last = passes[passes.length - 1]!;
-          if (!last.rateLimited) {
-            const quiet = (
-              await api<{ result: SyncResult }>(
-                'POST',
-                `/connectors/${encodeURIComponent(b.id)}/sync`,
-              )
-            ).result;
-            entry.quietPass = quiet;
-            if (quiet.error) failures.push(`${b.id}: resume pass failed: ${quiet.error}`);
-            else if (quiet.written > tolerance) {
-              failures.push(
-                `${b.id}: resume pass rewrote ${quiet.written} records (cursor not resuming?)`,
-              );
-            }
-          }
-        } catch (err) {
-          entry.error = err instanceof Error ? err.message : String(err);
-          failures.push(`${b.id}: ${entry.error}`);
-        }
+        const checked = await checkBinding(
+          api,
+          artifactsDir,
+          { ...b, corpusDir: project.connectors?.find((c) => c.id === b.id)?.corpusDir },
+          { quietTolerance: tolerance, sample: true },
+        );
+        report.push(checked.entry);
+        failures.push(...checked.failures);
       }
 
       const reportPath = process.env.GEZEL_LIVE_REPORT;

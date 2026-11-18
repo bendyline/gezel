@@ -30,6 +30,19 @@ describe('buildCodexConfigToml', () => {
     expect(body).toContain('ignore_default_excludes = false');
   });
 
+  it('keeps Gezel variables out of the shell, and turns the shell off when told', () => {
+    const on = buildCodexConfigToml({ instructions: 'x', model: 'm', mcpServers: {} });
+    expect(on).toContain('exclude = ["GEZEL_*"]');
+    expect(on).not.toContain('shell_tool');
+    const off = buildCodexConfigToml({
+      instructions: 'x',
+      model: 'm',
+      mcpServers: {},
+      shellTool: false,
+    });
+    expect(off).toContain('apps = false\nshell_tool = false\nunified_exec = false');
+  });
+
   it('includes reasoning effort when set', () => {
     const body = buildCodexConfigToml({
       instructions: 'x',

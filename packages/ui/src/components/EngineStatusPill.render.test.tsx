@@ -310,8 +310,8 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     const user = userEvent.setup();
     render(<EngineStatusPill />);
 
-    const pill = await screen.findByTitle(/talkie-1930-13b-q4 — Generating/);
-    expect(pill).toHaveTextContent('Generating');
+    const pill = await screen.findByTitle(/talkie-1930-13b-q4 — Working/);
+    expect(pill).toHaveTextContent('Working');
     expect(pill).not.toHaveTextContent('technical-writer');
     expect(pill).not.toHaveTextContent('tok');
     expect(pill).not.toHaveTextContent('Liesel');
@@ -321,7 +321,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
     await user.click(pill);
     expect(await screen.findByText('This turn')).toBeInTheDocument();
     expect(screen.getByText('≈100 tok')).toBeInTheDocument();
-    expect(screen.getByText(/technical-writer · Generating · 24 tok\/s/)).toBeInTheDocument();
+    expect(screen.getByText(/technical-writer · Working · 24 tok\/s/)).toBeInTheDocument();
   });
 
   /**
@@ -357,8 +357,8 @@ describe('EngineStatusPill — simultaneous local engines', () => {
 
     render(<EngineStatusPill />);
 
-    const pill = await screen.findByRole('button', { name: /Generating/i });
-    expect(pill).toHaveTextContent('Generating');
+    const pill = await screen.findByRole('button', { name: /Working/i });
+    expect(pill).toHaveTextContent('Working');
     expect(pill).not.toHaveTextContent('tokens');
     expect(pill).not.toHaveTextContent('tok/s');
     expect(pill).not.toHaveTextContent('· ·');
@@ -400,7 +400,7 @@ describe('EngineStatusPill — simultaneous local engines', () => {
 
     await waitFor(() => expect(document.querySelectorAll('button').length).toBeGreaterThan(0));
     const pill = [...document.querySelectorAll('button')].find((el) =>
-      (el.getAttribute('title') ?? '').includes('Generating'),
+      (el.getAttribute('title') ?? '').includes('Working'),
     )!;
     expect(pill).not.toHaveTextContent('tok/s');
     expect(pill.getAttribute('title')).not.toContain('tok/s');
@@ -1024,7 +1024,7 @@ describe('EngineStatusPill — crowded titlebar', () => {
       const { dwarfStar, talkie } = await pillsAt('full');
       expect(dwarfStar).toHaveTextContent('DwarfStar');
       expect(talkie).toHaveTextContent(device);
-      expect(talkie).toHaveTextContent('Generating');
+      expect(talkie).toHaveTextContent('Working');
       expect(talkie).not.toHaveTextContent('Liesel');
       expect(
         consoleError.mock.calls.some(([message]) =>
@@ -1057,13 +1057,48 @@ describe('EngineStatusPill — crowded titlebar', () => {
     };
     try {
       const { talkie } = await pillsAt('full');
-      expect(talkie).toHaveTextContent('Generating');
+      expect(talkie).toHaveTextContent('Working');
       expect(talkie).not.toHaveTextContent('Dejan');
       expect(talkie).not.toHaveTextContent('drafting the invoices');
       expect(talkie).not.toHaveTextContent('Liesel');
     } finally {
       mockActivity = null;
     }
+  });
+
+  // 2026-11-17: fifteen batch reviews on one MLX engine read "Generating · 2:08".
+  it('counts the turns on the engine, leaving out one held behind another', async () => {
+    const turn = (sessionId: string, gezelId: string, extra: object = {}) => ({
+      sessionId,
+      gezelId,
+      projectId: 'just-chat',
+      providerName: 'llama-cpp',
+      model: 'talkie-1930-13b-q4',
+      userText: 'Review the batch',
+      startedAt: Date.now(),
+      elapsedMs: 3_000,
+      ...extra,
+    });
+    vi.mocked(api.listGezels).mockResolvedValue({
+      gezels: [
+        { id: 'liesel', name: 'Liesel', updatedAt: '2026-08-13T00:00:00.000Z' },
+        { id: 'koray', name: 'Koray', updatedAt: '2026-08-13T00:00:00.000Z' },
+      ],
+    } as never);
+    vi.mocked(api.listInflightTurns).mockResolvedValue({
+      inflight: [
+        turn('talkie-session', 'liesel'),
+        turn('batch-1', 'koray'),
+        turn('batch-2', 'koray', { engineHold: 'behind' }),
+      ],
+    } as never);
+    const user = userEvent.setup();
+    const { talkie } = await pillsAt('full');
+    await waitFor(() => expect(talkie).toHaveTextContent('2 working'));
+    expect(talkie).not.toHaveTextContent('Generating');
+    expect(talkie.querySelector('.engine-pill-progress')).toBeNull();
+    await user.click(talkie);
+    expect(await screen.findByText(/Liesel, Koray · 2 working/)).toBeInTheDocument();
   });
 
   it('drops the machine name — but not a named engine — when compact', async () => {
@@ -1073,7 +1108,7 @@ describe('EngineStatusPill — crowded titlebar', () => {
     expect(talkie).not.toHaveTextContent(device);
     expect(dwarfStar).toHaveTextContent('DwarfStar');
     expect(talkie.textContent).not.toMatch(/^\s*·/);
-    expect(talkie).toHaveTextContent('Generating');
+    expect(talkie).toHaveTextContent('Working');
     // Nothing is actually lost — the tooltip still names the machine.
     expect(talkie.getAttribute('title')).toContain(device);
   });
@@ -1081,8 +1116,8 @@ describe('EngineStatusPill — crowded titlebar', () => {
   it('keeps the device phase when tight', async () => {
     const { talkie } = await pillsAt('tight');
     expect(talkie).not.toHaveTextContent('Liesel');
-    expect(talkie).toHaveTextContent('Generating');
-    expect(talkie.getAttribute('title')).toContain('Generating');
+    expect(talkie).toHaveTextContent('Working');
+    expect(talkie.getAttribute('title')).toContain('Working');
   });
 
   it('keeps crew identity out of the device pill at every density', async () => {

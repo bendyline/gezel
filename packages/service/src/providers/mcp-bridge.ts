@@ -1346,7 +1346,7 @@ function isSecretEnvName(name: string): boolean {
 }
 
 /** Drop ambient secret-shaped env vars before handing the env to an MCP child. */
-function filterMcpChildEnv(src: NodeJS.ProcessEnv): Record<string, string> {
+export function filterMcpChildEnv(src: NodeJS.ProcessEnv): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(src)) {
     if (v == null) continue;

@@ -407,6 +407,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         );
       }
     }
+    if (typeof body.workingDir === 'string' && body.workingDir !== '') {
+      const refusal = await checkNewProjectFolder(inferDeps(), body.workingDir, id);
+      if (refusal) return c.json(refusal.body, refusal.status);
+    }
     const project = await ctx.store.updateProject(id, body);
     if (
       body.managedWorkspaceWritePolicy !== undefined ||
@@ -1249,6 +1253,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
   app.put('/:id/working-dir', async (c) => {
     const id = c.req.param('id');
     const body = (await c.req.json()) as { workingDir?: string };
+    if (typeof body.workingDir === 'string' && body.workingDir !== '') {
+      const refusal = await checkNewProjectFolder(inferDeps(), body.workingDir, id);
+      if (refusal) return c.json(refusal.body, refusal.status);
+    }
     const project = await ctx.store.updateProjectWorkingDir(id, body.workingDir);
     return c.json(project);
   });

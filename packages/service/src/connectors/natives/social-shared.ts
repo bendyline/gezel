@@ -41,7 +41,10 @@ export function monthSegments(iso: string | undefined): string[] {
  * convention (colons become dashes so the stem stays a safe path segment).
  */
 export function postFileStem(iso: string | undefined, text: string): string {
-  const isoMin = (iso ?? '').slice(0, 16).replace(/:/g, '-') || 'undated';
+  // The timestamp comes from the source (a third party's post, for a
+  // mention): only a well-formed one may become part of a path.
+  const candidate = (iso ?? '').slice(0, 16).replace(/:/g, '-');
+  const isoMin = /^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}$/.test(candidate) ? candidate : 'undated';
   const words = text.trim().split(/\s+/).slice(0, 6).join(' ');
   return `${isoMin}--${slug(words || 'post', 48)}`;
 }

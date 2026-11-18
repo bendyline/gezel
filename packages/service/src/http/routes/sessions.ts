@@ -163,6 +163,9 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
     // Cameras stop watching and stay paused until the person resumes each
     // one; a sound a lookout is playing stops now.
     ctx.lookouts?.stopSounds();
+    // A page capture in flight closes its browser now.
+    ctx.connectors?.cancelPasses({}, 'emergency stop');
+    ctx.websites?.closeAll();
     const camerasStopped = (ctx.liveConnectors?.emergencyStop() ?? Promise.resolve(0)).catch(
       (err) => {
         log.warn(
@@ -709,7 +712,11 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
   });
 
   app.delete('/:id', async (c) => {
-    await ctx.chat.deleteSession(c.req.param('id'));
+    const sessionId = c.req.param('id');
+    const projectId = (await ctx.chat.getSessionRecord(sessionId).catch(() => null))?.projectId;
+    await ctx.chat.deleteSession(sessionId);
+    // Pages the person saved "just for this chat" go with it.
+    if (projectId) await ctx.websites?.forgetSessionPages(projectId, sessionId).catch(() => {});
     return c.json({ ok: true });
   });
 

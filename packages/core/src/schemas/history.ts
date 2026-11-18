@@ -81,6 +81,8 @@ const HistoryEventKinds = [
   'project.connector.bound',
   'project.connector.unbound',
   'project.connector.synced',
+  /** A binding moved to a newer compatible version of its connector type. */
+  'project.connector.updated',
   /** A device connector (camera) was paused, resumed, or stopped by emergency stop. */
   'project.connector.paused',
   'project.connector.resumed',
@@ -454,6 +456,7 @@ export const PERSON_FACING_HISTORY_KINDS: ReadonlySet<HistoryEventKind> = new Se
     'project.diffpack.dismissed',
     'project.connector.bound',
     'project.connector.unbound',
+    'project.connector.updated',
     'project.connector.paused',
     'project.connector.resumed',
     'project.digest.generated',

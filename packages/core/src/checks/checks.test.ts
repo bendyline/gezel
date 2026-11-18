@@ -416,6 +416,19 @@ describe('file checks', () => {
     expect(labeledForbidden.detail).toBe(
       'a.md contains forbidden content: remove game-over wording (matched "Game Over")',
     );
+    // A row-shaped pattern matches from the row's start; the word that caused
+    // it is at the end, and the quote has to reach it.
+    const row = `| 1 | major | ${'x'.repeat(300)} this could fail |`;
+    const longRow = await notContainsPattern(
+      ws({ 'r.md': row }),
+      'r.md',
+      '^\\|\\s*\\d+\\s*\\|[^\\n]*\\bcould\\b',
+      'im',
+      'findings use definite mechanisms',
+    );
+    expect(longRow.detail).toContain('(matched "| 1 | major | ');
+    expect(longRow.detail).toContain(' … ');
+    expect(longRow.detail.endsWith('this could")')).toBe(true);
     const grep = await grepMatches(w, 'game over', { flags: 'i', minMatches: 2 });
     expect(grep.ok).toBe(true);
     expect(grep.matched.sort()).toEqual(['a.md', 'src/c.ts']);

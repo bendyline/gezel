@@ -1675,9 +1675,10 @@ What the meester's thread shows after the person asks for something:
   gezel's replies remain visible in both modes.
 - **The crew arrives as cards** (`CrewIntroCard`, a `crew-introduction`
   message carrying `crewIntroduction`): a headshot, the name in the serif,
-  their role in plain words ("Trip Planner", "Crew Lead"), what they do
-  (the first sentence of their description), and **Say hello**, which opens
-  their chat. The lead and
+  their role in plain words ("Trip Planner", "Crew Lead"), and what they do
+  (the first sentence of their description). There is no button on the
+  card: a "Say hello" key that opened their chat was removed (2026-11-17)
+  because it served no purpose in the thread. The lead and
   whoever starts the work are introduced as the task begins; a gezel hired
   for a later step is introduced when they start. Someone hired in
   conversation, with no task behind them ("find me a copywriter", or a
@@ -1822,12 +1823,20 @@ key as `Task.requestRef`.
   of its name and position. The stop is the furthest any step has reached,
   so a review that sends work back never moves it left.
 - **One line in the lead's voice**: "Dejan is drafting the invoices". The
-  lead is the project's lead, else the thread's gezel; the crew is under
-  **Who's helping?** (`CrewMemberCard`). The phrase is the step's
+  lead is the project's lead, else the task's owner, else the thread's gezel.
+  A `solo` project's main gezel leads no crew, so they speak only for work
+  they hold: a task handed to a specialist is named for that specialist
+  ("Koray is …", not "Hieu is …" for a Reviewer's whole run). Everyone else
+  on the work is under **Who's helping?** (`CrewMemberCard`), never the
+  person the line names. The phrase is the step's
   `personLabel`, else its name with the verb turned, else the stage's phrase;
   a name holding a file name, a template token or a word for the machinery
-  gets the stage's phrase. Waiting says why ("is waiting for another chat to
-  finish", from the engine's structured `hold`).
+  gets the stage's phrase. A step waiting on parts an earlier step sent out
+  reads "is working through it in parts (0 of 15 done)": its own name says
+  what it does once they are back, and "merging the batch ledgers" while
+  fifteen reviews still ran claimed a merge nobody had started. Waiting says
+  why ("is waiting for another chat to finish", from the engine's structured
+  `hold`).
 - **An honest estimate**: "About 4 minutes left" from this computer's own
   finished runs (per step, then per stage), "First time here: about 8
   minutes" from shipped seeds. A step past half again its time and three
@@ -2079,11 +2088,13 @@ or recent-thread pills, and a message to the gezel is never delivered into one.
 
 The header’s **Activity** key opens one non-modal panel for work and questions
 across projects. It stays available when quiet. **Needs you**, **Working**,
-**Ready**, and **Next** separate decisions, current execution, finished
-results, and waiting or scheduled work, in that order: a decision leads, then
-what is running now, then what is finished, and the waiting and scheduled work
-closes the panel. Ready once sat last, under every scheduled job, so the
-results were the furthest thing from the top.
+**Next**, and **Ready** separate decisions, current execution, waiting or
+scheduled work, and finished results, in that order: a decision leads, then
+what is running now, then what runs after it, and the finished results close
+the panel. Next sat last until 2026-11-17, under a long Ready, so work about
+to start was the furthest thing from the work running now. Ready once sat
+last under every scheduled job; the scheduled fold (past two rows, "Scheduled
+for later") is what keeps Next short above it.
 
 **The panel is a list of rows, not a stack of cards.** Sixteen things once ran
 three screens deep (2,450 px in an 840 px panel), because every entry was four
@@ -2222,6 +2233,17 @@ changes). Everything else — create forms, rename prompts, icon iteration,
 template pickers — is a plain `Dialog`. AlertDialogs block the user until
 they respond; Dialogs are dismissable with Escape/backdrop-click.
 
+**A confirmation can carry one option, off by default.** When removing
+something can also delete what it made, the confirmation keeps one red key
+and puts the extra deletion under the message as a `SettingCheck` (through
+`ConfirmDialog`'s `children`): "Also delete what it downloaded", with a hint
+that says how much and what is not touched ("1,654 files, 26 MB, in this
+project. The originals at the source stay where they are."). Ticking it
+changes the message and the key ("Remove and delete"). It starts unticked:
+deleting the only copy should take a second, deliberate click. When there
+is nothing to delete, the option is not shown. Removing a connection is the
+reference ([RemoveConnectionDialog](../packages/ui/src/components/RemoveConnectionDialog.tsx)).
+
 **Select vs keys vs tab bar.** If the content panel below changes based on
 the choice, use **Tabs**. If it's one of many equivalent values (a long
 model list), use **Select**. If there are roughly 2–5 mutually exclusive
@@ -2299,15 +2321,22 @@ one concept keeps one picture. To keep every section on a phone, an
 iconified project tab may narrow below 44px wide, down to WCAG's 24px
 minimum. It keeps the 44px height.
 
-**Developer tabs belong to code projects.** Tools, Workspace and Artifacts
-show by default only for a codebase (core's `projectHoldsCode`: a code
-folder, a code-category type, a coding type, or a linked repository) and in
-debug mode. The Views tab shows when a view fits a codebase, a watched
-folder, or debug mode. A bakery's invoice project showed `package.json`,
-prompt drafts and a code-city map beside its board, none of which it needed.
-Hiding is only a default: an explicit choice in Project Settings → Project
-tabs always wins (the boxes show the default), and the tab a person is on
-stays visible, so opening a file into Artifacts never lands on a missing tab.
+**Developer tabs belong to code projects.** Tools and Workspace show by
+default only for a codebase (core's `projectHoldsCode`: a code folder, a
+code-category type, a coding type, or a linked repository) and in debug
+mode. The Views tab shows when a view fits a codebase, a watched folder, or
+debug mode. A bakery's invoice project showed `package.json` and a code-city
+map beside its board, neither of which it needed. Hiding is only a default:
+an explicit choice in Project Settings → Project tabs always wins (the boxes
+show the default), and the tab a person is on stays visible, so opening a
+file into a hidden tab never lands on a missing one.
+
+**Artifacts shows on every project.** It is where finished work lands (a
+report, a deck, a picture), so Default and the shared library show it like
+any other project. It was once a developer tab because a bakery's Artifacts
+tab listed the composer's prompt drafts; those no longer list there. An app
+with nothing to keep there (a board game, Just Chat) turns it off in its
+manifest's `tabVisibility`.
 
 **The Connections tab holds what the project reaches outside itself.** Its
 Connections section (the outside sources mirrored in, with the Lookouts that
@@ -2808,9 +2837,14 @@ with its reason in place of the description and an "Unavailable" stamp. Never
 hide it: a person who saw it on the desktop should learn why it is missing
 here, not wonder whether it exists.
 
-**A gallery dialog is a two-step wizard.** Both tenants are: New Task and
-New Project (`gz-npd-step-pick` / `gz-npd-step-configure` in
+**A gallery dialog is a two-step wizard.** Every tenant is: New Task, New
+Project and Add connection (`gz-npd-step-pick` / `gz-npd-step-configure` in
 [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)).
+Add connection ([AddConnectionDialog](../packages/ui/src/components/AddConnectionDialog.tsx))
+shelves connectors by family (`connectorTypeFamily` in core, the same reading
+that picks each mark's ground), and its second step is the connector's setup
+form in one centered column. It was an inline tray under the list, where the
+form opened below a 25-card grid.
 The old third column — a 19rem pane holding the selection's hero and its
 whole form — could not carry what these choices actually are. A craftbook is
 a page: a paragraph of description, four to a dozen named steps with their
@@ -3213,6 +3247,79 @@ action did and, when held, why — in plain words — plus *Not this*.
 A lookout alert while the app is open is a bottom-right toast with
 *Stop sound* when a sound is playing; it never replaces the OS notification
 when the window is not focused.
+
+A website lookout is the same sentence with the site in the camera's place
+and "has" for "sees": "When [shop.test] has [A page that changed | A new
+page | Words that appear] …", the words in a one-line field, an optional
+"/pricing" field under it, and one muted line saying page text is matched
+as written. The source picker lists cameras and websites together.
+
+**Saved web pages read like a reader, not a crawler.** The **Web pages**
+view (offered when a project follows a website) is the Reports view's
+recipe: pages by site in a list, a reader beside it. A list row says what a
+person wants to know first — "Changed 2 days ago", "Checked 5 hours ago",
+"Waiting to be saved", or the reason it could not be saved — never a crawl
+state word. Links found but not saved sit behind one quiet toggle. The
+reader leads with the title, the original address (opening in the browser),
+checked and changed times, and a synopsis labeled "written from the page";
+**Reading** and **Screenshots** are keys in a tray, never tabs, because the
+same page is re-presented. A link inside a saved page to another saved page
+opens it in place. A website connection's row on the Connections tab
+carries its status line, Sync now, Edit (in place, from the catalog form),
+Sign in… / Sign out and Remove; signing in shows one short instruction —
+check the address bar, sign in, come back and press Done — beside Done and
+Cancel.
+
+**Offline is a state, never an error.** Gezel keeps everything on this
+computer, so losing the network takes nothing away, and the interface says
+so rather than alarming anyone. A connection that could not reach its
+service reads "Offline since 10:45 AM" (or "Couldn't reach … since …. Trying
+again.") in muted text, never the red error line, and the Connections tab
+puts one sentence above the list while any connection is offline: everything
+already downloaded is here, and connections catch up on their own. Each row
+still leads with its count, so the person sees what they have. Coming back
+online needs no click: waiting connections catch up within seconds, and the
+line goes away. Red is for a service that answered with a problem the person
+may have to act on.
+
+**A connection the draft calls for is a notice, not a question.** When a
+message names something a connector can bring in, the composer says what Send
+will do in a dashed strip above the To line, in the task strip's frame
+([`ComposerConnectorStrip`](../packages/ui/src/components/ComposerConnectorStrip.tsx),
+`.chat-composer-connector-*`): one row per thing, at most three. A row is the
+connector's mark in a small `--radius-md` tile, one sentence, and two keys.
+For a web address with no saved copy: "**gezel.com/platform** will be saved
+here and included in the chat", **Save now**, and ×. Send saves the page and
+gives it to the gezel; × means this address is not fetched; Save now does it
+early and the row becomes "Saved **The Gezel platform**. It will be included
+in the chat." While it works the row reads "Saving …", and a failure gives
+the reason in plain words with **Try again**. Rules the strip keeps:
+
+- **It says what will happen, so it must be true for every send.** Send,
+  Nudge and Interrupt all take the open rows first.
+- **The row shows what is fetched.** Host and path, a query as `?…`, the whole
+  address in the tooltip.
+- **Something that needs setting up is an offer.** A connection that wants a
+  sign-in reads "… can be connected with GitHub Issues" with **Connect…**,
+  and Send never does it.
+- **Nothing is shown that cannot be done.** No row when connector data is off
+  or the catalog lacks the connection.
+
+Under the sent message, each saved copy is a row that opens the local file:
+the mark, the page's title, "Saved copy of gezel.com/platform", and two lines
+of synopsis ([`MessageInclusions`](../packages/ui/src/components/MessageInclusions.tsx)).
+A page that could not be saved says so there, with the reason. Contract in
+[prompt-connectors.md](prompt-connectors.md).
+
+**Connections have marks.** Every connector type carries a cut-paper mark
+from the craftbook family (an envelope for mail, a zipper for pull requests, a
+globe with a bookmark for websites), drawn on the ground its family takes:
+teal for the web, terracotta for mail, rose for calendars, ochre for files,
+indigo for code, plum for social, slate for data, forest for devices
+([`ConnectorMark`](../packages/ui/src/components/ConnectorMark.tsx),
+`connectorTypeGround`). The same mark shows in the Connections gallery, the
+composer strip and the message row. A type without art gets a line glyph on
+the same ground, never a broken image.
 
 **Mid-turn composer actions.** While a gezel is working, the composer keeps
 accepting text. With an empty draft the toolbar shows only the quiet

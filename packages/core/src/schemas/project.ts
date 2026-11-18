@@ -92,9 +92,24 @@ export const ProjectConnectorBindingSchema = z.object({
    * catalog read. Absent on bindings created before device connectors.
    */
   driver: z.enum(['mcp', 'script', 'spectral', 'native', 'device']).optional(),
+  /**
+   * The account the person signed in with, as the provider reported it at
+   * sign-in (Google, Microsoft). Absent for other sign-ins and for bindings
+   * made before it was recorded.
+   */
+  account: z.string().optional(),
   lastSyncedAt: z.string().optional(),
   /** Last sync error, surfaced in the UI; cleared on the next success. */
   lastError: z.string().optional(),
+  /**
+   * Its passes have not reached the service since `since`: this computer had
+   * no network (`offline`), or `host` did not answer. A waiting state, not an
+   * error; it retries soon and clears on the next pass that gets through.
+   */
+  unreachable: z
+    .object({ since: z.string(), offline: z.boolean(), host: z.string().optional() })
+    .optional()
+    .catch(undefined),
 });
 export type ProjectConnectorBinding = z.infer<typeof ProjectConnectorBindingSchema>;
 

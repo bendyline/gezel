@@ -11,6 +11,10 @@
  * dead token is OAuthException code 190, throttling a code such as 80002 (the
  * Instagram business-use-case cap). Any `vNN.0` version segment is accepted,
  * as Graph accepts every live version.
+ *
+ * Two behaviors the live API has and simpler fakes miss: `like_count` is
+ * omitted, not zero, on media whose owner hid its like count; and a paging
+ * cursor goes stale, answering code 100, once `expireCursors()` is called.
  */
 
 import { FakeHttp, type FakeRequest, json, status } from './fake-http.js';
@@ -24,6 +28,7 @@ interface FakeMedia {
   timestamp: string;
   likes: number;
   comments: number;
+  hideLikes?: boolean;
 }
 
 export interface FakeInstagramOptions {
@@ -47,6 +52,8 @@ export class FakeInstagram {
   private readonly tokens = new Set<string>(['ig-seed']);
   private media: FakeMedia[] = [];
   private n = 0;
+  /** Paging cursors carry it; `expireCursors()` moves it on. */
+  private cursorGeneration = 1;
   private containers = new Map<string, { imageUrl: string; caption: string }>();
 
   constructor(opts: FakeInstagramOptions = {}) {
@@ -87,6 +94,16 @@ export class FakeInstagram {
 
   setLikes(id: string, likes: number): void {
     this.find(id).likes = likes;
+  }
+
+  /** The owner hid this post's like count: Meta then omits `like_count`. */
+  hideLikes(id: string): void {
+    this.find(id).hideLikes = true;
+  }
+
+  /** Every paging cursor handed out so far stops working. */
+  expireCursors(): void {
+    this.cursorGeneration++;
   }
 
   deleteMedia(id: string): void {
@@ -142,7 +159,7 @@ export class FakeInstagram {
       media_url: `https://scontent.cdninstagram.com/fake/${m.id}.jpg`,
       permalink: this.permalink(m.id),
       timestamp: m.timestamp,
-      like_count: m.likes,
+      ...(m.hideLikes ? {} : { like_count: m.likes }),
       comments_count: m.comments,
     };
     // Meta returns only the requested fields (plus the id).
@@ -156,7 +173,10 @@ export class FakeInstagram {
     const after = q.get('after');
     let rows = this.sorted();
     if (after) {
-      const [msRaw, id = ''] = Buffer.from(after, 'base64url').toString('utf8').split('::');
+      const [gen, msRaw, id = ''] = Buffer.from(after, 'base64url').toString('utf8').split('::');
+      if (Number(gen) !== this.cursorGeneration) {
+        return this.metaError(100, 'Invalid parameter: the after cursor is invalid or expired.');
+      }
       const ms = Number(msRaw);
       rows = rows.filter((m) => {
         const t = Date.parse(m.timestamp);
@@ -165,7 +185,9 @@ export class FakeInstagram {
     }
     const page = rows.slice(0, limit);
     const cursorOf = (m: FakeMedia) =>
-      Buffer.from(`${Date.parse(m.timestamp)}::${m.id}`).toString('base64url');
+      Buffer.from(`${this.cursorGeneration}::${Date.parse(m.timestamp)}::${m.id}`).toString(
+        'base64url',
+      );
     const more = rows.length > page.length;
     const next = new URL(`${IG_GRAPH}/${version}/me/media`);
     for (const [k, v] of q) if (k !== 'after') next.searchParams.set(k, v);

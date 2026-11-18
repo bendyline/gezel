@@ -306,6 +306,9 @@ gezel.output({ ok: true });`,
           },
         }),
       );
+      // A project book's scripts are trusted only on request: gezels can edit
+      // them. Without the flag this run would need the OS boundary that
+      // childEnv switches off on Windows.
       const invoked = await runCli(
         '--project',
         folder,
@@ -313,6 +316,7 @@ gezel.output({ ok: true });`,
         'Batch',
         'Smoke',
         'c23n',
+        '--trust-scripts',
         '--wait',
         '--json',
       ).catch((error) => {

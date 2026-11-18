@@ -32,4 +32,27 @@ describe('stripQuotedAndSignature', () => {
   it('strips mobile signatures', () => {
     expect(stripQuotedAndSignature('quick reply\nSent from my iPhone')).toBe('quick reply');
   });
+
+  it('keeps a forward whole: its content is in no other message of the thread', () => {
+    const body =
+      'FYI\n\n---------- Forwarded message ---------\nFrom: Billing <b@x.com>\nDate: Mon\nSubject: Invoice\n\nPlease pay invoice 42.';
+    expect(stripQuotedAndSignature(body)).toContain('Please pay invoice 42.');
+    const outlook =
+      'FYI\n-- \nRobin\n\nFrom: Billing\nSent: Monday\nSubject: Invoice\n\nPlease pay.';
+    expect(stripQuotedAndSignature(outlook, { forwarded: true })).toContain('Please pay.');
+  });
+
+  it('keeps a reply written below the quote', () => {
+    const body = 'On Wed, Bob <bob@x.com> wrote:\n> Can you make Friday?\n\nYes, Friday works.';
+    expect(stripQuotedAndSignature(body)).toBe('Yes, Friday works.');
+  });
+
+  it('keeps answers written between quoted lines', () => {
+    const body = '> First question?\nFirst answer.\n> Second question?\nSecond answer.\n-- \nRobin';
+    expect(stripQuotedAndSignature(body)).toBe('First answer.\nSecond answer.');
+  });
+
+  it('never empties a message that is only quoted text', () => {
+    expect(stripQuotedAndSignature('> only quoted\n> text')).toBe('> only quoted\n> text');
+  });
 });

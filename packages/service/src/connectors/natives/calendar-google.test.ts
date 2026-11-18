@@ -271,6 +271,28 @@ describe('GoogleCalendarAdapter', () => {
     expect(third.written).toBe(0);
   });
 
+  it('an event deleted while the sync token was expired leaves the corpus on the re-list', async () => {
+    w = await world({ calendars: [PRIMARY] });
+    const now = Date.now();
+    w.fake.addEvent(PRIMARY, { summary: 'Keep', ...timed(now + DAY) });
+    const gone = w.fake.addEvent(PRIMARY, {
+      summary: 'Deleted in the gap',
+      ...timed(now + 2 * DAY),
+    });
+    const first = await pass(w.adapter(), undefined);
+    expect(first.written).toBe(2);
+    w.fake.cancelEvent(PRIMARY, gone.id!);
+    w.fake.expireSyncTokens();
+    w.fake.purgeCancelled();
+    const second = await pass(w.adapter(), first.cursor);
+    expect(second.error).toBeUndefined();
+    expect(second.pruned).toBe(1);
+    const titles = (await readCorpus(w.env.artifactsDir, 'data/calendar')).map(
+      (r) => r.frontmatter.title,
+    );
+    expect(titles).toEqual(['Keep']);
+  });
+
   it('turns cancelled events into tombstones, never records', async () => {
     w = await world({ calendars: [PRIMARY] });
     const now = Date.now();

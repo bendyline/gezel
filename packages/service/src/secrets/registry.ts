@@ -111,6 +111,14 @@ export interface CredentialRegistry {
    * values — just the names). Used by the Settings UI.
    */
   listGrants(projectId: string): Promise<string[]>;
+
+  /**
+   * True when the project granted the credential but no value is stored.
+   * Lets `http.authed` tell a script its credential is missing before the
+   * destination check, so an anonymous fallback works for any host. An
+   * ungranted credential is not "missing": it stays a denial.
+   */
+  isMissing?(credentialName: string, projectId: string): Promise<boolean>;
 }
 
 /**
@@ -185,6 +193,15 @@ export class DefaultCredentialRegistry implements CredentialRegistry {
   async listGrants(projectId: string): Promise<string[]> {
     const project = await this.store.getProject(projectId);
     return project?.grantedCredentials ?? [];
+  }
+
+  async isMissing(credentialName: string, projectId: string): Promise<boolean> {
+    const project = await this.store.getProject(projectId);
+    if (!(project?.grantedCredentials ?? []).includes(credentialName)) return false;
+    const key = secretKeyForCredential(credentialName);
+    if (!key) return true;
+    const value = await this.secrets.get(key);
+    return value == null || value.length === 0;
   }
 
   private async logUse(

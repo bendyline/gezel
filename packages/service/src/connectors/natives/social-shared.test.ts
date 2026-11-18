@@ -4,6 +4,7 @@ import {
   mergeWatchedPosts,
   metricsHistoryRecord,
   parseWatchedPosts,
+  postFileStem,
   vanishedPosts,
 } from './social-shared.js';
 
@@ -131,5 +132,22 @@ describe('metricsHistoryRecord', () => {
     expect(record.frontmatter.title).toBe('Engagement on 2026-08-12: 17900000000000001');
     expect(record.frontmatter.likes).toBeUndefined();
     expect(record.bodyMarkdown).toBe('Engagement reading for 17900000000000001 on 2026-08-12.');
+  });
+});
+
+describe('postFileStem', () => {
+  it('dates the stem from a well-formed timestamp', () => {
+    expect(postFileStem('2026-08-20T12:34:56.000Z', 'Hello there world')).toBe(
+      '2026-08-20T12-34--hello-there-world',
+    );
+  });
+
+  it('never lets a source timestamp put separators or dots into a path', () => {
+    for (const bad of ['../../etc/passwd', '2026/08/20 12:00', '..', 'not a date at all']) {
+      const stem = postFileStem(bad, 'Post');
+      expect(stem.startsWith('undated--')).toBe(true);
+      expect(stem).not.toMatch(/[/\\]|\.\./);
+    }
+    expect(postFileStem(undefined, '')).toBe('undated--post');
   });
 });

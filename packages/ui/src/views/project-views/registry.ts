@@ -44,6 +44,13 @@ export const PROJECT_VIEWS: readonly ProjectViewDefinition[] = [
     load: () => import('./timeline/index.js'),
   },
   {
+    id: 'web',
+    label: 'Web pages',
+    hint: 'The pages this project follows, saved to read offline',
+    icon: 'web',
+    load: () => import('./web/index.js'),
+  },
+  {
     id: 'village',
     label: 'Village',
     hint: 'Your files as a town you come to know',

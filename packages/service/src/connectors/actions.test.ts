@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
@@ -14,6 +14,8 @@ import type { ConnectorAdapter } from './types.js';
 registerConsentEnforcer('test-approve', () => ({ ok: true }));
 
 let lastAction: { action: string; input: unknown } | null = null;
+let failNextSend = false;
+let sends = 0;
 
 registerNativeAdapter(
   'fake-action',
@@ -26,6 +28,11 @@ registerNativeAdapter(
       throw new Error('unused');
     },
     runAction: async (action, input) => {
+      sends++;
+      if (failNextSend) {
+        failNextSend = false;
+        throw new Error('connection reset after the request was sent');
+      }
       lastAction = { action, input };
       return { ok: true };
     },
@@ -51,6 +58,15 @@ const MANIFEST = {
     { name: 'escalate', consentScope: 'no-such-scope' },
     { name: 'send', consentScope: 'recipient-allowlist' },
     { name: 'publish', consentScope: 'social-publish' },
+    {
+      name: 'label',
+      consentScope: 'test-approve',
+      inputSchema: {
+        type: 'object',
+        required: ['label'],
+        properties: { label: { type: 'string' }, color: { enum: ['red', 'green'] } },
+      },
+    },
   ],
   availableVersions: ['1.0.0'],
 };
@@ -59,6 +75,8 @@ let ws: string;
 beforeEach(async () => {
   ws = await mkdtemp(join(tmpdir(), 'gezel-actions-'));
   lastAction = null;
+  failNextSend = false;
+  sends = 0;
 });
 afterEach(async () => {
   await rm(ws, { recursive: true, force: true });
@@ -88,6 +106,32 @@ function mgr(nightShift = false) {
     isNightShiftActive: () => nightShift,
   });
 }
+
+describe('ConnectorActionManager send journal', () => {
+  it('a commit that fails mid-send is held as uncertain and never sent again on its own', async () => {
+    const m = mgr();
+    const { draftId } = await m.draft(project, {
+      bindingId: 'fake-action-conn:abc',
+      action: 'comment',
+      input: { body: 'hi', failSend: true },
+    });
+    failNextSend = true;
+    await expect(m.commit(project, draftId)).rejects.toThrow(/connection reset/);
+    const { pending } = await m.list(project);
+    expect(pending).toEqual([
+      expect.objectContaining({
+        draftId,
+        status: 'uncertain',
+        error: expect.stringMatching(/reset/),
+      }),
+    ]);
+    await expect(m.commit(project, draftId)).rejects.toThrow(/may already have been sent/);
+    expect(sends).toBe(1);
+    // The person checks the account and discards it.
+    await m.discard(project, draftId);
+    expect((await m.list(project)).pending).toEqual([]);
+  });
+});
 
 describe('ConnectorActionManager', () => {
   it('drafts an action, lists it as pending, commits it via runAction', async () => {
@@ -132,6 +176,40 @@ describe('ConnectorActionManager', () => {
     });
     await m.discard(project, draftId);
     expect((await m.list(project)).pending).toHaveLength(0);
+  });
+
+  it('refuses a draft its action input schema does not admit, naming the problem', async () => {
+    const m = mgr();
+    await expect(
+      m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'label',
+        input: { color: 'blue' },
+      }),
+    ).rejects.toThrow(/invalid input for fake-action-conn action 'label'.*label.*color/s);
+    const { draftId } = await m.draft(project, {
+      bindingId: 'fake-action-conn:abc',
+      action: 'label',
+      input: { label: 'bug', color: 'red' },
+    });
+    expect((await m.list(project)).pending.map((p) => p.draftId)).toEqual([draftId]);
+  });
+
+  it('re-checks the input at commit, after the queued copy was edited', async () => {
+    const m = mgr();
+    const { draftId } = await m.draft(project, {
+      bindingId: 'fake-action-conn:abc',
+      action: 'label',
+      input: { label: 'bug' },
+    });
+    const { relPath } = await m.queue(project, draftId);
+    const path = join(ws, 'artifacts', relPath);
+    const text = await readFile(path, 'utf8');
+    await writeFile(path, text.replace('"label": "bug"', '"label": 7'));
+    await expect(m.commit(project, draftId)).rejects.toThrow(
+      /invalid input.*label: expected string/,
+    );
+    expect(lastAction).toBeNull();
   });
 
   it('rejects drafting an action the type does not declare', async () => {

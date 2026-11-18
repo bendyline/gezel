@@ -1,5 +1,5 @@
 import type { CatalogItemSummary, ProjectDetail } from '@bendyline/gezel';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -43,6 +43,8 @@ describe('ProjectConnectionsTab connector picker', () => {
     vi.mocked(api.listConnectorTypes).mockReset();
     vi.mocked(api.bindConnector).mockReset();
     vi.mocked(api.getProject).mockReset();
+    vi.mocked(api.connectorReadiness).mockReset();
+    vi.mocked(api.connectorReadiness).mockResolvedValue({ needed: false } as never);
 
     vi.mocked(api.listConnectors).mockResolvedValue({ bindings: [] } as never);
     vi.mocked(api.listConnectorActions).mockResolvedValue({ pending: [] } as never);
@@ -84,38 +86,177 @@ describe('ProjectConnectionsTab connector picker', () => {
     vi.mocked(api.getProject).mockResolvedValue(PROJECT);
   });
 
-  it('renders compact selectable tiles and keeps the chosen connector visible', async () => {
+  it('opens a two-step dialog: choose a connector, then set it up', async () => {
     render(<ProjectConnectionsTab project={PROJECT} />);
     const user = userEvent.setup();
 
     await user.click(screen.getByRole('button', { name: 'Add connection' }));
 
-    const gallery = await screen.findByRole('radiogroup', { name: 'Connector type' });
-    expect(gallery).toBeInTheDocument();
-    expect(screen.getAllByRole('radio')).toHaveLength(3);
-    expect(screen.queryByRole('button', { name: 'Select' })).not.toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog', { name: 'Add a connection' });
+    const gallery = await within(dialog).findByRole('radiogroup', { name: 'Connector type' });
+    expect(within(gallery).getAllByRole('radio')).toHaveLength(3);
+    // Nothing to add until a connector is chosen.
+    expect(within(dialog).queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
 
-    const gmail = screen.getByRole('radio', { name: 'Gmail' });
-    const imap = screen.getByRole('radio', { name: 'Email (IMAP)' });
-    expect(gmail).toHaveAttribute('aria-checked', 'false');
+    // The rail shelves connectors by family.
+    const rail = within(dialog).getByRole('navigation', { name: 'Connector families' });
+    expect(within(rail).getByRole('button', { name: /All connectors\s*3/ })).toBeInTheDocument();
+    expect(within(rail).getByRole('button', { name: /Mail\s*2/ })).toBeInTheDocument();
+    expect(within(rail).getByRole('button', { name: /Code\s*1/ })).toBeInTheDocument();
 
-    await user.click(gmail);
-    expect(gmail).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByLabelText('Gmail setup')).toBeInTheDocument();
+    await user.click(within(gallery).getByRole('radio', { name: 'Gmail' }));
+    expect(screen.getByRole('dialog', { name: 'Gmail' })).toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Connector type' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Gmail setup' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument();
-
     await user.type(screen.getByLabelText(/Display name/), 'Personal mail');
-    await user.click(imap);
-    expect(gmail).toHaveAttribute('aria-checked', 'false');
-    expect(imap).toHaveAttribute('aria-checked', 'true');
+
+    // Back to the gallery with the choice still lit; the same card keeps the form.
+    await user.click(screen.getByRole('button', { name: 'Connectors' }));
+    expect(screen.getByRole('radio', { name: 'Gmail' })).toHaveAttribute('aria-checked', 'true');
+    await user.click(screen.getByRole('radio', { name: 'Gmail' }));
+    expect(screen.getByLabelText(/Display name/)).toHaveValue('Personal mail');
+
+    // A different card starts a fresh form.
+    await user.click(screen.getByRole('button', { name: 'Connectors' }));
+    await user.click(screen.getByRole('radio', { name: 'Email (IMAP)' }));
     expect(screen.getByLabelText(/Display name/)).toHaveValue('');
     expect(screen.getByLabelText('IMAP host')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeInTheDocument();
     expect(
       screen.getByText('Check which password your mail provider requires'),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/Use an app-specific password when your mail provider offers one/),
     ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(api.bindConnector).not.toHaveBeenCalled();
+  });
+
+  it('filters the gallery by family and by search', async () => {
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    const gallery = await screen.findByRole('radiogroup', { name: 'Connector type' });
+    await within(gallery).findAllByRole('radio');
+
+    await user.click(screen.getByRole('button', { name: /^Mail/ }));
+    expect(
+      within(gallery)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('aria-label')),
+    ).toEqual(['Gmail', 'Email (IMAP)']);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search connectors' }), 'github');
+    expect(
+      within(gallery)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('aria-label')),
+    ).toEqual(['GitHub Issues']);
+
+    await user.clear(screen.getByRole('searchbox', { name: 'Search connectors' }));
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search connectors' }),
+      'nothing like it',
+    );
+    expect(within(gallery).queryAllByRole('radio')).toHaveLength(0);
+    expect(within(gallery).getByText('No connectors match your search.')).toBeInTheDocument();
+  });
+
+  it('keeps the dialog open and says why when adding fails', async () => {
+    vi.mocked(api.bindConnector).mockRejectedValueOnce(new Error('The repository was not found.'));
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'GitHub Issues' }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Repository is required.');
+    expect(api.bindConnector).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText('Repository'), 'bendyline/nope');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The repository was not found.');
+    expect(screen.getByRole('dialog', { name: 'GitHub Issues' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Repository')).toHaveValue('bendyline/nope');
+  });
+
+  it('pauses and resumes a connection, and a paused one cannot be synced', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.patchConnector).mockReset();
+    vi.mocked(api.patchConnector).mockResolvedValue({ ok: true, binding: {} } as never);
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      bindings: [
+        {
+          id: 'rss:1',
+          type: 'rss-feed',
+          displayName: 'Blog',
+          lastSyncedAt: '2026-11-16T08:00:00Z',
+        },
+      ],
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    await user.click(await screen.findByRole('button', { name: 'Pause' }));
+    expect(api.patchConnector).toHaveBeenCalledWith('project-alpha', 'rss:1', { disabled: true });
+
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      bindings: [
+        {
+          id: 'rss:1',
+          type: 'rss-feed',
+          displayName: 'Blog',
+          disabled: true,
+          disabledReason: 'user',
+        },
+      ],
+    } as never);
+    await user.click(await screen.findByRole('button', { name: 'Pause' }));
+    expect(await screen.findByText(/Paused\. It does not sync until you resume it\./)).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Sync now' }) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(api.patchConnector).toHaveBeenLastCalledWith('project-alpha', 'rss:1', {
+      disabled: false,
+    });
+  });
+
+  it('checks a connection and says what it found, saving nothing', async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      bindings: [
+        { id: 'x:1', type: 'x-posts', displayName: 'X', lastSyncedAt: '2026-11-16T08:00:00Z' },
+      ],
+    } as never);
+    vi.mocked(api.checkConnector).mockReset();
+    vi.mocked(api.checkConnector).mockResolvedValueOnce({
+      ok: true,
+      check: { ok: true, scopes: ['posts'], records: 4, requests: [], notes: [] },
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    await user.click(await screen.findByRole('button', { name: 'Check' }));
+    expect(
+      await screen.findByText(/a trial read found 4 item\(s\)\. Nothing was saved\./),
+    ).toBeTruthy();
+
+    vi.mocked(api.checkConnector).mockResolvedValueOnce({
+      ok: true,
+      check: {
+        ok: false,
+        error: 'X refused the sign-in',
+        scopes: [],
+        records: 0,
+        requests: [],
+        notes: [],
+      },
+    } as never);
+    await user.click(screen.getByRole('button', { name: 'Check' }));
+    expect(
+      await screen.findByText(/The check found a problem: X refused the sign-in/),
+    ).toBeTruthy();
   });
 
   it('binds the selected tile with its configured values', async () => {
@@ -133,6 +274,41 @@ describe('ProjectConnectionsTab connector picker', () => {
         config: { repository: 'bendyline/gezel' },
       });
     });
+  });
+
+  it('says what connecting will download first', async () => {
+    vi.mocked(api.connectorReadiness).mockResolvedValueOnce({
+      needed: true,
+      package: { name: '@prismatic-io/components-airtable', version: '0.3.0' },
+      installed: false,
+      downloadable: true,
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'GitHub Issues' }));
+    expect(
+      await screen.findByText(/Connecting downloads @prismatic-io\/components-airtable 0\.3\.0/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeEnabled();
+  });
+
+  it('holds Add and says why when this build or security level cannot download', async () => {
+    vi.mocked(api.connectorReadiness).mockResolvedValue({
+      needed: true,
+      package: { name: '@prismatic-io/components-airtable', version: '0.3.0' },
+      installed: false,
+      downloadable: false,
+      reason: 'Connections are off at this security level.',
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'GitHub Issues' }));
+    expect(
+      await screen.findByText('Connections are off at this security level.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
   });
 
   it('asks for no token when the connector type declares no secret', async () => {
@@ -178,7 +354,82 @@ describe('ProjectConnectionsTab connector picker', () => {
     await waitFor(() => {
       expect(api.syncConnector).toHaveBeenCalledWith('project-alpha', 'github-issues:abc');
     });
-    expect(await screen.findByText('Synced 7 new record(s).')).toBeInTheDocument();
+    expect(await screen.findByText('Synced 7 new or changed issues.')).toBeInTheDocument();
+  });
+
+  it('shows a connection waiting for the network calmly, not as an error', async () => {
+    const since = new Date();
+    since.setHours(10, 45, 0, 0);
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      bindings: [
+        {
+          id: 'mail-gmail:1',
+          type: 'mail-gmail',
+          items: 3,
+          unreachable: { since: since.toISOString(), offline: true },
+        },
+        {
+          id: 'rss:1',
+          type: 'rss-feed',
+          items: 12,
+          unreachable: { since: since.toISOString(), offline: false, host: 'feeds.example.test' },
+        },
+      ],
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+
+    expect(
+      await screen.findByText(
+        "This computer is offline. Everything already downloaded is here, and connections catch up on their own when you're back online.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/^Offline since 10:45/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/^Couldn't reach feeds\.example\.test since 10:45.*\. Trying again\.$/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/^Error:/)).toBeNull();
+  });
+
+  it('shows each connection’s count, counts up while it syncs, and opens its folder', async () => {
+    const row = (extra: Record<string, unknown>) => ({
+      bindings: [
+        {
+          id: 'mail-gmail:1',
+          type: 'mail-gmail',
+          corpusDir: 'data/mail-gmail',
+          lastSyncedAt: new Date().toISOString(),
+          ...extra,
+        },
+      ],
+    });
+    vi.mocked(api.listConnectors)
+      .mockResolvedValueOnce(row({ items: 3 }) as never)
+      .mockResolvedValueOnce(row({ items: 3 }) as never)
+      .mockResolvedValueOnce(row({ items: 40, syncing: true }) as never)
+      .mockResolvedValue(row({ items: 1204 }) as never);
+    let finish!: () => void;
+    vi.mocked(api.syncConnector).mockReset();
+    vi.mocked(api.syncConnector).mockReturnValue(
+      new Promise((resolve) => {
+        finish = () => resolve({ ok: true, result: { written: 1201, quarantined: 0 } } as never);
+      }) as never,
+    );
+    const onOpenFolder = vi.fn();
+    render(<ProjectConnectionsTab project={PROJECT} onOpenFolder={onOpenFolder} />);
+    const user = userEvent.setup();
+
+    expect(await screen.findByText(/^3 emails ·/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Open' }));
+    expect(onOpenFolder).toHaveBeenCalledWith('data/mail-gmail');
+
+    await user.click(screen.getByRole('button', { name: 'Sync now' }));
+    expect(await screen.findByText('Syncing… 3 emails so far')).toBeInTheDocument();
+    expect(
+      await screen.findByText('Syncing… 40 emails so far', undefined, { timeout: 3000 }),
+    ).toBeInTheDocument();
+    finish();
+    expect(await screen.findByText('Synced 1,201 new or changed emails.')).toBeInTheDocument();
+    expect(await screen.findByText(/^1,204 emails ·/)).toBeInTheDocument();
   });
 
   it('preserves JSON-schema boolean defaults and numeric config values', async () => {

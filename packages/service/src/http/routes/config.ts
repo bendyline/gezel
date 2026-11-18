@@ -1,4 +1,9 @@
-import { type GezelConfig, UpdateConfigRequestSchema, createLogger } from '@bendyline/gezel';
+import {
+  type GezelConfig,
+  UpdateConfigRequestSchema,
+  createLogger,
+  resolveSecurityPolicy,
+} from '@bendyline/gezel';
 import { usesMachineEngine } from '@bendyline/gezel-inference/internal/http/routes/machine-engine-proxy';
 import { syncPerfProfiling } from '@bendyline/gezel-inference/internal/perf/responsiveness';
 import { appleFoundationModelsInstalled } from '@bendyline/gezel-inference/internal/providers/apple-foundation-models/provider';
@@ -260,6 +265,11 @@ export function configRoutes(ctx: ServiceContext): Hono {
     const updated = await ctx.store.writeConfig(plainPatch);
     // Engagement and the security level decide which cameras may run.
     void ctx.liveConnectors?.reconcile();
+    // A connection mid-pass (a website crawl can run for minutes) stops the
+    // moment the machine may no longer use the network for the person.
+    if (!resolveSecurityPolicy(updated).allowConnectorData) {
+      ctx.connectors?.cancelPasses({}, 'App network was turned off');
+    }
     if (body.remoteServing !== undefined) {
       try {
         await ctx.remoteServing.reconfigure(updated.remoteServing);

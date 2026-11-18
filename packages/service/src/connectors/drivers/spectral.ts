@@ -9,7 +9,14 @@
  */
 
 import type { ConnectorTypeManifest } from '@bendyline/gezel';
-import { type NormalizeSpec, applyNormalize, jget, ordinalKeyFromTs } from '../normalize.js';
+import {
+  type NormalizeSpec,
+  applyNormalize,
+  carryCursor,
+  itemsAt,
+  jget,
+  ordinalKeyFromTs,
+} from '../normalize.js';
 import { connectorSecretKey } from '../registry.js';
 import type {
   AdapterDeps,
@@ -40,7 +47,7 @@ interface SpectralSource {
  * secret string. A bare string is wrapped into `fields.<apiKeyField>` (the field
  * the component's `client.ts` reads, e.g. Airtable's `fields.apiKey`).
  */
-function buildConnection(blob: string, key: string, apiKeyField: string): unknown {
+export function buildConnection(blob: string, key: string, apiKeyField: string): unknown {
   let parsed: unknown;
   try {
     parsed = JSON.parse(blob);
@@ -57,7 +64,7 @@ function buildConnection(blob: string, key: string, apiKeyField: string): unknow
   return { key, fields: { [apiKeyField]: String(parsed) } };
 }
 
-function resolveInputs(
+export function resolveInputs(
   inputs: Record<string, string> | undefined,
   config: Record<string, unknown>,
 ): Record<string, unknown> {
@@ -111,7 +118,11 @@ export class SpectralConnectorAdapter implements ConnectorAdapter {
       connection: this.conn,
       inputs,
     });
-    const items = (jget({ data }, this.src.itemsPath) as unknown[]) ?? [];
+    const items = itemsAt(
+      { data },
+      this.src.itemsPath,
+      `${this.typeId} ${this.src.component}/${this.src.action}`,
+    );
     const records: RecordRef[] = items.map((r, i) => {
       const ts = this.src.tsPath ? jget(r, this.src.tsPath) : undefined;
       return {
@@ -124,7 +135,11 @@ export class SpectralConnectorAdapter implements ConnectorAdapter {
     const next = this.src.cursor?.fromPath ? jget({ data }, this.src.cursor.fromPath) : undefined;
     // A cursor-less source re-lists everything each pass (the Airtable model),
     // so the batch is the complete current state — mirror types may prune.
-    return { records, cursor: next, ...(this.src.cursor ? {} : { enumeratedAll: true }) };
+    return {
+      records,
+      cursor: carryCursor(next, cursor),
+      ...(this.src.cursor ? {} : { enumeratedAll: true }),
+    };
   }
 
   async fetchRecord(_scope: string, ref: RecordRef): Promise<NormalizedRecord> {

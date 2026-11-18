@@ -1061,6 +1061,28 @@ label.gz-setting-inline {
   background: var(--surface);
 }
 
+/* A website connection's row: the sign-in prompt and the in-place editor
+   take the row's full width under its name. */
+.website-binding-row > div:first-child {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.website-sign-in,
+.website-edit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+  margin-top: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+.website-sign-in p {
+  margin: 0;
+}
+
 .connected-app-meta {
   display: flex;
   flex-direction: column;

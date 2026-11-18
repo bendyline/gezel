@@ -210,6 +210,49 @@ describe.runIf(hasRealDuckdb())('runQuery (real engine)', () => {
     expect(Number(result.rows[0]?.n)).toBe(420);
   });
 
+  it('a dedupe key collapses rows delivered twice, across Parquet and NDJSON', async () => {
+    const KEY = ['ts', 'route', 'status', 'latency_ms', 'bytes', 'client_country', 'ua_family'];
+    const manifest = { ...(synthRequestsManifest('requests') as object), dedupeKey: KEY };
+    const rows = synthRequests({ rows: 200, seed: 5, days: 2 });
+    const deliver = async () => {
+      const writer = new ObservationWriter({
+        storageDir: artifacts,
+        corpusDir: 'data/traffic',
+        manifests: new Map([['requests', manifest as never]]),
+      });
+      await writer.writeBatch({ table: 'requests', rows });
+      await writer.finish();
+    };
+    await deliver();
+    await compactCorpus({ storageDir: artifacts, corpusDir: 'data/traffic', duck });
+    // An overlapping window delivers every row again, uncompacted this time.
+    await deliver();
+    const distinct = new Set(rows.map((r) => JSON.stringify(KEY.map((k) => (r as never)[k])))).size;
+    const result = await runQuery({ store: makeStore(), duck }, PROJECT, {
+      sql: 'SELECT count(*) AS n FROM requests',
+    });
+    expect(Number(result.rows[0]?.n)).toBe(distinct);
+    const cols = await runQuery({ store: makeStore(), duck }, PROJECT, {
+      sql: 'SELECT * FROM requests LIMIT 1',
+    });
+    expect(Object.keys(cols.rows[0] ?? {}).some((k) => k.startsWith('__gezel'))).toBe(false);
+  });
+
+  it('without a dedupe key, a row delivered twice counts twice', async () => {
+    const rows = await seed(100, { days: 1 });
+    const writer = new ObservationWriter({
+      storageDir: artifacts,
+      corpusDir: 'data/traffic',
+      manifests: new Map([['requests', synthRequestsManifest('requests') as never]]),
+    });
+    await writer.writeBatch({ table: 'requests', rows });
+    await writer.finish();
+    const result = await runQuery({ store: makeStore(), duck }, PROJECT, {
+      sql: 'SELECT count(*) AS n FROM requests',
+    });
+    expect(Number(result.rows[0]?.n)).toBe(200);
+  });
+
   it('caps rows and reports that it did', async () => {
     await seed(400, { days: 1 });
     const result = await runQuery({ store: makeStore(), duck }, PROJECT, {

@@ -62,6 +62,28 @@ export interface ChangeBatch<Cur> {
    */
   enumeratedAll?: boolean;
   /**
+   * This batch is part of a full listing of the scope that spans batches
+   * (and possibly passes): `first` on its first batch, `last` on its final
+   * one. The engine remembers what the listing returned and, for a mirror,
+   * removes what it did not once the listing finishes cleanly. This is how a
+   * mirror larger than one batch catches deletions it missed while its
+   * cursor was expired. A single complete batch can use `enumeratedAll`.
+   */
+  fullListing?: {
+    first: boolean;
+    last: boolean;
+    /** The listing stopped short (a file limit): absence proves nothing. */
+    incomplete?: boolean;
+    /**
+     * The listing covered every record dated in this range (ISO). Absence
+     * then proves deletion only for a record whose `date` falls inside it,
+     * and it does so for a `window` type too: a calendar re-listed after its
+     * sync position expired removes what was cancelled meanwhile, and keeps
+     * the history that aged out of its window.
+     */
+    within?: { start: string; end: string };
+  };
+  /**
    * `recordId`s the source reports deleted since the cursor — incremental
    * tombstones (a cancelled event, a trashed file, a removed feed item). The
    * engine removes them from this scope's corpus whatever the type's
@@ -71,6 +93,18 @@ export interface ChangeBatch<Cur> {
   removed?: string[];
   /** Source asked us to back off (rate limited) — resume next tick. */
   rateLimited?: boolean;
+  /**
+   * How long the source asked us to wait (its `Retry-After`), in ms. The
+   * binding backs off at least this long, however short its ladder is.
+   */
+  retryAfterMs?: number;
+  /**
+   * More work is due than this pass took on, and the adapter stopped on its
+   * own budget rather than paging (`partial` would keep the project's
+   * connector lock for every round). The manager runs a follow-up pass soon
+   * when the person started this one, instead of waiting for an idle tick.
+   */
+  deferred?: boolean;
 }
 
 /**
@@ -215,6 +249,54 @@ export class RecordGoneError extends Error {
   }
 }
 
+/**
+ * Thrown by `fetchRecord` when there is nothing to write for a ref this pass
+ * and the batch must still count as clean: the source has not changed since
+ * the last capture, or the adapter keeps its own retry state for a ref that
+ * failed (the website connector's crawl list backs a failed page off on its
+ * own). The engine counts it as skipped, never as an error, so the cursor
+ * still advances and one unreachable page cannot hold up the rest.
+ */
+export class RecordSkippedError extends Error {
+  constructor(
+    message: string,
+    /** Short machine-readable reason, for logs and tests. */
+    readonly reason = 'unchanged',
+  ) {
+    super(message);
+    this.name = 'RecordSkippedError';
+  }
+}
+
+/**
+ * Thrown by `fetchRecord` to end the whole pass with a message a person reads
+ * on the Connections row ("Signed out of example.com. Sign in again."), when
+ * continuing could only fail the same way for every remaining record.
+ * Records already written stay; the scope's cursor does not advance.
+ */
+export class PassStoppedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PassStoppedError';
+  }
+}
+
+/**
+ * Who started a sync pass. `request`: someone asked for specific records
+ * (a gezel's request for a found page); only those are fetched.
+ */
+export type SyncTrigger = 'manual' | 'schedule' | 'task' | 'request';
+
+/**
+ * `{ retryAfterMs }` from a throttle error that carried one (an
+ * `HttpStatusError` built from a response's `Retry-After`), for spreading into
+ * a `rateLimited` batch. Empty otherwise.
+ */
+export function retryAfterOf(err: unknown): { retryAfterMs?: number } {
+  const ms = (err as { retryAfterMs?: unknown } | null)?.retryAfterMs;
+  return typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? { retryAfterMs: ms } : {};
+}
+
 /** Narrowing helper — an adapter that emits rows rather than documents. */
 export function isObservationRecord(
   rec: NormalizedRecord | ConnectorRecord,
@@ -239,6 +321,21 @@ export interface ConnectorAdapter<Rec = NormalizedRecord, Cur = unknown> {
    * round that wrote something new.
    */
   readonly recordsMayMove?: boolean;
+  /**
+   * True when each scope is a separate service (RSS feeds on different
+   * hosts): a throttle then holds back only that scope, and the pass goes on
+   * with the others. Off by default, because most sources throttle the whole
+   * account and continuing would only spend more of its quota.
+   */
+  readonly throttlesPerScope?: boolean;
+  /**
+   * True when each scope is listed whole, even though the binding is a
+   * window over scopes (a pull request lists all of its files): a complete
+   * listing of a scope may then remove records it no longer returns, as a
+   * mirror would. Without it, a file that left a pull request stayed in its
+   * corpus for good.
+   */
+  readonly scopesAreMirrors?: boolean;
   /** Establish/refresh the connection + auth. Throws on hard auth failure. */
   ensureAuth(): Promise<void>;
   /** Partitions to sync (mail folders, calendars). `['']` for single-scope. */
@@ -255,6 +352,17 @@ export interface ConnectorAdapter<Rec = NormalizedRecord, Cur = unknown> {
   ): Promise<ChangeBatch<Cur>>;
   /** Fetch + normalize one record (raw → canonical `NormalizedRecord`). */
   fetchRecord(scope: string, ref: RecordRef): Promise<Rec>;
+  /**
+   * Called after the engine wrote (or deduplicated) the record `fetchRecord`
+   * returned for `ref`. An adapter that remembers what it captured commits
+   * that memory here, never in `fetchRecord`: a record that failed to write
+   * must not be remembered as current, or it would never be written.
+   */
+  recordWritten?(
+    scope: string,
+    ref: RecordRef,
+    result: { status: string; relPath?: string },
+  ): Promise<void>;
   /** Write-back (Phase 7). Invoked at commit time by the outbox — never exposed
    *  on the model's tool surface. */
   runAction?(action: string, input: unknown): Promise<unknown>;
@@ -289,6 +397,38 @@ export interface AdapterDeps {
    * bind → sync → commit path runs with no network.
    */
   fetch?: typeof fetch;
+  /**
+   * Test seam for the `mcp` driver: turns the server spec a manifest names
+   * into the one the bridge starts (the catalog contract sweep answers from
+   * an in-memory server). Production never sets it; a guard test pins that.
+   */
+  resolveMcpServer?: (
+    spec: import('../providers/mcp-bridge.js').McpServerSpec,
+  ) => import('../providers/mcp-bridge.js').McpServerSpec;
+  /**
+   * Renders web pages for the website connector. Production hands the
+   * daemon's page-capture service; tests and the simulator a fake.
+   */
+  capturer?: import('../page-capture/types.js').PageCapturer;
+  /** Who started this pass; an adapter may do more for a person who asked. */
+  trigger?: SyncTrigger;
+  /**
+   * Aborted when the pass must stop now: the network setting was turned off,
+   * emergency stop, the binding was paused or removed, or shutdown.
+   */
+  signal?: AbortSignal;
+  /**
+   * The binding's private working-state folder (`projectConnectorStateDir`):
+   * outside artifacts, removed with the binding.
+   */
+  stateDir?: string;
+  /** Published Prismatic components, for Spectral types built on one. */
+  components?: import('./spectral/component-store.js').ComponentStore;
+  /**
+   * Test seam for Spectral component types: the contract sweep's recorded
+   * exchanges, answered with the network denied. Production never sets it.
+   */
+  spectralReplay?: import('./drivers/spectral-component.js').SpectralReplay;
 }
 
 /**

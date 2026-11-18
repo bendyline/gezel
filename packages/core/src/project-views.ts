@@ -14,6 +14,7 @@ export const KNOWN_PROJECT_VIEWS = [
   'reports',
   'gallery',
   'timeline',
+  'web',
 ] as const;
 export type ProjectViewId = (typeof KNOWN_PROJECT_VIEWS)[number];
 
@@ -26,6 +27,16 @@ export interface ProjectViewSubject {
   detectedProjectType?: { id: string };
   properties?: Record<string, string>;
   tabVisibility?: { map?: boolean };
+  /** Connector bindings, by type; the Web pages view follows the website ones. */
+  connectors?: readonly { type: string }[];
+}
+
+/** The connector type whose bindings the Web pages view shows. */
+export const WEBSITE_CONNECTOR_TYPE = 'website';
+
+/** Whether the project follows any web site. */
+export function projectFollowsWebsites(p: Pick<ProjectViewSubject, 'connectors'>): boolean {
+  return (p.connectors ?? []).some((b) => b.type === WEBSITE_CONNECTOR_TYPE);
 }
 
 /** Types whose files make a poor settlement: prose, media and design work. */
@@ -59,6 +70,8 @@ export function projectViewApplies(p: ProjectViewSubject, view: ProjectViewId): 
       );
     case 'diagram':
       return folderKindOf(p) !== 'pictures';
+    case 'web':
+      return projectFollowsWebsites(p);
     default:
       return true;
   }

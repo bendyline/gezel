@@ -669,6 +669,187 @@ describe('TaskRunner — dispatch + FIFO', () => {
     expect(runner.snapshot().pendingCount).toBe(2);
   });
 
+  async function seedReviewBatches(count: number, parentRef?: string): Promise<void> {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    for (let num = 1; num <= count; num++) {
+      await store.writeTask({
+        projectId: 'p1',
+        num,
+        ref: `p1/${num}`,
+        title: `PR batch ${num}`,
+        status: 'active',
+        assignee: { kind: 'gezel', gezelId: 'bea' },
+        ...(parentRef ? { parentTaskRef: parentRef } : {}),
+        craftbook: fixtureCraftbook([
+          {
+            id: 'review',
+            name: 'review',
+            assignee: { kind: 'gezel', gezelId: 'bea' },
+            createdAt: now,
+          },
+        ]),
+        activeStepId: 'review',
+        createdAt: now,
+        updatedAt: now,
+        createdBy: { kind: 'user' },
+      });
+    }
+  }
+
+  // Pool-routed engines have no singleton provider; production supplies
+  // `ensureProvider`, and the runner reads capacity from the pool summary.
+  function pooledMlxDispatcher(): FakeDispatcher {
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'mlx']]));
+    dispatcher.ensureProvider = async () => {
+      throw new Error('pooled local admission must not initialize a singleton provider');
+    };
+    return dispatcher;
+  }
+
+  const pooledMlx = (taskConcurrency?: number) => () => ({
+    running: 0,
+    runningBackground: 0,
+    queuedInteractive: 0,
+    queuedBackground: 0,
+    backgroundConcurrency: 2,
+    maxConcurrency: 3,
+    ...(taskConcurrency !== undefined ? { taskConcurrency } : {}),
+    active: [],
+    pending: [],
+  });
+
+  it('holds one task session open on an engine that serves them one at a time', async () => {
+    await seedReviewBatches(4);
+    const dispatcher = pooledMlxDispatcher();
+    dispatcher.getPooledProviderQueueSummary = pooledMlx(1);
+    const runner = new TaskRunner({ store, dispatcher });
+    await runner.rehydrateFromStore({ projectId: 'p1' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches).toHaveLength(1);
+    expect(runner.snapshot().pendingCount).toBe(3);
+
+    // Still mid-turn: the second shard waits, however many ticks pass.
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(1);
+
+    // The first session finished its turn, so the next one is admitted.
+    dispatcher.activeSessionIds.clear();
+    await runner.tick();
+    expect(dispatcher.dispatches).toHaveLength(2);
+    expect(runner.snapshot().pendingCount).toBe(2);
+  });
+
+  it("does not hold a task's next step behind its own closing session", async () => {
+    await store.createProject({ name: 'p1' });
+    await store.createGezel({ name: 'Bea' });
+    const now = new Date().toISOString();
+    const step = (id: string): TaskCraftbookStep => ({
+      id,
+      name: id,
+      assignee: { kind: 'gezel', gezelId: 'bea' },
+      createdAt: now,
+    });
+    await store.writeTask({
+      projectId: 'p1',
+      num: 1,
+      ref: 'p1/1',
+      title: 'two steps',
+      status: 'active',
+      assignee: { kind: 'gezel', gezelId: 'bea' },
+      craftbook: fixtureCraftbook([step('open-batch'), step('review-batch')]),
+      activeStepId: 'open-batch',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' },
+    });
+    const dispatcher = pooledMlxDispatcher();
+    dispatcher.getPooledProviderQueueSummary = pooledMlx(1);
+    const runner = new TaskRunner({ store, dispatcher });
+    runner.enqueueHandoff({
+      taskRef: 'p1/1',
+      stepId: 'open-batch',
+      gezelId: 'bea',
+      projectId: 'p1',
+    });
+    await runner.tick();
+    expect(dispatcher.dispatches.map((dispatch) => dispatch.stepId)).toEqual(['open-batch']);
+
+    // The step advanced while its turn is still streaming its closing words.
+    const task = (await store.readTask('p1', 1))!;
+    await store.writeTask({ ...task, activeStepId: 'review-batch', updatedAt: now });
+    runner.enqueueHandoff({
+      taskRef: 'p1/1',
+      stepId: 'review-batch',
+      gezelId: 'bea',
+      projectId: 'p1',
+    });
+    await runner.tick();
+    expect(dispatcher.dispatches.map((dispatch) => dispatch.stepId)).toEqual([
+      'open-batch',
+      'review-batch',
+    ]);
+  });
+
+  it('keeps the background width when the engine declares no task width', async () => {
+    await seedReviewBatches(4);
+    const dispatcher = pooledMlxDispatcher();
+    dispatcher.getPooledProviderQueueSummary = pooledMlx();
+    const runner = new TaskRunner({ store, dispatcher });
+    await runner.rehydrateFromStore({ projectId: 'p1' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches).toHaveLength(2);
+    expect(runner.snapshot().pendingCount).toBe(2);
+  });
+
+  it('admits one fanout child at a time across its steps on a one-at-a-time engine', async () => {
+    await seedReviewBatches(3, 'p1/99');
+    const dispatcher = pooledMlxDispatcher();
+    dispatcher.getPooledProviderQueueSummary = pooledMlx(1);
+    const runner = new TaskRunner({ store, dispatcher });
+    for (let num = 1; num <= 3; num++) {
+      runner.enqueueHandoff({
+        taskRef: `p1/${num}`,
+        stepId: 'review',
+        gezelId: 'bea',
+        projectId: 'p1',
+      });
+    }
+    await runner.tick();
+    expect(dispatcher.dispatches.map((dispatch) => dispatch.taskRef)).toEqual(['p1/1']);
+
+    // Between two of its turns the admitted child holds no session, yet its
+    // siblings stay out: the cohort window, not the session count, holds them.
+    dispatcher.activeSessionIds.clear();
+    await runner.tick();
+    expect(dispatcher.dispatches.map((dispatch) => dispatch.taskRef)).toEqual(['p1/1']);
+
+    const child = (await store.readTask('p1', 1))!;
+    await store.writeTask({ ...child, status: 'complete' });
+    await runner.tick();
+    expect(dispatcher.dispatches.map((dispatch) => dispatch.taskRef)).toEqual(['p1/1', 'p1/2']);
+  });
+
+  it('applies a singleton provider task width from its batch capability', async () => {
+    await seedReviewBatches(3);
+    const dispatcher = new FakeDispatcher(new Map([['bea', 'mlx']]));
+    dispatcher.setProvider('mlx', new ProviderQueue({ concurrency: 4, backgroundConcurrency: 2 }));
+    const provider = dispatcher.providers.get('mlx')!;
+    dispatcher.providers.set('mlx', {
+      ...provider,
+      batch: { maxConcurrency: 3, taskConcurrency: 1 },
+    });
+    const runner = new TaskRunner({ store, dispatcher });
+    await runner.rehydrateFromStore({ projectId: 'p1' });
+    await runner.tick();
+
+    expect(dispatcher.dispatches).toHaveLength(1);
+    expect(runner.snapshot().pendingCount).toBe(2);
+  });
+
   it('holds restored work at the background cap and preserves foreground headroom', async () => {
     await store.createProject({ name: 'p1' });
     await store.createGezel({ name: 'Bea' });

@@ -159,6 +159,15 @@ export function findCraftbook(
   );
 }
 
+/**
+ * Whether starting this book vouches for its scripts. Catalog books are
+ * pinned by hash; local and project books are files gezels can write, so a
+ * person starting one from the terminal would vouch for a model's scripts.
+ */
+export function craftbookScriptsTrusted(sourceId: string): boolean {
+  return sourceId !== 'local' && sourceId !== 'project';
+}
+
 /** Build the one-shot, immediately-dispatched task behind `/do`. */
 export function craftbookStartRequest(book: StartCraftbook): CreateTaskRequest {
   const summary = book.description?.trim();
@@ -172,6 +181,6 @@ export function craftbookStartRequest(book: StartCraftbook): CreateTaskRequest {
     craftbookSourceId: book.sourceId,
     ...(book.version ? { craftbookVersion: book.version } : {}),
     dispatchEntry: true,
-    trustScripts: true,
+    trustScripts: craftbookScriptsTrusted(book.sourceId),
   };
 }

@@ -36,6 +36,7 @@ import { mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { HttpStatusError, createLogger } from '@bendyline/gezel';
+import { stripDataImages } from '../markdown-images.js';
 import { registerNativeAdapter } from '../registry.js';
 import {
   type ChangeBatch,
@@ -45,7 +46,7 @@ import {
   type RecordRef,
 } from '../types.js';
 import { slug } from '../writer.js';
-import { type OAuthSession, ReconnectRequiredError } from './oauth-session.js';
+import { type OAuthSession, ReconnectRequiredError, hasStatus } from './oauth-session.js';
 
 const log = createLogger('connectors');
 
@@ -794,12 +795,16 @@ export async function resolveFileContent(
     if (isContentRefusal(err, io)) {
       return {
         mode: 'metadata-only',
-        reason:
-          'This file could not be downloaded (the owner may have turned off downloading), so only its details are mirrored.',
+        reason: /downloadQuotaExceeded/i.test(String(err))
+          ? 'This file has reached its download limit for now (it is shared and was downloaded many times today), so only its details are mirrored. Its content comes with its next change.'
+          : 'This file could not be downloaded (the owner may have turned off downloading), so only its details are mirrored.',
       };
     }
     throw err;
   }
+  // The listing's size can be older than the bytes (the file changed in
+  // between); the response's own length is what says the download is whole.
+  const declared = Number(res.headers.get('content-length') ?? Number.NaN);
   const path = join(await io.stagingDir(), stagingName(file));
   let staged: { size: number; sha256: string };
   try {
@@ -810,10 +815,11 @@ export async function resolveFileContent(
     }
     throw err;
   }
-  if (file.size !== undefined && staged.size !== file.size) {
+  const expected = Number.isFinite(declared) ? declared : file.size;
+  if (expected !== undefined && staged.size !== expected) {
     await rm(path, { force: true });
     throw new Error(
-      `download of "${file.name}" ended at ${staged.size} of ${file.size} bytes; it will be retried`,
+      `download of "${file.name}" ended at ${staged.size} of ${expected} bytes; it will be retried`,
     );
   }
   if (plan.text && staged.size <= policy.maxInlineBytes) {
@@ -857,17 +863,7 @@ async function stageBytes(
   };
 }
 
-/**
- * Google's Markdown export inlines every image as a base64 data URI, which
- * would push an illustrated document past the inline limit on pictures a
- * model cannot read anyway.
- */
-export function stripDataImages(markdown: string): string {
-  return markdown.replace(
-    /<?data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=\s]*>?/gi,
-    '#image-omitted',
-  );
-}
+export { stripDataImages } from '../markdown-images.js';
 
 // ── The folder-tree sync ──────────────────────────────────────────────────
 
@@ -949,6 +945,13 @@ export interface TreeCursor {
   tombToken?: string;
   /** Files a change page produced past the batch limit, emitted next call. */
   pending?: TreeItem[];
+  /**
+   * A full walk of the folder is in progress (the first sync, or a resync
+   * after the change token expired). Its batches are marked as one
+   * listing, so the engine can remove what was deleted while the token was
+   * dead even when the walk spans many batches.
+   */
+  walking?: boolean;
 }
 
 /** What a tree-sync ref carries to `fetchRecord`. */
@@ -1006,6 +1009,7 @@ export async function syncTree(
   const records = new Map<string, RecordRef>();
   const removed = new Set<string>();
   let st = parseTreeCursor(priorRaw, hooks.key);
+  const walkingBefore = Boolean(st?.walking);
   let fresh = false;
   let truncated = false;
   let reachedEnd = false;
@@ -1026,6 +1030,7 @@ export async function syncTree(
       token,
       folders: { [rootId]: ['', ''] },
       queue: [rootId],
+      walking: true,
     };
   };
 
@@ -1064,6 +1069,34 @@ export async function syncTree(
     }
     const cur = (): TreeCursor => st!;
     let source = hooks.source(cur().drive);
+    /**
+     * A folder listing resumed from a stored page token: the provider forgets
+     * those, and a refused one restarts that folder's listing (what it lists
+     * again is unchanged, so nothing is rewritten). Once per call, so a refusal
+     * that is not about the token still surfaces.
+     */
+    let restartedListing = false;
+    const listResumed = async (
+      folderId: string,
+      token: string | undefined,
+      opts: { pageSize: number; includeTrashed: boolean },
+      forget: () => void,
+    ): Promise<Awaited<ReturnType<TreeSource['listChildren']>> | null> => {
+      try {
+        return await source.listChildren(folderId, {
+          ...(token ? { pageToken: token } : {}),
+          ...opts,
+        });
+      } catch (err) {
+        if (!token || restartedListing || !hasStatus(err, 400, 410)) throw err;
+        restartedListing = true;
+        log.info(
+          `${hooks.provider}: a stored folder page token was refused; listing that folder again`,
+        );
+        forget();
+        return null;
+      }
+    };
 
     const enqueue = (id: string) => {
       const c = cur();
@@ -1205,11 +1238,15 @@ export async function syncTree(
           c.queue.shift();
           delete c.queueToken;
         } else {
-          const page = await source.listChildren(folderId, {
-            ...(c.queueToken ? { pageToken: c.queueToken } : {}),
-            pageSize: Math.min(PAGE_MAX, limit - records.size),
-            includeTrashed: false,
-          });
+          const page = await listResumed(
+            folderId,
+            c.queueToken,
+            { pageSize: Math.min(PAGE_MAX, limit - records.size), includeTrashed: false },
+            () => {
+              delete c.queueToken;
+            },
+          );
+          if (!page) continue;
           pages++;
           for (const item of page.items) {
             if (item.trashed) continue;
@@ -1249,11 +1286,15 @@ export async function syncTree(
           c.tombs.shift();
           delete c.tombToken;
         } else {
-          const page = await source.listChildren(folderId, {
-            ...(c.tombToken ? { pageToken: c.tombToken } : {}),
-            pageSize: PAGE_MAX,
-            includeTrashed: true,
-          });
+          const page = await listResumed(
+            folderId,
+            c.tombToken,
+            { pageSize: PAGE_MAX, includeTrashed: true },
+            () => {
+              delete c.tombToken;
+            },
+          );
+          if (!page) continue;
           pages++;
           for (const item of page.items) {
             if (item.kind === 'folder') {
@@ -1302,6 +1343,8 @@ export async function syncTree(
     const final = cur();
     const moreWork =
       !reachedEnd || Boolean(final.pending?.length || final.queue?.length || final.tombs?.length);
+    const listing = walkListing(final, fresh, walkingBefore, truncated);
+    const singleBatchWalk = !moreWork && fresh && !truncated;
     return {
       records: [...records.values()],
       cursor: final,
@@ -1309,14 +1352,16 @@ export async function syncTree(
       ...(moreWork ? { partial: true } : {}),
       // A walk that started and finished inside this one batch saw the whole
       // folder, so the engine may prune whatever it did not return.
-      ...(!moreWork && fresh && !truncated ? { enumeratedAll: true } : {}),
+      ...(singleBatchWalk ? { enumeratedAll: true } : listing ? { fullListing: listing } : {}),
     };
   } catch (err) {
     if (hooks.isThrottle(err)) {
+      const listing = st ? walkListing(st, fresh, walkingBefore, truncated) : undefined;
       return {
         records: [...records.values()],
         cursor: (st ?? priorRaw) as TreeCursor,
         ...(removed.size ? { removed: [...removed] } : {}),
+        ...(listing ? { fullListing: listing } : {}),
         rateLimited: true,
       };
     }
@@ -1331,6 +1376,23 @@ export async function syncTree(
     }
     throw err;
   }
+}
+
+/**
+ * The `fullListing` mark for a batch of a folder walk, or undefined outside
+ * one. The walk ends when its queue is empty; the cursor stops saying it is
+ * walking from then on.
+ */
+function walkListing(
+  cursor: TreeCursor,
+  fresh: boolean,
+  walkingBefore: boolean,
+  truncated: boolean,
+): { first: boolean; last: boolean; incomplete?: boolean } | undefined {
+  if (!fresh && !walkingBefore) return undefined;
+  const last = !cursor.queue?.length;
+  if (last) delete cursor.walking;
+  return { first: fresh, last, ...(truncated ? { incomplete: true } : {}) };
 }
 
 /** The synced folder itself was deleted or trashed. */

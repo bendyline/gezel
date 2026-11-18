@@ -1,6 +1,15 @@
 import { execFileSync, execSync } from 'node:child_process';
 import { basename } from 'node:path';
 
+// `pnpm list --json --depth=Infinity` over every shipping project passed
+// Node's 1 MiB default maxBuffer in November 2026, and spawnSync failed with
+// ENOBUFS even though pnpm exited 0. The tree only grows, so leave headroom.
+const PNPM_OUTPUT_OPTIONS = {
+  encoding: 'utf8',
+  stdio: ['ignore', 'pipe', 'inherit'],
+  maxBuffer: 256 * 1024 * 1024,
+};
+
 function runPnpm(args, storeDir) {
   const configuredStore = process.env.GEZEL_PNPM_STORE_DIR ?? storeDir;
   const effectiveArgs = configuredStore ? [`--config.store-dir=${configuredStore}`, ...args] : args;
@@ -14,10 +23,7 @@ function runPnpm(args, storeDir) {
     return execFileSync(
       isJavaScriptCli ? process.execPath : pnpmCli,
       [...(isJavaScriptCli ? [pnpmCli] : []), ...effectiveArgs],
-      {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'inherit'],
-      },
+      PNPM_OUTPUT_OPTIONS,
     );
   }
   // PATH fallback, reached only when the caller is not itself a pnpm script —
@@ -35,15 +41,9 @@ function runPnpm(args, storeDir) {
     // `shell: true` earns Node's DEP0190 warning precisely because Node would
     // concatenate without escaping. We do the escaping, so hand the shell one
     // finished command string and skip the warning.
-    return execSync(['pnpm.cmd', ...effectiveArgs.map(cmdQuote)].join(' '), {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'inherit'],
-    });
+    return execSync(['pnpm.cmd', ...effectiveArgs.map(cmdQuote)].join(' '), PNPM_OUTPUT_OPTIONS);
   }
-  return execFileSync('pnpm', effectiveArgs, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
+  return execFileSync('pnpm', effectiveArgs, PNPM_OUTPUT_OPTIONS);
 }
 
 /** Quote an argument for cmd.exe, which is what `shell: true` invokes on Windows. */

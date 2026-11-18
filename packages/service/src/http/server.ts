@@ -25,6 +25,7 @@ import { ZodError } from 'zod';
 import { daemonHost } from '../daemon-host.js';
 import { staleStepSessionRefusal } from '../tasks/stale-step-session.js';
 import {
+  SESSION_BOOTSTRAP_PATH,
   bearerAuth,
   denyRemoteInferenceScope,
   requireInternalApiAccess,
@@ -122,6 +123,7 @@ import { projectReportRoutes } from './routes/project-reports.js';
 import { globalTaskRoutes, projectTaskRoutes } from './routes/project-tasks.js';
 import { projectRoutes } from './routes/projects.js';
 import { promptAssistRoutes } from './routes/prompt-assist.js';
+import { promptConnectorRoutes } from './routes/prompt-connectors.js';
 import { promptDraftRoutes } from './routes/prompt-drafts.js';
 import { questionRoutes } from './routes/questions.js';
 import { queueRoutes } from './routes/queues.js';
@@ -130,6 +132,7 @@ import { referencePreviewRoutes } from './routes/reference-preview.js';
 import { reminderRoutes } from './routes/reminders.js';
 import { requestRoutes } from './routes/requests.js';
 import { taskInputRoutes } from './routes/task-inputs.js';
+import { webPageRoutes } from './routes/web-pages.js';
 
 import { v1ChatRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-chat';
 import { v1EmbeddingsRoutes } from '@bendyline/gezel-inference/internal/http/routes/v1-embeddings';
@@ -500,6 +503,19 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
       }),
     );
   }
+  // A gezel MCP server started by a CLI agent trades its short-lived code for
+  // its session token. Loopback only: the container listener faces a network.
+  if (!container) {
+    app.post(SESSION_BOOTSTRAP_PATH, async (c) => {
+      const body = (await c.req.json().catch(() => null)) as { code?: unknown } | null;
+      const record =
+        typeof body?.code === 'string' && body.code.length > 0
+          ? ctx.tokenStore.redeemSessionBootstrap(body.code)
+          : null;
+      if (!record) return c.json({ error: 'unauthorized' }, 401);
+      return c.json({ token: record.token });
+    });
+  }
   app.get('/api/health', (c) => {
     // The supervisor sets three env vars about the llama-server backend:
     //   GEZEL_LLAMA_SERVER_BACKEND   — what's actually configured this
@@ -630,6 +646,8 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
   // Per-project mail operations live at /api/projects/:id/mail/*
   // Per-project connector operations live at /api/projects/:id/connectors/*
   app.route('/api/projects', connectorRoutes(ctx));
+  app.route('/api/projects', webPageRoutes(ctx));
+  app.route('/api/projects', promptConnectorRoutes(ctx));
   // Per-project lookouts live at /api/projects/:id/lookouts/*
   app.route('/api/projects', projectLookoutRoutes(ctx));
   // Per-project tasks live at /api/projects/:id/tasks/*

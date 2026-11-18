@@ -23,7 +23,10 @@ import { fileURLToPath } from 'node:url';
 
 import {
   REVIEWED_ENTITLEMENTS,
+  VENDOR_SIGNED_ENTITLEMENTS,
+  appRelativePath,
   assertExactReviewedEntitlements,
+  assertExactVendorEntitlements,
   parseBooleanEntitlementsPlist,
 } from './verify-macos-entitlements.mjs';
 
@@ -57,7 +60,7 @@ const REMOVED = new Map([
 const FORBIDDEN = new Map([
   [
     'com.apple.security.get-task-allow',
-    'development-only; breaks notarization and lets other processes attach',
+    'development-only; lets other processes attach to Gezel and borrow its privacy grants',
   ],
   [
     'com.apple.security.app-sandbox',
@@ -178,6 +181,72 @@ test('Electron stays new enough to omit unsigned executable memory on every arch
   assert.ok(
     major >= 12,
     `Electron ${electronRange} predates the MAP_JIT-only guidance. Restore com.apple.security.cs.allow-unsigned-executable-memory before using Electron 11 or older.`,
+  );
+});
+
+test('each vendor allowlist entry pins a path, a team, an exact set and a reason', () => {
+  assert.ok(VENDOR_SIGNED_ENTITLEMENTS.size > 0);
+  for (const [path, entry] of VENDOR_SIGNED_ENTITLEMENTS) {
+    assert.match(path, /^Contents\/Resources\/[^\\]+$/, `${path} must be app-relative`);
+    assert.match(entry.teamIdentifier, /^[A-Z0-9]{10}$/, `${path} needs an Apple team id`);
+    assert.ok(entry.vendor, `${path} must name its vendor`);
+    assert.ok(entry.accepted, `${path} must record why its entitlements were accepted`);
+    assert.ok(entry.entitlements.length > 0, `${path} lists no entitlements; drop the entry`);
+    assert.equal(new Set(entry.entitlements).size, entry.entitlements.length);
+    for (const key of entry.entitlements) assert.match(key, /^com\.apple\.security\./);
+  }
+});
+
+test('get-task-allow is accepted only on the vendor-signed Node runtime', () => {
+  const carriers = [...VENDOR_SIGNED_ENTITLEMENTS]
+    .filter(([, entry]) => entry.entitlements.includes('com.apple.security.get-task-allow'))
+    .map(([path]) => path);
+  assert.deepEqual(carriers, ['Contents/Resources/app.asar.unpacked/dist/node-bundle/node']);
+});
+
+test('vendor entitlement check fails on any drift from the pinned set', () => {
+  const [path, entry] = [...VENDOR_SIGNED_ENTITLEMENTS][0];
+  const exact = new Map(entry.entitlements.map((key) => [key, true]));
+  assertExactVendorEntitlements(exact, entry, path);
+
+  const added = new Map([...exact, ['com.apple.security.device.camera', true]]);
+  assert.throws(
+    () => assertExactVendorEntitlements(added, entry, path),
+    /carries com\.apple\.security\.device\.camera, which the reviewed/,
+  );
+
+  const dropped = new Map([...exact].slice(1));
+  assert.throws(() => assertExactVendorEntitlements(dropped, entry, path), /no longer carries/);
+  assert.throws(() => assertExactVendorEntitlements(null, entry, path), /no longer carries/);
+
+  const falseValue = new Map(exact);
+  falseValue.set(entry.entitlements[0], false);
+  assert.throws(() => assertExactVendorEntitlements(falseValue, entry, path), /no longer carries/);
+});
+
+test('app-relative paths match the allowlist keys on any platform separator', () => {
+  const app = join(root, 'Gezel.app');
+  const node = join(
+    app,
+    'Contents',
+    'Resources',
+    'app.asar.unpacked',
+    'dist',
+    'node-bundle',
+    'node',
+  );
+  assert.ok(VENDOR_SIGNED_ENTITLEMENTS.has(appRelativePath(app, node)));
+});
+
+test('the allowlisted Node team matches the release workflow signature pin', async () => {
+  const workflow = await readFile(releaseWorkflowPath, 'utf8');
+  const node = VENDOR_SIGNED_ENTITLEMENTS.get(
+    'Contents/Resources/app.asar.unpacked/dist/node-bundle/node',
+  );
+  assert.ok(node);
+  assert.ok(
+    workflow.includes(`TeamIdentifier=${node.teamIdentifier}`),
+    'release-electron.yml pins a different Node.js signing team than VENDOR_SIGNED_ENTITLEMENTS',
   );
 });
 

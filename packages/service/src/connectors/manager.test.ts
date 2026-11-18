@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { asScopedCursor, syncWithAdapter } from './manager.js';
+import { asScopedCursor, partialFailureNote, syncWithAdapter } from './manager.js';
 import type { ChangeBatch, ConnectorAdapter, NormalizedRecord, RecordRef } from './types.js';
 import type { WriteRecordResult } from './writer.js';
 
@@ -73,6 +73,49 @@ const base = {
   backfillLimit: 500,
 };
 
+describe('syncWithAdapter backpressure', () => {
+  it('keeps the longest Retry-After the source sent', async () => {
+    const adapter = new FakeAdapter({
+      scopes: ['a', 'b'],
+      changes: (scope, cursor) => ({
+        records: [],
+        cursor,
+        rateLimited: true,
+        retryAfterMs: scope === 'a' ? 90_000 : 30_000,
+      }),
+    });
+    // A source that throttles per account stops at the first scope.
+    const r = await syncWithAdapter(adapter, {
+      ...base,
+      cursor: undefined,
+      write: fakeWriter().write,
+    });
+    expect(r.rateLimited).toBe(true);
+    expect(r.retryAfterMs).toBe(90_000);
+  });
+
+  it('retries a record whose request timed out', async () => {
+    let calls = 0;
+    const adapter = new FakeAdapter({
+      changes: () => ({ records: [{ id: 'slow' }], cursor: 'C1' }),
+      fetch: async (_scope, ref) => {
+        calls++;
+        if (calls === 1) throw new DOMException('The operation timed out.', 'TimeoutError');
+        return record(ref.id);
+      },
+    });
+    const r = await syncWithAdapter(adapter, {
+      ...base,
+      cursor: undefined,
+      write: fakeWriter().write,
+      retrySchedule: [1],
+    });
+    expect(calls).toBe(2);
+    expect(r.errors).toBe(0);
+    expect(r.written).toBe(1);
+  });
+});
+
 describe('syncWithAdapter', () => {
   it('fetches newest-first, bounded by backfillLimit; overflow is counted skipped', async () => {
     const adapter = new FakeAdapter({
@@ -97,6 +140,9 @@ describe('syncWithAdapter', () => {
     expect(r.skipped).toBe(1); // 'a' overflowed the cap
     expect(r.cursor).toEqual(scoped({ '': 'C1' })); // clean batch → cursor advances
     expect(adapter.closed).toBe(true);
+    // The loss is reported where the person sees it, not only logged.
+    expect(r.truncated).toEqual([{ scope: '', dropped: 1, limit: 2 }]);
+    expect(partialFailureNote(r)).toMatch(/1 older record\(s\) were not synced/);
   });
 
   it('keeps the prior cursor when a fetch fails (idempotent retry)', async () => {

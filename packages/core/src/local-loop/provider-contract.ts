@@ -137,6 +137,14 @@ export interface SendAndWaitOpts {
    * whole job is one move sets it (`ProjectTypeToolReaction.turn`).
    */
   requiredTool?: string;
+  /**
+   * Think less on this turn: every request it makes, the follow-ups after
+   * tool results included, runs at `reducedThinkingBudget` of the session's
+   * thinking budget. Set for a turn that repairs what a gate rejection
+   * already named. A request with no thinking budget is left alone, and so
+   * is every other turn.
+   */
+  reducedThinking?: boolean;
   queue?: {
     lane: 'interactive' | 'background';
     /**

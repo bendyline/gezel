@@ -42,6 +42,7 @@ import type {
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
+import { retryAfterOf } from '../types.js';
 import { formatSeconds } from './rss-feed.js';
 import {
   firstLineTitle,
@@ -57,8 +58,12 @@ export const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
 const PAGE_SIZE = 50;
 const VIDEO_BATCH = 50;
 const DEFAULT_LIMIT = 500;
-/** Newest recorded ids kept as stop markers (a deleted marker must not restart the walk). */
-const STOP_MARKERS = 20;
+/**
+ * Newest recorded ids kept as stop markers. Enough that deleting a run of the
+ * newest videos does not send the walk back through the channel, and that a
+ * video surfacing between held ones is recognized as new.
+ */
+const STOP_MARKERS = 100;
 /** Videos watched for count refreshes; bounds the cursor, which lives in project.json. */
 const WATCH_CAP = 200;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -298,6 +303,8 @@ export interface ChannelCursor {
   metricsRefreshedAt?: string;
   /** A walk the per-pass limit cut short; the next round resumes it. */
   walk?: { pageToken: string; listed: number; top: string[] };
+  /** Where the next count refresh starts in `watch`, so a long list rotates. */
+  refreshFrom?: number;
 }
 
 function parseChannelCursor(raw: unknown): ChannelCursor | undefined {
@@ -329,6 +336,10 @@ function parseChannelCursor(raw: unknown): ChannelCursor | undefined {
       : undefined;
   const lastFetchAt = str('lastFetchAt');
   const metricsRefreshedAt = str('metricsRefreshedAt');
+  const refreshFrom =
+    typeof v.refreshFrom === 'number' && Number.isInteger(v.refreshFrom) && v.refreshFrom > 0
+      ? v.refreshFrom
+      : undefined;
   return {
     channelId,
     uploads,
@@ -338,6 +349,7 @@ function parseChannelCursor(raw: unknown): ChannelCursor | undefined {
     ...(lastFetchAt ? { lastFetchAt } : {}),
     ...(metricsRefreshedAt ? { metricsRefreshedAt } : {}),
     ...(walk ? { walk } : {}),
+    ...(refreshFrom ? { refreshFrom } : {}),
   };
 }
 
@@ -565,7 +577,7 @@ export class YouTubeVideosAdapter implements ConnectorAdapter {
     try {
       return await this.listChannel(target.spec, cursor, opts);
     } catch (err) {
-      if (isThrottle(err)) return { records: [], cursor, rateLimited: true };
+      if (isThrottle(err)) return { records: [], cursor, rateLimited: true, ...retryAfterOf(err) };
       throw err;
     }
   }
@@ -607,6 +619,8 @@ export class YouTubeVideosAdapter implements ConnectorAdapter {
     const top = [...walk.top];
     let complete = false;
     let restarted = false;
+    /** Videos found between two held ones: published after sitting private or scheduled. */
+    const late: string[] = [];
     while (!complete && fresh.length < limit) {
       if (listed >= config.maxVideos) {
         complete = true;
@@ -640,16 +654,42 @@ export class YouTubeVideosAdapter implements ConnectorAdapter {
           continue;
         }
         if (err instanceof YouTubeChannelUnavailableError) {
+          // A channel that has never uploaded has no uploads playlist. Only a
+          // channel that is itself gone is an error.
+          if (!pageToken && listed === 0 && (await this.channelExists(channel.channelId))) {
+            complete = true;
+            break;
+          }
           throw new YouTubeChannelUnavailableError(
             `The uploads of ${channel.title || channel.channelId} could not be listed; the channel may have been removed.`,
           );
         }
         throw err;
       }
+      // The playlist is newest first, but a video published after sitting
+      // private or scheduled can surface below ones already held. Past the
+      // first held video, the rest of the page is read: a video between two
+      // held ones is new; one after the last held one is older history.
+      let reachedHeld = false;
+      let between: string[] = [];
       for (const item of page.items ?? []) {
         const id = str(item.contentDetails?.videoId) || str(item.snippet?.resourceId?.videoId);
         if (!id) continue;
-        if (stop.has(id) || listed >= config.maxVideos) {
+        if (stop.has(id)) {
+          reachedHeld = true;
+          for (const lateId of between) {
+            if (fresh.length >= limit) break;
+            fresh.push(lateId);
+            late.push(lateId);
+          }
+          between = [];
+          continue;
+        }
+        if (reachedHeld) {
+          between.push(id);
+          continue;
+        }
+        if (listed >= config.maxVideos) {
           complete = true;
           break;
         }
@@ -657,6 +697,7 @@ export class YouTubeVideosAdapter implements ConnectorAdapter {
         fresh.push(id);
         listed++;
       }
+      if (reachedHeld) complete = true;
       if (complete) break;
       pageToken = str(page.nextPageToken) || undefined;
       if (!pageToken || listed >= config.maxVideos) complete = true;
@@ -671,12 +712,21 @@ export class YouTubeVideosAdapter implements ConnectorAdapter {
       prior.seen.length > 0 &&
       config.metricsWindowDays > 0 &&
       windowRefreshDue(prior.metricsRefreshedAt, config.metricsRefreshHours, now);
-    const refresh = metricsDue
+    // A refresh bigger than the room left rotates through the list, so the
+    // videos at its end are not starved by the ones at its start.
+    const candidates = metricsDue
       ? (prior?.watch ?? [])
           .filter(([id, ms]) => ms >= floorMs && !fresh.includes(id))
           .map(([id]) => id)
-          .slice(0, Math.max(0, limit - fresh.length))
       : [];
+    const room = Math.max(0, limit - fresh.length);
+    const start = candidates.length ? (prior?.refreshFrom ?? 0) % candidates.length : 0;
+    const refresh =
+      candidates.length > room
+        ? [...candidates.slice(start), ...candidates.slice(0, start)].slice(0, room)
+        : candidates;
+    const refreshFrom =
+      candidates.length > room && room > 0 ? (start + room) % candidates.length : undefined;
 
     // 3. One videos.list call per 50 ids.
     const videos = await this.videosById([...fresh, ...refresh]);
@@ -725,12 +775,13 @@ export class YouTubeVideosAdapter implements ConnectorAdapter {
           seen: prior?.seen ?? [],
           ...(prior?.lastFetchAt ? { lastFetchAt: prior.lastFetchAt } : {}),
           ...(prior?.metricsRefreshedAt ? { metricsRefreshedAt: prior.metricsRefreshedAt } : {}),
+          ...(prior?.refreshFrom ? { refreshFrom: prior.refreshFrom } : {}),
           walk,
         },
         partial: true,
       };
     }
-    const seen = [...new Set([...top, ...(prior?.seen ?? [])])].slice(0, STOP_MARKERS);
+    const seen = [...new Set([...top, ...late, ...(prior?.seen ?? [])])].slice(0, STOP_MARKERS);
     // The first walk observed counts on everything it fetched, so the refresh
     // window starts counting from it.
     const refreshedNow = metricsDue || !prior?.metricsRefreshedAt;
@@ -745,8 +796,26 @@ export class YouTubeVideosAdapter implements ConnectorAdapter {
           : prior?.metricsRefreshedAt
             ? { metricsRefreshedAt: prior.metricsRefreshedAt }
             : {}),
+        ...(metricsDue
+          ? refreshFrom
+            ? { refreshFrom }
+            : {}
+          : prior?.refreshFrom
+            ? { refreshFrom: prior.refreshFrom }
+            : {}),
       },
     };
+  }
+
+  /** Whether a pinned channel still exists (one `channels.list` by id). */
+  private async channelExists(channelId: string): Promise<boolean> {
+    try {
+      await this.resolveChannel({ kind: 'id', value: channelId });
+      return true;
+    } catch (err) {
+      if (err instanceof YouTubeChannelUnavailableError) return false;
+      throw err;
+    }
   }
 
   /** `channels.list` once per binding lifetime; the result is pinned in the cursor. */

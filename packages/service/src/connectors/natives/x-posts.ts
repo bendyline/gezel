@@ -54,6 +54,7 @@ import type {
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
+import { retryAfterOf } from '../types.js';
 import { ReconnectRequiredError } from './oauth-session.js';
 import {
   type WatchedPost,
@@ -80,8 +81,10 @@ const MIN_PAGE_SIZE = 5;
 const PAGE_SIZE = 100;
 const MAX_PAGES_PER_PASS = 5;
 const DEFAULT_BACKFILL = 500;
+// `note_tweet` carries the full text of a post longer than 280 characters;
+// without it, `text` is cut short and the corpus stores the truncation.
 const TWEET_FIELDS =
-  'public_metrics,created_at,lang,entities,referenced_tweets,attachments,edit_history_tweet_ids';
+  'public_metrics,created_at,lang,entities,referenced_tweets,attachments,edit_history_tweet_ids,note_tweet';
 /** X's advertised post ceiling; URLs are weighed as 23 chars on their side. */
 const MAX_POST_CODEPOINTS = 280;
 
@@ -300,7 +303,8 @@ export class XPostsAdapter implements ConnectorAdapter {
         this.accountFailure = err;
         throw err;
       }
-      if (isRateLimitError(err)) return { records: [], cursor, rateLimited: true };
+      if (isRateLimitError(err))
+        return { records: [], cursor, rateLimited: true, ...retryAfterOf(err) };
       throw err;
     }
   }
@@ -590,6 +594,10 @@ export class XPostsAdapter implements ConnectorAdapter {
     const floorId = prior?.walk ? prior.walk.floorId : prior?.sinceId;
     const newest = prior?.walk?.newestId ?? prior?.sinceId;
     const walk = await this.walkTimeline(path, {
+      // A repost is someone else's post, with someone else's engagement
+      // counts; filed as the account's own, it wrote those counts into its
+      // history. Bluesky's adapter leaves reposts out the same way.
+      params: { exclude: 'retweets' },
       ...(floorId ? { floorId } : {}),
       ...(prior?.walk ? { untilId: prior.walk.untilId } : {}),
       ...(newest ? { newestId: newest } : {}),
@@ -640,6 +648,7 @@ export class XPostsAdapter implements ConnectorAdapter {
     if (metricsDue) {
       const page = await this.timelinePage(path, {
         start_time: new Date(windowFloorMs).toISOString(),
+        exclude: 'retweets',
       });
       const returned = new Set<string>();
       const pageSeen: WatchedPost[] = [];
@@ -1123,13 +1132,23 @@ export interface TweetRecordOptions {
   metricsUpdatedAt: string;
 }
 
+/** A post's full text: X cuts `text` for long posts and carries the rest in `note_tweet`. */
+function fullTweetText(tweet: TweetView): string {
+  const note = (tweet as { note_tweet?: { text?: unknown; entities?: TweetView['entities'] } })
+    .note_tweet;
+  if (typeof note?.text === 'string' && note.text) {
+    return expandUrls(note.text, note.entities ?? tweet.entities);
+  }
+  return expandUrls(str(tweet.text), tweet.entities);
+}
+
 /** Map one v2 tweet object (`users/:id/tweets` item) to a corpus record. */
 export function tweetToRecord(item: unknown, opts: TweetRecordOptions): NormalizedRecord {
   const tweet = (item ?? {}) as TweetView;
   const id = str(tweet.id);
   if (!id) throw new Error('X tweet is missing its id.');
   const stableId = stableTweetId(item) || id;
-  const text = expandUrls(str(tweet.text), tweet.entities);
+  const text = fullTweetText(tweet);
   const createdAt = str(tweet.created_at);
   const metrics = tweet.public_metrics ?? {};
   const inReplyTo = repliedToId(tweet.referenced_tweets);
@@ -1182,7 +1201,7 @@ export function tweetMetricsRecord(
   const tweet = (item ?? {}) as TweetView;
   const id = str(tweet.id);
   if (!id) throw new Error('X tweet is missing its id.');
-  const text = expandUrls(str(tweet.text), tweet.entities);
+  const text = fullTweetText(tweet);
   const metrics = tweet.public_metrics ?? {};
   return metricsHistoryRecord(
     {
@@ -1210,7 +1229,7 @@ export function mentionToRecord(item: unknown, author: unknown): NormalizedRecor
   const id = str(tweet.id);
   if (!id) throw new Error('X mention is missing its id.');
   const username = str((author as { username?: unknown } | null)?.username) || 'unknown';
-  const text = expandUrls(str(tweet.text), tweet.entities);
+  const text = fullTweetText(tweet);
   const createdAt = str(tweet.created_at);
   const inReplyTo = repliedToId(tweet.referenced_tweets);
   const title = `mention from ${username}`;

@@ -1,78 +1,16 @@
 import type { ProjectDetail } from '@bendyline/gezel';
-import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
-import { ProjectGlyph, type ProjectGlyphId } from '../views/projects/new-project-meta.js';
-import { CatalogArtwork } from './CatalogArtwork.js';
-import { ConfirmDialog } from './ConfirmDialog.js';
-import {
-  ConnectorConfigFields,
-  type ConnectorConfigValue,
-  type ConnectorFormManifest,
-  initialConnectorConfig,
-} from './ConnectorConfigFields.js';
-import { OAuthAppSetup, type RegisteredOAuthClient } from './OAuthAppSetup.js';
+import { setVisibleInterval } from '../visible-interval.js';
+import { AddConnectionDialog, type AddedConnection } from './AddConnectionDialog.js';
+import { RemoveConnectionDialog } from './RemoveConnectionDialog.js';
+import { WebsiteBindingRow } from './WebsiteBindingRow.js';
 import { CameraBindingCard } from './cameras/CameraBindingCard.js';
-import {
-  type CameraForm,
-  CameraSetupPanel,
-  DEFAULT_CAMERA_FORM,
-  cameraConfigFromForm,
-} from './cameras/CameraSetupPanel.js';
-import { connectOAuth } from './connector-link.js';
-import { isOAuthNotConfiguredError, parseOAuthAppRequirement } from './oauth-app-setup.js';
+import { connectorItemCount, connectorItemNoun, connectorWaitingLine } from './connector-items.js';
 
 type ConnStatus = Awaited<ReturnType<typeof api.listConnectors>>;
 type ConnBinding = ConnStatus['bindings'][number];
-
-interface ConnManifest extends ConnectorFormManifest {
-  id: string;
-  name: string;
-  description: string;
-  secretShape?: {
-    kind?: string;
-    label?: string;
-    description?: string;
-    helpUrl?: string;
-    helpLabel?: string;
-    required?: boolean;
-    clientIdEnv?: string;
-    clientSecretEnv?: string;
-    clientSetup?: unknown;
-    'x-gezel-priority'?: 'primary' | 'secondary';
-  };
-  completeness?: string;
-  tags?: string[];
-  /** `device` for connectors that drive local hardware (cameras). */
-  driver?: string;
-}
-
-interface ConnectorOption extends ConnManifest {
-  iconSvg?: string;
-  logoUrl?: string;
-}
-
-function connectorGlyph(connector: ConnManifest): ProjectGlyphId {
-  const identity = `${connector.id} ${(connector.tags ?? []).join(' ')}`.toLowerCase();
-  if (/(camera|webcam)/.test(identity)) return 'camera';
-  if (identity.includes('wiki')) return 'sheet';
-  if (identity.includes('calendar')) return 'calendar';
-  if (/(mail|gmail|imap|email)/.test(identity)) return 'envelope';
-  if (/(github|git)/.test(identity)) return 'branch';
-  if (/(issue|linear)/.test(identity)) return 'bubbles';
-  if (/(airtable|record|data)/.test(identity)) return 'chart';
-  return 'dots';
-}
-
-function connectorCredentialLabel(connector: ConnManifest): string {
-  if (connector.driver === 'device') return 'On this computer';
-  const kind = connector.secretShape?.kind;
-  if (kind === 'oauth2') return 'OAuth';
-  if (kind === 'imap') return 'Mail login';
-  if (!connector.secretShape) return 'No sign-in';
-  if (!connector.secretShape.required) return 'Optional token';
-  return connector.secretShape?.label ?? 'API token';
-}
 
 /**
  * One line per data table under a binding.
@@ -107,23 +45,21 @@ function TableStats({ tables }: { tables: NonNullable<ConnBinding['tables']> }) 
   );
 }
 
-function connectorCoverageLabel(connector: ConnManifest): string {
-  if (connector.driver === 'device') return 'Live';
-  return connector.completeness === 'window' ? 'Recent window' : 'Full mirror';
-}
-
 /**
- * Project Connections tab — browse connector types, bind one (config form +
- * credential / OAuth), and manage bound connectors (per-binding status, sync,
- * unbind). Modeled on ProjectMailTab + RemoteServersPanel; data-driven off the
- * connector-type catalog, so new driver types appear automatically.
+ * Project Connections tab — manage bound connectors (per-binding status,
+ * sync, check, pause, unbind) and add new ones through AddConnectionDialog,
+ * which is data-driven off the connector-type catalog, so new driver types
+ * appear automatically.
  */
 export function ProjectConnectionsTab({
   project,
   onProjectChange,
+  onOpenFolder,
 }: {
   project: ProjectDetail;
   onProjectChange?: (p: ProjectDetail) => void;
+  /** Show a connection's folder (artifact-relative) in the project's Artifacts tab. */
+  onOpenFolder?: (path: string) => void;
 }) {
   const [status, setStatus] = useState<ConnStatus | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -135,24 +71,6 @@ export function ProjectConnectionsTab({
   >([]);
 
   const [adding, setAdding] = useState(false);
-  const [loadingTypes, setLoadingTypes] = useState(false);
-  const [types, setTypes] = useState<ConnectorOption[]>([]);
-  const [selected, setSelected] = useState<ConnectorOption | null>(null);
-  const [config, setConfig] = useState<Record<string, ConnectorConfigValue>>({});
-  const [displayName, setDisplayName] = useState('');
-  const [credential, setCredential] = useState('');
-  const [imapHost, setImapHost] = useState('');
-  const [imapPort, setImapPort] = useState('');
-  const [imapSecure, setImapSecure] = useState(true);
-  const [cameraForm, setCameraForm] = useState<CameraForm>(DEFAULT_CAMERA_FORM);
-  // Bring-your-own OAuth apps registered on this install, keyed by the
-  // manifest's `clientIdEnv` name. The daemon may additionally hold env-var
-  // overrides the UI can't see, so an absent key never blocks Connect —
-  // it only drives the proactive "use your own app" affordance.
-  const [oauthClients, setOauthClients] = useState<Record<string, RegisteredOAuthClient>>({});
-  // Counts failed "OAuth is not configured" connects; each bump pops the
-  // setup panel open as the error-driven fallback.
-  const [oauthSetupNudge, setOauthSetupNudge] = useState(0);
 
   const refresh = useCallback(async () => {
     try {
@@ -166,6 +84,25 @@ export function ProjectConnectionsTab({
       setError(err instanceof Error ? err.message : String(err));
     }
   }, [project.id]);
+
+  // While a connection syncs its count climbs: read the status every second.
+  const syncingNow = (status?.bindings ?? []).some((b) => b.syncing || b.id === busy);
+  useEffect(() => {
+    if (!syncingNow) return;
+    let live = true;
+    const stop = setVisibleInterval(() => {
+      api
+        .listConnectors(project.id)
+        .then((next) => {
+          if (live) setStatus(next);
+        })
+        .catch(() => {});
+    }, 1000);
+    return () => {
+      live = false;
+      stop();
+    };
+  }, [syncingNow, project.id]);
 
   const handleCommit = useCallback(
     async (draftId: string) => {
@@ -208,66 +145,72 @@ export function ProjectConnectionsTab({
     void refresh();
   }, [refresh]);
 
-  const closeAdd = useCallback(() => {
-    setAdding(false);
-    setSelected(null);
-    setConfig({});
-    setDisplayName('');
-    setCredential('');
-    setImapHost('');
-    setImapPort('');
-    setImapSecure(true);
-    setCameraForm(DEFAULT_CAMERA_FORM);
-    setOauthSetupNudge(0);
-  }, []);
-
-  const refreshOAuthClients = useCallback(async () => {
-    const res = await api.listOAuthClients();
-    setOauthClients(
-      Object.fromEntries(
-        (res.clients ?? []).map((c) => [c.key, { clientId: c.clientId, hasSecret: c.hasSecret }]),
-      ),
-    );
-  }, []);
-
-  const openAdd = useCallback(async () => {
-    setAdding(true);
-    setLoadingTypes(true);
-    setTypes([]);
-    setSelected(null);
+  const openAdd = useCallback(() => {
     setError('');
     setNotice('');
-    // Best-effort: an older daemon without the route just means no proactive
-    // affordance — the error-driven fallback still works.
-    void refreshOAuthClients().catch(() => {});
-    try {
-      const res = await api.listConnectorTypes();
-      setTypes(
-        res.items.map((item) => ({
-          ...(item.manifest as unknown as ConnManifest),
-          ...(item.iconSvg ? { iconSvg: item.iconSvg } : {}),
-          ...(item.logoUrl ? { logoUrl: item.logoUrl } : {}),
-        })),
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setLoadingTypes(false);
-    }
-  }, [refreshOAuthClients]);
+    setAdding(true);
+  }, []);
 
   const handleSync = useCallback(
-    async (bindingId: string) => {
+    async (bindingId: string, type: string) => {
       setBusy(bindingId);
       setError('');
       setNotice('');
       try {
         const res = await api.syncConnector(project.id, bindingId);
         const r = res.result as { written?: number; quarantined?: number; error?: string };
+        const added = (r.written ?? 0) + (r.quarantined ?? 0);
         setNotice(
           r.error
             ? `Sync error: ${r.error}`
-            : `Synced ${(r.written ?? 0) + (r.quarantined ?? 0)} new record(s).`,
+            : added === 0
+              ? 'Synced. Nothing new.'
+              : `Synced ${added.toLocaleString()} new or changed ${connectorItemNoun(type, added)}.`,
+        );
+        await refresh();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [project.id, refresh],
+  );
+
+  const handleCheck = useCallback(
+    async (bindingId: string) => {
+      setBusy(bindingId);
+      setError('');
+      try {
+        const { check } = await api.checkConnector(project.id, bindingId);
+        const problem =
+          check.error ??
+          check.failedScopes?.map((f) => `${f.scope}: ${f.message}`).join('; ') ??
+          (check.rateLimited ? 'the service asked to wait before more requests' : '');
+        setNotice(
+          check.ok && !problem
+            ? `The connection works: a trial read found ${check.records} item(s). Nothing was saved.`
+            : `The check found a problem: ${problem}`,
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [project.id],
+  );
+
+  const handlePause = useCallback(
+    async (bindingId: string, pause: boolean) => {
+      setBusy(bindingId);
+      setError('');
+      try {
+        await api.patchConnector(project.id, bindingId, { disabled: pause });
+        setNotice(
+          pause
+            ? 'Paused. It will not sync until you resume it.'
+            : 'Resumed. It syncs again on its usual schedule.',
         );
         await refresh();
       } catch (err) {
@@ -280,10 +223,18 @@ export function ProjectConnectionsTab({
   );
 
   const handleUnbind = useCallback(
-    async (bindingId: string) => {
+    async (bindingId: string, deleteData = false) => {
       setBusy(bindingId);
+      setError('');
+      setNotice('');
       try {
-        await api.unbindConnector(project.id, bindingId);
+        const result = await api.unbindConnector(project.id, bindingId, { deleteData });
+        if (deleteData) {
+          const files = (result && 'deleted' in result ? result.deleted?.files : 0) ?? 0;
+          setNotice(
+            `Removed, and deleted ${files.toLocaleString()} downloaded ${files === 1 ? 'file' : 'files'}.`,
+          );
+        }
         await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -295,284 +246,171 @@ export function ProjectConnectionsTab({
     [project.id, refresh],
   );
 
-  const buildConfig = useCallback((): Record<string, unknown> => {
-    const props = selected?.configSchema?.properties ?? {};
-    const out: Record<string, unknown> = {};
-    for (const [key, prop] of Object.entries(props)) {
-      if (prop.const !== undefined) {
-        out[key] = prop.const;
-      } else if (prop.type === 'array') {
-        const raw = typeof config[key] === 'string' ? config[key].trim() : '';
-        if (raw)
-          out[key] = raw
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean);
-      } else if (prop.type === 'boolean') {
-        if (typeof config[key] === 'boolean') out[key] = config[key];
-      } else if (prop.type === 'integer' || prop.type === 'number') {
-        const raw = typeof config[key] === 'string' ? config[key].trim() : '';
-        if (raw) out[key] = Number(raw);
-      } else {
-        const raw = typeof config[key] === 'string' ? config[key].trim() : '';
-        if (raw) out[key] = raw;
-      }
-    }
-    return out;
-  }, [selected, config]);
-
-  const oauthRequirement = useMemo(
-    () =>
-      selected?.secretShape?.kind === 'oauth2'
-        ? parseOAuthAppRequirement(selected.name, selected.secretShape)
-        : null,
-    [selected],
-  );
-
-  const handleBind = useCallback(async () => {
-    if (!selected) return;
-    setError('');
-    setNotice('');
-    // A camera has its own panel and starts watching on its own: there is
-    // nothing to sync.
-    if (selected.driver === 'device') {
-      if (!cameraForm.device) {
-        setError('Pick a camera first.');
-        return;
-      }
-      setBusy('add');
-      try {
-        await api.bindConnector(project.id, {
-          type: selected.id,
-          ...(cameraForm.displayName.trim()
-            ? { displayName: cameraForm.displayName.trim() }
-            : cameraForm.deviceName
-              ? { displayName: cameraForm.deviceName }
-              : {}),
-          config: cameraConfigFromForm(cameraForm),
-        });
-        setNotice('Camera added. It starts watching in a moment.');
-        closeAdd();
-        await refresh();
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setBusy(null);
-      }
-      return;
-    }
-    const built = buildConfig();
-    const kind = selected.secretShape?.kind;
-    const missingConfig = (selected.configSchema?.required ?? []).find((key) => {
-      const value = built[key];
-      return value === undefined || value === '' || (Array.isArray(value) && value.length === 0);
-    });
-    if (missingConfig) {
-      const label = selected.configSchema?.properties?.[missingConfig]?.title ?? missingConfig;
-      setError(`${label} is required.`);
-      return;
-    }
-    if (
-      kind !== 'oauth2' &&
-      kind !== 'imap' &&
-      selected.secretShape?.required &&
-      !credential.trim()
-    ) {
-      setError(`${selected.secretShape.label ?? 'API key / token'} is required.`);
-      return;
-    }
-    setBusy('add');
-    let added: { id: string } | undefined;
-    try {
-      if (kind === 'oauth2') {
-        added = await connectOAuth(
-          project.id,
-          selected.id,
-          built,
-          displayName.trim() || undefined,
-          oauthRequirement?.redirectPort !== undefined
-            ? { redirectPort: oauthRequirement.redirectPort }
-            : undefined,
-        );
-      } else {
-        let cred: unknown;
-        if (kind === 'imap') {
-          cred = {
-            host: imapHost.trim(),
-            ...(imapPort.trim() ? { port: Number(imapPort.trim()) } : {}),
-            secure: imapSecure,
-            user: String(built.address ?? ''),
-            pass: credential,
-          };
-        } else if (credential.trim()) {
-          cred = credential.trim();
-        }
-        const bound = await api.bindConnector(project.id, {
-          type: selected.id,
-          ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
-          config: built,
-          ...(cred !== undefined ? { credential: cred } : {}),
-        });
-        added = bound?.binding;
-      }
-      setNotice('Connector added.');
-      closeAdd();
+  const handleAdded = useCallback(
+    async ({ bindingId, type, device }: AddedConnection) => {
+      setAdding(false);
+      setError('');
+      setNotice(device ? 'Camera added. It starts watching in a moment.' : 'Connector added.');
       await refresh();
+      if (device) return;
       try {
         const fresh = await api.getProject(project.id);
         if (fresh) onProjectChange?.(fresh);
       } catch {
         /* best-effort project refetch */
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      // The service ships no OAuth client of its own; this rejection means
-      // the install hasn't registered an app yet — open the setup panel
-      // inline rather than leaving the user with a bare error line.
-      if (isOAuthNotConfiguredError(message)) setOauthSetupNudge((n) => n + 1);
-      setError(message);
-      added = undefined;
-    } finally {
-      setBusy(null);
-    }
-    // The background loop only syncs under the most permissive posture, so a
-    // freshly added connector would otherwise sit empty until someone found
-    // the Sync button. A first sync is what the person just asked for.
-    if (added?.id) await handleSync(added.id);
-  }, [
-    selected,
-    project.id,
-    buildConfig,
-    displayName,
-    credential,
-    imapHost,
-    imapPort,
-    imapSecure,
-    closeAdd,
-    refresh,
-    onProjectChange,
-    oauthRequirement,
-    handleSync,
-    cameraForm,
-  ]);
-
-  /**
-   * Save the user's OAuth app (client ID → config, secret → SecretStore),
-   * then proceed straight into the connect flow. Throws on save failure so
-   * the panel keeps its form open.
-   */
-  const handleOAuthAppSave = useCallback(
-    async (body: { clientId: string; clientSecret?: string }) => {
-      if (!oauthRequirement) return;
-      setError('');
-      setBusy('oauth-app');
-      try {
-        await api.putOAuthClient(oauthRequirement.clientKey, body);
-        await refreshOAuthClients().catch(() => {
-          setOauthClients((current) => ({
-            ...current,
-            [oauthRequirement.clientKey]: {
-              clientId: body.clientId,
-              hasSecret:
-                Boolean(body.clientSecret) ||
-                (current[oauthRequirement.clientKey]?.hasSecret ?? false),
-            },
-          }));
-        });
-        setOauthSetupNudge(0);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
-        throw err;
-      } finally {
-        setBusy(null);
-      }
-      await handleBind();
+      // The background loop only syncs under the most permissive posture, so a
+      // freshly added connector would otherwise sit empty until someone found
+      // the Sync button. A first sync is what the person just asked for.
+      if (bindingId) await handleSync(bindingId, type);
     },
-    [oauthRequirement, refreshOAuthClients, handleBind],
+    [project.id, refresh, onProjectChange, handleSync],
   );
 
   const bindings = status?.bindings ?? [];
-  const kind = selected?.secretShape?.kind;
-  const selectConnector = (connector: ConnectorOption) => {
-    if (connector.id === selected?.id) return;
-    setSelected(connector);
-    setConfig(initialConnectorConfig(connector));
-    setDisplayName('');
-    setCredential('');
-    setImapHost('');
-    setImapPort('');
-    setImapSecure(true);
-    setError('');
-    setOauthSetupNudge(0);
-  };
+  const offline = bindings.some((b) => b.unreachable?.offline && !b.disabled);
 
   return (
     <div className="settings-section">
       <div className="gz-mail-header">
         <h3>Connections</h3>
-        {!adding && (
-          <button type="button" onClick={() => void openAdd()}>
-            Add connection
-          </button>
-        )}
+        <button type="button" onClick={openAdd}>
+          Add connection
+        </button>
       </div>
 
-      {bindings.length === 0 && !adding ? (
+      {bindings.length === 0 ? (
         <p className="muted">
           No connectors yet. Add one to mirror an external source (email, issues, a data source)
           into this project as searchable files.
         </p>
       ) : (
-        <ul className="settings-list">
-          {bindings.map((b) =>
-            b.driver === 'device' ? (
-              <li key={b.id} className="camera-card-item">
-                <CameraBindingCard
+        <>
+          {offline ? (
+            <p className="muted small" aria-live="polite">
+              This computer is offline. Everything already downloaded is here, and connections catch
+              up on their own when you're back online.
+            </p>
+          ) : null}
+          <ul className="settings-list">
+            {bindings.map((b) =>
+              b.type === 'website' ? (
+                <WebsiteBindingRow
+                  key={b.id}
                   projectId={project.id}
                   binding={b}
                   onChanged={() => void refresh()}
                   onRemove={(id) => setConfirmUnbind(id)}
+                  onNotice={(text, isError) => {
+                    if (isError) {
+                      setError(text);
+                      setNotice('');
+                    } else {
+                      setNotice(text);
+                      setError('');
+                    }
+                  }}
                 />
-              </li>
-            ) : (
-              <li key={b.id} className="connected-app-row">
-                <div>
-                  <strong>{b.displayName || b.type}</strong>
-                  <span className="muted small"> · {b.type}</span>
-                  <div className="small">
-                    {b.lastError ? (
-                      <span className="error">Error: {b.lastError}</span>
-                    ) : b.lastSyncedAt ? (
-                      <span className="muted" title={formatAbsoluteTime(b.lastSyncedAt)}>
-                        Last synced {formatRelativeTime(b.lastSyncedAt)}
-                      </span>
-                    ) : (
-                      <span className="muted">Not synced yet</span>
-                    )}
+              ) : b.driver === 'device' ? (
+                <li key={b.id} className="camera-card-item">
+                  <CameraBindingCard
+                    projectId={project.id}
+                    binding={b}
+                    onChanged={() => void refresh()}
+                    onRemove={(id) => setConfirmUnbind(id)}
+                  />
+                </li>
+              ) : (
+                <li key={b.id} className="connected-app-row">
+                  <div>
+                    <strong>{b.displayName || b.type}</strong>
+                    <span className="muted small"> · {b.type}</span>
+                    {b.account ? <div className="small muted">Signed in as {b.account}</div> : null}
+                    <div className="small">
+                      {b.items !== undefined && !b.syncing && busy !== b.id ? (
+                        <span className="muted">{connectorItemCount(b.type, b.items)} · </span>
+                      ) : null}
+                      {b.syncing || busy === b.id ? (
+                        <span className="muted" aria-live="polite">
+                          Syncing…
+                          {b.items !== undefined
+                            ? ` ${connectorItemCount(b.type, b.items)} so far`
+                            : ''}
+                        </span>
+                      ) : b.disabled ? (
+                        <span className="muted">
+                          {b.disabledReason === 'emergency-stop'
+                            ? 'Stopped by the emergency stop. Resume it when you are ready.'
+                            : 'Paused. It does not sync until you resume it.'}
+                        </span>
+                      ) : b.unreachable ? (
+                        <span
+                          className="muted"
+                          title={
+                            b.lastSyncedAt
+                              ? `Last synced ${formatAbsoluteTime(b.lastSyncedAt)}`
+                              : undefined
+                          }
+                        >
+                          {connectorWaitingLine(b.unreachable)}
+                        </span>
+                      ) : b.lastError ? (
+                        <span className="error">Error: {b.lastError}</span>
+                      ) : b.lastSyncedAt ? (
+                        <span className="muted" title={formatAbsoluteTime(b.lastSyncedAt)}>
+                          Last synced {formatRelativeTime(b.lastSyncedAt)}
+                        </span>
+                      ) : (
+                        <span className="muted">Not synced yet</span>
+                      )}
+                    </div>
+                    {b.tables && b.tables.length > 0 ? <TableStats tables={b.tables} /> : null}
                   </div>
-                  {b.tables && b.tables.length > 0 ? <TableStats tables={b.tables} /> : null}
-                </div>
-                <div className="gz-mail-link-actions">
-                  <button
-                    type="button"
-                    onClick={() => void handleSync(b.id)}
-                    disabled={busy === b.id}
-                  >
-                    {busy === b.id ? 'Working…' : 'Sync now'}
-                  </button>
-                  <button
-                    type="button"
-                    className="danger"
-                    onClick={() => setConfirmUnbind(b.id)}
-                    disabled={busy === b.id}
-                  >
-                    Remove
-                  </button>
-                </div>
-              </li>
-            ),
-          )}
-        </ul>
+                  <div className="gz-mail-link-actions">
+                    {onOpenFolder && b.corpusDir ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenFolder(b.corpusDir!)}
+                        title="Show what it downloaded in Artifacts"
+                      >
+                        Open
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      onClick={() => void handleSync(b.id, b.type)}
+                      disabled={busy === b.id || Boolean(b.disabled)}
+                    >
+                      {busy === b.id ? 'Working…' : 'Sync now'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleCheck(b.id)}
+                      disabled={busy === b.id || Boolean(b.disabled)}
+                    >
+                      Check
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handlePause(b.id, !b.disabled)}
+                      disabled={busy === b.id}
+                    >
+                      {b.disabled ? 'Resume' : 'Pause'}
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => setConfirmUnbind(b.id)}
+                      disabled={busy === b.id}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </li>
+              ),
+            )}
+          </ul>
+        </>
       )}
 
       {pending.length > 0 && (
@@ -613,160 +451,25 @@ export function ProjectConnectionsTab({
       )}
 
       {adding && (
-        <div className="gz-connector-picker">
-          <div className="gz-connector-picker-heading">
-            <div>
-              <strong>Choose a connector</strong>
-              <p className="muted small">
-                Pick a source to mirror into this project's searchable files.
-              </p>
-            </div>
-            <span className="gz-connector-picker-count">
-              {loadingTypes ? null : `${types.length} available`}
-            </span>
-          </div>
-
-          {loadingTypes ? (
-            <div className="gz-connector-picker-empty muted small">Gathering connectors…</div>
-          ) : types.length === 0 ? (
-            <div className="gz-connector-picker-empty muted small">
-              No connector types are available.
-            </div>
-          ) : (
-            <div className="gz-connector-grid" role="radiogroup" aria-label="Connector type">
-              {types.map((connector, index) => (
-                <button
-                  key={connector.id}
-                  type="button"
-                  // biome-ignore lint/a11y/useSemanticElements: cards form one visual radio group; native inputs would duplicate the interactive surface.
-                  role="radio"
-                  aria-checked={selected?.id === connector.id}
-                  aria-label={connector.name}
-                  className={`gz-npd-card gz-connector-card${
-                    selected?.id === connector.id ? ' active' : ''
-                  }`}
-                  onClick={() => selectConnector(connector)}
-                  style={{ '--card-i': Math.min(index, 11) } as CSSProperties}
-                >
-                  <span className="gz-npd-card-mark">
-                    <CatalogArtwork
-                      iconSvg={connector.iconSvg}
-                      logoUrl={connector.logoUrl}
-                      svgClassName="gz-npd-card-mark-svg"
-                      fallback={<ProjectGlyph glyph={connectorGlyph(connector)} size={19} />}
-                    />
-                  </span>
-                  <span className="gz-npd-card-name">{connector.name}</span>
-                  <span className="gz-npd-card-description">{connector.description}</span>
-                  <span className="gz-connector-card-meta" aria-hidden="true">
-                    <span>{connectorCredentialLabel(connector)}</span>
-                    <span>{connectorCoverageLabel(connector)}</span>
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {selected && (
-            <div
-              className="gz-mail-link-form gz-connector-config"
-              aria-label={`${selected.name} setup`}
-            >
-              <div className="gz-connector-config-heading">
-                <span className="gz-connector-config-mark">
-                  <CatalogArtwork
-                    iconSvg={selected.iconSvg}
-                    logoUrl={selected.logoUrl}
-                    svgClassName="gz-npd-card-mark-svg"
-                    fallback={<ProjectGlyph glyph={connectorGlyph(selected)} size={19} />}
-                  />
-                </span>
-                <div>
-                  <strong>Set up {selected.name}</strong>
-                  <div className="small muted">
-                    {connectorCredentialLabel(selected)} · {connectorCoverageLabel(selected)}
-                  </div>
-                </div>
-              </div>
-
-              {selected.driver === 'device' ? (
-                <>
-                  {selected.setupInstructions ? (
-                    <aside className="gz-connector-setup-instructions">
-                      <strong>{selected.setupInstructions.title}</strong>
-                      {selected.setupInstructions.description ? (
-                        <p>{selected.setupInstructions.description}</p>
-                      ) : null}
-                    </aside>
-                  ) : null}
-                  <CameraSetupPanel form={cameraForm} onChange={setCameraForm} />
-                </>
-              ) : (
-                <ConnectorConfigFields
-                  connector={selected}
-                  config={config}
-                  onConfigChange={(key, value) =>
-                    setConfig((current) => ({ ...current, [key]: value }))
-                  }
-                  displayName={displayName}
-                  onDisplayNameChange={setDisplayName}
-                  credential={credential}
-                  onCredentialChange={setCredential}
-                  imapHost={imapHost}
-                  onImapHostChange={setImapHost}
-                  imapPort={imapPort}
-                  onImapPortChange={setImapPort}
-                  imapSecure={imapSecure}
-                  onImapSecureChange={setImapSecure}
-                />
-              )}
-
-              {oauthRequirement && (
-                <OAuthAppSetup
-                  key={selected.id}
-                  requirement={oauthRequirement}
-                  registered={oauthClients[oauthRequirement.clientKey] ?? null}
-                  forceOpenNonce={oauthSetupNudge}
-                  busy={busy === 'oauth-app' || busy === 'add'}
-                  onSave={handleOAuthAppSave}
-                />
-              )}
-            </div>
-          )}
-
-          <div className="gz-mail-link-actions gz-connector-picker-actions">
-            <button type="button" onClick={closeAdd} disabled={busy === 'add'}>
-              Cancel
-            </button>
-            {selected && (
-              <button
-                type="button"
-                className="primary"
-                onClick={() => void handleBind()}
-                disabled={busy === 'add'}
-              >
-                {busy === 'add' ? 'Working…' : kind === 'oauth2' ? 'Connect' : 'Add'}
-              </button>
-            )}
-          </div>
-        </div>
+        <AddConnectionDialog
+          projectId={project.id}
+          onClose={() => setAdding(false)}
+          onAdded={(added) => void handleAdded(added)}
+        />
       )}
 
       {error && <p className="error small">{error}</p>}
       {notice && <p className="muted small">{notice}</p>}
 
-      <ConfirmDialog
-        open={confirmUnbind !== null}
-        title="Remove connector?"
-        message={
-          bindings.find((b) => b.id === confirmUnbind)?.driver === 'device'
-            ? 'This stops the camera and deletes the pictures it saved on this computer. The moments it recorded stay in the project.'
-            : 'This removes the binding and its stored credential. Synced files stay on disk.'
+      <RemoveConnectionDialog
+        projectId={project.id}
+        binding={
+          confirmUnbind
+            ? (bindings.find((b) => b.id === confirmUnbind) ?? { id: confirmUnbind })
+            : null
         }
-        confirmLabel="Remove"
-        danger
-        onConfirm={() => {
-          if (confirmUnbind) void handleUnbind(confirmUnbind);
+        onConfirm={async (deleteData) => {
+          if (confirmUnbind) await handleUnbind(confirmUnbind, deleteData);
         }}
         onCancel={() => setConfirmUnbind(null)}
       />

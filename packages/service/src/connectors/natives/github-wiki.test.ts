@@ -64,6 +64,7 @@ function fakeRuntime(files: Record<string, string>): {
         }
         return { stdout: '', stderr: '' };
       }
+      if (args.includes('ls-remote')) return { stdout: `${COMMIT}\tHEAD\n`, stderr: '' };
       if (args[0] === 'rev-parse') return { stdout: `${COMMIT}\n`, stderr: '' };
       if (args[0] === 'show') return { stdout: `${COMMIT_DATE}\n`, stderr: '' };
       if (args[0] === 'ls-files') return { stdout: tracked, stderr: '' };
@@ -136,13 +137,18 @@ describe('GitHubWikiAdapter', () => {
     );
 
     await adapter.ensureAuth();
-    const clone = calls.find((call) => call.args.includes('clone'))!;
-    const joined = clone.args.join(' ');
-    // Scoped to the wiki's host: a redirect elsewhere never receives it.
-    expect(joined).toContain('http.https://github.example.test/.extraheader=AUTHORIZATION: Basic ');
-    expect(joined).toContain('https://github.example.test/octocat/Hello-World.wiki.git');
-    expect(joined).not.toContain(token);
-    expect(clone.opts?.redact).toContain(token);
+    await adapter.listChangesSince('', undefined);
+    for (const verb of ['ls-remote', 'clone']) {
+      const call = calls.find((c) => c.args.includes(verb))!;
+      const joined = call.args.join(' ');
+      // Scoped to the wiki's host: a redirect elsewhere never receives it.
+      expect(joined).toContain(
+        'http.https://github.example.test/.extraheader=AUTHORIZATION: Basic ',
+      );
+      expect(joined).toContain('https://github.example.test/octocat/Hello-World.wiki.git');
+      expect(joined).not.toContain(token);
+      expect(call.opts?.redact).toContain(token);
+    }
     await adapter.close();
   });
 
@@ -168,6 +174,38 @@ describe('GitHubWikiAdapter', () => {
     const complete = await adapter.listChangesSince('', second.cursor);
     expect(complete.records).toEqual([]);
     expect(complete.cursor).toEqual(second.cursor);
+    await adapter.close();
+  });
+
+  it('a wiki that has not moved since the last complete pass is not cloned again', async () => {
+    const { runtime, calls } = fakeRuntime({ 'Home.md': '# Welcome' });
+    const first = new GitHubWikiAdapter(binding(), deps(), runtime);
+    await first.ensureAuth();
+    const batch = await first.listChangesSince('', undefined);
+    await first.close();
+    calls.length = 0;
+
+    const next = new GitHubWikiAdapter(binding(), deps(), runtime);
+    await next.ensureAuth();
+    const again = await next.listChangesSince('', batch.cursor);
+    expect(again.records).toEqual([]);
+    expect(calls.map((c) => c.args.find((a) => a === 'ls-remote' || a === 'clone'))).toEqual([
+      'ls-remote',
+    ]);
+    await next.close();
+  });
+
+  it('a wiki larger than one batch reconciles its page list once the last batch lands', async () => {
+    const files = Object.fromEntries(
+      Array.from({ length: 3 }, (_, i) => [`Page-${i}.md`, `page ${i}`]),
+    );
+    const { runtime } = fakeRuntime(files);
+    const adapter = new GitHubWikiAdapter(binding(), deps(), runtime);
+    await adapter.ensureAuth();
+    const first = await adapter.listChangesSince('', undefined, { limit: 2 });
+    expect(first.fullListing).toEqual({ first: true, last: false });
+    const second = await adapter.listChangesSince('', first.cursor, { limit: 2 });
+    expect(second.fullListing).toEqual({ first: false, last: true });
     await adapter.close();
   });
 

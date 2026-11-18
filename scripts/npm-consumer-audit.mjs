@@ -13,10 +13,14 @@
  * blocked critical only until the 2026-10-27 npm ship audit, when such pins
  * left every consumer's `npm audit` with 12 high advisories marked "No fix
  * available" and this gate passed them.
+ *
+ * ReDoS advisories never block (`isRegexDenialOfService`); the check prints
+ * them instead.
  */
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isRegexDenialOfService } from './audit-vulnerability-policy.mjs';
 
 const BLOCKING = new Set(['high', 'critical']);
 
@@ -27,7 +31,7 @@ export const AUDIT_ALLOWLIST_PATH = join(
 
 /**
  * @typedef {{ id: string, reason: string, expires: string }} AllowlistEntry
- * @typedef {{ id: string, severity: string, pkg: string, title: string }} Advisory
+ * @typedef {{ id: string, severity: string, pkg: string, title: string, regexDenial: boolean }} Advisory
  */
 
 /** @returns {AllowlistEntry[]} */
@@ -45,8 +49,8 @@ export function readAuditAllowlist(path = AUDIT_ALLOWLIST_PATH) {
 }
 
 /**
- * High and critical advisories that no unexpired allowlist entry
- * covers. Advisory ids come from the GHSA URL npm reports.
+ * High and critical advisories that are not ReDoS and that no unexpired
+ * allowlist entry covers. Advisory ids come from the GHSA URL npm reports.
  *
  * @param {any} report parsed `npm audit --json`
  * @param {AllowlistEntry[]} allowlist
@@ -56,6 +60,21 @@ export function readAuditAllowlist(path = AUDIT_ALLOWLIST_PATH) {
 export function blockingAdvisories(report, allowlist, now = new Date()) {
   const today = now.toISOString().slice(0, 10);
   const accepted = new Set(allowlist.filter((e) => e.expires >= today).map((e) => e.id));
+  return highAdvisories(report).filter((a) => !a.regexDenial && !accepted.has(a.id));
+}
+
+/**
+ * High and critical ReDoS advisories, which the check prints but never blocks on.
+ *
+ * @param {any} report parsed `npm audit --json`
+ * @returns {Advisory[]}
+ */
+export function regexDenialAdvisories(report) {
+  return highAdvisories(report).filter((a) => a.regexDenial);
+}
+
+/** @returns {Advisory[]} */
+function highAdvisories(report) {
   const found = new Map();
   for (const [pkg, vulnerability] of Object.entries(report?.vulnerabilities ?? {})) {
     for (const via of vulnerability?.via ?? []) {
@@ -64,12 +83,12 @@ export function blockingAdvisories(report, allowlist, now = new Date()) {
       if (typeof via !== 'object' || via === null) continue;
       if (!BLOCKING.has(via.severity)) continue;
       const id = /GHSA-[\w-]+/i.exec(String(via.url ?? ''))?.[0] ?? String(via.source ?? via.title);
-      if (accepted.has(id)) continue;
       found.set(`${id}:${pkg}`, {
         id,
         severity: via.severity,
         pkg,
         title: String(via.title ?? ''),
+        regexDenial: isRegexDenialOfService(via),
       });
     }
   }

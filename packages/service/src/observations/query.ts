@@ -198,6 +198,17 @@ export function findTable(
   );
 }
 
+const SOURCE_RANK = '__gezel_source_rank';
+const SOURCE_FILE = '__gezel_source_file';
+
+/** The manifest's dedupe key, when every column it names exists. */
+function dedupeKeyOf(manifest: ObservationTableRef['manifest']): string[] | undefined {
+  const keys = manifest.dedupeKey;
+  if (!keys?.length) return undefined;
+  const names = new Set(manifest.columns.map((c) => c.name));
+  return keys.every((k) => names.has(k)) ? keys : undefined;
+}
+
 /**
  * SQL defining one table's view, or null when the table has no data files at
  * all.
@@ -224,24 +235,40 @@ export async function buildTableView(
     ndjson.push(...files.sealed, ...files.open);
   }
 
+  // With a dedupe key, each source says where its rows came from, so the
+  // copy delivered last wins: NDJSON is newer than Parquet, and within a
+  // kind the part ordinal in the file name orders deliveries.
+  const keys = dedupeKeyOf(ref.manifest);
+  const origin = (rank: number) => (keys ? `, ${rank} AS ${SOURCE_RANK}` : '');
+  const fileArg = keys ? `, filename = '${SOURCE_FILE}'` : '';
   if (parquet.length > 0) {
     const list = parquet.map((f) => `'${sqlLiteral(f)}'`).join(', ');
-    sources.push(`SELECT * FROM read_parquet([${list}], union_by_name = true)`);
+    sources.push(
+      `SELECT *${origin(0)} FROM read_parquet([${list}], union_by_name = true${fileArg})`,
+    );
   }
   if (ndjson.length > 0) {
     const list = ndjson.map((f) => `'${sqlLiteral(f)}'`).join(', ');
     const columns = ref.manifest.columns
       .map((c) => `'${sqlLiteral(c.name)}': '${c.type}'`)
       .join(', ');
-    sources.push(`SELECT * FROM read_ndjson([${list}], columns = {${columns}})`);
+    sources.push(
+      `SELECT *${origin(1)} FROM read_ndjson([${list}], columns = {${columns}}${fileArg})`,
+    );
   }
 
-  const body =
+  let body =
     sources.length > 0
       ? sources.join('\n      UNION ALL BY NAME\n      ')
       : `SELECT ${ref.manifest.columns
           .map((c) => `NULL::${c.type} AS "${c.name}"`)
           .join(', ')} WHERE false`;
+  if (keys && sources.length > 0) {
+    const partition = keys.map((k) => `"${k.replace(/"/g, '""')}"`).join(', ');
+    body = `SELECT * EXCLUDE (${SOURCE_RANK}, ${SOURCE_FILE}) FROM (
+      ${body}
+    ) QUALIFY row_number() OVER (PARTITION BY ${partition} ORDER BY ${SOURCE_RANK} DESC, ${SOURCE_FILE} DESC) = 1`;
+  }
 
   return `CREATE OR REPLACE VIEW "${ref.queryName}" AS ${body};`;
 }

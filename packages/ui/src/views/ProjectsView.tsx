@@ -20,6 +20,8 @@ import {
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   folderKindOf,
   getProjectType,
+  isConnectorBookkeepingPath,
+  isConnectorCorpusPath,
   isSharedLibraryProject,
   listProjectTypes,
   normalizeCodexPermissionMode,
@@ -400,15 +402,17 @@ const PROJECT_TAB_VISIBILITY_OPTIONS: ReadonlyArray<{
 const DEVELOPER_PROJECT_TABS: ReadonlySet<ConfigurableProjectTab> = new Set([
   'approvals',
   'workspace',
-  'artifacts',
 ]);
 
 /**
- * Whether a tab shows. An explicit setting always wins. Otherwise Tools,
- * Workspace and Artifacts belong to code projects (and debug mode): a bakery's
- * invoice project showed package.json, prompt drafts and a code-city map
- * beside its board. `map` is the Views tab (the Village's old key): shown when
- * a view fits a code project, a watched folder, or debug mode.
+ * Whether a tab shows. An explicit setting always wins. Otherwise Tools and
+ * Workspace belong to code projects (and debug mode): a bakery's invoice
+ * project showed package.json and a code-city map beside its board. Artifacts
+ * shows everywhere, Default and the shared library included, because it is
+ * where every project's finished work lands; composer drafts no longer list
+ * there, which was the bakery's complaint about it. `map` is the Views tab
+ * (the Village's old key): shown when a view fits a code project, a watched
+ * folder, or debug mode.
  */
 function projectTabIsVisible(
   project: Pick<
@@ -629,6 +633,16 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   }, []);
   useEffect(() => {
     setFileTreeFold((current) => (current && current.tab !== tab ? null : current));
+  }, [tab]);
+  // A folder another tab asked to show in Artifacts (a connection's Open).
+  // The ask lasts one visit, like the fold above.
+  const [artifactsReveal, setArtifactsReveal] = useState<{
+    path: string;
+    requestId: number;
+  } | null>(null);
+  const artifactsRevealSeq = useRef(0);
+  useEffect(() => {
+    if (tab !== 'artifacts') setArtifactsReveal(null);
   }, [tab]);
   const [workspaceFiles, setWorkspaceFiles] = useState<FileEntry[]>([]);
   const [workspaceHtmlFiles, setWorkspaceHtmlFiles] = useState<string[]>([]);
@@ -1744,6 +1758,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
     [selected, focusFile],
   );
 
+  // Show a folder in the Artifacts tab: its folders opened, its row marked
+  // and scrolled into view. A file already open there stays open.
+  const openArtifactsFolder = useCallback((path: string) => {
+    artifactsRevealSeq.current += 1;
+    setArtifactsReveal({ path, requestId: artifactsRevealSeq.current });
+    setTab('artifacts');
+  }, []);
+
   const allowOutsideInMarkdownEditing = useCallback(
     async (entry: FileEntry, source: FileTab) => {
       if (!selected || entry.isDirectory) return;
@@ -1925,12 +1947,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // The outside-in sidecar folders (`_squisq`, `*_files`) are hidden for the
   // same reason the walker hides dot-folders — "show hidden files" reveals
   // both, otherwise the artifacts shadow/ folder would open onto nothing.
+  // Connector bookkeeping (`_meta.json`, `_flags.json`) is hidden here rather
+  // than in the walker because gezels and scripts read the same listing.
   const visibleActiveEntries = useMemo(
     () =>
       showActiveHidden
         ? activeEntries
-        : activeEntries.filter((entry) => !isOutsideInInternalPath(entry.path)),
-    [activeEntries, showActiveHidden],
+        : activeEntries.filter(
+            (entry) =>
+              !isOutsideInInternalPath(entry.path) &&
+              !(fileTab === 'artifacts' && isConnectorBookkeepingPath(entry.path)),
+          ),
+    [activeEntries, showActiveHidden, fileTab],
   );
   const storedViewMode: FileViewMode = fileTab ? fileViewModes[fileTab] : 'tree-alpha';
   const activeViewMode =
@@ -2070,11 +2098,17 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // Workspace files are editable exactly when the managed-workspace write
   // policy allows it; artifacts always are. A rendered document additionally
   // needs its explicit Markdown-editing opt-in.
-  const isReadOnly = openFile?.outsideIn
-    ? !openFile.outsideIn.editingEnabled || !canWriteProjectFiles(openFile.source)
-    : fileTab
-      ? !canWriteProjectFiles(fileTab)
-      : true;
+  // A connector's record is rewritten on its next sync, so an edit there
+  // would be silently lost: those open read-only.
+  const connectorRecordOpen =
+    openFile?.source === 'artifacts' && isConnectorCorpusPath(openFile.path);
+  const isReadOnly = connectorRecordOpen
+    ? true
+    : openFile?.outsideIn
+      ? !openFile.outsideIn.editingEnabled || !canWriteProjectFiles(openFile.source)
+      : fileTab
+        ? !canWriteProjectFiles(fileTab)
+        : true;
   const selectedWorkspaceIssueCount = workspaceReviewPath
     ? indexedIssueCountForEntry(
         { name: basenameOf(workspaceReviewPath), path: workspaceReviewPath, isDirectory: false },
@@ -2673,14 +2707,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         projectTabIsVisible(selected, 'tasks', { debugMode }) || tab === 'tasks',
                     },
                     {
-                      value: 'packages',
-                      label: 'Tools',
-                      icon: 'tools',
-                      show:
-                        projectTabIsVisible(selected, 'approvals', { debugMode }) ||
-                        tab === 'packages',
-                    },
-                    {
                       value: 'workspace',
                       label: 'Workspace',
                       icon: 'workspace',
@@ -2721,6 +2747,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       show:
                         (projectTabIsVisible(selected, 'map', { debugMode }) || tab === 'map') &&
                         projectViews.view !== null,
+                    },
+                    {
+                      value: 'packages',
+                      label: 'Tools',
+                      icon: 'tools',
+                      show:
+                        projectTabIsVisible(selected, 'approvals', { debugMode }) ||
+                        tab === 'packages',
                     },
                     {
                       value: 'connections',
@@ -3383,6 +3417,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       collapseTreeRequest={
                         fileTreeFold?.tab === fileTab ? fileTreeFold.requestId : null
                       }
+                      reveal={fileTab === 'artifacts' ? artifactsReveal : null}
                       entries={visibleActiveEntries}
                       truncated={
                         (fileTab === 'workspace' ? workspaceTruncated : artifactsTruncated) &&
@@ -3713,6 +3748,7 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                             <ProjectConnectionsTab
                               project={selected}
                               onProjectChange={setSelected}
+                              onOpenFolder={openArtifactsFolder}
                             />
                           </ProjectPaneBoundary>
                           <ProjectPaneBoundary>

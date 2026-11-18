@@ -21,7 +21,7 @@ import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { resolveCredentialOriginPolicy } from '../secrets/origins.js';
-import type { CredentialRegistry } from '../secrets/registry.js';
+import { CredentialMissingError, type CredentialRegistry } from '../secrets/registry.js';
 import type { TaskManager } from '../tasks/manager.js';
 import { assertPublicUrl } from '../utils/ssrf.js';
 
@@ -109,6 +109,13 @@ export interface DispatcherDeps {
    * return a typed error.
    */
   mcpCall?: (ctx: DispatcherContext, tool: string, args: unknown) => Promise<unknown>;
+  /**
+   * Test seam for the `http.*` methods: what answers their requests and how
+   * a destination is checked for private addresses. The catalog contract
+   * sweep runs a connector's real fetch script against recorded answers
+   * through it. Production never sets it; a guard test pins that.
+   */
+  http?: { fetch?: typeof fetch; assertPublicUrl?: (url: string) => Promise<void> };
   /**
    * Optional. When provided, the dispatcher resolves `credential:<name>`
    * capabilities through it for the `http.authed` method. Scripts whose
@@ -545,10 +552,10 @@ export function buildDispatcher(deps: DispatcherDeps): {
         if (Object.keys(headers).some((name) => name.toLowerCase() === 'authorization')) {
           throw new Error('http.request is anonymous; use http.authed for Authorization');
         }
-        await assertPublicUrl(url);
+        await (deps.http?.assertPublicUrl ?? assertPublicUrl)(url);
         const init: RequestInit = { method, headers, redirect: 'manual' };
         if (body !== undefined) init.body = body;
-        return fetchScriptHttp(url, init);
+        return fetchScriptHttp(url, init, deps.http?.fetch);
       },
     },
 
@@ -580,7 +587,20 @@ export function buildDispatcher(deps: DispatcherDeps): {
             ctx.strippedCapabilities?.get(requiredCap),
           );
         }
-        await assertCredentialOriginAllowed(store, ctx.projectId, credentialName, url);
+        // With no value stored there is nothing to protect: say so first, so
+        // a script's anonymous fallback works whatever host it calls. Checking
+        // the destination first made a type with no declared origins fail
+        // every call, signed in or not.
+        if (await deps.credentials.isMissing?.(credentialName, ctx.projectId)) {
+          throw new CredentialMissingError(credentialName);
+        }
+        await assertCredentialOriginAllowed(
+          store,
+          ctx.projectId,
+          credentialName,
+          url,
+          deps.http?.assertPublicUrl,
+        );
         // Origin binding is checked before the secret is resolved, and
         // redirects remain manual so the Authorization header can never be
         // forwarded to a second origin implicitly.
@@ -604,7 +624,7 @@ export function buildDispatcher(deps: DispatcherDeps): {
         const init: RequestInit = { method, headers, redirect: 'manual' };
         if (body !== undefined) init.body = body;
 
-        return fetchScriptHttp(url, init);
+        return fetchScriptHttp(url, init, deps.http?.fetch);
       },
     },
   };
@@ -628,6 +648,7 @@ async function assertCredentialOriginAllowed(
   projectId: string,
   credentialName: string,
   rawUrl: string,
+  checkPublic: (url: string) => Promise<void> = assertPublicUrl,
 ): Promise<void> {
   let url: URL;
   try {
@@ -664,12 +685,13 @@ async function assertCredentialOriginAllowed(
   // Built-in providers stay public. Webhook and toolset destinations were
   // explicitly configured and may intentionally point at a self-hosted LAN
   // service, but remain pinned to that exact origin.
-  if (!originPolicy.permitsPrivateNetwork) await assertPublicUrl(url.href);
+  if (!originPolicy.permitsPrivateNetwork) await checkPublic(url.href);
 }
 
 async function fetchScriptHttp(
   url: string,
   init: RequestInit,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<{
   status: number;
   ok: boolean;
@@ -683,7 +705,7 @@ async function fetchScriptHttp(
   );
   timeout.unref?.();
   try {
-    const response = await fetch(url, { ...init, signal: controller.signal });
+    const response = await fetchImpl(url, { ...init, signal: controller.signal });
     const body = await readBoundedResponseText(response, SCRIPT_HTTP_MAX_RESPONSE_BYTES);
     return {
       status: response.status,

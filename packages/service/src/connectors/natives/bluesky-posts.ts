@@ -40,6 +40,7 @@ import type {
   NormalizedRecord,
   RecordRef,
 } from '../types.js';
+import { retryAfterOf } from '../types.js';
 import {
   type WatchedPost,
   deletedPostRecordIds,
@@ -58,6 +59,15 @@ const DEFAULT_SERVICE = 'https://bsky.social';
 const PAGE_SIZE = 100;
 const MAX_PAGES_PER_PASS = 10;
 const DEFAULT_BACKFILL = 500;
+/**
+ * How far below the floor a walk keeps reading. The feed sorts a post by the
+ * earlier of when it was written and when the AppView indexed it, so a post a
+ * slow relay delivered after the last pass sorts below posts that pass saw.
+ */
+const FEED_LAG_MS = 60 * 60_000;
+/** Budgets for one request: a server that accepts and goes quiet must not hold the pass. */
+const READ_TIMEOUT_MS = 30_000;
+const WRITE_TIMEOUT_MS = 120_000;
 const MAX_POST_GRAPHEMES = 300;
 const MAX_PUBLISH_IMAGES = 4;
 /** Bluesky's per-image blob limit. */
@@ -203,24 +213,44 @@ function sessionCacheFor(fetchImpl: typeof fetch): Map<string, AtprotoSession> {
  * (one refresh call, which also rotates the refresh token) before falling
  * back to a fresh sign-in.
  */
-export function createBlueskyRuntime(fetchImpl: typeof fetch = fetch): BlueskyRuntime {
+export function createBlueskyRuntime(
+  fetchImpl: typeof fetch = fetch,
+  opts: { requestTimeoutMs?: number } = {},
+): BlueskyRuntime {
   return {
-    login: (opts) => blueskyLogin(fetchImpl, opts),
+    login: (login) => blueskyLogin(fetchImpl, login, opts.requestTimeoutMs),
     now: () => new Date(),
+  };
+}
+
+/** Give every request a deadline: reads short, writes (an image upload) longer. */
+function withRequestTimeout(fetchImpl: typeof fetch, overrideMs?: number): typeof fetch {
+  return (input, init) => {
+    const method = (
+      init?.method ?? (input instanceof Request ? input.method : 'GET')
+    ).toUpperCase();
+    const budget = AbortSignal.timeout(
+      overrideMs ?? (method === 'GET' ? READ_TIMEOUT_MS : WRITE_TIMEOUT_MS),
+    );
+    const signal = init?.signal ? AbortSignal.any([init.signal, budget]) : budget;
+    return fetchImpl(input, { ...init, signal });
   };
 }
 
 async function blueskyLogin(
   fetchImpl: typeof fetch,
   { service, identifier, password }: { service: string; identifier: string; password: string },
+  requestTimeoutMs?: number,
 ): Promise<BlueskyAgentApi> {
   const { AtpAgent, RichText } = await loadAtproto();
+  // Keyed by the caller's transport, not the timed wrapper, so sessions are reused.
   const cache = sessionCacheFor(fetchImpl);
+  const timedFetch = withRequestTimeout(fetchImpl, requestTimeoutMs);
   const key = createHash('sha256').update(`${service}\n${identifier}\n${password}`).digest('hex');
   const makeAgent = () =>
     new AtpAgent({
       service,
-      fetch: fetchImpl,
+      fetch: timedFetch,
       persistSession: (event, session) => {
         if (session && (event === 'create' || event === 'update')) cache.set(key, session);
         else if (event === 'expired' || event === 'create-failed') cache.delete(key);
@@ -391,7 +421,8 @@ export class BlueskyPostsAdapter implements ConnectorAdapter {
       if (scope === 'stats') return await this.listStats(cursor);
       return { records: [], cursor };
     } catch (err) {
-      if (isRateLimitError(err)) return { records: [], cursor, rateLimited: true };
+      if (isRateLimitError(err))
+        return { records: [], cursor, rateLimited: true, ...retryAfterOf(err) };
       if ((err as { status?: unknown } | null)?.status === 401) {
         // The session is the account's: the rest of the pass fails with it.
         this.accountFailure = new Error(
@@ -523,14 +554,14 @@ export class BlueskyPostsAdapter implements ConnectorAdapter {
         const item = feed[i];
         const scan = scanFeedItem(item, agent.did);
         if (scan) {
-          // The feed is newest-first on its sort axis (repost time for
-          // reposts, otherwise indexedAt), and a post's indexedAt never
-          // exceeds its sort timestamp — once the axis is past both the
-          // incremental floor and the metrics window there is nothing left.
+          // The feed is newest-first on its own axis (repost time for a
+          // repost, else the earlier of written and indexed). A post indexed
+          // late sorts below ones already seen, so the walk reads FEED_LAG_MS
+          // past the floor before it stops; what it re-reads is not wanted.
           if (
             sinceMs !== undefined &&
-            scan.sortAtMs <= sinceMs &&
-            (!metricsDue || scan.sortAtMs < windowFloorMs)
+            scan.axisMs < sinceMs - FEED_LAG_MS &&
+            (!metricsDue || scan.axisMs < windowFloorMs)
           ) {
             done = true;
             break;
@@ -1156,6 +1187,8 @@ interface FeedScan {
    * this rather than on indexedAt.
    */
   feedMs: number;
+  /** Where the feed sorts this entry: the repost time for a repost, else `feedMs`. */
+  axisMs: number;
   authored: boolean;
 }
 
@@ -1191,6 +1224,7 @@ function scanFeedItem(item: unknown, accountDid: string): FeedScan | null {
     sortAtIso: reasonMs !== undefined ? (reasonIso as string) : indexedAtIso,
     sortAtMs: reasonMs ?? indexedAtMs,
     feedMs: Math.min(indexedAtMs, createdAtMs ?? indexedAtMs),
+    axisMs: reasonMs ?? Math.min(indexedAtMs, createdAtMs ?? indexedAtMs),
     authored:
       view.reason == null && typeof post.author?.did === 'string' && post.author.did === accountDid,
   };

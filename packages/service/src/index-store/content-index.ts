@@ -2369,6 +2369,14 @@ export class ContentIndex {
     return run;
   }
 
+  /** The artifacts index the saved-page synopses read (web-page-summaries.ts). */
+  webPageSummaryHost(projectId: string) {
+    return {
+      openArtifacts: () => this.openArtifacts(projectId),
+      artifactsDir: this.store.projectArtifactsDir(projectId),
+    };
+  }
+
   /** Docs-FTS over the project's artifacts corpora. Empty until a refresh has built the index. */
   async searchArtifacts(
     projectId: string,

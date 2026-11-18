@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   buildAuthorizeUrl,
+  clientAuthFor,
+  exchangeAuthCode,
   oauthClientSecretKey,
+  refreshToken,
   resolveOAuthClient,
   resolveOAuthClientFromEnv,
   validateOAuthEndpoints,
@@ -126,5 +129,70 @@ describe('resolveOAuthClient (bring-your-own app ladder)', () => {
     await expect(
       resolveOAuthClient({ clientIdEnv: 'PATH', getSecret: async () => null }),
     ).rejects.toThrow(/invalid client environment/);
+  });
+});
+
+describe('token endpoint client authentication', () => {
+  function capture(): {
+    fetchImpl: typeof fetch;
+    seen: { headers: Headers; form: URLSearchParams }[];
+  } {
+    const seen: { headers: Headers; form: URLSearchParams }[] = [];
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      seen.push({
+        headers: new Headers(init?.headers),
+        form: new URLSearchParams(String(init?.body ?? '')),
+      });
+      return new Response(JSON.stringify({ access_token: 'a', expires_in: 60 }), {
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+    return { fetchImpl, seen };
+  }
+  const base = { authEndpoint: 'https://auth.example/a', scopes: [] };
+
+  it('sends a confidential client in the form by default', async () => {
+    const { fetchImpl, seen } = capture();
+    await refreshToken({
+      endpoints: { ...base, tokenEndpoint: 'https://tokens.example/t' },
+      clientId: 'id',
+      clientSecret: 'secret',
+      refreshToken: 'r',
+      fetchImpl,
+    });
+    expect(seen[0]!.headers.has('authorization')).toBe(false);
+    expect(seen[0]!.form.get('client_secret')).toBe('secret');
+  });
+
+  it('uses HTTP Basic, form-encoding the pair, when the type or host asks for it', async () => {
+    const { fetchImpl, seen } = capture();
+    await exchangeAuthCode({
+      endpoints: { ...base, tokenEndpoint: 'https://tokens.example/t', clientAuth: 'basic' },
+      clientId: 'my id',
+      clientSecret: 's:cret',
+      code: 'c',
+      codeVerifier: 'v',
+      redirectUri: 'http://127.0.0.1/cb',
+      fetchImpl,
+    });
+    expect(seen[0]!.headers.get('authorization')).toBe(
+      `Basic ${Buffer.from('my%20id:s%3Acret').toString('base64')}`,
+    );
+    expect(seen[0]!.form.has('client_secret')).toBe(false);
+    expect(seen[0]!.form.has('client_id')).toBe(false);
+    expect(clientAuthFor({ tokenEndpoint: 'https://api.x.com/2/oauth2/token' })).toBe('basic');
+    expect(clientAuthFor({ tokenEndpoint: 'https://oauth2.googleapis.com/token' })).toBe('post');
+  });
+
+  it('a public client keeps its id in the form even where Basic is the rule', async () => {
+    const { fetchImpl, seen } = capture();
+    await refreshToken({
+      endpoints: { ...base, tokenEndpoint: 'https://api.x.com/2/oauth2/token' },
+      clientId: 'public-id',
+      refreshToken: 'r',
+      fetchImpl,
+    });
+    expect(seen[0]!.headers.has('authorization')).toBe(false);
+    expect(seen[0]!.form.get('client_id')).toBe('public-id');
   });
 });

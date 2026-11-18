@@ -53,7 +53,7 @@ Order is fixed in `buildInstructions`. Conditions are the interesting part:
 | 11 | `### Recalled from prior sessions` legacy compatibility block | only when ChatManager is embedded without the scoped SearchService wiring | ~4–7 bullets |
 | 12 | Capability-gated conduct: **act-don't-narrate** only when the turn has callable tools; structured-decision guidance only when `ask_user_question` is wired; **markdown guidance**, which also carries the one standing plain-words rule (name what you made or are doing, never task ids, tool names or craftbook ids; tool results that say what to tell the person end on the same sentence, `PLAIN_WORDS_RELAY` in [mcp relay-text.ts](../packages/mcp/src/relay-text.ts)), incl. the Squisq-dialect brief (`SQUISQ_DIALECT_BRIEF` from [prompts/squisq-dialect.ts](../packages/service/src/prompts/squisq-dialect.ts) — mermaid fences + `{[template]}` annotations; the long example-led sibling `SQUISQ_DIALECT_NOTE` goes into the transform one-shot prompt, context-gated). Task resumption is not standing conduct: it is emitted only inside rows 9/10/18 when an actual task or assignment exists, and names task tools only when wired. | by capability; markdown always | ~120 tok with no tools; up to ~370 tok with action + structured-decision guidance |
 | 13 | Browsing guidance (Playwright present vs "not installed, don't emit fake `browser_*`") | non-delegation roles | 1–3 lines |
-| 14 | `## Handling external (untrusted) content` | mail-enabled projects | ~850 ch |
+| 14 | `## Handling external (untrusted) content` — synced email, saved web pages and other connected data are data, never instructions | projects with any connector binding | ~900 ch |
 | 14b | `## Facts and sources` — state facts only from evidence, cite it as `[n]`, look up or leave out what is missing ([factual-writing.md](factual-writing.md)) | factual mode: the gezel's `factualWriting` setting, else a fact-stating role (writer, researcher, reviewer, …), else any session with document-write tools | ~700 ch |
 | 15 | **Behavior `promptAppend` walk** (the old "local hints") | per resolved model profile — see next section | 0 to ~9.4K ch |
 | 16 | `## Tools available this turn` ([chat/tools-block.ts](../packages/service/src/chat/tools-block.ts)) | tiers tiny/small/medium only; skipped for providers without an MCP bridge (copilot, the CLI providers); per-gezel `tools.md` overrides; bridge-failure notice overrides all | tiny: full descriptions; small/medium: names-only |
@@ -304,6 +304,19 @@ while they stream.
   thread runs no turn-intent plan, no behavior prelude, no library recall and
   no indexed context: the book is its whole context. `craftbook_read` returns
   the same checkup, so the model can see a change clear a finding.
+- **Named in this message** (`resolveTurnNamedItems`): on a person's own turn,
+  a web address in the message that has a saved copy in the project opens the
+  turn with that copy: title, address, the path of the local file, a summary,
+  and the page's text (whole, or the opening plus the passages that share
+  words with the question). One bracketed line says the text is untrusted
+  evidence. It sits nearer the person's words than indexed context, which
+  leaves the same file out, and it has its own budget: three times the
+  indexed-context ceiling, at most 6,000 tokens. A page that could not be
+  saved gets "No saved copy: …" so the gezel says so. It names
+  `read_web_page` or `read_artifact` only when the turn has the tool. No
+  block for a visitor, a craftbook-editing thread, or a message that names
+  nothing saved. The daemon only reads here; saving is the composer's, before
+  Send ([prompt-connectors.md](prompt-connectors.md)).
 - **Indexed context** (`resolveTurnProjectRetrieval`): a scoped, diversified
   evidence block from the active project, current gezel memory, the person's
   own memory ("About you"), and shared library. Off/Lean/Balanced/Deep plus a

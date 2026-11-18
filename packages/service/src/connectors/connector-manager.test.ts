@@ -72,6 +72,7 @@ afterEach(async () => {
 
 function harness(extra?: {
   scriptRunner?: ConstructorParameters<typeof ConnectorManager>[0]['scriptRunner'];
+  contentIndex?: ConstructorParameters<typeof ConnectorManager>[0]['contentIndex'];
 }) {
   let project: FakeProject = { id: 'p1' };
   const store = {
@@ -258,6 +259,78 @@ describe('ConnectorManager', () => {
     await h.mgr.unbind(h.getProject() as never, binding.id);
     expect(h.getProject().connectors).toEqual([]);
     expect(h.secretMap.has(`connector-fake-conn:${binding.id}`)).toBe(false);
+  });
+
+  describe('removing what a connection downloaded', () => {
+    async function twoConnections(refreshed: string[] = []) {
+      const h = harness({
+        contentIndex: {
+          refreshArtifacts: async (projectId: string) => {
+            refreshed.push(projectId);
+            return null;
+          },
+        } as never,
+      });
+      const a = await h.mgr.bind(h.getProject() as never, {
+        type: 'fake-conn',
+        displayName: 'Mine',
+        credential: '{}',
+      });
+      const b = await h.mgr.bind(h.getProject() as never, {
+        type: 'fake-conn',
+        displayName: 'Theirs',
+        credential: '{}',
+      });
+      for (const [dir, held] of [
+        ['mine', 'aaaaaaaa'],
+        ['theirs', 'bbbbbbbb'],
+      ] as const) {
+        const rec = join(ws, 'artifacts', 'data', dir, 'r');
+        await mkdir(rec, { recursive: true });
+        await writeFile(join(rec, '001-x.md'), 'x');
+        await writeFile(join(rec, '_flags.json'), JSON.stringify({ [held]: {} }));
+        const q = join(ws, 'private', 'quarantine', 'fake-conn');
+        await mkdir(q, { recursive: true });
+        await writeFile(join(q, `${held}.md`), 'held');
+      }
+      return { h, a, b };
+    }
+
+    it('keeps it unless asked', async () => {
+      const { h, a } = await twoConnections();
+      expect(await h.mgr.storedData(h.getProject() as never, a.id)).toEqual({
+        files: 3,
+        bytes: 1 + JSON.stringify({ aaaaaaaa: {} }).length + 4,
+      });
+      expect(await h.mgr.unbind(h.getProject() as never, a.id)).toEqual({});
+      expect(await readdir(join(ws, 'artifacts', 'data'))).toContain('mine');
+    });
+
+    it('deletes its records and held copies, leaves the other connection’s, and refreshes the index', async () => {
+      const refreshed: string[] = [];
+      const { h, a, b } = await twoConnections(refreshed);
+      const result = await h.mgr.unbind(h.getProject() as never, a.id, { deleteData: true });
+      expect(result.deleted?.files).toBe(3);
+      expect(await readdir(join(ws, 'artifacts', 'data'))).toEqual(['theirs']);
+      expect(await readdir(join(ws, 'private', 'quarantine', 'fake-conn'))).toEqual([
+        'bbbbbbbb.md',
+      ]);
+      expect(h.getProject().connectors?.map((c) => c.id)).toEqual([b.id]);
+      expect(refreshed).toEqual(['p1']);
+    });
+
+    it('refuses with the connection still in place when another saves into its folder', async () => {
+      const { h, a, b } = await twoConnections();
+      const project = h.getProject();
+      project.connectors = project.connectors?.map((c) =>
+        c.id === b.id ? { ...c, corpusDir: 'data/mine' } : c,
+      );
+      await expect(
+        h.mgr.unbind(h.getProject() as never, a.id, { deleteData: true }),
+      ).rejects.toThrow(/Another connection saves into data\/mine/);
+      expect(h.getProject().connectors?.map((c) => c.id)).toEqual([a.id, b.id]);
+      expect(h.secretMap.has(`connector-fake-conn:${a.id}`)).toBe(true);
+    });
   });
 
   it('resolves corpusDir at bind time from displayName, with collision suffixes', async () => {

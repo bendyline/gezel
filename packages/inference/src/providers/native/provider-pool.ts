@@ -243,7 +243,15 @@ export interface PoolSnapshot {
  * it in the same slot it uses for singleton providers. See
  * {@link ProviderPool.queueSummaries}.
  */
-export type PooledQueueSummary = ProviderQueueDescription & { maxConcurrency: number };
+export type PooledQueueSummary = ProviderQueueDescription & {
+  maxConcurrency: number;
+  /**
+   * Task sessions worth holding open across this provider's replicas, set
+   * only when a replica asks for fewer than its background lane admits
+   * (see `BatchCapability.taskConcurrency`).
+   */
+  taskConcurrency?: number;
+};
 
 function emptyPooledQueueSummary(): PooledQueueSummary {
   return {
@@ -1634,11 +1642,20 @@ export class ProviderPool {
 
   queueSummaries(): Map<LocalProviderName, PooledQueueSummary> {
     const out = new Map<LocalProviderName, PooledQueueSummary>();
+    const taskWidths = new Map<LocalProviderName, { width: number; declared: boolean }>();
     for (const entry of this.entries.values()) {
       const q = entry.provider.queue;
       if (!q) continue;
       const d = q.describe();
       const name = entry.parsed.provider;
+      const declaredWidth = positiveConcurrency(entry.provider.batch?.taskConcurrency);
+      const taskWidth = taskWidths.get(name) ?? { width: 0, declared: false };
+      taskWidth.width += Math.min(
+        d.backgroundConcurrency,
+        declaredWidth ?? Number.MAX_SAFE_INTEGER,
+      );
+      taskWidth.declared ||= declaredWidth !== undefined;
+      taskWidths.set(name, taskWidth);
       const cur = out.get(name) ?? emptyPooledQueueSummary();
       cur.running += d.running;
       cur.runningInteractive += d.runningInteractive;
@@ -1653,6 +1670,10 @@ export class ProviderPool {
       cur.active.push(...d.active);
       cur.pending.push(...d.pending);
       out.set(name, cur);
+    }
+    for (const [name, taskWidth] of taskWidths) {
+      const summary = out.get(name);
+      if (summary && taskWidth.declared) summary.taskConcurrency = Math.max(1, taskWidth.width);
     }
     return out;
   }

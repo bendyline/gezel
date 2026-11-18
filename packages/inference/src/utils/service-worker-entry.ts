@@ -27,6 +27,10 @@ export const SERVICE_WORKER_ENTRIES = {
   'relevance-model': { built: 'relevance/relevance-worker.js' },
   kokoro: { built: 'providers/audio/kokoro-worker.js' },
   quickjs: { built: 'scripts/quickjs-worker.js', source: 'scripts/quickjs-worker.ts' },
+  'page-capture': {
+    built: 'page-capture/capture-worker.js',
+    source: 'page-capture/capture-worker.ts',
+  },
   // The eval harness, compiled from `evals/` by tsup.config.ts and spawned as
   // a child process by eval/harness.ts in every install without a checkout.
   'eval-harness': { built: 'evals/all.js' },

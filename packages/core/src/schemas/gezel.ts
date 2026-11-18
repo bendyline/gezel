@@ -9,6 +9,7 @@ import { EntityIdSchema } from './entity-id.js';
 import { FileTurnIntentSchema } from './file-turn-intent.js';
 import { GezelGrowthSummarySchema } from './growth.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
+import { PromptInclusionSchema } from './prompt-connectors.js';
 import { QuestionSchema } from './question.js';
 import { MessageImageDigestSchema } from './recognition.js';
 import { ReferencedFileSchema, TaskDeliverableSchema } from './referenced-file.js';
@@ -875,6 +876,14 @@ const ChatMessageObject = z.object({
       ),
     })
     .optional(),
+  /**
+   * What connectors brought into THIS user turn because the person named it:
+   * a web address in the message that has a saved copy in the project. The
+   * turn's prompt carried each one's synopsis, passages and file path; the
+   * bubble links to the saved copy. An entry with a `reason` and no `path`
+   * records an attempt that failed. See docs/prompt-connectors.md.
+   */
+  inclusions: z.array(PromptInclusionSchema).max(12).optional(),
   /**
    * Factual writing: the numbered evidence this reply's `[n]` markers refer
    * to, and what the deterministic citation check found. Present only on
@@ -1860,6 +1869,21 @@ const ChatEventVariants = [
     projectId: z.string(),
     bindingId: z.string(),
     status: LiveBindingStatusSchema,
+  }),
+  /**
+   * A connector pass changed what is on disk (records written, refreshed,
+   * quarantined or removed). Project stream; the Web pages view and the
+   * Connections row refresh on it. Counts only, never record content.
+   */
+  z.object({
+    type: z.literal('connector_synced'),
+    projectId: z.string(),
+    bindingId: z.string(),
+    connectorType: z.string(),
+    written: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+    /** More is due and a follow-up pass is running or scheduled. */
+    continuing: z.boolean().optional(),
   }),
   /** A camera episode started, was reviewed, or ended. Project stream. */
   z.object({

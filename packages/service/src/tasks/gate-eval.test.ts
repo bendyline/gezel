@@ -162,7 +162,9 @@ describe('evaluateGate', () => {
       ),
     );
     expect(placeholder.pass).toBe(false);
-    expect(placeholder.failures[0]).toContain('actual integer new-side line');
+    expect(placeholder.failures[0]).toContain(
+      'B1-1 cites `src/a.ts:new-side-line`, which is not a line number',
+    );
     const anchored = await evaluateGate(
       [check],
       splitReader(
@@ -210,7 +212,8 @@ describe('evaluateGate', () => {
       ),
     );
     expect(numberedNonIssue.pass).toBe(false);
-    expect(numberedNonIssue.failures[0]).toContain('actionable PR defect');
+    expect(numberedNonIssue.failures[0]).toContain('B1-1 says "Intentional limitation"');
+    expect(numberedNonIssue.failures[0]).toContain('move it under Checks');
     const centralVerification = await evaluateGate(
       [check],
       splitReader(
@@ -222,7 +225,7 @@ describe('evaluateGate', () => {
       ),
     );
     expect(centralVerification.pass).toBe(false);
-    expect(centralVerification.failures[0]).toContain('actionable PR defect');
+    expect(centralVerification.failures[0]).toContain('B1-1 says "Needs central verification"');
     const boldAnchored = await evaluateGate(
       [check],
       splitReader(
@@ -248,6 +251,125 @@ describe('evaluateGate', () => {
         )
       ).pass,
     ).toBe(false);
+  });
+
+  describe('corpusBatchObservations rejections', () => {
+    const batchesFile = 'pr-review/batches.json';
+    const file = 'pr-review/observations-1.md';
+    const recordPath = 'data/pr/files/001--ci.md';
+    const patch = [
+      '@@ -930,4 +933,5 @@',
+      '       - name: Publish',
+      '         run: |',
+      '+          vsce publish 2>&1 | tee "$RUNNER_TEMP/vsce-publish.log"',
+      '           grep -q "is already published" "$RUNNER_TEMP/vsce-publish.log"',
+      '         shell: bash',
+    ].join('\n');
+    const check = {
+      kind: 'corpusBatchObservations' as const,
+      batchesFile,
+      batchNumber: '1',
+      file,
+      requireVerificationCandidates: true,
+      artifact: true,
+    };
+    const judge = (observations: string, record = `# \`ci.yml\`\n\n\`\`\`diff\n${patch}\n\`\`\``) =>
+      evaluateGate(
+        [check],
+        splitReader(
+          {},
+          {
+            [batchesFile]: JSON.stringify([
+              { batchNumber: 1, paths: ['ci.yml'], records: [recordPath] },
+            ]),
+            [recordPath]: record,
+            [file]: `# Batch 1 — files 1–1\n\n## ci.yml\n\n### Findings\n\n${observations}\n${verificationChannel}`,
+          },
+        ),
+      );
+    const mechanism =
+      "The step's exit status is the last command in the pipeline (`tee`), which exits 0 whether or not `vsce publish` succeeded. If `vsce` fails for any reason (network error, OIDC token rejected), the step still exits 0 and the job is reported green.";
+
+    // The finding a 27B reviewer wrote on its first pass and then rewrote for
+    // an hour: three rejections, each for the words "If `vsce` fails".
+    it('accepts a defect stated as a condition and its consequence', async () => {
+      const verdict = await judge(
+        `**B1-1** — \`ci.yml:935\` — severity: **major**\n\n${mechanism}\n\n**Fix:** add \`set -o pipefail\`.`,
+      );
+      expect(verdict.failures).toEqual([]);
+      expect(verdict.pass).toBe(true);
+    });
+
+    it('names a cited line the patch does not show, and the lines it does', async () => {
+      const verdict = await judge(`**B1-1** — \`ci.yml:941\` — major\n\n${mechanism}`);
+      expect(verdict.pass).toBe(false);
+      expect(verdict.failures[0]).toContain(
+        'B1-1 cites `ci.yml:941`, but that patch shows no line 941 (it shows 933-937)',
+      );
+      expect(verdict.checks[0]?.remaining).toBe(1);
+    });
+
+    it('quotes the hedge word and says where an unproven claim belongs', async () => {
+      const verdict = await judge(
+        '**B1-1** — `ci.yml:935` — major\n\nA failed publish could be reported green.',
+      );
+      expect(verdict.failures[0]).toContain('B1-1 says "could"');
+      expect(verdict.failures[0]).toContain('record it as V1-N under Verification candidates');
+    });
+
+    it('lists every problem at once, numbered, and counts them', async () => {
+      const verdict = await judge(
+        [
+          '**B1-1** — `ci.yml:941` — major — The publish step might be skipped.',
+          '**B2-1** — `ci.yml:935` — minor — Wrong batch.',
+          '**B1-2** — major — No line at all.',
+        ].join('\n'),
+      );
+      expect(verdict.checks[0]?.remaining).toBe(4);
+      const message = verdict.failures[0]!;
+      expect(message).toContain('needs 4 fixes; everything else in it passed');
+      expect(message).toContain('  1. B1-1 cites `ci.yml:941`');
+      expect(message).toContain('  2. B1-1 says "might"');
+      expect(message).toContain('  3. B2-1 is numbered for batch 2; this file is batch 1');
+      expect(message).toContain('  4. B1-2 names no line');
+    });
+
+    it('checks a question the same way, and states a length it refuses', async () => {
+      const candidate = {
+        id: 'V1-1',
+        path: 'ci.yml',
+        line: 12,
+        severity: 'minor',
+        claim: 'x'.repeat(409),
+        verify: 'Inspect the publish job.',
+      };
+      const channel = (value: unknown) =>
+        `## Verification candidates\n\n\`\`\`json\n${JSON.stringify({ verificationCandidates: [value] })}\n\`\`\`\n`;
+      const withChannel = (value: unknown) =>
+        evaluateGate(
+          [check],
+          splitReader(
+            {},
+            {
+              [batchesFile]: JSON.stringify([
+                { batchNumber: 1, paths: ['ci.yml'], records: [recordPath] },
+              ]),
+              [recordPath]: `\`\`\`diff\n${patch}\n\`\`\``,
+              [file]: `# Batch 1\n\n## ci.yml\nVerified OK.\n\n${channel(value)}`,
+            },
+          ),
+        );
+      const offPatch = await withChannel(candidate);
+      expect(offPatch.failures[0]).toContain(
+        'V1-1 cites `ci.yml:12`, but that patch shows no line 12',
+      );
+      // 409 characters against a stated 400 is within what a model can judge.
+      expect((await withChannel({ ...candidate, line: 935 })).pass).toBe(true);
+      const tooLong = await withChannel({ ...candidate, line: 935, claim: 'x'.repeat(650) });
+      expect(tooLong.failures[0]).toContain(
+        'V1-1: claim is 650 characters; cut it to 400 or fewer',
+      );
+    });
   });
 
   it('corpusReadEvidence requires service-observed complete reads of each exact batch record', async () => {

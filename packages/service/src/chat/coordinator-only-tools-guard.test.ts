@@ -23,10 +23,16 @@ const SESSION = 'sess-1';
 const OTHER = 'gz-2';
 
 /** Coordinator-only routes no model tool depends on. */
-const UNTOOLED_COORDINATOR_ROUTES: ReadonlyArray<{ probe: CoordinatorRouteProbe; why: string }> = [
+const UNTOOLED_COORDINATOR_ROUTES: ReadonlyArray<{
+  probe: CoordinatorRouteProbe;
+  why: string;
+  /** Also needs a turn the person started (pinned in scope-guard.test.ts). */
+  personTurn?: boolean;
+}> = [
   {
     probe: { method: 'PUT', path: '/api/projects/:project/working-dir' },
     why: 'project folder setting',
+    personTurn: true,
   },
   { probe: { method: 'POST', path: '/api/projects/:project/reveal' }, why: 'host file manager' },
   {
@@ -53,11 +59,19 @@ const UNTOOLED_COORDINATOR_ROUTES: ReadonlyArray<{ probe: CoordinatorRouteProbe;
   },
 ];
 
-const ALL_PROBES: ReadonlyArray<{ owner: string; probe: CoordinatorRouteProbe }> = [
+const ALL_PROBES: ReadonlyArray<{
+  owner: string;
+  probe: CoordinatorRouteProbe;
+  personTurn?: boolean;
+}> = [
   ...Object.entries(COORDINATOR_ONLY_TOOL_ROUTES).flatMap(([tool, probes]) =>
     probes.map((probe) => ({ owner: tool, probe })),
   ),
-  ...UNTOOLED_COORDINATOR_ROUTES.map(({ probe, why }) => ({ owner: `(no tool: ${why})`, probe })),
+  ...UNTOOLED_COORDINATOR_ROUTES.map(({ probe, why, personTurn }) => ({
+    owner: `(no tool: ${why})`,
+    probe,
+    personTurn,
+  })),
 ];
 
 function concretePath(probe: CoordinatorRouteProbe): string {
@@ -72,7 +86,7 @@ function concretePath(probe: CoordinatorRouteProbe): string {
 function guardedApp(
   team: boolean,
   onSessionDeny?: (reason: string) => void,
-  opts: { teamGuard?: boolean } = {},
+  opts: { teamGuard?: boolean; personTurn?: boolean } = {},
 ) {
   const app = new Hono();
   app.use('*', async (c, next) => {
@@ -89,6 +103,7 @@ function guardedApp(
     '/api/*',
     sessionRouteGuard({
       log: (line) => onSessionDeny?.(line.slice(line.lastIndexOf(': ') + 2)),
+      ...(opts.personTurn ? { isUserDirectedTurn: () => true } : {}),
     }),
   );
   if (opts.teamGuard !== false) app.use('/api/*', teamRouteGuard({ mode: 'enforce' }));
@@ -136,10 +151,12 @@ describe('coordinator-only tool table', () => {
   it('every listed route is refused to a worker and admitted to a coordinator', async () => {
     const worker = guardedApp(false);
     const coordinator = guardedApp(true);
-    for (const { owner, probe } of ALL_PROBES) {
+    const workerInTurn = guardedApp(false, undefined, { personTurn: true });
+    const coordinatorInTurn = guardedApp(true, undefined, { personTurn: true });
+    for (const { owner, probe, personTurn } of ALL_PROBES) {
       const label = `${owner}: ${probe.method} ${probe.path}`;
-      expect(await replay(worker, probe), label).toBe(403);
-      expect(await replay(coordinator, probe), label).toBe(200);
+      expect(await replay(personTurn ? workerInTurn : worker, probe), label).toBe(403);
+      expect(await replay(personTurn ? coordinatorInTurn : coordinator, probe), label).toBe(200);
     }
   });
 

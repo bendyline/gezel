@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
+import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { createLogger, stripMcpPrefix, toolActivityLabel } from '@bendyline/gezel';
 import { SessionResumeError } from '@bendyline/gezel-inference/internal/providers/types';
@@ -10,7 +11,9 @@ import type {
 } from '@bendyline/gezel-inference/internal/providers/types';
 import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/usage-builder';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
+import { CLAUDE_CLI_AUTH_ENV, agentCliEnv, withMcpBootstrapCode } from '../agent-cli-env.js';
 import { isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
+import { claudeCredentialDenyRules } from './credential-deny.js';
 import type { ClaudePermissionMode } from './provider.js';
 import {
   claudeRateLimitBuckets,
@@ -361,7 +364,7 @@ export class ClaudeWorker {
       child = this.spawn(this.opts.binaryPath, args, {
         cwd: this.opts.context.cwd,
         env: {
-          ...process.env,
+          ...agentCliEnv(process.env, CLAUDE_CLI_AUTH_ENV),
           ...(this.opts.reasoningEffort
             ? { CLAUDE_CODE_EFFORT_LEVEL: this.opts.reasoningEffort }
             : {}),
@@ -739,6 +742,9 @@ export class ClaudeWorker {
       runtimeDir: this.opts.runtimeDir,
       projectId: this.opts.context.projectId,
       sessionId: this.opts.context.sessionId,
+      denyRules: claudeCredentialDenyRules(
+        this.opts.mcpServer?.env.GEZEL_HOME ?? process.env.GEZEL_HOME,
+      ),
     });
   }
 
@@ -755,7 +761,7 @@ export class ClaudeWorker {
       servers.gezel = {
         command: this.opts.mcpServer.command,
         args: this.opts.mcpServer.args,
-        env: this.opts.mcpServer.env,
+        env: withMcpBootstrapCode(this.opts.mcpServer.env, this.opts.context.mintMcpBootstrapCode),
       };
     }
     for (const extra of this.opts.extraMcpServers ?? []) {
@@ -812,6 +818,8 @@ export class ClaudeWorker {
   }
 
   private onChildClose(code: number | null): void {
+    // Its server has started (or never will); the next start writes a fresh one.
+    if (this.mcpConfigPath) void rm(this.mcpConfigPath, { force: true }).catch(() => {});
     // Drain any tail line that wasn't terminated with `\n`.
     if (this.stdoutBuffer.length > 0) {
       this.handleStreamLine(this.stdoutBuffer);

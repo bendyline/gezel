@@ -125,6 +125,15 @@ describe('SpectralConnectorAdapter', () => {
     expect(rec.frontmatter.recordId).toBe('recA1');
   });
 
+  it('fails the pass when the action result has no list at itemsPath', async () => {
+    hoisted.data = { error: 'NOT_FOUND' } as unknown as unknown[];
+    const adapter = new SpectralConnectorAdapter(AIRTABLE_TYPE, binding, deps('patTEST'));
+    await adapter.ensureAuth();
+    await expect(adapter.listChangesSince('', undefined)).rejects.toThrow(
+      /expected a list at \$\.data but found object/,
+    );
+  });
+
   it('throws a clear error when no credential is stored', async () => {
     const adapter = new SpectralConnectorAdapter(AIRTABLE_TYPE, binding, deps(undefined));
     await expect(adapter.ensureAuth()).rejects.toThrow(/no stored credential/);

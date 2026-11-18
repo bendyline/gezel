@@ -26,11 +26,20 @@ const ACTION_WORDS: Record<LookoutAction['kind'], string> = {
 
 function conditionWords(lookout: Lookout): string {
   const c = lookout.condition;
-  if (c.kind === 'motion') return 'anything moving';
-  if (c.kind === 'subject') {
-    return c.subjects.includes('person') ? 'a person' : 'a pet';
+  switch (c.kind) {
+    case 'motion':
+      return 'anything moving';
+    case 'subject':
+      return c.subjects.includes('person') ? 'a person' : 'a pet';
+    case 'ask':
+      return `“${c.question}”${c.strictness === 'sure' ? ' (clearly)' : ''}`;
+    case 'page-changed':
+      return `a page that changed${c.pathPrefix ? ` under ${c.pathPrefix}` : ''}`;
+    case 'page-added':
+      return `a new page${c.pathPrefix ? ` under ${c.pathPrefix}` : ''}`;
+    case 'text-appears':
+      return `“${c.text}” appearing${c.pathPrefix ? ` under ${c.pathPrefix}` : ''}`;
   }
-  return `“${c.question}”${c.strictness === 'sure' ? ' (clearly)' : ''}`;
 }
 
 function sentence(lookout: Lookout, cameraName: string): string {
@@ -41,7 +50,8 @@ function sentence(lookout: Lookout, cameraName: string): string {
     actions.length <= 1
       ? (actions[0] ?? '')
       : `${actions.slice(0, -1).join(', ')} and ${actions[actions.length - 1]}`;
-  return `When ${cameraName} sees ${conditionWords(lookout)}, ${then}.`;
+  const verb = lookout.source.kind === 'website' ? 'has' : 'sees';
+  return `When ${cameraName} ${verb} ${conditionWords(lookout)}, ${then}.`;
 }
 
 function outcomeWords(firing: LookoutFiring): string {
@@ -106,6 +116,9 @@ export function ProjectLookoutsSection({ projectId }: { projectId: string }) {
         cameras: connectors.bindings
           .filter((b) => b.driver === 'device')
           .map((b) => ({ id: b.id, name: b.displayName || 'Camera' })),
+        websites: connectors.bindings
+          .filter((b) => b.type === 'website')
+          .map((b) => ({ id: b.id, name: b.displayName || 'Website' })),
         mailAccounts: connectors.bindings
           .filter((b) => b.type.startsWith('mail-'))
           .map((b) => ({ id: b.id, name: b.displayName || b.type })),
@@ -125,6 +138,7 @@ export function ProjectLookoutsSection({ projectId }: { projectId: string }) {
     ]).then(([g, c]) =>
       setChoices((current) => ({
         cameras: current?.cameras ?? [],
+        websites: current?.websites ?? [],
         mailAccounts: current?.mailAccounts ?? [],
         gezels: (g.gezels as Array<{ id: string; name: string }>).map((x) => ({
           id: x.id,
@@ -174,9 +188,14 @@ export function ProjectLookoutsSection({ projectId }: { projectId: string }) {
   };
 
   if (!data || !choices) return null;
-  if (choices.cameras.length === 0 && data.lookouts.length === 0) return null;
+  if (choices.cameras.length === 0 && choices.websites.length === 0 && data.lookouts.length === 0) {
+    return null;
+  }
 
-  const cameraName = (id: string) => choices.cameras.find((c) => c.id === id)?.name ?? 'the camera';
+  const cameraName = (id: string) =>
+    choices.cameras.find((c) => c.id === id)?.name ??
+    choices.websites.find((c) => c.id === id)?.name ??
+    'the camera';
   const nameOf = (id: string) => data.lookouts.find((l) => l.id === id)?.name ?? 'A lookout';
 
   const row = (lookout: LookoutWithStatus) => {

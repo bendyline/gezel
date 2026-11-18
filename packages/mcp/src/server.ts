@@ -71,6 +71,7 @@ import {
  * finds the running service through its runtime files instead.
  *   GEZEL_BASE_URL   — daemon base URL (http(s)://127.0.0.1:<port>)
  *   GEZEL_TOKEN      — bearer token for the daemon API
+ *   GEZEL_TOKEN_CODE — instead of GEZEL_TOKEN: a short-lived code traded for it at startup
  *   GEZEL_CERT_PATH  — path to the daemon's runtime/cert.pem (under its GEZEL_HOME; default ~/.gezel/runtime) when it serves HTTPS
  *   GEZEL_AGENT_ID   — the agent this session belongs to
  *   GEZEL_PROJECT_ID — the project context
@@ -322,6 +323,7 @@ import {
   validateFile,
 } from './validate.js';
 import { formatWebSearchResponse } from './web-search-format.js';
+import { registerWebTools } from './web-tools.js';
 import {
   equivalentWorkspaceGrepArgs,
   renderExactToolCall,
@@ -350,9 +352,34 @@ async function localGezelUnlessSpawned(): Promise<LocalGezel | null> {
   }
 }
 
+async function redeemSessionBootstrapCode(
+  base: string,
+  code: string,
+  fetcher: typeof fetch,
+): Promise<string> {
+  try {
+    const res = await fetcher(`${base}/api/session-bootstrap`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+    const body = (await res.json().catch(() => null)) as { token?: unknown } | null;
+    if (!res.ok || typeof body?.token !== 'string' || body.token === '') {
+      throw new Error(`the service answered ${res.status}`);
+    }
+    return body.token;
+  } catch (err) {
+    // Without its token this server can do nothing; the next start brings a fresh code.
+    process.stderr.write(
+      `gezel-mcp: could not trade the session code for a token: ${err instanceof Error ? err.message : String(err)}\n`,
+    );
+    process.exit(1);
+  }
+}
+
 const local = await localGezelUnlessSpawned();
 const baseUrl = local?.baseUrl ?? process.env.GEZEL_BASE_URL ?? 'http://127.0.0.1:0';
-const token = local?.token ?? process.env.GEZEL_TOKEN ?? '';
+let token = local?.token ?? process.env.GEZEL_TOKEN ?? '';
 const gezelId = process.env.GEZEL_AGENT_ID ?? '';
 const projectId = process.env.GEZEL_PROJECT_ID ?? 'default';
 const sessionId = process.env.GEZEL_SESSION_ID ?? '';
@@ -409,6 +436,14 @@ const certPath = process.env.GEZEL_CERT_PATH;
 const fetchImpl: typeof fetch =
   local?.fetch ??
   (certPath ? createTrustingFetch({ cert: readFileSync(certPath, 'utf8') }) : createPatientFetch());
+
+// A CLI agent (Claude Code, Codex) starts this server from a config file its
+// own tools can read, so the service writes a short-lived code there instead
+// of the session token, and the token lives only in this process.
+if (!token && process.env.GEZEL_TOKEN_CODE) {
+  token = await redeemSessionBootstrapCode(baseUrl, process.env.GEZEL_TOKEN_CODE, fetchImpl);
+  delete process.env.GEZEL_TOKEN_CODE;
+}
 
 const api = new GezelClient({ baseUrl, token, fetch: fetchImpl });
 
@@ -1254,6 +1289,10 @@ if (process.env.GEZEL_CONNECTORS_ENABLED === '1') {
 
 if (process.env.GEZEL_CAMERAS_ENABLED === '1') {
   registerCameraTools({ server, api, projectId, unwrapApiError });
+}
+
+if (process.env.GEZEL_WEBSITES_ENABLED === '1') {
+  registerWebTools({ server, api, projectId, unwrapApiError });
 }
 
 // ── Observation tables (the tabular connector corpus) ───────────────────────
@@ -4805,7 +4844,7 @@ server.tool(
 
 server.tool(
   'import_ai_app',
-  'Preview or install a shared `.gezapp` from project artifacts. Call it first without confirm to verify schemas, hashes, compatibility, embedded items, and dependencies; call again with confirm:true to atomically install it. Nothing executes on import.',
+  'Preview a shared `.gezapp` from project artifacts: verifies schemas, hashes, compatibility, embedded items, and dependencies. Installing it adds project types and templates for the whole install, so only the person can do that, from AI Apps in Gezel; tell them what the preview found. Nothing executes on import.',
   {
     path: z
       .string()
@@ -4816,7 +4855,9 @@ server.tool(
     confirm: z
       .boolean()
       .optional()
-      .describe('Omit to preview the bundle contents; set true to install.'),
+      .describe(
+        'Omit to preview the bundle contents. true installs, which only the person can do; from a gezel it is refused.',
+      ),
   },
   async ({ path, project, confirm }) => {
     const resolvedProject = project ? await resolveProjectId(project) : projectId;

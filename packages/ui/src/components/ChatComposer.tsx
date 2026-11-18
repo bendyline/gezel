@@ -43,6 +43,7 @@ import { AutosaveStatus } from './AutosaveStatus.js';
 import { ChatAttachmentButtons } from './ChatAttachmentButtons.js';
 import { ChatNarrateButton } from './ChatNarrateButton.js';
 import { ChatRecipientPicker } from './ChatRecipientPicker.js';
+import { type ComposerConnectorHandle, ComposerConnectorStrip } from './ComposerConnectorStrip.js';
 import { ComposerExpandButton } from './ComposerExpandButton.js';
 import { ComposerImageClipboard } from './ComposerImageClipboard.js';
 import { ComposerImageSettingsBar } from './ComposerImageSettingsBar.js';
@@ -562,6 +563,9 @@ export function ChatComposer({
     }),
     [craftbookRef, draftScope, gezelId, projectId, taskRef],
   );
+  // The strip of connections the draft calls for; every send path asks it to
+  // take the open ones first (docs/prompt-connectors.md).
+  const connectorStripRef = useRef<ComposerConnectorHandle>(null);
   // Seed the editor from the last text we knew for this slot's draft so a
   // remount paints immediately; the hook reconciles with disk right after.
   const draftRef = useRef<string>(
@@ -1456,6 +1460,8 @@ export function ChatComposer({
     const userText = draftSnapshot.source.trim();
     setError(null);
     setQueuedAhead(null);
+    // What the strip said Send would save is saved first, so the turn can read it.
+    await connectorStripRef.current?.beforeSend(userText);
     // Whether the person asked for a new thread, read before this send files
     // its draft. A draft filed with no session yet also reads as a fresh
     // thread, so reading it after `ensureDraft` sent a message meant for the
@@ -1879,6 +1885,7 @@ export function ChatComposer({
     if (!draftSnapshot) return;
     const userText = draftSnapshot.source.trim();
     setError(null);
+    await connectorStripRef.current?.beforeSend(userText);
     let sentDraftId: string | undefined;
     try {
       await draft.flush();
@@ -1923,6 +1930,7 @@ export function ChatComposer({
     if (!draftSnapshot) return;
     const userText = draftSnapshot.source.trim();
     setError(null);
+    await connectorStripRef.current?.beforeSend(userText);
     setServerInflight(true);
     let sentDraftId: string | undefined;
     try {
@@ -2070,6 +2078,13 @@ export function ChatComposer({
                 },
               }
             : {})}
+        />
+      )}
+      {runtimeCapabilities().connections && (
+        <ComposerConnectorStrip
+          ref={connectorStripRef}
+          projectId={projectId}
+          text={intentPreviewText}
         />
       )}
       {imageSettings.enabled && <ComposerImageSettingsBar settings={imageSettings} />}

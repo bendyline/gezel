@@ -94,6 +94,30 @@ describe('GmailMailProvider', () => {
     expect(third.written).toBe(0);
   });
 
+  it('after an outage longer than the backfill window, the resync reaches back to the last sync', async () => {
+    world = await gmailWorld({ backfillDays: 7 });
+    world.gmail.addMessage({ subject: 'Before', text: 'before' });
+    const first = await pass(world, undefined);
+    expect(scope(first.cursor).syncedAt).toBeTypeOf('number');
+    // The last sync was a month ago; mail kept arriving while the computer was off.
+    const DAY = 86_400_000;
+    const monthAgo = Date.now() - 30 * DAY;
+    const cursor = first.cursor as { scopes: Record<string, MailCursor> };
+    cursor.scopes.INBOX = { ...cursor.scopes.INBOX, syncedAt: monthAgo };
+    world.gmail.addMessage({
+      subject: 'During the outage',
+      text: 'twenty days ago',
+      date: new Date(Date.now() - 20 * DAY).toISOString(),
+    });
+    world.gmail.expireHistory();
+    const second = await pass(world, cursor);
+    expect(second.error).toBeUndefined();
+    const subjects = (await readCorpus(world.env.artifactsDir, 'data/mail')).map(
+      (r) => r.frontmatter.subject,
+    );
+    expect(subjects).toContain('During the outage');
+  });
+
   it('pages the backfill within the batch limit and anchors history before listing', async () => {
     world = await gmailWorld();
     const backlog = Array.from({ length: 5 }, (_, i) =>

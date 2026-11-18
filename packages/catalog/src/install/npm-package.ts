@@ -51,15 +51,13 @@ export async function installNpmPackageToolset(opts: NpmInstallOptions): Promise
   await recoverInterruptedNpmInstall(target, backup);
   await mkdir(staging, { recursive: true });
   try {
-    const tarballUrl = await retryTransient(
-      () => resolveTarballUrl(packageName, version, registry),
-      { attempts: NETWORK_ATTEMPTS, label: `${packageName}@${version} metadata` },
-    );
     const tarballPath = join(staging, 'package.tgz');
-    const actualHash = await retryTransient(
-      () => downloadTarball(tarballUrl, tarballPath, registry.origin),
-      { attempts: NETWORK_ATTEMPTS, label: `${packageName}@${version} tarball` },
-    );
+    const actualHash = await fetchPinnedNpmTarball({
+      packageName,
+      version,
+      dest: tarballPath,
+      registry: registry.href,
+    });
     if (actualHash !== expectedHash) {
       throw new Error(
         `[catalog] sha256 mismatch for ${packageName}@${version}: manifest=${expectedHash} actual=${actualHash}. Refusing to install.`,
@@ -103,6 +101,30 @@ export async function installNpmPackageToolset(opts: NpmInstallOptions): Promise
     await rm(staging, { recursive: true, force: true }).catch(() => {});
     throw err;
   }
+}
+
+/**
+ * Download one exact version's registry tarball to `dest` (created, never
+ * overwritten) and return its SHA-256. Registry traffic stays on the
+ * registry's origin, redirects included; transient faults are retried. The
+ * caller compares the hash with its pin before extracting anything.
+ */
+export async function fetchPinnedNpmTarball(opts: {
+  packageName: string;
+  version: string;
+  dest: string;
+  registry?: string;
+}): Promise<string> {
+  const { packageName, version } = opts;
+  const registry = validateRegistry(opts.registry ?? DEFAULT_NPM_REGISTRY);
+  const tarballUrl = await retryTransient(() => resolveTarballUrl(packageName, version, registry), {
+    attempts: NETWORK_ATTEMPTS,
+    label: `${packageName}@${version} metadata`,
+  });
+  return retryTransient(() => downloadTarball(tarballUrl, opts.dest, registry.origin), {
+    attempts: NETWORK_ATTEMPTS,
+    label: `${packageName}@${version} tarball`,
+  });
 }
 
 /** SHA-256 of a tarball on disk without buffering the archive in memory. */

@@ -701,6 +701,87 @@ describe('sending a draft', () => {
     expect(writesAfterSend).toHaveLength(0);
   });
 
+  it('saves a web address the message names before the message goes', async () => {
+    vi.mocked(api.promptConnectorOffers).mockResolvedValue({
+      offers: [
+        {
+          rule: 'web-page',
+          connectorType: 'website',
+          effect: 'include',
+          subject: 'https://gezel.com/platform',
+          label: 'gezel.com/platform',
+        },
+      ],
+    } as never);
+    vi.mocked(api.acceptPromptConnectorOffer).mockResolvedValue({
+      inclusion: {
+        connectorType: 'website',
+        subject: 'https://gezel.com/platform',
+        title: 'The Gezel platform',
+        path: 'data/saved-pages/gezel-com/001--platform--1a2b3c4d.md',
+      },
+    } as never);
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        draftScope="meester"
+      />,
+    );
+    type('Summarize https://gezel.com/platform');
+    expect(
+      await screen.findByText(/will be saved here and included in the chat/),
+    ).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    });
+
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalled());
+    expect(api.acceptPromptConnectorOffer).toHaveBeenCalledWith('default', {
+      rule: 'web-page',
+      subject: 'https://gezel.com/platform',
+    });
+    // The page is saved first, so the turn can read it.
+    expect(vi.mocked(api.acceptPromptConnectorOffer).mock.invocationCallOrder[0] ?? 0).toBeLessThan(
+      vi.mocked(api.sendToChatSession).mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(vi.mocked(api.sendToChatSession).mock.calls[0]?.[1]).toMatchObject({
+      message: 'Summarize https://gezel.com/platform',
+    });
+  });
+
+  it('sends without fetching an address the person dismissed', async () => {
+    vi.mocked(api.promptConnectorOffers).mockResolvedValue({
+      offers: [
+        {
+          rule: 'web-page',
+          connectorType: 'website',
+          effect: 'include',
+          subject: 'https://gezel.com/platform',
+          label: 'gezel.com/platform',
+        },
+      ],
+    } as never);
+    render(
+      <ChatComposer
+        gezelId="tomas"
+        gezelName="Tomas"
+        projectId="default"
+        sessionId="session-1"
+        draftScope="meester"
+      />,
+    );
+    type('Summarize https://gezel.com/platform');
+    fireEvent.click(await screen.findByRole('button', { name: 'Don’t save gezel.com/platform' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^send$/i }));
+    });
+    await waitFor(() => expect(api.sendToChatSession).toHaveBeenCalled());
+    expect(api.acceptPromptConnectorOffer).not.toHaveBeenCalled();
+  });
+
   // The phone accepts a message for a busy thread before it marks the draft
   // sent, so the thread's open-draft list still names it for a moment.
   it('never reopens the draft it just sent', async () => {
