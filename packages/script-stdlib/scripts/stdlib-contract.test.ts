@@ -21,6 +21,7 @@ describe('standard script contracts', () => {
       'mergeCorpusCoverage.ts',
       'publishCorpusBatches.ts',
       'publishCorpusCoverageShard.ts',
+      'publishGeneratedFileObservations.ts',
       'storeRecords.ts',
       'summarizePullRequestCorpus.ts',
       'summarizePullRequestObservations.ts',

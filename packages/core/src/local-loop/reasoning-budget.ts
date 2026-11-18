@@ -43,6 +43,36 @@ export function applyLlamaCppReasoningBudgetOverride(
   return undefined;
 }
 
+/** A reduced thinking budget never goes below this, or above the normal one. */
+export const REDUCED_THINKING_FLOOR_TOKENS = 512;
+
+/**
+ * The thinking budget for a turn that only repairs what a gate already named:
+ * a quarter of the normal one. Every generation of the pull-request review that
+ * prompted this spent its whole 4,096-token budget, including repair turns
+ * whose job was one targeted rewrite, about three minutes each on a 27B.
+ */
+export function reducedThinkingBudget(normal: number): number {
+  return Math.min(normal, Math.max(REDUCED_THINKING_FLOOR_TOKENS, Math.floor(normal / 4)));
+}
+
+/**
+ * Lower the thinking budget a request carries under `key` to its reduced
+ * value. Returns the change, or null when there is nothing to lower: a request
+ * with no budget keeps thinking as its model does.
+ */
+export function applyReducedThinkingBudget(
+  body: Record<string, unknown>,
+  key: 'reasoning_budget_tokens' | 'max_thinking_tokens',
+): { from: number; to: number } | null {
+  const current = body[key];
+  if (typeof current !== 'number' || !Number.isSafeInteger(current) || current <= 0) return null;
+  const reduced = reducedThinkingBudget(current);
+  if (reduced >= current) return null;
+  body[key] = reduced;
+  return { from: current, to: reduced };
+}
+
 /**
  * Streamed reasoning chars per token, for engines that report no live decode
  * count (ds4-server sends usage only at the end of the stream). Measured on

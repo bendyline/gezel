@@ -20,6 +20,7 @@ import {
   MANAGED_WORKSPACE_WRITE_SETTING_LABEL,
   folderKindOf,
   getProjectType,
+  isConnectorBookkeepingPath,
   isConnectorCorpusPath,
   isSharedLibraryProject,
   listProjectTypes,
@@ -1946,12 +1947,18 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
   // The outside-in sidecar folders (`_squisq`, `*_files`) are hidden for the
   // same reason the walker hides dot-folders — "show hidden files" reveals
   // both, otherwise the artifacts shadow/ folder would open onto nothing.
+  // Connector bookkeeping (`_meta.json`, `_flags.json`) is hidden here rather
+  // than in the walker because gezels and scripts read the same listing.
   const visibleActiveEntries = useMemo(
     () =>
       showActiveHidden
         ? activeEntries
-        : activeEntries.filter((entry) => !isOutsideInInternalPath(entry.path)),
-    [activeEntries, showActiveHidden],
+        : activeEntries.filter(
+            (entry) =>
+              !isOutsideInInternalPath(entry.path) &&
+              !(fileTab === 'artifacts' && isConnectorBookkeepingPath(entry.path)),
+          ),
+    [activeEntries, showActiveHidden, fileTab],
   );
   const storedViewMode: FileViewMode = fileTab ? fileViewModes[fileTab] : 'tree-alpha';
   const activeViewMode =
@@ -2700,14 +2707,6 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                         projectTabIsVisible(selected, 'tasks', { debugMode }) || tab === 'tasks',
                     },
                     {
-                      value: 'packages',
-                      label: 'Tools',
-                      icon: 'tools',
-                      show:
-                        projectTabIsVisible(selected, 'approvals', { debugMode }) ||
-                        tab === 'packages',
-                    },
-                    {
                       value: 'workspace',
                       label: 'Workspace',
                       icon: 'workspace',
@@ -2748,6 +2747,14 @@ export function ProjectsView({ forceProjectId, compact = false }: ProjectsViewPr
                       show:
                         (projectTabIsVisible(selected, 'map', { debugMode }) || tab === 'map') &&
                         projectViews.view !== null,
+                    },
+                    {
+                      value: 'packages',
+                      label: 'Tools',
+                      icon: 'tools',
+                      show:
+                        projectTabIsVisible(selected, 'approvals', { debugMode }) ||
+                        tab === 'packages',
                     },
                     {
                       value: 'connections',

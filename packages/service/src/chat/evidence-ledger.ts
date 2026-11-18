@@ -290,6 +290,84 @@ function structuredToolEvidence(tool: string, text: string): StructuredToolEvide
   });
 }
 
+/** One read's account of how much of a file it returned. */
+interface ReadDelivery {
+  path: string;
+  whole: boolean;
+  range?: [number, number];
+  totalLines?: number;
+}
+
+/** What a result the bridge cut to its output budget ends with (`capToolOutput`). */
+const OUTPUT_CUT = /…\[(?:tool output|middle) truncated:/;
+
+/**
+ * How much of each file a reader's result returned, read from the tool's own
+ * account of it: a batch reader's `1 OK <path> lines=1-283 totalLines=283
+ * complete` status line, `read_file`'s `[read_file path=… complete]` header,
+ * and `read_artifact`'s `[lines 401-800 of 900. …]` footer (it writes none
+ * when it returned the whole file). A result the bridge cut counts for
+ * nothing, and neither does a rerouted read or a reader that gives no
+ * account.
+ */
+function readDeliveries(tool: string, args: Record<string, unknown>, text: string): ReadDelivery[] {
+  if (OUTPUT_CUT.test(text)) return [];
+  const delivery = (
+    path: string,
+    whole: boolean,
+    start: string | undefined,
+    end: string | undefined,
+    total: string | undefined,
+  ): ReadDelivery => ({
+    path,
+    whole,
+    ...(start && end ? { range: [Number(start), Number(end)] as [number, number] } : {}),
+    ...(total && total !== '?' ? { totalLines: Number(total) } : {}),
+  });
+  if (tool === 'read_files' || tool === 'read_artifacts') {
+    // The status lines sit above the first file section. A file's own text
+    // can hold a line shaped like one.
+    const summary = text.split('\n\n', 1)[0] ?? '';
+    const status = /^\d+ OK (.+?) lines=(?:none|(\d+)-(\d+))(?: totalLines=(\d+|\?))?( .*)?$/gm;
+    return [...summary.matchAll(status)].map((m) =>
+      delivery(m[1]!.trim(), /(?:^| )complete(?: |$)/.test(m[5] ?? ''), m[2], m[3], m[4]),
+    );
+  }
+  const path = describeToolEvidence(tool, args).ref;
+  if (!path) return [];
+  if (tool === 'read_file') {
+    const header =
+      /^\[read_file path=.* lines=(?:none|(\d+)-(\d+)) totalLines=(\d+|\?)( complete)?\]\n/.exec(
+        text,
+      );
+    return header ? [delivery(path, header[4] !== undefined, header[1], header[2], header[3])] : [];
+  }
+  if (tool === 'read_artifact') {
+    const slice = /\n\n\[lines (\d+)-(\d+) of (\d+)\.[^\n]*\]\s*$/.exec(text);
+    if (slice) return [delivery(path, false, slice[1], slice[2], slice[3])];
+    const sliced = ['startLine', 'endLine', 'lines', 'head', 'tail'].some(
+      (key) => args[key] !== undefined,
+    );
+    return sliced || text.startsWith('[Rerouted ') ? [] : [{ path, whole: true }];
+  }
+  return [];
+}
+
+/** Up to four files to open, as the parenthetical a refusal names them in. */
+function fileList(files: readonly string[]): string {
+  const named = files.slice(0, 4).map((f) => `\`${f}\``);
+  return named.length > 0 ? ` (${named.join(', ')})` : '';
+}
+
+/** `a`, `b` and `c`, each in backticks. */
+function namedFiles(files: readonly string[]): string {
+  const shown = files.slice(0, 4).map((f) => `\`${f}\``);
+  if (files.length > shown.length) shown.push(`${files.length - shown.length} more`);
+  return shown.length > 1
+    ? `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`
+    : (shown[0] ?? '');
+}
+
 /** The text a document write carries, as prose sentences. */
 function documentWriteText(tool: string, args: Record<string, unknown>): string | null {
   if (tool === 'slide_insert') {
@@ -329,8 +407,13 @@ export class EvidenceLedger {
   private given = '';
   /** Given text that holds for the whole session; see `setSessionGiven`. */
   private sessionGiven = '';
-  /** Whether capitalized words are checked as names; see `setNameChecks`. */
-  private nameChecks = true;
+  /** Whether the project holds code; see `setCodeProject`. */
+  private codeProject = false;
+  /** How much of each source file the session has been shown; see `shownInFull`. */
+  private readonly delivered = new Map<
+    string,
+    { whole: boolean; ranges: Array<[number, number]>; totalLines?: number }
+  >();
   private turnStart: number;
   /** Consecutive refusals by write target, spanning task continuation turns. */
   private readonly refusals = new Map<string, number>();
@@ -399,11 +482,14 @@ export class EvidenceLedger {
   }
 
   /**
-   * Off for a project that holds code: names there are identifiers, which
-   * the check already skips, and Title Case is a label. See `GroundOptions.names`.
+   * A project that holds code checks no names, quotation-mark spans or line
+   * locators. Names there are identifiers, which the check already skips,
+   * and Title Case is a label; a quoted span is the reviewer's own wording;
+   * a line number is worked out from a diff, not read in one. Every other
+   * number and date is still checked. See `GroundOptions`.
    */
-  setNameChecks(on: boolean): void {
-    this.nameChecks = on;
+  setCodeProject(holdsCode: boolean): void {
+    this.codeProject = holdsCode;
   }
 
   /** Number one piece of evidence; the same text from the same place keeps its number. */
@@ -429,8 +515,38 @@ export class EvidenceLedger {
     return groundText(text, [...this.entries.values()], {
       given: this.sessionGiven ? `${this.sessionGiven}\n${this.given}` : this.given,
       opaque: (n) => n <= this.floor,
-      names: this.nameChecks,
+      names: !this.codeProject,
+      quotes: !this.codeProject,
+      lineLocators: !this.codeProject,
     });
+  }
+
+  private noteDeliveries(tool: string, args: Record<string, unknown>, text: string): void {
+    for (const read of readDeliveries(tool, args, text)) {
+      const seen = this.delivered.get(read.path) ?? { whole: false, ranges: [] };
+      seen.whole ||= read.whole;
+      if (read.range) seen.ranges.push(read.range);
+      if (read.totalLines !== undefined) seen.totalLines = read.totalLines;
+      this.delivered.set(read.path, seen);
+    }
+  }
+
+  /**
+   * Whether the session has been shown every line of a source file: one read
+   * returned it whole, or the ranges it has read cover it end to end. A file
+   * whose reader gave no account of itself is not counted.
+   */
+  private shownInFull(file: string): boolean {
+    const seen = this.delivered.get(file);
+    if (!seen) return false;
+    if (seen.whole) return true;
+    if (seen.totalLines === undefined) return false;
+    let next = 1;
+    for (const [start, end] of [...seen.ranges].sort((a, b) => a[0] - b[0])) {
+      if (start > next) return false;
+      next = Math.max(next, end + 1);
+    }
+    return next > seen.totalLines;
   }
 
   /** The `[n]` header for an evidence tool's result, or null for any other tool. */
@@ -441,6 +557,7 @@ export class EvidenceLedger {
     source?: { thirdParty: boolean },
   ): string | null {
     if (!isEvidenceTool(tool, source) || !text.trim()) return null;
+    this.noteDeliveries(tool, args, text);
     const structured = structuredToolEvidence(tool, text);
     if (structured.length > 0) {
       return structured
@@ -584,15 +701,32 @@ export class EvidenceLedger {
    * up", told the person it had no sources and asked for some, with
    * `wikipedia_search` on its roster; naming the tools, and the next call,
    * is what turns a refusal into research.
+   *
+   * A source file is named for a re-read only while the session has not been
+   * shown all of it. A reviewer that had every patch record in full was sent
+   * back to read four of them for line numbers no diff states, six times in
+   * one run, while its gate told it to write next and read nothing
+   * (docblocks PR #58, 2026-11-17).
    */
   private remedy(again: string, target?: string): string {
     const reread = this.workspaceReread(target);
     if (reread) {
-      const others =
-        this.lookupTools.length > 0
-          ? ` (for anything the project files do not hold: ${this.lookupTools.map((t) => `\`${t}\``).join(', ')})`
+      const lookups = this.lookupTools.map((t) => `\`${t}\``).join(', ');
+      const shown = reread.files.filter((f) => this.shownInFull(f));
+      const unread = reread.files.filter((f) => !this.shownInFull(f));
+      const one = shown.length === 1;
+      if (shown.length > 0 && unread.length === 0) {
+        const elsewhere = lookups
+          ? ` If another source could state one, look it up with ${lookups} first.`
           : '';
-      return `Do not ${again} yet. Your next tool call must be \`${reread.reader}\` on the source file that states the missing detail${reread.files}${others}. Use what it returns before writing again. Remove anything the files do not support, or say in the text that it could not be verified.`;
+        return `You have already read ${namedFiles(shown)} in full, and ${one ? 'it does' : 'they do'} not state these details, so reading ${one ? 'it' : 'them'} again will not help. Remove each of these, or say in the text that it could not be verified, then ${again}.${elsewhere}`;
+      }
+      const others = lookups ? ` (for anything the project files do not hold: ${lookups})` : '';
+      const already =
+        shown.length > 0
+          ? ` You have already read ${namedFiles(shown)} in full, and ${one ? 'it does' : 'they do'} not state these details.`
+          : '';
+      return `Do not ${again} yet. Your next tool call must be \`${reread.reader}\` on the source file that states the missing detail${fileList(unread)}${others}. Use what it returns before writing again.${already} Remove anything the files do not support, or say in the text that it could not be verified.`;
     }
     const [first, ...rest] = this.lookupTools;
     if (!first) {
@@ -614,7 +748,7 @@ export class EvidenceLedger {
   private researchFirstRemedy(tool: string, target?: string): string {
     const reread = this.workspaceReread(target);
     if (reread) {
-      return `Not saved: no source evidence has been collected. Do not call \`${tool}\` again yet. Your next tool call must be \`${reread.reader}\`${reread.files}. Use what it returns before writing.`;
+      return `Not saved: no source evidence has been collected. Do not call \`${tool}\` again yet. Your next tool call must be \`${reread.reader}\`${fileList(reread.files)}. Use what it returns before writing.`;
     }
     const first = this.lookupTools[0];
     if (!first) return this.remedy('write again', target);
@@ -632,7 +766,7 @@ export class EvidenceLedger {
    * had, or finds nothing: 92 recoveries narrowed to `search` across 28
    * workspace-sourced trials before this existed (2026-10-06 review).
    */
-  private workspaceReread(target?: string): { reader: string; files: string } | null {
+  private workspaceReread(target?: string): { reader: string; files: string[] } | null {
     const reader = this.readerTools[0];
     if (!reader) return null;
     const read = [...this.entries.values()]
@@ -645,11 +779,7 @@ export class EvidenceLedger {
       .map((f) => this.workspacePathFor(f))
       .filter((f) => !isTarget(f));
     if (read.length === 0 && named.length === 0) return null;
-    const files = [...new Set([...read, ...named])].filter((f) => !isTarget(f)).slice(0, 4);
-    return {
-      reader,
-      files: files.length > 0 ? ` (${files.map((f) => `\`${f}\``).join(', ')})` : '',
-    };
+    return { reader, files: [...new Set([...read, ...named])].filter((f) => !isTarget(f)) };
   }
 
   /**

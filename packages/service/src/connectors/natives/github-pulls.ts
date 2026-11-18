@@ -19,6 +19,7 @@
 import type { GitHubPullComment, GitHubPullDetail, GitHubPullFile } from '@bendyline/gezel';
 import { createLogger, prioritizePullsForCurrentBranch } from '@bendyline/gezel';
 import type { ProjectDetail } from '@bendyline/gezel';
+import { PATCH_LINE_LEGEND, generatedFileKind, numberUnifiedPatch } from '@bendyline/gezel/checks';
 import { type GitHubPrs, filterUnifiedDiffByPath } from '../../github/prs.js';
 import { registerNativeAdapter } from '../registry.js';
 import { assertConnectorTaskSync, registerConnectorTaskPrep } from '../task-prep.js';
@@ -43,22 +44,48 @@ const DEFAULT_MAX_PULLS = 20;
 /** GitHub caps one PR at 3,000 changed files; overview adds one record. */
 const TASK_PR_RECORD_LIMIT = 3_001;
 /** Bump when persisted corpus metadata must be refreshed for unchanged PRs. */
-const CURSOR_SCHEMA = 'v3';
+const CURSOR_SCHEMA = 'v4';
 /** A child reviewer should have one small, finishable unit of work. */
 export const REVIEW_MAX_FILES_PER_BATCH = 8;
 /** Patch text, rather than file count alone, bounds local-model context growth. */
 export const REVIEW_TARGET_PATCH_CHARS = 24_000;
 
-export function partitionPullReviewFiles(
-  files: readonly GitHubPullFile[],
-): Array<{ start: number; end: number; paths: string[]; patchChars: number }> {
-  const batches: Array<{ start: number; end: number; paths: string[]; patchChars: number }> = [];
+export interface PullReviewBatch {
+  start: number;
+  end: number;
+  paths: string[];
+  patchChars: number;
+  /** Lockfiles and the like: the runtime summarizes these, no reviewer reads them. */
+  generated?: true;
+}
+
+/**
+ * Hand-written files first, generated ones last, each group in listing order.
+ * A batch is a run of consecutive files, so a notices file listed between two
+ * source files would otherwise split one reviewer's batch into three.
+ */
+export function orderPullReviewFiles<T extends { filename: string }>(files: readonly T[]): T[] {
+  return [
+    ...files.filter((file) => generatedFileKind(file.filename) === null),
+    ...files.filter((file) => generatedFileKind(file.filename) !== null),
+  ];
+}
+
+export function partitionPullReviewFiles(files: readonly GitHubPullFile[]): PullReviewBatch[] {
+  const batches: PullReviewBatch[] = [];
   let paths: string[] = [];
   let patchChars = 0;
   let start = 1;
+  let generated = false;
   const flush = () => {
     if (paths.length === 0) return;
-    batches.push({ start, end: start + paths.length - 1, paths, patchChars });
+    batches.push({
+      start,
+      end: start + paths.length - 1,
+      paths,
+      patchChars,
+      ...(generated ? { generated: true as const } : {}),
+    });
     start += paths.length;
     paths = [];
     patchChars = 0;
@@ -67,12 +94,17 @@ export function partitionPullReviewFiles(
     // A missing patch still needs one review record; count its metadata so
     // binary/no-patch changes do not accumulate into an unbounded batch.
     const chars = Math.max(file.patch?.length ?? 0, file.filename.length + 256);
+    const fileGenerated = generatedFileKind(file.filename) !== null;
     if (
       paths.length > 0 &&
-      (paths.length >= REVIEW_MAX_FILES_PER_BATCH || patchChars + chars > REVIEW_TARGET_PATCH_CHARS)
+      (fileGenerated !== generated ||
+        paths.length >= REVIEW_MAX_FILES_PER_BATCH ||
+        // Patch text bounds what a reviewer must hold; nobody holds a generated batch.
+        (!generated && patchChars + chars > REVIEW_TARGET_PATCH_CHARS))
     ) {
       flush();
     }
+    generated = fileGenerated;
     paths.push(file.filename);
     patchChars += chars;
   }
@@ -303,19 +335,21 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
     // large file. Prefer the exact segment from the full diff whenever it is
     // available so the durable per-file record is not just a second copy of
     // that API limitation.
-    const completeFiles = diff
-      ? files.map((file) => {
-          const patch = filterUnifiedDiffByPath(diff, file.filename);
-          return patch
-            ? {
-                ...file,
-                patch,
-                patchChars: patch.length,
-                patchTruncated: false,
-              }
-            : file;
-        })
-      : files;
+    const completeFiles = orderPullReviewFiles(
+      diff
+        ? files.map((file) => {
+            const patch = filterUnifiedDiffByPath(diff, file.filename);
+            return patch
+              ? {
+                  ...file,
+                  patch,
+                  patchChars: patch.length,
+                  patchTruncated: false,
+                }
+              : file;
+          })
+        : files,
+    );
     const bundle: PullBundle = { detail, files: completeFiles, comments, diff };
     this.bundles.set(num, bundle);
     return bundle;
@@ -338,6 +372,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
         end: batch.end,
         paths: batch.paths,
         patchChars: batch.patchChars,
+        ...(batch.generated ? { generated: true as const } : {}),
       };
     });
     const manifest = {
@@ -347,19 +382,23 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
       batchSize: REVIEW_MAX_FILES_PER_BATCH,
       batchTargetPatchChars: REVIEW_TARGET_PATCH_CHARS,
       batches,
-      files: files.map((file, index) => ({
-        ordinal: index + 1,
-        path: file.filename,
-        // Stable join key into files/_flags.json. The writer owns the actual
-        // ordinal-prefixed filename and preserves it across refreshes/reorders;
-        // the sidecar therefore remains the authoritative path lookup.
-        recordHash: sha8(pullFileRecordId(num, file.filename)),
-        status: file.status,
-        additions: file.additions,
-        deletions: file.deletions,
-        changes: file.changes,
-        ...(file.previousFilename ? { previousPath: file.previousFilename } : {}),
-      })),
+      files: files.map((file, index) => {
+        const generated = generatedFileKind(file.filename);
+        return {
+          ordinal: index + 1,
+          path: file.filename,
+          ...(generated ? { generated } : {}),
+          // Stable join key into files/_flags.json. The writer owns the actual
+          // ordinal-prefixed filename and preserves it across refreshes/reorders;
+          // the sidecar therefore remains the authoritative path lookup.
+          recordHash: sha8(pullFileRecordId(num, file.filename)),
+          status: file.status,
+          additions: file.additions,
+          deletions: file.deletions,
+          changes: file.changes,
+          ...(file.previousFilename ? { previousPath: file.previousFilename } : {}),
+        };
+      }),
     };
     const body = [
       `# PR #${num}: ${detail.title}`,
@@ -379,7 +418,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
       '',
       ...batches.map(
         (batch) =>
-          `- Batch ${batch.number}: files ${batch.start}–${batch.end} (${batch.paths.length} path${batch.paths.length === 1 ? '' : 's'})`,
+          `- Batch ${batch.number}: files ${batch.start}–${batch.end} (${batch.paths.length} path${batch.paths.length === 1 ? '' : 's'}${batch.generated ? ', generated files the runtime summarizes' : ''})`,
       ),
       '',
       `The machine-readable manifest is attached as \`pr-${num}-files.json\`. Review every batch and record every exact path in the coverage ledger; the completion gate compares that ledger with the per-file corpus records.`,
@@ -435,14 +474,22 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
   }
 
   private fileRecord(num: number, file: GitHubPullFile): NormalizedRecord {
+    const numbered = file.patch ? numberUnifiedPatch(file.patch) : undefined;
+    const generated = generatedFileKind(file.filename);
     const body = [
       `# \`${file.filename}\``,
       '',
       `Status: ${file.status} (+${file.additions} / -${file.deletions}).`,
       ...(file.previousFilename ? [`Renamed from \`${file.previousFilename}\`.`] : []),
       '',
-      ...(file.patch
-        ? ['```diff', file.patch, '```']
+      ...(numbered !== undefined
+        ? [
+            // A deleted file has no new-file lines, so nothing was numbered.
+            ...(numbered !== file.patch ? [PATCH_LINE_LEGEND, ''] : []),
+            '```diff',
+            numbered,
+            '```',
+          ]
         : ['_No patch available (binary file, or the change is too large for the API)._']),
     ];
     return {
@@ -457,6 +504,7 @@ export class GitHubPullsAdapter implements ConnectorAdapter {
         status: file.status,
         additions: String(file.additions),
         deletions: String(file.deletions),
+        ...(generated ? { generated } : {}),
       },
       bodyMarkdown: body.join('\n'),
       scanOrigin: 'github-pulls',

@@ -222,6 +222,82 @@ describe('groundText', () => {
     expect(statuses('It says "every branch is covered by a test".', false)).toEqual(['uncited']);
   });
 
+  // docblocks PR #58, 2026-11-17: a review's line numbers come from counting
+  // hunk headers, and its quotation marks hold the reviewer's own wording.
+  describe('in a codebase', () => {
+    const ev = [
+      {
+        n: 1,
+        text: [
+          '@@ -613,16 +631,92 @@',
+          '+  build-vsix:',
+          '+    needs: [preflight, quality, create-draft-release]',
+          '+          npm ci --ignore-scripts',
+        ].join('\n'),
+      },
+    ];
+    const code = { names: false, quotes: false, lineLocators: false };
+    const missing = (text: string, options = {}) =>
+      groundText(text, ev, options).sentences.flatMap((s) => s.missing);
+
+    it('does not check a line number that locates code', () => {
+      const located = [
+        '**`build-vsix` job** (lines 634–722): depends on `preflight`.',
+        '**`all` target now includes `vscode`** (new-side line 179): intentional.',
+        '**Comment updates** (lines 19–33, 83–90, 631–638, 724–730): clarified.',
+        'The walk at lines 232-245 and 247 to 251 skips transparent nodes.',
+        'The caret check (new-side lines ~1270–1296) records a high finding.',
+        'The step at e2e/site-journey-review.ts:276 skips a visible dialog.',
+        'See src/a.ts:42-57 and scripts/Makefile:12 for the callers.',
+        'The guard sits at L222 and the scan at L247-251.',
+        'The job arrives in the @@ -776,3 +870,72 @@ hunk.',
+      ];
+      for (const sentence of located) {
+        expect(missing(sentence, code), sentence).toEqual([]);
+        expect(missing(sentence, { names: false }), sentence).not.toEqual([]);
+      }
+      // A `.yml` path was a file reference in every project already.
+      expect(
+        missing('The step at .github/workflows/store-release.yml:935 pipes through tee.', code),
+      ).toEqual([]);
+    });
+
+    it('still checks every other number', () => {
+      expect(missing('If it fails (Marketplace 500), the step exits.', code)).toEqual(['500']);
+      expect(missing('The patch adds a 32-line test at line 222.', code)).toEqual(['32']);
+      expect(missing('The job runs on 3 of the 14 targets.', code)).toEqual(['3', '14']);
+      expect(missing('It pins vsce-sign 2.1.0, published in 2031.', code)).toContain('2031');
+    });
+
+    it('does not check a quotation-mark span', () => {
+      const quoted = [
+        'The threshold is adequate as a "is this dark" guard for the scan.',
+        'The dialog checks are the correct "is a person seeing this" test.',
+        'Fix: distinguish "watcher expired / no notice element ever matched" from the rest.',
+      ];
+      for (const sentence of quoted) {
+        expect(missing(sentence, code), sentence).toEqual([]);
+        expect(missing(sentence, { names: false }), sentence).not.toEqual([]);
+      }
+    });
+
+    it('leaves every other project as it was', () => {
+      const prose = [
+        'The estate covered 240 acres (line 12).',
+        'The memo says "the budget is fixed at once".',
+        'See ledger.ts:42 for the total of 99.',
+      ];
+      for (const sentence of prose) {
+        expect(groundText(sentence, ev).sentences, sentence).toEqual(
+          groundText(sentence, ev, { quotes: true, lineLocators: true }).sentences,
+        );
+      }
+      expect(missing(prose[0]!)).toEqual(['240', '12']);
+      expect(missing(prose[1]!)).toEqual(['the budget is fixed at once']);
+      expect(missing(prose[2]!)).toEqual(['42', '99']);
+    });
+  });
+
   it('starts a sentence at a bold lead, so its label is not a name', () => {
     const ev = [{ n: 1, text: 'This memo supersedes the product memo on timing.' }];
     const result = groundText(

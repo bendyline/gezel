@@ -154,6 +154,7 @@ import { buildRambleAbortMessage } from './ramble-abort-message.js';
 import { RambleDetector, inertRambleDetector, outputIsConstrained } from './ramble-detector.js';
 import {
   applyLlamaCppReasoningBudgetOverride,
+  applyReducedThinkingBudget,
   buildThinkingBudgetCorrective,
   clientThinkingBudgetForRequest,
   estimateReasoningTokens,
@@ -2560,6 +2561,16 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
           this.deps.reasoningEffortRequestShape,
           this.deps.reasoningEffort,
         );
+        // Before the override below, so an eval's pinned budget still wins and
+        // an engine without a native budget enforces the reduced one client-side.
+        if (opts?.reducedThinking) {
+          const reduced = applyReducedThinkingBudget(body, 'reasoning_budget_tokens');
+          if (reduced && turn === 0) {
+            log.info(
+              `[llama-cpp] reduced thinking budget for this turn model=${this.deps.model ?? 'unknown'} budget=${reduced.from} → ${reduced.to}`,
+            );
+          }
+        }
         const unenforcedThinkingBudget = applyLlamaCppReasoningBudgetOverride(
           body,
           this.deps.disableThinkingRequestShape === 'chat-template',

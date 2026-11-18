@@ -481,6 +481,7 @@ import {
   stripMarkdownImages,
 } from './fixed-function-adapters.js';
 import { resolveFixedFunctionTaskImageArgs } from './fixed-function-task-image.js';
+import { stepGateRejectedSince } from './gate-repair-turn.js';
 import {
   type ExecutionModelProfile,
   checkpointGapForStep,
@@ -4737,6 +4738,9 @@ export class ChatManager extends LocalEngineRuntime {
         let rateLimitRetries = 0;
         let rateLimitRetryPending = false;
         let shardLeftStepOpen = false;
+        // The last attempt ended on the step's gate rejecting its work, so
+        // the next send repairs what the gate named; see gate-repair-turn.ts.
+        let retryRepairsGateRejection = false;
         for (let attempt = 1; attempt <= maxHandoffSendAttempts; attempt += 1) {
           const gap = await checkpointGapForStep(
             this.store,
@@ -4763,9 +4767,15 @@ export class ChatManager extends LocalEngineRuntime {
                   : `The automatic handoff turn failed before this active step completed. Retry step \`${dispatchStepId}\` now (bounded recovery ${attempt - 1}/${maxHandoffSendAttempts - 1}). Follow the exact step procedure already in your prompt, use its required tools, and persist only its declared output.`;
           shardLeftStepOpen = false;
           rateLimitRetryPending = false;
+          const sendStartedAt = nowIso();
+          const repairsGateRejection: boolean = retryRepairsGateRejection;
+          retryRepairsGateRejection = false;
           try {
-            const sendStartedAt = nowIso();
-            await this.sendWithBusyRetry(handoffSession.id, message, sendOptions);
+            await this.sendWithBusyRetry(
+              handoffSession.id,
+              message,
+              repairsGateRejection ? { ...sendOptions, reducedThinking: true } : sendOptions,
+            );
             // Asking a question is a successful suspension point, not a
             // failed fixed-action attempt. In particular,
             // `run_package_script` raises a command-approval question and
@@ -4894,6 +4904,7 @@ export class ChatManager extends LocalEngineRuntime {
             ) {
               rateLimitRetries += 1;
               rateLimitRetryPending = true;
+              retryRepairsGateRejection = repairsGateRejection;
               // Not a failed attempt. The provider thread is intact, so no
               // reset: the re-send continues it once the queue admits it.
               attempt -= 1;
@@ -4924,9 +4935,13 @@ export class ChatManager extends LocalEngineRuntime {
                   `${resetError instanceof Error ? resetError.message : String(resetError)}`,
               );
             });
+            retryRepairsGateRejection = dispatchStepId
+              ? stepGateRejectedSince(currentTask, dispatchStepId, sendStartedAt)
+              : false;
             log.warn(
               `[chat] handoff turn failed for ${args.taskRef}/${dispatchStepId}; retrying ` +
-                `${attempt}/${maxHandoffSendAttempts - 1} in session ${handoffSession.id.slice(0, 8)}: ` +
+                `${attempt}/${maxHandoffSendAttempts - 1} in session ${handoffSession.id.slice(0, 8)}` +
+                `${retryRepairsGateRejection ? ' on a reduced thinking budget (the gate rejected its work)' : ''}: ` +
                 `${error instanceof Error ? error.message : String(error)}`,
             );
           }
@@ -6537,6 +6552,7 @@ export class ChatManager extends LocalEngineRuntime {
       messageOrigin?: TurnMessageOrigin;
       fileTurnIntent?: FileTurnIntent;
       relayedImages?: NonNullable<ChatMessage['relayedImages']>;
+      reducedThinking?: boolean;
     },
   ): Promise<ChatMessage> {
     return this.send(sessionId, userText, opts);
@@ -7499,6 +7515,12 @@ export class ChatManager extends LocalEngineRuntime {
        * whole job is one move (`ProjectTypeToolReaction.turn`).
        */
       requiredTool?: string;
+      /**
+       * The turn repairs a gate rejection: the gate already named what to
+       * fix, so it runs at a reduced thinking budget. See
+       * SendAndWaitOpts.reducedThinking.
+       */
+      reducedThinking?: boolean;
       fileTurnIntent?: FileTurnIntent;
       /**
        * Deliver into the model's history but never render a transcript
@@ -7590,6 +7612,7 @@ export class ChatManager extends LocalEngineRuntime {
       continuationMaxTokens?: number;
       standalone?: boolean;
       requiredTool?: string;
+      reducedThinking?: boolean;
       fileTurnIntent?: FileTurnIntent;
       hidden?: boolean;
       nudge?: boolean;
@@ -7714,6 +7737,7 @@ export class ChatManager extends LocalEngineRuntime {
       continuationMaxTokens?: number;
       standalone?: boolean;
       requiredTool?: string;
+      reducedThinking?: boolean;
       fileTurnIntent?: FileTurnIntent;
       hidden?: boolean;
       nudge?: boolean;
@@ -8649,6 +8673,9 @@ export class ChatManager extends LocalEngineRuntime {
       // or stack ordinary nudges on top of the corrective prompt.
       let keurmeesterConsultedThisSend = false;
       let keurmeesterCaseToClose: string | null = null;
+      // The next send carries a gate's verdict (or retries a handoff the gate
+      // just rejected), so it thinks on a reduced budget. Cleared once sent.
+      let gateRepairSend = opts?.reducedThinking === true;
       // A task step can cap its own turns (`turnTimeoutSec`); read it once.
       const stepTurnLimitMs = await stepTurnTimeoutMs(this.store, state.record);
 
@@ -8849,6 +8876,7 @@ export class ChatManager extends LocalEngineRuntime {
             : {}),
           ...(opts?.standalone ? { standalone: true } : {}),
           ...(continuations === 0 && turnRequiredTool ? { requiredTool: turnRequiredTool } : {}),
+          ...(gateRepairSend ? { reducedThinking: true } : {}),
           queue: {
             lane: opts?.lane ?? 'interactive',
             enginePriority: engineTurnPriority(resolveTurnMessageOrigin(opts), isAskTarget),
@@ -8869,6 +8897,10 @@ export class ChatManager extends LocalEngineRuntime {
         };
         if (continuations === 0 && pendingAttachments.length > 0) {
           sendOpts.attachments = pendingAttachments;
+        }
+        if (gateRepairSend) {
+          log.info(`session ${sessionId}: gate-repair turn — thinking on a reduced budget`);
+          gateRepairSend = false;
         }
         // Wall-clock at the start of this iteration. Used at commit
         // time below to find any mid-turn approval questions
@@ -9763,6 +9795,9 @@ export class ChatManager extends LocalEngineRuntime {
                 : buildGateRejectionNudge(advanceOutcome.gateRejected.message),
               'task-gate',
             );
+            // A review's rejection hands back real rework, not a fix the gate
+            // spelled out, so it keeps the full budget.
+            gateRepairSend = !advanceOutcome.gateRejected.review;
             continue;
           }
           // Ad-hoc deliverable plateau exhausted (stage 3): stop the
@@ -9886,6 +9921,7 @@ export class ChatManager extends LocalEngineRuntime {
               clampNudge ?? (dStage >= 1 ? dRej.message : buildGateRejectionNudge(dRej.message)),
               'deliverable-gate',
             );
+            gateRepairSend = true;
             continue;
           }
           // False-"done" on an edit gate: a requireChange step is waiting on
@@ -16003,7 +16039,7 @@ export class ChatManager extends LocalEngineRuntime {
         task: workTask,
       }),
     );
-    evidenceLedger?.setNameChecks(!(project && projectHoldsCode(project)));
+    evidenceLedger?.setCodeProject(Boolean(project && projectHoldsCode(project)));
     const promptSurface = await resolveSessionToolSurface({
       surface: 'prompt',
       session: record,

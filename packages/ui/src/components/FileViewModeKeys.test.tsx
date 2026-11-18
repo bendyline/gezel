@@ -37,7 +37,7 @@ describe('FileHiddenKey', () => {
     rerender(<FileHiddenKey kind="artifacts" value={false} onChange={vi.fn()} />);
     expect(screen.getByRole('button', { name: 'Show hidden files' })).toHaveAttribute(
       'title',
-      'Show hidden files — Office lock files, dot-files, and the generated shadow folder.',
+      'Show hidden files — Office lock files, dot-files, connector bookkeeping, and the generated shadow folder.',
     );
   });
 });

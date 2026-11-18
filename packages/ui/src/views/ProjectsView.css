@@ -28,8 +28,7 @@
     min-width: 0;
   }
 
-  .gz-connector-field,
-  .gz-connector-grid {
+  .gz-connector-field {
     grid-template-columns: minmax(0, 1fr);
   }
 

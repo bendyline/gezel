@@ -3007,67 +3007,12 @@
   gap: 0.5rem;
 }
 
-/* Connector bin — the same compact, selectable gallery language used by
-   New Project and New Task, adapted to an inline settings tray. */
-.gz-connector-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
-  padding: 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: color-mix(in srgb, var(--panel) 70%, var(--surface));
-}
-
-.gz-connector-picker-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.gz-connector-picker-heading p {
-  margin: 0.2rem 0 0;
-}
-
-.gz-connector-picker-count {
-  flex: 0 0 auto;
-  padding: 0.15rem 0.4rem;
-  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  color: var(--text-muted);
-  font-size: var(--text-2xs);
-  line-height: 1.3;
-}
-
-.gz-connector-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(10.25rem, 1fr));
-  gap: 0.55rem;
-}
-
-.gz-npd-card.gz-connector-card {
-  min-width: 0;
-  min-height: 7rem;
-  gap: 0.35rem;
-  padding: 0.7rem 0.75rem;
-  border-radius: var(--radius-md);
-}
-
-.gz-connector-card .gz-npd-card-mark {
-  width: 2.3rem;
-  height: 2.3rem;
-  border-radius: var(--radius-md);
-}
-
-.gz-connector-card .gz-npd-card-name {
-  overflow: hidden;
-  max-width: 100%;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
+/* Add connection (`gz-acd`) — the shared gallery dialog (`gz-npd-*`, see
+   docs/ux.md "A gallery dialog is a two-step wizard"): a rail of connector
+   families and the cards, then the chosen connector's setup in one centered
+   column. This block only adds what connectors need: the cards' fact chips,
+   a full-bleed mark in step 2's header, and a settings-page form inside a
+   dialog. */
 /* Data tables on the project overview. A quiet list, matching the connector
    variant: one sentence per table rather than a grid of counters. */
 .project-overview-tables {
@@ -3119,51 +3064,59 @@
   color: color-mix(in srgb, var(--accent) 72%, var(--text));
 }
 
-.gz-connector-picker-empty {
-  display: grid;
-  min-height: 6rem;
-  place-items: center;
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-md);
-  background: var(--surface);
-}
-
-.gz-mail-link-form.gz-connector-config {
-  gap: 0.75rem;
-  padding: 0.8rem;
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--wash-tint) 3%, var(--surface));
-  animation: gz-npd-card-in 160ms ease-out;
-}
-
-.gz-connector-config-heading {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-}
-
-.gz-connector-config-mark {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  width: 2.3rem;
-  height: 2.3rem;
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--wash-tint) 13%, var(--panel));
-  color: var(--accent-text);
+/* Step 2's header mark fills its tile, as the card it was chosen from did. */
+.gz-acd-detail-art {
   overflow: hidden;
 }
 
-.gz-connector-config-mark[data-painted] {
-  color: var(--titlebar-ink, #f3ede0);
+.gz-acd-detail-art[data-painted] {
   background: color-mix(in srgb, var(--mark-ground) 88%, black);
+  color: var(--titlebar-ink, #f3ede0);
 }
 
-.gz-connector-config-mark img {
+.gz-npd-detail-art.gz-acd-detail-art img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.gz-npd-detail-art.gz-acd-detail-art img.gz-npd-card-mark-svg {
+  object-fit: contain;
+}
+
+/* A connector form is wider than a plan's brief: its fields run label |
+   control, so the centered column takes a little more room. */
+.gz-acd-detail[data-lean="true"] .gz-npd-brief,
+.gz-acd-detail[data-lean="true"] .gz-npd-setup {
+  max-width: 46rem;
+}
+
+.gz-acd-facts {
+  width: auto;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+/* The setup is the settings-page form drawn inside a dialog. Undo the
+   dialog's stacked-label defaults (`.gz-dialog label`, `.gz-dialog label
+   input`) so each field keeps its own label | control layout. */
+.gz-dialog .gz-acd-setup label {
+  margin-bottom: 0;
+}
+
+.gz-dialog .gz-acd-setup .gz-connector-field-label,
+.gz-dialog .gz-acd-setup .gz-oauth-app-fields label,
+.gz-dialog .gz-acd-setup .camera-setup-check,
+.gz-dialog .gz-acd-setup .camera-setup-row label {
+  display: flex;
+}
+
+.gz-dialog .gz-acd-setup label input {
+  margin-top: 0;
+}
+
+.gz-dialog .gz-acd-setup label input[type="checkbox"] {
+  width: auto;
 }
 
 .gz-connector-config-fields {
@@ -3404,16 +3357,7 @@
   gap: 0.5rem;
 }
 
-.gz-connector-picker-actions {
-  padding-top: 0.75rem;
-  border-top: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
-}
-
 @media (max-width: 700px) {
-  .gz-connector-grid {
-    grid-template-columns: 1fr;
-  }
-
   .gz-connector-field {
     grid-template-columns: 1fr;
   }
@@ -3421,9 +3365,12 @@
   .gz-connector-field-label {
     padding-top: 0;
   }
+}
 
-  .gz-connector-picker-heading {
-    align-items: center;
+/* One-line gallery rows have no room for the fact chips. */
+@media (max-width: 560px) {
+  .gz-connector-card .gz-connector-card-meta {
+    display: none;
   }
 }
 

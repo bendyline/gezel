@@ -254,9 +254,25 @@ export interface TaskRunnerDispatcher {
     queuedBackground: number;
     backgroundConcurrency: number;
     maxConcurrency: number;
+    /** See `BatchCapability.taskConcurrency`; absent means the background width. */
+    taskConcurrency?: number;
     active: Array<{ sessionId?: string }>;
     pending: Array<{ sessionId?: string }>;
   } | null;
+}
+
+/**
+ * How many task sessions the runner holds open on a provider at once, when
+ * its engine asks for fewer than the background lane admits. Undefined
+ * leaves admission to the lane caps.
+ */
+export function taskSessionWidth(
+  provider: Pick<LLMProvider, 'batch'> | null | undefined,
+  pooled: { taskConcurrency?: number } | null | undefined,
+): number | undefined {
+  const declared = provider?.batch?.taskConcurrency ?? pooled?.taskConcurrency;
+  if (typeof declared !== 'number' || !Number.isFinite(declared)) return undefined;
+  return Math.max(1, Math.floor(declared));
 }
 
 export interface TaskRunnerOptions {
@@ -1049,6 +1065,7 @@ export class TaskRunner {
       const pooled = provider
         ? null
         : (this.dispatcher.getPooledProviderQueueSummary?.(providerName) ?? null);
+      const taskWidth = taskSessionWidth(provider, pooled);
 
       // Keep a fanout child admitted across ALL of its steps. ProviderQueue
       // already limits simultaneous turns, but without this cohort window a
@@ -1080,10 +1097,32 @@ export class TaskRunner {
         }
         if (fanoutAdmission.size === 0) this.fanoutAdmissions.delete(fanoutAdmissionKey);
         else this.fanoutAdmissions.set(fanoutAdmissionKey, fanoutAdmission);
-        const fanoutWidth =
+        const backgroundWidth =
           provider?.queue?.backgroundConcurrency ?? pooled?.backgroundConcurrency ?? 1;
+        const fanoutWidth = Math.min(backgroundWidth, taskWidth ?? backgroundWidth);
         if (!fanoutAdmission.has(task.ref) && fanoutAdmission.size >= fanoutWidth) {
           handoff.heldFor = 'provider-busy';
+          keep.push(handoff);
+          continue;
+        }
+      }
+      // An engine that serves task sessions one generation at a time gains
+      // nothing from a second one: each waits out the other's generations.
+      // Counted from the runner's own dispatches, which already include this
+      // tick's, so the cap holds before any send has reached the queue. A
+      // task's own earlier step never holds its next one: that session is
+      // closing, and the chat layer already waits for it to go idle.
+      if (taskWidth !== undefined) {
+        const openTaskSessions = [...this.activeDispatches.values()].filter(
+          (dispatch) =>
+            dispatch.providerName === providerName && dispatch.taskRef !== handoff.taskRef,
+        ).length;
+        if (openTaskSessions >= taskWidth) {
+          this.holdProviderBusy(
+            handoff,
+            providerName,
+            `task-sessions=${openTaskSessions} task=${taskWidth}`,
+          );
           keep.push(handoff);
           continue;
         }

@@ -45,6 +45,8 @@ export interface QueuedSendOptions {
   standalone?: boolean;
   /** The turn's first request must call this tool (a reaction's declared `turn`). */
   requiredTool?: string;
+  /** The turn repairs a gate rejection; see `SendAndWaitOpts.reducedThinking`. */
+  reducedThinking?: boolean;
   nudge?: boolean;
   /** The prompt draft this send was written in, if any. */
   draftId?: string;
@@ -135,7 +137,14 @@ function runOptionsOf<O extends QueuedSendOptions>(opts: O): QueuedRunOptions<O>
   ] as const) {
     if (!out[key]) delete out[key];
   }
-  for (const key of ['ambient', 'checkIn', 'hidden', 'nudge', 'standalone'] as const) {
+  for (const key of [
+    'ambient',
+    'checkIn',
+    'hidden',
+    'nudge',
+    'standalone',
+    'reducedThinking',
+  ] as const) {
     if (out[key] !== true) delete out[key];
   }
   return out as QueuedRunOptions<O>;

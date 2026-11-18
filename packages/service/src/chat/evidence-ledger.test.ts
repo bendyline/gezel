@@ -173,7 +173,7 @@ describe('EvidenceLedger', () => {
         { path: 'packages/core/src/__tests__/convert.test.ts' },
         'Listed 180 entries.',
       );
-      ledger.setNameChecks(names);
+      ledger.setCodeProject(!names);
       return ledger;
     };
     expect(reviewer(true).checkProseFileWrite('write_artifact', audit)?.kind).toBe('reject');
@@ -273,6 +273,189 @@ describe('EvidenceLedger', () => {
       expect(refused.error).toContain('`memo-product.md`');
       expect(refused.error).toContain('`search`');
     }
+  });
+
+  // docblocks PR #58, 2026-11-17: a reviewer holding every patch record in
+  // full was sent back to `read_artifact` on four of them, six times, for
+  // details no diff states, while its gate said to write next and read nothing.
+  describe('a refused writer whose sources are project files', () => {
+    const storeRelease =
+      'data/github-pull-requests/pr-58/files/001--github-workflows-store-release-yml--4c11bc3c.md';
+    const vscodeRelease =
+      'data/github-pull-requests/pr-58/files/002--github-workflows-vscode-release-yml--37a00d72.md';
+    const journey =
+      'data/github-pull-requests/pr-58/files/008--e2e-site-journey-review-ts--3eb8be1f.md';
+    const batchRead = (
+      files: Array<{ path: string; lines: [number, number]; total: number; body: string }>,
+    ) =>
+      [
+        `[read_artifacts requested=${files.length} ok=${files.length} errors=0]`,
+        ...files.map(({ path, lines, total }, i) => {
+          const complete = lines[0] === 1 && lines[1] === total;
+          return `${i + 1} OK ${path} lines=${lines[0]}-${lines[1]} totalLines=${total}${complete ? ' complete' : ` nextStartLine=${lines[1] + 1}`}`;
+        }),
+        '',
+        ...files.map(
+          ({ path, lines, body }) => `--- ${path} (lines=${lines[0]}-${lines[1]}) ---\n${body}\n`,
+        ),
+      ].join('\n');
+    const reviewer = () => {
+      const ledger = new EvidenceLedger();
+      ledger.setCodeProject(true);
+      ledger.setLookupTools(['read_artifact', 'read_artifacts', 'write_artifact']);
+      return ledger;
+    };
+    const observations = {
+      path: 'tasks/1/pr-review/observations-1.md',
+      content:
+        'If `vsce` fails (network error, OIDC token rejected, Marketplace 500), the job is still reported green.',
+    };
+    const refusal = (ledger: EvidenceLedger, write = observations) => {
+      const verdict = ledger.checkProseFileWrite('write_artifact', write);
+      return verdict?.kind === 'reject' ? verdict.error : '';
+    };
+
+    it('does not send it to re-read files it was shown in full', () => {
+      const ledger = reviewer();
+      ledger.labelToolResult(
+        'read_artifacts',
+        { paths: [storeRelease, vscodeRelease] },
+        batchRead([
+          { path: storeRelease, lines: [1, 283], total: 283, body: '+  upload-vsix:' },
+          { path: vscodeRelease, lines: [1, 167], total: 167, body: '-name: VS Code Release' },
+        ]),
+      );
+      const error = refusal(ledger);
+      expect(error).toContain('no evidence shows "500"');
+      expect(error).toContain(
+        `You have already read \`${storeRelease}\` and \`${vscodeRelease}\` in full, and they do not state these details, so reading them again will not help. Remove each of these, or say in the text that it could not be verified, then save again.`,
+      );
+      expect(error).not.toContain('Your next tool call must be');
+      expect(error).not.toContain('Do not save again yet');
+    });
+
+    it('still sends it to the part of a file it has not read', () => {
+      const ledger = reviewer();
+      ledger.labelToolResult(
+        'read_artifacts',
+        { paths: [storeRelease, journey] },
+        batchRead([
+          { path: storeRelease, lines: [1, 283], total: 283, body: '+  upload-vsix:' },
+          { path: journey, lines: [1, 400], total: 900, body: "+const PHASES = ['media'];" },
+        ]),
+      );
+      const error = refusal(ledger);
+      expect(error).toContain(
+        `Do not save again yet. Your next tool call must be \`read_artifact\` on the source file that states the missing detail (\`${journey}\`). Use what it returns before writing again. You have already read \`${storeRelease}\` in full, and it does not state these details.`,
+      );
+    });
+
+    it('counts ranged reads that cover a file end to end', () => {
+      const ledger = reviewer();
+      ledger.labelToolResult(
+        'read_artifacts',
+        { paths: [journey] },
+        batchRead([
+          { path: journey, lines: [1, 400], total: 900, body: "+const PHASES = ['media'];" },
+        ]),
+      );
+      ledger.labelToolResult(
+        'read_artifact',
+        { path: journey, startLine: 401, endLine: 800 },
+        '+async function mediaPhase() {}\n\n[lines 401-800 of 900. Earlier lines are not included in this slice. Next: read_artifact({"path":"x","startLine":801,"endLine":900})]',
+      );
+      expect(refusal(ledger)).toContain('Your next tool call must be `read_artifact`');
+      ledger.labelToolResult(
+        'read_artifact',
+        { path: journey, startLine: 801, endLine: 1200 },
+        '+async function phonePhase() {}\n\n[lines 801-900 of 900. Earlier lines are not included in this slice. End of file; no later lines.]',
+      );
+      // Another target: the first refusal spent this one's allowance.
+      const error = refusal(ledger, { ...observations, path: 'tasks/1/pr-review/notes.md' });
+      expect(error).toContain(`You have already read \`${journey}\` in full, and it does not`);
+      expect(error).not.toContain('Your next tool call must be');
+    });
+
+    it('does not count a result the bridge cut short', () => {
+      const ledger = reviewer();
+      ledger.labelToolResult(
+        'read_artifacts',
+        { paths: [storeRelease] },
+        `${batchRead([
+          { path: storeRelease, lines: [1, 283], total: 283, body: '+  upload-vsix:' },
+        ])}\n\n…[tool output truncated: 5,000 additional chars dropped; tool output limit applied — re-run with a more specific request if you need the rest]`,
+      );
+      expect(refusal(ledger)).toContain(
+        `Your next tool call must be \`read_artifact\` on the source file that states the missing detail (\`${storeRelease}\`)`,
+      );
+    });
+
+    it('reads a whole file from a single reader, and names a lookup for what files cannot hold', () => {
+      const ledger = new EvidenceLedger();
+      ledger.beginTurn('Reconcile the memos.');
+      ledger.setLookupTools(['read_file', 'search', 'write_file']);
+      ledger.labelToolResult(
+        'read_file',
+        { path: 'memo-product.md' },
+        '[read_file path="memo-product.md" lines=1-1 totalLines=1 complete]\n1→The launch budget is 240,000 EUR.',
+      );
+      const error = refusal(ledger, {
+        path: 'synthesis.md',
+        content: 'The launch budget is 310,000 EUR.',
+      });
+      expect(error).toContain(
+        'You have already read `memo-product.md` in full, and it does not state these details, so reading it again will not help. Remove each of these, or say in the text that it could not be verified, then save again. If another source could state one, look it up with `search` first.',
+      );
+
+      const whole = reviewer();
+      whole.labelToolResult('read_artifact', { path: storeRelease }, '+  upload-vsix:');
+      expect(refusal(whole)).toContain(`You have already read \`${storeRelease}\` in full`);
+      const sliced = reviewer();
+      sliced.labelToolResult(
+        'read_artifact',
+        { path: storeRelease, startLine: 1, endLine: 40 },
+        '+  upload-vsix:\n\n[lines 1-40 of 283. Next: read_artifact({"path":"x","startLine":41,"endLine":283})]',
+      );
+      expect(refusal(sliced)).toContain('Your next tool call must be `read_artifact`');
+    });
+
+    it('checks no line locators or quoted spans in a codebase, and every one elsewhere', () => {
+      const review = {
+        path: 'tasks/1/pr-review/observations-1.md',
+        content: [
+          '- **`build-vsix` job** (lines 634–722): depends on `preflight`.',
+          '- **`persist-credentials: false` on the checkout** (new-side line 909): keeps the token out of later steps.',
+          '- The visibility checks are the correct "is a person seeing this" test.',
+          '- Fix: distinguish "watcher expired / no notice element ever matched" from the rest.',
+        ].join('\n'),
+      };
+      const read = (ledger: EvidenceLedger) =>
+        ledger.labelToolResult(
+          'read_artifacts',
+          { paths: [storeRelease] },
+          batchRead([
+            {
+              path: storeRelease,
+              lines: [1, 283],
+              total: 283,
+              body: '@@ -613,16 +631,92 @@\n+  build-vsix:\n+          persist-credentials: false',
+            },
+          ]),
+        );
+      const code = reviewer();
+      read(code);
+      expect(code.checkProseFileWrite('write_artifact', review)).toBeNull();
+      expect(code.takeUnverifiedWrites().sentences).toEqual([]);
+
+      const prose = new EvidenceLedger();
+      prose.setLookupTools(['read_artifact', 'read_artifacts', 'write_artifact']);
+      read(prose);
+      const error = refusal(prose, review);
+      expect(error).toContain('Not saved: 4 sentences state');
+      for (const missing of ['"634", "722"', '"909"', '"is a person seeing this"']) {
+        expect(error).toContain(missing);
+      }
+    });
   });
 
   // incident-postmortem on GLM 5.3, 2026-10-20: the project about said

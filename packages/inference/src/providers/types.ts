@@ -735,6 +735,15 @@ export interface BatchCapability {
    */
   readonly maxConcurrency: number;
   /**
+   * How many background task sessions are worth holding open on this engine
+   * at once, when that is fewer than its background lane admits. Two task
+   * sessions on an engine that serves them one generation at a time finish
+   * no sooner than one after the other; each only waits out the other's
+   * generations and keeps a second context growing. TaskRunner reads it.
+   * Omitted means the background lane's own width.
+   */
+  readonly taskConcurrency?: number;
+  /**
    * Optional live headroom check — return false to refuse adding
    * `candidate` to the current in-flight set. Defaults to "admit while
    * inflight.length < maxConcurrency" when omitted.

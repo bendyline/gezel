@@ -13,6 +13,7 @@ export { gateCheckLabel };
 export type { GateWorkspaceReader };
 import { validateFile } from '@bendyline/gezel-mcp';
 import {
+  type PrFindingBlock,
   type WorkspaceLike,
   buildJudgePrompt,
   citationsResolve,
@@ -21,10 +22,15 @@ import {
   cssMinBytes,
   esmImports,
   extractInlineScripts,
+  formatLineRanges,
   markdownHeadingsMatch,
   notContainsPattern,
   parseJudgeVerdict,
+  parsePatchRecord,
+  parsePrVerificationCandidates,
   planStructure,
+  prFindingBlocks,
+  prFindingWordingProblem,
   unsupportedClaims,
   validateJudgeEvidence,
   validateScriptSyntax,
@@ -86,144 +92,75 @@ export interface GateCheckOutcome {
   remaining?: number;
 }
 
-const PR_NON_ACTIONABLE_FINDING_RE =
-  /\b(?:verified\s+ok|no\s+(?:defect|issue|finding|action\s+needed|functional\s+issue)|not\s+(?:a\s+bug|a\s+(?:functional|correctness)\s+defect|a\s+defect|introduced\s+by\s+this\s+patch|available\s+(?:in|for)\s+this\s+batch)|none\s+needed|acceptable(?:\s+as[- ]is)?|accept\s+as[- ]is|worth\s+noting|future\s+(?:optimization|hardening)|pre[- ]existing|functionally\s+harmless|intentional\s+limitation|needs?\s+(?:(?:central|cross[- ]file)\s+)?verification|requires?\s+(?:central\s+)?verification|central\s+verification|not\s+audited|implementation\s+(?:is\s+)?unknown|no\s+evidence\s+(?:of|that).{0,80}\bavailable|correct\s+(?:and\s+bounded\s+)?fallback|intent\s+is\s+correct|best[- ]effort|harmless\s+here|does\s+not\s+affect\s+runtime\s+behavior|finding\s+is\s+contingent|this\s+finding\s+is\s+contingent|risk\s+(?:is\s+)?low|may|might|could|potential(?:ly)?|possibly|likely|consider(?:ing)?|comment|documentation|documented|discoverability|verify\s+(?:that|the|whether)|verification\s+(?:of|whether)|(?:style|quoting|backslash)\s+(?:inconsistency|concern)|standardiz(?:e|ing)|if\s+.{0,160}\b(?:fails?|missing|empty|malformed|changes?|changed|removed|renamed|never|does\s+not|doesn't))\b/is;
-
-/**
- * Models use several equivalent Markdown shapes for batch findings (plain,
- * bold, headings, bullets, and pipe-delimited rows). Normalize them before a
- * PR gate judges anchors or actionable content; matching only `B1-1:` let
- * `**B1-1** ...` and `B1-1 | ...` bypass both checks in real reviews.
- */
-function prFindingBlocks(text: string): Array<{ batch: number; id: string; text: string }> {
-  const lines = text.split(/\r?\n/);
-  const starts: Array<{ index: number; batch: number; id: string }> = [];
-  const pattern = /^\s*(?:#{1,6}\s+|[-*]\s+)?(?:\*\*)?B(\d+)-(\d+)(?:\*\*)?\b/i;
-  for (let index = 0; index < lines.length; index++) {
-    const match = pattern.exec(lines[index]!);
-    if (!match) continue;
-    starts.push({ index, batch: Number(match[1]), id: `B${match[1]}-${match[2]}` });
-  }
-  return starts.map((start, position) => {
-    const next = starts[position + 1]?.index ?? lines.length;
-    let end = next;
-    for (let index = start.index + 1; index < next; index++) {
-      if (/^\s*#{1,4}\s+/.test(lines[index]!)) {
-        end = index;
-        break;
-      }
-    }
-    return { batch: start.batch, id: start.id, text: lines.slice(start.index, end).join('\n') };
-  });
-}
-
-interface PrVerificationCandidate {
-  id: string;
-  path: string;
-  line: number;
-  severity: 'critical' | 'major' | 'minor' | 'nit';
-  claim: string;
-  verify: string;
+/** A numbered finding's or question's line, checked against the patch it cites. */
+function citedLineProblem(
+  id: string,
+  path: string,
+  line: number,
+  shown: ReadonlySet<number> | undefined,
+): string | null {
+  if (!shown || shown.size === 0 || shown.has(line)) return null;
+  return `${id} cites \`${path}:${line}\`, but that patch shows no line ${line} (it shows ${formatLineRanges(shown)}). Copy the number printed beside the line you mean.`;
 }
 
 /**
- * Pull a shard's machine-readable cross-file verification channel out of
- * its Markdown wrapper. Findings and verification candidates deliberately
- * have different contracts: a B-number is a defect the shard can already
- * prove, while a V-number is a bounded question the checkout-aware final
- * reviewer still has to resolve.
+ * Everything wrong with one numbered finding, each stated with the words or
+ * the number that caused it. A rejection that listed four possible causes and
+ * quoted the whole finding sent a reviewer after the wrong one three times.
  */
-function prVerificationCandidates(
-  text: string,
+function prFindingProblems(
+  finding: PrFindingBlock,
   batch: number,
-  assignedPaths: readonly string[],
-): { candidates: PrVerificationCandidate[]; error?: string } {
-  const heading = /^#{1,6}\s+Verification candidates\s*$/im.exec(text);
-  if (!heading) {
-    return {
-      candidates: [],
-      error:
-        'add a "Verification candidates" heading with one JSON block containing {"verificationCandidates":[]}',
-    };
+  paths: readonly string[],
+  shownLines: ReadonlyMap<string, ReadonlySet<number>>,
+): string[] {
+  if (finding.batch !== batch) {
+    return [
+      `${finding.id} is numbered for batch ${finding.batch}; this file is batch ${batch}, so number it B${batch}-N.`,
+    ];
   }
-  const afterHeading = text.slice(heading.index + heading[0].length);
-  const nextHeadingOffset = afterHeading.search(/^#{1,6}\s+/m);
-  const section = nextHeadingOffset >= 0 ? afterHeading.slice(0, nextHeadingOffset) : afterHeading;
-  const blocks = [...section.matchAll(/```json\s*([\s\S]*?)```/gi)];
-  const json = blocks[0]?.[1];
-  if (blocks.length !== 1 || json === undefined) {
-    return {
-      candidates: [],
-      error:
-        'the "Verification candidates" section must contain exactly one fenced JSON block with a verificationCandidates array',
-    };
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(json);
-  } catch (error) {
-    return {
-      candidates: [],
-      error: `verificationCandidates JSON is invalid: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { candidates: [], error: 'verificationCandidates JSON must be an object' };
-  }
-  const topLevelKeys = Object.keys(value);
-  if (topLevelKeys.length !== 1 || topLevelKeys[0] !== 'verificationCandidates') {
-    return {
-      candidates: [],
-      error: 'verificationCandidates JSON must contain only the verificationCandidates key',
-    };
-  }
-  const raw = (value as Record<string, unknown>).verificationCandidates;
-  if (!Array.isArray(raw)) {
-    return { candidates: [], error: 'verificationCandidates must be an array' };
-  }
-  if (raw.length > 12) {
-    return { candidates: [], error: 'verificationCandidates must contain at most 12 entries' };
-  }
-  const candidates: PrVerificationCandidate[] = [];
-  for (let index = 0; index < raw.length; index++) {
-    const candidate = raw[index];
-    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
-      return { candidates: [], error: `verificationCandidates[${index}] must be an object` };
+  const problems: string[] = [];
+  const anchors: Array<{ path: string; line: number }> = [];
+  let notANumber: string | undefined;
+  for (const path of paths) {
+    const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    for (const match of finding.text.matchAll(
+      new RegExp(`(?<![\\w./-])${escaped}:(\\d+)\\b`, 'g'),
+    )) {
+      anchors.push({ path, line: Number(match[1]) });
     }
-    const fields = candidate as Record<string, unknown>;
-    const expectedId = `V${batch}-${index + 1}`;
-    const allowedKeys = new Set(['id', 'path', 'line', 'severity', 'claim', 'verify']);
-    const unknownKeys = Object.keys(fields).filter((key) => !allowedKeys.has(key));
-    if (
-      fields.id !== expectedId ||
-      typeof fields.path !== 'string' ||
-      !assignedPaths.includes(fields.path) ||
-      !Number.isSafeInteger(fields.line) ||
-      Number(fields.line) < 1 ||
-      !['critical', 'major', 'minor', 'nit'].includes(String(fields.severity)) ||
-      typeof fields.claim !== 'string' ||
-      fields.claim.trim().length < 10 ||
-      fields.claim.length > 400 ||
-      typeof fields.verify !== 'string' ||
-      fields.verify.trim().length < 3 ||
-      fields.verify.length > 400 ||
-      unknownKeys.length > 0
-    ) {
-      return {
-        candidates: [],
-        error: `${expectedId} must contain only id, assigned path, positive integer line, severity (critical|major|minor|nit), a concise claim, and an exact verification target`,
-      };
-    }
-    candidates.push({
-      id: fields.id,
-      path: fields.path,
-      line: fields.line,
-      severity: fields.severity,
-      claim: fields.claim.trim(),
-      verify: fields.verify.trim(),
-    } as PrVerificationCandidate);
+    notANumber ??= new RegExp(`(?<![\\w./-])${escaped}:[A-Za-z][\\w-]*`).exec(finding.text)?.[0];
   }
-  return { candidates };
+  if (anchors.length === 0) {
+    problems.push(
+      notANumber
+        ? `${finding.id} cites \`${notANumber}\`, which is not a line number. Write the path, a colon, and the number printed beside the patch line, as \`${paths[0]}:42\`.`
+        : `${finding.id} names no line. Cite one of this batch's paths with the number printed beside the patch line, as \`${paths[0]}:42\`.`,
+    );
+  }
+  for (const anchor of anchors) {
+    const problem = citedLineProblem(
+      finding.id,
+      anchor.path,
+      anchor.line,
+      shownLines.get(anchor.path),
+    );
+    if (problem) {
+      problems.push(problem);
+      break;
+    }
+  }
+  const wording = prFindingWordingProblem(finding.text);
+  if (wording?.kind === 'not-a-defect') {
+    problems.push(
+      `${finding.id} says "${wording.phrase}". A numbered finding states a defect this pull request introduces: move it under Checks without a B-number, or delete it. A finding runs until the next Markdown heading, so checks written beneath one need their own \`### Checks\` heading.`,
+    );
+  } else if (wording) {
+    problems.push(
+      `${finding.id} says "${wording.phrase}". A numbered finding states what happens, not what might: write the mechanism as fact, or record it as V${batch}-N under Verification candidates when it depends on code outside this batch.`,
+    );
+  }
+  return problems;
 }
 
 export interface GateCheckResult {
@@ -1324,48 +1261,60 @@ async function evalCheckInner(
               heading.startsWith(`${path} -`),
           ),
       );
-      const findingBlocks = prFindingBlocks(observations);
-      const invalidFindings = findingBlocks.filter((finding) => {
-        if (finding.batch !== number) return true;
-        return !(paths as string[]).some((path) => {
-          const escaped = path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-          return new RegExp(`${escaped}:\\d+\\b`).test(finding.text);
-        });
-      });
-      const nonActionableFindings = findingBlocks.filter((finding) =>
-        PR_NON_ACTIONABLE_FINDING_RE.test(finding.text),
-      );
-      const verification = c.requireVerificationCandidates
-        ? prVerificationCandidates(observations, number, paths as string[])
-        : { candidates: [] };
-      const literalAnchorPlaceholders = observations
-        .split(/\r?\n/)
-        .filter((line) =>
-          /(?:\bnew-side-line\b|:\s*(?:new\s+side\s+line|(?:new\s+)?line)\b(?!\s*\d))/i.test(line),
+      // The patch each path cites, read only when the batch names its records
+      // (a batch published before records were attached judges wording alone).
+      const records = batch?.records;
+      const shownLines = new Map<string, ReadonlySet<number>>();
+      if (Array.isArray(records) && records.length === paths.length) {
+        await Promise.all(
+          (paths as string[]).map(async (path, index) => {
+            const record = records[index];
+            const text = typeof record === 'string' ? await reader.read(record) : null;
+            const patch = text === null ? null : parsePatchRecord(text);
+            if (patch) shownLines.set(path, patch.newLines);
+          }),
         );
-      const invalidCount =
-        invalidFindings.length +
-        nonActionableFindings.length +
-        literalAnchorPlaceholders.length +
-        (verification.error ? 1 : 0);
+      }
+      const problems: string[] = [];
+      if (!batchTitle) problems.push(`Add a Batch ${number} Markdown heading (#, ##, or ###).`);
+      if (missing.length > 0) {
+        problems.push(
+          `${missing.length}/${paths.length} assigned path(s) lack their own Markdown heading: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ' …' : ''}`,
+        );
+      }
+      for (const finding of prFindingBlocks(observations)) {
+        problems.push(...prFindingProblems(finding, number, paths as string[], shownLines));
+      }
+      if (c.requireVerificationCandidates) {
+        const verification = parsePrVerificationCandidates(observations, number, paths as string[]);
+        problems.push(
+          ...verification.problems.map(
+            (problem) =>
+              `${problem}. Use V${number}-1 onward only for cross-file questions; keep proven defects as B${number}-N findings.`,
+          ),
+        );
+        for (const candidate of verification.candidates) {
+          const problem = citedLineProblem(
+            candidate.id,
+            candidate.path,
+            candidate.line,
+            shownLines.get(candidate.path),
+          );
+          if (problem) problems.push(problem);
+        }
+      }
+      const shown = problems.slice(0, 6);
       return {
-        ok: batchTitle && missing.length === 0 && invalidCount === 0,
-        detail: !batchTitle
-          ? `${c.file}: add a Batch ${number} Markdown heading (#, ##, or ###).`
-          : missing.length > 0
-            ? `${c.file}: ${missing.length}/${paths.length} assigned path(s) lack their own Markdown heading: ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ' …' : ''}`
-            : verification.error
-              ? `${c.file}: ${verification.error}. Use V${number}-1 onward only for cross-file questions; keep proven defects as B${number}-N findings.`
-              : invalidCount > 0
-                ? `${c.file}: every B${number}-N finding must be an actionable PR defect and cite an assigned path with an actual integer new-side line (for example src/a.ts:42). Drop numbered non-issues (such as "no defect", "no action needed", or "acceptable as-is"), replace literal placeholders, and move checks/limitations outside Findings. Invalid: ${[
-                    ...invalidFindings.map((finding) => finding.text),
-                    ...nonActionableFindings.map((finding) => finding.text),
-                    ...literalAnchorPlaceholders,
-                  ]
-                    .slice(0, 3)
-                    .join(' | ')}`
-                : `Batch ${number}: observations include headings for all ${paths.length} assigned path(s) and concrete anchors for every numbered finding.`,
-        remaining: missing.length + invalidCount + (batchTitle ? 0 : 1),
+        ok: problems.length === 0,
+        detail:
+          problems.length === 0
+            ? `Batch ${number}: observations include headings for all ${paths.length} assigned path(s) and concrete anchors for every numbered finding.`
+            : `${c.file} needs ${problems.length} fix${problems.length === 1 ? '' : 'es'}; everything else in it passed, so change only these:\n${shown
+                .map((problem, index) => `  ${index + 1}. ${problem}`)
+                .join(
+                  '\n',
+                )}${problems.length > shown.length ? `\n  …and ${problems.length - shown.length} more of the same kinds.` : ''}`,
+        remaining: problems.length,
       };
     }
     case 'corpusCoverage': {

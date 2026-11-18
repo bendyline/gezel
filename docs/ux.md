@@ -2837,9 +2837,14 @@ with its reason in place of the description and an "Unavailable" stamp. Never
 hide it: a person who saw it on the desktop should learn why it is missing
 here, not wonder whether it exists.
 
-**A gallery dialog is a two-step wizard.** Both tenants are: New Task and
-New Project (`gz-npd-step-pick` / `gz-npd-step-configure` in
+**A gallery dialog is a two-step wizard.** Every tenant is: New Task, New
+Project and Add connection (`gz-npd-step-pick` / `gz-npd-step-configure` in
 [styles/project-surfaces.css](../packages/ui/src/styles/project-surfaces.css)).
+Add connection ([AddConnectionDialog](../packages/ui/src/components/AddConnectionDialog.tsx))
+shelves connectors by family (`connectorTypeFamily` in core, the same reading
+that picks each mark's ground), and its second step is the connector's setup
+form in one centered column. It was an inline tray under the list, where the
+form opened below a 25-card grid.
 The old third column — a 19rem pane holding the selection's hero and its
 whole form — could not carry what these choices actually are. A craftbook is
 a page: a paragraph of description, four to a dozen named steps with their

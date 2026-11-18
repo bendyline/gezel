@@ -167,7 +167,8 @@ export function FileViewModeKeys({
  * strip's divider because it is a toggle, not a member of the mode
  * radiogroup. In every file panel it also reveals Office lock files; in the
  * Workspace it reveals dotfiles and vendor folders, and in Artifacts it
- * additionally reveals the reserved `shadow/` cache.
+ * additionally reveals the reserved `shadow/` cache and connector bookkeeping
+ * files (`_meta.json`, `_flags.json`).
  */
 export function FileHiddenKey({
   kind,
@@ -184,7 +185,7 @@ export function FileHiddenKey({
     : kind === 'workspace'
       ? 'Show hidden files — Office lock files, dot-files, and folders like node_modules.'
       : kind === 'artifacts'
-        ? 'Show hidden files — Office lock files, dot-files, and the generated shadow folder.'
+        ? 'Show hidden files — Office lock files, dot-files, connector bookkeeping, and the generated shadow folder.'
         : 'Show hidden files — Office lock files, dot-files, and companion folders.';
   return (
     <button

@@ -98,6 +98,7 @@ function mkDesc(partial: Partial<Describe>): Describe {
 class QueueFakeProvider extends FakeProvider {
   desc: Describe = mkDesc({});
   batchWidth = 1;
+  taskWidth: number | undefined;
   launchedSlots: number | undefined;
   readonly queue = {
     describe: () => this.desc,
@@ -115,7 +116,10 @@ class QueueFakeProvider extends FakeProvider {
       this.desc.pending.some((p) => p.id === id),
   } as unknown as InferenceProviderQueue;
   get batch(): InferenceBatchCapability {
-    return { maxConcurrency: this.batchWidth } as unknown as InferenceBatchCapability;
+    return {
+      maxConcurrency: this.batchWidth,
+      ...(this.taskWidth !== undefined ? { taskConcurrency: this.taskWidth } : {}),
+    } as unknown as InferenceBatchCapability;
   }
   engineLaunchSnapshot() {
     return this.launchedSlots === undefined
@@ -1017,6 +1021,34 @@ describe('ProviderPool', () => {
     made[0]!.launchedSlots = 4;
 
     expect(pool.queueSummaries().get('llama-cpp')!.maxConcurrency).toBe(4);
+  });
+
+  it('queueSummaries reports a task width only when a replica asks for a narrower one', async () => {
+    const made: QueueFakeProvider[] = [];
+    const broker = new CapacityBroker({ budgetBytes: 64 * GB });
+    const pool = new ProviderPool({
+      broker,
+      builders: { mlx: mkQueueBuilder(5 * GB, made) },
+    });
+    await pool.ensure('mlx', 'qwen', 0, 5 * GB);
+    made[0]!.batchWidth = 3;
+    made[0]!.desc = mkDesc({ concurrency: 4, interactiveConcurrency: 3, backgroundConcurrency: 2 });
+
+    expect(pool.queueSummaries().get('mlx')!.taskConcurrency).toBeUndefined();
+
+    made[0]!.taskWidth = 1;
+    const narrowed = pool.queueSummaries().get('mlx')!;
+    expect(narrowed.taskConcurrency).toBe(1);
+    // The lanes themselves are untouched: a chat still has its slot, and a
+    // turn's own one-shot still has the second background lease.
+    expect(narrowed.backgroundConcurrency).toBe(2);
+    expect(narrowed.maxConcurrency).toBe(3);
+
+    // A second replica without a drafter adds its whole background lane.
+    await pool.ensure('mlx', 'qwen', 1, 5 * GB);
+    made[1]!.batchWidth = 3;
+    made[1]!.desc = mkDesc({ concurrency: 4, interactiveConcurrency: 3, backgroundConcurrency: 2 });
+    expect(pool.queueSummaries().get('mlx')!.taskConcurrency).toBe(3);
   });
 
   it('queueSummaries returns an empty map for an empty pool', () => {

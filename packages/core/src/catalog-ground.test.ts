@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   CATALOG_GROUND_TONES,
+  CONNECTOR_FAMILIES,
+  CONNECTOR_FAMILY_GROUND,
   CRAFTBOOK_CATEGORY_GROUND,
   PROJECT_TYPE_CATEGORY_GROUND,
   catalogGroundFor,
+  connectorTypeFamily,
 } from './catalog-ground.js';
 import {
   CRAFTBOOK_CATEGORY_FAMILY_META,
@@ -71,6 +74,22 @@ describe('catalog grounds', () => {
     expect(ground('http-json-rows', ['data', 'table', 'json'])).toBe('slate');
     expect(ground('camera-local', ['camera', 'home', 'device'])).toBe('forest');
     expect(ground('from-a-newer-gilde')).toBe('sage');
+  });
+
+  it('shelves a connector type by family, and paints it on that family’s ground', () => {
+    const shelve = (id: string, tags: string[] = []) => connectorTypeFamily({ id, tags });
+    expect(shelve('mail-imap', ['email'])).toBe('mail');
+    expect(shelve('calendar-google', ['calendar', 'oauth'])).toBe('calendars');
+    expect(shelve('files-onedrive', ['files', 'onedrive'])).toBe('files');
+    expect(shelve('linear-issues', ['issues', 'mcp'])).toBe('code');
+    expect(shelve('x-posts', ['x', 'twitter', 'social', 'posts'])).toBe('social');
+    expect(shelve('azure-monitor-logs', ['azure', 'logs', 'telemetry'])).toBe('data');
+    expect(shelve('website', ['web', 'website'])).toBe('web');
+    expect(shelve('camera-local', ['camera', 'device'])).toBe('devices');
+    expect(shelve('from-a-newer-gilde')).toBe('other');
+    for (const family of CONNECTOR_FAMILIES) {
+      expect(CONNECTOR_FAMILY_GROUND[family]).toBeDefined();
+    }
   });
 
   it('leaves kinds whose artwork carries its own ground alone', () => {

@@ -148,6 +148,35 @@ Needs central verification at the new-side line 29.
       /lacks path heading/,
     );
   });
+  // The gate passed this finding; a private copy of the gate's old wording rule
+  // here would have set it aside for "If ... fails" and lost it from the report.
+  it('keeps a defect stated as a condition and its consequence on the shortlist', async () => {
+    h.files.set(
+      'tasks/1/pr-review/observations-1.md',
+      `# Batch 1\n## src/a.ts\nVerified OK.\n## src/b.ts\n### Findings\n- **B1-1** — \`.github/workflows/release.yml:935\` — severity: **major**\n\nIf \`vsce\` fails for any reason, the step still exits 0 and the job is reported green. The comment above the step documents the opposite.\n${emptyVerification}`,
+    );
+    h.files.set(
+      'tasks/1/pr-review/observations-2.md',
+      `## Batch 2\n### \`src/c.ts\`\nGenerated file.\n${emptyVerification}`,
+    );
+    h.files.set(
+      'tasks/1/pr-review/batches.json',
+      JSON.stringify([
+        { batchNumber: 1, start: 1, end: 2, paths: ['src/a.ts', 'src/b.ts'] },
+        { batchNumber: 2, start: 3, end: 3, paths: ['src/c.ts'], generated: true },
+      ]),
+    );
+    vi.resetModules();
+    await import('./summarizePullRequestObservations');
+    const index = JSON.parse(h.files.get('tasks/1/pr-review/synthesis-data.json')!);
+    expect(index.shortlist).toEqual([
+      expect.objectContaining({ id: 'B1-1', severity: 'major', likelyNonIssue: false }),
+    ]);
+    expect(index.nonActionableCandidateCount).toBe(0);
+    expect(index.generatedBatchCount).toBe(1);
+    expect(index.batches[1].generated).toBe(true);
+    expect(index.batches[0]).not.toHaveProperty('generated');
+  });
   it('drops speculative candidates and prioritizes product source over eval-only findings', async () => {
     h.files.set(
       'tasks/1/pr-review/observations-1.md',

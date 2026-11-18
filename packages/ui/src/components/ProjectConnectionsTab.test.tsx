@@ -1,5 +1,5 @@
 import type { CatalogItemSummary, ProjectDetail } from '@bendyline/gezel';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockApi } from '../test-utils/mockApi.js';
@@ -86,38 +86,102 @@ describe('ProjectConnectionsTab connector picker', () => {
     vi.mocked(api.getProject).mockResolvedValue(PROJECT);
   });
 
-  it('renders compact selectable tiles and keeps the chosen connector visible', async () => {
+  it('opens a two-step dialog: choose a connector, then set it up', async () => {
     render(<ProjectConnectionsTab project={PROJECT} />);
     const user = userEvent.setup();
 
     await user.click(screen.getByRole('button', { name: 'Add connection' }));
 
-    const gallery = await screen.findByRole('radiogroup', { name: 'Connector type' });
-    expect(gallery).toBeInTheDocument();
-    expect(screen.getAllByRole('radio')).toHaveLength(3);
-    expect(screen.queryByRole('button', { name: 'Select' })).not.toBeInTheDocument();
+    const dialog = await screen.findByRole('dialog', { name: 'Add a connection' });
+    const gallery = await within(dialog).findByRole('radiogroup', { name: 'Connector type' });
+    expect(within(gallery).getAllByRole('radio')).toHaveLength(3);
+    // Nothing to add until a connector is chosen.
+    expect(within(dialog).queryByRole('button', { name: 'Add' })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
 
-    const gmail = screen.getByRole('radio', { name: 'Gmail' });
-    const imap = screen.getByRole('radio', { name: 'Email (IMAP)' });
-    expect(gmail).toHaveAttribute('aria-checked', 'false');
+    // The rail shelves connectors by family.
+    const rail = within(dialog).getByRole('navigation', { name: 'Connector families' });
+    expect(within(rail).getByRole('button', { name: /All connectors\s*3/ })).toBeInTheDocument();
+    expect(within(rail).getByRole('button', { name: /Mail\s*2/ })).toBeInTheDocument();
+    expect(within(rail).getByRole('button', { name: /Code\s*1/ })).toBeInTheDocument();
 
-    await user.click(gmail);
-    expect(gmail).toHaveAttribute('aria-checked', 'true');
-    expect(screen.getByLabelText('Gmail setup')).toBeInTheDocument();
+    await user.click(within(gallery).getByRole('radio', { name: 'Gmail' }));
+    expect(screen.getByRole('dialog', { name: 'Gmail' })).toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'Connector type' })).not.toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Gmail setup' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Connect' })).toBeInTheDocument();
-
     await user.type(screen.getByLabelText(/Display name/), 'Personal mail');
-    await user.click(imap);
-    expect(gmail).toHaveAttribute('aria-checked', 'false');
-    expect(imap).toHaveAttribute('aria-checked', 'true');
+
+    // Back to the gallery with the choice still lit; the same card keeps the form.
+    await user.click(screen.getByRole('button', { name: 'Connectors' }));
+    expect(screen.getByRole('radio', { name: 'Gmail' })).toHaveAttribute('aria-checked', 'true');
+    await user.click(screen.getByRole('radio', { name: 'Gmail' }));
+    expect(screen.getByLabelText(/Display name/)).toHaveValue('Personal mail');
+
+    // A different card starts a fresh form.
+    await user.click(screen.getByRole('button', { name: 'Connectors' }));
+    await user.click(screen.getByRole('radio', { name: 'Email (IMAP)' }));
     expect(screen.getByLabelText(/Display name/)).toHaveValue('');
     expect(screen.getByLabelText('IMAP host')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add' })).toBeInTheDocument();
     expect(
       screen.getByText('Check which password your mail provider requires'),
     ).toBeInTheDocument();
     expect(
       screen.getByText(/Use an app-specific password when your mail provider offers one/),
     ).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(api.bindConnector).not.toHaveBeenCalled();
+  });
+
+  it('filters the gallery by family and by search', async () => {
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    const gallery = await screen.findByRole('radiogroup', { name: 'Connector type' });
+    await within(gallery).findAllByRole('radio');
+
+    await user.click(screen.getByRole('button', { name: /^Mail/ }));
+    expect(
+      within(gallery)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('aria-label')),
+    ).toEqual(['Gmail', 'Email (IMAP)']);
+
+    await user.type(screen.getByRole('searchbox', { name: 'Search connectors' }), 'github');
+    expect(
+      within(gallery)
+        .getAllByRole('radio')
+        .map((r) => r.getAttribute('aria-label')),
+    ).toEqual(['GitHub Issues']);
+
+    await user.clear(screen.getByRole('searchbox', { name: 'Search connectors' }));
+    await user.type(
+      screen.getByRole('searchbox', { name: 'Search connectors' }),
+      'nothing like it',
+    );
+    expect(within(gallery).queryAllByRole('radio')).toHaveLength(0);
+    expect(within(gallery).getByText('No connectors match your search.')).toBeInTheDocument();
+  });
+
+  it('keeps the dialog open and says why when adding fails', async () => {
+    vi.mocked(api.bindConnector).mockRejectedValueOnce(new Error('The repository was not found.'));
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+
+    await user.click(screen.getByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'GitHub Issues' }));
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Repository is required.');
+    expect(api.bindConnector).not.toHaveBeenCalled();
+
+    await user.type(screen.getByLabelText('Repository'), 'bendyline/nope');
+    await user.click(screen.getByRole('button', { name: 'Add' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The repository was not found.');
+    expect(screen.getByRole('dialog', { name: 'GitHub Issues' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Repository')).toHaveValue('bendyline/nope');
   });
 
   it('pauses and resumes a connection, and a paused one cannot be synced', async () => {

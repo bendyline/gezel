@@ -795,6 +795,7 @@ export async function buildMlxProvider(opts: {
     // Supervised path only; external-baseUrl MLX stays at one in-flight
     // request because we don't control that server's width.
     batchMaxConcurrency: mlxBatchMaxConcurrency,
+    ...(specDrafter ? { speculativeDrafter: true } : {}),
     // mlx_vlm.server's `/v1/chat/completions` keys its in-memory cache
     // on `request.model` and reloads when it doesn't match what was
     // preloaded via `--model` (`PRELOAD_MODEL` env). The reload path

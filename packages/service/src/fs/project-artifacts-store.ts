@@ -3,6 +3,7 @@ import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import {
+  CONNECTOR_BOOKKEEPING_FILE_NAMES,
   artifactSegments,
   isReservedDiffpackArtifactPath,
   isReservedPromptDraftArtifactPath,
@@ -726,9 +727,7 @@ const ENGINE_OWNED_CORPUS_ENTRIES = new Set([
   '_outbox',
   '_sending',
   '_sent',
-  '_meta.json',
-  '_listing.json',
-  '_flags.json',
+  ...CONNECTOR_BOOKKEEPING_FILE_NAMES,
 ]);
 
 function isProtectedConnectorCorpusPath(path: string): boolean {

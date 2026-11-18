@@ -55,6 +55,11 @@ export const meta = defineScript({
       description:
         'Manifest field holding the expected total item count the batches must cover (default: totalFiles). Set empty to skip the total cross-check.',
     },
+    reviewOutFile: {
+      type: 'string',
+      description:
+        'Optional artifact path for the batches a reviewer reads: the published array without the batches the manifest marks `generated`. Point `spawn.overFile` here so no child is spawned for a lockfile.',
+    },
   },
   outputs: {
     ok: { type: 'boolean', description: 'True when the artifact was written; failures throw.' },
@@ -67,6 +72,14 @@ export const meta = defineScript({
       description: 'Total exact per-file artifact record paths attached to the batches.',
     },
     bytes: { type: 'number', description: 'Size of the written artifact in bytes.' },
+    reviewBatches: {
+      type: 'number',
+      description: 'Batches a reviewer reads (every batch not marked generated).',
+    },
+    generatedBatches: {
+      type: 'number',
+      description: 'Batches of generated files the runtime summarizes itself.',
+    },
   },
   requires: ['artifacts.read', 'artifacts.write'],
 } as const);
@@ -97,6 +110,10 @@ const outFile = cleanPath(input.outFile, 'outFile');
 const manifestSuffix = String(input.manifestSuffix ?? '-files.json');
 const itemsField = String(input.itemsField ?? 'batches');
 const totalField = input.totalField === undefined ? 'totalFiles' : String(input.totalField);
+const reviewOutFile =
+  input.reviewOutFile === undefined || String(input.reviewOutFile).trim() === ''
+    ? undefined
+    : cleanPath(input.reviewOutFile, 'reviewOutFile');
 
 // The changed-file directory can hold thousands of records, while a recursive
 // artifact listing is deliberately bounded. Manifests are small overview
@@ -146,6 +163,8 @@ interface Batch {
   end: number;
   paths: string[];
   records: string[];
+  /** Lockfiles and the like: summarized by the runtime, read by no reviewer. */
+  generated?: true;
 }
 
 function isPositiveInt(value: unknown): value is number {
@@ -194,7 +213,13 @@ const parsedBatches: Omit<Batch, 'records'>[] = itemsRaw.map((item, index) => {
       fail(`${where} repeats '${path}', which another batch already claims.`);
     seenPaths.add(path);
   }
-  return { batchNumber, start, end, paths };
+  return {
+    batchNumber,
+    start,
+    end,
+    paths,
+    ...(fields.generated === true ? { generated: true as const } : {}),
+  };
 });
 
 if (totalField !== '') {
@@ -287,6 +312,12 @@ const batches: Batch[] = parsedBatches.map((batch) => ({
 
 const content = `${JSON.stringify(batches, null, 2)}\n`;
 await gezel.artifacts.write(outFile, content);
+// The full array stays the authority for coverage; the fanout gets its own
+// file so the batch numbers a child addresses still match that array.
+const reviewBatches = batches.filter((batch) => !batch.generated);
+if (reviewOutFile !== undefined) {
+  await gezel.artifacts.write(reviewOutFile, `${JSON.stringify(reviewBatches, null, 2)}\n`);
+}
 
 gezel.output({
   ok: true,
@@ -296,4 +327,6 @@ gezel.output({
   paths: seenPaths.size,
   records: recordsByPath.size,
   bytes: content.length,
+  reviewBatches: reviewBatches.length,
+  generatedBatches: batches.length - reviewBatches.length,
 });

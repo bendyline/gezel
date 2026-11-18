@@ -39,6 +39,7 @@ import {
   turnCancelledMessage,
 } from '@bendyline/gezel';
 import {
+  applyReducedThinkingBudget,
   leadingSystemMessages,
   standaloneTurnMessages,
   toolSurfaceSize,
@@ -365,6 +366,8 @@ export class MlxProvider implements LLMProvider {
   /** Width-N gate over physical engine requests; see {@link MlxEngineGate}. */
   private readonly engineGate: MlxEngineGate;
   private readonly batchMaxConcurrency: number;
+  /** See the `speculativeDrafter` constructor option. */
+  private readonly speculativeDrafter: boolean;
   private readonly turnProtection = new AsyncLocalStorage<boolean>();
 
   constructor(opts: {
@@ -390,6 +393,16 @@ export class MlxProvider implements LLMProvider {
      * adaptive interactive policy.
      */
     batchMaxConcurrency?: number;
+    /**
+     * The engine was launched with a speculative drafter. The sidecar starts a
+     * wave only once the last has drained, and runs a request speculatively
+     * only when it is alone in its wave, so two task sessions take turns one
+     * generation at a time: each `[batch] admitted … waited=195s` of a
+     * 15-shard review was one shard waiting out the other. Task admission
+     * drops to one session; interactive turns and the queue's lanes are
+     * unchanged, so a chat still starts and parks a background wave.
+     */
+    speculativeDrafter?: boolean;
     affinity?: boolean;
     fetchImpl?: typeof fetch;
     modelManager?: import('./models.js').MlxModelManager;
@@ -421,6 +434,7 @@ export class MlxProvider implements LLMProvider {
     if (opts.templateOpensReasoning) this.templateOpensReasoning = opts.templateOpensReasoning;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
+    this.speculativeDrafter = opts.speculativeDrafter === true;
     this.engineGate = new MlxEngineGate(batchMax);
     this.visionMode = opts.vision ?? MlxVisionMode.fixed(opts.visionEnabled === true);
     this.visionMode.bindEngine(this.supervisor, this.engineGate, () => this.disposed);
@@ -462,7 +476,10 @@ export class MlxProvider implements LLMProvider {
    * See {@link LLMProvider.batch}.
    */
   get batch(): BatchCapability {
-    return { maxConcurrency: this.batchMaxConcurrency };
+    return {
+      maxConcurrency: this.batchMaxConcurrency,
+      ...(this.speculativeDrafter ? { taskConcurrency: 1 } : {}),
+    };
   }
 
   /** Can see images now, or after one reload into the vision tower. */
@@ -1474,6 +1491,14 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
           max_tokens: 16_384,
         };
         applyMlxRequestShape(body, this.deps, { hasTools: Boolean(tools?.length) });
+        if (opts?.reducedThinking) {
+          const reduced = applyReducedThinkingBudget(body, 'max_thinking_tokens');
+          if (reduced && turn === 0) {
+            log.info(
+              `turn#${seq} reduced thinking budget for this turn ${reduced.from} → ${reduced.to} tokens`,
+            );
+          }
+        }
         // Engine-side scheduling: who is waiting on this turn. Omitted reads
         // as interactive at the sidecar, so only background is spelled out.
         const enginePriority = opts?.queue?.enginePriority ?? 'interactive';

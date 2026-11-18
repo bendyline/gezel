@@ -1,4 +1,5 @@
 import { type InferredInput, defineScript, gezel } from '@bendyline/gezel-sdk';
+import { PR_FINDING_START_RE, prFindingWordingProblem } from '@bendyline/gezel-sdk/checks';
 
 /** Compact, deterministic synthesis input from every gated PR-review shard. */
 export const meta = defineScript({
@@ -55,8 +56,6 @@ function cleanPath(raw: string): string {
 const batchesFile = cleanPath(input.batchesFile);
 const shardDir = cleanPath(input.shardDir);
 const outFile = cleanPath(input.outFile);
-const NON_ACTIONABLE_RE =
-  /\b(?:verified\s+ok|no\s+(?:defect|issue|finding|action\s+needed|functional\s+issue)|not\s+(?:a\s+bug|a\s+(?:functional|correctness)\s+defect|a\s+defect|introduced\s+by\s+this\s+patch|available\s+(?:in|for)\s+this\s+batch)|none\s+needed|acceptable(?:\s+as[- ]is)?|accept\s+as[- ]is|worth\s+noting|future\s+(?:optimization|hardening)|pre[- ]existing|functionally\s+harmless|intentional\s+limitation|needs?\s+(?:(?:central|cross[- ]file)\s+)?verification|requires?\s+(?:central\s+)?verification|central\s+verification|not\s+audited|implementation\s+(?:is\s+)?unknown|no\s+evidence\s+(?:of|that).{0,80}\bavailable|correct\s+(?:and\s+bounded\s+)?fallback|intent\s+is\s+correct|best[- ]effort|harmless\s+here|does\s+not\s+affect\s+runtime\s+behavior|finding\s+is\s+contingent|this\s+finding\s+is\s+contingent|risk\s+(?:is\s+)?low|may|might|could|potential(?:ly)?|possibly|likely|consider(?:ing)?|comment|documentation|documented|discoverability|verify\s+(?:that|the|whether)|verification\s+(?:of|whether)|(?:style|quoting|backslash)\s+(?:inconsistency|concern)|standardiz(?:e|ing)|if\s+.{0,160}\b(?:fails?|missing|empty|malformed|changes?|changed|removed|renamed|never|does\s+not|doesn't))\b/is;
 const SHORTLIST_LIMIT = 8;
 const UNKNOWN_SEVERITY_RANK = 3;
 const SEVERITY_RANK: Record<string, number> = {
@@ -69,7 +68,6 @@ const SEVERITY_RANK: Record<string, number> = {
 function severityRank(severity: string): number {
   return SEVERITY_RANK[severity] ?? UNKNOWN_SEVERITY_RANK;
 }
-const FINDING_START_RE = /^\s*(?:#{1,6}\s+|\*\*|[-*]\s+)?B(\d+)-(\d+)\b/i;
 interface VerificationCandidate {
   id: string;
   path: string;
@@ -217,12 +215,12 @@ for (let index = 0; index < parsed.length; index++) {
   const candidates = [];
   const overflow: string[] = [];
   for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
-    const match = FINDING_START_RE.exec(lines[lineIndex]!);
+    const match = PR_FINDING_START_RE.exec(lines[lineIndex]!);
     if (!match) continue;
     const id = `B${match[1]}-${match[2]}`;
     const previewLines = [lines[lineIndex]!];
     for (let next = lineIndex + 1; next < lines.length && previewLines.length < 20; next++) {
-      if (FINDING_START_RE.test(lines[next]!) || /^\s*#{1,4}\s+/.test(lines[next]!)) break;
+      if (PR_FINDING_START_RE.test(lines[next]!) || /^\s*#{1,4}\s+/.test(lines[next]!)) break;
       previewLines.push(lines[next]!);
     }
     const fullPreview = previewLines.join('\n');
@@ -240,8 +238,10 @@ for (let index = 0; index < parsed.length; index++) {
       'unknown'
     ).toLowerCase();
     const candidateScopeRank = scopeRank(fullPreview);
+    // The gate's own rule, so a finding it passed is never set aside here for
+    // wording the gate allowed.
     const likelyNonIssue =
-      NON_ACTIONABLE_RE.test(fullPreview) ||
+      prFindingWordingProblem(fullPreview) !== null ||
       (candidateScopeRank === 2 && !['critical', 'major'].includes(normalizedSeverity));
     const preview = fullPreview.slice(0, likelyNonIssue ? 240 : 520);
     if (candidates.length < 20) {
@@ -279,6 +279,7 @@ for (let index = 0; index < parsed.length; index++) {
       .map((candidate) => candidate.id),
     overflow,
     verificationCandidateIds: batchVerificationCandidates.map((candidate) => candidate.id),
+    ...(batch.generated === true ? { generated: true } : {}),
   });
 }
 const actionableCandidates = indexedCandidates
@@ -313,6 +314,7 @@ await gezel.artifacts.write(
       schemaVersion: 2,
       batchesFile,
       batchCount: summaries.length,
+      generatedBatchCount: summaries.filter((summary) => summary.generated).length,
       candidateCount,
       actionableCandidateCount: actionableCandidates.length + overflowCandidates.length,
       nonActionableCandidateCount: indexedCandidates.filter((candidate) => candidate.likelyNonIssue)
