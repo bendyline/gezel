@@ -1,10 +1,9 @@
 import { type CrewMember, type GezelSummary, plainRoleTitle } from '@bendyline/gezel';
 import { GezelIcon } from './GezelIcon.js';
-import { navigateToTab } from './nav-actions.js';
 
 /**
- * One gezel on a crew: portrait, their role in plain words, what they do,
- * and a way to say hello. Shared by the crew introduction in a thread and a
+ * One gezel on a crew: portrait, their role in plain words, and what they
+ * do. Shared by the crew introduction in a thread and a
  * request tracker's "Who's helping?". An introduction saved before roles
  * were plain English still carries the Dutch title (and a gloss), so the
  * role goes through `plainRoleTitle` rather than printing as stored. The
@@ -29,13 +28,6 @@ export function CrewMemberCard({ member, gezel }: { member: CrewMember; gezel?: 
         {member.role && <span className="msg-crew-card-role">{plainRoleTitle(member.role)}</span>}
         {member.purpose && <span className="msg-crew-card-purpose">{member.purpose}</span>}
       </div>
-      <button
-        type="button"
-        className="gz-key msg-crew-card-hello"
-        onClick={() => navigateToTab({ kind: 'gezel', id: member.gezelId })}
-      >
-        Say hello
-      </button>
     </li>
   );
 }

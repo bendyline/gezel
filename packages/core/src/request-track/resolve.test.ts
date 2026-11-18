@@ -80,6 +80,18 @@ describe('resolveRequestTracks on the bakery', () => {
     });
   });
 
+  // 2026-11-17: one shard queued behind its sibling put a running review under Next.
+  it('is working while any of its turns runs, even with another held behind it', () => {
+    const sibling = {
+      ...draftTurn,
+      sessionId: 'step-shard',
+      taskRef: 'bakery/4',
+      engineHold: 'behind' as const,
+    };
+    const work = resolveRequestTracks(base({ inflight: [draftTurn, sibling, closingTurn] }))[1];
+    expect(work).toMatchObject({ state: 'working', line: { doing: 'is drafting the invoices' } });
+  });
+
   it('asks the person when a task does', () => {
     const question = {
       id: 'q1',
@@ -227,6 +239,120 @@ describe('resolveRequestTracks on the bakery', () => {
     expect(work?.joined).toEqual(['aditya']);
     expect(prices?.joined).toEqual(['noor']);
     expect(resolveRequestTracks(base())[1]?.joined).toBeUndefined();
+  });
+});
+
+// 2026-11-17: a solo project's Builder was credited with a Reviewer's whole
+// pull request review, the Reviewer was listed as helping on their own task,
+// and the line read a merge step's name while fifteen batch reviews ran.
+describe('resolveRequestTracks on a solo project that handed a task to a specialist', () => {
+  const step = (id: string, over: Partial<Task['craftbook']['steps'][number]> = {}) =>
+    ({ id, name: id, createdAt: T(0), ...over }) as Task['craftbook']['steps'][number];
+  const review = {
+    ...invoices,
+    projectId: 'docblocks',
+    num: 1,
+    ref: 'docblocks/1',
+    title: 'Pull Request Review',
+    assignee: { kind: 'gezel', gezelId: 'koray' },
+    activeStepId: 'collect',
+    requestRef: { sessionId: 'hieu-thread', at: T(0), messageId: 'p1' },
+    launchSessionId: 'hieu-thread',
+    craftbook: {
+      id: 'pull-request-review',
+      name: 'Pull Request Review',
+      entryStepId: 'scope',
+      steps: [
+        step('scope', { name: 'Map the pull request corpus', next: 'scan', completedAt: T(1) }),
+        step('scan', {
+          name: 'Fan the batches out to the review crew',
+          next: 'collect',
+          spawnFanout: true,
+          completedAt: T(2),
+        }),
+        step('collect', { name: 'Merge the batch ledgers', next: 'report', lastActivatedAt: T(2) }),
+        step('report', { name: 'Synthesize the review', terminal: true }),
+      ],
+    },
+  } as Task;
+  const batch = (num: number, status: Task['status'] = 'active') =>
+    ({
+      ...review,
+      num,
+      ref: `docblocks/${num}`,
+      title: `Review batch ${num}`,
+      status,
+      parentTaskRef: 'docblocks/1',
+      activeStepId: 'review',
+      craftbook: {
+        id: 'batch',
+        name: 'Batch',
+        entryStepId: 'review',
+        steps: [step('review', { name: 'Review the batch', terminal: true })],
+      },
+    }) as Task;
+  const hieuThread: RequestThread = {
+    id: 'hieu-thread',
+    gezelId: 'hieu',
+    projectId: 'docblocks',
+    messages: [{ id: 'p1', role: 'user', at: T(0), content: 'Review pull request 58' }],
+  };
+  const solo = (over: Partial<RequestTrackInput> = {}) =>
+    resolveRequestTracks({
+      tasks: [review, batch(2), batch(3)],
+      threads: new Map([[hieuThread.id, hieuThread]]),
+      inflight: [
+        {
+          sessionId: 'batch-2',
+          gezelId: 'koray',
+          projectId: 'docblocks',
+          taskRef: 'docblocks/2',
+          userText: 'Review the batch',
+          startedAt: Date.parse(T(3)),
+        },
+      ],
+      waiting: [],
+      questions: [],
+      leadOf: () => 'hieu',
+      soloOf: () => true,
+      estimates: stepDurationEstimates([]),
+      now: NOW,
+      ...over,
+    })[0];
+
+  it('names who holds the work, and never lists them as helping', () => {
+    expect(solo()).toMatchObject({
+      leadGezelId: 'koray',
+      line: { gezelId: 'koray' },
+      crew: [],
+      parts: { done: 0, total: 2 },
+    });
+  });
+
+  it('keeps the main gezel speaking when they hold part of it', () => {
+    const shared = {
+      ...review,
+      craftbook: {
+        ...review.craftbook,
+        steps: review.craftbook.steps.map((s) =>
+          s.id === 'report' ? { ...s, assignee: { kind: 'gezel', gezelId: 'hieu' } } : s,
+        ),
+      },
+    } as Task;
+    expect(solo({ tasks: [shared, batch(2)] })).toMatchObject({
+      leadGezelId: 'hieu',
+      crew: ['koray'],
+    });
+  });
+
+  it('keeps a crew lead speaking for a task they handed out', () => {
+    expect(solo({ soloOf: () => false })).toMatchObject({ leadGezelId: 'hieu', crew: ['koray'] });
+  });
+
+  it('says the work is in parts, not the waiting step’s name, while the parts run', () => {
+    expect(solo()?.line?.doing).toBe('is working through it in parts');
+    const back = solo({ tasks: [review, batch(2, 'complete'), batch(3, 'complete')] });
+    expect(back?.line?.doing).toBe('is merging the batch ledgers');
   });
 });
 

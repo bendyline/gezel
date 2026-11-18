@@ -101,7 +101,7 @@ export const targets = [
     id: 'connectors-spectral',
     root: 'packages/connectors-spectral',
     include: sourceInclude,
-    thresholds: { statements: 36, branches: 29, functions: 19, lines: 39 },
+    thresholds: { statements: 85, branches: 80, functions: 75, lines: 85 },
   },
   {
     id: 'vscode',

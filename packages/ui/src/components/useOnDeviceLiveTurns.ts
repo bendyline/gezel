@@ -315,7 +315,8 @@ export function phaseBaseLabel(phase: LiveTurnState['phase']): string {
     case 'prefill':
       return 'Thinking it through';
     case 'generating':
-      return 'Generating';
+      // The engine's word is "generating"; a person reads that the work is under way.
+      return 'Working';
     case 'ready':
       return 'Ready';
   }

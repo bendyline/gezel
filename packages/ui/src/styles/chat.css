@@ -4618,7 +4618,7 @@ button.timeline-session-divider-child::before {
 /* ── Crew introduction ───────────────────────────────────────────────
    The crew a task brought, introduced in the thread that launched it:
    a card per gezel with a portrait, the guild role beside its plain
-   words, and a Say hello key. See docs/ux.md, "The welcome". */
+   words, and what they do. See docs/ux.md, "The welcome". */
 .msg-crew-intro {
   width: min(44rem, calc(100% - 1rem));
   margin: 0.65rem 0 0.65rem 0.5rem;
@@ -4667,10 +4667,6 @@ button.timeline-session-divider-child::before {
 .msg-crew-card-purpose {
   font-size: var(--text-xs);
   color: var(--text-muted);
-}
-.msg-crew-card-hello {
-  flex: none;
-  font-size: var(--text-sm);
 }
 
 /* ── Working notes ───────────────────────────────────────────────────

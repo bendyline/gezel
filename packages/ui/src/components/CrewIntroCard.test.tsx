@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('./GezelIcon.js', () => ({
@@ -47,18 +47,5 @@ describe('CrewIntroCard', () => {
     );
     expect(screen.getByText('Joined the crew')).toBeInTheDocument();
     expect(screen.getByText('Copywriter')).toBeInTheDocument();
-  });
-
-  it('opens a chat with the gezel from Say hello', () => {
-    const events: CustomEvent[] = [];
-    const record = (e: Event) => events.push(e as CustomEvent);
-    window.addEventListener('gezel:open-tab', record);
-    try {
-      render(<CrewIntroCard intro={intro} />);
-      fireEvent.click(screen.getAllByRole('button', { name: 'Say hello' })[0]!);
-    } finally {
-      window.removeEventListener('gezel:open-tab', record);
-    }
-    expect(events.at(-1)?.detail).toMatchObject({ kind: 'gezel', id: 'g-mira' });
   });
 });

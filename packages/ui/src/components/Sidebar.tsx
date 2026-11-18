@@ -646,7 +646,7 @@ export function Sidebar({
     [collapsed, groups, setRailCollapsed, commitGroups],
   );
 
-  // Opening a gezel's chat (Say hello on a crew card, a search hit) opens the
+  // Opening a gezel's chat (a search hit, say) opens the
   // Gezellen list, so the rail shows whose chat this is. Keyed on the gezel,
   // so closing the list while there keeps it closed.
   const selectedGezelId = selection?.kind === 'gezel' ? selection.id : null;

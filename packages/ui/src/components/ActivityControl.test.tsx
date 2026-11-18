@@ -937,13 +937,13 @@ describe('Activity reads as rows, with what is for the person first', () => {
     return fold;
   };
 
-  it('orders the sections: decisions, running, results, waiting', async () => {
+  it('orders the sections: decisions, running, waiting, results', async () => {
     const dialog = await openPanel(snapshot());
     expect(
       within(dialog)
         .getAllByRole('region')
         .map((region) => region.getAttribute('aria-label')),
-    ).toEqual(['Needs you', 'Working', 'Ready', 'Next']);
+    ).toEqual(['Needs you', 'Working', 'Next', 'Ready']);
   });
 
   it('folds a long schedule into one line and leaves a short one in view', async () => {

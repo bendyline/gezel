@@ -1675,9 +1675,10 @@ What the meester's thread shows after the person asks for something:
   gezel's replies remain visible in both modes.
 - **The crew arrives as cards** (`CrewIntroCard`, a `crew-introduction`
   message carrying `crewIntroduction`): a headshot, the name in the serif,
-  their role in plain words ("Trip Planner", "Crew Lead"), what they do
-  (the first sentence of their description), and **Say hello**, which opens
-  their chat. The lead and
+  their role in plain words ("Trip Planner", "Crew Lead"), and what they do
+  (the first sentence of their description). There is no button on the
+  card: a "Say hello" key that opened their chat was removed (2026-11-17)
+  because it served no purpose in the thread. The lead and
   whoever starts the work are introduced as the task begins; a gezel hired
   for a later step is introduced when they start. Someone hired in
   conversation, with no task behind them ("find me a copywriter", or a
@@ -1822,12 +1823,20 @@ key as `Task.requestRef`.
   of its name and position. The stop is the furthest any step has reached,
   so a review that sends work back never moves it left.
 - **One line in the lead's voice**: "Dejan is drafting the invoices". The
-  lead is the project's lead, else the thread's gezel; the crew is under
-  **Who's helping?** (`CrewMemberCard`). The phrase is the step's
+  lead is the project's lead, else the task's owner, else the thread's gezel.
+  A `solo` project's main gezel leads no crew, so they speak only for work
+  they hold: a task handed to a specialist is named for that specialist
+  ("Koray is …", not "Hieu is …" for a Reviewer's whole run). Everyone else
+  on the work is under **Who's helping?** (`CrewMemberCard`), never the
+  person the line names. The phrase is the step's
   `personLabel`, else its name with the verb turned, else the stage's phrase;
   a name holding a file name, a template token or a word for the machinery
-  gets the stage's phrase. Waiting says why ("is waiting for another chat to
-  finish", from the engine's structured `hold`).
+  gets the stage's phrase. A step waiting on parts an earlier step sent out
+  reads "is working through it in parts (0 of 15 done)": its own name says
+  what it does once they are back, and "merging the batch ledgers" while
+  fifteen reviews still ran claimed a merge nobody had started. Waiting says
+  why ("is waiting for another chat to finish", from the engine's structured
+  `hold`).
 - **An honest estimate**: "About 4 minutes left" from this computer's own
   finished runs (per step, then per stage), "First time here: about 8
   minutes" from shipped seeds. A step past half again its time and three
@@ -2079,11 +2088,13 @@ or recent-thread pills, and a message to the gezel is never delivered into one.
 
 The header’s **Activity** key opens one non-modal panel for work and questions
 across projects. It stays available when quiet. **Needs you**, **Working**,
-**Ready**, and **Next** separate decisions, current execution, finished
-results, and waiting or scheduled work, in that order: a decision leads, then
-what is running now, then what is finished, and the waiting and scheduled work
-closes the panel. Ready once sat last, under every scheduled job, so the
-results were the furthest thing from the top.
+**Next**, and **Ready** separate decisions, current execution, waiting or
+scheduled work, and finished results, in that order: a decision leads, then
+what is running now, then what runs after it, and the finished results close
+the panel. Next sat last until 2026-11-17, under a long Ready, so work about
+to start was the furthest thing from the work running now. Ready once sat
+last under every scheduled job; the scheduled fold (past two rows, "Scheduled
+for later") is what keeps Next short above it.
 
 **The panel is a list of rows, not a stack of cards.** Sixteen things once ran
 three screens deep (2,450 px in an 840 px panel), because every entry was four
