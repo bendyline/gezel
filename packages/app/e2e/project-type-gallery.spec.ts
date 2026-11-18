@@ -31,11 +31,17 @@ const appRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
  * preview iframe — keeps a slow or failed create from being reported as a
  * missing string inside the PREVIOUS project's still-mounted dashboard,
  * which is what the failure looked like the one time this flaked.
+ *
+ * The dialog closes only after the page has switched, and until it does the
+ * rest of the window is out of reach, to a person and to a role query alike.
+ * A dashboard that drew within 250 ms of Create left `expandRail` looking for
+ * its button behind the dialog, finding none, and leaving the rail folded.
  */
 async function expectProjectSelected(page: Page, name: string): Promise<void> {
   await expect(page.locator('.project-rail-name.active')).toContainText(name, {
     timeout: 45_000,
   });
+  await expect(page.locator('.gz-npd')).toBeHidden();
 }
 
 /**

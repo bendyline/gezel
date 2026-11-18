@@ -39,6 +39,8 @@ overrides:
   tar: 7.5.21
   ws: 8.21.1
 
+pnpmfileChecksum: sha256-F5Ukhp1/5awwEFof1Oa4FExu0HV5cIIx3AyQwNu+/JE=
+
 patchedDependencies:
   app-builder-lib@26.15.3: 5357766ccf0569ff700b84ec2a83fb4cc98d719c26d79969d913fb0321b0da05
   zod@3.25.76: 0c3a9369ea373fbff7a2b5f617047d5acde808a0fd6e5e0cc201bcdff2c3b621
@@ -402,7 +404,7 @@ importers:
     dependencies:
       '@prismatic-io/spectral':
         specifier: 10.39.1
-        version: 10.39.1(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)(vitest@4.1.10)
+        version: 10.39.1(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
     devDependencies:
       tsup:
         specifier: ^8.5.1
@@ -2555,14 +2557,6 @@ packages:
   '@prismatic-io/spectral@10.39.1':
     resolution: {integrity: sha512-kQHwf5VyO70wbVP8YqLqZBKSkT2r/SZUURZq9hyChPx7qDoWJ3hIZRiraKCWssUpr9RK5NLmw+9pp7pCugNuxA==}
     hasBin: true
-    peerDependencies:
-      '@jest/globals': '>=29'
-      vitest: '>=4'
-    peerDependenciesMeta:
-      '@jest/globals':
-        optional: true
-      vitest:
-        optional: true
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -10310,7 +10304,7 @@ snapshots:
 
   '@popperjs/core@2.11.8': {}
 
-  '@prismatic-io/spectral@10.39.1(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)(vitest@4.1.10)':
+  '@prismatic-io/spectral@10.39.1(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)':
     dependencies:
       axios: 1.20.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1)
       axios-retry: 4.5.0(axios@1.20.0(debug@4.4.3(supports-color@8.1.1))(supports-color@8.1.1))
@@ -10325,8 +10319,6 @@ snapshots:
       valid-url: 1.0.9
       yaml: 2.9.1
       zod: 4.6.7(patch_hash=ef5de5bf46fa98636fcccbe6d16124792588ae4facb62a1974692340403b2b9b)
-    optionalDependencies:
-      vitest: 4.1.10(@types/node@26.1.1)(@vitest/coverage-v8@4.1.10)(jsdom@29.1.1(@noble/hashes@2.2.0))(vite@8.1.5(@types/node@26.1.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.1)(yaml@2.9.1))
     transitivePeerDependencies:
       - debug
       - supports-color

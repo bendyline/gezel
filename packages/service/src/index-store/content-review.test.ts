@@ -18,6 +18,13 @@ import { type ResolvedRubric, resolveRubrics } from './rubrics.js';
  * attempt), rubric-change re-review, and the tolerant reply parser.
  */
 
+// Whichever test runs first pays for the file's first index pass: the lazy
+// imports behind it and a grammar compiled one WebAssembly function at a
+// time. That is 60 ms on a workstation and was 5.3 s on a 4-vCPU runner
+// thirty seconds into the suite, with every other fork still importing
+// (stability pass 2 of 3, 2026-11-18).
+vi.setConfig({ testTimeout: 30_000 });
+
 let dir: string;
 let home: string;
 let artifacts: string;

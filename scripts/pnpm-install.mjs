@@ -527,6 +527,9 @@ export async function dependencyInputsFingerprint(repoRoot) {
   const paths = [
     join(repoRoot, 'pnpm-lock.yaml'),
     join(repoRoot, 'pnpm-workspace.yaml'),
+    // The lockfile pins this file's checksum, and a frozen install refuses a
+    // mismatch.
+    join(repoRoot, '.pnpmfile.cjs'),
     ...workspacePackageDirs(repoRoot).map((packageDir) => join(packageDir, 'package.json')),
   ];
   const hash = createHash('sha256');
