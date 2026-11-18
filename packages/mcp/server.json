@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.gezel/gezel",
+  "title": "Gezel",
+  "description": "Search your folders and documents, share memory, make images and export Office files. Needs Gezel.",
+  "websiteUrl": "https://gezel.com/docs/connected-apps/",
+  "repository": {
+    "url": "https://github.com/bendyline/gezel",
+    "source": "github",
+    "id": "1310260618",
+    "subfolder": "packages/mcp"
+  },
+  "icons": [
+    {
+      "src": "https://gezel.com/favicon.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": ["any"]
+    }
+  ],
+  "version": "1.3.3",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@bendyline/gezel-mcp",
+      "version": "1.3.3",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--harness",
+          "description": "The app these tools run in. Gezel names it beside what the app saves.",
+          "isRequired": true,
+          "choices": ["claude-code", "claude-desktop", "codex", "cursor", "vscode"]
+        }
+      ]
+    }
+  ]
+}

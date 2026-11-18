@@ -708,6 +708,51 @@ check still fails the release job.
 Locally, `pnpm exec multi-semantic-release --dry-run` shows the computed
 versions and notes without touching anything.
 
+## Listing in the MCP Registry
+
+Gezel's tools for coding agents (`gezel-mcp --harness <app>`, see
+[harness-tools.md](harness-tools.md)) are listed in the official
+[MCP Registry](https://registry.modelcontextprotocol.io) as `com.gezel/gezel`.
+Claude, VS Code and the directories that copy the registry find them there.
+The registry stores only metadata,
+[`packages/mcp/server.json`](../packages/mcp/server.json), and verifies it
+against the npm package it names:
+
+- `server.json`'s `name` must equal `mcpName` in
+  [`packages/mcp/package.json`](../packages/mcp/package.json), in the version
+  being listed. A version published before `mcpName` existed cannot be listed.
+- `server.json` names the package at the version it lists.
+  [`scripts/sync-server-json.mjs`](../scripts/sync-server-json.mjs) runs in each
+  release's `prepareCmd` and stamps the new version, and `server.json` rides the
+  release commit as a `@semantic-release/git` asset. `check:release-toolchain`
+  fails without either, and `packages/mcp/src/server-json.test.ts` keeps the file
+  true to the package: name, version, the `--harness` choices
+  (`HARNESS_CLIENT_IDS`), and the registry's 100-character description.
+
+The `com.gezel/*` namespace is proved by a TXT record on gezel.com, so
+publishing needs the Ed25519 key behind it. After an npm release, from
+`packages/mcp` on `main`:
+
+```bash
+# Once, to set up: make the key and put its public half in DNS.
+openssl genpkey -algorithm Ed25519 -out key.pem
+echo "gezel.com. IN TXT \"v=MCPv1; k=ed25519; p=$(openssl pkey -in key.pem -pubout -outform DER | tail -c 32 | base64)\""
+
+# Each time: sign in with the key, then publish what server.json names.
+MCP_PRIVATE_KEY="$(openssl pkey -in key.pem -noout -text | sed -n '/priv:/,/pub:/p' | sed '1d;$d' | tr -d ' :\n')" \
+  mcp-publisher login dns --domain gezel.com
+mcp-publisher publish
+curl "https://registry.modelcontextprotocol.io/v0.1/servers?search=com.gezel/gezel"
+```
+
+`mcp-publisher` comes from the registry's
+[releases](https://github.com/modelcontextprotocol/registry/releases) or
+`brew install mcp-publisher`. The record goes at the apex of gezel.com; the
+registry ignores records under a subdomain. Keep `key.pem` out of the
+repository. Publishing is not part of the release workflow yet, so an npm
+release leaves the listing on the previous version until someone runs these
+steps; moving it into the workflow means storing the key as a secret.
+
 ## Toolchain fragility
 
 `multi-semantic-release` sits on a fragile seam: it depends on

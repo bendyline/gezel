@@ -38,6 +38,24 @@ test('normalizes a semantic-release manifest with the repository Biome config', 
   }
 });
 
+test('formats a package’s server.json with its manifest', async () => {
+  const packageDir = await mkdtemp(join(repoRoot, '.release-server-json-test-'));
+  const serverPath = join(packageDir, 'server.json');
+  try {
+    await writeFile(join(packageDir, 'package.json'), RELEASE_SERIALIZED_MANIFEST);
+    await writeFile(
+      serverPath,
+      `${JSON.stringify({ name: 'com.example/example', choices: ['a', 'b'] }, null, 2)}\n`,
+    );
+
+    await execFileP(process.execPath, [script], { cwd: packageDir });
+
+    assert.match(await readFile(serverPath, 'utf8'), /"choices": \["a", "b"\]/);
+  } finally {
+    await rm(packageDir, { recursive: true, force: true });
+  }
+});
+
 test('dry run leaves the release manifest untouched', async () => {
   const packageDir = await mkdtemp(join(repoRoot, '.release-manifest-dry-run-test-'));
   const manifestPath = join(packageDir, 'package.json');
