@@ -8,6 +8,7 @@ import { ExportToolbarControls } from '../../components/DocumentExport/index.js'
 import { DocumentNarration } from '../../components/DocumentNarration.js';
 import { ironCalcEngineFactory } from '../../components/SquisqIntegration/calculation.js';
 import { useDocumentViewProps } from '../../components/SquisqIntegration/document-view.js';
+import { gezelEditorHost } from '../../components/SquisqIntegration/editor-host.js';
 import {
   type OutsideInLayout,
   createDataReferenceContainer,
@@ -108,6 +109,7 @@ export function ProjectOutsideInEditor({
     <div className="editor-wrap" style={{ height: '100%' }}>
       <EditorShell
         {...GEZEL_WRITE_CANVAS}
+        {...gezelEditorHost()}
         {...documentView}
         initialMarkdown={autosave.desiredValue()}
         // Detect the mode from the Markdown companion, not the rendered target.

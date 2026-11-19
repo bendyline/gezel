@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { Resvg } from '@resvg/resvg-js';
 
@@ -154,6 +155,7 @@ export async function writeIconAsset(path, data, checkOnly) {
       `${path} is stale; run pnpm --filter @bendyline/gezel-app generate:icons`,
     );
   } else {
+    await mkdir(dirname(path), { recursive: true });
     await writeFile(path, data);
   }
 }

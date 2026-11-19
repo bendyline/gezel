@@ -6,6 +6,7 @@ import { AutosaveStatus } from '../components/AutosaveStatus.js';
 import { DocumentNarration } from '../components/DocumentNarration.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import { useDocumentViewProps } from '../components/SquisqIntegration/document-view.js';
+import { gezelEditorHost } from '../components/SquisqIntegration/editor-host.js';
 import {
   type OutsideInLayout,
   chooseOutsideInSource,
@@ -308,6 +309,7 @@ function OutsideInEditor({
       <div className="editor-wrap">
         <EditorShell
           {...GEZEL_WRITE_CANVAS}
+          {...gezelEditorHost()}
           {...documentView}
           initialMarkdown={autosave.desiredValue()}
           // The visible file is CSV/XLSX/etc., but EditorShell is editing the

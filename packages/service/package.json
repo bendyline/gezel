@@ -103,7 +103,7 @@
     "@bendyline/gezel-sdk": "workspace:*",
     "@bendyline/gilde": "0.3.12",
     "@bendyline/squisq": "2.13.20",
-    "@bendyline/squisq-cli": "2.9.36",
+    "@bendyline/squisq-cli": "2.9.37",
     "@bendyline/squisq-formats": "2.8.22",
     "@hono/node-server": "2.1.6",
     "@modelcontextprotocol/sdk": "1.32.2",

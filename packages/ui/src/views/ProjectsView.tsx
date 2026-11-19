@@ -79,6 +79,7 @@ import {
 } from '../components/SettingsSection.js';
 import { ironCalcEngineFactory } from '../components/SquisqIntegration/calculation.js';
 import { useDocumentViewProps } from '../components/SquisqIntegration/document-view.js';
+import { gezelEditorHost } from '../components/SquisqIntegration/editor-host.js';
 import {
   createArtifactsContentContainer,
   createDataReferenceContainer,
@@ -3998,6 +3999,7 @@ function ProjectFileEditor({
     <div className="editor-wrap" style={{ height: '100%' }}>
       <EditorShell
         {...GEZEL_WRITE_CANVAS}
+        {...gezelEditorHost()}
         {...documentView}
         initialMarkdown={autosave.desiredValue()}
         fileName={file.path}
@@ -4201,6 +4203,7 @@ function HtmlFileViewer({
         <div className="editor-wrap">
           <EditorShell
             {...GEZEL_WRITE_CANVAS}
+            {...gezelEditorHost()}
             {...documentView}
             key={`${file.source}:${file.path}`}
             initialMarkdown={sourceAutosave.desiredValue()}
@@ -4359,6 +4362,7 @@ function ProjectDocEditor({
       <div className="editor-wrap">
         <EditorShell
           {...GEZEL_WRITE_CANVAS}
+          {...gezelEditorHost()}
           ariaLabel={label}
           initialMarkdown={autosave.desiredValue()}
           onChange={handleDocChange}

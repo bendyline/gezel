@@ -252,6 +252,40 @@ describe('tool-cap trim is deliberate, not incidental', () => {
     expect(allow.has('write_file')).toBe(true);
     expect(allow.has('ask_user_question')).toBe(true);
   });
+
+  // Wild-caught (petshop, Spark-X2.6-4B and LFM3, 2026-11): a tiny-tier
+  // Illustrator kept twenty read tools and lost `generate_image`, so the crew
+  // escalated for half an hour before a fixed-function image gezel drew.
+  it.each([
+    ['Illustrator', ['generate_image', 'render_image']],
+    ['Image Generator', ['generate_image', 'render_image']],
+    ['Video Generator', ['generate_video']],
+  ])('a tiny-tier %s keeps the tool it exists to call', async (role, tools) => {
+    const res = await resolveSessionToolSurface({
+      surface: 'bridge',
+      session: {
+        id: 's1',
+        gezelId: 'g1',
+        projectId: 'p1',
+        providerName: 'llama-cpp',
+        title: '',
+        messages: [],
+        createdAt: '2026-08-01T00:00:00.000Z',
+        lastActivityAt: '2026-08-01T00:00:00.000Z',
+      } as unknown as ChatSession,
+      role,
+      mode: 'always',
+      provider: 'llama-cpp',
+      modelId: 'spark-x2.6-4b-q4',
+      toolsetsGroupOverride: [],
+      githubLinked: false,
+      isGitRepo: false,
+      tier: 'tiny',
+      latestUserMessage: undefined,
+    });
+    const allow = res.allowlist!;
+    for (const tool of tools) expect(allow.has(tool)).toBe(true);
+  });
 });
 
 /**

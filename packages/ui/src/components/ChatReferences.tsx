@@ -28,6 +28,7 @@ import { GezelIcon } from './GezelIcon.js';
 import { HtmlPreviewFrame } from './HtmlPreviewFrame.js';
 import { PhotoThumb } from './PhotoThumb.js';
 import { useDocumentViewProps } from './SquisqIntegration/document-view.js';
+import { gezelEditorHost } from './SquisqIntegration/editor-host.js';
 import { GEZEL_WRITE_CANVAS } from './SquisqIntegration/write-canvas.js';
 import { StepTracker } from './StepTracker.js';
 import { taskStepStatus } from './TaskStepTracker.js';
@@ -1923,6 +1924,7 @@ function ReferenceCodePreview({ path, content }: { path: string; content: string
     <div className="chat-rail-viewer-code">
       <EditorShell
         {...GEZEL_WRITE_CANVAS}
+        {...gezelEditorHost()}
         {...documentView}
         key={path}
         initialMarkdown={content}

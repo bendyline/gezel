@@ -1351,6 +1351,36 @@ const IMPLEMENTATION_TOOL_CAP_PRIORITY = [
   'advance_task_step',
 ] as const;
 
+// Generator roles exist to call one tool. Without a curated list they fell to
+// GENERIC_TOOL_CAP_FALLBACK, whose twenty read tools fill the tiny cap of 15
+// before `generate_image` is reached: a tiny-tier Illustrator on petshop could
+// not draw, and the crew escalated for half an hour before a fixed-function
+// image gezel did it (Spark-X2.6-4B and LFM3, 2026-11).
+const IMAGE_GENERATOR_TOOL_CAP_PRIORITY = [
+  'generate_image',
+  'render_image',
+  'describe_image',
+  'read_image_metadata',
+  'list_dir',
+  'read_file',
+  'make_dir',
+  'stat',
+  'list_artifacts',
+  'read_artifact',
+  'write_artifact',
+  'list_tasks',
+  'get_task',
+] as const;
+
+const VIDEO_GENERATOR_TOOL_CAP_PRIORITY = [
+  'generate_video',
+  'list_artifacts',
+  'read_artifact',
+  'write_artifact',
+  'list_tasks',
+  'get_task',
+] as const;
+
 // Ranking for the slots that remain after a role's curated priority list is
 // exhausted — and the entire ranking for a role that has no curated list
 // (any custom role at tiny tier). Previously these slots were filled by
@@ -1508,14 +1538,19 @@ function toolCapPriorityForRole(
   deliverableKind?: import('@bendyline/gezel').DeliverableKind,
 ): readonly string[] {
   const normalized = roleForMatching(role)?.toLowerCase().trim() ?? '';
+  const roleId = resolveRoleId(role);
   const base =
-    resolveRoleId(role) === 'meester'
+    roleId === 'meester'
       ? MEESTER_TOOL_CAP_PRIORITY
       : normalized.includes('voorman') || normalized.includes('foreman')
         ? VOORMAN_TOOL_CAP_PRIORITY
         : isImplementationRole(role)
           ? IMPLEMENTATION_TOOL_CAP_PRIORITY
-          : [];
+          : roleId === 'image-generator'
+            ? IMAGE_GENERATOR_TOOL_CAP_PRIORITY
+            : roleId === 'video-generator'
+              ? VIDEO_GENERATOR_TOOL_CAP_PRIORITY
+              : [];
   // Deliverable-aware prefix: the active step's producing tools rank
   // first so the tiny cap never trims them in favor of generic breadth
   // (e.g. derive_file ranked 10th would fall below a 15-tool cut on a
