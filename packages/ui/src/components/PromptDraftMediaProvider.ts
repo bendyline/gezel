@@ -1,8 +1,8 @@
 import type { MediaEntry, MediaProvider } from '@bendyline/squisq';
 import { api } from '../api.js';
 import { BLOCKED_REMOTE_MEDIA_URL, createGezelMediaProvider } from './GezelMediaProvider.js';
-import { createDocumentMediaProvider } from './SquisqIntegration/documents-container.js';
 import { createArtifactsContentContainer } from './SquisqIntegration/artifacts-container.js';
+import { createDocumentMediaProvider } from './SquisqIntegration/documents-container.js';
 
 /**
  * Media for a prompt draft, which is shaped exactly like every other squisq

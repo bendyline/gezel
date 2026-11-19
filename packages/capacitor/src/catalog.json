@@ -1,6 +1,6 @@
 {
   "package": "@bendyline/gilde",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "models": [
     {
       "name": "Qwen 3.5 (0.8B, Q4)",
@@ -320,6 +320,22 @@
           "narration": 78.9
         }
       }
+    },
+    {
+      "name": "Spark-X2.6 (4B, Q4)",
+      "license": "Apache-2.0",
+      "approxSizeBytes": 3543441312,
+      "contextWindow": 262144,
+      "source": {
+        "catalogId": "spark-x2.6-4b-q4",
+        "catalogVersion": "1.0.0",
+        "sourceId": "bundled",
+        "huggingfaceRepo": "XHToken/Spark-X2.6-4B-GGUF",
+        "revision": "9d716770ac7477776de5f891f70cdf98b003a5cd",
+        "filename": "Spark-X2.6-4B-Q4_K_M.gguf",
+        "sha256": "91cb2811aebb47ac916aa619d27d4cdd7f4143106b7917accb8ead4cd7f5cbd9"
+      },
+      "licenseClass": "open"
     },
     {
       "name": "Gemma 4 (E4B, Q4)",
