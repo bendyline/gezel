@@ -40,6 +40,8 @@ export interface OAuthTokens {
   expiresAt: string;
   /** The OpenID Connect ID token, when `openid` was asked for. */
   idToken?: string;
+  /** The scopes the provider says it granted (space-separated), when it says. */
+  scope?: string;
 }
 
 /** Authorize/token endpoints + scopes for one source. */
@@ -151,6 +153,7 @@ async function postToken(
     ...(json.refresh_token ? { refreshToken: String(json.refresh_token) } : {}),
     expiresAt: expiresAtFrom(json.expires_in),
     ...(typeof json.id_token === 'string' ? { idToken: json.id_token } : {}),
+    ...(typeof json.scope === 'string' ? { scope: json.scope } : {}),
   };
 }
 
@@ -380,6 +383,33 @@ function readOAuthClientEnv(clientIdEnv: string, clientSecretEnv?: string): OAut
   if (!clientId) return null;
   const clientSecret = clientSecretEnv ? process.env[clientSecretEnv] : undefined;
   return { clientId, ...(clientSecret ? { clientSecret } : {}) };
+}
+
+/** An OAuth client supplied by environment variables, as `/api/oauth-clients` lists it. */
+export interface EnvOAuthClient {
+  key: string;
+  clientId: string;
+  hasSecret: boolean;
+}
+
+/**
+ * The OAuth clients this daemon's environment supplies. They win over apps
+ * saved in Settings ({@link resolveOAuthClient}), so the bind flow lists them
+ * rather than offering a form whose entry would be ignored. Reads the
+ * `GEZEL_<PROVIDER>_CLIENT_ID` / `_CLIENT_SECRET` pair every catalog manifest
+ * uses: a manifest naming its pair another way still connects through its env
+ * vars, it just goes unlisted here.
+ */
+export function listEnvOAuthClients(env: NodeJS.ProcessEnv = process.env): EnvOAuthClient[] {
+  const out: EnvOAuthClient[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (!key.endsWith('_CLIENT_ID') || !OAUTH_CLIENT_ENV_NAME.test(key)) continue;
+    const clientId = value?.trim();
+    if (!clientId) continue;
+    const secret = env[`${key.slice(0, -'_CLIENT_ID'.length)}_CLIENT_SECRET`]?.trim();
+    out.push({ key, clientId, hasSecret: Boolean(secret) });
+  }
+  return out.sort((a, b) => a.key.localeCompare(b.key));
 }
 
 /** SecretStore namespace for install-registered OAuth app secrets. */

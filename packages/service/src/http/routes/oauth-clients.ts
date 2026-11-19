@@ -1,7 +1,7 @@
 import { createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { oauthClientSecretKey } from '../../connectors/oauth.js';
+import { listEnvOAuthClients, oauthClientSecretKey } from '../../connectors/oauth.js';
 import { requireFirstParty } from '../auth.js';
 import type { ServiceContext } from '../context.js';
 
@@ -30,16 +30,26 @@ const PutOAuthClientSchema = z.object({
 export function oauthClientRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
+  // An environment-supplied client wins over a saved one at connect time, so
+  // the listing reports that one, marked `environment`, in the saved one's place.
   app.get('/', requireFirstParty(), async (c) => {
     const config = await ctx.store.readConfig();
-    const entries = Object.entries(config.oauthClients ?? {});
-    const clients = await Promise.all(
-      entries.map(async ([key, value]) => ({
-        key,
-        clientId: value.clientId,
-        hasSecret: (await ctx.secrets.get(oauthClientSecretKey(key)).catch(() => null)) !== null,
-      })),
+    const fromEnv = listEnvOAuthClients();
+    const envKeys = new Set(fromEnv.map((client) => client.key));
+    const saved = await Promise.all(
+      Object.entries(config.oauthClients ?? {})
+        .filter(([key]) => !envKeys.has(key))
+        .map(async ([key, value]) => ({
+          key,
+          clientId: value.clientId,
+          hasSecret: (await ctx.secrets.get(oauthClientSecretKey(key)).catch(() => null)) !== null,
+          source: 'settings' as const,
+        })),
     );
+    const clients = [
+      ...saved,
+      ...fromEnv.map((client) => ({ ...client, source: 'environment' as const })),
+    ].sort((a, b) => a.key.localeCompare(b.key));
     return c.json({ clients });
   });
 

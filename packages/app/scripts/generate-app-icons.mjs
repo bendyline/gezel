@@ -59,6 +59,22 @@ for (const size of [16, 26, 42]) {
     checkOnly,
   );
 }
+const registrationsDir = join(appDir, '..', '..', 'assets', 'app-registrations');
+await writeIconAsset(
+  join(registrationsDir, 'gezel-read-only-logo.svg'),
+  iconSvg({ size: 215, variant: 'read-only' }),
+  checkOnly,
+);
+await writeIconAsset(
+  join(registrationsDir, 'gezel-read-only-logo.png'),
+  renderIcon({ size: 215, variant: 'read-only' }).asPng(),
+  checkOnly,
+);
+await writeIconAsset(
+  join(registrationsDir, 'gezel-read-only-logo-120.png'),
+  renderIcon({ size: 120, variant: 'read-only' }).asPng(),
+  checkOnly,
+);
 for (const script of ['generate-windows-icon.mjs', 'generate-mobile-icons.mjs']) {
   execFileSync(process.execPath, [join(scriptDir, script), ...(checkOnly ? ['--check'] : [])], {
     stdio: 'inherit',

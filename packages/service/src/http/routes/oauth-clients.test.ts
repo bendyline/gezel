@@ -18,9 +18,14 @@ let home: string;
 let httpFetch: typeof fetch;
 
 const priorMockFlag = process.env.GEZEL_MOCK_PROVIDER;
+// A developer's own GEZEL_*_CLIENT_* overrides would show up in every listing.
+const priorClientEnv = Object.entries(process.env).filter(([key]) =>
+  /^GEZEL_.+_CLIENT_(ID|SECRET)$/.test(key),
+);
 
 beforeAll(async () => {
   process.env.GEZEL_MOCK_PROVIDER = '1';
+  for (const [key] of priorClientEnv) delete process.env[key];
   home = await mkdtemp(join(tmpdir(), 'gezel-oauth-clients-'));
   svc = await startService({ home });
   const scheme = svc.cert ? 'https' : 'http';
@@ -34,6 +39,7 @@ afterAll(async () => {
   await rm(home, { recursive: true, force: true }).catch(() => {});
   if (priorMockFlag === undefined) delete process.env.GEZEL_MOCK_PROVIDER;
   else process.env.GEZEL_MOCK_PROVIDER = priorMockFlag;
+  for (const [key, value] of priorClientEnv) process.env[key] = value;
 }, 30_000);
 
 function call(method: string, path: string, body?: unknown, auth = true) {
@@ -66,7 +72,7 @@ describe('/api/oauth-clients', () => {
       clients: Array<{ key: string; clientId: string; hasSecret: boolean }>;
     };
     expect(body.clients).toEqual([
-      { key: 'GEZEL_X_CLIENT_ID', clientId: 'my-public-id', hasSecret: true },
+      { key: 'GEZEL_X_CLIENT_ID', clientId: 'my-public-id', hasSecret: true, source: 'settings' },
     ]);
     // The secret never appears in any response body.
     expect(JSON.stringify(body)).not.toContain('shh-secret');
@@ -99,6 +105,37 @@ describe('/api/oauth-clients', () => {
     };
     expect(body.clients[0]).toMatchObject({ clientId: 'pkce-only', hasSecret: false });
     await call('DELETE', '/GEZEL_X_CLIENT_ID');
+  });
+
+  it('lists a client the environment supplies in place of a saved one, never its secret', async () => {
+    await call('PUT', '/GEZEL_GOOGLE_CLIENT_ID', { clientId: 'saved-id', clientSecret: 'saved' });
+    process.env.GEZEL_GOOGLE_CLIENT_ID = 'env-id.apps.googleusercontent.com';
+    process.env.GEZEL_GOOGLE_CLIENT_SECRET = 'env-secret';
+    process.env.GEZEL_MICROSOFT_CLIENT_ID = 'env-public-client';
+    try {
+      const res = await call('GET', '');
+      const text = await res.text();
+      expect(JSON.parse(text).clients).toEqual([
+        {
+          key: 'GEZEL_GOOGLE_CLIENT_ID',
+          clientId: 'env-id.apps.googleusercontent.com',
+          hasSecret: true,
+          source: 'environment',
+        },
+        {
+          key: 'GEZEL_MICROSOFT_CLIENT_ID',
+          clientId: 'env-public-client',
+          hasSecret: false,
+          source: 'environment',
+        },
+      ]);
+      expect(text).not.toContain('env-secret');
+    } finally {
+      delete process.env.GEZEL_GOOGLE_CLIENT_ID;
+      delete process.env.GEZEL_GOOGLE_CLIENT_SECRET;
+      delete process.env.GEZEL_MICROSOFT_CLIENT_ID;
+      await call('DELETE', '/GEZEL_GOOGLE_CLIENT_ID');
+    }
   });
 
   it('rejects keys that are not GEZEL_* env names', async () => {

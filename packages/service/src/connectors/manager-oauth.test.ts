@@ -366,7 +366,7 @@ describe('the account a Google or Microsoft sign-in reaches', () => {
     const part = (v: unknown) => Buffer.from(JSON.stringify(v)).toString('base64url');
     return `${part({ alg: 'RS256' })}.${part({ aud: 'client-abc', ...claims })}.c2ln`;
   };
-  const tokens = (tokenUrl: string, claims?: Record<string, unknown>) =>
+  const tokens = (tokenUrl: string, claims?: Record<string, unknown>, scope?: string) =>
     stubFetch((url) =>
       url.origin + url.pathname === tokenUrl
         ? jsonResponse(200, {
@@ -374,9 +374,49 @@ describe('the account a Google or Microsoft sign-in reaches', () => {
             refresh_token: 'ref-tok',
             expires_in: 3600,
             ...(claims ? { id_token: idToken(claims) } : {}),
+            ...(scope !== undefined ? { scope } : {}),
           })
         : undefined,
     );
+
+  it('refuses a Google sign-in that left out a permission, keeping nothing', async () => {
+    const h = harness(google());
+    tokens(
+      GOOGLE_TOKEN,
+      { email: 'test@gmail.com' },
+      'openid https://www.googleapis.com/auth/userinfo.email',
+    );
+    const { state } = await h.mgr.startOAuth(h.getProject() as never, {
+      type: 'oauth-conn',
+      redirectUri: 'http://127.0.0.1:5000/callback',
+      config: { address: 'test@gmail.com' },
+    });
+    await expect(
+      h.mgr.completeOAuth(h.getProject() as never, { state, code: 'code-1' }),
+    ).rejects.toThrow(/Google did not give Gezel all the access this connection needs/);
+    expect(h.secretMap.size).toBe(0);
+    expect(h.getProject().connectors ?? []).toEqual([]);
+    await expect(
+      h.mgr.completeOAuth(h.getProject() as never, { state, code: 'code-1' }),
+    ).rejects.toThrow(/state not found/);
+  });
+
+  it('binds when Google grants everything the connection asked for', async () => {
+    const h = harness(google());
+    tokens(
+      GOOGLE_TOKEN,
+      { email: 'test@gmail.com' },
+      'https://mail.google.com/ openid https://www.googleapis.com/auth/userinfo.email',
+    );
+    const { state } = await h.mgr.startOAuth(h.getProject() as never, {
+      type: 'oauth-conn',
+      redirectUri: 'http://127.0.0.1:5000/callback',
+      config: { address: 'test@gmail.com' },
+    });
+    const binding = await h.mgr.completeOAuth(h.getProject() as never, { state, code: 'code-1' });
+    expect(binding.account).toBe('test@gmail.com');
+    expect(h.secretMap.size).toBe(1);
+  });
 
   it('asks for the typed address and for the token that names the account', async () => {
     const h = harness(google());

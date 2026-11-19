@@ -369,6 +369,16 @@ ladder (`resolveOAuthClient` in [connectors/oauth.ts](../packages/service/src/co
    through `/api/oauth-clients` (listings never reflect the secret back, only `hasSecret`)
    and registered in-product by the bind flow's setup panel in the project Connections tab.
 
+`GET /api/oauth-clients` lists both, marking each `source: 'settings' | 'environment'`; an
+environment client replaces a saved one with the same key, as it does at connect time. The
+setup panel then names the variable rather than offering a form whose entry would be ignored.
+It finds environment clients by the `GEZEL_<PROVIDER>_CLIENT_ID` / `_CLIENT_SECRET` pair every
+catalog manifest uses (`listEnvOAuthClients`).
+
+The bind flow can cancel a sign-in while it waits on the browser (`mail:oauth-cancel` in the
+desktop shell). A provider that refuses before its consent screen, such as a Google app in
+Testing that does not list the account, shows an error page and never redirects back.
+
 Keying by the manifest's `clientIdEnv` *name* means one registered provider app serves every
 type that names the same pair — `mail-gmail` and `calendar-google` share one Google app.
 

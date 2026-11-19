@@ -73,6 +73,7 @@ import {
   accountProviderFor,
   expectedAccountFrom,
   isExpectedAccount,
+  missingGrantedScopes,
   signedInAccounts,
   withAccountScopes,
 } from './oauth-account.js';
@@ -1749,6 +1750,17 @@ export class ConnectorManager {
         ...(this.opts.fetch ? { fetchImpl: this.opts.fetch } : {}),
       });
       const account = this.signedInAccount(pending, tokens.idToken, args.state);
+      const missing = pending.accountProvider
+        ? missingGrantedScopes(pending.accountProvider, pending.endpoints.scopes, tokens.scope)
+        : [];
+      if (missing.length > 0) {
+        log.warn(`${pending.type} sign-in did not grant: ${missing.join(' ')}`);
+        // Spent, like a wrong-account sign-in: connecting again starts a new link.
+        this.pendingOAuth.delete(args.state);
+        throw new Error(
+          'Google did not give Gezel all the access this connection needs, so nothing was saved. Connect again, and on Google’s screen allow everything Gezel asks for.',
+        );
+      }
       let credential: string;
       if (pending.longLivedExchange) {
         // Meta issues no refresh token: trade the short-lived token for the

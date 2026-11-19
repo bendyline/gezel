@@ -54,6 +54,19 @@ function benchArtwork(size, { monochrome = false, template = false } = {}) {
   return parts.join('\n');
 }
 
+// The read-only mark: an eye, the usual sign for "can look, can't change".
+function eyeBadge(cx, cy, r) {
+  const w = r * 1.5;
+  const h = r;
+  return [
+    `<circle cx="${cx}" cy="${cy}" r="${r + 2}" fill="#3e4e34"/>`,
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="${IVORY}"/>`,
+    `<path d="M${cx - w / 2} ${cy}Q${cx} ${cy - h} ${cx + w / 2} ${cy}Q${cx} ${cy + h} ${cx - w / 2} ${cy}Z" fill="${IVORY}" stroke="${ICON_GREEN}" stroke-width="${r * 0.17}" stroke-linejoin="round"/>`,
+    `<circle cx="${cx}" cy="${cy}" r="${r * 0.3}" fill="${ICON_GREEN}"/>`,
+    `<circle cx="${cx + r * 0.1}" cy="${cy - r * 0.1}" r="${r * 0.09}" fill="${IVORY}"/>`,
+  ].join('\n');
+}
+
 export function iconSvg({ size, variant = 'desktop', workingFrame = 0 }) {
   const template = variant === 'template';
   const monochrome = template || variant === 'android-monochrome';
@@ -83,6 +96,10 @@ export function iconSvg({ size, variant = 'desktop', workingFrame = 0 }) {
     art = `<rect width="64" height="64" fill="${field}"/>\n${bench}`;
   } else if (variant === 'mac') {
     art = `<g transform="translate(5 5) scale(.84375)"><rect width="64" height="64" rx="14.5" fill="${field}"/>\n${bench}</g>`;
+  } else if (variant === 'read-only') {
+    // An app-registration logo: a square field, because sign-in pages frame it
+    // themselves, and a smaller bench so both legs stay clear of the badge.
+    art = `<rect width="64" height="64" fill="${field}"/>\n<g transform="translate(4 1.5) scale(.74)">${bench}</g>\n${eyeBadge(49.5, 49.5, 10.5)}`;
   } else {
     assert.equal(variant, 'desktop');
     art = `<rect x="2" y="2" width="60" height="60" rx="13" fill="${field}"/>\n${bench}`;

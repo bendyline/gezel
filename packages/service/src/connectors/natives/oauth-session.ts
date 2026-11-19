@@ -181,6 +181,10 @@ export interface ApiRequestInit {
   timeoutMs?: number;
 }
 
+/** Google's answer to a token that lacks the scope a call needs. */
+const GOOGLE_SCOPE_INSUFFICIENT =
+  /ACCESS_TOKEN_SCOPE_INSUFFICIENT|insufficient authentication scopes/;
+
 /**
  * Authorized request through a session: one silent retry with a refreshed
  * token on 401, `HttpStatusError` on any other non-2xx (so 429/503 reach the
@@ -215,6 +219,14 @@ export async function authorizedFetch(
   }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
+    // The sign-in lacks a permission the call needs, usually one the person
+    // unticked on Google's consent screen. Retrying cannot help; signing in
+    // again can.
+    if (res.status === 403 && GOOGLE_SCOPE_INSUFFICIENT.test(body)) {
+      throw new ReconnectRequiredError(
+        'Google has not given Gezel permission to read this. Remove this connection and connect it again, allowing everything Gezel asks for on Google’s screen.',
+      );
+    }
     const retryAfterMs = parseRetryAfterMs(res.headers.get('retry-after'));
     throw new HttpStatusError(
       res.status,

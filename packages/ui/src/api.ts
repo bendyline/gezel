@@ -153,6 +153,8 @@ declare global {
         requestId: string,
         authUrl: string,
       ) => Promise<{ code: string; state: string } | { error: string }>;
+      /** Stop waiting for that sign-in: its pending `mailOAuthAwait` resolves `{ error: 'cancelled' }`. */
+      mailOAuthCancel?: (requestId: string) => Promise<{ ok: boolean }>;
       /** Start the app hidden at login (packaged desktop only; `supported: false` elsewhere). */
       startAtLogin?: {
         get(): Promise<{ supported: boolean; enabled: boolean }>;

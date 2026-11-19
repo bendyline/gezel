@@ -5,6 +5,7 @@ import {
   accountProviderFor,
   expectedAccountFrom,
   isExpectedAccount,
+  missingGrantedScopes,
   signedInAccounts,
   withAccountScopes,
 } from './oauth-account.js';
@@ -36,6 +37,34 @@ describe('which providers say which account signed in', () => {
       'profile',
       'email',
     ]);
+  });
+});
+
+describe('what a sign-in left out', () => {
+  const CALENDAR = 'https://www.googleapis.com/auth/calendar.readonly';
+  const asked = [CALENDAR, 'openid', 'email'];
+
+  it('names a Google scope the person unticked, ignoring the sign-in scopes', () => {
+    // Google reports `email` back as userinfo.email; that difference is not a gap.
+    expect(
+      missingGrantedScopes(
+        'google',
+        asked,
+        'openid https://www.googleapis.com/auth/userinfo.email',
+      ),
+    ).toEqual([CALENDAR]);
+    expect(missingGrantedScopes('google', asked, `${CALENDAR} openid`)).toEqual([]);
+  });
+
+  it('finds nothing missing when there is nothing to compare, or the provider is Microsoft', () => {
+    expect(missingGrantedScopes('google', asked, undefined)).toEqual([]);
+    expect(
+      missingGrantedScopes(
+        'microsoft',
+        ['offline_access', 'https://graph.microsoft.com/Calendars.Read'],
+        'https://graph.microsoft.com/User.Read',
+      ),
+    ).toEqual([]);
   });
 });
 

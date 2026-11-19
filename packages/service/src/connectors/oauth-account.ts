@@ -46,6 +46,26 @@ export function withAccountScopes(scopes: string[], provider: AccountProvider): 
 }
 
 /**
+ * The connection's own scopes that a sign-in did not grant. Google lets a
+ * person untick a permission on its consent screen and still completes the
+ * sign-in, so without this check the connection is saved and then fails its
+ * first sync with "insufficient authentication scopes". Only Google is
+ * checked: Microsoft's consent is all or nothing, and the scopes it reports
+ * back do not always read the way they were asked for. When the token
+ * response names no scopes there is nothing to compare, so nothing is missing.
+ */
+export function missingGrantedScopes(
+  provider: AccountProvider,
+  requested: string[],
+  granted: string | undefined,
+): string[] {
+  if (provider !== 'google' || granted === undefined) return [];
+  const have = new Set(granted.split(' ').filter(Boolean));
+  const signIn = new Set(ACCOUNT_SCOPES.google);
+  return requested.filter((scope) => !signIn.has(scope) && !have.has(scope));
+}
+
+/**
  * The authorize parameters that keep the browser from choosing an account on
  * its own: the expected account as `login_hint` when there is one, otherwise
  * the provider's account picker. Google takes several `prompt` values at once

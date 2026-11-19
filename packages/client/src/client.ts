@@ -1905,10 +1905,17 @@ export class GezelClient {
   /**
    * Bring-your-own OAuth apps (Settings → Connections). Keys are the
    * connector manifest's `clientIdEnv` name; the secret is write-only —
-   * listings carry only `hasSecret`.
+   * listings carry only `hasSecret`. `source` says whether the daemon's
+   * environment supplies the client (it then wins over a saved one); daemons
+   * that predate it list saved apps only and omit the field.
    */
   listOAuthClients(): Promise<{
-    clients: Array<{ key: string; clientId: string; hasSecret: boolean }>;
+    clients: Array<{
+      key: string;
+      clientId: string;
+      hasSecret: boolean;
+      source?: 'settings' | 'environment';
+    }>;
   }> {
     return this.request('GET', '/api/oauth-clients');
   }
