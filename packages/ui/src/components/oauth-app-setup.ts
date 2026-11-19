@@ -1,8 +1,9 @@
 /**
  * Bring-your-own OAuth app: pure helpers behind the connector bind flow's
- * setup panel. Gezel is open source and ships no OAuth client of its own —
- * each install registers its own developer app per provider (client ID in
- * `config.oauthClients` via `/api/oauth-clients`, secret in the SecretStore).
+ * setup panel. Read-only Google and Microsoft types can connect through
+ * Gezel's own app; every other provider, and anyone who prefers their own,
+ * registers a developer app per provider (client ID in `config.oauthClients`
+ * via `/api/oauth-clients`, secret in the SecretStore).
  * A connector-type manifest names the pair via `secretShape.clientIdEnv` /
  * `clientSecretEnv` and may carry a `clientSetup` block with the copy that
  * turns the panel from a bare form into instructions.

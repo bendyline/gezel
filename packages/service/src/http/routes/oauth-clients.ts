@@ -8,11 +8,13 @@ import type { ServiceContext } from '../context.js';
 const log = createLogger('http');
 
 /**
- * Bring-your-own OAuth apps. Gezel ships no OAuth client of its own (open
- * source — an embedded secret would be public, and X's quotas bill the app
- * owner), so each install registers its own developer app per provider and
- * records it here. Keys are the connector manifest's `clientIdEnv` name,
- * which shares one entry across types that name the same provider app.
+ * Bring-your-own OAuth apps. Gezel has read-only apps of its own for Google
+ * and Microsoft (`connectors/builtin-oauth-clients.ts`); everything else (X,
+ * Meta, LinkedIn, whose quotas bill the app owner), anything those apps may
+ * not ask for, and anyone who prefers their own, uses an app registered here.
+ * A saved app wins over Gezel's. Keys are the connector manifest's
+ * `clientIdEnv` name, which shares one entry across types that name the same
+ * provider app.
  *
  * The client ID is public and lives in config.json; the client secret
  * (only where the provider requires one — PKCE public clients don't) goes

@@ -72,6 +72,18 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
     }
   });
 
+  // Whether Gezel's own sign-in app can connect a type, so the form can say
+  // which app Connect will use before the person presses it.
+  app.get('/:id/connectors/oauth-app', async (c) => {
+    const type = c.req.query('type');
+    if (!type) return c.json({ error: 'type is required' }, 400);
+    try {
+      return c.json(await ctx.connectors.oauthAppFor(type));
+    } catch (err) {
+      return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
+    }
+  });
+
   app.post('/:id/connectors/bind', async (c) => {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);

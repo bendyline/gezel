@@ -125,6 +125,47 @@ describe('resolveOAuthClient (bring-your-own app ladder)', () => {
     ).rejects.toThrow(/Settings.*or set GEZEL_LADDER_TEST_CLIENT.*GEZEL_LADDER_TEST_SECRET/s);
   });
 
+  it("uses Gezel's own app last, with its secret, when nothing else is set", async () => {
+    const client = await resolveOAuthClient({
+      clientIdEnv: key,
+      getConfiguredClients: async () => undefined,
+      getSecret: async () => null,
+      builtin: { clientId: 'gezel-id', clientSecret: 'gezel-secret' },
+    });
+    expect(client).toEqual({ clientId: 'gezel-id', clientSecret: 'gezel-secret' });
+  });
+
+  it("a saved app and an env var both win over Gezel's own", async () => {
+    const builtin = { clientId: 'gezel-id' };
+    const saved = await resolveOAuthClient({
+      clientIdEnv: key,
+      getConfiguredClients: async () => ({ [key]: { clientId: 'config-id' } }),
+      getSecret: async () => null,
+      builtin,
+    });
+    expect(saved).toEqual({ clientId: 'config-id' });
+    process.env[key] = 'env-id';
+    const fromEnv = await resolveOAuthClient({
+      clientIdEnv: key,
+      getSecret: async () => null,
+      builtin,
+    });
+    expect(fromEnv).toEqual({ clientId: 'env-id' });
+  });
+
+  it("says Gezel's own app can only read when it is too narrow for the connection", async () => {
+    await expect(
+      resolveOAuthClient({
+        clientIdEnv: key,
+        getSecret: async () => null,
+        builtin: null,
+        builtinTooNarrow: true,
+      }),
+    ).rejects.toThrow(
+      /^OAuth is not configured for this connector — Gezel's own app can only read, and this connection asks for more\. Add your own app/,
+    );
+  });
+
   it('still refuses arbitrary env names', async () => {
     await expect(
       resolveOAuthClient({ clientIdEnv: 'PATH', getSecret: async () => null }),

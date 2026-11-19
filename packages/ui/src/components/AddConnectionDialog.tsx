@@ -155,6 +155,9 @@ export function AddConnectionDialog({
   // Counts failed "OAuth is not configured" connects; each bump pops the
   // setup panel open as the error-driven fallback.
   const [oauthSetupNudge, setOauthSetupNudge] = useState(0);
+  // Gezel's own sign-in app can connect the selected type (read-only Google
+  // and Microsoft types). An app saved here, or set by the environment, wins.
+  const [builtinApp, setBuiltinApp] = useState(false);
   const galleryRef = useRef<HTMLDivElement>(null);
   const setupRef = useRef<HTMLElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -212,6 +215,23 @@ export function AddConnectionDialog({
       live = false;
     };
   }, [refreshOAuthClients]);
+
+  useEffect(() => {
+    setBuiltinApp(false);
+    if (!selected || selected.secretShape?.kind !== 'oauth2') return;
+    let live = true;
+    // Best effort: an older daemon has no such route, and the form offers the
+    // person's own app as it always did.
+    Promise.resolve()
+      .then(() => api.connectorOAuthApp(projectId, selected.id))
+      .then((r) => {
+        if (live) setBuiltinApp(r?.builtin === true);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [projectId, selected]);
 
   useEffect(() => {
     setReadiness(null);
@@ -436,6 +456,24 @@ export function AddConnectionDialog({
     cameraForm,
     onAdded,
   ]);
+
+  /** Forget the saved app, so Connect goes back to Gezel's own. */
+  const handleUseBuiltinApp = useCallback(async () => {
+    if (!oauthRequirement) return;
+    const key = oauthRequirement.clientKey;
+    setError('');
+    setBusy('oauth-app');
+    try {
+      await api.deleteOAuthClient(key);
+      await refreshOAuthClients().catch(() => {
+        setOauthClients(({ [key]: _forgotten, ...rest }) => rest);
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [oauthRequirement, refreshOAuthClients]);
 
   /**
    * Save the user's OAuth app (client ID → config, secret → SecretStore),
@@ -702,9 +740,11 @@ export function AddConnectionDialog({
                       key={selected.id}
                       requirement={oauthRequirement}
                       registered={oauthClients[oauthRequirement.clientKey] ?? null}
+                      builtin={builtinApp}
                       forceOpenNonce={oauthSetupNudge}
                       busy={working}
                       onSave={handleOAuthAppSave}
+                      onUseBuiltin={handleUseBuiltinApp}
                     />
                   )}
                 </section>

@@ -1,0 +1,122 @@
+{
+  "id": "126680c8-26bb-4555-b9d3-2f976bcc59cb",
+  "deletedDateTime": null,
+  "appId": "fd484001-ce41-44ee-8ecb-dfb3b639cee5",
+  "applicationTemplateId": null,
+  "disabledByMicrosoftStatus": null,
+  "createdByAppId": "18ed3507-a475-4ccb-b669-d66bc9f2a36e",
+  "createdDateTime": "2026-11-18T15:46:50Z",
+  "displayName": "Gezel (read-only)",
+  "description": null,
+  "groupMembershipClaims": null,
+  "identifierUris": [],
+  "isDeviceOnlyAuthSupported": null,
+  "isDisabled": null,
+  "isFallbackPublicClient": null,
+  "nativeAuthenticationApisEnabled": null,
+  "notes": null,
+  "publisherDomain": "bendyline.com",
+  "serviceManagementReference": null,
+  "signInAudience": "AzureADandPersonalMicrosoftAccount",
+  "tags": [],
+  "tokenEncryptionKeyId": null,
+  "samlMetadataUrl": null,
+  "defaultRedirectUri": null,
+  "certification": null,
+  "optionalClaims": null,
+  "requestSignatureVerification": null,
+  "addIns": [],
+  "api": {
+    "acceptMappedClaims": null,
+    "knownClientApplications": [],
+    "requestedAccessTokenVersion": 2,
+    "oauth2PermissionScopes": [],
+    "preAuthorizedApplications": []
+  },
+  "appRoles": [],
+  "info": {
+    "logoUrl": "https://aadcdn.msftauthimages.net/dbd5a2dd-hu2eggyh1kgh8vait9avef87zegqllpixzszq5t7nto/appbranding/ifkb7xbr8beyynwmm-a9m83glif6rorgywkpw4cn8ke/1033/bannerlogo?ts=639306158029649371",
+    "marketingUrl": null,
+    "privacyStatementUrl": "https://bendyline.com/privacy/",
+    "supportUrl": null,
+    "termsOfServiceUrl": "https://bendyline.com/terms/"
+  },
+  "keyCredentials": [],
+  "parentalControlSettings": {
+    "countriesBlockedForMinors": [],
+    "legalAgeGroupRule": "Allow"
+  },
+  "passwordCredentials": [],
+  "publicClient": {
+    "redirectUris": ["http://127.0.0.1/callback"]
+  },
+  "requiredResourceAccess": [
+    {
+      "resourceAppId": "00000003-0000-0000-c000-000000000000",
+      "resourceAccess": [
+        {
+          "id": "465a38f9-76ea-45b9-9f34-9e8b0d4b0b42",
+          "type": "Scope"
+        },
+        {
+          "id": "64a6cdd6-aab1-4aaf-94b8-3cc8405e90d0",
+          "type": "Scope"
+        },
+        {
+          "id": "10465720-29dd-4523-a11a-6a75c743c9d9",
+          "type": "Scope"
+        },
+        {
+          "id": "570282fd-fa5c-430d-a7fd-fc8dc98a9dca",
+          "type": "Scope"
+        },
+        {
+          "id": "7427e0e9-2fba-42fe-b0c0-848c9e6a8182",
+          "type": "Scope"
+        },
+        {
+          "id": "37f7f235-527c-4136-accd-4a02d197296e",
+          "type": "Scope"
+        },
+        {
+          "id": "14dad69e-099b-42c9-810b-d002981feec1",
+          "type": "Scope"
+        },
+        {
+          "id": "205e70e5-aba6-4c52-a976-6d2d46c48043",
+          "type": "Scope"
+        },
+        {
+          "id": "e1fe6dd8-ba31-4d61-89e7-88639da4683d",
+          "type": "Scope"
+        }
+      ]
+    }
+  ],
+  "verifiedPublisher": {
+    "displayName": "Bendyline",
+    "verifiedPublisherId": "5209621",
+    "addedDateTime": "2026-11-18T16:22:11Z"
+  },
+  "web": {
+    "homePageUrl": "https://gezel.com",
+    "logoutUrl": null,
+    "redirectUris": [],
+    "implicitGrantSettings": {
+      "enableAccessTokenIssuance": false,
+      "enableIdTokenIssuance": false
+    },
+    "redirectUriSettings": []
+  },
+  "servicePrincipalLockConfiguration": {
+    "isEnabled": true,
+    "allProperties": true,
+    "credentialsWithUsageVerify": true,
+    "credentialsWithUsageSign": true,
+    "identifierUris": false,
+    "tokenEncryptionKeyId": true
+  },
+  "spa": {
+    "redirectUris": []
+  }
+}

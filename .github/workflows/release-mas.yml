@@ -292,6 +292,9 @@ jobs:
           GEZEL_MACOS_SIGN_BUNDLE: '1'
           GEZEL_MACOS_SIGN_IDENTITY_KIND: apple-distribution
           GEZEL_MACOS_SIGN_ENTITLEMENTS: packages/app/entitlements.mas.inherit.plist
+          # Gezel's own Google sign-in app; see release-electron.yml.
+          GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GEZEL_GOOGLE_OAUTH_CLIENT_ID }}
+          GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GEZEL_GOOGLE_OAUTH_CLIENT_SECRET }}
         run: pnpm build:packaged
 
       - name: Verify release version propagation

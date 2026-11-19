@@ -5201,6 +5201,19 @@ export class GezelClient {
     );
   }
 
+  /**
+   * Whether Gezel's own sign-in app can connect an OAuth type (`builtin`),
+   * and the `clientIdEnv` key its apps are saved under. When it cannot, the
+   * person needs an app of their own. An app they saved, or one the daemon's
+   * environment sets, still wins at connect time.
+   */
+  connectorOAuthApp(id: string, type: string): Promise<{ key: string | null; builtin: boolean }> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/connectors/oauth-app?type=${encodeURIComponent(type)}`,
+    );
+  }
+
   /** Trigger a manual sync of one binding. */
   syncConnector(id: string, bindingId: string): Promise<{ ok: boolean; result: unknown }> {
     return this.request(

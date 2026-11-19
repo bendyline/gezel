@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { iconSvg, renderIcon, writeIconAsset } from './icon-artwork.mjs';
@@ -60,6 +61,7 @@ for (const size of [16, 26, 42]) {
   );
 }
 const registrationsDir = join(appDir, '..', '..', 'assets', 'app-registrations');
+if (!checkOnly) mkdirSync(registrationsDir, { recursive: true });
 await writeIconAsset(
   join(registrationsDir, 'gezel-read-only-logo.svg'),
   iconSvg({ size: 215, variant: 'read-only' }),

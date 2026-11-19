@@ -605,12 +605,16 @@ describe('ProjectConnectionsTab bring-your-own OAuth app', () => {
       'listConnectorTypes',
       'listOAuthClients',
       'putOAuthClient',
+      'deleteOAuthClient',
+      'connectorOAuthApp',
       'startConnectorOAuth',
       'completeConnectorOAuth',
       'getProject',
     ] as const) {
       vi.mocked(api[method]).mockReset();
     }
+    vi.mocked(api.connectorOAuthApp).mockResolvedValue({ key: null, builtin: false });
+    vi.mocked(api.deleteOAuthClient).mockResolvedValue({ ok: true });
     vi.mocked(api.listConnectors).mockResolvedValue({ bindings: [] } as never);
     vi.mocked(api.listConnectorActions).mockResolvedValue({ pending: [] } as never);
     vi.mocked(api.listConnectorTypes).mockResolvedValue({ items: [X_POSTS, INSTAGRAM] } as never);
@@ -706,6 +710,44 @@ describe('ProjectConnectionsTab bring-your-own OAuth app', () => {
     expect(screen.getByText(/secret saved/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Edit' }));
     expect(screen.getByLabelText('Client ID')).toHaveValue('registered-id-123');
+  });
+
+  it("says Connect uses Gezel's own app when it can, and keeps your own as the choice", async () => {
+    vi.mocked(api.connectorOAuthApp).mockResolvedValue({
+      key: 'GEZEL_X_CLIENT_ID',
+      builtin: true,
+    });
+    const user = await selectXPosts();
+
+    expect(
+      await screen.findByText("Connects through Gezel's own X (Twitter) app, which can only read."),
+    ).toBeInTheDocument();
+    expect(api.connectorOAuthApp).toHaveBeenCalledWith('project-alpha', 'x-posts');
+    await user.click(screen.getByRole('button', { name: 'Use your own X (Twitter) app' }));
+    expect(screen.getByLabelText('Client ID')).toBeInTheDocument();
+  });
+
+  it("forgets a saved app to go back to Gezel's own", async () => {
+    vi.mocked(api.connectorOAuthApp).mockResolvedValue({
+      key: 'GEZEL_X_CLIENT_ID',
+      builtin: true,
+    });
+    vi.mocked(api.listOAuthClients)
+      .mockResolvedValueOnce({
+        clients: [
+          { key: 'GEZEL_X_CLIENT_ID', clientId: 'mine-123', hasSecret: false, source: 'settings' },
+        ],
+      } as never)
+      .mockResolvedValue({ clients: [] } as never);
+    const user = await selectXPosts();
+
+    expect(await screen.findByText('mine-123')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: "Use Gezel's app" }));
+
+    await waitFor(() => expect(api.deleteOAuthClient).toHaveBeenCalledWith('GEZEL_X_CLIENT_ID'));
+    expect(
+      await screen.findByText("Connects through Gezel's own X (Twitter) app, which can only read."),
+    ).toBeInTheDocument();
   });
 
   it('names the app the daemon environment sets, with no form to override it', async () => {

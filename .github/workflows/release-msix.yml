@@ -247,6 +247,9 @@ jobs:
         run: pnpm build:packaged
         env:
           GEZEL_REQUIRE_BUNDLE_PE_VERIFY: '1'
+          # Gezel's own Google sign-in app; see release-electron.yml.
+          GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GEZEL_GOOGLE_OAUTH_CLIENT_ID }}
+          GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GEZEL_GOOGLE_OAUTH_CLIENT_SECRET }}
 
       - name: Verify release version propagation
         shell: bash
