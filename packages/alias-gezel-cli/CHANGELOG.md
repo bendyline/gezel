@@ -1,3 +1,10 @@
+## gezel-cli [1.0.6](https://github.com/bendyline/gezel/compare/gezel-cli%401.0.5...gezel-cli%401.0.6) (2026-11-20)
+
+
+### Dependencies
+
+* **@bendyline/gezel-cli:** upgraded to 1.3.4
+
 ## gezel-cli [1.0.5](https://github.com/bendyline/gezel/compare/gezel-cli%401.0.4...gezel-cli%401.0.5) (2026-11-14)
 
 
