@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { DISABLE_DEBUG_SIGNAL_FLAG } from '@bendyline/gezel/native';
 import { redirectAsarToUnpacked } from './extract-bundle.js';
 
 /** Options forwarded to `startService` in the child. Must stay structured-clonable. */
@@ -150,8 +151,24 @@ function childEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   return out;
 }
 
+/**
+ * Electron applies no Node option from `execArgv` to a utility process, so
+ * without this any process of the account could open the service's
+ * inspector (tested against Electron 43). It does read NODE_OPTIONS, at least
+ * where the fuse leaves that on (development). The start message clears the
+ * variable again before the service loads, so the service's own children
+ * never inherit it.
+ */
 function forkServiceChild(fork: UtilityFork, entryPath: string, env: Record<string, string>) {
-  return fork(entryPath, [], { env, stdio: 'pipe', serviceName: 'Gezel Service' });
+  const current = env.NODE_OPTIONS ?? '';
+  const nodeOptions = current.split(/\s+/).includes(DISABLE_DEBUG_SIGNAL_FLAG)
+    ? current
+    : `${current} ${DISABLE_DEBUG_SIGNAL_FLAG}`.trim();
+  return fork(entryPath, [], {
+    env: { ...env, NODE_OPTIONS: nodeOptions },
+    stdio: 'pipe',
+    serviceName: 'Gezel Service',
+  });
 }
 
 export function prewarmUtilityService(opts: {
@@ -197,6 +214,7 @@ export async function startUtilityHostedService(
   // environment, which also removes values it cannot vouch for (an inherited
   // GEZEL_NODE_PATH in packaged mode). Mirror both directions.
   const unset = warm ? Object.keys(warm.forkEnv).filter((key) => !(key in env)) : [];
+  if (!('NODE_OPTIONS' in env) && !unset.includes('NODE_OPTIONS')) unset.push('NODE_OPTIONS');
 
   child.stdout?.on('data', (chunk: Buffer | string) => opts.onOutput?.(chunk.toString(), 'stdout'));
   child.stderr?.on('data', (chunk: Buffer | string) => opts.onOutput?.(chunk.toString(), 'stderr'));

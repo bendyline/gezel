@@ -1,6 +1,7 @@
 import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { gezelHome } from '@bendyline/gezel/paths';
 import { daemonHost } from './daemon-host.js';
+import { guardDebugSignalOnce } from './debug-signal-guard.js';
 import type { EngineContext } from './http/engine-context.js';
 import type { RunningInferenceOnlyService } from './inference-host.js';
 import { routeServiceLogs } from './log-routing.js';
@@ -34,6 +35,8 @@ export async function startService(
 ): Promise<RunningService<EngineContext> | RunningInferenceOnlyService> {
   // Before any child process is spawned: see daemon-host.ts.
   daemonHost();
+  // Before any sandboxed script could run: see debug-signal-guard.ts.
+  guardDebugSignalOnce();
   // Before any worker or child loads ONNX Runtime: see core native/onnx-telemetry.ts.
   disableOnnxRuntimeTelemetry();
   const home = opts.home ?? gezelHome();

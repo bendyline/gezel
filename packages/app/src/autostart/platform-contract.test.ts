@@ -20,7 +20,7 @@ describe('autostart platform runtime contract', () => {
 
   it('quotes the bundled Node path in the Linux user unit', () => {
     const unit = buildUnit(opts);
-    expect(unit).toContain(`ExecStart="${opts.nodePath}" "${opts.gezeldPath}"`);
+    expect(unit).toContain(`ExecStart="${opts.nodePath}" --disable-sigusr1 "${opts.gezeldPath}"`);
     expect(unit).toContain(`Environment="GEZEL_NODE_PATH=${opts.nodePath}"`);
     expect(unit).toContain(`Environment="GEZEL_PNPM_PATH=${opts.pnpmPath}"`);
   });
@@ -34,7 +34,7 @@ describe('autostart platform runtime contract', () => {
     const xml = buildTaskXml(windowsOpts, 'DESKTOP\\Test & User');
     expect(xml).toContain('<Command>C:\\Users\\Test &amp; User\\.gezel\\bin\\node.exe</Command>');
     expect(xml).toContain(
-      '<Arguments>&quot;C:\\Users\\Test &amp; User\\.gezel\\service\\dist\\bin\\gezeld.js&quot; &quot;--gezel-autostart-home=C:\\Users\\Test &amp; User\\.gezel&quot;</Arguments>',
+      '<Arguments>--disable-sigusr1 &quot;C:\\Users\\Test &amp; User\\.gezel\\service\\dist\\bin\\gezeld.js&quot; &quot;--gezel-autostart-home=C:\\Users\\Test &amp; User\\.gezel&quot;</Arguments>',
     );
   });
 });

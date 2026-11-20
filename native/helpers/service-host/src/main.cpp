@@ -110,8 +110,12 @@ std::wstring derive_instdir(const std::wstring& module_path) {
   return module_path.substr(0, slash);
 }
 
+// --disable-sigusr1: without it any process of an account that may open this
+// one could start its inspector with process._debugProcess(pid) and run code
+// inside the daemon.
 std::wstring build_child_cmdline(const std::wstring& instdir, const std::wstring& home) {
-  return L"\"" + instdir + L"\\Gezel.exe\" \"" + home + L"\\service\\dist\\bin\\gezeld.js\"";
+  return L"\"" + instdir + L"\\Gezel.exe\" --disable-sigusr1 \"" + home +
+         L"\\service\\dist\\bin\\gezeld.js\"";
 }
 
 // The service environment contract, formerly NSSM's AppEnvironmentExtra
@@ -273,7 +277,7 @@ int self_test() {
          "instdir derivation");
 
   expect(build_child_cmdline(L"C:\\Program Files\\Gezel", L"C:\\ProgramData\\Gezel") ==
-             L"\"C:\\Program Files\\Gezel\\Gezel.exe\" "
+             L"\"C:\\Program Files\\Gezel\\Gezel.exe\" --disable-sigusr1 "
              L"\"C:\\ProgramData\\Gezel\\service\\dist\\bin\\gezeld.js\"",
          "child cmdline quoting");
 

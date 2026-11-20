@@ -75,8 +75,10 @@ function fakeClient() {
 }
 
 describe('discoverOrSpawn', () => {
+  // --disable-sigusr1: otherwise any process of the account, a sandboxed
+  // script included, can open the daemon's inspector and run code inside it.
   it.each([undefined, '0', '1'])(
-    'only opts into baseline WASM when explicitly enabled (%s)',
+    'starts with the inspector signal off and opts into baseline WASM only when enabled (%s)',
     async (value) => {
       const spawnFn = vi.fn<SpawnLike>(() => makeFakeChild());
       await discoverOrSpawn({
@@ -91,8 +93,8 @@ describe('discoverOrSpawn', () => {
       }).catch(() => undefined);
       expect(spawnFn.mock.calls[0]?.[1]).toEqual(
         value === '1'
-          ? ['--liftoff-only', '--no-wasm-tier-up', '/fake/gezeld.js']
-          : ['/fake/gezeld.js'],
+          ? ['--disable-sigusr1', '--liftoff-only', '--no-wasm-tier-up', '/fake/gezeld.js']
+          : ['--disable-sigusr1', '/fake/gezeld.js'],
       );
     },
   );

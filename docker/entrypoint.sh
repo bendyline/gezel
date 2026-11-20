@@ -44,7 +44,7 @@ pull_model_when_ready() {
 case "${1:-serve}" in
   serve)
     pull_model_when_ready
-    exec node "$GEZELD"
+    exec node --disable-sigusr1 "$GEZELD"
     ;;
   health)
     health

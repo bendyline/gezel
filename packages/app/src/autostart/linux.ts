@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { DISABLE_DEBUG_SIGNAL_FLAG } from '@bendyline/gezel/native';
 import type { AutostartInstallOptions } from './index.js';
 
 const defaultExec = promisify(execFile);
@@ -49,7 +50,7 @@ After=default.target
 
 [Service]
 Type=simple
-ExecStart=${quoteSystemd(opts.nodePath)} ${quoteSystemd(opts.gezeldPath)}
+ExecStart=${quoteSystemd(opts.nodePath)} ${DISABLE_DEBUG_SIGNAL_FLAG} ${quoteSystemd(opts.gezeldPath)}
 Environment=${quoteSystemd(`GEZEL_HOME=${opts.gezelHome}`)}
 Environment=${quoteSystemd(`GEZEL_NODE_PATH=${opts.nodePath}`)}
 Environment="GEZEL_AUTOSTART=1"

@@ -447,6 +447,9 @@ binary wrapped in:
    `deny default` profile, or on Windows the MXC process container (below).
 3. **Network egress block** (`denyNet`, **fail closed**): Seatbelt `(deny network*)`, the
    container's denied egress, or (Linux) a systemd user service restricted to `AF_UNIX`.
+   Network-on work on Linux runs in the same kind of unit restricted to
+   `AF_INET AF_INET6 AF_NETLINK` when that probe passes, so it cannot reach the D-Bus bus
+   (whose `StartTransientUnit` starts an unconfined process) or the Docker socket.
    The JS `--import` preload also blocks fetch/WebSocket,
    net/dgram, callback + promise DNS, named built-in exports, and Resolver instances, but is
    defense-in-depth rather than a malicious-code boundary. Where no boundary applies the run
@@ -458,6 +461,32 @@ binary wrapped in:
 5. **Env scrub** — `sandboxEnv` allowlists only `PATH`/`HOME`/`NODE_*`/locale; strips
    `GEZEL_TOKEN`, `OPENAI_API_KEY`, etc. → a script **cannot read host secrets from
    `process.env`**.
+6. **What the permission model leaves open**, closed for every run where the Node binary
+   has the option (read from `node --help`): `--no-experimental-sqlite` (`node:sqlite`
+   opened, ATTACHed and VACUUMed INTO any path) and `--disable-sigusr1`. A preload replaces
+   `process._kill` and `process._debugProcess`, so a script signals only itself and opens no
+   other Node process's inspector; `process.binding` is refused under `--permission`, so the
+   originals are out of reach. Network-on runs also get a preload that refuses local-socket
+   and named-pipe connects (`net.Socket#connect` with a path): the permission model gates
+   neither, and `fs` cannot open a pipe there. Both preloads are defense in depth.
+7. **Links that lead out of the folder** — the permission model checks the path a script
+   names and the kernel follows any link on it, so a cloned repository's `r -> /` reached
+   anywhere. Where nothing confines the file system by real path (Linux, Windows without the
+   container) the run is refused when its folder holds a link that resolves outside the
+   granted roots, dangling links included (`sandbox/escaping-links.ts`, at most 500,000
+   entries, refused past that). A script cannot make such a link: `symlink`, `link` and
+   renames out are all refused under `--permission`.
+
+**The daemon's own inspector.** Any process of the account can open a Node process's
+inspector — SIGUSR1 on POSIX, `process._debugProcess(pid)` on Windows — and then run code in
+it. Every launcher Gezel owns starts `gezeld` with `--disable-sigusr1` (the client spawn the
+supervisor, CLI, VS Code and app SDK share, `gezel start --foreground`, the autostart units,
+the installed services, the Docker entrypoint; `DISABLE_DEBUG_SIGNAL_FLAG` in core
+`native/debug-signal.ts`). Electron ignores `execArgv` in a utility process, so the
+supervisor forks one with the flag in `NODE_OPTIONS` and clears it again before the service
+loads; the packaged main process relies on the `enableNodeCliInspectArguments` fuse. For
+hosts that pass nothing (an app embedding the service), `startService` takes SIGUSR1 with a
+listener on POSIX and warns on Windows, where no listener helps (`debug-signal-guard.ts`).
 
 **Windows: the MXC process container** (`sandbox/windows-mxc.ts`, `stdio-rpc.ts`;
 [ADR 0022](decisions/0022-windows-mxc-sandbox.md)). Microsoft's signed launcher
@@ -914,6 +943,8 @@ privileged service identity or putting the daemon root token on disk.
 | Remote product UI/API access | INTERIM — tunnel recipe | The product `/api` + web UI stay loopback-only by three independent layers (bind, host guard, cert/auth). The supported interim is a loopback-preserving tunnel (SSH `-L` / Tailscale toward loopback) with the schema-declared `service:{url,token}` supervisor mode; first-class remote access is designed in `docs/remote-access.md` and gated on the accounts ADR (0004). |
 | External user working directories from a machine daemon | NEEDS BROKER/GRANT | Dedicated service identities cannot safely inherit arbitrary user-profile access. Add an explicit ACL grant or user-context broker when linking such a folder; do not restore a privileged daemon identity. |
 | `denyNet` execution without an OS boundary | FAIL CLOSED | Windows runs it in the MXC container when the probe passes; Linux runs it under a systemd user unit when the probe passes, carrying script RPC over stdio. Elsewhere (Windows with the container off or unavailable, Linux without a usable systemd user manager) model/gate scripts return exit 126. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |
+| Network-on execution without an OS boundary | PARTIAL | Spectral components, and model scripts at `free` where no denyNet boundary exists, run with the network. On Linux without a usable systemd user manager (a container, a server with no session) and on Windows without the container, only the Node layers above stand between them and the account: the permission model, the hardening options and preloads, and the link check. The Spectral origin guard is JavaScript-only and a component can step around it (`_http_client`, `WebSocket`, its own dispatcher). Next: Landlock and signal scoping in `gezel-sandbox`, and Spectral egress through a daemon filter proxy. |
+| File-system boundary on Linux | PARTIAL | No OS layer confines files on Linux; the systemd unit restricts address families only. The link check refuses a link that leads out now, but a script can move a directory holding a relative link so that it leads out afterwards, and a hard link to an outside file (a package store's) is written through. Landlock in `gezel-sandbox` is the fix. |
 | SSRF connect-time IP pin | DEFERRED | Current guard validates at DNS-resolution time (rebinding-window residual). |
 | Egress tripwire coverage (§11.1) | PARTIAL | Lexical and easy to evade on purpose: it targets trained-in habits, not an adversary. Provider-native shells (Claude CLI, Codex CLI, an unsandboxed Copilot) and MCP toolsets those providers call directly never pass the bridge, so their calls are not read. The next layer is a Gezel-owned egress proxy that logs and filters the connections themselves. |
 | Package-script edits by sandboxed scripts | PARTIAL | `run_nodejs_script` / `derive_file` write through Node's permission model, not the Store, so only the workspace's root manifests are snapshotted and put back. A nested workspace package's `scripts` can still change that way while `allowPackageScriptEdits` is off. |

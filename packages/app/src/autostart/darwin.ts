@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { promisify } from 'node:util';
+import { DISABLE_DEBUG_SIGNAL_FLAG } from '@bendyline/gezel/native';
 import type { AutostartInstallOptions } from './index.js';
 
 const defaultExec = promisify(execFile);
@@ -54,6 +55,7 @@ export function buildPlist(opts: AutostartInstallOptions): string {
   <key>ProgramArguments</key>
   <array>
     <string>${escapeXml(opts.nodePath)}</string>
+    <string>${DISABLE_DEBUG_SIGNAL_FLAG}</string>
     <string>${escapeXml(opts.gezeldPath)}</string>
   </array>
   <key>EnvironmentVariables</key>

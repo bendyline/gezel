@@ -60,7 +60,7 @@ WorkingDirectory=/var/lib/gezel
 # from the shipped tarball by installer/linux/after-install.sh at install
 # time. ProtectSystem=full keeps /opt and /usr read-only; ReadWritePaths
 # below grants writes to the daemon's data dir.
-ExecStart=/opt/Gezel/gezel /var/lib/gezel/service/dist/bin/gezeld.js
+ExecStart=/opt/Gezel/gezel --disable-sigusr1 /var/lib/gezel/service/dist/bin/gezeld.js
 Restart=on-failure
 RestartSec=5
 
